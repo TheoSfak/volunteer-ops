@@ -11,7 +11,7 @@ class UpdateService
     /**
      * Τρέχουσα έκδοση της εφαρμογής
      */
-    const CURRENT_VERSION = '1.0.0';
+    const CURRENT_VERSION = '1.1.0';
     
     /**
      * GitHub repository
