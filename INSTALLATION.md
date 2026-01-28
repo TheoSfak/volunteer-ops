@@ -4,7 +4,7 @@
 
 - PHP 8.2+
 - MySQL 8.0+
-- Composer (για εγκατάσταση dependencies)
+- Composer (για εγκατάσταση από GitHub)
 - Apache/Nginx με mod_rewrite ενεργοποιημένο
 
 ### Απαιτούμενες PHP Extensions
@@ -12,7 +12,42 @@
 
 ---
 
-## Μέθοδος 1: Εγκατάσταση από ZIP (Shared Hosting)
+## 🚀 Γρήγορη Εγκατάσταση (Shared Hosting - Συνιστάται)
+
+**Η ευκολότερη μέθοδος για shared hosting χωρίς SSH!**
+
+### Βήμα 1: Ανέβασμα αρχείων
+1. Κατεβάστε το `volunteerops-deploy.zip`
+2. Αποσυμπιέστε και ανεβάστε ΟΛΑ τα αρχεία στον server
+3. Ο φάκελος `public/` πρέπει να είναι ο web root
+
+### Βήμα 2: Εισαγωγή βάσης δεδομένων
+1. Δημιουργήστε νέα MySQL βάση μέσω cPanel (π.χ. `volunteer_ops`)
+2. Μπείτε στο **phpMyAdmin**
+3. Επιλέξτε τη βάση σας → **Import** → Επιλέξτε αρχείο:
+   - `database/schema.sql` (κενή βάση)
+   - ή `database/volunteer_ops_full.sql` (με δοκιμαστικά δεδομένα)
+4. Κλικ **Go/Εκτέλεση**
+
+### Βήμα 3: Εκτέλεση Web Installer
+1. Επισκεφθείτε: `https://yourdomain.com/install.php`
+2. Ο installer θα ελέγξει τις απαιτήσεις
+3. Συμπληρώστε τα στοιχεία της βάσης δεδομένων
+4. Κλικ **Εγκατάσταση**
+5. **ΔΙΑΓΡΑΨΤΕ το `public/install.php` μετά την εγκατάσταση!**
+
+### Βήμα 4: Σύνδεση
+Χρησιμοποιήστε τους προεπιλεγμένους λογαριασμούς (αν εισάγατε το full SQL):
+- **Admin:** admin@volunteerops.gr / password123
+- **Volunteer:** volunteer@volunteerops.gr / password123
+
+⚠️ **Αλλάξτε αμέσως τους κωδικούς!**
+
+---
+
+## Μέθοδος 2: Χειροκίνητη Εγκατάσταση (Shared Hosting)
+
+Αν ο web installer δεν λειτουργεί:
 
 ### Βήμα 1: Ανέβασμα αρχείων
 1. Αποσυμπιέστε το αρχείο `volunteerops-deploy.zip`
@@ -21,13 +56,9 @@
 
 ### Βήμα 2: Ρύθμιση βάσης δεδομένων
 1. Δημιουργήστε μια νέα MySQL βάση δεδομένων (π.χ. `volunteer_ops`)
-2. Εισάγετε το SQL αρχείο:
+2. Εισάγετε το SQL αρχείο μέσω phpMyAdmin:
    - **Μόνο δομή (χωρίς δεδομένα):** `database/schema.sql`
    - **Πλήρης (με δεδομένα δοκιμής):** `database/volunteer_ops_full.sql`
-
-```bash
-mysql -u USERNAME -p DATABASE_NAME < database/schema.sql
-```
 
 ### Βήμα 3: Ρύθμιση περιβάλλοντος
 1. Αντιγράψτε το `.env.example` σε `.env`
