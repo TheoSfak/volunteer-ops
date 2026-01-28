@@ -48,19 +48,78 @@ DB_PASSWORD=your_db_password
 ```
 
 ### Βήμα 4: Δημιουργία κλειδιού εφαρμογής
+
+**Επιλογή A: Με SSH πρόσβαση**
 ```bash
 php artisan key:generate
 ```
 
-### Βήμα 5: Δικαιώματα φακέλων
+**Επιλογή B: Χωρίς SSH (Shared Hosting)**
+
+1. Επισκεφθείτε: https://generate-random.org/laravel-key-generator
+2. Αντιγράψτε το κλειδί που δημιουργείται (μορφή: `base64:XXXXX...`)
+3. Ανοίξτε το `.env` και προσθέστε/επεξεργαστείτε:
+```env
+APP_KEY=base64:ΤΟ_ΚΛΕΙΔΙ_ΠΟΥ_ΑΝΤΙΓΡΑΨΑΤΕ
+```
+
+**Επιλογή Γ: Χρήση του web installer**
+
+Αν δεν έχετε SSH, μπορείτε να ανεβάσετε προσωρινά αυτό το αρχείο ως `generate-key.php` στο `public/`:
+
+```php
+<?php
+// Διαγράψτε αυτό το αρχείο ΑΜΕΣΩΣ μετά τη χρήση!
+$key = 'base64:' . base64_encode(random_bytes(32));
+echo "Προσθέστε αυτό στο .env σας:<br><br>";
+echo "<code>APP_KEY=" . $key . "</code>";
+echo "<br><br><strong style='color:red'>ΔΙΑΓΡΑΨΤΕ ΑΥΤΟ ΤΟ ΑΡΧΕΙΟ ΤΩΡΑ!</strong>";
+```
+
+Επισκεφθείτε `https://yourdomain.com/generate-key.php`, αντιγράψτε το κλειδί, και **διαγράψτε αμέσως το αρχείο**.
+
+### Βήμα 6: Δικαιώματα φακέλων
+
+**Μέσω cPanel File Manager:**
+- Κάντε δεξί κλικ στο `storage/` → Change Permissions → 755 ή 775
+- Το ίδιο για `bootstrap/cache/`
+
+**Μέσω SSH:**
 ```bash
 chmod -R 775 storage
 chmod -R 775 bootstrap/cache
 ```
 
-### Βήμα 6: Storage Link
+### Βήμα 7: Storage Link
+
+**Επιλογή A: Με SSH**
 ```bash
 php artisan storage:link
+```
+
+**Επιλογή B: Χωρίς SSH (Shared Hosting)**
+
+Δημιουργήστε χειροκίνητα symbolic link μέσω cPanel:
+1. Πηγαίνετε στο **cPanel → File Manager**
+2. Διαγράψτε το `public/storage` αν υπάρχει
+3. Στο terminal του cPanel ή μέσω SSH:
+   ```bash
+   ln -s ../storage/app/public public/storage
+   ```
+
+Εναλλακτικά, ανεβάστε προσωρινά αυτό ως `public/storage-link.php`:
+```php
+<?php
+// Διαγράψτε ΑΜΕΣΩΣ μετά τη χρήση!
+$target = __DIR__ . '/../storage/app/public';
+$link = __DIR__ . '/storage';
+if (file_exists($link)) { echo "Το link υπάρχει ήδη!"; exit; }
+if (symlink($target, $link)) {
+    echo "Storage link δημιουργήθηκε επιτυχώς!<br>";
+    echo "<strong style='color:red'>ΔΙΑΓΡΑΨΤΕ ΑΥΤΟ ΤΟ ΑΡΧΕΙΟ ΤΩΡΑ!</strong>";
+} else {
+    echo "Αποτυχία. Δοκιμάστε μέσω cPanel File Manager.";
+}
 ```
 
 ---
