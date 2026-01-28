@@ -7,6 +7,7 @@ use App\Models\Setting;
 use App\Models\User;
 use App\Models\EmailTemplate;
 use App\Services\SettingsService;
+use App\Services\UpdateService;
 use App\Modules\Directory\Models\Department;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -14,7 +15,8 @@ use Illuminate\Support\Facades\Storage;
 class SettingsController extends Controller
 {
     public function __construct(
-        protected SettingsService $settingsService
+        protected SettingsService $settingsService,
+        protected UpdateService $updateService
     ) {
         // Μόνο System Admin έχει πρόσβαση
         $this->middleware(function ($request, $next) {
@@ -341,5 +343,33 @@ class SettingsController extends Controller
 
         return redirect()->route('settings.index', ['tab' => 'templates'])
             ->with('success', 'Το logo email ενημερώθηκε επιτυχώς.');
+    }
+
+    /**
+     * Έλεγχος για ενημερώσεις από το GitHub
+     */
+    public function checkUpdates()
+    {
+        $this->updateService->clearCache();
+        $updateInfo = $this->updateService->checkForUpdates();
+        $systemInfo = $this->updateService->getSystemInfo();
+        
+        return response()->json([
+            'success' => true,
+            'update' => $updateInfo,
+            'system' => $systemInfo,
+        ]);
+    }
+
+    /**
+     * Σελίδα ενημερώσεων
+     */
+    public function updates()
+    {
+        $updateInfo = $this->updateService->checkForUpdates();
+        $systemInfo = $this->updateService->getSystemInfo();
+        $allReleases = $this->updateService->getAllReleases(5);
+        
+        return view('settings.updates', compact('updateInfo', 'systemInfo', 'allReleases'));
     }
 }

@@ -58,6 +58,18 @@
                     <i class="bi bi-file-earmark-text me-2"></i>Email Templates
                 </button>
             </li>
+            <li class="nav-item" role="presentation">
+                <a class="nav-link" href="{{ route('settings.updates') }}">
+                    <i class="bi bi-cloud-download me-2"></i>Ενημερώσεις
+                    @php
+                        $updateService = app(\App\Services\UpdateService::class);
+                        $updateInfo = $updateService->checkForUpdates();
+                    @endphp
+                    @if($updateInfo['success'] && ($updateInfo['has_update'] ?? false))
+                        <span class="badge bg-success ms-1">Νέα!</span>
+                    @endif
+                </a>
+            </li>
         </ul>
 
         <!-- Tab Content -->

@@ -1,7 +1,7 @@
 @extends('layouts.app')
 
-@section('title', 'Νέος Εθελοντής')
-@section('page-title', 'Νέος Εθελοντής')
+@section('title', $canCreateAdmin ? 'Νέος Χρήστης' : 'Νέος Εθελοντής')
+@section('page-title', $canCreateAdmin ? 'Νέος Χρήστης' : 'Νέος Εθελοντής')
 
 @section('content')
     <div class="row">
@@ -12,6 +12,20 @@
                 <div class="card mb-4">
                     <div class="card-header"><i class="bi bi-person me-2"></i>Βασικές Πληροφορίες</div>
                     <div class="card-body">
+                        @if($canCreateAdmin)
+                        <div class="row">
+                            <div class="col-md-12 mb-3">
+                                <label for="role" class="form-label">Ρόλος Χρήστη <span class="text-danger">*</span></label>
+                                <select class="form-select @error('role') is-invalid @enderror" id="role" name="role">
+                                    @foreach($roles as $value => $label)
+                                        <option value="{{ $value }}" {{ old('role', 'VOLUNTEER') == $value ? 'selected' : '' }}>{{ $label }}</option>
+                                    @endforeach
+                                </select>
+                                @error('role')<div class="invalid-feedback">{{ $message }}</div>@enderror
+                                <small class="text-muted">Ως Διαχειριστής Συστήματος μπορείτε να δημιουργήσετε χρήστες με οποιονδήποτε ρόλο.</small>
+                            </div>
+                        </div>
+                        @endif
                         <div class="row">
                             <div class="col-md-6 mb-3">
                                 <label for="name" class="form-label">Ονοματεπώνυμο <span class="text-danger">*</span></label>
@@ -55,8 +69,8 @@
                     </div>
                 </div>
                 
-                <div class="card mb-4">
-                    <div class="card-header"><i class="bi bi-info-circle me-2"></i>Επιπλέον Στοιχεία</div>
+                <div class="card mb-4" id="profile-card">
+                    <div class="card-header"><i class="bi bi-info-circle me-2"></i>Επιπλέον Στοιχεία <small class="text-muted">(Προφίλ Εθελοντή)</small></div>
                     <div class="card-body">
                         <div class="row">
                             <div class="col-md-6 mb-3">
@@ -105,5 +119,43 @@
                 </div>
             </form>
         </div>
+        
+        @if($canCreateAdmin)
+        <div class="col-lg-4">
+            <div class="card border-info">
+                <div class="card-header bg-info text-white">
+                    <i class="bi bi-info-circle me-2"></i>Πληροφορίες Ρόλων
+                </div>
+                <div class="card-body small">
+                    <p><strong>Εθελοντής:</strong><br>Βασικός χρήστης, μπορεί να δηλώνει συμμετοχή σε βάρδιες.</p>
+                    <p><strong>Υπεύθυνος Βάρδιας:</strong><br>Διαχειρίζεται τις βάρδιες που του έχουν ανατεθεί.</p>
+                    <p><strong>Διαχειριστής Τμήματος:</strong><br>Διαχειρίζεται το τμήμα του, τις αποστολές και τους εθελοντές.</p>
+                    <p class="mb-0"><strong>Διαχειριστής Συστήματος:</strong><br>Πλήρη πρόσβαση σε όλες τις λειτουργίες.</p>
+                </div>
+            </div>
+        </div>
+        @endif
     </div>
 @endsection
+
+@if($canCreateAdmin)
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const roleSelect = document.getElementById('role');
+    const profileCard = document.getElementById('profile-card');
+    
+    function toggleProfileCard() {
+        if (roleSelect.value === 'VOLUNTEER') {
+            profileCard.style.display = 'block';
+        } else {
+            profileCard.style.display = 'none';
+        }
+    }
+    
+    roleSelect.addEventListener('change', toggleProfileCard);
+    toggleProfileCard(); // Initial state
+});
+</script>
+@endpush
+@endif

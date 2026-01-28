@@ -108,6 +108,10 @@ Route::middleware('auth')->group(function () {
     Route::put('/settings/email-template/{template}', [SettingsController::class, 'updateEmailTemplate'])->name('settings.email-template.update');
     Route::put('/settings/email-logo', [SettingsController::class, 'updateEmailLogo'])->name('settings.email-logo.update');
     
+    // Ενημερώσεις Συστήματος
+    Route::get('/settings/updates', [SettingsController::class, 'updates'])->name('settings.updates');
+    Route::post('/settings/check-updates', [SettingsController::class, 'checkUpdates'])->name('settings.check-updates');
+    
     // Gamification - Κατάταξη & Επιτεύγματα
     Route::get('/leaderboard', [GamificationController::class, 'leaderboard'])->name('gamification.leaderboard');
     Route::get('/achievements', [GamificationController::class, 'achievements'])->name('gamification.achievements');
