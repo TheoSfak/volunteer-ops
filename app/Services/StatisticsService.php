@@ -48,6 +48,8 @@ class StatisticsService
     public function getPersonalStats(User $user): array
     {
         $participations = ParticipationRequest::where('volunteer_id', $user->id);
+        $totalVolunteers = User::where('role', User::ROLE_VOLUNTEER)->where('is_active', true)->count();
+        $userRanking = $this->getUserRanking($user);
         
         return [
             'my_total_shifts' => (clone $participations)->count(),
@@ -57,8 +59,18 @@ class StatisticsService
             'my_hours' => $this->calculateUserHours($user),
             'my_points' => $user->total_points ?? 0,
             'my_monthly_points' => $user->monthly_points ?? 0,
-            'my_ranking' => $this->getUserRanking($user),
+            'my_ranking' => $userRanking,
             'participation_streak' => $this->calculateParticipationStreak($user),
+            // Πεδία που χρειάζεται το dashboard
+            'member_since' => $user->created_at,
+            'days_as_member' => $user->created_at ? $user->created_at->diffInDays(now()) : 0,
+            'achievements_count' => $user->achievements()->count(),
+            'ranking' => [
+                'position' => $userRanking,
+                'percentile' => $totalVolunteers > 0 
+                    ? round(($totalVolunteers - $userRanking + 1) / $totalVolunteers * 100) 
+                    : 0,
+            ],
         ];
     }
 
