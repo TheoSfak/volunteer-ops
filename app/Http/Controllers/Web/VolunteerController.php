@@ -43,18 +43,45 @@ class VolunteerController extends Controller
     public function create()
     {
         $departments = Department::where('is_active', true)->get();
-        return view('volunteers.create', compact('departments'));
+        $canCreateAdmin = auth()->user()->hasRole(User::ROLE_SYSTEM_ADMIN);
+        $roles = $canCreateAdmin ? [
+            User::ROLE_VOLUNTEER => 'Εθελοντής',
+            User::ROLE_SHIFT_LEADER => 'Υπεύθυνος Βάρδιας',
+            User::ROLE_DEPARTMENT_ADMIN => 'Διαχειριστής Τμήματος',
+            User::ROLE_SYSTEM_ADMIN => 'Διαχειριστής Συστήματος',
+        ] : [];
+        
+        return view('volunteers.create', compact('departments', 'canCreateAdmin', 'roles'));
     }
 
     public function store(Request $request)
     {
-        $validated = $request->validate([
+        $canCreateAdmin = auth()->user()->hasRole(User::ROLE_SYSTEM_ADMIN);
+        
+        $rules = [
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users',
             'phone' => 'nullable|string|max:20',
             'department_id' => 'nullable|exists:departments,id',
             'password' => 'required|string|min:8|confirmed',
-        ]);
+        ];
+        
+        // Αν είναι SYSTEM_ADMIN, επιτρέπουμε επιλογή ρόλου
+        if ($canCreateAdmin) {
+            $rules['role'] = 'nullable|string|in:' . implode(',', [
+                User::ROLE_VOLUNTEER,
+                User::ROLE_SHIFT_LEADER,
+                User::ROLE_DEPARTMENT_ADMIN,
+                User::ROLE_SYSTEM_ADMIN,
+            ]);
+        }
+        
+        $validated = $request->validate($rules);
+        
+        // Ορισμός ρόλου - default VOLUNTEER αν δεν επιλεχθεί
+        $role = ($canCreateAdmin && !empty($validated['role'])) 
+            ? $validated['role'] 
+            : User::ROLE_VOLUNTEER;
 
         $user = User::create([
             'name' => $validated['name'],
@@ -62,23 +89,33 @@ class VolunteerController extends Controller
             'phone' => $validated['phone'] ?? null,
             'department_id' => $validated['department_id'] ?? null,
             'password' => Hash::make($validated['password']),
-            'role' => 'VOLUNTEER',
+            'role' => $role,
             'is_active' => true,
         ]);
 
-        VolunteerProfile::create([
-            'user_id' => $user->id,
-            'date_of_birth' => $request->input('date_of_birth'),
-            'blood_type' => $request->input('blood_type'),
-            'address' => $request->input('address'),
-            'city' => $request->input('city'),
-            'postal_code' => $request->input('postal_code'),
-            'emergency_contact' => $request->input('emergency_contact'),
-            'specialties' => $request->input('specialties'),
-        ]);
+        // Δημιουργία προφίλ μόνο για εθελοντές
+        if ($role === User::ROLE_VOLUNTEER) {
+            VolunteerProfile::create([
+                'user_id' => $user->id,
+                'date_of_birth' => $request->input('date_of_birth'),
+                'blood_type' => $request->input('blood_type'),
+                'address' => $request->input('address'),
+                'city' => $request->input('city'),
+                'postal_code' => $request->input('postal_code'),
+                'emergency_contact' => $request->input('emergency_contact'),
+                'specialties' => $request->input('specialties'),
+            ]);
+        }
+
+        $roleLabels = [
+            User::ROLE_SYSTEM_ADMIN => 'Διαχειριστής Συστήματος',
+            User::ROLE_DEPARTMENT_ADMIN => 'Διαχειριστής Τμήματος',
+            User::ROLE_SHIFT_LEADER => 'Υπεύθυνος Βάρδιας',
+            User::ROLE_VOLUNTEER => 'Εθελοντής',
+        ];
 
         return redirect()->route('volunteers.show', $user)
-            ->with('success', 'Ο εθελοντής δημιουργήθηκε επιτυχώς.');
+            ->with('success', 'Ο χρήστης (' . ($roleLabels[$role] ?? $role) . ') δημιουργήθηκε επιτυχώς.');
     }
 
     public function show(User $volunteer)
