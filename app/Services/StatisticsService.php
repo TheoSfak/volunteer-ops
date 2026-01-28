@@ -59,6 +59,7 @@ class StatisticsService
             'my_hours' => $this->calculateUserHours($user),
             'my_points' => $user->total_points ?? 0,
             'my_monthly_points' => $user->monthly_points ?? 0,
+            'monthly_points' => $user->monthly_points ?? 0,
             'my_ranking' => $userRanking,
             'participation_streak' => $this->calculateParticipationStreak($user),
             // Πεδία που χρειάζεται το dashboard
@@ -67,6 +68,7 @@ class StatisticsService
             'achievements_count' => $user->achievements()->count(),
             'ranking' => [
                 'position' => $userRanking,
+                'total' => $totalVolunteers,
                 'percentile' => $totalVolunteers > 0 
                     ? round(($totalVolunteers - $userRanking + 1) / $totalVolunteers * 100) 
                     : 0,

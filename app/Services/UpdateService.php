@@ -40,47 +40,72 @@ class UpdateService
         
         return Cache::remember($cacheKey, self::CACHE_DURATION * 60, function () {
             try {
-                $response = Http::timeout(10)
-                    ->get("https://api.github.com/repos/" . self::GITHUB_REPO . "/releases/latest");
+                // Χρήση file_get_contents για συμβατότητα (χωρίς Guzzle dependency)
+                $context = stream_context_create([
+                    'http' => [
+                        'method' => 'GET',
+                        'header' => [
+                            'User-Agent: VolunteerOps/' . self::CURRENT_VERSION,
+                            'Accept: application/vnd.github.v3+json',
+                        ],
+                        'timeout' => 10,
+                    ],
+                    'ssl' => [
+                        'verify_peer' => false,
+                        'verify_peer_name' => false,
+                    ],
+                ]);
                 
-                if ($response->successful()) {
-                    $release = $response->json();
-                    $latestVersion = ltrim($release['tag_name'] ?? '', 'v');
-                    
-                    // Βρες το ZIP asset
-                    $downloadUrl = null;
-                    $assetSize = 0;
-                    foreach ($release['assets'] ?? [] as $asset) {
-                        if (str_contains($asset['name'], '.zip')) {
-                            $downloadUrl = $asset['browser_download_url'];
-                            $assetSize = $asset['size'];
-                            break;
-                        }
-                    }
-                    
-                    // Αν δεν βρέθηκε asset, χρησιμοποίησε το zipball
-                    if (!$downloadUrl) {
-                        $downloadUrl = $release['zipball_url'] ?? null;
-                    }
-                    
+                $url = "https://api.github.com/repos/" . self::GITHUB_REPO . "/releases/latest";
+                $response = @file_get_contents($url, false, $context);
+                
+                if ($response === false) {
                     return [
-                        'success' => true,
+                        'success' => false,
                         'current_version' => self::CURRENT_VERSION,
-                        'latest_version' => $latestVersion,
-                        'has_update' => version_compare($latestVersion, self::CURRENT_VERSION, '>'),
-                        'release_name' => $release['name'] ?? "v{$latestVersion}",
-                        'release_notes' => $release['body'] ?? '',
-                        'release_date' => $release['published_at'] ?? null,
-                        'download_url' => $downloadUrl,
-                        'download_size' => $assetSize,
-                        'html_url' => $release['html_url'] ?? null,
+                        'error' => 'Αδυναμία σύνδεσης με το GitHub',
                     ];
                 }
                 
+                $release = json_decode($response, true);
+                
+                if (!$release || !isset($release['tag_name'])) {
+                    return [
+                        'success' => false,
+                        'current_version' => self::CURRENT_VERSION,
+                        'error' => 'Μη έγκυρη απάντηση από το GitHub',
+                    ];
+                }
+                
+                $latestVersion = ltrim($release['tag_name'] ?? '', 'v');
+                
+                // Βρες το ZIP asset
+                $downloadUrl = null;
+                $assetSize = 0;
+                foreach ($release['assets'] ?? [] as $asset) {
+                    if (str_contains($asset['name'], '.zip')) {
+                        $downloadUrl = $asset['browser_download_url'];
+                        $assetSize = $asset['size'];
+                        break;
+                    }
+                }
+                
+                // Αν δεν βρέθηκε asset, χρησιμοποίησε το zipball
+                if (!$downloadUrl) {
+                    $downloadUrl = $release['zipball_url'] ?? null;
+                }
+                
                 return [
-                    'success' => false,
+                    'success' => true,
                     'current_version' => self::CURRENT_VERSION,
-                    'error' => 'Αδυναμία σύνδεσης με το GitHub',
+                    'latest_version' => $latestVersion,
+                    'has_update' => version_compare($latestVersion, self::CURRENT_VERSION, '>'),
+                    'release_name' => $release['name'] ?? "v{$latestVersion}",
+                    'release_notes' => $release['body'] ?? '',
+                    'release_date' => $release['published_at'] ?? null,
+                    'download_url' => $downloadUrl,
+                    'download_size' => $assetSize,
+                    'html_url' => $release['html_url'] ?? null,
                 ];
                 
             } catch (\Exception $e) {
@@ -107,25 +132,44 @@ class UpdateService
     public function getAllReleases(int $limit = 5): array
     {
         try {
-            $response = Http::timeout(10)
-                ->get("https://api.github.com/repos/" . self::GITHUB_REPO . "/releases", [
-                    'per_page' => $limit
-                ]);
+            $context = stream_context_create([
+                'http' => [
+                    'method' => 'GET',
+                    'header' => [
+                        'User-Agent: VolunteerOps/' . self::CURRENT_VERSION,
+                        'Accept: application/vnd.github.v3+json',
+                    ],
+                    'timeout' => 10,
+                ],
+                'ssl' => [
+                    'verify_peer' => false,
+                    'verify_peer_name' => false,
+                ],
+            ]);
             
-            if ($response->successful()) {
-                $releases = [];
-                foreach ($response->json() as $release) {
-                    $releases[] = [
-                        'version' => ltrim($release['tag_name'] ?? '', 'v'),
-                        'name' => $release['name'] ?? '',
-                        'date' => $release['published_at'] ?? null,
-                        'url' => $release['html_url'] ?? null,
-                    ];
-                }
-                return ['success' => true, 'releases' => $releases];
+            $url = "https://api.github.com/repos/" . self::GITHUB_REPO . "/releases?per_page=" . $limit;
+            $response = @file_get_contents($url, false, $context);
+            
+            if ($response === false) {
+                return ['success' => false, 'releases' => []];
             }
             
-            return ['success' => false, 'releases' => []];
+            $data = json_decode($response, true);
+            
+            if (!is_array($data)) {
+                return ['success' => false, 'releases' => []];
+            }
+            
+            $releases = [];
+            foreach ($data as $release) {
+                $releases[] = [
+                    'version' => ltrim($release['tag_name'] ?? '', 'v'),
+                    'name' => $release['name'] ?? '',
+                    'date' => $release['published_at'] ?? null,
+                    'url' => $release['html_url'] ?? null,
+                ];
+            }
+            return ['success' => true, 'releases' => $releases];
             
         } catch (\Exception $e) {
             return ['success' => false, 'releases' => [], 'error' => $e->getMessage()];

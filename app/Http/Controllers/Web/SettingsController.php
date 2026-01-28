@@ -75,7 +75,6 @@ class SettingsController extends Controller
             return back()->with('error', 'Σφάλμα αποστολής: ' . $e->getMessage());
         }
     }
-    }
 
     /**
      * Αποθήκευση notification settings.
