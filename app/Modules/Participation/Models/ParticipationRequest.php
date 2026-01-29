@@ -30,6 +30,14 @@ class ParticipationRequest extends Model
         'decided_by',
         'decided_at',
         'points_awarded',
+        // Νέα πεδία για παρουσία
+        'attended',
+        'actual_hours',
+        'actual_start_time',
+        'actual_end_time',
+        'admin_notes',
+        'attendance_confirmed_at',
+        'attendance_confirmed_by',
     ];
 
     /**
@@ -40,6 +48,9 @@ class ParticipationRequest extends Model
     protected $casts = [
         'decided_at' => 'datetime',
         'points_awarded' => 'boolean',
+        'attended' => 'boolean',
+        'actual_hours' => 'decimal:2',
+        'attendance_confirmed_at' => 'datetime',
     ];
 
     /**
@@ -151,5 +162,74 @@ class ParticipationRequest extends Model
     public function scopeForUser($query, $userId)
     {
         return $query->where('volunteer_id', $userId);
+    }
+
+    /**
+     * Σχέση με τον χρήστη που επιβεβαίωσε την παρουσία.
+     */
+    public function attendanceConfirmer()
+    {
+        return $this->belongsTo(User::class, 'attendance_confirmed_by');
+    }
+
+    /**
+     * Έλεγχος αν ήρθε ο εθελοντής.
+     */
+    public function didAttend(): bool
+    {
+        return $this->attended === true;
+    }
+
+    /**
+     * Έλεγχος αν είναι no-show.
+     */
+    public function isNoShow(): bool
+    {
+        return $this->attended === false;
+    }
+
+    /**
+     * Υπολογισμός ωρών εργασίας.
+     * Αν υπάρχουν actual_hours, επιστρέφει αυτές.
+     * Αλλιώς υπολογίζει από actual_start/end_time ή από τη βάρδια.
+     */
+    public function getCalculatedHoursAttribute(): float
+    {
+        // Αν έχει οριστεί χειροκίνητα
+        if ($this->actual_hours !== null) {
+            return (float) $this->actual_hours;
+        }
+        
+        // Αν έχει πραγματικές ώρες έναρξης/λήξης
+        if ($this->actual_start_time && $this->actual_end_time) {
+            $start = \Carbon\Carbon::parse($this->actual_start_time);
+            $end = \Carbon\Carbon::parse($this->actual_end_time);
+            return abs($end->diffInMinutes($start)) / 60;
+        }
+        
+        // Fallback στις ώρες της βάρδιας
+        if ($this->shift) {
+            $start = \Carbon\Carbon::parse($this->shift->start_time);
+            $end = \Carbon\Carbon::parse($this->shift->end_time);
+            return abs($end->diffInMinutes($start)) / 60;
+        }
+        
+        return 0;
+    }
+
+    /**
+     * Scope για συμμετοχές που ήρθαν.
+     */
+    public function scopeAttended($query)
+    {
+        return $query->where('attended', true);
+    }
+
+    /**
+     * Scope για no-shows.
+     */
+    public function scopeNoShow($query)
+    {
+        return $query->where('attended', false);
     }
 }

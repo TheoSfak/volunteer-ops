@@ -5,40 +5,35 @@
 
 @section('content')
     <!-- Header Actions -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <p class="text-muted mb-0">Διαχείριση εθελοντικών αποστολών</p>
-        </div>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <span class="text-muted small">Διαχείριση εθελοντικών αποστολών</span>
         @if(auth()->user()->isAdmin())
-        <a href="{{ route('missions.create') }}" class="btn btn-primary">
-            <i class="bi bi-plus-lg me-2"></i>Νέα Αποστολή
+        <a href="{{ route('missions.create') }}" class="btn btn-primary btn-sm">
+            <i class="bi bi-plus-lg me-1"></i>Νέα Αποστολή
         </a>
         @endif
     </div>
     
-    <!-- Filters -->
-    <div class="card mb-4">
-        <div class="card-body">
-            <form action="{{ route('missions.index') }}" method="GET" class="row g-3">
-                <div class="col-md-3">
-                    <label class="form-label">Αναζήτηση</label>
-                    <input type="text" class="form-control" name="search" value="{{ request('search') }}" placeholder="Τίτλος, τοποθεσία...">
+    <!-- Compact Filters -->
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <form action="{{ route('missions.index') }}" method="GET" class="row g-2 align-items-end">
+                <div class="col">
+                    <input type="text" class="form-control form-control-sm" name="search" value="{{ request('search') }}" placeholder="Αναζήτηση...">
                 </div>
-                <div class="col-md-2">
-                    <label class="form-label">Κατάσταση</label>
-                    <select class="form-select" name="status">
-                        <option value="">Όλες</option>
-                        <option value="draft" {{ request('status') == 'draft' ? 'selected' : '' }}>Πρόχειρη</option>
-                        <option value="published" {{ request('status') == 'published' ? 'selected' : '' }}>Δημοσιευμένη</option>
-                        <option value="active" {{ request('status') == 'active' ? 'selected' : '' }}>Ενεργή</option>
-                        <option value="completed" {{ request('status') == 'completed' ? 'selected' : '' }}>Ολοκληρωμένη</option>
-                        <option value="cancelled" {{ request('status') == 'cancelled' ? 'selected' : '' }}>Ακυρωμένη</option>
+                <div class="col-auto">
+                    <select class="form-select form-select-sm" name="status" style="width: 130px;">
+                        <option value="">Κατάσταση</option>
+                        <option value="DRAFT" {{ request('status') == 'DRAFT' ? 'selected' : '' }}>Πρόχειρη</option>
+                        <option value="OPEN" {{ request('status') == 'OPEN' ? 'selected' : '' }}>Ανοιχτή</option>
+                        <option value="CLOSED" {{ request('status') == 'CLOSED' ? 'selected' : '' }}>Κλειστή</option>
+                        <option value="COMPLETED" {{ request('status') == 'COMPLETED' ? 'selected' : '' }}>Ολοκληρωμένη</option>
+                        <option value="CANCELED" {{ request('status') == 'CANCELED' ? 'selected' : '' }}>Ακυρωμένη</option>
                     </select>
                 </div>
-                <div class="col-md-2">
-                    <label class="form-label">Τμήμα</label>
-                    <select class="form-select" name="department_id">
-                        <option value="">Όλα</option>
+                <div class="col-auto">
+                    <select class="form-select form-select-sm" name="department_id" style="width: 140px;">
+                        <option value="">Τμήμα</option>
                         @foreach($departments ?? [] as $dept)
                             <option value="{{ $dept->id }}" {{ request('department_id') == $dept->id ? 'selected' : '' }}>
                                 {{ $dept->name }}
@@ -46,112 +41,105 @@
                         @endforeach
                     </select>
                 </div>
-                <div class="col-md-2">
-                    <label class="form-label">Από</label>
-                    <input type="date" class="form-control" name="from_date" value="{{ request('from_date') }}">
+                <div class="col-auto">
+                    <input type="date" class="form-control form-control-sm" name="from_date" value="{{ request('from_date') }}" title="Από">
                 </div>
-                <div class="col-md-2">
-                    <label class="form-label">Έως</label>
-                    <input type="date" class="form-control" name="to_date" value="{{ request('to_date') }}">
+                <div class="col-auto">
+                    <input type="date" class="form-control form-control-sm" name="to_date" value="{{ request('to_date') }}" title="Έως">
                 </div>
-                <div class="col-md-1 d-flex align-items-end">
-                    <button type="submit" class="btn btn-outline-primary w-100">
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-outline-primary btn-sm">
                         <i class="bi bi-search"></i>
                     </button>
+                    @if(request()->hasAny(['search', 'status', 'department_id', 'from_date', 'to_date']))
+                    <a href="{{ route('missions.index') }}" class="btn btn-outline-secondary btn-sm" title="Καθαρισμός">
+                        <i class="bi bi-x-lg"></i>
+                    </a>
+                    @endif
                 </div>
             </form>
         </div>
     </div>
     
-    <!-- Missions List -->
+    <!-- Compact Missions Table -->
     <div class="card">
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-hover mb-0">
-                    <thead>
+                <table class="table table-hover table-sm mb-0 align-middle">
+                    <thead class="table-light">
                         <tr>
-                            <th>Αποστολή</th>
+                            <th class="ps-3">Αποστολή</th>
                             <th>Τμήμα</th>
                             <th>Τοποθεσία</th>
-                            <th>Ημερομηνίες</th>
-                            <th>Βάρδιες</th>
+                            <th>Ημερομηνία</th>
+                            <th class="text-center">Βάρδιες</th>
                             <th>Κατάσταση</th>
-                            <th class="text-end">Ενέργειες</th>
+                            <th class="text-end pe-3" style="width: 100px;">Ενέργειες</th>
                         </tr>
                     </thead>
                     <tbody>
                         @forelse($missions ?? [] as $mission)
                             <tr>
-                                <td>
-                                    <div class="d-flex align-items-center gap-3">
-                                        <div class="bg-primary bg-opacity-10 rounded p-2">
-                                            <i class="bi bi-flag text-primary"></i>
-                                        </div>
-                                        <div>
-                                            <div class="fw-medium">{{ $mission->title }}</div>
-                                            <small class="text-muted">{{ Str::limit($mission->description, 50) }}</small>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td>
-                                    <span class="badge bg-light text-dark">
-                                        {{ $mission->department->name ?? '-' }}
-                                    </span>
-                                </td>
-                                <td>
-                                    <i class="bi bi-geo-alt text-muted me-1"></i>
-                                    {{ $mission->location ?? '-' }}
-                                </td>
-                                <td>
-                                    @if($mission->start_datetime)
-                                        <div>{{ $mission->start_datetime->format('d/m/Y') }}</div>
-                                        <small class="text-muted">
-                                            {{ $mission->end_datetime ? 'έως ' . $mission->end_datetime->format('d/m/Y') : '' }}
-                                        </small>
-                                    @else
-                                        -
+                                <td class="ps-3">
+                                    <a href="{{ route('missions.show', $mission) }}" class="text-decoration-none fw-medium">
+                                        {{ Str::limit($mission->title, 35) }}
+                                    </a>
+                                    @if($mission->type === 'MEDICAL')
+                                        <i class="bi bi-heart-pulse text-danger ms-1" title="Ιατρική"></i>
                                     @endif
                                 </td>
                                 <td>
-                                    <span class="badge bg-secondary">{{ $mission->shifts_count ?? 0 }}</span>
+                                    <small class="text-muted">{{ $mission->department->name ?? '-' }}</small>
+                                </td>
+                                <td>
+                                    <small><i class="bi bi-geo-alt text-muted"></i> {{ Str::limit($mission->location ?? '-', 20) }}</small>
+                                </td>
+                                <td>
+                                    @if($mission->start_datetime)
+                                        <small>{{ $mission->start_datetime->format('d/m/y') }}
+                                        @if($mission->end_datetime && $mission->end_datetime->format('d/m/y') !== $mission->start_datetime->format('d/m/y'))
+                                            - {{ $mission->end_datetime->format('d/m/y') }}
+                                        @endif
+                                        </small>
+                                    @else
+                                        <small class="text-muted">-</small>
+                                    @endif
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge bg-secondary bg-opacity-75">{{ $mission->shifts_count ?? $mission->shifts->count() ?? 0 }}</span>
                                 </td>
                                 <td>
                                     @php
                                         $statusClasses = [
-                                            'draft' => 'badge-draft',
-                                            'published' => 'badge-published',
-                                            'active' => 'badge-active',
-                                            'completed' => 'badge-completed',
-                                            'cancelled' => 'badge-cancelled',
+                                            'DRAFT' => 'bg-secondary',
+                                            'OPEN' => 'bg-success',
+                                            'CLOSED' => 'bg-warning text-dark',
+                                            'COMPLETED' => 'bg-primary',
+                                            'CANCELED' => 'bg-danger',
                                         ];
                                         $statusLabels = [
-                                            'draft' => 'Πρόχειρη',
-                                            'published' => 'Δημοσιευμένη',
-                                            'active' => 'Ενεργή',
-                                            'completed' => 'Ολοκληρωμένη',
-                                            'cancelled' => 'Ακυρωμένη',
+                                            'DRAFT' => 'Πρόχειρη',
+                                            'OPEN' => 'Ανοιχτή',
+                                            'CLOSED' => 'Κλειστή',
+                                            'COMPLETED' => 'Ολοκληρωμένη',
+                                            'CANCELED' => 'Ακυρωμένη',
                                         ];
                                     @endphp
-                                    <span class="badge-status {{ $statusClasses[$mission->status] ?? 'badge-draft' }}">
+                                    <span class="badge {{ $statusClasses[$mission->status] ?? 'bg-secondary' }}" style="font-size: 0.7rem;">
                                         {{ $statusLabels[$mission->status] ?? $mission->status }}
                                     </span>
                                 </td>
-                                <td class="text-end">
-                                    <div class="btn-group btn-group-sm">
-                                        <a href="{{ route('missions.show', $mission) }}" class="btn btn-outline-primary" title="Προβολή">
-                                            <i class="bi bi-eye"></i>
-                                        </a>
-                                        @if(auth()->user()->isAdmin())
-                                        <a href="{{ route('missions.edit', $mission) }}" class="btn btn-outline-secondary" title="Επεξεργασία">
-                                            <i class="bi bi-pencil"></i>
-                                        </a>
-                                        <button type="button" class="btn btn-outline-danger" title="Διαγραφή" 
-                                                onclick="confirmDelete({{ $mission->id }})">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                        @endif
-                                    </div>
+                                <td class="text-end pe-3">
+                                    <a href="{{ route('missions.show', $mission) }}" class="btn btn-link btn-sm p-0 me-2" title="Προβολή">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
                                     @if(auth()->user()->isAdmin())
+                                    <a href="{{ route('missions.edit', $mission) }}" class="btn btn-link btn-sm p-0 me-2 text-secondary" title="Επεξεργασία">
+                                        <i class="bi bi-pencil"></i>
+                                    </a>
+                                    <button type="button" class="btn btn-link btn-sm p-0 text-danger" title="Διαγραφή" onclick="confirmDelete({{ $mission->id }})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
                                     <form id="delete-form-{{ $mission->id }}" action="{{ route('missions.destroy', $mission) }}" method="POST" class="d-none">
                                         @csrf
                                         @method('DELETE')
@@ -161,16 +149,14 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="7" class="text-center py-5">
-                                    <div class="text-muted">
-                                        <i class="bi bi-inbox fs-1 d-block mb-3"></i>
-                                        <p class="mb-3">Δεν βρέθηκαν αποστολές</p>
-                                        @if(auth()->user()->isAdmin())
-                                        <a href="{{ route('missions.create') }}" class="btn btn-primary">
-                                            <i class="bi bi-plus-lg me-2"></i>Δημιουργία Αποστολής
-                                        </a>
-                                        @endif
-                                    </div>
+                                <td colspan="7" class="text-center py-4">
+                                    <i class="bi bi-inbox text-muted fs-4 d-block mb-2"></i>
+                                    <span class="text-muted">Δεν βρέθηκαν αποστολές</span>
+                                    @if(auth()->user()->isAdmin())
+                                    <br><a href="{{ route('missions.create') }}" class="btn btn-sm btn-primary mt-2">
+                                        <i class="bi bi-plus-lg me-1"></i>Νέα Αποστολή
+                                    </a>
+                                    @endif
                                 </td>
                             </tr>
                         @endforelse
@@ -180,7 +166,7 @@
         </div>
         
         @if(isset($missions) && $missions->hasPages())
-            <div class="card-footer">
+            <div class="card-footer py-2">
                 {{ $missions->links() }}
             </div>
         @endif

@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\StatisticsService;
 use App\Modules\Missions\Models\Mission;
 use App\Modules\Participation\Models\ParticipationRequest;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
 class DashboardController extends Controller
@@ -18,19 +19,24 @@ class DashboardController extends Controller
     /**
      * Εμφάνιση κεντρικού dashboard.
      */
-    public function index()
+    public function index(Request $request)
     {
         $user = Auth::user();
+        $currentYear = now()->year;
+        $selectedYear = (int) $request->get('year', $currentYear);
+        
+        // Διαθέσιμα έτη για επιλογή
+        $availableYears = $this->statisticsService->getAvailableYears($user->id);
         
         // Στατιστικά για admins (χρήση service)
         $adminStats = [];
         if ($user->isAdmin()) {
             $departmentId = $user->hasRole(User::ROLE_DEPARTMENT_ADMIN) ? $user->department_id : null;
-            $adminStats = $this->statisticsService->getAdminStats($departmentId);
+            $adminStats = $this->statisticsService->getAdminStats($departmentId, $selectedYear);
         }
         
         // Προσωπικά στατιστικά (χρήση service)
-        $personalStats = $this->statisticsService->getPersonalStats($user);
+        $personalStats = $this->statisticsService->getPersonalStats($user, $selectedYear);
         
         // Πρόσφατες αποστολές - με eager loading (χρήση config για count)
         $recentMissionsCount = config('volunteerops.dashboard.recent_missions_count', 5);
@@ -52,6 +58,15 @@ class DashboardController extends Controller
             ->take($upcomingShiftsCount)
             ->get();
         
-        return view('dashboard', compact('user', 'adminStats', 'personalStats', 'recentMissions', 'upcomingShifts'));
+        return view('dashboard', compact(
+            'user', 
+            'adminStats', 
+            'personalStats', 
+            'recentMissions', 
+            'upcomingShifts',
+            'selectedYear',
+            'currentYear',
+            'availableYears'
+        ));
     }
 }

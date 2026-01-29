@@ -41,6 +41,10 @@ class Mission extends Model
         'coverage_percentage',
         'status',
         'created_by',
+        // Νέα πεδία για ακύρωση
+        'cancellation_reason',
+        'canceled_by',
+        'canceled_at',
     ];
 
     /**
@@ -55,6 +59,7 @@ class Mission extends Model
         'longitude' => 'decimal:8',
         'is_urgent' => 'boolean',
         'coverage_percentage' => 'integer',
+        'canceled_at' => 'datetime',
     ];
 
     /**
@@ -206,5 +211,89 @@ class Mission extends Model
     public function scopeForDepartment($query, $departmentId)
     {
         return $query->where('department_id', $departmentId);
+    }
+
+    /**
+     * Σχέση με τον χρήστη που ακύρωσε την αποστολή.
+     */
+    public function canceler()
+    {
+        return $this->belongsTo(User::class, 'canceled_by');
+    }
+
+    /**
+     * Έλεγχος αν η αποστολή είναι σε πρόχειρη κατάσταση.
+     */
+    public function isDraft(): bool
+    {
+        return $this->status === self::STATUS_DRAFT;
+    }
+
+    /**
+     * Έλεγχος αν η αποστολή είναι ανοιχτή.
+     */
+    public function isOpen(): bool
+    {
+        return $this->status === self::STATUS_OPEN;
+    }
+
+    /**
+     * Έλεγχος αν η αποστολή είναι κλειστή.
+     */
+    public function isClosed(): bool
+    {
+        return $this->status === self::STATUS_CLOSED;
+    }
+
+    /**
+     * Έλεγχος αν η αποστολή είναι ολοκληρωμένη.
+     */
+    public function isCompleted(): bool
+    {
+        return $this->status === self::STATUS_COMPLETED;
+    }
+
+    /**
+     * Έλεγχος αν η αποστολή είναι ακυρωμένη.
+     */
+    public function isCanceled(): bool
+    {
+        return $this->status === self::STATUS_CANCELED;
+    }
+
+    /**
+     * Έλεγχος αν επιτρέπεται η αλλαγή κατάστασης.
+     */
+    public function canTransitionTo(string $newStatus): bool
+    {
+        $allowedTransitions = [
+            self::STATUS_DRAFT => [self::STATUS_OPEN, self::STATUS_CANCELED],
+            self::STATUS_OPEN => [self::STATUS_CLOSED, self::STATUS_CANCELED],
+            self::STATUS_CLOSED => [self::STATUS_COMPLETED, self::STATUS_OPEN], // Μπορεί να επανανοίξει
+            self::STATUS_COMPLETED => [], // Τελική κατάσταση
+            self::STATUS_CANCELED => [], // Τελική κατάσταση
+        ];
+
+        return in_array($newStatus, $allowedTransitions[$this->status] ?? []);
+    }
+
+    /**
+     * Λήψη όλων των εγκεκριμένων συμμετοχών της αποστολής.
+     */
+    public function getApprovedParticipationsAttribute()
+    {
+        return $this->shifts->flatMap(function ($shift) {
+            return $shift->participations->where('status', 'APPROVED');
+        });
+    }
+
+    /**
+     * Υπολογισμός συνολικών ωρών της αποστολής.
+     */
+    public function getTotalHoursAttribute(): float
+    {
+        return $this->start_datetime && $this->end_datetime
+            ? abs($this->end_datetime->diffInMinutes($this->start_datetime)) / 60
+            : 0;
     }
 }

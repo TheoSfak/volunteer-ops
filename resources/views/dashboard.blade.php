@@ -5,6 +5,36 @@
 
 @section('content')
 <div class="content-area">
+    {{-- Year Selector --}}
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h5 class="mb-0">
+            <i class="bi bi-calendar3 me-2"></i>Στατιστικά {{ $selectedYear ?? now()->year }}
+            @if(($selectedYear ?? now()->year) !== ($currentYear ?? now()->year))
+                <span class="badge bg-secondary ms-2">Ιστορικό</span>
+            @endif
+        </h5>
+        @if(!empty($availableYears) && count($availableYears) > 1)
+        <div class="dropdown">
+            <button class="btn btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                <i class="bi bi-calendar-range me-1"></i>{{ $selectedYear ?? now()->year }}
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                @foreach($availableYears as $year)
+                    <li>
+                        <a class="dropdown-item {{ ($selectedYear ?? now()->year) == $year ? 'active' : '' }}" 
+                           href="{{ route('dashboard') }}?year={{ $year }}">
+                            {{ $year }}
+                            @if($year == ($currentYear ?? now()->year))
+                                <span class="badge bg-primary ms-2">Τρέχον</span>
+                            @endif
+                        </a>
+                    </li>
+                @endforeach
+            </ul>
+        </div>
+        @endif
+    </div>
+
     <!-- Main Stats Cards -->
     <div class="row g-4 mb-4">
         <div class="col-sm-6 col-xl-3">

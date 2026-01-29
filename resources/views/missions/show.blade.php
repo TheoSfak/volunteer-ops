@@ -48,32 +48,87 @@
                 @endif
                 @if($mission->status === 'OPEN')
                     <li>
-                        <form action="{{ route('missions.complete', $mission) }}" method="POST">
+                        <form action="{{ route('missions.close', $mission) }}" method="POST">
                             @csrf
                             <button type="submit" class="dropdown-item">
-                                <i class="bi bi-check-circle me-2"></i>Ολοκλήρωση
+                                <i class="bi bi-lock me-2"></i>Κλείσιμο (Διαχείριση Παρουσιών)
                             </button>
                         </form>
                     </li>
                     <li>
-                        <form action="{{ route('missions.cancel', $mission) }}" method="POST">
+                        <button type="button" class="dropdown-item text-danger" data-bs-toggle="modal" data-bs-target="#cancelModal">
+                            <i class="bi bi-x-circle me-2"></i>Ακύρωση Αποστολής
+                        </button>
+                    </li>
+                @endif
+                @if($mission->status === 'CLOSED')
+                    <li>
+                        <a href="{{ route('attendance.manage', $mission) }}" class="dropdown-item">
+                            <i class="bi bi-clipboard-check me-2"></i>Διαχείριση Παρουσιών
+                        </a>
+                    </li>
+                    <li>
+                        <form action="{{ route('missions.complete', $mission) }}" method="POST">
                             @csrf
-                            <button type="submit" class="dropdown-item text-danger">
-                                <i class="bi bi-x-circle me-2"></i>Ακύρωση
+                            <button type="submit" class="dropdown-item text-success" 
+                                    onclick="return confirm('Μόλις ολοκληρωθεί η αποστολή, οι πόντοι θα αποδοθούν στους εθελοντές. Συνέχεια;')">
+                                <i class="bi bi-check-circle me-2"></i>Ολοκλήρωση & Απόδοση Πόντων
+                            </button>
+                        </form>
+                    </li>
+                    <li>
+                        <form action="{{ route('missions.activate', $mission) }}" method="POST">
+                            @csrf
+                            <button type="submit" class="dropdown-item">
+                                <i class="bi bi-arrow-counterclockwise me-2"></i>Επαναφορά σε Ανοιχτή
                             </button>
                         </form>
                     </li>
                 @endif
+                @if(!in_array($mission->status, ['COMPLETED', 'CANCELED']))
                 <li><hr class="dropdown-divider"></li>
                 <li>
                     <button type="button" class="dropdown-item text-danger" onclick="confirmDelete()">
                         <i class="bi bi-trash me-2"></i>Διαγραφή
                     </button>
                 </li>
+                @endif
             </ul>
         </div>
         @endif
     </div>
+    
+    {{-- Cancel Modal --}}
+    @if(auth()->user()->isAdmin())
+    <div class="modal fade" id="cancelModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="{{ route('missions.cancel', $mission) }}" method="POST">
+                    @csrf
+                    <div class="modal-header bg-danger text-white">
+                        <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Ακύρωση Αποστολής</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Είστε σίγουροι ότι θέλετε να ακυρώσετε την αποστολή <strong>"{{ $mission->title }}"</strong>;</p>
+                        <p class="text-muted">Όλοι οι εθελοντές που έχουν δηλώσει συμμετοχή θα ενημερωθούν με email.</p>
+                        <div class="mb-3">
+                            <label class="form-label">Λόγος Ακύρωσης <span class="text-muted">(προαιρετικό)</span></label>
+                            <textarea name="cancellation_reason" class="form-control" rows="3" 
+                                      placeholder="π.χ. Ακύρωση λόγω καιρικών συνθηκών..."></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Άκυρο</button>
+                        <button type="submit" class="btn btn-danger">
+                            <i class="bi bi-x-circle me-2"></i>Ακύρωση Αποστολής
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    @endif
     
     @if(auth()->user()->isAdmin())
     <form id="delete-form" action="{{ route('missions.destroy', $mission) }}" method="POST" class="d-none">

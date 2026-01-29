@@ -371,4 +371,170 @@ class SettingsController extends Controller
         
         return view('settings.updates', compact('updateInfo', 'systemInfo', 'allReleases'));
     }
+
+    /**
+     * Εγκατάσταση ενημέρωσης
+     */
+    public function installUpdate(Request $request)
+    {
+        try {
+            // Παίρνουμε τα στοιχεία της ενημέρωσης
+            $updateInfo = $this->updateService->checkForUpdates();
+            
+            if (!$updateInfo['success'] || !$updateInfo['has_update']) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Δεν υπάρχει διαθέσιμη ενημέρωση.',
+                ], 400);
+            }
+
+            $version = $updateInfo['latest_version'];
+            $downloadUrl = $updateInfo['download_url'];
+
+            if (empty($downloadUrl)) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Δεν βρέθηκε URL λήψης.',
+                ], 400);
+            }
+
+            // Βήμα 1: Δημιουργία backup
+            \Log::info('Update: Creating backup...');
+            $backupResult = $this->updateService->createBackup();
+            if (!$backupResult['success']) {
+                return response()->json([
+                    'success' => false,
+                    'step' => 'backup',
+                    'error' => $backupResult['message'],
+                ], 500);
+            }
+
+            // Βήμα 2: Λήψη αρχείου
+            \Log::info('Update: Downloading update from ' . $downloadUrl);
+            $downloadResult = $this->updateService->downloadUpdate($downloadUrl);
+            if (!$downloadResult['success']) {
+                return response()->json([
+                    'success' => false,
+                    'step' => 'download',
+                    'error' => $downloadResult['message'],
+                ], 500);
+            }
+
+            // Βήμα 3: Εξαγωγή και εφαρμογή
+            \Log::info('Update: Applying update...');
+            $applyResult = $this->updateService->applyUpdate($downloadResult['file']);
+            if (!$applyResult['success']) {
+                return response()->json([
+                    'success' => false,
+                    'step' => 'apply',
+                    'error' => $applyResult['message'],
+                ], 500);
+            }
+
+            // Βήμα 4: Εκτέλεση migrations
+            \Log::info('Update: Running migrations...');
+            $migrateResult = $this->updateService->runMigrations();
+
+            // Βήμα 5: Καθαρισμός cache
+            \Log::info('Update: Clearing caches...');
+            $this->updateService->clearAllCaches();
+
+            // Βήμα 6: Καθαρισμός temp files
+            $this->updateService->cleanupTempFiles();
+
+            \Log::info('Update: Completed successfully to version ' . $version);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Η ενημέρωση ολοκληρώθηκε επιτυχώς!',
+                'version' => $version,
+                'files_updated' => $applyResult['files_count'] ?? 0,
+                'migrations_run' => $migrateResult['migrations'] ?? [],
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Update failed: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'step' => 'unknown',
+                'error' => 'Σφάλμα: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Εκτέλεση migrations μόνο
+     */
+    public function runMigrations()
+    {
+        try {
+            $result = $this->updateService->runMigrations();
+            return response()->json($result);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Λίστα διαθέσιμων backups
+     */
+    public function getBackups()
+    {
+        try {
+            $backups = $this->updateService->getBackupsList();
+            return response()->json([
+                'success' => true,
+                'backups' => $backups
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+                'backups' => []
+            ]);
+        }
+    }
+
+    /**
+     * Επαναφορά από backup
+     */
+    public function restoreBackup(Request $request)
+    {
+        $request->validate([
+            'backup_name' => 'required|string',
+        ]);
+
+        try {
+            $result = $this->updateService->restoreBackup($request->backup_name);
+            return response()->json($result);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Καθαρισμός caches
+     */
+    public function clearCaches()
+    {
+        try {
+            $this->updateService->clearAllCaches();
+            return response()->json([
+                'success' => true,
+                'message' => 'Όλα τα caches καθαρίστηκαν επιτυχώς.',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
 }

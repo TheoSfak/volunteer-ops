@@ -14,6 +14,7 @@ use App\Http\Controllers\Web\ReportController;
 use App\Http\Controllers\Web\ProfileController;
 use App\Http\Controllers\Web\SettingsController;
 use App\Http\Controllers\Web\GamificationController;
+use App\Http\Controllers\Web\AttendanceController;
 
 /*
 |--------------------------------------------------------------------------
@@ -57,9 +58,16 @@ Route::middleware('auth')->group(function () {
     Route::resource('missions', MissionController::class);
     Route::post('/missions/{mission}/publish', [MissionController::class, 'publish'])->name('missions.publish');
     Route::post('/missions/{mission}/activate', [MissionController::class, 'activate'])->name('missions.activate');
+    Route::post('/missions/{mission}/close', [MissionController::class, 'close'])->name('missions.close');
     Route::post('/missions/{mission}/complete', [MissionController::class, 'complete'])->name('missions.complete');
     Route::post('/missions/{mission}/cancel', [MissionController::class, 'cancel'])->name('missions.cancel');
     Route::post('/missions/{mission}/apply', [ParticipationController::class, 'applyToMission'])->name('missions.apply');
+    
+    // Διαχείριση Παρουσιών (για κλειστές αποστολές)
+    Route::get('/missions/{mission}/attendance', [AttendanceController::class, 'manage'])->name('attendance.manage');
+    Route::put('/attendance/{participation}', [AttendanceController::class, 'update'])->name('attendance.update');
+    Route::post('/missions/{mission}/attendance/bulk', [AttendanceController::class, 'bulkUpdate'])->name('attendance.bulk');
+    Route::post('/missions/{mission}/attendance/mark-all', [AttendanceController::class, 'markAllAttended'])->name('attendance.mark-all');
     
     // Βάρδιες
     Route::resource('shifts', ShiftController::class);
@@ -111,6 +119,12 @@ Route::middleware('auth')->group(function () {
     // Ενημερώσεις Συστήματος
     Route::get('/settings/updates', [SettingsController::class, 'updates'])->name('settings.updates');
     Route::post('/settings/check-updates', [SettingsController::class, 'checkUpdates'])->name('settings.check-updates');
+    Route::post('/settings/install-update', [SettingsController::class, 'installUpdate'])->name('updates.install');
+    Route::post('/settings/run-migrations', [SettingsController::class, 'runMigrations'])->name('updates.migrate');
+    Route::get('/settings/backups', [SettingsController::class, 'getBackups'])->name('updates.backups');
+    Route::post('/settings/restore-backup', [SettingsController::class, 'restoreBackup'])->name('updates.rollback');
+    Route::post('/settings/clear-caches', [SettingsController::class, 'clearCaches'])->name('updates.clear-cache');
+    Route::post('/updates/check', [SettingsController::class, 'checkUpdates'])->name('updates.check');
     
     // Gamification - Κατάταξη & Επιτεύγματα
     Route::get('/leaderboard', [GamificationController::class, 'leaderboard'])->name('gamification.leaderboard');
