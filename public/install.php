@@ -85,7 +85,7 @@ session_start();
 $basePath = __DIR__ . '/volunteerops';
 $envPath = $basePath . '/.env';
 $schemaPath = $basePath . '/database/schema.sql';
-$fullSqlPath = $basePath . '/database/volunteer_ops_full.sql';
+$fullSqlPath = $basePath . '/database/volunteer_ops_clean.sql';
 
 logInstall("Base path: $basePath");
 logInstall("Checking paths - basePath exists: " . (file_exists($basePath) ? 'YES' : 'NO'));
