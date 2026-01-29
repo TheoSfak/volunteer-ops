@@ -3,6 +3,10 @@
 namespace App\Providers;
 
 use App\Modules\Missions\Events\MissionPublished;
+use App\Modules\Missions\Events\MissionCanceled;
+use App\Modules\Missions\Events\MissionCompleted;
+use App\Modules\Missions\Listeners\SendMissionPublishedNotification;
+use App\Modules\Missions\Listeners\SendMissionCanceledNotification;
 use App\Modules\Shifts\Events\ShiftFull;
 use App\Modules\Participation\Events\ParticipationRequested;
 use App\Modules\Participation\Events\ParticipationApproved;
@@ -29,7 +33,17 @@ class EventServiceProvider extends ServiceProvider
 
         // Γεγονότα Αποστολών
         MissionPublished::class => [
+            SendMissionPublishedNotification::class,
             SendNotification::class,
+            WriteAuditLog::class,
+        ],
+
+        MissionCanceled::class => [
+            SendMissionCanceledNotification::class,
+            WriteAuditLog::class,
+        ],
+
+        MissionCompleted::class => [
             WriteAuditLog::class,
         ],
 

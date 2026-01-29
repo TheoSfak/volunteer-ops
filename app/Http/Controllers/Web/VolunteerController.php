@@ -118,25 +118,59 @@ class VolunteerController extends Controller
             ->with('success', 'Ο χρήστης (' . ($roleLabels[$role] ?? $role) . ') δημιουργήθηκε επιτυχώς.');
     }
 
-    public function show(User $volunteer)
+    public function show(Request $request, User $volunteer)
     {
         $volunteer->load(['department', 'volunteerProfile', 'participationRequests.shift.mission', 'achievements']);
         
-        // Calculate extended statistics
-        $stats = $this->calculateVolunteerStats($volunteer);
+        $currentYear = now()->year;
+        $selectedYear = (int) $request->get('year', $currentYear);
         
-        return view('volunteers.show', compact('volunteer', 'stats'));
+        // Calculate extended statistics με επιλεγμένο έτος
+        $stats = $this->calculateVolunteerStats($volunteer, $selectedYear);
+        
+        // Διαθέσιμα έτη για επιλογή
+        $availableYears = $this->getVolunteerAvailableYears($volunteer);
+        
+        return view('volunteers.show', compact('volunteer', 'stats', 'selectedYear', 'currentYear', 'availableYears'));
     }
 
-    protected function calculateVolunteerStats(User $volunteer): array
+    protected function getVolunteerAvailableYears(User $volunteer): array
     {
+        $years = ParticipationRequest::where('volunteer_id', $volunteer->id)
+            ->whereHas('shift')
+            ->with('shift')
+            ->get()
+            ->pluck('shift.start_time')
+            ->filter()
+            ->map(fn($date) => Carbon::parse($date)->year)
+            ->unique()
+            ->sort()
+            ->values()
+            ->toArray();
+            
+        // Προσθήκη τρέχοντος έτους αν δεν υπάρχει
+        if (!in_array(now()->year, $years)) {
+            $years[] = now()->year;
+        }
+        
+        rsort($years);
+        return $years;
+    }
+
+    protected function calculateVolunteerStats(User $volunteer, ?int $year = null): array
+    {
+        $year = $year ?? now()->year;
+        $startOfYear = Carbon::create($year, 1, 1)->startOfDay();
+        $endOfYear = Carbon::create($year, 12, 31)->endOfDay();
+        
         $now = Carbon::now();
         $startOfMonth = $now->copy()->startOfMonth();
-        $startOfYear = $now->copy()->startOfYear();
         $startOfLastMonth = $now->copy()->subMonth()->startOfMonth();
         $endOfLastMonth = $now->copy()->subMonth()->endOfMonth();
 
+        // Φιλτράρισμα συμμετοχών με βάση το έτος
         $participations = $volunteer->participationRequests()
+            ->whereHas('shift', fn($q) => $q->whereBetween('start_time', [$startOfYear, $endOfYear]))
             ->with('shift.mission')
             ->get();
 

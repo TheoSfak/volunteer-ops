@@ -4,15 +4,25 @@ namespace App\Modules\Missions\Services;
 
 use App\Modules\Missions\Models\Mission;
 use App\Modules\Missions\Events\MissionPublished;
+use App\Modules\Missions\Events\MissionCanceled;
+use App\Modules\Missions\Events\MissionCompleted;
+use App\Modules\Participation\Models\ParticipationRequest;
 use App\Modules\Audit\Services\AuditService;
+use App\Services\GamificationService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 class MissionService
 {
     public function __construct(
-        protected AuditService $auditService
-    ) {}
+        protected AuditService $auditService,
+        protected ?GamificationService $gamificationService = null
+    ) {
+        // GamificationService is optional to avoid circular dependencies
+        if ($this->gamificationService === null) {
+            $this->gamificationService = app(GamificationService::class);
+        }
+    }
 
     /**
      * Λήψη όλων των αποστολών με pagination.
@@ -154,6 +164,39 @@ class MissionService
     }
 
     /**
+     * Διαγραφή αποστολής (soft delete).
+     */
+    public function delete(int $id): array
+    {
+        $mission = Mission::findOrFail($id);
+        $before = $mission->toArray();
+
+        // Ακύρωση όλων των εκκρεμών συμμετοχών
+        foreach ($mission->shifts as $shift) {
+            $shift->participations()
+                ->where('status', ParticipationRequest::STATUS_PENDING)
+                ->update(['status' => ParticipationRequest::STATUS_CANCELED_BY_ADMIN]);
+        }
+
+        // Soft delete της αποστολής
+        $mission->delete();
+
+        $this->auditService->log(
+            actor: Auth::user(),
+            action: 'ΔΙΑΓΡΑΦΗ_ΑΠΟΣΤΟΛΗΣ',
+            entityType: 'Mission',
+            entityId: $id,
+            before: $before,
+            after: null
+        );
+
+        return [
+            'success' => true,
+            'message' => 'Η αποστολή διαγράφηκε επιτυχώς.',
+        ];
+    }
+
+    /**
      * Δημοσίευση αποστολής.
      */
     public function publish(int $id): array
@@ -223,7 +266,7 @@ class MissionService
     /**
      * Ακύρωση αποστολής.
      */
-    public function cancel(int $id): array
+    public function cancel(int $id, ?string $reason = null): array
     {
         $mission = Mission::findOrFail($id);
 
@@ -235,7 +278,12 @@ class MissionService
         }
 
         $before = $mission->toArray();
-        $mission->update(['status' => Mission::STATUS_CANCELED]);
+        $mission->update([
+            'status' => Mission::STATUS_CANCELED,
+            'cancellation_reason' => $reason,
+            'canceled_by' => Auth::id(),
+            'canceled_at' => now(),
+        ]);
 
         // Ακύρωση όλων των βαρδιών
         $mission->shifts()->update(['status' => 'CANCELED']);
@@ -249,10 +297,83 @@ class MissionService
             after: $mission->toArray()
         );
 
+        // Εκπομπή γεγονότος για ενημέρωση εθελοντών
+        event(new MissionCanceled($mission, $reason));
+
         return [
             'success' => true,
             'mission' => $this->formatMission($mission->fresh(['department', 'creator'])),
         ];
+    }
+
+    /**
+     * Ολοκλήρωση αποστολής - μεταφορά πόντων και ωρών στους εθελοντές.
+     */
+    public function complete(int $id): array
+    {
+        $mission = Mission::with(['shifts.participations.volunteer'])->findOrFail($id);
+
+        if ($mission->status !== Mission::STATUS_CLOSED) {
+            return [
+                'success' => false,
+                'message' => 'Μόνο κλειστές αποστολές μπορούν να ολοκληρωθούν. Πρέπει πρώτα να κλείσετε την αποστολή και να επιβεβαιώσετε τις παρουσίες.',
+            ];
+        }
+
+        $before = $mission->toArray();
+
+        DB::beginTransaction();
+        try {
+            // Υπολογισμός και απόδοση πόντων για κάθε εγκεκριμένη συμμετοχή
+            foreach ($mission->shifts as $shift) {
+                foreach ($shift->participations as $participation) {
+                    // Μόνο εγκεκριμένες συμμετοχές που ήρθαν
+                    if ($participation->status === ParticipationRequest::STATUS_APPROVED 
+                        && $participation->attended 
+                        && !$participation->points_awarded
+                    ) {
+                        // Απόδοση πόντων μέσω GamificationService
+                        $this->gamificationService->awardPointsForShift(
+                            $participation->volunteer,
+                            $shift,
+                            $participation
+                        );
+
+                        // Σημείωση ότι δόθηκαν πόντοι
+                        $participation->update(['points_awarded' => true]);
+                    }
+                }
+            }
+
+            // Ενημέρωση κατάστασης αποστολής
+            $mission->update(['status' => Mission::STATUS_COMPLETED]);
+
+            DB::commit();
+
+            $this->auditService->log(
+                actor: Auth::user(),
+                action: 'ΟΛΟΚΛΗΡΩΣΗ_ΑΠΟΣΤΟΛΗΣ',
+                entityType: 'Mission',
+                entityId: $mission->id,
+                before: $before,
+                after: $mission->fresh()->toArray()
+            );
+
+            // Εκπομπή γεγονότος
+            event(new MissionCompleted($mission));
+
+            return [
+                'success' => true,
+                'mission' => $this->formatMission($mission->fresh(['department', 'creator'])),
+                'message' => 'Η αποστολή ολοκληρώθηκε και οι πόντοι αποδόθηκαν στους εθελοντές.',
+            ];
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return [
+                'success' => false,
+                'message' => 'Σφάλμα κατά την ολοκλήρωση: ' . $e->getMessage(),
+            ];
+        }
     }
 
     /**

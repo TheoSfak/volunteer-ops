@@ -12,6 +12,16 @@ $app = new Illuminate\Foundation\Application(
 
 /*
 |--------------------------------------------------------------------------
+| Override Public Path for Non-Standard Directory Structure
+|--------------------------------------------------------------------------
+| Our structure: public_html/ (public files) + public_html/volunteerops/ (Laravel)
+| So public path is one level up from the Laravel base path
+*/
+
+$app->usePublicPath(dirname(__DIR__, 2));
+
+/*
+|--------------------------------------------------------------------------
 | Bind Important Interfaces
 |--------------------------------------------------------------------------
 */

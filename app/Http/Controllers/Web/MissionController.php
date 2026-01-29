@@ -150,17 +150,44 @@ class MissionController extends Controller
         return back()->with('success', 'Η αποστολή ενεργοποιήθηκε.');
     }
 
+    public function close(Mission $mission)
+    {
+        $this->authorize('update', $mission);
+        
+        if (!$mission->isOpen()) {
+            return back()->with('error', 'Μόνο ανοιχτές αποστολές μπορούν να κλείσουν.');
+        }
+        
+        $mission->update(['status' => Mission::STATUS_CLOSED]);
+        return redirect()->route('attendance.manage', $mission)
+            ->with('success', 'Η αποστολή έκλεισε. Επιβεβαιώστε τις παρουσίες πριν την ολοκλήρωση.');
+    }
+
     public function complete(Mission $mission)
     {
         $this->authorize('close', $mission);
         $result = $this->missionService->complete($mission->id);
-        return back()->with('success', 'Η αποστολή ολοκληρώθηκε.');
+        
+        if (!$result['success']) {
+            return back()->with('error', $result['message']);
+        }
+        
+        return redirect()->route('missions.show', $mission)
+            ->with('success', $result['message'] ?? 'Η αποστολή ολοκληρώθηκε.');
     }
 
-    public function cancel(Mission $mission)
+    public function cancel(Request $request, Mission $mission)
     {
         $this->authorize('cancel', $mission);
-        $result = $this->missionService->cancel($mission->id);
-        return back()->with('success', 'Η αποστολή ακυρώθηκε.');
+        
+        $reason = $request->input('cancellation_reason');
+        $result = $this->missionService->cancel($mission->id, $reason);
+        
+        if (!$result['success']) {
+            return back()->with('error', $result['message']);
+        }
+        
+        return redirect()->route('missions.index')
+            ->with('success', 'Η αποστολή ακυρώθηκε και οι εθελοντές ενημερώθηκαν.');
     }
 }

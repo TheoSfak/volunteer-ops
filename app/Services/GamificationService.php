@@ -15,14 +15,26 @@ class GamificationService
 {
     /**
      * Απονέμει πόντους σε εθελοντή για ολοκληρωμένη βάρδια.
+     * Χρησιμοποιεί τις πραγματικές ώρες από το participation αν υπάρχουν.
      */
     public function awardPointsForShift(User $user, Shift $shift, ParticipationRequest $participation): int
     {
+        // Αν ο εθελοντής δεν ήρθε (no-show), δεν παίρνει πόντους
+        if (!$participation->attended) {
+            return 0;
+        }
+
         $totalPoints = 0;
         $points = [];
 
-        // Βασικοί πόντοι ανά ώρα
-        $hours = $this->calculateShiftHours($shift);
+        // Χρήση πραγματικών ωρών αν υπάρχουν, αλλιώς ωρών βάρδιας
+        $hours = $participation->calculated_hours;
+        
+        // Αν δεν υπάρχουν ώρες, δεν δίνουμε πόντους
+        if ($hours <= 0) {
+            return 0;
+        }
+        
         $basePoints = (int) ($hours * VolunteerPoint::POINTS_PER_HOUR);
         
         if ($basePoints > 0) {

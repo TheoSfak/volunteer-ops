@@ -5,35 +5,47 @@ namespace App\Http\Controllers\Web;
 use App\Http\Controllers\Controller;
 use App\Models\Achievement;
 use App\Models\User;
+use App\Models\VolunteerYearlyStat;
 use App\Services\GamificationService;
+use App\Services\StatisticsService;
 use Illuminate\Http\Request;
 
 class GamificationController extends Controller
 {
     protected GamificationService $gamificationService;
+    protected StatisticsService $statisticsService;
 
-    public function __construct(GamificationService $gamificationService)
+    public function __construct(GamificationService $gamificationService, StatisticsService $statisticsService)
     {
         $this->gamificationService = $gamificationService;
+        $this->statisticsService = $statisticsService;
     }
 
     /**
-     * Σελίδα Leaderboard.
+     * Σελίδα Leaderboard (ετήσια κατάταξη).
      */
     public function leaderboard(Request $request)
     {
-        $period = $request->get('period', 'all');
+        $currentYear = now()->year;
+        $selectedYear = (int) $request->get('year', $currentYear);
+        $period = $request->get('period', 'yearly');
         
-        $leaderboard = $this->gamificationService->getLeaderboard($period, 20);
+        // Διαθέσιμα έτη
+        $availableYears = $this->getLeaderboardYears();
+        
+        // Leaderboard με βάση το έτος
+        $leaderboard = $this->statisticsService->getTopVolunteers(20, $period, $selectedYear);
         
         // Θέση του τρέχοντος χρήστη
         $currentUser = auth()->user();
         $userRank = null;
         $userStats = null;
         
-        if ($currentUser && $currentUser->volunteerProfile) {
-            $userRank = $this->gamificationService->getUserRank($currentUser, $period);
+        if ($currentUser) {
+            $userRank = $this->statisticsService->getUserRanking($currentUser, $selectedYear);
             $userStats = $this->gamificationService->getUserStats($currentUser);
+            $userStats['yearly_hours'] = $this->statisticsService->calculateUserHours($currentUser, $selectedYear);
+            $userStats['yearly_points'] = $this->statisticsService->getUserYearlyPoints($currentUser->id, $selectedYear);
         }
 
         return view('gamification.leaderboard', compact(
@@ -41,8 +53,27 @@ class GamificationController extends Controller
             'period',
             'userRank',
             'userStats',
-            'currentUser'
+            'currentUser',
+            'selectedYear',
+            'currentYear',
+            'availableYears'
         ));
+    }
+    
+    /**
+     * Λίστα διαθέσιμων ετών για leaderboard.
+     */
+    protected function getLeaderboardYears(): array
+    {
+        $years = VolunteerYearlyStat::distinct()->pluck('year')->toArray();
+        $currentYear = now()->year;
+        
+        if (!in_array($currentYear, $years)) {
+            $years[] = $currentYear;
+        }
+        
+        rsort($years);
+        return $years;
     }
 
     /**

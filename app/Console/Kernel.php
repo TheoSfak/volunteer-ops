@@ -15,8 +15,14 @@ class Kernel extends ConsoleKernel
         // Καθαρισμός ληγμένων tokens κάθε μέρα
         $schedule->command('sanctum:prune-expired --hours=24')->daily();
         
-        // Ενημέρωση στατιστικών κάλυψης αποστολών
-        // $schedule->command('missions:update-coverage')->hourly();
+        // Μηδενισμός μηνιαίων πόντων - 1η κάθε μήνα στα μεσάνυχτα
+        $schedule->command('stats:reset-monthly')->monthlyOn(1, '00:01');
+        
+        // Αρχειοθέτηση & μηδενισμός ετήσιων στατιστικών - 1η Ιανουαρίου
+        $schedule->command('stats:archive-year')
+            ->yearlyOn(1, 1, '00:05'); // 1η Ιαν, 00:05
+        $schedule->command('stats:reset-yearly --force')
+            ->yearlyOn(1, 1, '00:10'); // 1η Ιαν, 00:10
     }
 
     /**
