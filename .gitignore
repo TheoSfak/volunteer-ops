@@ -1,17 +1,38 @@
-/vendor/
-node_modules/
-/public/hot
-/public/storage
-/storage/*.key
-.env
-.env.backup
-.env.production
-.phpunit.result.cache
-Homestead.json
-Homestead.yaml
-auth.json
-npm-debug.log
-yarn-error.log
-/.idea
-/.vscode
+# VolunteerOps - Gitignore
+
+# Local configuration (contains database credentials)
+config.local.php
+
+# IDE/Editor
+.vscode/
+.idea/
+*.sublime-*
+
+# OS files
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Dependencies (if any added later)
+vendor/
+node_modules/
+
+# Cache
+*.cache
+
+# Uploads (if added later)
+uploads/
+
+# Backup files
+*.bak
+*.backup
+*.sql.gz
+
+# Temporary files
+*.tmp
+*.temp
+~*
