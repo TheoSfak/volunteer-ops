@@ -377,68 +377,7 @@ INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
 ('smtp_encryption', 'tls'),
 ('smtp_from_email', ''),
 ('smtp_from_name', 'VolunteerOps');
-
--- Default email templates
-INSERT INTO `email_templates` (`code`, `name`, `subject`, `body_html`, `description`, `available_variables`) VALUES
-('welcome', 'Καλωσόρισμα', 'Καλώς ήρθατε στο {{app_name}}!', '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-    <div style="background: #3498db; color: white; padding: 20px; text-align: center;">
-        <h1>{{app_name}}</h1>
-    </div>
-    <div style="padding: 30px; background: #fff;">
-        <h2>Καλώς ήρθατε, {{user_name}}!</h2>
-        <p>Ευχαριστούμε για την εγγραφή σας στην πλατφόρμα εθελοντισμού.</p>
-        <p>Μπορείτε τώρα να:</p>
-        <ul>
-            <li>Δείτε τις διαθέσιμες αποστολές</li>
-            <li>Δηλώσετε συμμετοχή σε βάρδιες</li>
-            <li>Κερδίσετε πόντους και επιτεύγματα</li>
-        </ul>
-        <p style="text-align: center; margin-top: 30px;">
-            <a href="{{login_url}}" style="background: #3498db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;">Σύνδεση</a>
-        </p>
-    </div>
-    <div style="padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;">
-        {{app_name}} - Σύστημα Διαχείρισης Εθελοντών
-    </div>
-</div>', 'Αποστέλλεται σε νέους χρήστες μετά την εγγραφή', '{{app_name}}, {{user_name}}, {{user_email}}, {{login_url}}'),
-
-('participation_approved', 'Έγκριση Συμμετοχής', 'Η συμμετοχή σας εγκρίθηκε - {{mission_title}}', '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-    <div style="background: #27ae60; color: white; padding: 20px; text-align: center;">
-        <h1>✓ Εγκρίθηκε!</h1>
-    </div>
-    <div style="padding: 30px; background: #fff;">
-        <h2>Γεια σας {{user_name}},</h2>
-        <p>Η συμμετοχή σας στη βάρδια εγκρίθηκε!</p>
-        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
-            <p><strong>Βάρδια:</strong> {{shift_date}} ({{shift_time}})</p>
-            <p><strong>Τοποθεσία:</strong> {{location}}</p>
-        </div>
-        <p>Παρακαλούμε να είστε στην τοποθεσία έγκαιρα.</p>
-    </div>
-    <div style="padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;">
-        {{app_name}}
-    </div>
-</div>', 'Αποστέλλεται όταν εγκρίνεται η συμμετοχή εθελοντή σε βάρδια', '{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}'),
-
-('participation_rejected', 'Απόρριψη Συμμετοχής', 'Η συμμετοχή σας δεν εγκρίθηκε - {{mission_title}}', '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-    <div style="background: #e74c3c; color: white; padding: 20px; text-align: center;">
-        <h1>Απόρριψη Αίτησης</h1>
-    </div>
-    <div style="padding: 30px; background: #fff;">
-        <h2>Γεια σας {{user_name}},</h2>
-        <p>Λυπούμαστε, αλλά η αίτησή σας για τη βάρδια δεν εγκρίθηκε.</p>
-        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
-            <p><strong>Βάρδια:</strong> {{shift_date}} ({{shift_time}})</p>
-            <p><strong>Λόγος:</strong> {{rejection_reason}}</p>
-        </div>
-        <p>Μπορείτε να δηλώσετε συμμετοχή σε άλλες διαθέσιμες βάρδιες.</p>
-    </div>
-    <div style="padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;">
-        {{app_name}}
-    </div>
-</div>', 'Αποστέλλεται όταν απορρίπτεται η συμμετοχή εθελοντή', '{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{rejection_reason}}'); max-width: 600px; margin: 0 auto;\">
+-- Email templates will be inserted programmatically by install.php max-width: 600px; margin: 0 auto;\">
     <div style=\"background: #3498db; color: white; padding: 20px; text-align: center;\">
         <h1>{{app_name}}</h1>
     </div>
