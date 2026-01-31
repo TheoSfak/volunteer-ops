@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Web Installer
  * Comprehensive installation wizard with debug & demo data options
