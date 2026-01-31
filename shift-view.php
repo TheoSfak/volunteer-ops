@@ -335,7 +335,7 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
             </div>
             <div class="card-body">
-                <?php if ($shift['description']): ?>
+                <?php if (!empty($shift['description'])): ?>
                     <p><?= nl2br(h($shift['description'])) ?></p>
                 <?php endif; ?>
                 
