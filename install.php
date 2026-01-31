@@ -330,8 +330,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Πλατεία Συντάγματος, Αθήνα',
             'department_id' => $deptIds[1] ?? 1,
             'status' => 'OPEN',
-            'start_date' => date('Y-m-d H:i:s', strtotime('+3 days 09:00')),
-            'end_date' => date('Y-m-d H:i:s', strtotime('+3 days 14:00')),
+            'start_datetime' => date('Y-m-d H:i:s', strtotime('+3 days 09:00')),
+            'end_datetime' => date('Y-m-d H:i:s', strtotime('+3 days 14:00')),
         ],
         [
             'title' => 'Καθαρισμός Παραλίας',
@@ -339,8 +339,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Παραλία Γλυφάδας',
             'department_id' => $deptIds[3] ?? 1,
             'status' => 'OPEN',
-            'start_date' => date('Y-m-d H:i:s', strtotime('+5 days 08:00')),
-            'end_date' => date('Y-m-d H:i:s', strtotime('+5 days 13:00')),
+            'start_datetime' => date('Y-m-d H:i:s', strtotime('+5 days 08:00')),
+            'end_datetime' => date('Y-m-d H:i:s', strtotime('+5 days 13:00')),
         ],
         [
             'title' => 'Υποστήριξη Μαθητών - Κέντρο Μελέτης',
@@ -348,8 +348,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Δημοτική Βιβλιοθήκη Αθηνών',
             'department_id' => $deptIds[2] ?? 1,
             'status' => 'DRAFT',
-            'start_date' => date('Y-m-d H:i:s', strtotime('+7 days 16:00')),
-            'end_date' => date('Y-m-d H:i:s', strtotime('+7 days 20:00')),
+            'start_datetime' => date('Y-m-d H:i:s', strtotime('+7 days 16:00')),
+            'end_datetime' => date('Y-m-d H:i:s', strtotime('+7 days 20:00')),
         ],
         [
             'title' => 'Ιατρείο Αστέγων',
@@ -357,8 +357,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Κέντρο Αστέγων, Πειραιάς',
             'department_id' => $deptIds[0] ?? 1,
             'status' => 'OPEN',
-            'start_date' => date('Y-m-d H:i:s', strtotime('+2 days 18:00')),
-            'end_date' => date('Y-m-d H:i:s', strtotime('+2 days 22:00')),
+            'start_datetime' => date('Y-m-d H:i:s', strtotime('+2 days 18:00')),
+            'end_datetime' => date('Y-m-d H:i:s', strtotime('+2 days 22:00')),
         ],
         [
             'title' => 'Επίσκεψη σε Γηροκομείο',
@@ -366,8 +366,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Γηροκομείο Αγία Ειρήνη, Νέα Σμύρνη',
             'department_id' => $deptIds[4] ?? 1,
             'status' => 'OPEN',
-            'start_date' => date('Y-m-d H:i:s', strtotime('+4 days 10:00')),
-            'end_date' => date('Y-m-d H:i:s', strtotime('+4 days 13:00')),
+            'start_datetime' => date('Y-m-d H:i:s', strtotime('+4 days 10:00')),
+            'end_datetime' => date('Y-m-d H:i:s', strtotime('+4 days 13:00')),
         ],
         [
             'title' => 'Δενδροφύτευση Πάρκου',
@@ -375,13 +375,13 @@ function installDemoData(PDO $pdo) {
             'location' => 'Πάρκο Τρίτση, Ίλιον',
             'department_id' => $deptIds[3] ?? 1,
             'status' => 'COMPLETED',
-            'start_date' => date('Y-m-d H:i:s', strtotime('-10 days 09:00')),
-            'end_date' => date('Y-m-d H:i:s', strtotime('-10 days 15:00')),
+            'start_datetime' => date('Y-m-d H:i:s', strtotime('-10 days 09:00')),
+            'end_datetime' => date('Y-m-d H:i:s', strtotime('-10 days 15:00')),
         ],
     ];
     
     $missionIds = [];
-    $stmt = $pdo->prepare("INSERT INTO missions (title, description, location, department_id, status, start_date, end_date, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())");
+    $stmt = $pdo->prepare("INSERT INTO missions (title, description, location, department_id, status, start_datetime, end_datetime, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())");
     foreach ($missions as $mission) {
         $stmt->execute([
             $mission['title'],
@@ -389,8 +389,8 @@ function installDemoData(PDO $pdo) {
             $mission['location'],
             $mission['department_id'],
             $mission['status'],
-            $mission['start_date'],
-            $mission['end_date']
+            $mission['start_datetime'],
+            $mission['end_datetime']
         ]);
         $missionIds[] = $pdo->lastInsertId();
     }
