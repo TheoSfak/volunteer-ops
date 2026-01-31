@@ -11,7 +11,7 @@ echo "<style>body{font-family:Arial;margin:40px;} .success{color:green;} .error{
 echo "<h1>🔧 Προσθήκη Tasks Tables</h1>";
 
 try {
-    $pdo = getDbConnection();
+    $pdo = getPdo();
     
     echo "<h2>Έλεγχος υπαρχόντων πινάκων...</h2>";
     
