@@ -236,12 +236,25 @@ try {
     foreach ($notifications as $n) {
         $templateId = dbFetchValue("SELECT id FROM email_templates WHERE code = ?", [$n['code']]);
         if ($templateId) {
-            dbInsert(
-                "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id, created_at, updated_at) 
-                 VALUES (?, ?, ?, ?, ?, NOW(), NOW())",
-                [$n['code'], $n['name'], $n['description'], $n['enabled'], $templateId]
-            );
-            echo "<p class='success'>✓ {$n['name']} συνδέθηκε με template</p>";
+            // Έλεγχος αν υπάρχει ήδη
+            $exists = dbFetchValue("SELECT id FROM notification_settings WHERE code = ?", [$n['code']]);
+            
+            if ($exists) {
+                // UPDATE existing
+                dbExecute(
+                    "UPDATE notification_settings SET name = ?, description = ?, email_enabled = ?, email_template_id = ?, updated_at = NOW() WHERE code = ?",
+                    [$n['name'], $n['description'], $n['enabled'], $templateId, $n['code']]
+                );
+                echo "<p class='success'>✓ {$n['name']} ενημερώθηκε</p>";
+            } else {
+                // INSERT new
+                dbInsert(
+                    "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id, created_at, updated_at) 
+                     VALUES (?, ?, ?, ?, ?, NOW(), NOW())",
+                    [$n['code'], $n['name'], $n['description'], $n['enabled'], $templateId]
+                );
+                echo "<p class='success'>✓ {$n['name']} συνδέθηκε με template</p>";
+            }
             $countNotif++;
         }
     }
