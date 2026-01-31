@@ -1,4 +1,4 @@
-﻿-- VolunteerOps Database Schema v2.0
+-- VolunteerOps Database Schema v2.0
 -- Plain PHP Version
 -- UTF-8 encoded with Greek characters support
 
