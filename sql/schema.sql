@@ -391,5 +391,70 @@ INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabl
 ('points_earned', 'Κέρδος Πόντων', 'Όταν ο εθελοντής κερδίζει πόντους', 0),
 ('welcome', 'Καλωσόρισμα', 'Μετά την εγγραφή νέου χρήστη', 1);
 
+-- ============================================================================
+-- TASK MANAGEMENT TABLES
+-- ============================================================================
 
+CREATE TABLE tasks (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    description TEXT NULL,
+    status ENUM('TODO', 'IN_PROGRESS', 'COMPLETED', 'CANCELED') DEFAULT 'TODO',
+    priority ENUM('LOW', 'MEDIUM', 'HIGH', 'URGENT') DEFAULT 'MEDIUM',
+    progress INT UNSIGNED DEFAULT 0 COMMENT 'Progress percentage 0-100',
+    start_date DATE NULL,
+    due_date DATE NULL,
+    completed_at DATETIME NULL,
+    mission_id INT UNSIGNED NULL,
+    created_by INT UNSIGNED NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE SET NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_status (status),
+    INDEX idx_priority (priority),
+    INDEX idx_due_date (due_date),
+    INDEX idx_mission (mission_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE subtasks (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    task_id INT UNSIGNED NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    status ENUM('TODO', 'IN_PROGRESS', 'COMPLETED') DEFAULT 'TODO',
+    completed_at DATETIME NULL,
+    sort_order INT UNSIGNED DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    INDEX idx_task (task_id),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE task_assignments (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    task_id INT UNSIGNED NOT NULL,
+    user_id INT UNSIGNED NOT NULL,
+    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    assigned_by INT UNSIGNED NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_assignment (task_id, user_id),
+    INDEX idx_task (task_id),
+    INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE task_comments (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    task_id INT UNSIGNED NOT NULL,
+    user_id INT UNSIGNED NOT NULL,
+    comment TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_task (task_id),
+    INDEX idx_user (user_id),
+    INDEX idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
