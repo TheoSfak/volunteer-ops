@@ -1,4 +1,22 @@
         </div><!-- /.content-wrapper -->
+        
+        <!-- Footer -->
+        <footer class="mt-auto py-3 bg-light border-top">
+            <div class="container-fluid">
+                <div class="row align-items-center">
+                    <div class="col-md-6 text-center text-md-start">
+                        <span class="text-muted">
+                            &copy; <?= date('Y') ?> VolunteerOps. Με επιφύλαξη παντός δικαιώματος.
+                        </span>
+                    </div>
+                    <div class="col-md-6 text-center text-md-end">
+                        <span class="text-muted">
+                            Made with <span class="text-danger">&hearts;</span> by Theodore Sfakianakis
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </footer>
     </div><!-- /.main-content -->
     
     <!-- jQuery (required for Summernote) -->

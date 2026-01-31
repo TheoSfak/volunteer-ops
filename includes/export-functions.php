@@ -1,0 +1,342 @@
+<?php
+/**
+ * Export Helper Functions
+ * CSV export utilities for missions, volunteers, participations, and statistics
+ */
+
+/**
+ * Export missions to CSV
+ */
+function exportMissionsToCsv($filters = []) {
+    $where = ['1=1'];
+    $params = [];
+    
+    if (!empty($filters['status'])) {
+        $where[] = 'status = ?';
+        $params[] = $filters['status'];
+    }
+    
+    if (!empty($filters['department_id'])) {
+        $where[] = 'department_id = ?';
+        $params[] = $filters['department_id'];
+    }
+    
+    if (!empty($filters['type'])) {
+        $where[] = 'type = ?';
+        $params[] = $filters['type'];
+    }
+    
+    if (!empty($filters['start_date'])) {
+        $where[] = 'start_datetime >= ?';
+        $params[] = $filters['start_date'] . ' 00:00:00';
+    }
+    
+    if (!empty($filters['end_date'])) {
+        $where[] = 'end_datetime <= ?';
+        $params[] = $filters['end_date'] . ' 23:59:59';
+    }
+    
+    $sql = "SELECT 
+                m.id,
+                m.title,
+                m.description,
+                m.type,
+                d.name AS department,
+                m.location,
+                m.start_datetime,
+                m.end_datetime,
+                m.status,
+                m.created_at
+            FROM missions m
+            LEFT JOIN departments d ON m.department_id = d.id
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY m.start_datetime DESC";
+    
+    $missions = dbFetchAll($sql, $params);
+    
+    // Clean output buffer before sending CSV
+    if (ob_get_level()) {
+        ob_end_clean();
+    }
+    
+    // Set headers for CSV download
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="missions_' . date('Y-m-d_His') . '.csv"');
+    
+    // Open output stream
+    $output = fopen('php://output', 'w');
+    
+    // UTF-8 BOM for Greek characters
+    fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
+    
+    // CSV headers
+    fputcsv($output, [
+        'ID',
+        'Τίτλος',
+        'Περιγραφή',
+        'Τύπος',
+        'Τμήμα',
+        'Τοποθεσία',
+        'Έναρξη',
+        'Λήξη',
+        'Κατάσταση',
+        'Δημιουργήθηκε'
+    ]);
+    
+    // Data rows
+    foreach ($missions as $mission) {
+        fputcsv($output, [
+            $mission['id'],
+            $mission['title'],
+            $mission['description'],
+            $mission['type'],
+            $mission['department'],
+            $mission['location'],
+            formatDateTime($mission['start_datetime']),
+            formatDateTime($mission['end_datetime']),
+            $GLOBALS['STATUS_LABELS'][$mission['status']] ?? $mission['status'],
+            formatDateTime($mission['created_at'])
+        ]);
+    }
+    
+    fclose($output);
+    exit;
+}
+
+/**
+ * Export volunteers to CSV
+ */
+function exportVolunteersToCsv($filters = []) {
+    $where = ['u.is_active = 1'];
+    $params = [];
+    
+    if (!empty($filters['role'])) {
+        $where[] = 'u.role = ?';
+        $params[] = $filters['role'];
+    }
+    
+    if (!empty($filters['department_id'])) {
+        $where[] = 'u.department_id = ?';
+        $params[] = $filters['department_id'];
+    }
+    
+    $sql = "SELECT 
+                u.id,
+                u.name,
+                u.email,
+                u.phone,
+                d.name AS department,
+                u.role,
+                u.is_active,
+                u.total_points
+            FROM users u
+            LEFT JOIN departments d ON u.department_id = d.id
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY u.name";
+    
+    $volunteers = dbFetchAll($sql, $params);
+    
+    // Clean output buffer
+    if (ob_get_level()) {
+        ob_end_clean();
+    }
+    
+    // Set headers
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="volunteers_' . date('Y-m-d_His') . '.csv"');
+    
+    $output = fopen('php://output', 'w');
+    fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
+    
+    // Headers
+    fputcsv($output, [
+        'ID',
+        'Όνομα',
+        'Email',
+        'Τηλέφωνο',
+        'Τμήμα',
+        'Ρόλος',
+        'Ενεργός',
+        'Πόντοι'
+    ]);
+    
+    // Data
+    foreach ($volunteers as $v) {
+        fputcsv($output, [
+            $v['id'],
+            $v['name'],
+            $v['email'],
+            $v['phone'],
+            $v['department'],
+            $GLOBALS['ROLE_LABELS'][$v['role']] ?? $v['role'],
+            $v['is_active'] ? 'Ναι' : 'Όχι',
+            $v['total_points']
+        ]);
+    }
+    
+    fclose($output);
+    exit;
+}
+
+/**
+ * Export participations to CSV
+ */
+function exportParticipationsToCsv($filters = []) {
+    $where = ['1=1'];
+    $params = [];
+    
+    if (!empty($filters['status'])) {
+        $where[] = 'pr.status = ?';
+        $params[] = $filters['status'];
+    }
+    
+    if (!empty($filters['mission_id'])) {
+        $where[] = 's.mission_id = ?';
+        $params[] = $filters['mission_id'];
+    }
+    
+    if (!empty($filters['volunteer_id'])) {
+        $where[] = 'pr.volunteer_id = ?';
+        $params[] = $filters['volunteer_id'];
+    }
+    
+    $sql = "SELECT 
+                pr.id,
+                u.name AS volunteer_name,
+                u.email AS volunteer_email,
+                m.title AS mission_title,
+                s.start_time,
+                s.end_time,
+                pr.status,
+                pr.attended,
+                pr.actual_hours,
+                pr.notes,
+                pr.admin_notes,
+                pr.created_at
+            FROM participation_requests pr
+            INNER JOIN users u ON pr.volunteer_id = u.id
+            INNER JOIN shifts s ON pr.shift_id = s.id
+            INNER JOIN missions m ON s.mission_id = m.id
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY pr.created_at DESC";
+    
+    $participations = dbFetchAll($sql, $params);
+    
+    // Clean output buffer
+    if (ob_get_level()) {
+        ob_end_clean();
+    }
+    
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="participations_' . date('Y-m-d_His') . '.csv"');
+    
+    $output = fopen('php://output', 'w');
+    fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
+    
+    fputcsv($output, [
+        'ID',
+        'Εθελοντής',
+        'Email',
+        'Αποστολή',
+        'Έναρξη Βάρδιας',
+        'Λήξη Βάρδιας',
+        'Κατάσταση',
+        'Παρουσία',
+        'Ώρες',
+        'Σημειώσεις Εθελοντή',
+        'Σημειώσεις Admin',
+        'Αίτηση'
+    ]);
+    
+    foreach ($participations as $p) {
+        fputcsv($output, [
+            $p['id'],
+            $p['volunteer_name'],
+            $p['volunteer_email'],
+            $p['mission_title'],
+            formatDateTime($p['start_time']),
+            formatDateTime($p['end_time']),
+            $GLOBALS['PARTICIPATION_LABELS'][$p['status']] ?? $p['status'],
+            $p['attended'] ? 'Ναι' : 'Όχι',
+            $p['actual_hours'] ?? '-',
+            $p['notes'] ?? '',
+            $p['admin_notes'] ?? '',
+            formatDateTime($p['created_at'])
+        ]);
+    }
+    
+    fclose($output);
+    exit;
+}
+
+/**
+ * Export statistics to CSV
+ */
+function exportStatisticsToCsv($period = 'monthly') {
+    if ($period === 'monthly') {
+        $sql = "SELECT 
+                    DATE_FORMAT(m.start_datetime, '%Y-%m') AS period,
+                    DATE_FORMAT(m.start_datetime, '%M %Y') AS period_label,
+                    COUNT(DISTINCT m.id) AS total_missions,
+                    COUNT(DISTINCT pr.id) AS total_participations,
+                    COUNT(DISTINCT CASE WHEN pr.attended = 1 THEN pr.id END) AS attended_count,
+                    SUM(pr.actual_hours) AS total_hours,
+                    COUNT(DISTINCT pr.volunteer_id) AS unique_volunteers
+                FROM missions m
+                LEFT JOIN shifts s ON m.id = s.mission_id
+                LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = 'PARTICIPATION_APPROVED'
+                WHERE m.start_datetime >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+                GROUP BY DATE_FORMAT(m.start_datetime, '%Y-%m')
+                ORDER BY period DESC";
+    } else {
+        $sql = "SELECT 
+                    YEAR(m.start_datetime) AS period,
+                    YEAR(m.start_datetime) AS period_label,
+                    COUNT(DISTINCT m.id) AS total_missions,
+                    COUNT(DISTINCT pr.id) AS total_participations,
+                    COUNT(DISTINCT CASE WHEN pr.attended = 1 THEN pr.id END) AS attended_count,
+                    SUM(pr.actual_hours) AS total_hours,
+                    COUNT(DISTINCT pr.volunteer_id) AS unique_volunteers
+                FROM missions m
+                LEFT JOIN shifts s ON m.id = s.mission_id
+                LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = 'PARTICIPATION_APPROVED'
+                GROUP BY YEAR(m.start_datetime)
+                ORDER BY period DESC";
+    }
+    
+    $stats = dbFetchAll($sql);
+    
+    // Clean output buffer
+    if (ob_get_level()) {
+        ob_end_clean();
+    }
+    
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="statistics_' . date('Y-m-d_His') . '.csv"');
+    
+    $output = fopen('php://output', 'w');
+    fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
+    
+    fputcsv($output, [
+        'Περίοδος',
+        'Αποστολές',
+        'Συμμετοχές',
+        'Παρουσίες',
+        'Ώρες',
+        'Μοναδικοί Εθελοντές'
+    ]);
+    
+    foreach ($stats as $stat) {
+        fputcsv($output, [
+            $stat['period_label'],
+            $stat['total_missions'],
+            $stat['total_participations'],
+            $stat['attended_count'],
+            $stat['total_hours'] ?? 0,
+            $stat['unique_volunteers']
+        ]);
+    }
+    
+    fclose($output);
+    exit;
+}

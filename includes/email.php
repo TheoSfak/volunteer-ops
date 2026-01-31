@@ -80,7 +80,7 @@ function replaceTemplateVariables(string $text, array $variables): string {
 /**
  * Send email using SMTP
  */
-function sendEmail(string $to, string $subject, string $htmlBody, string $fromName = null): array {
+function sendEmail(string $to, string $subject, string $htmlBody, ?string $fromName = null): array {
     $smtp = getSmtpSettings();
     
     if (empty($smtp['host']) || empty($smtp['from_email'])) {
@@ -359,4 +359,14 @@ function sendNotificationEmail(string $notificationCode, string $to, array $vari
     $body = replaceTemplateVariables($template['body_html'], $variables);
     
     return sendEmail($to, $subject, $body);
+}
+
+/**
+ * Simple notification wrapper - creates a notification record in database
+ */
+function sendNotification(int $userId, string $title, string $message, string $type = 'info'): void {
+    dbInsert(
+        "INSERT INTO notifications (user_id, type, title, message, created_at) VALUES (?, ?, ?, ?, NOW())",
+        [$userId, $type, $title, $message]
+    );
 }

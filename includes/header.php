@@ -13,6 +13,7 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
 // Get app settings for header
 $appName = getSetting('app_name', 'VolunteerOps');
 $appLogo = getSetting('app_logo', '');
+$appDescription = getSetting('app_description', '');
 ?>
 <!DOCTYPE html>
 <html lang="el">
@@ -29,6 +30,10 @@ $appLogo = getSetting('app_logo', '');
     <link href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" rel="stylesheet">
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <!-- Sortable.js for drag and drop -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.1/Sortable.min.js"></script>
     
     <style>
         :root {
@@ -154,6 +159,13 @@ $appLogo = getSetting('app_logo', '');
         .main-content {
             margin-left: var(--sidebar-width);
             min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .content-wrapper {
+            flex: 1;
+            padding: 2rem;
         }
         
         /* Glassmorphism Top Navbar */
@@ -163,10 +175,39 @@ $appLogo = getSetting('app_logo', '');
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             padding: 1rem 1.5rem;
             border-bottom: 1px solid rgba(255,255,255,0.3);
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
         
-        .content-wrapper {
-            padding: 2rem;
+        /* User Dropdown Styling */
+        .top-navbar .dropdown {
+            position: relative;
+        }
+        
+        .top-navbar .dropdown-menu {
+            position: absolute !important;
+            right: 0 !important;
+            left: auto !important;
+            top: 100% !important;
+            transform: none !important;
+            min-width: 220px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-radius: 8px;
+            border: none;
+            margin-top: 0.5rem;
+        }
+        
+        .top-navbar .dropdown-toggle {
+            font-weight: 500;
+        }
+        
+        .top-navbar .dropdown-item {
+            padding: 0.6rem 1rem;
+        }
+        
+        .top-navbar .dropdown-item:hover {
+            background-color: #f8f9fa;
         }
         
         /* Modern Cards */
@@ -531,12 +572,13 @@ $appLogo = getSetting('app_logo', '');
     <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
         <a href="dashboard.php" class="sidebar-brand">
-            <?php if (!empty($appLogo) && file_exists(__DIR__ . '/../uploads/logos/' . $appLogo)): ?>
-                <img src="uploads/logos/<?= h($appLogo) ?>" alt="<?= h($appName) ?>" style="max-height: 32px; max-width: 40px; margin-right: 8px; vertical-align: middle;">
-            <?php else: ?>
-                <i class="bi bi-heart-pulse"></i>
-            <?php endif; ?>
-            <?= h($appName) ?>
+            <i class="bi bi-heart-pulse"></i>
+            <div style="flex: 1;">
+                <div style="font-size: 1.4rem; font-weight: 700;"><?= h($appName) ?></div>
+                <?php if (!empty($appDescription)): ?>
+                    <div style="font-size: 0.75rem; font-weight: 400; opacity: 0.85; margin-top: 0.25rem; line-height: 1.3;"><?= h($appDescription) ?></div>
+                <?php endif; ?>
+            </div>
         </a>
         
         <ul class="nav flex-column">
@@ -566,6 +608,11 @@ $appLogo = getSetting('app_logo', '');
             
             <div class="sidebar-section">Διαχείριση</div>
             
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'tasks' ? 'active' : '' ?>" href="tasks.php">
+                    <i class="bi bi-list-task"></i> Εργασίες
+                </a>
+            </li>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'participations' ? 'active' : '' ?>" href="participations.php">
                     <i class="bi bi-person-check"></i> Συμμετοχές
@@ -630,14 +677,15 @@ $appLogo = getSetting('app_logo', '');
                 <i class="bi bi-list fs-4"></i>
             </button>
             
-            <div class="d-flex align-items-center">
+            <div class="d-flex align-items-center ms-auto">
                 <div class="dropdown">
-                    <button class="btn btn-link text-dark dropdown-toggle text-decoration-none" type="button" data-bs-toggle="dropdown">
+                    <button class="btn btn-link text-dark dropdown-toggle text-decoration-none" type="button" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="bi bi-person-circle me-1"></i>
                         <?= h($currentUser['name'] ?? 'Χρήστης') ?>
                     </button>
-                    <ul class="dropdown-menu dropdown-menu-end">
+                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i>Το Προφίλ μου</a></li>
+                        <li><a class="dropdown-item" href="my-participations.php"><i class="bi bi-list-check me-2"></i>Οι Αιτήσεις μου</a></li>
                         <li><a class="dropdown-item" href="my-points.php"><i class="bi bi-star me-2"></i>Οι Πόντοι μου</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
@@ -655,4 +703,9 @@ $appLogo = getSetting('app_logo', '');
         
         <!-- Page Content -->
         <div class="content-wrapper">
+            <?php if (!empty($appLogo) && file_exists(__DIR__ . '/../uploads/logos/' . $appLogo)): ?>
+                <div class="text-center mb-4" style="padding: 2rem 0;">
+                    <img src="uploads/logos/<?= h($appLogo) ?>" alt="<?= h($appName) ?>" style="max-width: 200px; max-height: 150px; width: auto; height: auto; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.15);">
+                </div>
+            <?php endif; ?>
             <?php displayFlash(); ?>

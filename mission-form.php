@@ -14,6 +14,10 @@ $pageTitle = $isEdit ? 'Επεξεργασία Αποστολής' : 'Νέα Α�
 $user = getCurrentUser();
 $departments = dbFetchAll("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
 
+// Get all active volunteers for responsible selection
+$allVolunteers = dbFetchAll("SELECT id, name, role FROM users WHERE is_active = 1 AND role IN (?, ?, ?, ?) ORDER BY name", 
+    [ROLE_VOLUNTEER, ROLE_SHIFT_LEADER, ROLE_DEPARTMENT_ADMIN, ROLE_SYSTEM_ADMIN]);
+
 $mission = null;
 if ($isEdit) {
     $mission = dbFetchOne("SELECT * FROM missions WHERE id = ?", [$id]);
@@ -49,6 +53,7 @@ if (isPost()) {
         'notes' => post('notes'),
         'is_urgent' => isset($_POST['is_urgent']) ? 1 : 0,
         'status' => post('status') ?: STATUS_DRAFT,
+        'responsible_user_id' => post('responsible_user_id') ?: null,
     ];
     
     // Validation
@@ -72,13 +77,13 @@ if (isPost()) {
                         title = ?, description = ?, type = ?, department_id = ?,
                         location = ?, location_details = ?, latitude = ?, longitude = ?,
                         start_datetime = ?, end_datetime = ?, requirements = ?, notes = ?,
-                        is_urgent = ?, status = ?, updated_at = NOW()
+                        is_urgent = ?, status = ?, responsible_user_id = ?, updated_at = NOW()
                         WHERE id = ?";
                 dbExecute($sql, [
                     $data['title'], $data['description'], $data['type'], $data['department_id'],
                     $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
                     $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
-                    $data['is_urgent'], $data['status'], $id
+                    $data['is_urgent'], $data['status'], $data['responsible_user_id'], $id
                 ]);
                 
                 logAudit('update', 'missions', $id, $mission, $data);
@@ -87,13 +92,13 @@ if (isPost()) {
                 $sql = "INSERT INTO missions 
                         (title, description, type, department_id, location, location_details, 
                          latitude, longitude, start_datetime, end_datetime, requirements, notes,
-                         is_urgent, status, created_by, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                         is_urgent, status, responsible_user_id, created_by, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
                 $newId = dbInsert($sql, [
                     $data['title'], $data['description'], $data['type'], $data['department_id'],
                     $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
                     $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
-                    $data['is_urgent'], $data['status'], $user['id']
+                    $data['is_urgent'], $data['status'], $data['responsible_user_id'], $user['id']
                 ]);
                 
                 logAudit('create', 'missions', $newId, null, $data);
@@ -281,6 +286,19 @@ include __DIR__ . '/includes/header.php';
                         <label class="form-check-label" for="is_urgent">
                             <i class="bi bi-exclamation-triangle text-danger"></i> Επείγουσα Αποστολή
                         </label>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="responsible_user_id" class="form-label">Υπεύθυνος Αποστολής</label>
+                        <select class="form-select" id="responsible_user_id" name="responsible_user_id">
+                            <option value="">Χωρίς υπεύθυνο</option>
+                            <?php foreach ($allVolunteers as $v): ?>
+                                <option value="<?= $v['id'] ?>" <?= ($mission['responsible_user_id'] ?? '') == $v['id'] ? 'selected' : '' ?>>
+                                    <?= h($v['name']) ?> (<?= h($GLOBALS['ROLE_LABELS'][$v['role']]) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="text-muted">Επιλέξτε υπεύθυνο για την αποστολή</small>
                     </div>
                 </div>
             </div>

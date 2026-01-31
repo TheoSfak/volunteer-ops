@@ -43,27 +43,41 @@ $errors = [];
 if (isPost()) {
     verifyCsrf();
     
-    // Note: shifts table only has: mission_id, start_time, end_time, max_volunteers, min_volunteers, notes
-    $data = [
-        'start_time' => post('start_date') . ' ' . post('start_time_hour') . ':00',
-        'end_time' => post('end_date') . ' ' . post('end_time_hour') . ':00',
-        'max_volunteers' => (int) post('max_volunteers', 5),
-        'min_volunteers' => (int) post('min_volunteers', 1),
-        'notes' => post('notes'),
-    ];
+    // Get and validate inputs
+    $startDate = post('start_date');
+    $startHour = post('start_time_hour');
+    $endDate = post('end_date');
+    $endHour = post('end_time_hour');
+    $maxVolunteers = post('max_volunteers', 5);
+    $minVolunteers = post('min_volunteers', 1);
+    $notes = post('notes');
     
-    // Validation
-    if (empty(post('start_date')) || empty(post('start_time_hour'))) {
-        $errors[] = 'Η ημ/νία έναρξης είναι υποχρεωτική.';
-    }
-    if (empty(post('end_date')) || empty(post('end_time_hour'))) {
-        $errors[] = 'Η ημ/νία λήξης είναι υποχρεωτική.';
-    }
-    if ($data['start_time'] >= $data['end_time']) {
-        $errors[] = 'Η λήξη πρέπει να είναι μετά την έναρξη.';
-    }
-    if ($data['min_volunteers'] > $data['max_volunteers']) {
-        $errors[] = 'Ο ελάχιστος αριθμός δεν μπορεί να υπερβαίνει τον μέγιστο.';
+    // Validation using new helpers
+    $errors = validateFields([
+        ['validateRequired', $startDate, 'Ημερομηνία έναρξης'],
+        ['validateRequired', $startHour, 'Ώρα έναρξης'],
+        ['validateRequired', $endDate, 'Ημερομηνία λήξης'],
+        ['validateRequired', $endHour, 'Ώρα λήξης'],
+        ['validateNumber', $maxVolunteers, 1, 100, 'Μέγιστος αριθμός εθελοντών'],
+        ['validateNumber', $minVolunteers, 1, 100, 'Ελάχιστος αριθμός εθελοντών'],
+    ]);
+    
+    if (empty($errors)) {
+        $data = [
+            'start_time' => $startDate . ' ' . $startHour . ':00',
+            'end_time' => $endDate . ' ' . $endHour . ':00',
+            'max_volunteers' => (int) $maxVolunteers,
+            'min_volunteers' => (int) $minVolunteers,
+            'notes' => $notes,
+        ];
+        
+        // Additional validation
+        if ($data['start_time'] >= $data['end_time']) {
+            $errors[] = 'Η λήξη πρέπει να είναι μετά την έναρξη.';
+        }
+        if ($data['min_volunteers'] > $data['max_volunteers']) {
+            $errors[] = 'Ο ελάχιστος αριθμός δεν μπορεί να υπερβαίνει τον μέγιστο.';
+        }
     }
     
     if (empty($errors)) {

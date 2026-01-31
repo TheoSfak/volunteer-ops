@@ -197,8 +197,20 @@ function get($key, $default = '') {
 /**
  * Log audit trail
  */
-function logAudit($action, $tableName = null, $recordId = null, $notes = null) {
+function logAudit($action, $tableName = null, $recordId = null, $oldData = null, $newData = null) {
     $userId = getCurrentUserId();
+    
+    // If newData is provided, convert both oldData and newData to JSON for notes
+    $notes = null;
+    if ($newData !== null) {
+        $notes = json_encode(['old' => $oldData, 'new' => $newData]);
+    } elseif (is_array($oldData)) {
+        // If oldData is array but no newData, treat oldData as additional data
+        $notes = json_encode($oldData);
+    } else {
+        // Otherwise, oldData is just notes text
+        $notes = $oldData;
+    }
     
     dbInsert(
         "INSERT INTO audit_logs (user_id, action, table_name, record_id, notes, ip_address, created_at) 
@@ -293,21 +305,118 @@ function jsonResponse($data, $statusCode = 200) {
  * Get application setting from database (with caching)
  */
 function getSetting($key, $default = null) {
-    static $cache = null;
+    // Check session cache first
+    if (!isset($_SESSION['app_settings_cache'])) {
+        $_SESSION['app_settings_cache'] = [];
+        $_SESSION['app_settings_loaded_at'] = time();
+    }
     
-    // Load all settings on first call
-    if ($cache === null) {
-        $cache = [];
-        try {
+    // Reload cache if older than 5 minutes
+    if ((time() - ($_SESSION['app_settings_loaded_at'] ?? 0)) > 300) {
+        $_SESSION['app_settings_cache'] = [];
+        $_SESSION['app_settings_loaded_at'] = time();
+    }
+    
+    // Return from session cache if exists
+    if (isset($_SESSION['app_settings_cache'][$key])) {
+        return $_SESSION['app_settings_cache'][$key];
+    }
+    
+    // Load from database
+    try {
+        if (empty($_SESSION['app_settings_cache'])) {
             $rows = dbFetchAll("SELECT setting_key, setting_value FROM settings");
             foreach ($rows as $row) {
-                $cache[$row['setting_key']] = $row['setting_value'];
+                $_SESSION['app_settings_cache'][$row['setting_key']] = $row['setting_value'];
             }
-        } catch (Exception $e) {
-            // Database might not be ready
-            return $default;
+        }
+        
+        return $_SESSION['app_settings_cache'][$key] ?? $default;
+    } catch (Exception $e) {
+        // Database might not be ready
+        return $default;
+    }
+}
+
+/**
+ * Clear settings cache
+ */
+function clearSettingsCache() {
+    unset($_SESSION['app_settings_cache']);
+    unset($_SESSION['app_settings_loaded_at']);
+}
+
+/**
+ * Input validation helpers
+ */
+function validateRequired($value, $fieldName = 'Πεδίο') {
+    if (empty($value)) {
+        return "$fieldName είναι υποχρεωτικό";
+    }
+    return null;
+}
+
+function validateEmail($email) {
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        return "Μη έγκυρη διεύθυνση email";
+    }
+    return null;
+}
+
+function validateLength($value, $min, $max, $fieldName = 'Πεδίο') {
+    $len = mb_strlen($value);
+    if ($len < $min) {
+        return "$fieldName πρέπει να είναι τουλάχιστον $min χαρακτήρες";
+    }
+    if ($len > $max) {
+        return "$fieldName δεν μπορεί να υπερβαίνει τους $max χαρακτήρες";
+    }
+    return null;
+}
+
+function validateNumber($value, $min = null, $max = null, $fieldName = 'Πεδίο') {
+    if (!is_numeric($value)) {
+        return "$fieldName πρέπει να είναι αριθμός";
+    }
+    $num = (float)$value;
+    if ($min !== null && $num < $min) {
+        return "$fieldName πρέπει να είναι τουλάχιστον $min";
+    }
+    if ($max !== null && $num > $max) {
+        return "$fieldName δεν μπορεί να υπερβαίνει το $max";
+    }
+    return null;
+}
+
+function validateDate($date, $fieldName = 'Ημερομηνία') {
+    $d = DateTime::createFromFormat('Y-m-d', $date);
+    if (!$d || $d->format('Y-m-d') !== $date) {
+        return "$fieldName δεν είναι έγκυρη";
+    }
+    return null;
+}
+
+function validateDateTime($datetime, $fieldName = 'Ημερομηνία/Ώρα') {
+    $d = DateTime::createFromFormat('Y-m-d H:i', $datetime);
+    if (!$d || $d->format('Y-m-d H:i') !== $datetime) {
+        return "$fieldName δεν είναι έγκυρη";
+    }
+    return null;
+}
+
+/**
+ * Validate multiple fields and return all errors
+ */
+function validateFields($validations) {
+    $errors = [];
+    foreach ($validations as $validation) {
+        $error = call_user_func_array($validation[0], array_slice($validation, 1));
+        if ($error !== null) {
+            $errors[] = $error;
         }
     }
+    return $errors;
+}
     
     return $cache[$key] ?? $default;
 }

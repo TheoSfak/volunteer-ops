@@ -12,6 +12,7 @@ if (!defined('VOLUNTEEROPS')) {
 // Application
 define('APP_NAME', 'VolunteerOps');
 define('APP_VERSION', '2.0.0');
+define('BASE_URL', 'http://localhost/volunteerops');
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {

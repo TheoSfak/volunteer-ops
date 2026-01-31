@@ -34,6 +34,9 @@ $defaults = [
     'registration_enabled' => '1',
     'require_approval' => '0',
     'maintenance_mode' => '0',
+    'shift_reminder_hours' => '24',
+    'resend_mission_hours_before' => '48',
+    'resend_mission_enabled' => '1',
     'smtp_host' => '',
     'smtp_port' => '587',
     'smtp_username' => '',
@@ -121,13 +124,14 @@ if (isPost()) {
         $fieldsToUpdate = [
             'app_name', 'app_description', 'admin_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
-            'registration_enabled', 'require_approval', 'maintenance_mode'
+            'registration_enabled', 'require_approval', 'maintenance_mode',
+            'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled'
         ];
         
         foreach ($fieldsToUpdate as $field) {
             $value = isset($_POST[$field]) ? $_POST[$field] : '';
             
-            if (in_array($field, ['registration_enabled', 'require_approval', 'maintenance_mode'])) {
+            if (in_array($field, ['registration_enabled', 'require_approval', 'maintenance_mode', 'resend_mission_enabled'])) {
                 $value = isset($_POST[$field]) ? '1' : '0';
             }
             
@@ -141,6 +145,9 @@ if (isPost()) {
             
             $settings[$field] = $value;
         }
+        
+        // Clear settings cache after update
+        clearSettingsCache();
         
         logAudit('update_settings', 'settings', null, 'Γενικές ρυθμίσεις');
         setFlash('success', 'Οι γενικές ρυθμίσεις αποθηκεύτηκαν.');
@@ -168,6 +175,9 @@ if (isPost()) {
             
             $settings[$field] = $value;
         }
+        
+        // Clear settings cache after update
+        clearSettingsCache();
         
         logAudit('update_settings', 'settings', null, 'Ρυθμίσεις SMTP');
         setFlash('success', 'Οι ρυθμίσεις SMTP αποθηκεύτηκαν.');
@@ -197,6 +207,9 @@ if (isPost()) {
                     [$row['code']]);
             }
         }
+        
+        // Clear settings cache after notification update
+        clearSettingsCache();
         
         logAudit('update_settings', 'notification_settings', null, 'Ρυθμίσεις ειδοποιήσεων');
         setFlash('success', 'Οι ρυθμίσεις ειδοποιήσεων αποθηκεύτηκαν.');
@@ -393,6 +406,38 @@ include __DIR__ . '/includes/header.php';
                         Οι πολλαπλασιαστές εφαρμόζονται για βάρδιες Σαββατοκύριακου, νυχτερινές (22:00-06:00), 
                         και ιατρικές αποστολές.
                     </small>
+                </div>
+            </div>
+            
+            <!-- Notification Settings -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-bell me-1"></i>Ρυθμίσεις Ειδοποιήσεων</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="shift_reminder_hours" class="form-label">Υπενθύμιση Βάρδιας (ώρες πριν)</label>
+                        <input type="number" class="form-control" id="shift_reminder_hours" name="shift_reminder_hours" 
+                               value="<?= h($settings['shift_reminder_hours']) ?>" min="1" max="168" required>
+                        <small class="text-muted">Πόσες ώρες πριν τη βάρδια να στέλνεται υπενθύμιση (προεπιλογή: 24)</small>
+                    </div>
+                    
+                    <hr>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="resend_mission_enabled" id="resendMission"
+                               <?= $settings['resend_mission_enabled'] === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="resendMission">
+                            <strong>Ξαναστείλε Αποστολή αν δεν έχει συμπληρωθεί</strong>
+                        </label>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="resend_mission_hours_before" class="form-label">Ξαναστείλε Αποστολή (ώρες πριν)</label>
+                        <input type="number" class="form-control" id="resend_mission_hours_before" name="resend_mission_hours_before" 
+                               value="<?= h($settings['resend_mission_hours_before']) ?>" min="1" max="720" required>
+                        <small class="text-muted">Αν μια βάρδια δεν έχει συμπληρωθεί, στείλε email προς όλους τους χρήστες Χ ώρες πριν (προεπιλογή: 48)</small>
+                    </div>
                 </div>
             </div>
             
