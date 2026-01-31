@@ -423,7 +423,7 @@ include __DIR__ . '/includes/header.php';
                                     <br>
                                     <small class="text-muted">
                                         <?= number_format($vol['total_hours'], 1) ?>ω · 
-                                        <?= $vol['shift_count'] ?> βάρδιες
+                                        <?= !empty($vol['shift_count']) ? $vol['shift_count'] : 0 ?> βάρδιες
                                     </small>
                                 </div>
                                 <span class="text-warning">
