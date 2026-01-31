@@ -417,9 +417,6 @@ function validateFields($validations) {
     }
     return $errors;
 }
-    
-    return $cache[$key] ?? $default;
-}
 
 /**
  * Get all application settings (with caching)
