@@ -1,4 +1,4 @@
--- VolunteerOps Database Schema v2.0
+﻿-- VolunteerOps Database Schema v2.0
 -- Plain PHP Version
 -- UTF-8 encoded with Greek characters support
 
@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS `achievements` (
     `name` VARCHAR(100) NOT NULL,
     `description` TEXT NULL,
     `category` VARCHAR(50) DEFAULT 'milestone',
-    `icon` VARCHAR(50) DEFAULT '🏆',
+    `icon` VARCHAR(50) DEFAULT 'ðŸ†',
     `required_points` INT DEFAULT 0,
     `threshold` INT DEFAULT 0,
     `is_active` TINYINT(1) DEFAULT 1,
@@ -317,50 +317,50 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 -- Default departments
 INSERT INTO `departments` (`name`, `description`) VALUES
-('Γενικός Εθελοντισμός', 'Γενικές εθελοντικές δράσεις'),
-('Υγειονομική Κάλυψη', 'Υγειονομικές αποστολές και παροχή πρώτων βοηθειών'),
-('Περιβαλλοντικές Δράσεις', 'Δράσεις για το περιβάλλον'),
-('Κοινωνική Αλληλεγγύη', 'Δράσεις κοινωνικής αλληλεγγύης');
+('Î“ÎµÎ½Î¹ÎºÏŒÏ‚ Î•Î¸ÎµÎ»Î¿Î½Ï„Î¹ÏƒÎ¼ÏŒÏ‚', 'Î“ÎµÎ½Î¹ÎºÎ­Ï‚ ÎµÎ¸ÎµÎ»Î¿Î½Ï„Î¹ÎºÎ­Ï‚ Î´ÏÎ¬ÏƒÎµÎ¹Ï‚'),
+('Î¥Î³ÎµÎ¹Î¿Î½Î¿Î¼Î¹ÎºÎ® ÎšÎ¬Î»Ï…ÏˆÎ·', 'Î¥Î³ÎµÎ¹Î¿Î½Î¿Î¼Î¹ÎºÎ­Ï‚ Î±Ï€Î¿ÏƒÏ„Î¿Î»Î­Ï‚ ÎºÎ±Î¹ Ï€Î±ÏÎ¿Ï‡Î® Ï€ÏÏŽÏ„Ï‰Î½ Î²Î¿Î·Î¸ÎµÎ¹ÏŽÎ½'),
+('Î ÎµÏÎ¹Î²Î±Î»Î»Î¿Î½Ï„Î¹ÎºÎ­Ï‚ Î”ÏÎ¬ÏƒÎµÎ¹Ï‚', 'Î”ÏÎ¬ÏƒÎµÎ¹Ï‚ Î³Î¹Î± Ï„Î¿ Ï€ÎµÏÎ¹Î²Î¬Î»Î»Î¿Î½'),
+('ÎšÎ¿Î¹Î½Ï‰Î½Î¹ÎºÎ® Î‘Î»Î»Î·Î»ÎµÎ³Î³ÏÎ·', 'Î”ÏÎ¬ÏƒÎµÎ¹Ï‚ ÎºÎ¿Î¹Î½Ï‰Î½Î¹ÎºÎ®Ï‚ Î±Î»Î»Î·Î»ÎµÎ³Î³ÏÎ·Ï‚');
 
 -- Default skills
 INSERT INTO `skills` (`name`, `category`) VALUES
-('Πρώτες Βοήθειες', 'Υγεία'),
-('Νοσηλευτική', 'Υγεία'),
-('Οδήγηση', 'Μεταφορές'),
-('Οδήγηση Μοτοσυκλέτας', 'Μεταφορές'),
-('Οργάνωση Εκδηλώσεων', 'Διοίκηση'),
-('Διαχείριση Κρίσεων', 'Διοίκηση'),
-('Επικοινωνία', 'Γενικά'),
-('Ξένες Γλώσσες', 'Γενικά'),
-('Φωτογραφία', 'Τεχνικά'),
-('Πληροφορική', 'Τεχνικά');
+('Î ÏÏŽÏ„ÎµÏ‚ Î’Î¿Î®Î¸ÎµÎ¹ÎµÏ‚', 'Î¥Î³ÎµÎ¯Î±'),
+('ÎÎ¿ÏƒÎ·Î»ÎµÏ…Ï„Î¹ÎºÎ®', 'Î¥Î³ÎµÎ¯Î±'),
+('ÎŸÎ´Î®Î³Î·ÏƒÎ·', 'ÎœÎµÏ„Î±Ï†Î¿ÏÎ­Ï‚'),
+('ÎŸÎ´Î®Î³Î·ÏƒÎ· ÎœÎ¿Ï„Î¿ÏƒÏ…ÎºÎ»Î­Ï„Î±Ï‚', 'ÎœÎµÏ„Î±Ï†Î¿ÏÎ­Ï‚'),
+('ÎŸÏÎ³Î¬Î½Ï‰ÏƒÎ· Î•ÎºÎ´Î·Î»ÏŽÏƒÎµÏ‰Î½', 'Î”Î¹Î¿Î¯ÎºÎ·ÏƒÎ·'),
+('Î”Î¹Î±Ï‡ÎµÎ¯ÏÎ¹ÏƒÎ· ÎšÏÎ¯ÏƒÎµÏ‰Î½', 'Î”Î¹Î¿Î¯ÎºÎ·ÏƒÎ·'),
+('Î•Ï€Î¹ÎºÎ¿Î¹Î½Ï‰Î½Î¯Î±', 'Î“ÎµÎ½Î¹ÎºÎ¬'),
+('ÎžÎ­Î½ÎµÏ‚ Î“Î»ÏŽÏƒÏƒÎµÏ‚', 'Î“ÎµÎ½Î¹ÎºÎ¬'),
+('Î¦Ï‰Ï„Î¿Î³ÏÎ±Ï†Î¯Î±', 'Î¤ÎµÏ‡Î½Î¹ÎºÎ¬'),
+('Î Î»Î·ÏÎ¿Ï†Î¿ÏÎ¹ÎºÎ®', 'Î¤ÎµÏ‡Î½Î¹ÎºÎ¬');
 
 -- Default achievements
 INSERT INTO `achievements` (`code`, `name`, `description`, `category`, `icon`, `required_points`, `threshold`) VALUES
-('first_shift', 'Πρώτη Βάρδια', 'Ολοκλήρωσε την πρώτη σου βάρδια', 'milestone', '⭐', 0, 1),
-('shifts_5', '5 Βάρδιες', 'Ολοκλήρωσε 5 βάρδιες', 'shifts', '📅', 0, 5),
-('shifts_10', '10 Βάρδιες', 'Ολοκλήρωσε 10 βάρδιες', 'shifts', '📅', 0, 10),
-('shifts_25', '25 Βάρδιες', 'Ολοκλήρωσε 25 βάρδιες', 'shifts', '📅', 0, 25),
-('shifts_50', '50 Βάρδιες', 'Ολοκλήρωσε 50 βάρδιες', 'shifts', '🎯', 0, 50),
-('hours_10', '10 Ώρες', 'Συμπλήρωσε 10 ώρες εθελοντισμού', 'hours', '⏰', 0, 10),
-('hours_50', '50 Ώρες', 'Συμπλήρωσε 50 ώρες εθελοντισμού', 'hours', '⏰', 0, 50),
-('hours_100', '100 Ώρες', 'Συμπλήρωσε 100 ώρες εθελοντισμού', 'hours', '⏰', 0, 100),
-('hours_250', '250 Ώρες', 'Συμπλήρωσε 250 ώρες εθελοντισμού', 'hours', '🏆', 0, 250),
-('weekend_warrior', 'Πολεμιστής Σαββατοκύριακου', 'Ολοκλήρωσε 10 βάρδιες Σαββατοκύριακου', 'special', '☀️', 100, 10),
-('night_owl', 'Νυχτοπούλι', 'Ολοκλήρωσε 10 νυχτερινές βάρδιες', 'special', '🌙', 100, 10),
-('medical_hero', 'Ήρωας Υγείας', 'Ολοκλήρωσε 10 υγειονομικές αποστολές', 'special', '❤️', 200, 10),
-('points_100', '100 Πόντοι', 'Συγκέντρωσε 100 πόντους', 'points', '💯', 100, 0),
-('points_500', '500 Πόντοι', 'Συγκέντρωσε 500 πόντους', 'points', '🌟', 500, 0),
-('points_1000', '1000 Πόντοι', 'Συγκέντρωσε 1000 πόντους', 'points', '👑', 1000, 0);
+('first_shift', 'Î ÏÏŽÏ„Î· Î’Î¬ÏÎ´Î¹Î±', 'ÎŸÎ»Î¿ÎºÎ»Î®ÏÏ‰ÏƒÎµ Ï„Î·Î½ Ï€ÏÏŽÏ„Î· ÏƒÎ¿Ï… Î²Î¬ÏÎ´Î¹Î±', 'milestone', 'â­', 0, 1),
+('shifts_5', '5 Î’Î¬ÏÎ´Î¹ÎµÏ‚', 'ÎŸÎ»Î¿ÎºÎ»Î®ÏÏ‰ÏƒÎµ 5 Î²Î¬ÏÎ´Î¹ÎµÏ‚', 'shifts', 'ðŸ“…', 0, 5),
+('shifts_10', '10 Î’Î¬ÏÎ´Î¹ÎµÏ‚', 'ÎŸÎ»Î¿ÎºÎ»Î®ÏÏ‰ÏƒÎµ 10 Î²Î¬ÏÎ´Î¹ÎµÏ‚', 'shifts', 'ðŸ“…', 0, 10),
+('shifts_25', '25 Î’Î¬ÏÎ´Î¹ÎµÏ‚', 'ÎŸÎ»Î¿ÎºÎ»Î®ÏÏ‰ÏƒÎµ 25 Î²Î¬ÏÎ´Î¹ÎµÏ‚', 'shifts', 'ðŸ“…', 0, 25),
+('shifts_50', '50 Î’Î¬ÏÎ´Î¹ÎµÏ‚', 'ÎŸÎ»Î¿ÎºÎ»Î®ÏÏ‰ÏƒÎµ 50 Î²Î¬ÏÎ´Î¹ÎµÏ‚', 'shifts', 'ðŸŽ¯', 0, 50),
+('hours_10', '10 ÎÏÎµÏ‚', 'Î£Ï…Î¼Ï€Î»Î®ÏÏ‰ÏƒÎµ 10 ÏŽÏÎµÏ‚ ÎµÎ¸ÎµÎ»Î¿Î½Ï„Î¹ÏƒÎ¼Î¿Ï', 'hours', 'â°', 0, 10),
+('hours_50', '50 ÎÏÎµÏ‚', 'Î£Ï…Î¼Ï€Î»Î®ÏÏ‰ÏƒÎµ 50 ÏŽÏÎµÏ‚ ÎµÎ¸ÎµÎ»Î¿Î½Ï„Î¹ÏƒÎ¼Î¿Ï', 'hours', 'â°', 0, 50),
+('hours_100', '100 ÎÏÎµÏ‚', 'Î£Ï…Î¼Ï€Î»Î®ÏÏ‰ÏƒÎµ 100 ÏŽÏÎµÏ‚ ÎµÎ¸ÎµÎ»Î¿Î½Ï„Î¹ÏƒÎ¼Î¿Ï', 'hours', 'â°', 0, 100),
+('hours_250', '250 ÎÏÎµÏ‚', 'Î£Ï…Î¼Ï€Î»Î®ÏÏ‰ÏƒÎµ 250 ÏŽÏÎµÏ‚ ÎµÎ¸ÎµÎ»Î¿Î½Ï„Î¹ÏƒÎ¼Î¿Ï', 'hours', 'ðŸ†', 0, 250),
+('weekend_warrior', 'Î Î¿Î»ÎµÎ¼Î¹ÏƒÏ„Î®Ï‚ Î£Î±Î²Î²Î±Ï„Î¿ÎºÏÏÎ¹Î±ÎºÎ¿Ï…', 'ÎŸÎ»Î¿ÎºÎ»Î®ÏÏ‰ÏƒÎµ 10 Î²Î¬ÏÎ´Î¹ÎµÏ‚ Î£Î±Î²Î²Î±Ï„Î¿ÎºÏÏÎ¹Î±ÎºÎ¿Ï…', 'special', 'â˜€ï¸', 100, 10),
+('night_owl', 'ÎÏ…Ï‡Ï„Î¿Ï€Î¿ÏÎ»Î¹', 'ÎŸÎ»Î¿ÎºÎ»Î®ÏÏ‰ÏƒÎµ 10 Î½Ï…Ï‡Ï„ÎµÏÎ¹Î½Î­Ï‚ Î²Î¬ÏÎ´Î¹ÎµÏ‚', 'special', 'ðŸŒ™', 100, 10),
+('medical_hero', 'Î‰ÏÏ‰Î±Ï‚ Î¥Î³ÎµÎ¯Î±Ï‚', 'ÎŸÎ»Î¿ÎºÎ»Î®ÏÏ‰ÏƒÎµ 10 Ï…Î³ÎµÎ¹Î¿Î½Î¿Î¼Î¹ÎºÎ­Ï‚ Î±Ï€Î¿ÏƒÏ„Î¿Î»Î­Ï‚', 'special', 'â¤ï¸', 200, 10),
+('points_100', '100 Î ÏŒÎ½Ï„Î¿Î¹', 'Î£Ï…Î³ÎºÎ­Î½Ï„ÏÏ‰ÏƒÎµ 100 Ï€ÏŒÎ½Ï„Î¿Ï…Ï‚', 'points', 'ðŸ’¯', 100, 0),
+('points_500', '500 Î ÏŒÎ½Ï„Î¿Î¹', 'Î£Ï…Î³ÎºÎ­Î½Ï„ÏÏ‰ÏƒÎµ 500 Ï€ÏŒÎ½Ï„Î¿Ï…Ï‚', 'points', 'ðŸŒŸ', 500, 0),
+('points_1000', '1000 Î ÏŒÎ½Ï„Î¿Î¹', 'Î£Ï…Î³ÎºÎ­Î½Ï„ÏÏ‰ÏƒÎµ 1000 Ï€ÏŒÎ½Ï„Î¿Ï…Ï‚', 'points', 'ðŸ‘‘', 1000, 0);
 
 -- Default admin user (password: admin123)
 INSERT INTO `users` (`name`, `email`, `password`, `role`, `is_active`) VALUES
-('Διαχειριστής', 'admin@volunteerops.gr', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'SYSTEM_ADMIN', 1);
+('Î”Î¹Î±Ï‡ÎµÎ¹ÏÎ¹ÏƒÏ„Î®Ï‚', 'admin@volunteerops.gr', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'SYSTEM_ADMIN', 1);
 
 -- Default settings
 INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
 ('app_name', 'VolunteerOps'),
-('app_description', 'Σύστημα Διαχείρισης Εθελοντών'),
+('app_description', 'Î£ÏÏƒÏ„Î·Î¼Î± Î”Î¹Î±Ï‡ÎµÎ¯ÏÎ¹ÏƒÎ·Ï‚ Î•Î¸ÎµÎ»Î¿Î½Ï„ÏŽÎ½'),
 ('points_per_hour', '10'),
 ('weekend_multiplier', '1.5'),
 ('night_multiplier', '1.5'),
@@ -377,190 +377,17 @@ INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
 ('smtp_encryption', 'tls'),
 ('smtp_from_email', ''),
 ('smtp_from_name', 'VolunteerOps');
--- Email templates will be inserted programmatically by install.php max-width: 600px; margin: 0 auto;\">
-    <div style=\"background: #3498db; color: white; padding: 20px; text-align: center;\">
-        <h1>{{app_name}}</h1>
-    </div>
-    <div style=\"padding: 30px; background: #fff;\">
-        <h2>Καλώς ήρθατε, {{user_name}}!</h2>
-        <p>Ευχαριστούμε για την εγγραφή σας στην πλατφόρμα εθελοντισμού.</p>
-        <p>Μπορείτε τώρα να:</p>
-        <ul>
-            <li>Δείτε τις διαθέσιμες αποστολές</li>
-            <li>Δηλώσετε συμμετοχή σε βάρδιες</li>
-            <li>Κερδίσετε πόντους και επιτεύγματα</li>
-        </ul>
-        <p style=\"text-align: center; margin-top: 30px;\">
-            <a href=\"{{login_url}}\" style=\"background: #3498db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;\">Σύνδεση</a>
-        </p>
-    </div>
-    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
-        {{app_name}} - Σύστημα Διαχείρισης Εθελοντών
-    </div>
-</div>', 
-'Αποστέλλεται σε νέους χρήστες μετά την εγγραφή', 
-'{{app_name}}, {{user_name}}, {{user_email}}, {{login_url}}'),
 
-('participation_approved', 'Έγκριση Συμμετοχής', 'Η συμμετοχή σας εγκρίθηκε - {{mission_title}}',
-'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
-    <div style=\"background: #27ae60; color: white; padding: 20px; text-align: center;\">
-        <h1>✓ Εγκρίθηκε!</h1>
-    </div>
-    <div style=\"padding: 30px; background: #fff;\">
-        <h2>Γεια σας {{user_name}},</h2>
-        <p>Η συμμετοχή σας στη βάρδια εγκρίθηκε!</p>
-        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
-            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
-            <p><strong>Βάρδια:</strong> {{shift_date}} ({{shift_time}})</p>
-            <p><strong>Τοποθεσία:</strong> {{location}}</p>
-        </div>
-        <p>Παρακαλούμε να είστε στην τοποθεσία έγκαιρα.</p>
-    </div>
-    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
-        {{app_name}}
-    </div>
-</div>',
-'Αποστέλλεται όταν εγκρίνεται η συμμετοχή εθελοντή σε βάρδια',
-'{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}'),
-
-('participation_rejected', 'Απόρριψη Συμμετοχής', 'Η συμμετοχή σας δεν εγκρίθηκε - {{mission_title}}',
-'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
-    <div style=\"background: #e74c3c; color: white; padding: 20px; text-align: center;\">
-        <h1>Ενημέρωση Συμμετοχής</h1>
-    </div>
-    <div style=\"padding: 30px; background: #fff;\">
-        <h2>Γεια σας {{user_name}},</h2>
-        <p>Δυστυχώς η αίτηση συμμετοχής σας δεν μπόρεσε να εγκριθεί.</p>
-        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
-            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
-            <p><strong>Βάρδια:</strong> {{shift_date}}</p>
-        </div>
-        <p>Μπορείτε να δηλώσετε συμμετοχή σε άλλες διαθέσιμες βάρδιες.</p>
-    </div>
-    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
-        {{app_name}}
-    </div>
-</div>',
-'Αποστέλλεται όταν απορρίπτεται η συμμετοχή εθελοντή',
-'{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}'),
-
-('shift_reminder', 'Υπενθύμιση Βάρδιας', 'Υπενθύμιση: Αύριο έχετε βάρδια - {{mission_title}}',
-'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
-    <div style=\"background: #f39c12; color: white; padding: 20px; text-align: center;\">
-        <h1>⏰ Υπενθύμιση</h1>
-    </div>
-    <div style=\"padding: 30px; background: #fff;\">
-        <h2>Γεια σας {{user_name}},</h2>
-        <p>Σας υπενθυμίζουμε ότι αύριο έχετε βάρδια.</p>
-        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
-            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
-            <p><strong>Ημερομηνία:</strong> {{shift_date}}</p>
-            <p><strong>Ώρα:</strong> {{shift_time}}</p>
-            <p><strong>Τοποθεσία:</strong> {{location}}</p>
-        </div>
-        <p>Σε περίπτωση αδυναμίας, παρακαλούμε ενημερώστε μας έγκαιρα.</p>
-    </div>
-    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
-        {{app_name}}
-    </div>
-</div>',
-'Αποστέλλεται την προηγούμενη μέρα της βάρδιας',
-'{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}'),
-
-('new_mission', 'Νέα Αποστολή', 'Νέα αποστολή: {{mission_title}}',
-'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
-    <div style=\"background: #3498db; color: white; padding: 20px; text-align: center;\">
-        <h1>🚀 Νέα Αποστολή!</h1>
-    </div>
-    <div style=\"padding: 30px; background: #fff;\">
-        <h2>{{mission_title}}</h2>
-        <p>{{mission_description}}</p>
-        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
-            <p><strong>Τοποθεσία:</strong> {{location}}</p>
-            <p><strong>Περίοδος:</strong> {{start_date}} - {{end_date}}</p>
-        </div>
-        <p style=\"text-align: center; margin-top: 30px;\">
-            <a href=\"{{mission_url}}\" style=\"background: #3498db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;\">Δήλωση Συμμετοχής</a>
-        </p>
-    </div>
-    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
-        {{app_name}}
-    </div>
-</div>',
-'Αποστέλλεται σε εθελοντές όταν δημοσιεύεται νέα αποστολή',
-'{{app_name}}, {{mission_title}}, {{mission_description}}, {{location}}, {{start_date}}, {{end_date}}, {{mission_url}}'),
-
-('mission_canceled', 'Ακύρωση Αποστολής', 'Ακυρώθηκε η αποστολή: {{mission_title}}',
-'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
-    <div style=\"background: #e74c3c; color: white; padding: 20px; text-align: center;\">
-        <h1>Ακύρωση Αποστολής</h1>
-    </div>
-    <div style=\"padding: 30px; background: #fff;\">
-        <h2>Γεια σας {{user_name}},</h2>
-        <p>Σας ενημερώνουμε ότι η παρακάτω αποστολή ακυρώθηκε:</p>
-        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
-            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
-        </div>
-        <p>Ζητούμε συγγνώμη για την όποια αναστάτωση.</p>
-    </div>
-    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
-        {{app_name}}
-    </div>
-</div>',
-'Αποστέλλεται σε εθελοντές όταν ακυρώνεται αποστολή που είχαν δηλώσει συμμετοχή',
-'{{app_name}}, {{user_name}}, {{mission_title}}'),
-
-('shift_canceled', 'Ακύρωση Βάρδιας', 'Ακυρώθηκε η βάρδια: {{shift_date}} - {{mission_title}}',
-'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
-    <div style=\"background: #e74c3c; color: white; padding: 20px; text-align: center;\">
-        <h1>Ακύρωση Βάρδιας</h1>
-    </div>
-    <div style=\"padding: 30px; background: #fff;\">
-        <h2>Γεια σας {{user_name}},</h2>
-        <p>Σας ενημερώνουμε ότι η βάρδια στην οποία είχατε δηλώσει συμμετοχή ακυρώθηκε:</p>
-        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
-            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
-            <p><strong>Βάρδια:</strong> {{shift_date}} ({{shift_time}})</p>
-        </div>
-        <p>Ζητούμε συγγνώμη για την όποια αναστάτωση.</p>
-    </div>
-    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
-        {{app_name}}
-    </div>
-</div>',
-'Αποστέλλεται σε εθελοντές όταν ακυρώνεται βάρδια',
-'{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}'),
-
-('points_earned', 'Κέρδος Πόντων', 'Κερδίσατε {{points}} πόντους!',
-'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
-    <div style=\"background: #27ae60; color: white; padding: 20px; text-align: center;\">
-        <h1>🎉 Συγχαρητήρια!</h1>
-    </div>
-    <div style=\"padding: 30px; background: #fff;\">
-        <h2>Γεια σας {{user_name}},</h2>
-        <p style=\"font-size: 24px; text-align: center; color: #27ae60;\">
-            <strong>+{{points}} πόντοι</strong>
-        </p>
-        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
-            <p><strong>Βάρδια:</strong> {{shift_date}}</p>
-            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
-        </div>
-        <p>Συνολικοί πόντοι: <strong>{{total_points}}</strong></p>
-    </div>
-    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
-        {{app_name}}
-    </div>
-</div>',
-'Αποστέλλεται όταν ο εθελοντής κερδίζει πόντους',
-'{{app_name}}, {{user_name}}, {{points}}, {{mission_title}}, {{shift_date}}, {{total_points}}');
+-- Email templates will be inserted programmatically by install.php
 
 -- Default notification settings
 INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabled`, `email_template_id`) VALUES
-('new_mission', 'Νέα Αποστολή', 'Όταν δημοσιεύεται νέα αποστολή', 1, (SELECT id FROM email_templates WHERE code = 'new_mission')),
-('participation_approved', 'Έγκριση Συμμετοχής', 'Όταν εγκρίνεται η συμμετοχή εθελοντή σε βάρδια', 1, (SELECT id FROM email_templates WHERE code = 'participation_approved')),
-('participation_rejected', 'Απόρριψη Συμμετοχής', 'Όταν απορρίπτεται η συμμετοχή εθελοντή', 1, (SELECT id FROM email_templates WHERE code = 'participation_rejected')),
-('shift_reminder', 'Υπενθύμιση Βάρδιας', 'Μία μέρα πριν τη βάρδια', 1, (SELECT id FROM email_templates WHERE code = 'shift_reminder')),
-('mission_canceled', 'Ακύρωση Αποστολής', 'Όταν ακυρώνεται αποστολή', 1, (SELECT id FROM email_templates WHERE code = 'mission_canceled')),
-('shift_canceled', 'Ακύρωση Βάρδιας', 'Όταν ακυρώνεται βάρδια', 1, (SELECT id FROM email_templates WHERE code = 'shift_canceled')),
-('points_earned', 'Κέρδος Πόντων', 'Όταν ο εθελοντής κερδίζει πόντους', 0, (SELECT id FROM email_templates WHERE code = 'points_earned')),
-('welcome', 'Καλωσόρισμα', 'Μετά την εγγραφή νέου χρήστη', 1, (SELECT id FROM email_templates WHERE code = 'welcome'));
+('new_mission', 'ÎÎ­Î± Î‘Ï€Î¿ÏƒÏ„Î¿Î»Î®', 'ÎŒÏ„Î±Î½ Î´Î·Î¼Î¿ÏƒÎ¹ÎµÏÎµÏ„Î±Î¹ Î½Î­Î± Î±Ï€Î¿ÏƒÏ„Î¿Î»Î®', 1, (SELECT id FROM email_templates WHERE code = 'new_mission')),
+('participation_approved', 'ÎˆÎ³ÎºÏÎ¹ÏƒÎ· Î£Ï…Î¼Î¼ÎµÏ„Î¿Ï‡Î®Ï‚', 'ÎŒÏ„Î±Î½ ÎµÎ³ÎºÏÎ¯Î½ÎµÏ„Î±Î¹ Î· ÏƒÏ…Î¼Î¼ÎµÏ„Î¿Ï‡Î® ÎµÎ¸ÎµÎ»Î¿Î½Ï„Î® ÏƒÎµ Î²Î¬ÏÎ´Î¹Î±', 1, (SELECT id FROM email_templates WHERE code = 'participation_approved')),
+('participation_rejected', 'Î‘Ï€ÏŒÏÏÎ¹ÏˆÎ· Î£Ï…Î¼Î¼ÎµÏ„Î¿Ï‡Î®Ï‚', 'ÎŒÏ„Î±Î½ Î±Ï€Î¿ÏÏÎ¯Ï€Ï„ÎµÏ„Î±Î¹ Î· ÏƒÏ…Î¼Î¼ÎµÏ„Î¿Ï‡Î® ÎµÎ¸ÎµÎ»Î¿Î½Ï„Î®', 1, (SELECT id FROM email_templates WHERE code = 'participation_rejected')),
+('shift_reminder', 'Î¥Ï€ÎµÎ½Î¸ÏÎ¼Î¹ÏƒÎ· Î’Î¬ÏÎ´Î¹Î±Ï‚', 'ÎœÎ¯Î± Î¼Î­ÏÎ± Ï€ÏÎ¹Î½ Ï„Î· Î²Î¬ÏÎ´Î¹Î±', 1, (SELECT id FROM email_templates WHERE code = 'shift_reminder')),
+('mission_canceled', 'Î‘ÎºÏÏÏ‰ÏƒÎ· Î‘Ï€Î¿ÏƒÏ„Î¿Î»Î®Ï‚', 'ÎŒÏ„Î±Î½ Î±ÎºÏ…ÏÏŽÎ½ÎµÏ„Î±Î¹ Î±Ï€Î¿ÏƒÏ„Î¿Î»Î®', 1, (SELECT id FROM email_templates WHERE code = 'mission_canceled')),
+('shift_canceled', 'Î‘ÎºÏÏÏ‰ÏƒÎ· Î’Î¬ÏÎ´Î¹Î±Ï‚', 'ÎŒÏ„Î±Î½ Î±ÎºÏ…ÏÏŽÎ½ÎµÏ„Î±Î¹ Î²Î¬ÏÎ´Î¹Î±', 1, (SELECT id FROM email_templates WHERE code = 'shift_canceled')),
+('points_earned', 'ÎšÎ­ÏÎ´Î¿Ï‚ Î ÏŒÎ½Ï„Ï‰Î½', 'ÎŒÏ„Î±Î½ Î¿ ÎµÎ¸ÎµÎ»Î¿Î½Ï„Î®Ï‚ ÎºÎµÏÎ´Î¯Î¶ÎµÎ¹ Ï€ÏŒÎ½Ï„Î¿Ï…Ï‚', 0, (SELECT id FROM email_templates WHERE code = 'points_earned')),
+('welcome', 'ÎšÎ±Î»Ï‰ÏƒÏŒÏÎ¹ÏƒÎ¼Î±', 'ÎœÎµÏ„Î¬ Ï„Î·Î½ ÎµÎ³Î³ÏÎ±Ï†Î® Î½Î­Î¿Ï… Ï‡ÏÎ®ÏƒÏ„Î·', 1, (SELECT id FROM email_templates WHERE code = 'welcome'));
+
