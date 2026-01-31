@@ -353,7 +353,7 @@ include __DIR__ . '/includes/header.php';
                 <p><strong><i class="bi bi-hourglass me-1"></i>Διάρκεια:</strong> 
                     <?= number_format(calculateShiftHours($shift), 1) ?> ώρες</p>
                 
-                <?php if ($shift['location']): ?>
+                <?php if (!empty($shift['location'])): ?>
                     <p><strong><i class="bi bi-geo-alt me-1"></i>Τοποθεσία:</strong> <?= h($shift['location']) ?></p>
                 <?php endif; ?>
                 
@@ -362,7 +362,7 @@ include __DIR__ . '/includes/header.php';
                     (ελάχ. <?= $shift['min_volunteers'] ?>)
                 </p>
                 
-                <?php if ($shift['required_skills']): 
+                <?php if (!empty($shift['required_skills'])): 
                     $skillIds = json_decode($shift['required_skills'], true);
                     if ($skillIds):
                         $shiftSkills = dbFetchAll(
