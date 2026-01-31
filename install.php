@@ -444,7 +444,7 @@ function installDemoData(PDO $pdo) {
     logDebug('Δημιουργία demo πόντων...');
     foreach (array_slice($volunteerIds, 0, 4) as $volId) {
         $points = rand(50, 200);
-        $stmt = $pdo->prepare("INSERT INTO volunteer_points (volunteer_id, points, source_type, source_id, description, created_at) VALUES (?, ?, 'mission', ?, ?, NOW()) ON DUPLICATE KEY UPDATE points = points");
+        $stmt = $pdo->prepare("INSERT INTO volunteer_points (user_id, points, reason, description, pointable_type, pointable_id, created_at) VALUES (?, ?, 'Ολοκλήρωση αποστολής', ?, 'mission', ?, NOW()) ON DUPLICATE KEY UPDATE points = points");
         $stmt->execute([$volId, $points, $missionIds[5] ?? 1, 'Συμμετοχή σε αποστολή']);
         
         // Update user total points
