@@ -109,6 +109,55 @@ if (isPost() && ($isAdmin || $isShiftLeader)) {
     verifyCsrf();
     
     $action = post('action');
+    
+    // Bulk actions
+    if ($action === 'bulk_action') {
+        $bulkAction = post('bulk_action_type');
+        $selectedIds = post('selected_ids', []);
+        
+        if (!empty($selectedIds) && in_array($bulkAction, ['approve', 'reject'])) {
+            $successCount = 0;
+            $rejectionReason = $bulkAction === 'reject' ? post('bulk_rejection_reason', '') : null;
+            $newStatus = $bulkAction === 'approve' ? 'APPROVED' : 'REJECTED';
+            
+            foreach ($selectedIds as $participationId) {
+                $participation = dbFetchOne("SELECT * FROM participation_requests WHERE id = ? AND status = 'PENDING'", [(int)$participationId]);
+                
+                if ($participation) {
+                    dbExecute(
+                        "UPDATE participation_requests 
+                         SET status = ?, rejection_reason = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() 
+                         WHERE id = ?",
+                        [$newStatus, $rejectionReason, $currentUser['id'], $participationId]
+                    );
+                    
+                    // Send notification
+                    $notificationType = $bulkAction === 'approve' ? 'participation_approved' : 'participation_rejected';
+                    if (isNotificationEnabled($notificationType)) {
+                        $message = $bulkAction === 'approve' 
+                            ? 'Η αίτησή σας για συμμετοχή εγκρίθηκε!'
+                            : 'Η αίτησή σας για συμμετοχή απορρίφθηκε.';
+                        if ($rejectionReason) {
+                            $message .= ' Αιτιολογία: ' . $rejectionReason;
+                        }
+                        sendNotification($participation['volunteer_id'], 'Ενημέρωση Συμμετοχής', $message);
+                    }
+                    
+                    logAudit($bulkAction, 'participation_requests', $participationId, $participation['status'] . ' -> ' . $newStatus);
+                    $successCount++;
+                }
+            }
+            
+            $actionLabel = $bulkAction === 'approve' ? 'εγκρίθηκαν' : 'απορρίφθηκαν';
+            setFlash('success', "$successCount συμμετοχές $actionLabel επιτυχώς.");
+            redirect('participations.php?' . $_SERVER['QUERY_STRING']);
+        } else {
+            setFlash('error', 'Δεν επιλέχθηκαν συμμετοχές.');
+            redirect('participations.php?' . $_SERVER['QUERY_STRING']);
+        }
+    }
+    
+    // Single action
     $participationId = (int)post('participation_id');
     
     if ($participationId && in_array($action, ['approve', 'reject'])) {
@@ -124,6 +173,18 @@ if (isPost() && ($isAdmin || $isShiftLeader)) {
                  WHERE id = ?",
                 [$newStatus, $rejectionReason, $currentUser['id'], $participationId]
             );
+            
+            // Send notification
+            $notificationType = $action === 'approve' ? 'participation_approved' : 'participation_rejected';
+            if (isNotificationEnabled($notificationType)) {
+                $message = $action === 'approve' 
+                    ? 'Η αίτησή σας για συμμετοχή εγκρίθηκε!'
+                    : 'Η αίτησή σας για συμμετοχή απορρίφθηκε.';
+                if ($rejectionReason) {
+                    $message .= ' Αιτιολογία: ' . $rejectionReason;
+                }
+                sendNotification($participation['volunteer_id'], 'Ενημέρωση Συμμετοχής', $message);
+            }
             
             logAudit($action, 'participation_requests', $participationId, $participation['status'] . ' -> ' . $newStatus);
             
@@ -141,6 +202,19 @@ include __DIR__ . '/includes/header.php';
     <h1 class="h3 mb-0">
         <i class="bi bi-people me-2"></i>Συμμετοχές
     </h1>
+    <?php if ($isAdmin || $isShiftLeader): ?>
+        <?php
+        // Build export URL with current filters
+        $exportParams = array_filter([
+            'status' => $filterStatus,
+            'mission' => $filterMission
+        ]);
+        $exportUrl = 'exports/export-participations.php?' . http_build_query($exportParams);
+        ?>
+        <a href="<?= $exportUrl ?>" class="btn btn-outline-success">
+            <i class="bi bi-download me-1"></i>Εξαγωγή CSV
+        </a>
+    <?php endif; ?>
 </div>
 
 <?= showFlash() ?>
@@ -192,11 +266,26 @@ include __DIR__ . '/includes/header.php';
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span>Βρέθηκαν <?= $total ?> συμμετοχές</span>
+        <?php if (($isAdmin || $isShiftLeader) && $total > 0): ?>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-success" onclick="showBulkApproveModal()">
+                    <i class="bi bi-check-all me-1"></i>Μαζική Έγκριση
+                </button>
+                <button type="button" class="btn btn-sm btn-danger" onclick="showBulkRejectModal()">
+                    <i class="bi bi-x-circle me-1"></i>Μαζική Απόρριψη
+                </button>
+            </div>
+        <?php endif; ?>
     </div>
     <div class="table-responsive">
         <table class="table table-hover mb-0">
             <thead class="table-light">
                 <tr>
+                    <?php if ($isAdmin || $isShiftLeader): ?>
+                        <th width="40">
+                            <input type="checkbox" id="selectAll" class="form-check-input">
+                        </th>
+                    <?php endif; ?>
                     <?php if ($isAdmin || $isShiftLeader): ?>
                         <th>Εθελοντής</th>
                     <?php endif; ?>
@@ -211,13 +300,21 @@ include __DIR__ . '/includes/header.php';
             <tbody>
                 <?php if (empty($participations)): ?>
                     <tr>
-                        <td colspan="<?= ($isAdmin || $isShiftLeader) ? 7 : 6 ?>" class="text-center py-4 text-muted">
+                        <td colspan="<?= ($isAdmin || $isShiftLeader) ? 8 : 6 ?>" class="text-center py-4 text-muted">
                             Δεν βρέθηκαν συμμετοχές
                         </td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($participations as $p): ?>
                         <tr>
+                            <?php if ($isAdmin || $isShiftLeader): ?>
+                                <td>
+                                    <?php if ($p['status'] === 'PENDING'): ?>
+                                        <input type="checkbox" class="form-check-input participation-checkbox" 
+                                               value="<?= $p['id'] ?>" data-volunteer="<?= h($p['volunteer_name']) ?>">
+                                    <?php endif; ?>
+                                </td>
+                            <?php endif; ?>
                             <?php if ($isAdmin || $isShiftLeader): ?>
                                 <td>
                                     <a href="volunteer-view.php?id=<?= $p['volunteer_id'] ?>">
@@ -322,5 +419,137 @@ include __DIR__ . '/includes/header.php';
         </div>
     <?php endif; ?>
 </div>
+
+<!-- Bulk Approve Modal -->
+<div class="modal fade" id="bulkApproveModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" id="bulkApproveForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="bulk_action">
+                <input type="hidden" name="bulk_action_type" value="approve">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-check-all me-2"></i>Μαζική Έγκριση Συμμετοχών</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Θα εγκριθούν <strong id="approveCount">0</strong> συμμετοχές:</p>
+                    <ul id="approveList" class="list-unstyled mb-0" style="max-height: 300px; overflow-y: auto;"></ul>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-check-lg me-1"></i>Έγκριση Όλων
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Reject Modal -->
+<div class="modal fade" id="bulkRejectModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" id="bulkRejectForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="bulk_action">
+                <input type="hidden" name="bulk_action_type" value="reject">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-x-circle me-2"></i>Μαζική Απόρριψη Συμμετοχών</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Θα απορριφθούν <strong id="rejectCount">0</strong> συμμετοχές:</p>
+                    <ul id="rejectList" class="list-unstyled mb-3" style="max-height: 200px; overflow-y: auto;"></ul>
+                    <div class="mb-3">
+                        <label class="form-label">Αιτιολογία (προαιρετικά)</label>
+                        <textarea class="form-control" name="bulk_rejection_reason" rows="3" 
+                                  placeholder="Αιτιολογία που θα σταλεί σε όλους..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-x-lg me-1"></i>Απόρριψη Όλων
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// Select all checkbox
+document.getElementById('selectAll')?.addEventListener('change', function() {
+    document.querySelectorAll('.participation-checkbox').forEach(cb => {
+        cb.checked = this.checked;
+    });
+});
+
+// Show bulk approve modal
+function showBulkApproveModal() {
+    const selected = getSelectedParticipations();
+    if (selected.length === 0) {
+        alert('Παρακαλώ επιλέξτε τουλάχιστον μία συμμετοχή');
+        return;
+    }
+    
+    document.getElementById('approveCount').textContent = selected.length;
+    const list = document.getElementById('approveList');
+    list.innerHTML = selected.map(p => `<li><i class="bi bi-person text-success me-2"></i>${p.volunteer}</li>`).join('');
+    
+    // Add hidden inputs
+    const form = document.getElementById('bulkApproveForm');
+    form.querySelectorAll('input[name="selected_ids[]"]').forEach(el => el.remove());
+    selected.forEach(p => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'selected_ids[]';
+        input.value = p.id;
+        form.appendChild(input);
+    });
+    
+    new bootstrap.Modal(document.getElementById('bulkApproveModal')).show();
+}
+
+// Show bulk reject modal
+function showBulkRejectModal() {
+    const selected = getSelectedParticipations();
+    if (selected.length === 0) {
+        alert('Παρακαλώ επιλέξτε τουλάχιστον μία συμμετοχή');
+        return;
+    }
+    
+    document.getElementById('rejectCount').textContent = selected.length;
+    const list = document.getElementById('rejectList');
+    list.innerHTML = selected.map(p => `<li><i class="bi bi-person text-danger me-2"></i>${p.volunteer}</li>`).join('');
+    
+    // Add hidden inputs
+    const form = document.getElementById('bulkRejectForm');
+    form.querySelectorAll('input[name="selected_ids[]"]').forEach(el => el.remove());
+    selected.forEach(p => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'selected_ids[]';
+        input.value = p.id;
+        form.appendChild(input);
+    });
+    
+    new bootstrap.Modal(document.getElementById('bulkRejectModal')).show();
+}
+
+// Get selected participations
+function getSelectedParticipations() {
+    const selected = [];
+    document.querySelectorAll('.participation-checkbox:checked').forEach(cb => {
+        selected.push({
+            id: cb.value,
+            volunteer: cb.dataset.volunteer
+        });
+    });
+    return selected;
+}
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

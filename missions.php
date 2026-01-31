@@ -84,9 +84,15 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-flag me-2"></i>Αποστολές
     </h1>
     <?php if (isAdmin()): ?>
-        <a href="mission-form.php" class="btn btn-primary">
-            <i class="bi bi-plus-lg me-1"></i>Νέα Αποστολή
-        </a>
+        <div class="d-flex gap-2">
+            <a href="exports/export-missions.php?status=<?= h($status) ?>&department_id=<?= h($department) ?>" 
+               class="btn btn-outline-success">
+                <i class="bi bi-download me-1"></i>Εξαγωγή CSV
+            </a>
+            <a href="mission-form.php" class="btn btn-primary">
+                <i class="bi bi-plus-lg me-1"></i>Νέα Αποστολή
+            </a>
+        </div>
     <?php endif; ?>
 </div>
 

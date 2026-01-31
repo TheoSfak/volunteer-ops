@@ -97,12 +97,38 @@ if (isPost()) {
             
         case 'reject':
             if ($canManage) {
-                dbExecute(
-                    "UPDATE participation_requests SET status = 'REJECTED', rejection_reason = ?, updated_at = NOW() WHERE id = ?",
-                    [post('reason'), $prId]
+                $reason = post('reason');
+                
+                // Get volunteer info for notification
+                $prInfo = dbFetchOne(
+                    "SELECT pr.volunteer_id, u.name FROM participation_requests pr JOIN users u ON pr.volunteer_id = u.id WHERE pr.id = ?",
+                    [$prId]
                 );
-                logAudit('reject', 'participation_requests', $prId);
-                setFlash('success', 'Η αίτηση απορρίφθηκε.');
+                
+                dbExecute(
+                    "UPDATE participation_requests SET status = 'REJECTED', rejection_reason = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
+                    [$reason, $user['id'], $prId]
+                );
+                
+                // Send notification to volunteer
+                if ($prInfo && isNotificationEnabled('participation_rejected')) {
+                    $message = 'Η αίτηση συμμετοχής σας στη βάρδια "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') απορρίφθηκε.';
+                    if ($reason) {
+                        $message .= ' Αιτία: ' . $reason;
+                    }
+                    dbInsert(
+                        "INSERT INTO notifications (user_id, type, title, message, data, created_at) VALUES (?, 'participation_rejected', ?, ?, ?, NOW())",
+                        [
+                            $prInfo['volunteer_id'],
+                            'Απόρριψη Αίτησης',
+                            $message,
+                            json_encode(['shift_id' => $id, 'reason' => $reason])
+                        ]
+                    );
+                }
+                
+                logAudit('reject', 'participation_requests', $prId, $reason);
+                setFlash('success', 'Η αίτηση απορρίφθηκε και ο εθελοντής ειδοποιήθηκε.');
             }
             break;
             
@@ -140,9 +166,43 @@ if (isPost()) {
             
         case 'delete':
             if ($canManage) {
+                // Get all participants to notify them
+                $affectedParticipants = dbFetchAll(
+                    "SELECT pr.*, u.name, u.email 
+                     FROM participation_requests pr 
+                     JOIN users u ON pr.volunteer_id = u.id 
+                     WHERE pr.shift_id = ? AND pr.status IN ('PENDING', 'APPROVED')",
+                    [$id]
+                );
+                
+                // Send notifications to affected volunteers
+                if (isNotificationEnabled('mission_cancelled')) {
+                    foreach ($affectedParticipants as $participant) {
+                        dbInsert(
+                            "INSERT INTO notifications (user_id, type, title, message, data, created_at) 
+                             VALUES (?, 'shift_deleted', ?, ?, ?, NOW())",
+                            [
+                                $participant['volunteer_id'],
+                                'Ακύρωση Βάρδιας',
+                                'Η βάρδια στην αποστολή "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') διαγράφηκε. Η αίτησή σας ακυρώθηκε αυτόματα.',
+                                json_encode(['shift_id' => $id, 'mission_id' => $shift['mission_id']])
+                            ]
+                        );
+                    }
+                }
+                
+                // Delete participation requests first
+                dbExecute("DELETE FROM participation_requests WHERE shift_id = ?", [$id]);
+                
+                // Delete the shift
                 dbExecute("DELETE FROM shifts WHERE id = ?", [$id]);
-                logAudit('delete', 'shifts', $id);
-                setFlash('success', 'Η βάρδια διαγράφηκε.');
+                logAudit('delete', 'shifts', $id, 'Notified ' . count($affectedParticipants) . ' volunteers');
+                
+                $msg = 'Η βάρδια διαγράφηκε.';
+                if (count($affectedParticipants) > 0) {
+                    $msg .= ' Ειδοποιήθηκαν ' . count($affectedParticipants) . ' εθελοντές.';
+                }
+                setFlash('success', $msg);
                 redirect('mission-view.php?id=' . $shift['mission_id']);
             }
             break;
@@ -523,13 +583,9 @@ include __DIR__ . '/includes/header.php';
                     <h5 class="mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Επικίνδυνες Ενέργειες</h5>
                 </div>
                 <div class="card-body">
-                    <form method="post" onsubmit="return confirm('Διαγραφή της βάρδιας;')">
-                        <?= csrfField() ?>
-                        <input type="hidden" name="action" value="delete">
-                        <button type="submit" class="btn btn-outline-danger w-100">
-                            <i class="bi bi-trash me-1"></i>Διαγραφή Βάρδιας
-                        </button>
-                    </form>
+                    <button type="button" class="btn btn-outline-danger w-100" data-bs-toggle="modal" data-bs-target="#deleteShiftModal">
+                        <i class="bi bi-trash me-1"></i>Διαγραφή Βάρδιας
+                    </button>
                 </div>
             </div>
         <?php endif; ?>
@@ -659,6 +715,69 @@ include __DIR__ . '/includes/header.php';
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
                     <button type="submit" class="btn btn-success">Καταγραφή</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Shift Confirmation Modal -->
+<?php 
+$activeParticipants = array_filter($participants, function($p) {
+    return in_array($p['status'], ['PENDING', 'APPROVED']);
+});
+?>
+<div class="modal fade" id="deleteShiftModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="delete">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-1"></i>Διαγραφή Βάρδιας</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-circle me-1"></i>
+                        <strong>Προσοχή!</strong> Αυτή η ενέργεια δεν μπορεί να αναιρεθεί.
+                    </div>
+                    
+                    <?php if (count($activeParticipants) > 0): ?>
+                        <div class="alert alert-warning">
+                            <i class="bi bi-people me-1"></i>
+                            <strong>Οι παρακάτω <?= count($activeParticipants) ?> αιτήσεις θα ακυρωθούν:</strong>
+                        </div>
+                        <ul class="list-group mb-3">
+                            <?php foreach ($activeParticipants as $p): ?>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <span>
+                                        <i class="bi bi-person me-1"></i><?= h($p['name']) ?>
+                                    </span>
+                                    <?php if ($p['status'] === 'APPROVED'): ?>
+                                        <span class="badge bg-success">Εγκεκριμένη</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-warning">Εκκρεμεί</span>
+                                    <?php endif; ?>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                        <p class="text-muted mb-0">
+                            <i class="bi bi-bell me-1"></i>
+                            Οι εθελοντές θα ειδοποιηθούν αυτόματα για την ακύρωση.
+                        </p>
+                    <?php else: ?>
+                        <p class="mb-0">Η βάρδια δεν έχει ενεργές αιτήσεις συμμετοχής.</p>
+                    <?php endif; ?>
+                    
+                    <hr>
+                    <p class="mb-0"><strong>Είστε σίγουροι ότι θέλετε να διαγράψετε τη βάρδια;</strong></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-trash me-1"></i>Διαγραφή
+                    </button>
                 </div>
             </form>
         </div>

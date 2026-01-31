@@ -57,13 +57,21 @@ $whereClause = implode(' AND ', $where);
 $total = dbFetchValue("SELECT COUNT(*) FROM users u WHERE $whereClause", $params);
 $pagination = paginate($total, $page, $perPage);
 
-// Get volunteers
+// Get volunteers (optimized with JOINs)
 $volunteers = dbFetchAll(
     "SELECT u.*, d.name as department_name,
-            (SELECT COUNT(*) FROM participation_requests pr WHERE pr.volunteer_id = u.id AND pr.status = 'APPROVED') as shifts_count,
-            (SELECT COALESCE(SUM(pr.actual_hours), 0) FROM participation_requests pr WHERE pr.volunteer_id = u.id AND pr.attended = 1) as total_hours
+            COALESCE(pr_stats.shifts_count, 0) as shifts_count,
+            COALESCE(pr_stats.total_hours, 0) as total_hours
      FROM users u
      LEFT JOIN departments d ON u.department_id = d.id
+     LEFT JOIN (
+         SELECT volunteer_id, 
+                COUNT(*) as shifts_count,
+                COALESCE(SUM(actual_hours), 0) as total_hours
+         FROM participation_requests 
+         WHERE status = 'APPROVED' OR attended = 1
+         GROUP BY volunteer_id
+     ) pr_stats ON u.id = pr_stats.volunteer_id
      WHERE $whereClause
      ORDER BY u.name ASC
      LIMIT {$pagination['offset']}, {$pagination['per_page']}",
@@ -133,9 +141,18 @@ include __DIR__ . '/includes/header.php';
     <h1 class="h3 mb-0">
         <i class="bi bi-people me-2"></i>Εθελοντές
     </h1>
-    <a href="volunteer-form.php" class="btn btn-primary">
-        <i class="bi bi-plus-lg me-1"></i>Νέος Εθελοντής
-    </a>
+    <div class="d-flex gap-2">
+        <a href="exports/import-volunteers.php" class="btn btn-outline-primary">
+            <i class="bi bi-upload me-1"></i>Εισαγωγή CSV
+        </a>
+        <a href="exports/export-volunteers.php?role=<?= h($role) ?>&department_id=<?= h($departmentId) ?>" 
+           class="btn btn-outline-success">
+            <i class="bi bi-download me-1"></i>Εξαγωγή CSV
+        </a>
+        <a href="volunteer-form.php" class="btn btn-primary">
+            <i class="bi bi-plus-lg me-1"></i>Νέος Εθελοντής
+        </a>
+    </div>
 </div>
 
 <!-- Filters -->

@@ -12,10 +12,11 @@ if (!$id) {
 }
 
 $mission = dbFetchOne(
-    "SELECT m.*, d.name as department_name, u.name as creator_name
+    "SELECT m.*, d.name as department_name, u.name as creator_name, r.name as responsible_name
      FROM missions m
      LEFT JOIN departments d ON m.department_id = d.id
      LEFT JOIN users u ON m.created_by = u.id
+     LEFT JOIN users r ON m.responsible_user_id = r.id
      WHERE m.id = ?",
     [$id]
 );
@@ -49,12 +50,62 @@ if (!isAdmin()) {
     $userParticipations = array_column($userParticipations, 'status', 'shift_id');
 }
 
+// Check if user has approved participation (for chat access)
+$isApprovedParticipant = false;
+if (!isAdmin()) {
+    $isApprovedParticipant = dbFetchValue(
+        "SELECT COUNT(*) FROM participation_requests pr
+         INNER JOIN shifts s ON pr.shift_id = s.id
+         WHERE s.mission_id = ? AND pr.volunteer_id = ? AND pr.status = ?",
+        [$id, $user['id'], PARTICIPATION_APPROVED]
+    ) > 0;
+}
+$canAccessChat = isAdmin() || $isApprovedParticipant;
+
+// Get chat messages if user has access
+$chatMessages = [];
+if ($canAccessChat) {
+    $chatMessages = dbFetchAll(
+        "SELECT m.*, u.name as user_name 
+         FROM mission_chat_messages m
+         INNER JOIN users u ON m.user_id = u.id
+         WHERE m.mission_id = ?
+         ORDER BY m.created_at ASC",
+        [$id]
+    );
+}
+
 // Handle actions
 if (isPost()) {
     verifyCsrf();
     $action = post('action');
     
     switch ($action) {
+        case 'delete_chat_message':
+            if (isAdmin() && $canAccessChat) {
+                $messageId = post('message_id');
+                if ($messageId) {
+                    dbExecute("DELETE FROM mission_chat_messages WHERE id = ? AND mission_id = ?", [$messageId, $id]);
+                    setFlash('success', 'Το μήνυμα διαγράφηκε.');
+                }
+                redirect('mission-view.php?id=' . $id . '#chat');
+            }
+            break;
+            
+        case 'send_chat_message':
+            if ($canAccessChat) {
+                $message = trim(post('message'));
+                if (!empty($message)) {
+                    dbInsert(
+                        "INSERT INTO mission_chat_messages (mission_id, user_id, message) VALUES (?, ?, ?)",
+                        [$id, $user['id'], $message]
+                    );
+                    setFlash('success', 'Το μήνυμα στάλθηκε.');
+                }
+                redirect('mission-view.php?id=' . $id . '#chat');
+            }
+            break;
+            
         case 'publish':
             if (isAdmin() && $mission['status'] === STATUS_DRAFT) {
                 dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_OPEN, $id]);
@@ -95,8 +146,67 @@ if (isPost()) {
             }
             break;
             
+        case 'delete':
+            if (isAdmin()) {
+                // Get all shifts for this mission
+                $missionShifts = dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$id]);
+                $shiftIds = array_column($missionShifts, 'id');
+                
+                if (!empty($shiftIds)) {
+                    // Get all affected participants
+                    $placeholders = implode(',', array_fill(0, count($shiftIds), '?'));
+                    $affectedParticipants = dbFetchAll(
+                        "SELECT DISTINCT pr.volunteer_id, u.name, u.email, s.start_time
+                         FROM participation_requests pr 
+                         JOIN users u ON pr.volunteer_id = u.id 
+                         JOIN shifts s ON pr.shift_id = s.id
+                         WHERE pr.shift_id IN ($placeholders) AND pr.status IN ('PENDING', 'APPROVED')",
+                        $shiftIds
+                    );
+                    
+                    // Send notifications to all affected volunteers
+                    $notifiedUsers = [];
+                    if (isNotificationEnabled('mission_cancelled')) {
+                        foreach ($affectedParticipants as $participant) {
+                            if (!in_array($participant['volunteer_id'], $notifiedUsers)) {
+                                dbInsert(
+                                    "INSERT INTO notifications (user_id, type, title, message, data, created_at) 
+                                     VALUES (?, 'mission_deleted', ?, ?, ?, NOW())",
+                                    [
+                                        $participant['volunteer_id'],
+                                        'Ακύρωση Αποστολής',
+                                        'Η αποστολή "' . $mission['title'] . '" διαγράφηκε. Όλες οι αιτήσεις σας για αυτή την αποστολή ακυρώθηκαν αυτόματα.',
+                                        json_encode(['mission_id' => $id])
+                                    ]
+                                );
+                                $notifiedUsers[] = $participant['volunteer_id'];
+                            }
+                        }
+                    }
+                    
+                    // Delete participation requests
+                    dbExecute("DELETE FROM participation_requests WHERE shift_id IN ($placeholders)", $shiftIds);
+                    
+                    // Delete shifts
+                    dbExecute("DELETE FROM shifts WHERE mission_id = ?", [$id]);
+                }
+                
+                // Soft delete mission
+                dbExecute("UPDATE missions SET deleted_at = NOW(), updated_at = NOW() WHERE id = ?", [$id]);
+                logAudit('delete', 'missions', $id, 'Notified ' . count($notifiedUsers ?? []) . ' volunteers');
+                
+                $msg = 'Η αποστολή διαγράφηκε.';
+                if (!empty($notifiedUsers)) {
+                    $msg .= ' Ειδοποιήθηκαν ' . count($notifiedUsers) . ' εθελοντές.';
+                }
+                setFlash('success', $msg);
+                redirect('missions.php');
+            }
+            break;
+            
         case 'apply':
             $shiftId = post('shift_id');
+            $volunteerNotes = post('volunteer_notes');
             if ($shiftId && !isAdmin()) {
                 // Check if already applied
                 $existing = dbFetchValue(
@@ -106,8 +216,8 @@ if (isPost()) {
                 
                 if (!$existing) {
                     dbInsert(
-                        "INSERT INTO participation_requests (volunteer_id, shift_id, status, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())",
-                        [$user['id'], $shiftId, PARTICIPATION_PENDING]
+                        "INSERT INTO participation_requests (volunteer_id, shift_id, status, notes, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())",
+                        [$user['id'], $shiftId, PARTICIPATION_PENDING, $volunteerNotes ?: null]
                     );
                     logAudit('apply', 'participation_requests', null, null, ['shift_id' => $shiftId]);
                     setFlash('success', 'Η αίτησή σας υποβλήθηκε.');
@@ -156,6 +266,13 @@ include __DIR__ . '/includes/header.php';
                 <?= statusBadge($mission['status']) ?>
             </div>
             <div class="card-body">
+                <?php if ($mission['status'] === STATUS_CANCELED && $mission['cancellation_reason']): ?>
+                    <div class="alert alert-danger">
+                        <i class="bi bi-x-circle me-1"></i>
+                        <strong>Λόγος Ακύρωσης:</strong> <?= h($mission['cancellation_reason']) ?>
+                    </div>
+                <?php endif; ?>
+                
                 <?php if ($mission['description']): ?>
                     <p><?= nl2br(h($mission['description'])) ?></p>
                     <hr>
@@ -187,6 +304,11 @@ include __DIR__ . '/includes/header.php';
                         
                         <p><strong><i class="bi bi-person me-1"></i>Δημιουργός:</strong><br>
                         <?= h($mission['creator_name'] ?? '-') ?></p>
+                        
+                        <?php if ($mission['responsible_user_id']): ?>
+                            <p><strong><i class="bi bi-star me-1 text-warning"></i>Υπεύθυνος:</strong><br>
+                            <span class="badge bg-warning text-dark"><?= h($mission['responsible_name']) ?></span></p>
+                        <?php endif; ?>
                     </div>
                 </div>
                 
@@ -276,14 +398,11 @@ include __DIR__ . '/includes/header.php';
                                                 <?php if (isset($userParticipations[$shift['id']])): ?>
                                                     <?= statusBadge($userParticipations[$shift['id']], 'participation') ?>
                                                 <?php elseif (!$isPast && !$isFull && $mission['status'] === STATUS_OPEN): ?>
-                                                    <form method="post" class="d-inline">
-                                                        <?= csrfField() ?>
-                                                        <input type="hidden" name="action" value="apply">
-                                                        <input type="hidden" name="shift_id" value="<?= $shift['id'] ?>">
-                                                        <button type="submit" class="btn btn-sm btn-primary">
-                                                            <i class="bi bi-hand-index"></i> Αίτηση
-                                                        </button>
-                                                    </form>
+                                                    <button type="button" class="btn btn-sm btn-primary apply-btn" 
+                                                            data-shift-id="<?= $shift['id'] ?>"
+                                                            data-shift-date="<?= formatDateTime($shift['start_time'], 'd/m/Y H:i') ?>">
+                                                        <i class="bi bi-hand-index"></i> Αίτηση
+                                                    </button>
                                                 <?php endif; ?>
                                             <?php else: ?>
                                                 <a href="shift-view.php?id=<?= $shift['id'] ?>" class="btn btn-sm btn-outline-primary">
@@ -350,10 +469,14 @@ include __DIR__ . '/includes/header.php';
                     
                     <?php if (in_array($mission['status'], [STATUS_DRAFT, STATUS_OPEN])): ?>
                         <hr>
-                        <button type="button" class="btn btn-outline-danger w-100" data-bs-toggle="modal" data-bs-target="#cancelModal">
+                        <button type="button" class="btn btn-outline-danger w-100 mb-2" data-bs-toggle="modal" data-bs-target="#cancelModal">
                             <i class="bi bi-x-circle me-1"></i>Ακύρωση Αποστολής
                         </button>
                     <?php endif; ?>
+                    
+                    <button type="button" class="btn btn-danger w-100" data-bs-toggle="modal" data-bs-target="#deleteMissionModal">
+                        <i class="bi bi-trash me-1"></i>Διαγραφή Αποστολής
+                    </button>
                 </div>
             </div>
         <?php endif; ?>
@@ -410,5 +533,197 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<!-- Delete Mission Modal -->
+<?php
+$allMissionParticipants = [];
+foreach ($shifts as $s) {
+    $shiftParticipants = dbFetchAll(
+        "SELECT DISTINCT u.name, pr.status 
+         FROM participation_requests pr 
+         JOIN users u ON pr.volunteer_id = u.id 
+         WHERE pr.shift_id = ? AND pr.status IN ('PENDING', 'APPROVED')",
+        [$s['id']]
+    );
+    $allMissionParticipants = array_merge($allMissionParticipants, $shiftParticipants);
+}
+?>
+<div class="modal fade" id="deleteMissionModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="delete">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-1"></i>Διαγραφή Αποστολής</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-circle me-1"></i>
+                        <strong>Προσοχή!</strong> Αυτή η ενέργεια δεν μπορεί να αναιρεθεί.
+                    </div>
+                    
+                    <?php if (count($allMissionParticipants) > 0): ?>
+                        <div class="alert alert-warning">
+                            <i class="bi bi-people me-1"></i>
+                            <strong>Οι παρακάτω <?= count($allMissionParticipants) ?> αιτήσεις θα ακυρωθούν:</strong>
+                        </div>
+                        <ul class="list-group mb-3" style="max-height: 200px; overflow-y: auto;">
+                            <?php foreach ($allMissionParticipants as $p): ?>
+                                <li class="list-group-item d-flex justify-content-between align-items-center py-2">
+                                    <span>
+                                        <i class="bi bi-person me-1"></i><?= h($p['name']) ?>
+                                    </span>
+                                    <?php if ($p['status'] === 'APPROVED'): ?>
+                                        <span class="badge bg-success">Εγκεκριμένη</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-warning">Εκκρεμεί</span>
+                                    <?php endif; ?>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                        <p class="text-muted mb-0">
+                            <i class="bi bi-bell me-1"></i>
+                            Οι εθελοντές θα ειδοποιηθούν αυτόματα για την ακύρωση.
+                        </p>
+                    <?php else: ?>
+                        <p>Η αποστολή δεν έχει ενεργές αιτήσεις συμμετοχής.</p>
+                    <?php endif; ?>
+                    
+                    <hr>
+                    <p class="mb-0"><strong>Είστε σίγουροι ότι θέλετε να διαγράψετε την αποστολή "<?= h($mission['title']) ?>";</strong></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-trash me-1"></i>Διαγραφή
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Apply Modal (for volunteers) -->
+<?php if (!isAdmin()): ?>
+<div class="modal fade" id="applyModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="apply">
+                <input type="hidden" name="shift_id" id="applyShiftId">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-hand-index me-1"></i>Αίτηση Συμμετοχής</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Αίτηση για τη βάρδια: <strong id="applyShiftDate"></strong></p>
+                    <div class="mb-3">
+                        <label class="form-label">Σημειώσεις (προαιρετικά)</label>
+                        <textarea class="form-control" name="volunteer_notes" rows="3" 
+                                  placeholder="Π.χ. διαθεσιμότητα, εμπειρία, ειδικές δεξιότητες..."></textarea>
+                        <small class="text-muted">Οι σημειώσεις θα είναι ορατές στους διαχειριστές.</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-send me-1"></i>Υποβολή Αίτησης
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.querySelectorAll('.apply-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        document.getElementById('applyShiftId').value = this.getAttribute('data-shift-id');
+        document.getElementById('applyShiftDate').textContent = this.getAttribute('data-shift-date');
+        var modal = new bootstrap.Modal(document.getElementById('applyModal'));
+        modal.show();
+    });
+});
+</script>
+<?php endif; ?>
+
+<!-- Mission Chat Section -->
+<?php if ($canAccessChat): ?>
+<div class="card shadow-sm mb-4" id="chat">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0">
+            <i class="bi bi-chat-dots me-2"></i>Συζήτηση Αποστολής
+            <?php if (!isAdmin()): ?>
+                <small class="ms-2">(Μόνο εγκεκριμένοι εθελοντές)</small>
+            <?php endif; ?>
+        </h5>
+    </div>
+    <div class="card-body">
+        <div class="chat-messages mb-3" style="max-height: 400px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 8px; padding: 15px; background: #f8f9fa;">
+            <?php if (empty($chatMessages)): ?>
+                <p class="text-muted text-center mb-0">
+                    <i class="bi bi-chat-square-text me-2"></i>Δεν υπάρχουν μηνύματα ακόμα. Ξεκινήστε τη συζήτηση!
+                </p>
+            <?php else: ?>
+                <?php foreach ($chatMessages as $msg): ?>
+                    <div class="chat-message mb-3 <?= $msg['user_id'] == $user['id'] ? 'text-end' : '' ?>">
+                        <div class="d-inline-block position-relative <?= $msg['user_id'] == $user['id'] ? 'bg-primary text-white' : 'bg-white border' ?>" 
+                             style="max-width: 70%; padding: 10px 15px; border-radius: 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                            <?php if (isAdmin()): ?>
+                                <form method="post" class="position-absolute" style="top: 5px; right: 5px;" onsubmit="return confirm('Θέλετε να διαγράψετε αυτό το μήνυμα;');">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="delete_chat_message">
+                                    <input type="hidden" name="message_id" value="<?= $msg['id'] ?>">
+                                    <button type="submit" class="btn btn-sm btn-danger" style="padding: 2px 6px; font-size: 0.7rem;">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            <?php endif; ?>
+                            <div class="fw-bold mb-1" style="font-size: 0.85rem;">
+                                <?= h($msg['user_name']) ?>
+                                <?= $msg['user_id'] == $user['id'] ? '(Εσείς)' : '' ?>
+                            </div>
+                            <div style="word-wrap: break-word;"><?= $msg['message'] ?></div>
+                            <div class="text-<?= $msg['user_id'] == $user['id'] ? 'white-50' : 'muted' ?> mt-1" style="font-size: 0.75rem;">
+                                <?= formatDateTime($msg['created_at']) ?>
+                            </div>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+            <div id="chatEnd"></div>
+        </div>
+        
+        <form method="post" id="chatForm">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="send_chat_message">
+            <div class="mb-2">
+                <textarea class="form-control" name="message" id="chatMessage" rows="3" placeholder="Γράψτε το μήνυμά σας..." required style="resize: vertical;"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-send"></i> Αποστολή
+            </button>
+        </form>
+    </div>
+</div>
+
+<script>
+// Auto-scroll to bottom of chat on load
+document.addEventListener('DOMContentLoaded', function() {
+    const chatMessages = document.querySelector('.chat-messages');
+    if (chatMessages) {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    // Scroll to chat if hash is #chat
+    if (window.location.hash === '#chat') {
+        document.getElementById('chat').scrollIntoView({ behavior: 'smooth' });
+    }
+});
+</script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

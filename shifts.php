@@ -65,13 +65,15 @@ $total = dbFetchValue(
 
 $pagination = paginate($total, $page, $perPage);
 
-// Get shifts
+// Get shifts (optimized with JOINs)
 $shifts = dbFetchAll(
     "SELECT s.*, m.title as mission_title, m.status as mission_status,
-            (SELECT COUNT(*) FROM participation_requests pr WHERE pr.shift_id = s.id AND pr.status = 'APPROVED') as approved_count,
-            (SELECT COUNT(*) FROM participation_requests pr WHERE pr.shift_id = s.id AND pr.status = 'PENDING') as pending_count
+            COALESCE(pr_approved.count, 0) as approved_count,
+            COALESCE(pr_pending.count, 0) as pending_count
      FROM shifts s
      JOIN missions m ON s.mission_id = m.id
+     LEFT JOIN (SELECT shift_id, COUNT(*) as count FROM participation_requests WHERE status = 'APPROVED' GROUP BY shift_id) pr_approved ON s.id = pr_approved.shift_id
+     LEFT JOIN (SELECT shift_id, COUNT(*) as count FROM participation_requests WHERE status = 'PENDING' GROUP BY shift_id) pr_pending ON s.id = pr_pending.shift_id
      WHERE $whereClause
      ORDER BY s.start_time DESC
      LIMIT {$pagination['offset']}, {$pagination['per_page']}",
