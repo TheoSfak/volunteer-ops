@@ -454,12 +454,3 @@ function getSettings() {
     
     return $cache;
 }
-
-/**
- * Clear settings cache (call after updating settings)
- */
-function clearSettingsCache() {
-    // Reset static variables by re-declaring functions
-    // This is a workaround since PHP doesn't allow clearing static vars directly
-    $GLOBALS['_settings_cache_cleared'] = true;
-}
