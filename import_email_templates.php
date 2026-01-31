@@ -204,6 +204,120 @@ try {
 </div>',
             'description' => 'Αποστέλλεται όταν ο εθελοντής κερδίζει πόντους',
             'available_variables' => '{{app_name}}, {{user_name}}, {{points}}, {{mission_title}}, {{shift_date}}, {{total_points}}, {{leaderboard_url}}'
+        ],
+        [
+            'code' => 'task_assigned',
+            'name' => 'Ανάθεση Εργασίας',
+            'subject' => 'Νέα εργασία: {{task_title}}',
+            'body_html' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #3498db; color: white; padding: 20px; text-align: center;">
+        <h1>📋 Νέα Εργασία</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Σας ανατέθηκε μια νέα εργασία.</p>
+        <p><strong>Εργασία:</strong> {{task_title}}</p>
+        <p><strong>Προτεραιότητα:</strong> {{priority}}</p>
+        <p><strong>Προθεσμία:</strong> {{due_date}}</p>
+        <p style="text-align: center; margin-top: 30px;">
+            <a href="{{task_url}}" style="background: #3498db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;">Δείτε την Εργασία</a>
+        </p>
+    </div>
+</div>',
+            'description' => 'Αποστέλλεται όταν ανατίθεται εργασία σε χρήστη',
+            'available_variables' => '{{app_name}}, {{user_name}}, {{task_title}}, {{priority}}, {{due_date}}, {{task_url}}'
+        ],
+        [
+            'code' => 'task_comment',
+            'name' => 'Σχόλιο σε Εργασία',
+            'subject' => 'Νέο σχόλιο στην εργασία: {{task_title}}',
+            'body_html' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #9b59b6; color: white; padding: 20px; text-align: center;">
+        <h1>💬 Νέο Σχόλιο</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Νέο σχόλιο στην εργασία <strong>{{task_title}}</strong></p>
+        <p><strong>Από:</strong> {{commenter_name}}</p>
+        <div style="background: #f8f9fa; padding: 15px; border-left: 4px solid #9b59b6; margin: 20px 0;">
+            {{comment_text}}
+        </div>
+        <p style="text-align: center; margin-top: 30px;">
+            <a href="{{task_url}}" style="background: #9b59b6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;">Δείτε την Εργασία</a>
+        </p>
+    </div>
+</div>',
+            'description' => 'Αποστέλλεται όταν προστίθεται σχόλιο σε εργασία',
+            'available_variables' => '{{app_name}}, {{user_name}}, {{task_title}}, {{commenter_name}}, {{comment_text}}, {{task_url}}'
+        ],
+        [
+            'code' => 'task_status_changed',
+            'name' => 'Αλλαγή Κατάστασης Εργασίας',
+            'subject' => 'Η εργασία {{task_title}} άλλαξε κατάσταση',
+            'body_html' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #f39c12; color: white; padding: 20px; text-align: center;">
+        <h1>🔄 Αλλαγή Κατάστασης</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Η κατάσταση της εργασίας <strong>{{task_title}}</strong> άλλαξε.</p>
+        <p><strong>Νέα Κατάσταση:</strong> {{new_status}}</p>
+        <p><strong>Από:</strong> {{changed_by}}</p>
+        <p style="text-align: center; margin-top: 30px;">
+            <a href="{{task_url}}" style="background: #f39c12; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;">Δείτε την Εργασία</a>
+        </p>
+    </div>
+</div>',
+            'description' => 'Αποστέλλεται όταν αλλάζει η κατάσταση εργασίας',
+            'available_variables' => '{{app_name}}, {{user_name}}, {{task_title}}, {{new_status}}, {{changed_by}}, {{task_url}}'
+        ],
+        [
+            'code' => 'task_due_soon',
+            'name' => 'Υπενθύμιση Προθεσμίας Εργασίας',
+            'subject' => 'Υπενθύμιση: Η εργασία {{task_title}} λήγει σύντομα',
+            'body_html' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #e67e22; color: white; padding: 20px; text-align: center;">
+        <h1>⏰ Υπενθύμιση Προθεσμίας</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Η εργασία <strong>{{task_title}}</strong> λήγει σύντομα!</p>
+        <p><strong>Προθεσμία:</strong> {{due_date}}</p>
+        <p><strong>Πρόοδος:</strong> {{progress}}%</p>
+        <p style="margin-top: 20px; padding: 15px; background: #fff3cd; border-left: 4px solid #e67e22;">
+            ⚠️ Παρακαλούμε ολοκληρώστε την εργασία το συντομότερο.
+        </p>
+        <p style="text-align: center; margin-top: 30px;">
+            <a href="{{task_url}}" style="background: #e67e22; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;">Δείτε την Εργασία</a>
+        </p>
+    </div>
+</div>',
+            'description' => 'Αποστέλλεται πριν τη λήξη της προθεσμίας εργασίας',
+            'available_variables' => '{{app_name}}, {{user_name}}, {{task_title}}, {{due_date}}, {{progress}}, {{task_url}}'
+        ],
+        [
+            'code' => 'task_overdue',
+            'name' => 'Εκπρόθεσμη Εργασία',
+            'subject' => 'Εκπρόθεσμη εργασία: {{task_title}}',
+            'body_html' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #e74c3c; color: white; padding: 20px; text-align: center;">
+        <h1>❗ Εκπρόθεσμη Εργασία</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Η εργασία <strong>{{task_title}}</strong> είναι εκπρόθεσμη.</p>
+        <p><strong>Προθεσμία ήταν:</strong> {{due_date}}</p>
+        <p><strong>Πρόοδος:</strong> {{progress}}%</p>
+        <p style="margin-top: 20px; padding: 15px; background: #f8d7da; border-left: 4px solid #e74c3c;">
+            ❗ Παρακαλούμε ενημερώστε για την κατάσταση της εργασίας.
+        </p>
+        <p style="text-align: center; margin-top: 30px;">
+            <a href="{{task_url}}" style="background: #e74c3c; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;">Δείτε την Εργασία</a>
+        </p>
+    </div>
+</div>',
+            'description' => 'Αποστέλλεται όταν μια εργασία είναι εκπρόθεσμη',
+            'available_variables' => '{{app_name}}, {{user_name}}, {{task_title}}, {{due_date}}, {{progress}}, {{task_url}}'
         ]
     ];
 
@@ -230,6 +344,11 @@ try {
         ['code' => 'mission_canceled', 'name' => 'Ακύρωση Αποστολής', 'description' => 'Όταν ακυρώνεται αποστολή', 'enabled' => 1],
         ['code' => 'shift_canceled', 'name' => 'Ακύρωση Βάρδιας', 'description' => 'Όταν ακυρώνεται βάρδια', 'enabled' => 1],
         ['code' => 'points_earned', 'name' => 'Κέρδος Πόντων', 'description' => 'Όταν ο εθελοντής κερδίζει πόντους', 'enabled' => 0],
+        ['code' => 'task_assigned', 'name' => 'Ανάθεση Εργασίας', 'description' => 'Όταν ανατίθεται εργασία σε χρήστη', 'enabled' => 1],
+        ['code' => 'task_comment', 'name' => 'Σχόλιο σε Εργασία', 'description' => 'Όταν προστίθεται σχόλιο σε εργασία', 'enabled' => 1],
+        ['code' => 'task_status_changed', 'name' => 'Αλλαγή Κατάστασης Εργασίας', 'description' => 'Όταν αλλάζει η κατάσταση εργασίας', 'enabled' => 1],
+        ['code' => 'task_due_soon', 'name' => 'Υπενθύμιση Προθεσμίας Εργασίας', 'description' => 'Πριν τη λήξη της προθεσμίας εργασίας', 'enabled' => 1],
+        ['code' => 'task_overdue', 'name' => 'Εκπρόθεσμη Εργασία', 'description' => 'Όταν μια εργασία είναι εκπρόθεσμη', 'enabled' => 1],
     ];
 
     $countNotif = 0;
