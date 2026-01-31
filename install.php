@@ -199,6 +199,107 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </div>',
                             'description' => 'Αποστέλλεται όταν απορρίπτεται η συμμετοχή εθελοντή',
                             'available_variables' => '{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{rejection_reason}}'
+                        ],
+                        [
+                            'code' => 'new_mission',
+                            'name' => 'Νέα Αποστολή',
+                            'subject' => 'Νέα διαθέσιμη αποστολή - {{mission_title}}',
+                            'body_html' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #3498db; color: white; padding: 20px; text-align: center;">
+        <h1>✨ Νέα Αποστολή!</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>{{mission_title}}</h2>
+        <p>{{mission_description}}</p>
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p><strong>Τοποθεσία:</strong> {{location}}</p>
+        </div>
+    </div>
+</div>',
+                            'description' => 'Αποστέλλεται όταν δημοσιεύεται νέα αποστολή',
+                            'available_variables' => '{{app_name}}, {{mission_title}}, {{mission_description}}, {{location}}'
+                        ],
+                        [
+                            'code' => 'shift_reminder',
+                            'name' => 'Υπενθύμιση Βάρδιας',
+                            'subject' => 'Υπενθύμιση: Η βάρδια σας είναι αύριο - {{mission_title}}',
+                            'body_html' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #f39c12; color: white; padding: 20px; text-align: center;">
+        <h1>⏰ Υπενθύμιση Βάρδιας</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Η βάρδια σας είναι <strong>αύριο</strong>!</p>
+        <div style="background: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+            <p><strong>Βάρδια:</strong> {{shift_date}} ({{shift_time}})</p>
+            <p><strong>Τοποθεσία:</strong> {{location}}</p>
+        </div>
+    </div>
+</div>',
+                            'description' => 'Αποστέλλεται μία μέρα πριν από τη βάρδια',
+                            'available_variables' => '{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}'
+                        ],
+                        [
+                            'code' => 'mission_canceled',
+                            'name' => 'Ακύρωση Αποστολής',
+                            'subject' => 'Ακύρωση αποστολής - {{mission_title}}',
+                            'body_html' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #e74c3c; color: white; padding: 20px; text-align: center;">
+        <h1>⚠️ Ακύρωση Αποστολής</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Λυπούμαστε να σας ενημερώσουμε ότι η παρακάτω αποστολή ακυρώθηκε:</p>
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+            <p><strong>Λόγος:</strong> {{cancellation_reason}}</p>
+        </div>
+    </div>
+</div>',
+                            'description' => 'Αποστέλλεται όταν ακυρώνεται αποστολή',
+                            'available_variables' => '{{app_name}}, {{user_name}}, {{mission_title}}, {{cancellation_reason}}'
+                        ],
+                        [
+                            'code' => 'shift_canceled',
+                            'name' => 'Ακύρωση Βάρδιας',
+                            'subject' => 'Ακύρωση βάρδιας - {{mission_title}}',
+                            'body_html' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #e74c3c; color: white; padding: 20px; text-align: center;">
+        <h1>⚠️ Ακύρωση Βάρδιας</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Η βάρδια στην οποία είχατε δηλώσει συμμετοχή ακυρώθηκε:</p>
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+            <p><strong>Βάρδια:</strong> {{shift_date}} ({{shift_time}})</p>
+        </div>
+    </div>
+</div>',
+                            'description' => 'Αποστέλλεται όταν ακυρώνεται βάρδια',
+                            'available_variables' => '{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}'
+                        ],
+                        [
+                            'code' => 'points_earned',
+                            'name' => 'Κέρδος Πόντων',
+                            'subject' => 'Κερδίσατε {{points}} πόντους!',
+                            'body_html' => '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #27ae60; color: white; padding: 20px; text-align: center;">
+        <h1>🎉 Συγχαρητήρια!</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Κερδίσατε <strong>{{points}} πόντους</strong>!</p>
+        <div style="background: #d4edda; padding: 20px; border-radius: 8px; margin: 20px 0; text-align: center;">
+            <p style="font-size: 48px; margin: 0;">{{points}}</p>
+            <p style="font-size: 18px; margin: 5px 0;">Πόντοι</p>
+        </div>
+        <p><strong>Σύνολο πόντων:</strong> {{total_points}}</p>
+    </div>
+</div>',
+                            'description' => 'Αποστέλλεται όταν ο εθελοντής κερδίζει πόντους',
+                            'available_variables' => '{{app_name}}, {{user_name}}, {{points}}, {{total_points}}'
                         ]
                     ];
                     
@@ -216,6 +317,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ]);
                     }
                     logDebug('Email templates εισήχθησαν επιτυχώς: ' . count($emailTemplates), 'success');
+                    
+                    // Link notification settings to email templates
+                    logDebug('Σύνδεση notification settings με email templates...', 'info');
+                    $templateLinks = [
+                        'welcome' => 'welcome',
+                        'participation_approved' => 'participation_approved',
+                        'participation_rejected' => 'participation_rejected',
+                        'new_mission' => 'new_mission',
+                        'shift_reminder' => 'shift_reminder',
+                        'mission_canceled' => 'mission_canceled',
+                        'shift_canceled' => 'shift_canceled',
+                        'points_earned' => 'points_earned'
+                    ];
+                    foreach ($templateLinks as $notifCode => $templateCode) {
+                        $pdo->exec("UPDATE notification_settings ns 
+                                    SET email_template_id = (SELECT id FROM email_templates WHERE code = '$templateCode')
+                                    WHERE ns.code = '$notifCode'");
+                    }
+                    logDebug('Notification settings συνδέθηκαν με templates', 'success');
                     
                     // Store in session for next step
                     $_SESSION['db'] = [
@@ -428,8 +548,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Πλατεία Συντάγματος, Αθήνα',
             'department_id' => $deptIds[1] ?? 1,
             'status' => 'OPEN',
-            'start_date' => date('Y-m-d H:i:s', strtotime('+3 days 09:00')),
-            'end_date' => date('Y-m-d H:i:s', strtotime('+3 days 14:00')),
+            'start_datetimetime' => date('Y-m-d H:i:s', strtotime('+3 days 09:00')),
+            'end_datetimetime' => date('Y-m-d H:i:s', strtotime('+3 days 14:00')),
         ],
         [
             'title' => 'Καθαρισμός Παραλίας',
@@ -437,8 +557,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Παραλία Γλυφάδας',
             'department_id' => $deptIds[3] ?? 1,
             'status' => 'OPEN',
-            'start_date' => date('Y-m-d H:i:s', strtotime('+5 days 08:00')),
-            'end_date' => date('Y-m-d H:i:s', strtotime('+5 days 13:00')),
+            'start_datetimetime' => date('Y-m-d H:i:s', strtotime('+5 days 08:00')),
+            'end_datetimetime' => date('Y-m-d H:i:s', strtotime('+5 days 13:00')),
         ],
         [
             'title' => 'Υποστήριξη Μαθητών - Κέντρο Μελέτης',
@@ -446,8 +566,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Δημοτική Βιβλιοθήκη Αθηνών',
             'department_id' => $deptIds[2] ?? 1,
             'status' => 'DRAFT',
-            'start_date' => date('Y-m-d H:i:s', strtotime('+7 days 16:00')),
-            'end_date' => date('Y-m-d H:i:s', strtotime('+7 days 20:00')),
+            'start_datetimetime' => date('Y-m-d H:i:s', strtotime('+7 days 16:00')),
+            'end_datetimetime' => date('Y-m-d H:i:s', strtotime('+7 days 20:00')),
         ],
         [
             'title' => 'Ιατρείο Αστέγων',
@@ -455,8 +575,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Κέντρο Αστέγων, Πειραιάς',
             'department_id' => $deptIds[0] ?? 1,
             'status' => 'OPEN',
-            'start_date' => date('Y-m-d H:i:s', strtotime('+2 days 18:00')),
-            'end_date' => date('Y-m-d H:i:s', strtotime('+2 days 22:00')),
+            'start_datetimetime' => date('Y-m-d H:i:s', strtotime('+2 days 18:00')),
+            'end_datetimetime' => date('Y-m-d H:i:s', strtotime('+2 days 22:00')),
         ],
         [
             'title' => 'Επίσκεψη σε Γηροκομείο',
@@ -464,8 +584,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Γηροκομείο Αγία Ειρήνη, Νέα Σμύρνη',
             'department_id' => $deptIds[4] ?? 1,
             'status' => 'OPEN',
-            'start_date' => date('Y-m-d H:i:s', strtotime('+4 days 10:00')),
-            'end_date' => date('Y-m-d H:i:s', strtotime('+4 days 13:00')),
+            'start_datetimetime' => date('Y-m-d H:i:s', strtotime('+4 days 10:00')),
+            'end_datetimetime' => date('Y-m-d H:i:s', strtotime('+4 days 13:00')),
         ],
         [
             'title' => 'Δενδροφύτευση Πάρκου',
@@ -473,13 +593,13 @@ function installDemoData(PDO $pdo) {
             'location' => 'Πάρκο Τρίτση, Ίλιον',
             'department_id' => $deptIds[3] ?? 1,
             'status' => 'COMPLETED',
-            'start_date' => date('Y-m-d H:i:s', strtotime('-10 days 09:00')),
-            'end_date' => date('Y-m-d H:i:s', strtotime('-10 days 15:00')),
+            'start_datetimetime' => date('Y-m-d H:i:s', strtotime('-10 days 09:00')),
+            'end_datetimetime' => date('Y-m-d H:i:s', strtotime('-10 days 15:00')),
         ],
     ];
     
     $missionIds = [];
-    $stmt = $pdo->prepare("INSERT INTO missions (title, description, location, department_id, status, start_date, end_date, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())");
+    $stmt = $pdo->prepare("INSERT INTO missions (title, description, location, department_id, status, start_datetime, end_datetime, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())");
     foreach ($missions as $mission) {
         $stmt->execute([
             $mission['title'],
@@ -487,8 +607,8 @@ function installDemoData(PDO $pdo) {
             $mission['location'],
             $mission['department_id'],
             $mission['status'],
-            $mission['start_date'],
-            $mission['end_date']
+            $mission['start_datetimetime'],
+            $mission['end_datetimetime']
         ]);
         $missionIds[] = $pdo->lastInsertId();
     }
@@ -531,7 +651,7 @@ function installDemoData(PDO $pdo) {
         
         foreach ($selectedVolunteers as $volId) {
             $status = $statuses[array_rand($statuses)];
-            $stmt = $pdo->prepare("INSERT INTO participation_requests (shift_id, volunteer_id, status, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW()) ON DUPLICATE KEY UPDATE status = status");
+            $stmt = $pdo->prepare("INSERT INTO participation_requests (shift_id, user_id, status, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW()) ON DUPLICATE KEY UPDATE status = status");
             $stmt->execute([$shiftId, $volId, $status]);
             $participationCount++;
         }
@@ -542,8 +662,8 @@ function installDemoData(PDO $pdo) {
     logDebug('Δημιουργία demo πόντων...');
     foreach (array_slice($volunteerIds, 0, 4) as $volId) {
         $points = rand(50, 200);
-        $stmt = $pdo->prepare("INSERT INTO volunteer_points (volunteer_id, points, source_type, source_id, description, created_at) VALUES (?, ?, 'mission', ?, ?, NOW()) ON DUPLICATE KEY UPDATE points = points");
-        $stmt->execute([$volId, $points, $missionIds[5] ?? 1, 'Συμμετοχή σε αποστολή']);
+$stmt = $pdo->prepare("INSERT INTO volunteer_points (user_id, points, reason, description, pointable_type, pointable_id, created_at) VALUES (?, ?, 'shift_completion', ?, 'mission', ?, NOW())");
+                $stmt->execute([$volId, $points, 'Συμμετοχή σε αποστολή', $missionIds[5] ?? 1]);
         
         // Update user total points
         $pdo->exec("UPDATE users SET total_points = total_points + {$points} WHERE id = {$volId}");
