@@ -110,9 +110,9 @@ include __DIR__ . '/includes/header.php';
             <tbody>
                 <?php foreach ($departments as $d): ?>
                     <tr class="<?= !$d['is_active'] ? 'table-secondary' : '' ?>">
-                        <td><code><?= h($d['code'] ?: '-') ?></code></td>
+                        <td><code><?= h(!empty($d['code']) ? $d['code'] : '-') ?></code></td>
                         <td><strong><?= h($d['name']) ?></strong></td>
-                        <td><?= h($d['description'] ?: '-') ?></td>
+                        <td><?= h(!empty($d['description']) ? $d['description'] : '-') ?></td>
                         <td class="text-center">
                             <span class="badge bg-secondary"><?= $d['users_count'] ?></span>
                         </td>
