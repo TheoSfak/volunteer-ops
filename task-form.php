@@ -27,7 +27,19 @@ if ($isEdit) {
 }
 
 // Get all active users for assignment
-$allUsers = dbFetchAll("SELECT id, name, role FROM users WHERE is_active = 1 ORDER BY name");
+$allUsers = dbFetchAll(
+    "SELECT id, name, role FROM users 
+     WHERE is_active = 1 
+     ORDER BY name"
+);
+
+// Priority labels for notifications
+$priorityLabels = [
+    'LOW' => 'Χαμηλή',
+    'MEDIUM' => 'Μεσαία', 
+    'HIGH' => 'Υψηλή',
+    'URGENT' => 'Επείγουσα'
+];
 
 // Handle form submission
 if (isPost()) {
@@ -186,7 +198,7 @@ include __DIR__ . '/includes/header.php';
                 </h4>
             </div>
             <div class="card-body">
-                <form method="post">
+                <form method="post" id="taskForm">
                     <?= csrfField() ?>
                     
                     <div class="mb-3">
@@ -276,7 +288,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<!-- Volunteer Selection Modal -->
+<!-- Volunteer Selection Modal (outside form, using form attribute) -->
 <div class="modal fade" id="volunteerModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -293,6 +305,7 @@ include __DIR__ . '/includes/header.php';
                         <label class="list-group-item list-group-item-action" style="cursor: pointer;">
                             <div class="d-flex align-items-center">
                                 <input class="form-check-input me-2 volunteer-checkbox" type="checkbox" 
+                                       form="taskForm"
                                        name="assigned_to[]" value="<?= $u['id'] ?>" 
                                        data-name="<?= h($u['name']) ?>"
                                        data-role="<?= h($GLOBALS['ROLE_LABELS'][$u['role']]) ?>"
@@ -309,6 +322,10 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Κλείσιμο</button>
+            </div>
+        </div>
+    </div>
+</div>
             </div>
         </div>
     </div>

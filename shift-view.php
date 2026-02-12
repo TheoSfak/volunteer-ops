@@ -12,7 +12,8 @@ if (!$id) {
 }
 
 $shift = dbFetchOne(
-    "SELECT s.*, m.title as mission_title, m.status as mission_status, m.department_id
+    "SELECT s.*, m.title as mission_title, m.status as mission_status, m.department_id,
+            m.description, m.location
      FROM shifts s
      JOIN missions m ON s.mission_id = m.id
      WHERE s.id = ?",
@@ -86,10 +87,40 @@ if (isPost()) {
             
         case 'approve':
             if ($canManage) {
+                // Get participation and volunteer info for notification
+                $prInfo = dbFetchOne(
+                    "SELECT pr.volunteer_id, u.name, u.email 
+                     FROM participation_requests pr 
+                     JOIN users u ON pr.volunteer_id = u.id 
+                     WHERE pr.id = ?",
+                    [$prId]
+                );
+                
                 dbExecute(
                     "UPDATE participation_requests SET status = 'APPROVED', decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
                     [$user['id'], $prId]
                 );
+                
+                // Send notification
+                if ($prInfo && isNotificationEnabled('participation_approved')) {
+                    // Send email
+                    sendNotificationEmail('participation_approved', $prInfo['email'], [
+                        'user_name' => $prInfo['name'],
+                        'mission_title' => $shift['mission_title'],
+                        'shift_date' => formatDateTime($shift['start_time'], 'd/m/Y'),
+                        'shift_time' => formatDateTime($shift['start_time'], 'H:i'),
+                        'location' => $shift['location'] ?: 'Θα ανακοινωθεί'
+                    ]);
+                    
+                    // Send in-app notification
+                    sendNotification(
+                        $prInfo['volunteer_id'],
+                        'Η αίτησή σας εγκρίθηκε',
+                        'Η αίτησή σας για τη βάρδια "' . $shift['mission_title'] . '" στις ' . 
+                        formatDateTime($shift['start_time']) . ' εγκρίθηκε.'
+                    );
+                }
+                
                 logAudit('approve', 'participation_requests', $prId);
                 setFlash('success', 'Η αίτηση εγκρίθηκε.');
             }
@@ -112,6 +143,18 @@ if (isPost()) {
                 
                 // Send notification to volunteer
                 if ($prInfo && isNotificationEnabled('participation_rejected')) {
+                    // Get volunteer email
+                    $volunteer = dbFetchOne("SELECT name, email FROM users WHERE id = ?", [$prInfo['volunteer_id']]);
+                    
+                    // Send email
+                    sendNotificationEmail('participation_rejected', $volunteer['email'], [
+                        'user_name' => $volunteer['name'],
+                        'mission_title' => $shift['mission_title'],
+                        'shift_date' => formatDateTime($shift['start_time'], 'd/m/Y'),
+                        'rejection_reason' => $reason ?: 'Δεν αναφέρθηκε λόγος'
+                    ]);
+                    
+                    // Send in-app notification
                     $message = 'Η αίτηση συμμετοχής σας στη βάρδια "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') απορρίφθηκε.';
                     if ($reason) {
                         $message .= ' Αιτία: ' . $reason;
@@ -292,7 +335,11 @@ if ($canManage) {
         $excludeClause = 'AND id NOT IN (' . implode(',', array_map('intval', $existingIds)) . ')';
     }
     $availableVolunteers = dbFetchAll(
-        "SELECT id, name, email FROM users WHERE role = 'VOLUNTEER' $excludeClause ORDER BY name"
+        "SELECT id, name, email FROM users 
+         WHERE role = 'VOLUNTEER' 
+           AND is_active = 1
+           $excludeClause 
+         ORDER BY name"
     );
 }
 
@@ -685,7 +732,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
-                    <button type="submit" class="btn btn-danger" id="rejectSubmitBtn">Απόρριψη</button>
+                    <button type="submit" class="btn btn-danger" id="rejectSubmitBtn">Ακύρωση Συμμετοχής</button>
                 </div>
             </form>
         </div>

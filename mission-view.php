@@ -75,6 +75,17 @@ if ($canAccessChat) {
     );
 }
 
+// Get available volunteers for admin manual add
+$availableVolunteers = [];
+if (isAdmin()) {
+    $availableVolunteers = dbFetchAll(
+        "SELECT id, name, email FROM users 
+         WHERE role = 'VOLUNTEER' 
+           AND is_active = 1
+         ORDER BY name"
+    );
+}
+
 // Handle actions
 if (isPost()) {
     verifyCsrf();
@@ -223,6 +234,86 @@ if (isPost()) {
                     setFlash('success', 'Η αίτησή σας υποβλήθηκε.');
                 } else {
                     setFlash('error', 'Έχετε ήδη υποβάλει αίτηση για αυτή τη βάρδια.');
+                }
+                redirect('mission-view.php?id=' . $id);
+            }
+            break;
+            
+        case 'manual_add_volunteer':
+            if (isAdmin()) {
+                $shiftIds = post('shift_ids', []); // Array of shift IDs
+                $volunteerId = post('volunteer_id');
+                $adminNotes = post('admin_notes');
+                
+                if (!empty($shiftIds) && $volunteerId) {
+                    $addedCount = 0;
+                    $skippedCount = 0;
+                    
+                    // Get volunteer info once
+                    $volunteer = dbFetchOne("SELECT name, email FROM users WHERE id = ?", [$volunteerId]);
+                    
+                    foreach ($shiftIds as $shiftId) {
+                        // Check if already exists
+                        $existing = dbFetchValue(
+                            "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND shift_id = ?",
+                            [$volunteerId, $shiftId]
+                        );
+                        
+                        if (!$existing) {
+                            // Add volunteer directly as approved
+                            $prId = dbInsert(
+                                "INSERT INTO participation_requests 
+                                 (volunteer_id, shift_id, status, admin_notes, decided_by, decided_at, created_at, updated_at) 
+                                 VALUES (?, ?, ?, ?, ?, NOW(), NOW(), NOW())",
+                                [$volunteerId, $shiftId, PARTICIPATION_APPROVED, $adminNotes, $user['id']]
+                            );
+                            
+                            // Get shift info with mission details
+                            $shift = dbFetchOne(
+                                "SELECT s.*, m.title as mission_title, m.location 
+                                 FROM shifts s 
+                                 JOIN missions m ON s.mission_id = m.id 
+                                 WHERE s.id = ?",
+                                [$shiftId]
+                            );
+                            
+                            // Send notification email
+                            sendNotificationEmail(
+                                'participation_approved',
+                                $volunteer['email'],
+                                [
+                                    'user_name' => $volunteer['name'],
+                                    'mission_title' => $shift['mission_title'],
+                                    'shift_date' => formatDateTime($shift['start_time'], 'd/m/Y'),
+                                    'shift_time' => formatDateTime($shift['start_time'], 'H:i'),
+                                    'location' => $shift['location'] ?: 'Θα ανακοινωθεί',
+                                    'admin_notes' => $adminNotes ?: 'Προστέθηκατε χειροκίνητα από διαχειριστή.'
+                                ]
+                            );
+                            
+                            // Send in-app notification
+                            sendNotification(
+                                $volunteerId,
+                                'Εγκρίθηκε η συμμετοχή σας',
+                                'Προστεθήκατε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time'])
+                            );
+                            
+                            logAudit('manual_add_volunteer', 'participation_requests', $prId);
+                            $addedCount++;
+                        } else {
+                            $skippedCount++;
+                        }
+                    }
+                    
+                    $message = '';
+                    if ($addedCount > 0) {
+                        $message = "Ο εθελοντής προστέθηκε σε {$addedCount} βάρδια/ες.";
+                    }
+                    if ($skippedCount > 0) {
+                        $message .= " {$skippedCount} βάρδια/ες παραλείφθηκαν (ήδη συμμετέχει).";
+                    }
+                    
+                    setFlash($addedCount > 0 ? 'success' : 'warning', $message);
                 }
                 redirect('mission-view.php?id=' . $id);
             }
@@ -431,6 +522,10 @@ include __DIR__ . '/includes/header.php';
                     <h5 class="mb-0">Ενέργειες</h5>
                 </div>
                 <div class="card-body d-grid gap-2">
+                    <button type="button" class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#addVolunteerModal">
+                        <i class="bi bi-person-plus me-1"></i>Προσθήκη Εθελοντή
+                    </button>
+                    
                     <?php if ($mission['status'] === STATUS_DRAFT): ?>
                         <form method="post">
                             <?= csrfField() ?>
@@ -648,6 +743,82 @@ document.querySelectorAll('.apply-btn').forEach(function(btn) {
     });
 });
 </script>
+<?php endif; ?>
+
+<!-- Add Volunteer Modal (for admins) -->
+<?php if (isAdmin()): ?>
+<div class="modal fade" id="addVolunteerModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="manual_add_volunteer">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-person-plus me-1"></i>Προσθήκη Εθελοντή</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Επιλογή Εθελοντή</label>
+                        <select class="form-select" name="volunteer_id" required>
+                            <option value="">-- Επιλέξτε εθελοντή --</option>
+                            <?php foreach ($availableVolunteers as $vol): ?>
+                                <option value="<?= $vol['id'] ?>">
+                                    <?= h($vol['name']) ?> (<?= h($vol['email']) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <hr>
+                    
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Επιλογή Βαρδιών</strong> (μπορείτε να επιλέξετε πολλές)</label>
+                        <?php if (empty($shifts)): ?>
+                            <p class="text-muted">Δεν υπάρχουν διαθέσιμες βάρδιες.</p>
+                        <?php else: ?>
+                            <div class="list-group" style="max-height: 300px; overflow-y: auto;">
+                                <?php foreach ($shifts as $shift): ?>
+                                    <label class="list-group-item d-flex align-items-start">
+                                        <input class="form-check-input me-2 mt-1" type="checkbox" 
+                                               name="shift_ids[]" value="<?= $shift['id'] ?>">
+                                        <div class="flex-grow-1">
+                                            <div><strong><?= formatDateTime($shift['start_time'], 'd/m/Y') ?></strong></div>
+                                            <small class="text-muted">
+                                                <?= formatDateTime($shift['start_time'], 'H:i') ?> - 
+                                                <?= formatDateTime($shift['end_time'], 'H:i') ?>
+                                                | <?= $shift['approved_count'] ?>/<?= $shift['max_volunteers'] ?> εθελοντές
+                                            </small>
+                                        </div>
+                                    </label>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Σημειώσεις Διαχειριστή (προαιρετικά)</label>
+                        <textarea class="form-control" name="admin_notes" rows="2" 
+                                  placeholder="Λόγος χειροκίνητης ανάθεσης..."></textarea>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Ο εθελοντής θα προστεθεί αυτόματα ως <strong>εγκεκριμένος</strong> σε όλες τις επιλεγμένες βάρδιες και θα λάβει ειδοποιήσεις.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="bi bi-x me-1"></i>Ακύρωση
+                    </button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-person-plus me-1"></i>Προσθήκη σε Επιλεγμένες Βάρδιες
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 <?php endif; ?>
 
 <!-- Mission Chat Section -->
