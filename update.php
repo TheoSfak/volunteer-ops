@@ -279,6 +279,15 @@ function downloadUpdate($zipUrl, $version) {
 function extractUpdate($zipFile, $tempDir) {
     updateLog('Εξαγωγή αρχείων...');
     
+    // Check if ZipArchive is available
+    if (!class_exists('ZipArchive')) {
+        throw new Exception(
+            'Η επέκταση PHP zip δεν είναι ενεργοποιημένη. ' .
+            'Παρακαλώ ενεργοποιήστε την στο php.ini: ' .
+            'Αφαιρέστε το ; από τη γραμμή: ;extension=zip'
+        );
+    }
+    
     $zip = new ZipArchive();
     $result = $zip->open($zipFile);
     

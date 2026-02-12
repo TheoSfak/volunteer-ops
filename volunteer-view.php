@@ -27,6 +27,50 @@ if (!$volunteer) {
 
 $pageTitle = $volunteer['name'];
 
+// Handle actions
+if (isPost()) {
+    verifyCsrf();
+    $action = post('action');
+    
+    if ($action === 'delete_personal_data') {
+        // GDPR-compliant personal data deletion
+        // Only system admins can delete personal data
+        if (!isSystemAdmin()) {
+            setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
+            redirect('volunteer-view.php?id=' . $id);
+        }
+        
+        // Anonymize user data
+        $anonymizedEmail = 'deleted_' . $id . '_' . time() . '@deleted.local';
+        dbExecute(
+            "UPDATE users SET 
+             name = ?, 
+             email = ?, 
+             phone = NULL, 
+             is_active = 0,
+             updated_at = NOW() 
+             WHERE id = ?",
+            ['[Διαγραμμένος Χρήστης]', $anonymizedEmail, $id]
+        );
+        
+        // Delete volunteer profile
+        dbExecute("DELETE FROM volunteer_profiles WHERE user_id = ?", [$id]);
+        
+        // Delete user skills
+        dbExecute("DELETE FROM user_skills WHERE user_id = ?", [$id]);
+        
+        // Delete user achievements
+        dbExecute("DELETE FROM user_achievements WHERE user_id = ?", [$id]);
+        
+        // Delete notifications
+        dbExecute("DELETE FROM notifications WHERE user_id = ?", [$id]);
+        
+        logAudit('delete_personal_data', 'users', $id, 'GDPR data deletion');
+        setFlash('success', 'Τα προσωπικά δεδομένα διαγράφηκαν επιτυχώς.');
+        redirect('volunteers.php');
+    }
+}
+
 // Get profile
 $profile = dbFetchOne("SELECT * FROM volunteer_profiles WHERE user_id = ?", [$id]);
 
@@ -105,8 +149,11 @@ include __DIR__ . '/includes/header.php';
     <div>
         <a href="volunteer-form.php?id=<?= $id ?>" class="btn btn-outline-primary">
             <i class="bi bi-pencil me-1"></i>Επεξεργασία
-        </a>
-        <a href="volunteers.php" class="btn btn-outline-secondary">
+        </a>        <?php if (isSystemAdmin()): ?>
+            <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteDataModal">
+                <i class="bi bi-shield-x me-1"></i>Διαγραφή Προσωπικών Δεδομένων
+            </button>
+        <?php endif; ?>        <a href="volunteers.php" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left me-1"></i>Πίσω
         </a>
     </div>
@@ -318,6 +365,45 @@ include __DIR__ . '/includes/header.php';
                         <?php endforeach; ?>
                     </ul>
                 <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Personal Data Modal -->
+<div class="modal fade" id="deleteDataModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-shield-x me-2"></i>Διαγραφή Προσωπικών Δεδομένων (GDPR)</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <strong>Προειδοποίηση:</strong> Αυτή η ενέργεια είναι μόνιμη και δεν μπορεί να αναιρεθεί!
+                </div>
+                <p><strong>Θα διαγραφούν τα ακόλουθα δεδομένα:</strong></p>
+                <ul>
+                    <li>Όνομα και στοιχεία επικοινωνίας (θα αντικατασταθούν με "[Διαγραμμένος Χρήστης]")</li>
+                    <li>Προφίλ εθελοντή (βιογραφικό, διεύθυνση, επαφή έκτακτης ανάγκης)</li>
+                    <li>Δεξιότητες και επιτεύγματα</li>
+                    <li>Ειδοποιήσεις</li>
+                </ul>
+                <p class="text-muted"><small><i class="bi bi-info-circle me-1"></i>Οι συμμετοχές σε αποστολές και βάρδιες θα διατηρηθούν για στατιστικούς λόγους, αλλά θα συνδεθούν με ανωνυμοποιημένο χρήστη.</small></p>
+                <p class="mb-0">Είστε σίγουροι ότι θέλετε να διαγράψετε τα προσωπικά δεδομένα του <strong><?= h($volunteer['name']) ?></strong>;</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x me-1"></i>Ακύρωση
+                </button>
+                <form method="post" class="d-inline">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="delete_personal_data">
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-shield-x me-1"></i>Οριστική Διαγραφή Δεδομένων
+                    </button>
+                </form>
             </div>
         </div>
     </div>
