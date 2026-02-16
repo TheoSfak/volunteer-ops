@@ -678,6 +678,7 @@ CREATE TABLE IF NOT EXISTS `training_exams` (
 -- =============================================
 CREATE TABLE IF NOT EXISTS `training_quiz_questions` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `category_id` INT UNSIGNED NOT NULL COMMENT 'Required - questions always belong to a category',
     `quiz_id` INT UNSIGNED NULL COMMENT 'Nullable - questions remain in pool when quiz is deleted',
     `question_type` ENUM('MULTIPLE_CHOICE', 'TRUE_FALSE', 'OPEN_ENDED') DEFAULT 'MULTIPLE_CHOICE',
     `question_text` TEXT NOT NULL,
@@ -690,7 +691,9 @@ CREATE TABLE IF NOT EXISTS `training_quiz_questions` (
     `display_order` INT DEFAULT 0,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`category_id`) REFERENCES `training_categories`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`quiz_id`) REFERENCES `training_quizzes`(`id`) ON DELETE SET NULL,
+    INDEX `idx_quiz_questions_category` (`category_id`),
     INDEX `idx_quiz_questions_quiz` (`quiz_id`),
     INDEX `idx_quiz_questions_order` (`display_order`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -700,6 +703,7 @@ CREATE TABLE IF NOT EXISTS `training_quiz_questions` (
 -- =============================================
 CREATE TABLE IF NOT EXISTS `training_exam_questions` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `category_id` INT UNSIGNED NOT NULL COMMENT 'Required - questions always belong to a category',
     `exam_id` INT UNSIGNED NULL COMMENT 'Nullable - questions remain in pool when exam is deleted',
     `question_type` ENUM('MULTIPLE_CHOICE', 'TRUE_FALSE', 'OPEN_ENDED') DEFAULT 'MULTIPLE_CHOICE',
     `question_text` TEXT NOT NULL,
@@ -712,7 +716,9 @@ CREATE TABLE IF NOT EXISTS `training_exam_questions` (
     `display_order` INT DEFAULT 0,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`category_id`) REFERENCES `training_categories`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`exam_id`) REFERENCES `training_exams`(`id`) ON DELETE SET NULL,
+    INDEX `idx_exam_questions_category` (`category_id`),
     INDEX `idx_exam_questions_exam` (`exam_id`),
     INDEX `idx_exam_questions_order` (`display_order`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
