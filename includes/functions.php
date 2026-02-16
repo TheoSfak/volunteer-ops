@@ -547,11 +547,12 @@ function calculateAttemptScore($attemptId, $attemptType) {
  * Check if a user can take an exam (hasn't taken it yet)
  */
 function canUserTakeExam($examId, $userId) {
-    $attempt = dbFetchOne(
-        "SELECT id FROM exam_attempts WHERE exam_id = ? AND user_id = ?",
+    // Check if user has a COMPLETED attempt for this exam
+    $completedAttempt = dbFetchOne(
+        "SELECT id FROM exam_attempts WHERE exam_id = ? AND user_id = ? AND completed_at IS NOT NULL",
         [$examId, $userId]
     );
-    return $attempt === null;
+    return $completedAttempt === null;
 }
 
 /**
