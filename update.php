@@ -413,15 +413,43 @@ function runMigrations() {
         
         try {
             $sql = file_get_contents($file);
-            $statements = array_filter(array_map('trim', explode(';', $sql)));
+            
+            // Remove SQL comments (lines starting with --)
+            $lines = explode("\n", $sql);
+            $cleanLines = [];
+            foreach ($lines as $line) {
+                $trimmed = trim($line);
+                if ($trimmed === '' || strpos($trimmed, '--') === 0) {
+                    continue;
+                }
+                $cleanLines[] = $line;
+            }
+            $cleanSql = implode("\n", $cleanLines);
+            
+            $statements = array_filter(array_map('trim', explode(';', $cleanSql)));
+            $stmtErrors = 0;
             
             foreach ($statements as $stmt) {
                 if (!empty($stmt)) {
-                    dbExecute($stmt);
+                    try {
+                        dbExecute($stmt);
+                    } catch (Exception $stmtEx) {
+                        // Log per-statement error but continue with remaining statements
+                        $stmtErrors++;
+                        $errMsg = $stmtEx->getMessage();
+                        // Ignore "already exists" type errors (column/index/table already present)
+                        if (stripos($errMsg, 'Duplicate') !== false || 
+                            stripos($errMsg, 'already exists') !== false) {
+                            updateLog("  Παράλειψη (ήδη υπάρχει): " . substr($stmt, 0, 80));
+                        } else {
+                            $errors[] = "{$migrationName}: {$errMsg}";
+                            updateLog("  Σφάλμα statement: {$errMsg}", 'error');
+                        }
+                    }
                 }
             }
             
-            // Mark as executed
+            // Mark as executed even if some statements had "already exists" errors
             dbInsert("INSERT INTO migrations (migration) VALUES (?)", [$migrationName]);
             $executed++;
             
