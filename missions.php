@@ -11,6 +11,7 @@ $user = getCurrentUser();
 // Filters
 $status = get('status', 'OPEN');
 $department = get('department');
+$missionType = (int)get('mission_type', 0);
 $search = get('search');
 $page = max(1, (int)get('page', 1));
 $perPage = 20;
@@ -45,6 +46,11 @@ if ($search) {
     $params = array_merge($params, [$searchTerm, $searchTerm, $searchTerm]);
 }
 
+if ($missionType) {
+    $where[] = 'm.mission_type_id = ?';
+    $params[] = $missionType;
+}
+
 // Department admin can only see their department
 if ($user['role'] === ROLE_DEPARTMENT_ADMIN && $user['department_id']) {
     $where[] = 'm.department_id = ?';
@@ -60,6 +66,7 @@ $pagination = paginate($total, $page, $perPage);
 // Fetch missions
 $missions = dbFetchAll(
     "SELECT m.*, d.name as department_name, u.name as creator_name,
+            mt.name as type_name, mt.color as type_color, mt.icon as type_icon,
             (SELECT COUNT(*) FROM shifts WHERE mission_id = m.id) as shift_count,
             (SELECT COUNT(*) FROM shifts s 
              JOIN participation_requests pr ON pr.shift_id = s.id 
@@ -67,6 +74,7 @@ $missions = dbFetchAll(
      FROM missions m
      LEFT JOIN departments d ON m.department_id = d.id
      LEFT JOIN users u ON m.created_by = u.id
+     LEFT JOIN mission_types mt ON m.mission_type_id = mt.id
      WHERE $whereClause
      ORDER BY m.start_datetime DESC
      LIMIT {$pagination['per_page']} OFFSET {$pagination['offset']}",
@@ -75,6 +83,9 @@ $missions = dbFetchAll(
 
 // Get departments for filter
 $departments = dbFetchAll("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
+
+// Get mission types for filter
+$missionTypesFilter = dbFetchAll("SELECT id, name FROM mission_types WHERE is_active = 1 ORDER BY sort_order");
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -114,6 +125,16 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </select>
             </div>
+            <div class="col-md-2">
+                <select class="form-select" name="mission_type">
+                    <option value="">Όλοι οι τύποι</option>
+                    <?php foreach ($missionTypesFilter as $mtf): ?>
+                        <option value="<?= $mtf['id'] ?>" <?= $missionType == $mtf['id'] ? 'selected' : '' ?>>
+                            <?= h($mtf['name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
             <div class="col-md-3">
                 <select class="form-select" name="department">
                     <option value="">Όλα τα τμήματα</option>
@@ -147,6 +168,7 @@ include __DIR__ . '/includes/header.php';
                     <thead class="table-light">
                         <tr>
                             <th>Τίτλος</th>
+                            <th>Τύπος</th>
                             <th>Τμήμα</th>
                             <th>Ημερομηνία</th>
                             <th>Βάρδιες</th>
@@ -169,6 +191,16 @@ include __DIR__ . '/includes/header.php';
                                     <small class="text-muted">
                                         <i class="bi bi-geo-alt"></i> <?= h($mission['location']) ?>
                                     </small>
+                                </td>
+                                <td>
+                                    <?php if (!empty($mission['type_name'])): ?>
+                                        <span class="badge bg-<?= h($mission['type_color'] ?? 'secondary') ?>">
+                                            <i class="bi <?= h($mission['type_icon'] ?? 'bi-flag') ?>"></i>
+                                            <?= h($mission['type_name']) ?>
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="text-muted">-</span>
+                                    <?php endif; ?>
                                 </td>
                                 <td><?= h($mission['department_name'] ?? '-') ?></td>
                                 <td>

@@ -143,7 +143,7 @@ include __DIR__ . '/includes/header.php';
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h1 class="h3 mb-0"><?= h($volunteer['name']) ?></h1>
+        <h1 class="h3 mb-0"><?= h($volunteer['name']) ?><?= volunteerTypeBadge($volunteer['volunteer_type'] ?? VTYPE_VOLUNTEER) ?></h1>
         <small class="text-muted"><?= h($volunteer['email']) ?></small>
     </div>
     <div>

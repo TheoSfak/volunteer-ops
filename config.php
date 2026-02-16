@@ -50,6 +50,11 @@ define('UPLOAD_MAX_SIZE', 10 * 1024 * 1024); // 10MB
 define('UPLOAD_PATH', __DIR__ . '/uploads/');
 define('ALLOWED_EXTENSIONS', ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png']);
 
+// Training module upload settings
+define('TRAINING_UPLOAD_PATH', __DIR__ . '/uploads/training/materials/');
+define('TRAINING_MAX_FILE_SIZE', 20 * 1024 * 1024); // 20MB
+define('TRAINING_ALLOWED_TYPES', ['application/pdf']);
+
 // Gamification
 define('POINTS_PER_HOUR', 10);
 define('WEEKEND_MULTIPLIER', 1.5);
@@ -76,6 +81,16 @@ define('PARTICIPATION_REJECTED', 'REJECTED');
 define('PARTICIPATION_CANCELED_BY_USER', 'CANCELED_BY_USER');
 define('PARTICIPATION_CANCELED_BY_ADMIN', 'CANCELED_BY_ADMIN');
 
+// Training question types
+define('QUESTION_TYPE_MC', 'MULTIPLE_CHOICE');
+define('QUESTION_TYPE_TF', 'TRUE_FALSE');
+define('QUESTION_TYPE_OPEN', 'OPEN_ENDED');
+
+// Volunteer types
+define('VTYPE_VOLUNTEER', 'VOLUNTEER');
+define('VTYPE_TRAINEE', 'TRAINEE_RESCUER');
+define('VTYPE_RESCUER', 'RESCUER');
+
 // Greek labels (using define for PHP 7+ array constant support)
 define('ROLE_LABELS', [
     ROLE_SYSTEM_ADMIN => 'Διαχειριστής Συστήματος',
@@ -100,9 +115,33 @@ define('PARTICIPATION_LABELS', [
     PARTICIPATION_CANCELED_BY_ADMIN => 'Ακυρώθηκε από διαχειριστή',
 ]);
 
+define('QUESTION_TYPE_LABELS', [
+    QUESTION_TYPE_MC => 'Πολλαπλής Επιλογής',
+    QUESTION_TYPE_TF => 'Σωστό/Λάθος',
+    QUESTION_TYPE_OPEN => 'Ανοιχτή Ερώτηση',
+]);
+
 define('MISSION_TYPES', [
     'VOLUNTEER' => 'Εθελοντική',
     'MEDICAL' => 'Υγειονομική',
+]);
+
+define('VOLUNTEER_TYPE_LABELS', [
+    VTYPE_VOLUNTEER => 'Εθελοντής',
+    VTYPE_TRAINEE => 'Δόκιμος Διασώστης',
+    VTYPE_RESCUER => 'Εθελοντής Διασώστης',
+]);
+
+define('VOLUNTEER_TYPE_COLORS', [
+    VTYPE_VOLUNTEER => 'primary',
+    VTYPE_TRAINEE => 'warning',
+    VTYPE_RESCUER => 'success',
+]);
+
+define('VOLUNTEER_TYPE_ICONS', [
+    VTYPE_VOLUNTEER => '',
+    VTYPE_TRAINEE => '📚',
+    VTYPE_RESCUER => '⛑️',
 ]);
 
 define('STATUS_COLORS', [
@@ -127,3 +166,6 @@ $GLOBALS['STATUS_LABELS'] = STATUS_LABELS;
 $GLOBALS['PARTICIPATION_LABELS'] = PARTICIPATION_LABELS;
 $GLOBALS['STATUS_COLORS'] = STATUS_COLORS;
 $GLOBALS['PARTICIPATION_COLORS'] = PARTICIPATION_COLORS;
+$GLOBALS['VOLUNTEER_TYPE_LABELS'] = VOLUNTEER_TYPE_LABELS;
+$GLOBALS['VOLUNTEER_TYPE_COLORS'] = VOLUNTEER_TYPE_COLORS;
+$GLOBALS['VOLUNTEER_TYPE_ICONS'] = VOLUNTEER_TYPE_ICONS;

@@ -31,7 +31,7 @@ $canManage = isAdmin() || hasRole(ROLE_SHIFT_LEADER);
 
 // Get participants
 $participants = dbFetchAll(
-    "SELECT pr.*, u.name, u.email, u.phone
+    "SELECT pr.*, u.name, u.email, u.phone, u.volunteer_type
      FROM participation_requests pr
      JOIN users u ON pr.volunteer_id = u.id
      WHERE pr.shift_id = ?
@@ -460,7 +460,7 @@ include __DIR__ . '/includes/header.php';
                                 <?php foreach ($participants as $p): ?>
                                     <tr>
                                         <td>
-                                            <strong><?= h($p['name']) ?></strong>
+                                            <strong><?= h($p['name']) ?></strong><?= volunteerTypeBadge($p['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
                                             <?php if ($canManage): ?>
                                                 <button type="button" class="btn btn-sm btn-link p-0 ms-1 edit-notes-btn" 
                                                         data-id="<?= $p['id'] ?>"

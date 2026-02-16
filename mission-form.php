@@ -13,6 +13,7 @@ $pageTitle = $isEdit ? 'Επεξεργασία Αποστολής' : 'Νέα Α�
 
 $user = getCurrentUser();
 $departments = dbFetchAll("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
+$missionTypes = dbFetchAll("SELECT id, name, color, icon FROM mission_types WHERE is_active = 1 ORDER BY sort_order");
 
 // Get all active volunteers for responsible selection
 $allVolunteers = dbFetchAll("SELECT id, name, role FROM users WHERE is_active = 1 AND role IN (?, ?, ?, ?) ORDER BY name", 
@@ -41,7 +42,7 @@ if (isPost()) {
     $data = [
         'title' => post('title'),
         'description' => post('description'),
-        'type' => post('type'),
+        'mission_type_id' => (int)post('mission_type_id', 1),
         'department_id' => post('department_id') ?: null,
         'location' => post('location'),
         'location_details' => post('location_details'),
@@ -74,13 +75,13 @@ if (isPost()) {
         try {
             if ($isEdit) {
                 $sql = "UPDATE missions SET 
-                        title = ?, description = ?, type = ?, department_id = ?,
+                        title = ?, description = ?, mission_type_id = ?, department_id = ?,
                         location = ?, location_details = ?, latitude = ?, longitude = ?,
                         start_datetime = ?, end_datetime = ?, requirements = ?, notes = ?,
                         is_urgent = ?, status = ?, responsible_user_id = ?, updated_at = NOW()
                         WHERE id = ?";
                 dbExecute($sql, [
-                    $data['title'], $data['description'], $data['type'], $data['department_id'],
+                    $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
                     $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
                     $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
                     $data['is_urgent'], $data['status'], $data['responsible_user_id'], $id
@@ -90,12 +91,12 @@ if (isPost()) {
                 setFlash('success', 'Η αποστολή ενημερώθηκε επιτυχώς.');
             } else {
                 $sql = "INSERT INTO missions 
-                        (title, description, type, department_id, location, location_details, 
+                        (title, description, mission_type_id, department_id, location, location_details, 
                          latitude, longitude, start_datetime, end_datetime, requirements, notes,
                          is_urgent, status, responsible_user_id, created_by, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
                 $newId = dbInsert($sql, [
-                    $data['title'], $data['description'], $data['type'], $data['department_id'],
+                    $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
                     $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
                     $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
                     $data['is_urgent'], $data['status'], $data['responsible_user_id'], $user['id']
@@ -169,11 +170,11 @@ include __DIR__ . '/includes/header.php';
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label for="type" class="form-label">Τύπος</label>
-                            <select class="form-select" id="type" name="type">
-                                <?php foreach ($GLOBALS['MISSION_TYPES'] as $key => $label): ?>
-                                    <option value="<?= $key ?>" <?= ($mission['type'] ?? post('type', 'VOLUNTEER')) === $key ? 'selected' : '' ?>>
-                                        <?= h($label) ?>
+                            <label for="mission_type_id" class="form-label">Τύπος Αποστολής</label>
+                            <select class="form-select" id="mission_type_id" name="mission_type_id">
+                                <?php foreach ($missionTypes as $mt): ?>
+                                    <option value="<?= $mt['id'] ?>" <?= ($mission['mission_type_id'] ?? post('mission_type_id', 1)) == $mt['id'] ? 'selected' : '' ?>>
+                                        <?= h($mt['name']) ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>

@@ -45,6 +45,16 @@ $stats = [
     ),
 ];
 
+// Get exam attempts history
+$examAttempts = dbFetchAll("
+    SELECT ea.*, te.title as exam_title, tc.name as category_name, tc.icon as category_icon
+    FROM exam_attempts ea
+    INNER JOIN training_exams te ON ea.exam_id = te.id
+    INNER JOIN training_categories tc ON te.category_id = tc.id
+    WHERE ea.user_id = ?
+    ORDER BY ea.completed_at DESC
+", [$user['id']]);
+
 $errors = [];
 $success = '';
 
@@ -222,6 +232,73 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<!-- Exam Attempts History -->
+<?php if (!empty($examAttempts)): ?>
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-award me-1"></i>Ιστορικό Διαγωνισμάτων</h5>
+        <a href="training-exams.php" class="btn btn-sm btn-primary">
+            <i class="bi bi-arrow-right"></i> Όλα τα Διαγωνίσματα
+        </a>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Διαγώνισμα</th>
+                        <th>Κατηγορία</th>
+                        <th>Βαθμός</th>
+                        <th>Ποσοστό</th>
+                        <th>Αποτέλεσμα</th>
+                        <th>Ημερομηνία</th>
+                        <th>Ενέργειες</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($examAttempts as $attempt): ?>
+                        <?php 
+                        $percentage = $attempt['total_questions'] > 0 
+                            ? round(($attempt['score'] / $attempt['total_questions']) * 100, 1) 
+                            : 0;
+                        ?>
+                        <tr>
+                            <td><?= h($attempt['exam_title']) ?></td>
+                            <td>
+                                <span class="badge bg-warning">
+                                    <?= h($attempt['category_icon']) ?> <?= h($attempt['category_name']) ?>
+                                </span>
+                            </td>
+                            <td><strong><?= $attempt['score'] ?> / <?= $attempt['total_questions'] ?></strong></td>
+                            <td>
+                                <div class="progress" style="height: 20px;">
+                                    <div class="progress-bar bg-<?= $percentage >= $attempt['passing_percentage'] ? 'success' : 'danger' ?>" 
+                                         style="width: <?= $percentage ?>%">
+                                        <?= $percentage ?>%
+                                    </div>
+                                </div>
+                            </td>
+                            <td><?= passFailBadge($attempt['passed']) ?></td>
+                            <td>
+                                <?= formatDateTime($attempt['completed_at']) ?>
+                                <?php if ($attempt['time_taken_seconds']): ?>
+                                    <br><small class="text-muted"><?= formatDuration($attempt['time_taken_seconds']) ?></small>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <a href="exam-results.php?attempt_id=<?= $attempt['id'] ?>" class="btn btn-sm btn-info">
+                                    <i class="bi bi-eye"></i> Προβολή
+                                </a>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <div class="row">
     <div class="col-lg-8">
         <!-- Profile Form -->
@@ -386,6 +463,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card-body text-center">
                 <h6 class="text-muted mb-2">Ο ρόλος σας</h6>
                 <?= roleBadge($user['role']) ?>
+                <?= volunteerTypeBadge($user['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
                 <p class="text-muted mt-2 mb-0 small">
                     Μέλος από <?= formatDate($user['created_at']) ?>
                 </p>

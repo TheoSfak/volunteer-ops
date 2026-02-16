@@ -135,7 +135,11 @@ if (isAdmin()) {
                 (SELECT COUNT(*) FROM shifts WHERE mission_id = m.id) as shift_count
          FROM missions m
          LEFT JOIN departments d ON m.department_id = d.id
-         WHERE 1=1 $departmentFilter
+         WHERE m.deleted_at IS NULL 
+           AND LOWER(m.title) NOT LIKE '%test%'
+           AND LOWER(m.title) NOT LIKE '%δοκιμ%'
+           AND LOWER(m.title) NOT LIKE '%δοκή%'
+           $departmentFilter
          ORDER BY m.created_at DESC
          LIMIT 5",
         $params
@@ -202,6 +206,17 @@ if (isAdmin()) {
 }
 
 include __DIR__ . '/includes/header.php';
+
+// Check for active (LIVE) exams - shown to all users
+$liveExams = dbFetchAll("
+    SELECT te.*, tc.name as category_name, tc.icon as category_icon
+    FROM training_exams te
+    INNER JOIN training_categories tc ON te.category_id = tc.id
+    WHERE te.is_active = 1 
+      AND (te.available_from IS NULL OR te.available_from <= NOW())
+      AND (te.available_until IS NULL OR te.available_until > NOW())
+    ORDER BY te.available_from DESC
+");
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -219,6 +234,57 @@ include __DIR__ . '/includes/header.php';
         </select>
     </div>
 </div>
+
+<?php if (!empty($liveExams)): ?>
+    <?php foreach ($liveExams as $liveExam): ?>
+        <?php
+        $remainingMin = '';
+        if (!empty($liveExam['available_until'])) {
+            $secsLeft = strtotime($liveExam['available_until']) - time();
+            if ($secsLeft > 0) {
+                $remainingMin = ceil($secsLeft / 60);
+            }
+        }
+        // Check if current user (volunteer) has already taken it
+        $alreadyTaken = false;
+        if (!isAdmin()) {
+            $alreadyTaken = !canUserTakeExam($liveExam['id'], $user['id']);
+        }
+        ?>
+        <div class="alert alert-warning border-warning shadow-sm mb-4" style="border-left: 5px solid #f59e0b !important; animation: pulse 2s infinite;">
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <div>
+                    <h5 class="mb-1">
+                        <i class="bi bi-broadcast text-danger"></i>
+                        <span class="badge bg-danger me-2">LIVE</span>
+                        <?= h($liveExam['category_icon']) ?> <?= h($liveExam['title']) ?>
+                    </h5>
+                    <p class="mb-0 text-muted">
+                        Κατηγορία: <?= h($liveExam['category_name']) ?>
+                        | <?= $liveExam['questions_per_attempt'] ?> ερωτήσεις
+                        | Όριο: <?= $liveExam['passing_percentage'] ?>%
+                        <?php if ($remainingMin): ?>
+                            | <strong class="text-danger">Απομένουν <?= $remainingMin ?> λεπτά</strong>
+                        <?php endif; ?>
+                    </p>
+                </div>
+                <div>
+                    <?php if (isAdmin()): ?>
+                        <span class="badge bg-success fs-6"><i class="bi bi-broadcast"></i> Σε Εξέλιξη</span>
+                    <?php elseif ($alreadyTaken): ?>
+                        <span class="badge bg-secondary fs-6">Ολοκληρώθηκε</span>
+                    <?php elseif (!isTraineeRescuer()): ?>
+                        <span class="badge bg-info fs-6">Μόνο για Δόκιμους</span>
+                    <?php else: ?>
+                        <a href="exam-take.php?id=<?= $liveExam['id'] ?>" class="btn btn-danger btn-lg">
+                            <i class="bi bi-play-fill"></i> Ξεκινήστε Τώρα!
+                        </a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    <?php endforeach; ?>
+<?php endif; ?>
 
 <!-- Stats Cards with Comparison -->
 <div class="row g-3 mb-4" id="statsCards">
@@ -423,7 +489,7 @@ include __DIR__ . '/includes/header.php';
                                     <br>
                                     <small class="text-muted">
                                         <?= number_format($vol['total_hours'], 1) ?>ω · 
-                                        <?= !empty($vol['shift_count']) ? $vol['shift_count'] : 0 ?> βάρδιες
+                                        <?= $vol['shifts_count'] ?> βάρδιες
                                     </small>
                                 </div>
                                 <span class="text-warning">

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `password` VARCHAR(255) NOT NULL,
     `phone` VARCHAR(20) NULL,
     `role` ENUM('SYSTEM_ADMIN', 'DEPARTMENT_ADMIN', 'SHIFT_LEADER', 'VOLUNTEER') DEFAULT 'VOLUNTEER',
+    `volunteer_type` ENUM('VOLUNTEER','TRAINEE_RESCUER','RESCUER') NOT NULL DEFAULT 'VOLUNTEER',
     `department_id` INT UNSIGNED NULL,
     `is_active` TINYINT(1) DEFAULT 1,
     `total_points` INT DEFAULT 0,
@@ -177,7 +178,7 @@ CREATE TABLE IF NOT EXISTS `achievements` (
     `name` VARCHAR(100) NOT NULL,
     `description` TEXT NULL,
     `category` VARCHAR(50) DEFAULT 'milestone',
-    `icon` VARCHAR(50) DEFAULT 'ÃƒÂ°Ã…Â¸Ã‚ÂÃ¢â‚¬Â ',
+    `icon` VARCHAR(50) DEFAULT '🏆',
     `required_points` INT DEFAULT 0,
     `threshold` INT DEFAULT 0,
     `is_active` TINYINT(1) DEFAULT 1,
@@ -317,50 +318,50 @@ SET FOREIGN_KEY_CHECKS = 1;
 
 -- Default departments
 INSERT INTO `departments` (`name`, `description`) VALUES
-('ÃƒÅ½Ã¢â‚¬Å“ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÂÃ…â€™ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã¢â‚¬Â¢ÃƒÅ½Ã‚Â¸ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¹ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â¼ÃƒÂÃ…â€™ÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã¢â‚¬Å“ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â­ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¸ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â­ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚Â´ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¬ÃƒÂÃ†â€™ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¹ÃƒÂÃ¢â‚¬Å¡'),
-('ÃƒÅ½Ã‚Â¥ÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â¼ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â® ÃƒÅ½Ã…Â¡ÃƒÅ½Ã‚Â¬ÃƒÅ½Ã‚Â»ÃƒÂÃ¢â‚¬Â¦ÃƒÂÃ‹â€ ÃƒÅ½Ã‚Â·', 'ÃƒÅ½Ã‚Â¥ÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â¼ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â­ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚Â±ÃƒÂÃ¢â€šÂ¬ÃƒÅ½Ã‚Â¿ÃƒÂÃ†â€™ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â­ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â±ÃƒÅ½Ã‚Â¹ ÃƒÂÃ¢â€šÂ¬ÃƒÅ½Ã‚Â±ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¿ÃƒÂÃ¢â‚¬Â¡ÃƒÅ½Ã‚Â® ÃƒÂÃ¢â€šÂ¬ÃƒÂÃ‚ÂÃƒÂÃ…Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÂÃ¢â‚¬Â°ÃƒÅ½Ã‚Â½ ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â·ÃƒÅ½Ã‚Â¸ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¹ÃƒÂÃ…Â½ÃƒÅ½Ã‚Â½'),
-('ÃƒÅ½Ã‚Â ÃƒÅ½Ã‚ÂµÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â±ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â­ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã¢â‚¬ÂÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¬ÃƒÂÃ†â€™ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¹ÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã¢â‚¬ÂÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¬ÃƒÂÃ†â€™ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¹ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â± ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ ÃƒÂÃ¢â€šÂ¬ÃƒÅ½Ã‚ÂµÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â¬ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â½'),
-('ÃƒÅ½Ã…Â¡ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Â°ÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â® ÃƒÅ½Ã¢â‚¬ËœÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â·ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚Â³ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â·', 'ÃƒÅ½Ã¢â‚¬ÂÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¬ÃƒÂÃ†â€™ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¹ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Â°ÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â®ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚Â±ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â·ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚Â³ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â·ÃƒÂÃ¢â‚¬Å¡');
+('Γενικός Εθελοντισμός', 'Γενικές εθελοντικές δράσεις'),
+('Υγειονομική Κάλυψη', 'Υγειονομικές αποστολές και παροχή πρώτων βοηθειών'),
+('Περιβαλλοντικές Δράσεις', 'Δράσεις για το περιβάλλον'),
+('Κοινωνική Αλληλεγγύη', 'Δράσεις κοινωνικής αλληλεγγύης');
 
 -- Default skills
 INSERT INTO `skills` (`name`, `category`) VALUES
-('ÃƒÅ½Ã‚Â ÃƒÂÃ‚ÂÃƒÂÃ…Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã¢â‚¬â„¢ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â®ÃƒÅ½Ã‚Â¸ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã‚Â¥ÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¯ÃƒÅ½Ã‚Â±'),
-('ÃƒÅ½Ã‚ÂÃƒÅ½Ã‚Â¿ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â·ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Â¦ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â®', 'ÃƒÅ½Ã‚Â¥ÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¯ÃƒÅ½Ã‚Â±'),
-('ÃƒÅ½Ã…Â¸ÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â®ÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚Â·ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â·', 'ÃƒÅ½Ã…â€œÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â±ÃƒÂÃ¢â‚¬Â ÃƒÅ½Ã‚Â¿ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â­ÃƒÂÃ¢â‚¬Å¡'),
-('ÃƒÅ½Ã…Â¸ÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â®ÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚Â·ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â· ÃƒÅ½Ã…â€œÃƒÅ½Ã‚Â¿ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÂÃ†â€™ÃƒÂÃ¢â‚¬Â¦ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â­ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â±ÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã…â€œÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â±ÃƒÂÃ¢â‚¬Â ÃƒÅ½Ã‚Â¿ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â­ÃƒÂÃ¢â‚¬Å¡'),
-('ÃƒÅ½Ã…Â¸ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚Â¬ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â· ÃƒÅ½Ã¢â‚¬Â¢ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â·ÃƒÅ½Ã‚Â»ÃƒÂÃ…Â½ÃƒÂÃ†â€™ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Â°ÃƒÅ½Ã‚Â½', 'ÃƒÅ½Ã¢â‚¬ÂÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â¯ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â·ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â·'),
-('ÃƒÅ½Ã¢â‚¬ÂÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â±ÃƒÂÃ¢â‚¬Â¡ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¯ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¹ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â· ÃƒÅ½Ã…Â¡ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¯ÃƒÂÃ†â€™ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Â°ÃƒÅ½Ã‚Â½', 'ÃƒÅ½Ã¢â‚¬ÂÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â¯ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â·ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â·'),
-('ÃƒÅ½Ã¢â‚¬Â¢ÃƒÂÃ¢â€šÂ¬ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Â°ÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â¯ÃƒÅ½Ã‚Â±', 'ÃƒÅ½Ã¢â‚¬Å“ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â¬'),
-('ÃƒÅ½Ã…Â¾ÃƒÅ½Ã‚Â­ÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã¢â‚¬Å“ÃƒÅ½Ã‚Â»ÃƒÂÃ…Â½ÃƒÂÃ†â€™ÃƒÂÃ†â€™ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã¢â‚¬Å“ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â¬'),
-('ÃƒÅ½Ã‚Â¦ÃƒÂÃ¢â‚¬Â°ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â³ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â±ÃƒÂÃ¢â‚¬Â ÃƒÅ½Ã‚Â¯ÃƒÅ½Ã‚Â±', 'ÃƒÅ½Ã‚Â¤ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Â¡ÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â¬'),
-('ÃƒÅ½Ã‚Â ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â·ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¿ÃƒÂÃ¢â‚¬Â ÃƒÅ½Ã‚Â¿ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â®', 'ÃƒÅ½Ã‚Â¤ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Â¡ÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â¬');
+('Πρώτες Βοήθειες', 'Υγεία'),
+('Νοσηλευτική', 'Υγεία'),
+('Οδήγηση', 'Μεταφορές'),
+('Οδήγηση Μοτοσυκλέτας', 'Μεταφορές'),
+('Οργάνωση Εκδηλώσεων', 'Διοίκηση'),
+('Διαχείριση Κρίσεων', 'Διοίκηση'),
+('Επικοινωνία', 'Γενικά'),
+('Ξένες Γλώσσες', 'Γενικά'),
+('Φωτογραφία', 'Τεχνικά'),
+('Πληροφορική', 'Τεχνικά');
 
 -- Default achievements
 INSERT INTO `achievements` (`code`, `name`, `description`, `category`, `icon`, `required_points`, `threshold`) VALUES
-('first_shift', 'ÃƒÅ½Ã‚Â ÃƒÂÃ‚ÂÃƒÂÃ…Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â· ÃƒÅ½Ã¢â‚¬â„¢ÃƒÅ½Ã‚Â¬ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â±', 'ÃƒÅ½Ã…Â¸ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â®ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â·ÃƒÅ½Ã‚Â½ ÃƒÂÃ¢â€šÂ¬ÃƒÂÃ‚ÂÃƒÂÃ…Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â· ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â¿ÃƒÂÃ¢â‚¬Â¦ ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â¬ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â±', 'milestone', 'ÃƒÂ¢Ã‚Â­Ã‚Â', 0, 1),
-('shifts_5', '5 ÃƒÅ½Ã¢â‚¬â„¢ÃƒÅ½Ã‚Â¬ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã…Â¸ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â®ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 5 ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â¬ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'shifts', 'ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Â¦', 0, 5),
-('shifts_10', '10 ÃƒÅ½Ã¢â‚¬â„¢ÃƒÅ½Ã‚Â¬ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã…Â¸ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â®ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 10 ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â¬ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'shifts', 'ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Â¦', 0, 10),
-('shifts_25', '25 ÃƒÅ½Ã¢â‚¬â„¢ÃƒÅ½Ã‚Â¬ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã…Â¸ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â®ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 25 ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â¬ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'shifts', 'ÃƒÂ°Ã…Â¸Ã¢â‚¬Å“Ã¢â‚¬Â¦', 0, 25),
-('shifts_50', '50 ÃƒÅ½Ã¢â‚¬â„¢ÃƒÅ½Ã‚Â¬ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã…Â¸ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â®ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 50 ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â¬ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'shifts', 'ÃƒÂ°Ã…Â¸Ã…Â½Ã‚Â¯', 0, 50),
-('hours_10', '10 ÃƒÅ½Ã‚ÂÃƒÂÃ‚ÂÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã‚Â£ÃƒÂÃ¢â‚¬Â¦ÃƒÅ½Ã‚Â¼ÃƒÂÃ¢â€šÂ¬ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â®ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 10 ÃƒÂÃ…Â½ÃƒÂÃ‚ÂÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¸ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¹ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â¼ÃƒÅ½Ã‚Â¿ÃƒÂÃ‚Â', 'hours', 'ÃƒÂ¢Ã‚ÂÃ‚Â°', 0, 10),
-('hours_50', '50 ÃƒÅ½Ã‚ÂÃƒÂÃ‚ÂÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã‚Â£ÃƒÂÃ¢â‚¬Â¦ÃƒÅ½Ã‚Â¼ÃƒÂÃ¢â€šÂ¬ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â®ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 50 ÃƒÂÃ…Â½ÃƒÂÃ‚ÂÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¸ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¹ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â¼ÃƒÅ½Ã‚Â¿ÃƒÂÃ‚Â', 'hours', 'ÃƒÂ¢Ã‚ÂÃ‚Â°', 0, 50),
-('hours_100', '100 ÃƒÅ½Ã‚ÂÃƒÂÃ‚ÂÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã‚Â£ÃƒÂÃ¢â‚¬Â¦ÃƒÅ½Ã‚Â¼ÃƒÂÃ¢â€šÂ¬ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â®ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 100 ÃƒÂÃ…Â½ÃƒÂÃ‚ÂÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¸ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¹ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â¼ÃƒÅ½Ã‚Â¿ÃƒÂÃ‚Â', 'hours', 'ÃƒÂ¢Ã‚ÂÃ‚Â°', 0, 100),
-('hours_250', '250 ÃƒÅ½Ã‚ÂÃƒÂÃ‚ÂÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã‚Â£ÃƒÂÃ¢â‚¬Â¦ÃƒÅ½Ã‚Â¼ÃƒÂÃ¢â€šÂ¬ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â®ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 250 ÃƒÂÃ…Â½ÃƒÂÃ‚ÂÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¸ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¹ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â¼ÃƒÅ½Ã‚Â¿ÃƒÂÃ‚Â', 'hours', 'ÃƒÂ°Ã…Â¸Ã‚ÂÃ¢â‚¬Â ', 0, 250),
-('weekend_warrior', 'ÃƒÅ½Ã‚Â ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¼ÃƒÅ½Ã‚Â¹ÃƒÂÃ†â€™ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â®ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚Â£ÃƒÅ½Ã‚Â±ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â±ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚ÂºÃƒÂÃ‚ÂÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â±ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â¿ÃƒÂÃ¢â‚¬Â¦', 'ÃƒÅ½Ã…Â¸ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â®ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 10 ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â¬ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚Â£ÃƒÅ½Ã‚Â±ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â±ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚ÂºÃƒÂÃ‚ÂÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â±ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â¿ÃƒÂÃ¢â‚¬Â¦', 'special', 'ÃƒÂ¢Ã‹Å“Ã¢â€šÂ¬ÃƒÂ¯Ã‚Â¸Ã‚Â', 100, 10),
-('night_owl', 'ÃƒÅ½Ã‚ÂÃƒÂÃ¢â‚¬Â¦ÃƒÂÃ¢â‚¬Â¡ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÂÃ¢â€šÂ¬ÃƒÅ½Ã‚Â¿ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¹', 'ÃƒÅ½Ã…Â¸ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â®ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 10 ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Â¦ÃƒÂÃ¢â‚¬Â¡ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚ÂµÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â­ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚Â²ÃƒÅ½Ã‚Â¬ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â´ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂµÃƒÂÃ¢â‚¬Å¡', 'special', 'ÃƒÂ°Ã…Â¸Ã…â€™Ã¢â€žÂ¢', 100, 10),
-('medical_hero', 'ÃƒÅ½Ã¢â‚¬Â°ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÅ½Ã‚Â±ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚Â¥ÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¯ÃƒÅ½Ã‚Â±ÃƒÂÃ¢â‚¬Å¡', 'ÃƒÅ½Ã…Â¸ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â®ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 10 ÃƒÂÃ¢â‚¬Â¦ÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â½ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â¼ÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â­ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã‚Â±ÃƒÂÃ¢â€šÂ¬ÃƒÅ½Ã‚Â¿ÃƒÂÃ†â€™ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â­ÃƒÂÃ¢â‚¬Å¡', 'special', 'ÃƒÂ¢Ã‚ÂÃ‚Â¤ÃƒÂ¯Ã‚Â¸Ã‚Â', 200, 10),
-('points_100', '100 ÃƒÅ½Ã‚Â ÃƒÂÃ…â€™ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â¹', 'ÃƒÅ½Ã‚Â£ÃƒÂÃ¢â‚¬Â¦ÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â­ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 100 ÃƒÂÃ¢â€šÂ¬ÃƒÂÃ…â€™ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÂÃ¢â‚¬Â¦ÃƒÂÃ¢â‚¬Å¡', 'points', 'ÃƒÂ°Ã…Â¸Ã¢â‚¬â„¢Ã‚Â¯', 100, 0),
-('points_500', '500 ÃƒÅ½Ã‚Â ÃƒÂÃ…â€™ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â¹', 'ÃƒÅ½Ã‚Â£ÃƒÂÃ¢â‚¬Â¦ÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â­ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 500 ÃƒÂÃ¢â€šÂ¬ÃƒÂÃ…â€™ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÂÃ¢â‚¬Â¦ÃƒÂÃ¢â‚¬Å¡', 'points', 'ÃƒÂ°Ã…Â¸Ã…â€™Ã…Â¸', 500, 0),
-('points_1000', '1000 ÃƒÅ½Ã‚Â ÃƒÂÃ…â€™ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â¹', 'ÃƒÅ½Ã‚Â£ÃƒÂÃ¢â‚¬Â¦ÃƒÅ½Ã‚Â³ÃƒÅ½Ã‚ÂºÃƒÅ½Ã‚Â­ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÂÃ‚ÂÃƒÂÃ¢â‚¬Â°ÃƒÂÃ†â€™ÃƒÅ½Ã‚Âµ 1000 ÃƒÂÃ¢â€šÂ¬ÃƒÂÃ…â€™ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â¿ÃƒÂÃ¢â‚¬Â¦ÃƒÂÃ¢â‚¬Å¡', 'points', 'ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ¢â‚¬Ëœ', 1000, 0);
+('first_shift', 'Πρώτη Βάρδια', 'Ολοκλήρωσε την πρώτη σου βάρδια', 'milestone', '⭐', 0, 1),
+('shifts_5', '5 Βάρδιες', 'Ολοκλήρωσε 5 βάρδιες', 'shifts', '📅', 0, 5),
+('shifts_10', '10 Βάρδιες', 'Ολοκλήρωσε 10 βάρδιες', 'shifts', '📅', 0, 10),
+('shifts_25', '25 Βάρδιες', 'Ολοκλήρωσε 25 βάρδιες', 'shifts', '📅', 0, 25),
+('shifts_50', '50 Βάρδιες', 'Ολοκλήρωσε 50 βάρδιες', 'shifts', '🎯', 0, 50),
+('hours_10', '10 Ώρες', 'Συμπλήρωσε 10 ώρες εθελοντισμού', 'hours', '⏰', 0, 10),
+('hours_50', '50 Ώρες', 'Συμπλήρωσε 50 ώρες εθελοντισμού', 'hours', '⏰', 0, 50),
+('hours_100', '100 Ώρες', 'Συμπλήρωσε 100 ώρες εθελοντισμού', 'hours', '⏰', 0, 100),
+('hours_250', '250 Ώρες', 'Συμπλήρωσε 250 ώρες εθελοντισμού', 'hours', '🏆', 0, 250),
+('weekend_warrior', 'Πολεμιστής Σαββατοκύριακου', 'Ολοκλήρωσε 10 βάρδιες Σαββατοκύριακου', 'special', '☀️', 100, 10),
+('night_owl', 'Νυχτοπούλι', 'Ολοκλήρωσε 10 νυχτερινές βάρδιες', 'special', '🌙', 100, 10),
+('medical_hero', 'Ήρωας Υγείας', 'Ολοκλήρωσε 10 υγειονομικές αποστολές', 'special', '❤️', 200, 10),
+('points_100', '100 Πόντοι', 'Συγκέντρωσε 100 πόντους', 'points', '💯', 100, 0),
+('points_500', '500 Πόντοι', 'Συγκέντρωσε 500 πόντους', 'points', '🌟', 500, 0),
+('points_1000', '1000 Πόντοι', 'Συγκέντρωσε 1000 πόντους', 'points', '👑', 1000, 0);
 
 -- Default admin user (password: admin123)
 INSERT INTO `users` (`name`, `email`, `password`, `role`, `is_active`) VALUES
-('ÃƒÅ½Ã¢â‚¬ÂÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â±ÃƒÂÃ¢â‚¬Â¡ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¹ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¹ÃƒÂÃ†â€™ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â®ÃƒÂÃ¢â‚¬Å¡', 'admin@volunteerops.gr', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'SYSTEM_ADMIN', 1);
+('Διαχειριστής', 'admin@volunteerops.gr', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'SYSTEM_ADMIN', 1);
 
 -- Default settings
 INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
 ('app_name', 'VolunteerOps'),
-('app_description', 'ÃƒÅ½Ã‚Â£ÃƒÂÃ‚ÂÃƒÂÃ†â€™ÃƒÂÃ¢â‚¬Å¾ÃƒÅ½Ã‚Â·ÃƒÅ½Ã‚Â¼ÃƒÅ½Ã‚Â± ÃƒÅ½Ã¢â‚¬ÂÃƒÅ½Ã‚Â¹ÃƒÅ½Ã‚Â±ÃƒÂÃ¢â‚¬Â¡ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â¯ÃƒÂÃ‚ÂÃƒÅ½Ã‚Â¹ÃƒÂÃ†â€™ÃƒÅ½Ã‚Â·ÃƒÂÃ¢â‚¬Å¡ ÃƒÅ½Ã¢â‚¬Â¢ÃƒÅ½Ã‚Â¸ÃƒÅ½Ã‚ÂµÃƒÅ½Ã‚Â»ÃƒÅ½Ã‚Â¿ÃƒÅ½Ã‚Â½ÃƒÂÃ¢â‚¬Å¾ÃƒÂÃ…Â½ÃƒÅ½Ã‚Â½'),
+('app_description', 'Σύστημα Διαχείρισης Εθελοντών'),
 ('points_per_hour', '10'),
 ('weekend_multiplier', '1.5'),
 ('night_multiplier', '1.5'),
@@ -378,83 +379,397 @@ INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
 ('smtp_from_email', ''),
 ('smtp_from_name', 'VolunteerOps');
 
--- Email templates will be inserted programmatically by install.php
+-- Default email templates
+INSERT INTO `email_templates` (`code`, `name`, `subject`, `body_html`, `description`, `available_variables`) VALUES
+('welcome', 'Καλωσόρισμα', 'Καλώς ήρθατε στο {{app_name}}!', 
+'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
+    <div style=\"background: #3498db; color: white; padding: 20px; text-align: center;\">
+        <h1>{{app_name}}</h1>
+    </div>
+    <div style=\"padding: 30px; background: #fff;\">
+        <h2>Καλώς ήρθατε, {{user_name}}!</h2>
+        <p>Ευχαριστούμε για την εγγραφή σας στην πλατφόρμα εθελοντισμού.</p>
+        <p>Μπορείτε τώρα να:</p>
+        <ul>
+            <li>Δείτε τις διαθέσιμες αποστολές</li>
+            <li>Δηλώσετε συμμετοχή σε βάρδιες</li>
+            <li>Κερδίσετε πόντους και επιτεύγματα</li>
+        </ul>
+        <p style=\"text-align: center; margin-top: 30px;\">
+            <a href=\"{{login_url}}\" style=\"background: #3498db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;\">Σύνδεση</a>
+        </p>
+    </div>
+    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
+        {{app_name}} - Σύστημα Διαχείρισης Εθελοντών
+    </div>
+</div>', 
+'Αποστέλλεται σε νέους χρήστες μετά την εγγραφή', 
+'{{app_name}}, {{user_name}}, {{user_email}}, {{login_url}}'),
 
--- Default notification settings (email_template_id will be linked by install.php)
-INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabled`) VALUES
-('new_mission', 'Νέα Αποστολή', 'Όταν δημοσιεύεται νέα αποστολή', 1),
-('participation_approved', 'Έγκριση Συμμετοχής', 'Όταν εγκρίνεται η συμμετοχή εθελοντή σε βάρδια', 1),
-('participation_rejected', 'Απόρριψη Συμμετοχής', 'Όταν απορρίπτεται η συμμετοχή εθελοντή', 1),
-('shift_reminder', 'Υπενθύμιση Βάρδιας', 'Μία μέρα πριν τη βάρδια', 1),
-('mission_canceled', 'Ακύρωση Αποστολής', 'Όταν ακυρώνεται αποστολή', 1),
-('shift_canceled', 'Ακύρωση Βάρδιας', 'Όταν ακυρώνεται βάρδια', 1),
-('points_earned', 'Κέρδος Πόντων', 'Όταν ο εθελοντής κερδίζει πόντους', 0),
-('welcome', 'Καλωσόρισμα', 'Μετά την εγγραφή νέου χρήστη', 1);
+('participation_approved', 'Έγκριση Συμμετοχής', 'Η συμμετοχή σας εγκρίθηκε - {{mission_title}}',
+'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
+    <div style=\"background: #27ae60; color: white; padding: 20px; text-align: center;\">
+        <h1>✓ Εγκρίθηκε!</h1>
+    </div>
+    <div style=\"padding: 30px; background: #fff;\">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Η συμμετοχή σας στη βάρδια εγκρίθηκε!</p>
+        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+            <p><strong>Βάρδια:</strong> {{shift_date}} ({{shift_time}})</p>
+            <p><strong>Τοποθεσία:</strong> {{location}}</p>
+        </div>
+        <p>Παρακαλούμε να είστε στην τοποθεσία έγκαιρα.</p>
+    </div>
+    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
+        {{app_name}}
+    </div>
+</div>',
+'Αποστέλλεται όταν εγκρίνεται η συμμετοχή εθελοντή σε βάρδια',
+'{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}'),
 
--- ============================================================================
--- TASK MANAGEMENT TABLES
--- ============================================================================
+('participation_rejected', 'Απόρριψη Συμμετοχής', 'Η συμμετοχή σας δεν εγκρίθηκε - {{mission_title}}',
+'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
+    <div style=\"background: #e74c3c; color: white; padding: 20px; text-align: center;\">
+        <h1>Ενημέρωση Συμμετοχής</h1>
+    </div>
+    <div style=\"padding: 30px; background: #fff;\">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Δυστυχώς η αίτηση συμμετοχής σας δεν μπόρεσε να εγκριθεί.</p>
+        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+            <p><strong>Βάρδια:</strong> {{shift_date}}</p>
+        </div>
+        <p>Μπορείτε να δηλώσετε συμμετοχή σε άλλες διαθέσιμες βάρδιες.</p>
+    </div>
+    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
+        {{app_name}}
+    </div>
+</div>',
+'Αποστέλλεται όταν απορρίπτεται η συμμετοχή εθελοντή',
+'{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}'),
 
-CREATE TABLE tasks (
-    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(200) NOT NULL,
-    description TEXT NULL,
-    status ENUM('TODO', 'IN_PROGRESS', 'COMPLETED', 'CANCELED') DEFAULT 'TODO',
-    priority ENUM('LOW', 'MEDIUM', 'HIGH', 'URGENT') DEFAULT 'MEDIUM',
-    progress INT UNSIGNED DEFAULT 0 COMMENT 'Progress percentage 0-100',
-    start_date DATE NULL,
-    due_date DATE NULL,
-    completed_at DATETIME NULL,
-    mission_id INT UNSIGNED NULL,
-    created_by INT UNSIGNED NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE SET NULL,
-    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_status (status),
-    INDEX idx_priority (priority),
-    INDEX idx_due_date (due_date),
-    INDEX idx_mission (mission_id)
+('shift_reminder', 'Υπενθύμιση Βάρδιας', 'Υπενθύμιση: Αύριο έχετε βάρδια - {{mission_title}}',
+'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
+    <div style=\"background: #f39c12; color: white; padding: 20px; text-align: center;\">
+        <h1>⏰ Υπενθύμιση</h1>
+    </div>
+    <div style=\"padding: 30px; background: #fff;\">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Σας υπενθυμίζουμε ότι αύριο έχετε βάρδια.</p>
+        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+            <p><strong>Ημερομηνία:</strong> {{shift_date}}</p>
+            <p><strong>Ώρα:</strong> {{shift_time}}</p>
+            <p><strong>Τοποθεσία:</strong> {{location}}</p>
+        </div>
+        <p>Σε περίπτωση αδυναμίας, παρακαλούμε ενημερώστε μας έγκαιρα.</p>
+    </div>
+    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
+        {{app_name}}
+    </div>
+</div>',
+'Αποστέλλεται την προηγούμενη μέρα της βάρδιας',
+'{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}'),
+
+('new_mission', 'Νέα Αποστολή', 'Νέα αποστολή: {{mission_title}}',
+'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
+    <div style=\"background: #3498db; color: white; padding: 20px; text-align: center;\">
+        <h1>🚀 Νέα Αποστολή!</h1>
+    </div>
+    <div style=\"padding: 30px; background: #fff;\">
+        <h2>{{mission_title}}</h2>
+        <p>{{mission_description}}</p>
+        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
+            <p><strong>Τοποθεσία:</strong> {{location}}</p>
+            <p><strong>Περίοδος:</strong> {{start_date}} - {{end_date}}</p>
+        </div>
+        <p style=\"text-align: center; margin-top: 30px;\">
+            <a href=\"{{mission_url}}\" style=\"background: #3498db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;\">Δήλωση Συμμετοχής</a>
+        </p>
+    </div>
+    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
+        {{app_name}}
+    </div>
+</div>',
+'Αποστέλλεται σε εθελοντές όταν δημοσιεύεται νέα αποστολή',
+'{{app_name}}, {{mission_title}}, {{mission_description}}, {{location}}, {{start_date}}, {{end_date}}, {{mission_url}}'),
+
+('mission_canceled', 'Ακύρωση Αποστολής', 'Ακυρώθηκε η αποστολή: {{mission_title}}',
+'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
+    <div style=\"background: #e74c3c; color: white; padding: 20px; text-align: center;\">
+        <h1>Ακύρωση Αποστολής</h1>
+    </div>
+    <div style=\"padding: 30px; background: #fff;\">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Σας ενημερώνουμε ότι η παρακάτω αποστολή ακυρώθηκε:</p>
+        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+        </div>
+        <p>Ζητούμε συγγνώμη για την όποια αναστάτωση.</p>
+    </div>
+    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
+        {{app_name}}
+    </div>
+</div>',
+'Αποστέλλεται σε εθελοντές όταν ακυρώνεται αποστολή που είχαν δηλώσει συμμετοχή',
+'{{app_name}}, {{user_name}}, {{mission_title}}'),
+
+('shift_canceled', 'Ακύρωση Βάρδιας', 'Ακυρώθηκε η βάρδια: {{shift_date}} - {{mission_title}}',
+'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
+    <div style=\"background: #e74c3c; color: white; padding: 20px; text-align: center;\">
+        <h1>Ακύρωση Βάρδιας</h1>
+    </div>
+    <div style=\"padding: 30px; background: #fff;\">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Σας ενημερώνουμε ότι η βάρδια στην οποία είχατε δηλώσει συμμετοχή ακυρώθηκε:</p>
+        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+            <p><strong>Βάρδια:</strong> {{shift_date}} ({{shift_time}})</p>
+        </div>
+        <p>Ζητούμε συγγνώμη για την όποια αναστάτωση.</p>
+    </div>
+    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
+        {{app_name}}
+    </div>
+</div>',
+'Αποστέλλεται σε εθελοντές όταν ακυρώνεται βάρδια',
+'{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}'),
+
+('points_earned', 'Κέρδος Πόντων', 'Κερδίσατε {{points}} πόντους!',
+'<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">
+    <div style=\"background: #27ae60; color: white; padding: 20px; text-align: center;\">
+        <h1>🎉 Συγχαρητήρια!</h1>
+    </div>
+    <div style=\"padding: 30px; background: #fff;\">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p style=\"font-size: 24px; text-align: center; color: #27ae60;\">
+            <strong>+{{points}} πόντοι</strong>
+        </p>
+        <div style=\"background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;\">
+            <p><strong>Βάρδια:</strong> {{shift_date}}</p>
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+        </div>
+        <p>Συνολικοί πόντοι: <strong>{{total_points}}</strong></p>
+    </div>
+    <div style=\"padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;\">
+        {{app_name}}
+    </div>
+</div>',
+'Αποστέλλεται όταν ο εθελοντής κερδίζει πόντους',
+'{{app_name}}, {{user_name}}, {{points}}, {{mission_title}}, {{shift_date}}, {{total_points}}');
+
+-- Default notification settings
+INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabled`, `email_template_id`) VALUES
+('new_mission', 'Νέα Αποστολή', 'Όταν δημοσιεύεται νέα αποστολή', 1, (SELECT id FROM email_templates WHERE code = 'new_mission')),
+('participation_approved', 'Έγκριση Συμμετοχής', 'Όταν εγκρίνεται η συμμετοχή εθελοντή σε βάρδια', 1, (SELECT id FROM email_templates WHERE code = 'participation_approved')),
+('participation_rejected', 'Απόρριψη Συμμετοχής', 'Όταν απορρίπτεται η συμμετοχή εθελοντή', 1, (SELECT id FROM email_templates WHERE code = 'participation_rejected')),
+('shift_reminder', 'Υπενθύμιση Βάρδιας', 'Μία μέρα πριν τη βάρδια', 1, (SELECT id FROM email_templates WHERE code = 'shift_reminder')),
+('mission_canceled', 'Ακύρωση Αποστολής', 'Όταν ακυρώνεται αποστολή', 1, (SELECT id FROM email_templates WHERE code = 'mission_canceled')),
+('shift_canceled', 'Ακύρωση Βάρδιας', 'Όταν ακυρώνεται βάρδια', 1, (SELECT id FROM email_templates WHERE code = 'shift_canceled')),
+('points_earned', 'Κέρδος Πόντων', 'Όταν ο εθελοντής κερδίζει πόντους', 0, (SELECT id FROM email_templates WHERE code = 'points_earned')),
+('welcome', 'Καλωσόρισμα', 'Μετά την εγγραφή νέου χρήστη', 1, (SELECT id FROM email_templates WHERE code = 'welcome'));
+
+-- =============================================
+-- TRAINING MODULE TABLES
+-- =============================================
+
+-- =============================================
+-- TRAINING CATEGORIES TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `training_categories` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(100) NOT NULL,
+    `description` TEXT NULL,
+    `icon` VARCHAR(50) DEFAULT '📚',
+    `display_order` INT DEFAULT 0,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_categories_active` (`is_active`),
+    INDEX `idx_categories_order` (`display_order`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE subtasks (
-    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    task_id INT UNSIGNED NOT NULL,
-    title VARCHAR(200) NOT NULL,
-    status ENUM('TODO', 'IN_PROGRESS', 'COMPLETED') DEFAULT 'TODO',
-    completed_at DATETIME NULL,
-    sort_order INT UNSIGNED DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-    INDEX idx_task (task_id),
-    INDEX idx_status (status)
+-- =============================================
+-- TRAINING MATERIALS TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `training_materials` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `category_id` INT UNSIGNED NOT NULL,
+    `title` VARCHAR(255) NOT NULL,
+    `description` TEXT NULL,
+    `file_path` VARCHAR(500) NOT NULL,
+    `file_type` VARCHAR(100) NOT NULL,
+    `file_size` INT UNSIGNED NOT NULL,
+    `uploaded_by` INT UNSIGNED NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`category_id`) REFERENCES `training_categories`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`uploaded_by`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    INDEX `idx_materials_category` (`category_id`),
+    INDEX `idx_materials_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE task_assignments (
-    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    task_id INT UNSIGNED NOT NULL,
-    user_id INT UNSIGNED NOT NULL,
-    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    assigned_by INT UNSIGNED NOT NULL,
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE CASCADE,
-    UNIQUE KEY unique_assignment (task_id, user_id),
-    INDEX idx_task (task_id),
-    INDEX idx_user (user_id)
+-- =============================================
+-- TRAINING QUIZZES TABLE (Informal practice tests)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `training_quizzes` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `title` VARCHAR(255) NOT NULL,
+    `description` TEXT NULL,
+    `category_id` INT UNSIGNED NOT NULL,
+    `time_limit_minutes` INT NULL,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `created_by` INT UNSIGNED NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`category_id`) REFERENCES `training_categories`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    INDEX `idx_quizzes_category` (`category_id`),
+    INDEX `idx_quizzes_active` (`is_active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE task_comments (
-    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    task_id INT UNSIGNED NOT NULL,
-    user_id INT UNSIGNED NOT NULL,
-    comment TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    INDEX idx_task (task_id),
-    INDEX idx_user (user_id),
-    INDEX idx_created (created_at)
+-- =============================================
+-- TRAINING EXAMS TABLE (Official exams with random question selection)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `training_exams` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `title` VARCHAR(255) NOT NULL,
+    `description` TEXT NULL,
+    `category_id` INT UNSIGNED NOT NULL,
+    `questions_per_attempt` INT DEFAULT 10,
+    `passing_percentage` INT DEFAULT 70,
+    `time_limit_minutes` INT NULL,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `allow_retake` TINYINT(1) DEFAULT 0,
+    `created_by` INT UNSIGNED NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`category_id`) REFERENCES `training_categories`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    INDEX `idx_exams_category` (`category_id`),
+    INDEX `idx_exams_active` (`is_active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- TRAINING QUIZ QUESTIONS TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `training_quiz_questions` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `quiz_id` INT UNSIGNED NOT NULL,
+    `question_type` ENUM('MULTIPLE_CHOICE', 'TRUE_FALSE', 'OPEN_ENDED') DEFAULT 'MULTIPLE_CHOICE',
+    `question_text` TEXT NOT NULL,
+    `option_a` VARCHAR(500) NULL,
+    `option_b` VARCHAR(500) NULL,
+    `option_c` VARCHAR(500) NULL,
+    `option_d` VARCHAR(500) NULL,
+    `correct_option` CHAR(1) NULL COMMENT 'A, B, C, D, or T/F for True/False',
+    `explanation` TEXT NULL,
+    `display_order` INT DEFAULT 0,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`quiz_id`) REFERENCES `training_quizzes`(`id`) ON DELETE CASCADE,
+    INDEX `idx_quiz_questions_quiz` (`quiz_id`),
+    INDEX `idx_quiz_questions_order` (`display_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- TRAINING EXAM QUESTIONS TABLE (Question pool for exams)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `training_exam_questions` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `exam_id` INT UNSIGNED NOT NULL,
+    `question_type` ENUM('MULTIPLE_CHOICE', 'TRUE_FALSE', 'OPEN_ENDED') DEFAULT 'MULTIPLE_CHOICE',
+    `question_text` TEXT NOT NULL,
+    `option_a` VARCHAR(500) NULL,
+    `option_b` VARCHAR(500) NULL,
+    `option_c` VARCHAR(500) NULL,
+    `option_d` VARCHAR(500) NULL,
+    `correct_option` CHAR(1) NULL COMMENT 'A, B, C, D, or T/F for True/False',
+    `explanation` TEXT NULL,
+    `display_order` INT DEFAULT 0,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`exam_id`) REFERENCES `training_exams`(`id`) ON DELETE CASCADE,
+    INDEX `idx_exam_questions_exam` (`exam_id`),
+    INDEX `idx_exam_questions_order` (`display_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- QUIZ ATTEMPTS TABLE (Repeatable practice)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `quiz_attempts` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `quiz_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `score` INT DEFAULT 0,
+    `total_questions` INT DEFAULT 0,
+    `started_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `completed_at` TIMESTAMP NULL,
+    `time_taken_seconds` INT NULL,
+    FOREIGN KEY (`quiz_id`) REFERENCES `training_quizzes`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    INDEX `idx_quiz_attempts_user` (`user_id`),
+    INDEX `idx_quiz_attempts_quiz` (`quiz_id`),
+    INDEX `idx_quiz_attempts_completed` (`completed_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- EXAM ATTEMPTS TABLE (Official one-time attempts)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `exam_attempts` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `exam_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `selected_questions_json` JSON NOT NULL COMMENT 'Array of question IDs that were randomly selected',
+    `score` INT DEFAULT 0,
+    `total_questions` INT DEFAULT 0,
+    `passing_percentage` INT DEFAULT 70,
+    `passed` TINYINT(1) DEFAULT 0,
+    `started_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `completed_at` TIMESTAMP NULL,
+    `time_taken_seconds` INT NULL,
+    FOREIGN KEY (`exam_id`) REFERENCES `training_exams`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY `unique_exam_attempt` (`exam_id`, `user_id`),
+    INDEX `idx_exam_attempts_user` (`user_id`),
+    INDEX `idx_exam_attempts_completed` (`completed_at`),
+    INDEX `idx_exam_attempts_passed` (`passed`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- USER ANSWERS TABLE (Stores all answers for quizzes and exams)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `user_answers` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `attempt_id` INT UNSIGNED NOT NULL,
+    `attempt_type` ENUM('QUIZ', 'EXAM') NOT NULL,
+    `question_id` INT UNSIGNED NOT NULL,
+    `selected_option` CHAR(1) NULL COMMENT 'A, B, C, D, T, or F',
+    `answer_text` TEXT NULL,
+    `is_correct` TINYINT(1) NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_answers_attempt` (`attempt_id`, `attempt_type`),
+    INDEX `idx_answers_question` (`question_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- TRAINING USER PROGRESS TABLE (Track overall progress)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `training_user_progress` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT UNSIGNED NOT NULL,
+    `category_id` INT UNSIGNED NOT NULL,
+    `materials_viewed` JSON NULL COMMENT 'Array of material IDs viewed',
+    `quizzes_completed` INT DEFAULT 0,
+    `exams_passed` INT DEFAULT 0,
+    `last_activity_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`category_id`) REFERENCES `training_categories`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY `unique_user_category` (`user_id`, `category_id`),
+    INDEX `idx_progress_user` (`user_id`),
+    INDEX `idx_progress_category` (`category_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET FOREIGN_KEY_CHECKS = 1;

@@ -98,7 +98,6 @@ include __DIR__ . '/includes/header.php';
         <table class="table table-hover align-middle">
             <thead>
                 <tr>
-                    <th>Κωδικός</th>
                     <th>Όνομα</th>
                     <th>Περιγραφή</th>
                     <th class="text-center">Χρήστες</th>
@@ -110,9 +109,8 @@ include __DIR__ . '/includes/header.php';
             <tbody>
                 <?php foreach ($departments as $d): ?>
                     <tr class="<?= !$d['is_active'] ? 'table-secondary' : '' ?>">
-                        <td><code><?= h(!empty($d['code']) ? $d['code'] : '-') ?></code></td>
                         <td><strong><?= h($d['name']) ?></strong></td>
-                        <td><?= h(!empty($d['description']) ? $d['description'] : '-') ?></td>
+                        <td><?= h($d['description'] ?: '-') ?></td>
                         <td class="text-center">
                             <span class="badge bg-secondary"><?= $d['users_count'] ?></span>
                         </td>
