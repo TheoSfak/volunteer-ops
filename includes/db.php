@@ -78,3 +78,7 @@ function dbInsert($sql, $params = []) {
     $stmt->execute($params);
     return db()->lastInsertId();
 }
+
+function dbEscape($string) {
+    return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $string);
+}
