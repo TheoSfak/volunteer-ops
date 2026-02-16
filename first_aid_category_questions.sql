@@ -2,8 +2,8 @@
 -- Δημιουργεί κατηγορία "Πρώτες Βοήθειες" και 100 ερωτήσεις (50 quiz + 50 exam)
 
 -- Δημιουργία Κατηγορίας Πρώτες Βοήθειες
-INSERT INTO `training_categories` (`id`, `name`, `description`, `icon`, `color`, `display_order`, `created_at`) 
-VALUES (100, 'Πρώτες Βοήθειες', 'Βασικές γνώσεις πρώτων βοηθειών για εθελοντές', 'bi-heart-pulse', '#dc2626', 1, NOW())
+INSERT INTO `training_categories` (`id`, `name`, `description`, `icon`, `display_order`, `created_at`) 
+VALUES (100, 'Πρώτες Βοήθειες', 'Βασικές γνώσεις πρώτων βοηθειών για εθελοντές', 'bi-heart-pulse', 1, NOW())
 ON DUPLICATE KEY UPDATE 
     `name` = 'Πρώτες Βοήθειες',
     `description` = 'Βασικές γνώσεις πρώτων βοηθειών για εθελοντές';
