@@ -111,7 +111,7 @@ include __DIR__ . '/includes/header.php';
     </div>
     
     <!-- Quick Action Cards -->
-    <div class="row mb-4" id="questions">
+    <div class="row mb-4">
         <div class="col-md-6">
             <div class="card border-primary shadow-sm h-100">
                 <div class="card-body text-center">

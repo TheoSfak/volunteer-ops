@@ -668,7 +668,7 @@ $appDescription = getSetting('app_description', '');
                 </a>
             </li>
             <li class="nav-item">
-                <a class="nav-link <?= in_array($currentPage, ['exam-questions-admin', 'quiz-questions-admin']) ? 'active' : '' ?>" href="exam-admin.php#questions">
+                <a class="nav-link <?= in_array($currentPage, ['exam-questions-admin', 'quiz-questions-admin']) ? 'active' : '' ?>" href="exam-admin.php">
                     <i class="bi bi-question-circle"></i> Διαχείριση Ερωτήσεων
                 </a>
             </li>
