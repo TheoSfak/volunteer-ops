@@ -57,14 +57,6 @@
             });
         });
         
-        // Auto-hide alerts after 5 seconds
-        document.querySelectorAll('.alert:not(.alert-permanent)').forEach(function(alert) {
-            setTimeout(function() {
-                var bsAlert = new bootstrap.Alert(alert);
-                bsAlert.close();
-            }, 5000);
-        });
-        
         // Initialize Bootstrap tooltips
         var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
         tooltipTriggerList.map(function (el) {
