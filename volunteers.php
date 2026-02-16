@@ -227,7 +227,7 @@ include __DIR__ . '/includes/header.php';
                     <tr class="<?= !$v['is_active'] ? 'table-secondary' : '' ?>">
                         <td>
                             <a href="volunteer-view.php?id=<?= $v['id'] ?>" class="text-decoration-none">
-                                <strong><?= h($v['name']) ?></strong>
+                                <strong><?= h($v['name']) ?></strong><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
                             </a>
                             <br><small class="text-muted"><?= h($v['email']) ?></small>
                             <?php if ($v['phone']): ?>

@@ -77,17 +77,22 @@ if (isPost()) {
     
     if (empty($errors)) {
         try {
+        $volunteerType = post('volunteer_type', VTYPE_VOLUNTEER);
+        if (!in_array($volunteerType, [VTYPE_VOLUNTEER, VTYPE_TRAINEE, VTYPE_RESCUER])) {
+            $volunteerType = VTYPE_VOLUNTEER;
+        }
+        
         if ($volunteer) {
             // Update
             dbExecute(
                 "UPDATE users SET 
                  name = ?, email = ?, phone = ?, role = ?, department_id = ?, is_active = ?,
-                 updated_at = NOW()
+                 volunteer_type = ?, updated_at = NOW()
                  WHERE id = ?",
                 [
                     $data['name'], $data['email'], $data['phone'],
                     $data['role'], $data['department_id'], $data['is_active'],
-                    $id
+                    $volunteerType, $id
                 ]
             );
             
@@ -105,11 +110,12 @@ if (isPost()) {
             // Create
             $id = dbInsert(
                 "INSERT INTO users 
-                 (name, email, password, phone, role, department_id, is_active, total_points, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                 (name, email, password, phone, role, department_id, is_active, volunteer_type, total_points, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                 [
                     $data['name'], $data['email'], password_hash($password, PASSWORD_DEFAULT),
-                    $data['phone'], $data['role'], $data['department_id'], $data['is_active']
+                    $data['phone'], $data['role'], $data['department_id'], $data['is_active'],
+                    $volunteerType
                 ]
             );
             logAudit('create', 'users', $id);
@@ -130,6 +136,7 @@ $form = $volunteer ?: [
     'role' => ROLE_VOLUNTEER,
     'department_id' => $currentUser['department_id'],
     'is_active' => 1,
+    'volunteer_type' => VTYPE_VOLUNTEER,
 ];
 
 include __DIR__ . '/includes/header.php';
@@ -194,6 +201,19 @@ include __DIR__ . '/includes/header.php';
                         <?php endforeach; ?>
                     </select>
                 </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Τύπος Εθελοντή</label>
+                    <select class="form-select" name="volunteer_type">
+                        <?php foreach (VOLUNTEER_TYPE_LABELS as $vt => $vtLabel): ?>
+                            <option value="<?= $vt ?>" <?= ($form['volunteer_type'] ?? VTYPE_VOLUNTEER) === $vt ? 'selected' : '' ?>>
+                                <?= (VOLUNTEER_TYPE_ICONS[$vt] ?? '') . ' ' . $vtLabel ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="row">
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Τμήμα</label>
                     <select class="form-select" name="department_id">

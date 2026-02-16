@@ -619,6 +619,46 @@ $appDescription = getSetting('app_description', '');
                 </a>
             </li>
             
+            <div class="sidebar-section">Εκπαίδευση</div>
+            
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'training' ? 'active' : '' ?>" href="training.php">
+                    <i class="bi bi-book"></i> Μαθήματα
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'training-materials' ? 'active' : '' ?>" href="training-materials.php">
+                    <i class="bi bi-file-earmark-pdf"></i> Εκπαιδευτικό Υλικό
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'training-quizzes' ? 'active' : '' ?>" href="training-quizzes.php">
+                    <i class="bi bi-puzzle"></i> Κουίζ
+                </a>
+            </li>
+            <?php if (isAdmin() || isTraineeRescuer()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'training-exams' ? 'active' : '' ?>" href="training-exams.php">
+                    <i class="bi bi-award"></i> Διαγωνίσματα
+                </a>
+            </li>
+            <?php endif; ?>
+            
+            <?php if (isAdmin()): ?>
+            <div class="sidebar-section">Διαχείριση Εκπαίδευσης</div>
+            
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'training-admin' ? 'active' : '' ?>" href="training-admin.php">
+                    <i class="bi bi-gear"></i> Κατηγορίες & Υλικό
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'exam-admin' ? 'active' : '' ?>" href="exam-admin.php">
+                    <i class="bi bi-file-earmark-text"></i> Διαγωνίσματα
+                </a>
+            </li>
+            <?php endif; ?>
+            
             <?php if (isAdmin()): ?>
             <div class="sidebar-section">Διοίκηση</div>
             
@@ -630,6 +670,11 @@ $appDescription = getSetting('app_description', '');
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'departments' ? 'active' : '' ?>" href="departments.php">
                     <i class="bi bi-building"></i> Τμήματα
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'mission-types' ? 'active' : '' ?>" href="mission-types.php">
+                    <i class="bi bi-tags"></i> Τύποι Αποστολών
                 </a>
             </li>
             <li class="nav-item">
@@ -681,7 +726,7 @@ $appDescription = getSetting('app_description', '');
                 <div class="dropdown">
                     <button class="btn btn-link text-dark dropdown-toggle text-decoration-none" type="button" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                         <i class="bi bi-person-circle me-1"></i>
-                        <?= h($currentUser['name'] ?? 'Χρήστης') ?>
+                        <?= h($currentUser['name'] ?? 'Χρήστης') ?><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i>Το Προφίλ μου</a></li>

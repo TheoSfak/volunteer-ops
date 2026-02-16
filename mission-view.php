@@ -12,11 +12,13 @@ if (!$id) {
 }
 
 $mission = dbFetchOne(
-    "SELECT m.*, d.name as department_name, u.name as creator_name, r.name as responsible_name
+    "SELECT m.*, d.name as department_name, u.name as creator_name, r.name as responsible_name,
+            mt.name as type_name, mt.color as type_color, mt.icon as type_icon
      FROM missions m
      LEFT JOIN departments d ON m.department_id = d.id
      LEFT JOIN users u ON m.created_by = u.id
      LEFT JOIN users r ON m.responsible_user_id = r.id
+     LEFT JOIN mission_types mt ON m.mission_type_id = mt.id
      WHERE m.id = ?",
     [$id]
 );
@@ -328,6 +330,12 @@ include __DIR__ . '/includes/header.php';
     <div>
         <h1 class="h3 mb-0">
             <?= h($mission['title']) ?>
+            <?php if (!empty($mission['type_name'])): ?>
+                <span class="badge bg-<?= h($mission['type_color'] ?? 'secondary') ?>">
+                    <i class="bi <?= h($mission['type_icon'] ?? 'bi-flag') ?>"></i>
+                    <?= h($mission['type_name']) ?>
+                </span>
+            <?php endif; ?>
             <?php if ($mission['is_urgent']): ?>
                 <span class="badge bg-danger">Επείγον</span>
             <?php endif; ?>
