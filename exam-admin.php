@@ -110,6 +110,68 @@ include __DIR__ . '/includes/header.php';
         </h1>
     </div>
     
+    <!-- Quick Action Cards -->
+    <div class="row mb-4" id="questions">
+        <div class="col-md-6">
+            <div class="card border-primary shadow-sm h-100">
+                <div class="card-body text-center">
+                    <i class="bi bi-award text-primary" style="font-size: 3rem;"></i>
+                    <h5 class="mt-3">Διαχείριση Ερωτήσεων Διαγωνισμάτων</h5>
+                    <p class="text-muted">Προσθέστε, επεξεργαστείτε ή διαγράψτε ερωτήσεις για τα διαγωνίσματά σας</p>
+                    <?php if (!empty($exams)): ?>
+                        <div class="list-group list-group-flush mt-3">
+                            <?php foreach (array_slice($exams, 0, 5) as $exam): ?>
+                                <a href="exam-questions-admin.php?exam_id=<?= $exam['id'] ?>" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                    <span><?= h($exam['title']) ?></span>
+                                    <span class="badge bg-primary rounded-pill"><?= $exam['question_count'] ?> ερωτήσεις</span>
+                                </a>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php if (count($exams) > 5): ?>
+                            <p class="text-muted small mt-2">Και άλλα <?= count($exams) - 5 ?> διαγωνίσματα παρακάτω...</p>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <div class="alert alert-info mt-3">
+                            <i class="bi bi-info-circle"></i> Πρώτα δημιουργήστε ένα διαγώνισμα
+                        </div>
+                        <a href="exam-form.php" class="btn btn-primary mt-2">
+                            <i class="bi bi-plus-lg"></i> Δημιουργία Διαγώνισματος
+                        </a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card border-success shadow-sm h-100">
+                <div class="card-body text-center">
+                    <i class="bi bi-puzzle text-success" style="font-size: 3rem;"></i>
+                    <h5 class="mt-3">Διαχείριση Ερωτήσεων Κουίζ</h5>
+                    <p class="text-muted">Προσθέστε, επεξεργαστείτε ή διαγράψτε ερωτήσεις για τα κουίζ σας</p>
+                    <?php if (!empty($quizzes)): ?>
+                        <div class="list-group list-group-flush mt-3">
+                            <?php foreach (array_slice($quizzes, 0, 5) as $quiz): ?>
+                                <a href="quiz-questions-admin.php?quiz_id=<?= $quiz['id'] ?>" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+                                    <span><?= h($quiz['title']) ?></span>
+                                    <span class="badge bg-success rounded-pill"><?= $quiz['question_count'] ?> ερωτήσεις</span>
+                                </a>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php if (count($quizzes) > 5): ?>
+                            <p class="text-muted small mt-2">Και άλλα <?= count($quizzes) - 5 ?> κουίζ παρακάτω...</p>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <div class="alert alert-info mt-3">
+                            <i class="bi bi-info-circle"></i> Πρώτα δημιουργήστε ένα κουίζ
+                        </div>
+                        <a href="quiz-form.php" class="btn btn-success mt-2">
+                            <i class="bi bi-plus-lg"></i> Δημιουργία Κουίζ
+                        </a>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <!-- Tabs -->
     <ul class="nav nav-tabs mb-4">
         <li class="nav-item">

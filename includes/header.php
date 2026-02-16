@@ -654,7 +654,22 @@ $appDescription = getSetting('app_description', '');
             </li>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'exam-admin' ? 'active' : '' ?>" href="exam-admin.php">
-                    <i class="bi bi-file-earmark-text"></i> Διαγωνίσματα
+                    <i class="bi bi-file-earmark-text"></i> Διαγωνίσματα & Κουίζ
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'exam-form' ? 'active' : '' ?>" href="exam-form.php">
+                    <i class="bi bi-plus-circle"></i> Νέο Διαγώνισμα
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'quiz-form' ? 'active' : '' ?>" href="quiz-form.php">
+                    <i class="bi bi-plus-circle"></i> Νέο Κουίζ
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= in_array($currentPage, ['exam-questions-admin', 'quiz-questions-admin']) ? 'active' : '' ?>" href="exam-admin.php#questions">
+                    <i class="bi bi-question-circle"></i> Διαχείριση Ερωτήσεων
                 </a>
             </li>
             <?php endif; ?>
