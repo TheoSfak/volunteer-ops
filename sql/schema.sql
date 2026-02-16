@@ -678,7 +678,7 @@ CREATE TABLE IF NOT EXISTS `training_exams` (
 -- =============================================
 CREATE TABLE IF NOT EXISTS `training_quiz_questions` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `quiz_id` INT UNSIGNED NOT NULL,
+    `quiz_id` INT UNSIGNED NULL COMMENT 'Nullable - questions remain in pool when quiz is deleted',
     `question_type` ENUM('MULTIPLE_CHOICE', 'TRUE_FALSE', 'OPEN_ENDED') DEFAULT 'MULTIPLE_CHOICE',
     `question_text` TEXT NOT NULL,
     `option_a` VARCHAR(500) NULL,
@@ -690,7 +690,7 @@ CREATE TABLE IF NOT EXISTS `training_quiz_questions` (
     `display_order` INT DEFAULT 0,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (`quiz_id`) REFERENCES `training_quizzes`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`quiz_id`) REFERENCES `training_quizzes`(`id`) ON DELETE SET NULL,
     INDEX `idx_quiz_questions_quiz` (`quiz_id`),
     INDEX `idx_quiz_questions_order` (`display_order`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -700,7 +700,7 @@ CREATE TABLE IF NOT EXISTS `training_quiz_questions` (
 -- =============================================
 CREATE TABLE IF NOT EXISTS `training_exam_questions` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `exam_id` INT UNSIGNED NOT NULL,
+    `exam_id` INT UNSIGNED NULL COMMENT 'Nullable - questions remain in pool when exam is deleted',
     `question_type` ENUM('MULTIPLE_CHOICE', 'TRUE_FALSE', 'OPEN_ENDED') DEFAULT 'MULTIPLE_CHOICE',
     `question_text` TEXT NOT NULL,
     `option_a` VARCHAR(500) NULL,
@@ -712,7 +712,7 @@ CREATE TABLE IF NOT EXISTS `training_exam_questions` (
     `display_order` INT DEFAULT 0,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (`exam_id`) REFERENCES `training_exams`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`exam_id`) REFERENCES `training_exams`(`id`) ON DELETE SET NULL,
     INDEX `idx_exam_questions_exam` (`exam_id`),
     INDEX `idx_exam_questions_order` (`display_order`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -782,10 +782,10 @@ CREATE TABLE IF NOT EXISTS `training_user_progress` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `user_id` INT UNSIGNED NOT NULL,
     `category_id` INT UNSIGNED NOT NULL,
-    `materials_viewed_json` JSON NULL COMMENT 'Array of material IDs viewed',
+    `materials_viewed` JSON NULL COMMENT 'Array of material IDs viewed',
     `quizzes_completed` INT DEFAULT 0,
     `exams_passed` INT DEFAULT 0,
-    `last_activity` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `last_activity_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`category_id`) REFERENCES `training_categories`(`id`) ON DELETE CASCADE,
