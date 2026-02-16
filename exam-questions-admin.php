@@ -39,9 +39,9 @@ if (isPost()) {
         
         $newId = dbInsert("
             INSERT INTO training_exam_questions 
-            (exam_id, question_type, question_text, option_a, option_b, option_c, option_d, correct_option, explanation)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ", [$examId, $type, $text, $optionA, $optionB, $optionC, $optionD, $correctOption, $explanation]);
+            (exam_id, category_id, question_type, question_text, option_a, option_b, option_c, option_d, correct_option, explanation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ", [$examId, $exam['category_id'], $type, $text, $optionA, $optionB, $optionC, $optionD, $correctOption, $explanation]);
         
         logAudit('create', 'training_exam_questions', $newId);
         setFlash('success', 'Η ερώτηση προστέθηκε.');

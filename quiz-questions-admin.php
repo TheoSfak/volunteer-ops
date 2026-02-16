@@ -56,6 +56,7 @@ if (isPost()) {
         if (empty($errors)) {
             $insertData = [
                 $quizId,
+                $quiz['category_id'],
                 $questionText,
                 $questionType,
                 $correctOption,
@@ -68,8 +69,8 @@ if (isPost()) {
             
             $newId = dbInsert("
                 INSERT INTO training_quiz_questions 
-                (quiz_id, question_text, question_type, correct_option, option_a, option_b, option_c, option_d, explanation)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (quiz_id, category_id, question_text, question_type, correct_option, option_a, option_b, option_c, option_d, explanation)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ", $insertData);
             
             logAudit('create', 'training_quiz_questions', $newId);
