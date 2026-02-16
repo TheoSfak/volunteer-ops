@@ -87,6 +87,27 @@ CREATE TABLE IF NOT EXISTS `user_skills` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- MISSION TYPES TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_types` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(100) NOT NULL,
+    `description` TEXT DEFAULT NULL,
+    `color` VARCHAR(20) NOT NULL DEFAULT 'primary',
+    `icon` VARCHAR(50) NOT NULL DEFAULT 'bi-flag',
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `sort_order` INT NOT NULL DEFAULT 0,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `mission_types` (`id`, `name`, `description`, `color`, `icon`, `sort_order`) VALUES
+(1, 'Εθελοντική', 'Γενική εθελοντική αποστολή', 'primary', 'bi-people', 1),
+(2, 'Υγειονομική', 'Υγειονομική κάλυψη και πρώτες βοήθειες', 'danger', 'bi-heart-pulse', 2),
+(3, 'Εκπαιδευτική', 'Εκπαιδευτική αποστολή και ασκήσεις', 'info', 'bi-mortarboard', 3),
+(4, 'Διασωστική', 'Επιχείρηση διάσωσης και αντιμετώπιση κινδύνων', 'warning', 'bi-shield-exclamation', 4);
+
+-- =============================================
 -- MISSIONS TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS `missions` (
@@ -95,6 +116,7 @@ CREATE TABLE IF NOT EXISTS `missions` (
     `title` VARCHAR(255) NOT NULL,
     `description` TEXT NULL,
     `type` ENUM('VOLUNTEER', 'MEDICAL') DEFAULT 'VOLUNTEER',
+    `mission_type_id` INT UNSIGNED DEFAULT 1,
     `location` VARCHAR(255) NOT NULL,
     `location_details` VARCHAR(255) NULL,
     `latitude` DECIMAL(10, 8) NULL,
