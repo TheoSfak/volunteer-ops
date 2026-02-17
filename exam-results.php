@@ -13,17 +13,26 @@ if (empty($attemptId)) {
 // Fetch attempt
 $attempt = dbFetchOne("
     SELECT ea.*, te.title as exam_title, te.category_id,
-           tc.name as category_name
+           tc.name as category_name, u.name as user_name
     FROM exam_attempts ea
     INNER JOIN training_exams te ON ea.exam_id = te.id
     INNER JOIN training_categories tc ON te.category_id = tc.id
-    WHERE ea.id = ? AND ea.user_id = ?
-", [$attemptId, $user['id']]);
+    INNER JOIN users u ON ea.user_id = u.id
+    WHERE ea.id = ?
+", [$attemptId]);
 
 if (!$attempt) {
     setFlash('error', 'Η προσπάθεια δεν βρέθηκε.');
     redirect('training-exams.php');
 }
+
+// Check access: user owns attempt OR is admin
+if ($attempt['user_id'] != $user['id'] && !isAdmin()) {
+    setFlash('error', 'Δεν έχετε δικαίωμα προβολής αυτής της προσπάθειας.');
+    redirect('training-exams.php');
+}
+
+$isAdminViewing = isAdmin() && ($attempt['user_id'] != $user['id']);
 
 // Clear session data for this exam
 if (isset($_SESSION['exam_attempt_' . $attempt['exam_id']])) {
@@ -53,6 +62,23 @@ include __DIR__ . '/includes/header.php';
 <div class="container-fluid">
     <div class="row justify-content-center">
         <div class="col-lg-8">
+            <?php if ($isAdminViewing): ?>
+                <!-- Admin breadcrumb -->
+                <div class="mb-3">
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb">
+                            <li class="breadcrumb-item"><a href="exam-statistics.php">Στατιστικά Εξετάσεων</a></li>
+                            <li class="breadcrumb-item"><a href="volunteer-view.php?id=<?= $attempt['user_id'] ?>"><?= h($attempt['user_name']) ?></a></li>
+                            <li class="breadcrumb-item active">Αποτελέσματα</li>
+                        </ol>
+                    </nav>
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Προβολή αποτελεσμάτων για: <strong><?= h($attempt['user_name']) ?></strong>
+                    </div>
+                </div>
+            <?php endif; ?>
+            
             <!-- Results Header -->
             <div class="card mb-4 bg-<?= $attempt['passed'] ? 'success' : 'danger' ?> text-white">
                 <div class="card-body text-center">

@@ -82,17 +82,19 @@ if (isPost()) {
             $volunteerType = VTYPE_VOLUNTEER;
         }
         
+        $cohortYear = post('cohort_year') ? post('cohort_year') : null;
+        
         if ($volunteer) {
             // Update
             dbExecute(
                 "UPDATE users SET 
                  name = ?, email = ?, phone = ?, role = ?, department_id = ?, is_active = ?,
-                 volunteer_type = ?, updated_at = NOW()
+                 volunteer_type = ?, cohort_year = ?, updated_at = NOW()
                  WHERE id = ?",
                 [
                     $data['name'], $data['email'], $data['phone'],
                     $data['role'], $data['department_id'], $data['is_active'],
-                    $volunteerType, $id
+                    $volunteerType, $cohortYear, $id
                 ]
             );
             
@@ -110,12 +112,12 @@ if (isPost()) {
             // Create
             $id = dbInsert(
                 "INSERT INTO users 
-                 (name, email, password, phone, role, department_id, is_active, volunteer_type, total_points, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                 (name, email, password, phone, role, department_id, is_active, volunteer_type, cohort_year, total_points, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                 [
                     $data['name'], $data['email'], password_hash($password, PASSWORD_DEFAULT),
                     $data['phone'], $data['role'], $data['department_id'], $data['is_active'],
-                    $volunteerType
+                    $volunteerType, $cohortYear
                 ]
             );
             logAudit('create', 'users', $id);
@@ -137,6 +139,7 @@ $form = $volunteer ?: [
     'department_id' => $currentUser['department_id'],
     'is_active' => 1,
     'volunteer_type' => VTYPE_VOLUNTEER,
+    'cohort_year' => null,
 ];
 
 include __DIR__ . '/includes/header.php';
@@ -214,6 +217,14 @@ include __DIR__ . '/includes/header.php';
             </div>
             
             <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Χρονιά Σειράς</label>
+                    <input type="number" class="form-control" name="cohort_year" 
+                           value="<?= h($form['cohort_year'] ?? '') ?>" 
+                           placeholder="π.χ. 2026" min="2020" max="2099"
+                           title="Χρονιά σειράς δοκίμων (προαιρετικό)">
+                    <small class="text-muted">Για δόκιμους διασώστες - χρησιμοποιείται για στατιστικά ανά χρονιά</small>
+                </div>
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Τμήμα</label>
                     <select class="form-select" name="department_id">

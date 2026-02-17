@@ -13,17 +13,26 @@ if (empty($attemptId)) {
 // Fetch attempt
 $attempt = dbFetchOne("
     SELECT qa.*, tq.title as quiz_title, tq.category_id,
-           tc.name as category_name
+           tc.name as category_name, u.name as user_name
     FROM quiz_attempts qa
     INNER JOIN training_quizzes tq ON qa.quiz_id = tq.id
     INNER JOIN training_categories tc ON tq.category_id = tc.id
-    WHERE qa.id = ? AND qa.user_id = ?
-", [$attemptId, $user['id']]);
+    INNER JOIN users u ON qa.user_id = u.id
+    WHERE qa.id = ?
+", [$attemptId]);
 
 if (!$attempt) {
     setFlash('error', 'Η προσπάθεια δεν βρέθηκε.');
     redirect('training-quizzes.php');
 }
+
+// Check access: user owns attempt OR is admin
+if ($attempt['user_id'] != $user['id'] && !isAdmin()) {
+    setFlash('error', 'Δεν έχετε δικαίωμα προβολής αυτής της προσπάθειας.');
+    redirect('training-quizzes.php');
+}
+
+$isAdminViewing = isAdmin() && ($attempt['user_id'] != $user['id']);
 
 // Fetch user answers with questions
 $answers = dbFetchAll("
@@ -48,6 +57,22 @@ include __DIR__ . '/includes/header.php';
 <div class="container-fluid">
     <div class="row justify-content-center">
         <div class="col-lg-8">
+            <?php if ($isAdminViewing): ?>
+                <!-- Admin breadcrumb -->
+                <div class="mb-3">
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb">
+                            <li class="breadcrumb-item"><a href="exam-statistics.php">Στατιστικά Εξετάσεων</a></li>
+                            <li class="breadcrumb-item"><a href="volunteer-view.php?id=<?= $attempt['user_id'] ?>"><?= h($attempt['user_name']) ?></a></li>
+                            <li class="breadcrumb-item active">Αποτελέσματα Κουίζ</li>
+                        </ol>
+                    </nav>
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        Προβολή αποτελεσμάτων για: <strong><?= h($attempt['user_name']) ?></strong>
+                    </div>
+                </div>
+            <?php endif; ?>
             <!-- Results Header -->
             <div class="card mb-4 bg-<?= $percentage >= 70 ? 'success' : 'warning' ?> text-white">
                 <div class="card-body text-center">

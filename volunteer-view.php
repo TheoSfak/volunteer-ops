@@ -138,6 +138,29 @@ $pointsHistory = dbFetchAll(
     [$id]
 );
 
+// Get exam and quiz attempts
+$examAttempts = dbFetchAll(
+    "SELECT ea.*, te.title as exam_title, tc.name as category_name,
+            ROUND((ea.score / ea.total_questions * 100), 2) as percentage
+     FROM exam_attempts ea
+     INNER JOIN training_exams te ON ea.exam_id = te.id
+     INNER JOIN training_categories tc ON te.category_id = tc.id
+     WHERE ea.user_id = ? AND ea.completed_at IS NOT NULL
+     ORDER BY ea.completed_at DESC",
+    [$id]
+);
+
+$quizAttempts = dbFetchAll(
+    "SELECT qa.*, tq.title as quiz_title, tc.name as category_name,
+            ROUND((qa.score / qa.total_questions * 100), 2) as percentage
+     FROM quiz_attempts qa
+     INNER JOIN training_quizzes tq ON qa.quiz_id = tq.id
+     INNER JOIN training_categories tc ON tq.category_id = tc.id
+     WHERE qa.user_id = ? AND qa.completed_at IS NOT NULL
+     ORDER BY qa.completed_at DESC",
+    [$id]
+);
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -288,6 +311,79 @@ include __DIR__ . '/includes/header.php';
                             </tbody>
                         </table>
                     </div>
+                <?php endif; ?>
+            </div>
+        </div>
+        
+        <!-- Exam & Quiz History -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-file-earmark-text me-1"></i>Ιστορικό Εξετάσεων & Κουίζ</h5>
+            </div>
+            <div class="card-body">
+                <?php if (empty($examAttempts) && empty($quizAttempts)): ?>
+                    <p class="text-muted">Δεν υπάρχουν εξετάσεις ή κουίζ.</p>
+                <?php else: ?>
+                    <?php if (!empty($examAttempts)): ?>
+                        <h6 class="text-muted mb-2"><i class="bi bi-award"></i> Διαγωνίσματα</h6>
+                        <div class="list-group list-group-flush mb-3">
+                            <?php foreach ($examAttempts as $exam): ?>
+                                <a href="exam-results.php?attempt_id=<?= $exam['id'] ?>" class="list-group-item list-group-item-action">
+                                    <div class="d-flex w-100 justify-content-between align-items-center">
+                                        <div class="flex-grow-1">
+                                            <h6 class="mb-1"><?= h($exam['exam_title']) ?></h6>
+                                            <small class="text-muted"><?= h($exam['category_name']) ?></small>
+                                        </div>
+                                        <div class="text-end">
+                                            <?php if ($exam['passed']): ?>
+                                                <span class="badge bg-success">Επιτυχία</span>
+                                            <?php else: ?>
+                                                <span class="badge bg-danger">Αποτυχία</span>
+                                            <?php endif; ?>
+                                            <div class="mt-1">
+                                                <strong><?= $exam['percentage'] ?>%</strong>
+                                                <small class="text-muted">(<?= $exam['score'] ?>/<?= $exam['total_questions'] ?>)</small>
+                                            </div>
+                                            <small class="text-muted d-block"><?= formatDateTime($exam['completed_at']) ?></small>
+                                        </div>
+                                    </div>
+                                </a>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <?php if (!empty($quizAttempts)): ?>
+                        <h6 class="text-muted mb-2"><i class="bi bi-question-circle"></i> Κουίζ</h6>
+                        <div class="list-group list-group-flush">
+                            <?php foreach (array_slice($quizAttempts, 0, 5) as $quiz): ?>
+                                <a href="quiz-results.php?attempt_id=<?= $quiz['id'] ?>" class="list-group-item list-group-item-action">
+                                    <div class="d-flex w-100 justify-content-between align-items-center">
+                                        <div class="flex-grow-1">
+                                            <h6 class="mb-1"><?= h($quiz['quiz_title']) ?></h6>
+                                            <small class="text-muted"><?= h($quiz['category_name']) ?></small>
+                                        </div>
+                                        <div class="text-end">
+                                            <?php if ($quiz['passed']): ?>
+                                                <span class="badge bg-success">Επιτυχία</span>
+                                            <?php else: ?>
+                                                <span class="badge bg-danger">Αποτυχία</span>
+                                            <?php endif; ?>
+                                            <div class="mt-1">
+                                                <strong><?= $quiz['percentage'] ?>%</strong>
+                                                <small class="text-muted">(<?= $quiz['score'] ?>/<?= $quiz['total_questions'] ?>)</small>
+                                            </div>
+                                            <small class="text-muted d-block"><?= formatDateTime($quiz['completed_at']) ?></small>
+                                        </div>
+                                    </div>
+                                </a>
+                            <?php endforeach; ?>
+                            <?php if (count($quizAttempts) > 5): ?>
+                                <div class="list-group-item text-center text-muted">
+                                    +<?= count($quizAttempts) - 5 ?> ακόμα κουίζ
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    <?php endif; ?>
                 <?php endif; ?>
             </div>
         </div>
