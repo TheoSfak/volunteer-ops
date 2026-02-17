@@ -113,17 +113,13 @@ if ($filterType === 'exams') {
 } elseif ($filterType === 'quizzes') {
     $combinedQuery = $quizQuery;
 } else {
-    // Use LEFT JOIN to combine both types
+    // Both queries already have all JOINs, just UNION them
     $combinedQuery = "
         SELECT * FROM (
             $examQuery
             UNION ALL
             $quizQuery
         ) as combined
-        LEFT JOIN users u ON combined.user_id = u.id
-        LEFT JOIN training_exams te ON combined.exam_id = te.id
-        LEFT JOIN training_quizzes tq ON combined.quiz_id = tq.id
-        LEFT JOIN training_categories tc ON COALESCE(te.category_id, tq.category_id) = tc.id
     ";
 }
 
