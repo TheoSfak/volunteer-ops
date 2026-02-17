@@ -199,7 +199,7 @@ include __DIR__ . '/includes/header.php';
                             <h5 class="mb-3"><?= nl2br(h($question['question_text'])) ?></h5>
                             
                             <?php if ($question['question_type'] === QUESTION_TYPE_MC): ?>
-                                <!-- Multiple Choice (shuffled options) -->
+                                <!-- Multiple Choice -->
                                 <?php
                                 $mcOptions = [
                                     ['key' => 'A', 'text' => $question['option_a']],
@@ -207,7 +207,7 @@ include __DIR__ . '/includes/header.php';
                                     ['key' => 'C', 'text' => $question['option_c']],
                                     ['key' => 'D', 'text' => $question['option_d']],
                                 ];
-                                shuffle($mcOptions);
+                                // Don't shuffle - breaks answer validation
                                 ?>
                                 <?php foreach ($mcOptions as $oi => $opt): ?>
                                     <div class="form-check mb-2">
@@ -222,13 +222,13 @@ include __DIR__ . '/includes/header.php';
                                 <?php endforeach; ?>
                             
                             <?php elseif ($question['question_type'] === QUESTION_TYPE_TF): ?>
-                                <!-- True/False (shuffled) -->
+                                <!-- True/False -->
                                 <?php
                                 $tfOptions = [
                                     ['key' => 'T', 'text' => 'Σωστό'],
                                     ['key' => 'F', 'text' => 'Λάθος'],
                                 ];
-                                shuffle($tfOptions);
+                                // Don't shuffle - breaks answer validation
                                 ?>
                                 <?php foreach ($tfOptions as $tfi => $tfOpt): ?>
                                     <div class="form-check mb-2">

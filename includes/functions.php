@@ -675,6 +675,18 @@ function incrementQuizCompletion($userId, $categoryId) {
 }
 
 /**
+ * Increment quizzes passed count (for when user passes with required percentage)
+ */
+function incrementQuizzesPassed($userId, $categoryId) {
+    dbExecute(
+        "UPDATE training_user_progress 
+         SET quizzes_passed = quizzes_passed + 1, last_activity = NOW() 
+         WHERE user_id = ? AND category_id = ?",
+        [$userId, $categoryId]
+    );
+}
+
+/**
  * Increment exams passed count
  */
 function incrementExamsPassed($userId, $categoryId) {
