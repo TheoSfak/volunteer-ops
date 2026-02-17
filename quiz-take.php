@@ -28,15 +28,19 @@ if (!$quiz) {
 if (isPost()) {
     verifyCsrf();
     
-    // Create attempt record
-    $startTime = post('start_time'); // Hidden field from form
-    $attemptId = dbInsert("
-        INSERT INTO quiz_attempts (quiz_id, user_id, started_at)
-        VALUES (?, ?, FROM_UNIXTIME(?))
-    ", [$quizId, $userId, $startTime]);
+    $attemptId = post('attempt_id');
+    $startTime = post('start_time');
     
-    // Get all questions to grade
-    $questions = dbFetchAll("SELECT * FROM training_quiz_questions WHERE quiz_id = ?", [$quizId]);
+    // Get the selected questions from the attempt
+    $attempt = dbFetchOne("SELECT selected_questions_json, passing_percentage FROM quiz_attempts WHERE id = ?", [$attemptId]);
+    $selectedQuestionIds = json_decode($attempt['selected_questions_json'], true);
+    
+    // Fetch questions
+    $placeholders = str_repeat('?,', count($selectedQuestionIds) - 1) . '?';
+    $questions = dbFetchAll("
+        SELECT * FROM training_quiz_questions 
+        WHERE id IN ($placeholders)
+    ", $selectedQuestionIds);
     
     $score = 0;
     $totalQuestions = count($questions);
@@ -64,26 +68,67 @@ if (isPost()) {
         ", [$attemptId, $question['id'], $userAnswer, $userAnswer, $isCorrect]);
     }
     
+    // Calculate pass/fail
+    $percentage = round(($score / $totalQuestions) * 100, 2);
+    $passed = ($percentage >= $attempt['passing_percentage']) ? 1 : 0;
+    
     // Update attempt with final score and completion time
     $timeTaken = time() - $startTime;
     dbExecute("
         UPDATE quiz_attempts 
-        SET score = ?, total_questions = ?, completed_at = NOW(), time_taken_seconds = ?
+        SET score = ?, total_questions = ?, passed = ?, completed_at = NOW(), time_taken_seconds = ?
         WHERE id = ?
-    ", [$score, $totalQuestions, $timeTaken, $attemptId]);
+    ", [$score, $totalQuestions, $passed, $timeTaken, $attemptId]);
     
     // Update user progress
     incrementQuizCompletion($userId, $quiz['category_id']);
+    if ($passed) {
+        incrementQuizzesPassed($userId, $quiz['category_id']);
+    }
     
     // Redirect to results
     redirect('quiz-results.php?attempt_id=' . $attemptId);
 }
 
-// Fetch questions
+// Initialize quiz attempt - select random questions
+if (!isset($_SESSION['quiz_attempt_' . $quizId])) {
+    // Get random questions from the pool
+    $allQuestions = dbFetchAll("SELECT id FROM training_quiz_questions WHERE quiz_id = ?", [$quizId]);
+    
+    if (count($allQuestions) < $quiz['questions_per_attempt']) {
+        setFlash('error', 'Δεν υπάρχουν αρκετές ερωτήσεις για αυτό το κουίζ.');
+        redirect('training-quizzes.php');
+    }
+    
+    // Randomly select questions
+    shuffle($allQuestions);
+    $selectedQuestionIds = array_slice(array_column($allQuestions, 'id'), 0, $quiz['questions_per_attempt']);
+    
+    // Create attempt record
+    $attemptId = dbInsert("
+        INSERT INTO quiz_attempts (quiz_id, user_id, selected_questions_json, passing_percentage, started_at)
+        VALUES (?, ?, ?, ?, NOW())
+    ", [$quizId, $userId, json_encode($selectedQuestionIds), $quiz['passing_percentage']]);
+    
+    // Store in session
+    $_SESSION['quiz_attempt_' . $quizId] = [
+        'attempt_id' => $attemptId,
+        'question_ids' => $selectedQuestionIds,
+        'start_time' => time()
+    ];
+} else {
+    // Resume existing attempt
+    $attemptData = $_SESSION['quiz_attempt_' . $quizId];
+    $attemptId = $attemptData['attempt_id'];
+    $selectedQuestionIds = $attemptData['question_ids'];
+}
+
+// Fetch selected questions
+$placeholders = str_repeat('?,', count($selectedQuestionIds) - 1) . '?';
 $questions = dbFetchAll("
     SELECT * FROM training_quiz_questions 
-    WHERE quiz_id = ?
-", [$quizId]);
+    WHERE id IN ($placeholders)
+", $selectedQuestionIds);
 shuffle($questions);
 
 if (empty($questions)) {
@@ -102,7 +147,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card mb-4 bg-info text-white">
                 <div class="card-body">
                     <h3 class="mb-1"><?= h($quiz['title']) ?></h3>
-                    <p class="mb-0"><?= h($quiz['category_name']) ?></p>
+                    <p class="mb-0"><?= h($quiz['category_name']) ?> | Όριο Επιτυχίας: <?= $quiz['passing_percentage'] ?>%</p>
                 </div>
             </div>
             
@@ -121,7 +166,8 @@ include __DIR__ . '/includes/header.php';
             <!-- Quiz Form -->
             <form method="post" id="quizForm">
                 <?= csrfField() ?>
-                <input type="hidden" name="start_time" value="<?= time() ?>">
+                <input type="hidden" name="attempt_id" value="<?= $attemptId ?>">
+                <input type="hidden" name="start_time" value="<?= $_SESSION['quiz_attempt_' . $quizId]['start_time'] ?>">
                 
                 <?php foreach ($questions as $index => $question): ?>
                     <div class="card mb-4">
@@ -135,7 +181,7 @@ include __DIR__ . '/includes/header.php';
                             <h5 class="mb-3"><?= nl2br(h($question['question_text'])) ?></h5>
                             
                             <?php if ($question['question_type'] === QUESTION_TYPE_MC): ?>
-                                <!-- Multiple Choice (shuffled options) -->
+                                <!-- Multiple Choice -->
                                 <?php
                                 $mcOptions = [
                                     ['key' => 'A', 'text' => $question['option_a']],
@@ -143,7 +189,7 @@ include __DIR__ . '/includes/header.php';
                                     ['key' => 'C', 'text' => $question['option_c']],
                                     ['key' => 'D', 'text' => $question['option_d']],
                                 ];
-                                shuffle($mcOptions);
+                                // Don't shuffle - breaks answer validation
                                 ?>
                                 <?php foreach ($mcOptions as $oi => $opt): ?>
                                     <div class="form-check mb-2">
@@ -158,13 +204,13 @@ include __DIR__ . '/includes/header.php';
                                 <?php endforeach; ?>
                             
                             <?php elseif ($question['question_type'] === QUESTION_TYPE_TF): ?>
-                                <!-- True/False (shuffled) -->
+                                <!-- True/False -->
                                 <?php
                                 $tfOptions = [
                                     ['key' => 'T', 'text' => 'Σωστό'],
                                     ['key' => 'F', 'text' => 'Λάθος'],
                                 ];
-                                shuffle($tfOptions);
+                                // Don't shuffle - breaks answer validation
                                 ?>
                                 <?php foreach ($tfOptions as $tfi => $tfOpt): ?>
                                     <div class="form-check mb-2">

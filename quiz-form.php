@@ -20,27 +20,31 @@ if (isPost()) {
     $title = post('title');
     $description = post('description');
     $categoryId = post('category_id');
+    $questionsPerAttempt = post('questions_per_attempt', 10);
+    $passingPercentage = post('passing_percentage', 70);
     $timeLimit = post('time_limit_minutes');
     $isActive = isset($_POST['is_active']) ? 1 : 0;
     
     $errors = [];
     if (empty($title)) $errors[] = 'Το πεδίο τίτλος είναι υποχρεωτικό.';
     if (empty($categoryId)) $errors[] = 'Επιλέξτε κατηγορία.';
+    if ($questionsPerAttempt < 1) $errors[] = 'Ο αριθμός ερωτήσεων πρέπει να είναι τουλάχιστον 1.';
+    if ($passingPercentage < 0 || $passingPercentage > 100) $errors[] = 'Το ποσοστό επιτυχίας πρέπει να είναι μεταξύ 0-100.';
     
     if (empty($errors)) {
         if ($isEdit) {
             dbExecute("
                 UPDATE training_quizzes 
-                SET title = ?, description = ?, category_id = ?, time_limit_minutes = ?, is_active = ?, updated_at = NOW()
+                SET title = ?, description = ?, category_id = ?, questions_per_attempt = ?, passing_percentage = ?, time_limit_minutes = ?, is_active = ?, updated_at = NOW()
                 WHERE id = ?
-            ", [$title, $description, $categoryId, $timeLimit, $isActive, $id]);
+            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $isActive, $id]);
             logAudit('update', 'training_quizzes', $id);
             setFlash('success', 'Το κουίζ ενημερώθηκε.');
         } else {
             $newId = dbInsert("
-                INSERT INTO training_quizzes (title, description, category_id, time_limit_minutes, is_active, created_by)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ", [$title, $description, $categoryId, $timeLimit, $isActive, getCurrentUserId()]);
+                INSERT INTO training_quizzes (title, description, category_id, questions_per_attempt, passing_percentage, time_limit_minutes, is_active, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $isActive, getCurrentUserId()]);
             logAudit('create', 'training_quizzes', $newId);
             setFlash('success', 'Το κουίζ δημιουργήθηκε.');
             redirect('quiz-questions-admin.php?quiz_id=' . $newId);
@@ -99,6 +103,22 @@ include __DIR__ . '/includes/header.php';
                                     </option>
                                 <?php endforeach; ?>
                             </select>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Αριθμός Ερωτήσεων ανά Προσπάθεια *</label>
+                                <input type="number" name="questions_per_attempt" class="form-control" min="1" 
+                                       value="<?= h($quiz['questions_per_attempt'] ?? 10) ?>" required>
+                                <small class="text-muted">Πόσες ερωτήσεις να τραβηχτούν από το pool</small>
+                            </div>
+                            
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Ποσοστό Επιτυχίας (%) *</label>
+                                <input type="number" name="passing_percentage" class="form-control" min="0" max="100" 
+                                       value="<?= h($quiz['passing_percentage'] ?? 70) ?>" required>
+                                <small class="text-muted">Απαιτούμενο ποσοστό για επιτυχία</small>
+                            </div>
                         </div>
                         
                         <div class="mb-3">
