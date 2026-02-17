@@ -30,24 +30,7 @@ if (!$exam) {
     redirect('training-exams.php');
 }
 
-// Clean up any incomplete attempts first (from previous abandoned sessions)
-dbExecute("DELETE FROM exam_attempts WHERE exam_id = ? AND user_id = ? AND completed_at IS NULL", [$examId, $userId]);
-
-// Check if user has already completed this exam
-$completedAttempt = dbFetchOne("SELECT id FROM exam_attempts WHERE exam_id = ? AND user_id = ? AND completed_at IS NOT NULL", [$examId, $userId]);
-if ($completedAttempt) {
-    setFlash('error', 'Έχετε ήδη ολοκληρώσει αυτό το διαγώνισμα.');
-    redirect('training-exams.php');
-}
-
-// Check exam availability
-$availability = isExamAvailable($exam);
-if (!$availability['available']) {
-    setFlash('error', $availability['message']);
-    redirect('training-exams.php');
-}
-
-// Handle form submission
+// Handle form submission FIRST (before cleanup to preserve the attempt being submitted)
 if (isPost()) {
     verifyCsrf();
     
@@ -56,6 +39,12 @@ if (isPost()) {
     
     // Get the selected questions from the attempt
     $attempt = dbFetchOne("SELECT selected_questions_json FROM exam_attempts WHERE id = ?", [$attemptId]);
+    
+    if (!$attempt) {
+        setFlash('error', 'Η προσπάθεια διαγωνίσματος δεν βρέθηκε.');
+        redirect('training-exams.php');
+    }
+    
     $selectedQuestionIds = json_decode($attempt['selected_questions_json'], true);
     
     // Fetch questions
@@ -110,6 +99,23 @@ if (isPost()) {
     
     // Redirect to results
     redirect('exam-results.php?attempt_id=' . $attemptId);
+}
+
+// Clean up any incomplete attempts (only when NOT submitting - to allow viewing the exam)
+dbExecute("DELETE FROM exam_attempts WHERE exam_id = ? AND user_id = ? AND completed_at IS NULL", [$examId, $userId]);
+
+// Check if user has already completed this exam
+$completedAttempt = dbFetchOne("SELECT id FROM exam_attempts WHERE exam_id = ? AND user_id = ? AND completed_at IS NOT NULL", [$examId, $userId]);
+if ($completedAttempt) {
+    setFlash('error', 'Έχετε ήδη ολοκληρώσει αυτό το διαγώνισμα.');
+    redirect('training-exams.php');
+}
+
+// Check exam availability
+$availability = isExamAvailable($exam);
+if (!$availability['available']) {
+    setFlash('error', $availability['message']);
+    redirect('training-exams.php');
 }
 
 // Initialize exam attempt - select random questions

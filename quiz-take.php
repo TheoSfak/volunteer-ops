@@ -24,10 +24,7 @@ if (!$quiz) {
     redirect('training-quizzes.php');
 }
 
-// Clean up any incomplete attempts from abandoned sessions (to prevent database conflicts)
-dbExecute("DELETE FROM quiz_attempts WHERE quiz_id = ? AND user_id = ? AND completed_at IS NULL", [$quizId, $userId]);
-
-// Handle form submission
+// Handle form submission FIRST (before cleanup to preserve the attempt being submitted)
 if (isPost()) {
     verifyCsrf();
     
@@ -36,6 +33,12 @@ if (isPost()) {
     
     // Get the selected questions from the attempt
     $attempt = dbFetchOne("SELECT selected_questions_json, passing_percentage FROM quiz_attempts WHERE id = ?", [$attemptId]);
+    
+    if (!$attempt) {
+        setFlash('error', 'Η προσπάθεια κουίζ δεν βρέθηκε.');
+        redirect('training-quizzes.php');
+    }
+    
     $selectedQuestionIds = json_decode($attempt['selected_questions_json'], true);
     
     // Fetch questions
@@ -92,6 +95,9 @@ if (isPost()) {
     // Redirect to results
     redirect('quiz-results.php?attempt_id=' . $attemptId);
 }
+
+// Clean up any incomplete attempts (only when NOT submitting - to allow viewing the quiz)
+dbExecute("DELETE FROM quiz_attempts WHERE quiz_id = ? AND user_id = ? AND completed_at IS NULL", [$quizId, $userId]);
 
 // Initialize quiz attempt - select random questions
 if (!isset($_SESSION['quiz_attempt_' . $quizId])) {
