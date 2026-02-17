@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `phone` VARCHAR(20) NULL,
     `role` ENUM('SYSTEM_ADMIN', 'DEPARTMENT_ADMIN', 'SHIFT_LEADER', 'VOLUNTEER') DEFAULT 'VOLUNTEER',
     `volunteer_type` ENUM('VOLUNTEER','TRAINEE_RESCUER','RESCUER') NOT NULL DEFAULT 'VOLUNTEER',
+    `cohort_year` YEAR NULL COMMENT 'Χρονιά σειράς δοκίμων διασωστών',
     `department_id` INT UNSIGNED NULL,
     `is_active` TINYINT(1) DEFAULT 1,
     `total_points` INT DEFAULT 0,
@@ -799,5 +800,10 @@ CREATE TABLE IF NOT EXISTS `training_user_progress` (
     INDEX `idx_progress_user` (`user_id`),
     INDEX `idx_progress_category` (`category_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- INDEXES FOR PERFORMANCE
+-- =============================================
+CREATE INDEX `idx_users_cohort_year` ON `users`(`cohort_year`);
 
 SET FOREIGN_KEY_CHECKS = 1;
