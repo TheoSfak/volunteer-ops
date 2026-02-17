@@ -1,3 +1,4 @@
+<?php if (!defined('VOLUNTEEROPS')) die('Direct access not permitted'); ?>
         </div><!-- /.content-wrapper -->
         
         <!-- Footer -->

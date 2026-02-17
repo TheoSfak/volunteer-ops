@@ -410,7 +410,7 @@ include __DIR__ . '/includes/header.php';
                         <span class="badge bg-primary mb-1">
                             <?= h($sk['name']) ?>
                             <?php if ($sk['level']): ?>
-                                <span class="badge bg-light text-dark"><?= $sk['level'] ?></span>
+                                <span class="badge bg-light text-dark"><?= h($sk['level']) ?></span>
                             <?php endif; ?>
                         </span>
                     <?php endforeach; ?>
@@ -429,7 +429,7 @@ include __DIR__ . '/includes/header.php';
                 <?php else: ?>
                     <?php foreach ($achievements as $ach): ?>
                         <div class="d-flex align-items-center mb-2">
-                            <span class="fs-4 me-2"><?= $ach['icon'] ?: '🏆' ?></span>
+                            <span class="fs-4 me-2"><?= h($ach['icon'] ?: '🏆') ?></span>
                             <div>
                                 <strong><?= h($ach['name']) ?></strong>
                                 <br><small class="text-muted"><?= formatDate($ach['earned_at']) ?></small>

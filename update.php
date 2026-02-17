@@ -16,9 +16,10 @@ define('GITHUB_API_URL', 'https://api.github.com/repos/' . GITHUB_REPO);
 define('BACKUP_DIR', __DIR__ . '/backups');
 define('UPDATE_LOG_FILE', __DIR__ . '/update.log');
 
-// Enable full error reporting for this process
+// Error logging for update process
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 set_time_limit(300); // 5 minutes max
 
 $pageTitle = 'Ενημέρωση Συστήματος';

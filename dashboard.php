@@ -655,14 +655,22 @@ $liveExams = dbFetchAll("
                                             </small>
                                         </td>
                                         <td class="text-end">
-                                            <a href="participation-action.php?id=<?= $request['id'] ?>&action=approve" 
-                                               class="btn btn-sm btn-success" title="Έγκριση">
-                                                <i class="bi bi-check"></i>
-                                            </a>
-                                            <a href="participation-action.php?id=<?= $request['id'] ?>&action=reject" 
-                                               class="btn btn-sm btn-danger" title="Απόρριψη">
-                                                <i class="bi bi-x"></i>
-                                            </a>
+                                            <form method="post" action="participation-action.php" class="d-inline">
+                                                <?= csrfField() ?>
+                                                <input type="hidden" name="id" value="<?= $request['id'] ?>">
+                                                <input type="hidden" name="action" value="approve">
+                                                <button type="submit" class="btn btn-sm btn-success" title="Έγκριση">
+                                                    <i class="bi bi-check"></i>
+                                                </button>
+                                            </form>
+                                            <form method="post" action="participation-action.php" class="d-inline">
+                                                <?= csrfField() ?>
+                                                <input type="hidden" name="id" value="<?= $request['id'] ?>">
+                                                <input type="hidden" name="action" value="reject">
+                                                <button type="submit" class="btn btn-sm btn-danger" title="Απόρριψη">
+                                                    <i class="bi bi-x"></i>
+                                                </button>
+                                            </form>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>

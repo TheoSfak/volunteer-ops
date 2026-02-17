@@ -77,7 +77,7 @@ if (isPost()) {
         case 'cancel':
             if ($myParticipation && $myParticipation['status'] === 'PENDING') {
                 dbExecute(
-                    "UPDATE participation_requests SET status = 'CANCELED_BY_VOLUNTEER', updated_at = NOW() WHERE id = ?",
+                    "UPDATE participation_requests SET status = '" . PARTICIPATION_CANCELED_BY_USER . "', updated_at = NOW() WHERE id = ?",
                     [$myParticipation['id']]
                 );
                 logAudit('cancel', 'participation_requests', $myParticipation['id']);
