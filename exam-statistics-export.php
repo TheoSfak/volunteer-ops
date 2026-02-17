@@ -14,11 +14,48 @@ $filterType = get('type', 'all');
 $filterStatus = get('status', 'all');
 $searchTerm = get('search', '');
 
-// Build WHERE clauses
-$whereConditions = [];
-$params = [];
+// Build filter conditions INSIDE each subquery (same logic as exam-statistics.php)
+$examFilters = [];
+$quizFilters = [];
+$examParams = [];
+$quizParams = [];
 
-// Build unified query for export
+if ($filterYear !== 'all') {
+    $examFilters[] = "u.cohort_year = ?";
+    $quizFilters[] = "u.cohort_year = ?";
+    $examParams[] = $filterYear;
+    $quizParams[] = $filterYear;
+}
+
+if ($filterCategory !== 'all') {
+    $examFilters[] = "te.category_id = ?";
+    $quizFilters[] = "tq.category_id = ?";
+    $examParams[] = $filterCategory;
+    $quizParams[] = $filterCategory;
+}
+
+if ($filterStatus === 'passed') {
+    $examFilters[] = "ea.passed = 1";
+    $quizFilters[] = "qa.passed = 1";
+} elseif ($filterStatus === 'failed') {
+    $examFilters[] = "ea.passed = 0";
+    $quizFilters[] = "qa.passed = 0";
+}
+
+if (!empty($searchTerm)) {
+    $searchParam = '%' . $searchTerm . '%';
+    $examFilters[] = "(u.name LIKE ? OR te.title LIKE ?)";
+    $quizFilters[] = "(u.name LIKE ? OR tq.title LIKE ?)";
+    $examParams[] = $searchParam;
+    $examParams[] = $searchParam;
+    $quizParams[] = $searchParam;
+    $quizParams[] = $searchParam;
+}
+
+$examWhere = !empty($examFilters) ? ' AND ' . implode(' AND ', $examFilters) : '';
+$quizWhere = !empty($quizFilters) ? ' AND ' . implode(' AND ', $quizFilters) : '';
+
+// Build query with filters injected inside each subquery
 $query = "
     SELECT 
         u.name as volunteer_name,
@@ -37,10 +74,35 @@ $query = "
     INNER JOIN users u ON ea.user_id = u.id
     INNER JOIN training_exams te ON ea.exam_id = te.id
     INNER JOIN training_categories tc ON te.category_id = tc.id
-    WHERE ea.completed_at IS NOT NULL
+    WHERE ea.completed_at IS NOT NULL $examWhere
 ";
+$params = $examParams;
 
-if ($filterType !== 'exams') {
+if ($filterType === 'quizzes') {
+    // Only quizzes
+    $query = "
+        SELECT 
+            u.name as volunteer_name,
+            u.cohort_year,
+            'Κουίζ' as type,
+            tq.title as exam_title,
+            tc.name as category_name,
+            qa.completed_at,
+            qa.score,
+            qa.total_questions,
+            ROUND((qa.score / qa.total_questions * 100), 2) as percentage,
+            CASE WHEN qa.passed = 1 THEN 'Επιτυχία' ELSE 'Αποτυχία' END as status,
+            FLOOR(qa.time_taken_seconds / 60) as time_minutes,
+            (qa.time_taken_seconds % 60) as time_seconds
+        FROM quiz_attempts qa
+        INNER JOIN users u ON qa.user_id = u.id
+        INNER JOIN training_quizzes tq ON qa.quiz_id = tq.id
+        INNER JOIN training_categories tc ON tq.category_id = tc.id
+        WHERE qa.completed_at IS NOT NULL $quizWhere
+    ";
+    $params = $quizParams;
+} elseif ($filterType !== 'exams') {
+    // Both types
     $query .= "
     UNION ALL
     SELECT 
@@ -60,8 +122,9 @@ if ($filterType !== 'exams') {
     INNER JOIN users u ON qa.user_id = u.id
     INNER JOIN training_quizzes tq ON qa.quiz_id = tq.id
     INNER JOIN training_categories tc ON tq.category_id = tc.id
-    WHERE qa.completed_at IS NOT NULL
+    WHERE qa.completed_at IS NOT NULL $quizWhere
     ";
+    $params = array_merge($examParams, $quizParams);
 }
 
 $query .= " ORDER BY completed_at DESC";
