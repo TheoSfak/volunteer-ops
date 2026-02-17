@@ -24,38 +24,56 @@ $availableYears = dbFetchAll("
 // Get categories
 $categories = dbFetchAll("SELECT id, name FROM training_categories ORDER BY name");
 
-// Build WHERE clauses for filtering
-$whereConditions = [];
-$params = [];
+// Build filter conditions INSIDE each subquery (correct architecture)
+// Each filter uses the correct table aliases for exams vs quizzes
+$examFilters = [];
+$quizFilters = [];
+$examParams = [];
+$quizParams = [];
 
 if ($filterYear !== 'all') {
-    $whereConditions[] = "u.cohort_year = ?";
-    $params[] = $filterYear;
+    $examFilters[] = "u.cohort_year = ?";
+    $quizFilters[] = "u.cohort_year = ?";
+    $examParams[] = $filterYear;
+    $quizParams[] = $filterYear;
 }
 
 if ($filterCategory !== 'all') {
-    $whereConditions[] = "(te.category_id = ? OR tq.category_id = ?)";
-    $params[] = $filterCategory;
-    $params[] = $filterCategory;
+    $examFilters[] = "te.category_id = ?";
+    $quizFilters[] = "tq.category_id = ?";
+    $examParams[] = $filterCategory;
+    $quizParams[] = $filterCategory;
 }
 
 if ($filterStatus === 'passed') {
-    $whereConditions[] = "(ea.passed = 1 OR qa.passed = 1)";
+    $examFilters[] = "ea.passed = 1";
+    $quizFilters[] = "qa.passed = 1";
 } elseif ($filterStatus === 'failed') {
-    $whereConditions[] = "(ea.passed = 0 OR qa.passed = 0)";
+    $examFilters[] = "ea.passed = 0";
+    $quizFilters[] = "qa.passed = 0";
 }
 
 if (!empty($searchTerm)) {
-    $whereConditions[] = "(u.name LIKE ? OR te.title LIKE ? OR tq.title LIKE ?)";
     $searchParam = '%' . $searchTerm . '%';
-    $params[] = $searchParam;
-    $params[] = $searchParam;
-    $params[] = $searchParam;
+    $examFilters[] = "(u.name LIKE ? OR te.title LIKE ?)";
+    $quizFilters[] = "(u.name LIKE ? OR tq.title LIKE ?)";
+    $examParams[] = $searchParam;
+    $examParams[] = $searchParam;
+    $quizParams[] = $searchParam;
+    $quizParams[] = $searchParam;
 }
 
-$whereClause = !empty($whereConditions) ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
+// Build exam WHERE extension
+$examWhere = '';
+if (!empty($examFilters)) {
+    $examWhere = ' AND ' . implode(' AND ', $examFilters);
+}
+$quizWhere = '';
+if (!empty($quizFilters)) {
+    $quizWhere = ' AND ' . implode(' AND ', $quizFilters);
+}
 
-// Query for EXAMS
+// Base query for EXAMS (filters injected inside WHERE)
 $examQuery = "
     SELECT 
         ea.id as attempt_id,
@@ -78,10 +96,10 @@ $examQuery = "
     INNER JOIN users u ON ea.user_id = u.id
     INNER JOIN training_exams te ON ea.exam_id = te.id
     INNER JOIN training_categories tc ON te.category_id = tc.id
-    WHERE ea.completed_at IS NOT NULL
+    WHERE ea.completed_at IS NOT NULL $examWhere
 ";
 
-// Query for QUIZZES - get best attempt per user per quiz
+// Base query for QUIZZES (filters injected inside WHERE)
 $quizQuery = "
     SELECT 
         qa.id as attempt_id,
@@ -104,16 +122,17 @@ $quizQuery = "
     INNER JOIN users u ON qa.user_id = u.id
     INNER JOIN training_quizzes tq ON qa.quiz_id = tq.id
     INNER JOIN training_categories tc ON tq.category_id = tc.id
-    WHERE qa.completed_at IS NOT NULL
+    WHERE qa.completed_at IS NOT NULL $quizWhere
 ";
 
-// Combine based on filter type
+// Build combined query and params based on filter type
 if ($filterType === 'exams') {
     $combinedQuery = $examQuery;
+    $params = $examParams;
 } elseif ($filterType === 'quizzes') {
     $combinedQuery = $quizQuery;
+    $params = $quizParams;
 } else {
-    // Both queries already have all JOINs, just UNION them
     $combinedQuery = "
         SELECT * FROM (
             $examQuery
@@ -121,11 +140,7 @@ if ($filterType === 'exams') {
             $quizQuery
         ) as combined
     ";
-}
-
-// Add WHERE clause if exists
-if (!empty($whereClause)) {
-    $combinedQuery .= " " . $whereClause;
+    $params = array_merge($examParams, $quizParams);
 }
 
 // Calculate summary statistics
@@ -137,21 +152,13 @@ $stats = [
     'pass_rate' => 0
 ];
 
-// Get all results for statistics (no pagination)
 $allResultsQuery = "
     SELECT 
         COUNT(*) as total_attempts,
         SUM(CASE WHEN passed = 1 THEN 1 ELSE 0 END) as total_passed,
-        AVG(score / total_questions * 100) as avg_percentage,
+        AVG(percentage) as avg_percentage,
         AVG(time_taken_seconds) as avg_time_seconds
-    FROM (
-        $examQuery
-        " . ($filterType !== 'exams' ? "UNION ALL $quizQuery" : "") . "
-    ) as all_attempts
-    LEFT JOIN users u ON all_attempts.user_id = u.id
-    LEFT JOIN training_exams te ON all_attempts.exam_id = te.id
-    LEFT JOIN training_quizzes tq ON all_attempts.quiz_id = tq.id
-    $whereClause
+    FROM (" . $combinedQuery . ") as all_attempts
 ";
 
 $statsRow = dbFetchOne($allResultsQuery, $params);
@@ -167,7 +174,7 @@ if ($statsRow) {
 
 // Get paginated results for table
 $offset = ($page - 1) * $perPage;
-$resultsQuery = $combinedQuery . " ORDER BY completed_at DESC LIMIT ? OFFSET ?";
+$resultsQuery = "SELECT * FROM (" . $combinedQuery . ") as r ORDER BY completed_at DESC LIMIT ? OFFSET ?";
 $detailedParams = array_merge($params, [$perPage, $offset]);
 $results = dbFetchAll($resultsQuery, $detailedParams);
 
@@ -176,26 +183,19 @@ $countQuery = "SELECT COUNT(*) FROM (" . $combinedQuery . ") as counted";
 $totalResults = (int)dbFetchValue($countQuery, $params);
 $totalPages = ceil($totalResults / $perPage);
 
-// Get leaderboards
+// Get leaderboards - reuse the combined subquery, no extra JOINs needed
 // Top 10 by score (highest percentage)
 $topScorersQuery = "
     SELECT 
-        u.name as user_name,
-        u.cohort_year,
-        COALESCE(te.title, tq.title) as exam_title,
-        attempts.score,
-        attempts.total_questions,
-        ROUND((attempts.score / attempts.total_questions * 100), 2) as percentage,
-        attempts.completed_at
-    FROM (
-        $examQuery
-        " . ($filterType !== 'exams' ? "UNION ALL $quizQuery" : "") . "
-    ) as attempts
-    LEFT JOIN users u ON attempts.user_id = u.id
-    LEFT JOIN training_exams te ON attempts.exam_id = te.id
-    LEFT JOIN training_quizzes tq ON attempts.quiz_id = tq.id
-    $whereClause
-    ORDER BY percentage DESC, attempts.time_taken_seconds ASC
+        user_name,
+        cohort_year,
+        COALESCE(exam_title, quiz_title) as title,
+        score,
+        total_questions,
+        percentage,
+        completed_at
+    FROM (" . $combinedQuery . ") as attempts
+    ORDER BY percentage DESC, time_taken_seconds ASC
     LIMIT 10
 ";
 $topScorers = dbFetchAll($topScorersQuery, $params);
@@ -203,50 +203,35 @@ $topScorers = dbFetchAll($topScorersQuery, $params);
 // Top 10 fastest (with passing grade)
 $fastestQuery = "
     SELECT 
-        u.name as user_name,
-        u.cohort_year,
-        COALESCE(te.title, tq.title) as exam_title,
-        attempts.time_taken_seconds,
-        ROUND((attempts.score / attempts.total_questions * 100), 2) as percentage,
-        attempts.completed_at
-    FROM (
-        $examQuery
-        " . ($filterType !== 'exams' ? "UNION ALL $quizQuery" : "") . "
-    ) as attempts
-    LEFT JOIN users u ON attempts.user_id = u.id
-    LEFT JOIN training_exams te ON attempts.exam_id = te.id
-    LEFT JOIN training_quizzes tq ON attempts.quiz_id = tq.id
-    $whereClause
-    AND attempts.passed = 1
-    ORDER BY attempts.time_taken_seconds ASC
+        user_name,
+        cohort_year,
+        COALESCE(exam_title, quiz_title) as title,
+        time_taken_seconds,
+        percentage,
+        completed_at
+    FROM (" . $combinedQuery . ") as attempts
+    WHERE passed = 1
+    ORDER BY time_taken_seconds ASC
     LIMIT 10
 ";
 $fastestCompletions = dbFetchAll($fastestQuery, $params);
 
 // "Golden Eagle" - Combined metric (best overall performance)
-// Formula: percentage * (1 / time_ratio) for balance
+// Formula: percentage * (60 / time_seconds), guards against division by zero
 $goldenEagleQuery = "
     SELECT 
-        u.name as user_name,
-        u.cohort_year,
-        COALESCE(te.title, tq.title) as exam_title,
-        attempts.score,
-        attempts.total_questions,
-        ROUND((attempts.score / attempts.total_questions * 100), 2) as percentage,
-        attempts.time_taken_seconds,
+        user_name,
+        cohort_year,
+        COALESCE(exam_title, quiz_title) as title,
+        score,
+        total_questions,
+        percentage,
+        time_taken_seconds,
         ROUND(
-            (attempts.score / attempts.total_questions * 100) * 
-            (1 / (attempts.time_taken_seconds / 60))
+            percentage * (60 / GREATEST(time_taken_seconds, 1))
         , 2) as golden_score
-    FROM (
-        $examQuery
-        " . ($filterType !== 'exams' ? "UNION ALL $quizQuery" : "") . "
-    ) as attempts
-    LEFT JOIN users u ON attempts.user_id = u.id
-    LEFT JOIN training_exams te ON attempts.exam_id = te.id
-    LEFT JOIN training_quizzes tq ON attempts.quiz_id = tq.id
-    $whereClause
-    AND attempts.passed = 1
+    FROM (" . $combinedQuery . ") as attempts
+    WHERE passed = 1 AND time_taken_seconds > 0
     ORDER BY golden_score DESC
     LIMIT 10
 ";
@@ -315,12 +300,12 @@ include __DIR__ . '/includes/header.php';
                     <i class="bi bi-funnel me-1"></i>Φίλτρο
                 </button>
             </div>
+            
+            <div class="col-12">
+                <input type="search" name="search" class="form-control" placeholder="Αναζήτηση ονόματος ή τίτλου..." 
+                       value="<?= h($searchTerm) ?>">
+            </div>
         </form>
-        
-        <div class="mt-3">
-            <input type="search" name="search" class="form-control" placeholder="Αναζήτηση ονόματος ή τίτλου..." 
-                   value="<?= h($searchTerm) ?>" onchange="this.form.submit()">
-        </div>
     </div>
 </div>
 
@@ -390,7 +375,7 @@ include __DIR__ . '/includes/header.php';
                                             <small class="text-muted">(<?= $scorer['cohort_year'] ?>)</small>
                                         <?php endif; ?>
                                     </div>
-                                    <small class="text-muted"><?= h($scorer['exam_title']) ?></small>
+                                    <small class="text-muted"><?= h($scorer['title']) ?></small>
                                 </div>
                                 <span class="badge bg-primary rounded-pill"><?= $scorer['percentage'] ?>%</span>
                             </div>
@@ -424,7 +409,7 @@ include __DIR__ . '/includes/header.php';
                                             <small class="text-muted">(<?= $fastest['cohort_year'] ?>)</small>
                                         <?php endif; ?>
                                     </div>
-                                    <small class="text-muted"><?= h($fastest['exam_title']) ?> - <?= $fastest['percentage'] ?>%</small>
+                                    <small class="text-muted"><?= h($fastest['title']) ?> - <?= $fastest['percentage'] ?>%</small>
                                 </div>
                                 <span class="badge bg-success rounded-pill">
                                     <?= floor($fastest['time_taken_seconds'] / 60) ?>:<?= str_pad($fastest['time_taken_seconds'] % 60, 2, '0', STR_PAD_LEFT) ?>
@@ -461,7 +446,7 @@ include __DIR__ . '/includes/header.php';
                                         <?php endif; ?>
                                     </div>
                                     <small class="text-muted">
-                                        <?= h($eagle['exam_title']) ?> - <?= $eagle['percentage'] ?>% σε 
+                                        <?= h($eagle['title']) ?> - <?= $eagle['percentage'] ?>% σε 
                                         <?= floor($eagle['time_taken_seconds'] / 60) ?>:<?= str_pad($eagle['time_taken_seconds'] % 60, 2, '0', STR_PAD_LEFT) ?>
                                     </small>
                                 </div>
