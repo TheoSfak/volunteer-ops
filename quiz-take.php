@@ -75,7 +75,7 @@ if (isPost()) {
     }
     
     // Calculate pass/fail
-    $percentage = round(($score / $totalQuestions) * 100, 2);
+    $percentage = $totalQuestions > 0 ? round(($score / $totalQuestions) * 100, 2) : 0;
     $passed = ($percentage >= $attempt['passing_percentage']) ? 1 : 0;
     
     // Update attempt with final score and completion time

@@ -4,22 +4,8 @@
  * Διαχείριση αιτήσεων συμμετοχής σε βάρδιες
  */
 
-// DEBUG MODE
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-error_reporting(E_ALL);
-
-try {
-    require_once __DIR__ . '/bootstrap.php';
-} catch (Exception $e) {
-    die("Bootstrap error: " . $e->getMessage());
-}
-
-// Check login
-if (!isLoggedIn()) {
-    setFlash('error', 'Παρακαλώ συνδεθείτε για να συνεχίσετε.');
-    redirect('login.php');
-}
+require_once __DIR__ . '/bootstrap.php';
+requireLogin();
 
 $pageTitle = 'Συμμετοχές';
 
@@ -73,7 +59,8 @@ try {
                  $whereClause";
     $total = dbFetchValue($countSql, $params);
 } catch (Exception $e) {
-    die("Count query error: " . $e->getMessage() . "<br>SQL: " . $countSql);
+    error_log('Participations count error: ' . $e->getMessage());
+    $total = 0;
 }
 
 $pagination = paginate($total, $page, $perPage);
@@ -98,7 +85,8 @@ try {
 
     $participations = dbFetchAll($sql, $params);
 } catch (Exception $e) {
-    die("Fetch query error: " . $e->getMessage() . "<br>SQL: " . $sql);
+    error_log('Participations fetch error: ' . $e->getMessage());
+    $participations = [];
 }
 
 // Get missions for filter dropdown

@@ -13,6 +13,7 @@ $errors = [];
 $departments = dbFetchAll("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
 
 if (isPost()) {
+    verifyCsrf();
     $name = post('name');
     $email = post('email');
     $phone = post('phone');
@@ -112,6 +113,7 @@ $appLogo = getSetting('app_logo', '');
             <?php endif; ?>
             
             <form method="post" action="">
+                <?= csrfField() ?>
                 <div class="mb-3">
                     <label for="name" class="form-label">Ονοματεπώνυμο *</label>
                     <input type="text" class="form-control" id="name" name="name" 

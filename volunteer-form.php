@@ -125,7 +125,9 @@ if (isPost()) {
         }
         redirect('volunteer-view.php?id=' . $id);
         } catch (Exception $e) {
-            die('DEBUG ERROR: ' . $e->getMessage());
+            error_log('Volunteer form error: ' . $e->getMessage());
+            setFlash('error', 'Παρουσιάστηκε σφάλμα κατά την αποθήκευση. Παρακαλώ δοκιμάστε ξανά.');
+            redirect('volunteers.php');
         }
     }
 }
