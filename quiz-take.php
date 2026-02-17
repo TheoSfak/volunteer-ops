@@ -24,6 +24,9 @@ if (!$quiz) {
     redirect('training-quizzes.php');
 }
 
+// Clean up any incomplete attempts from abandoned sessions (to prevent database conflicts)
+dbExecute("DELETE FROM quiz_attempts WHERE quiz_id = ? AND user_id = ? AND completed_at IS NULL", [$quizId, $userId]);
+
 // Handle form submission
 if (isPost()) {
     verifyCsrf();

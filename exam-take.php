@@ -30,8 +30,12 @@ if (!$exam) {
     redirect('training-exams.php');
 }
 
-// Check if user has already taken this exam
-if (!canUserTakeExam($examId, $userId)) {
+// Clean up any incomplete attempts first (from previous abandoned sessions)
+dbExecute("DELETE FROM exam_attempts WHERE exam_id = ? AND user_id = ? AND completed_at IS NULL", [$examId, $userId]);
+
+// Check if user has already completed this exam
+$completedAttempt = dbFetchOne("SELECT id FROM exam_attempts WHERE exam_id = ? AND user_id = ? AND completed_at IS NOT NULL", [$examId, $userId]);
+if ($completedAttempt) {
     setFlash('error', 'Έχετε ήδη ολοκληρώσει αυτό το διαγώνισμα.');
     redirect('training-exams.php');
 }
