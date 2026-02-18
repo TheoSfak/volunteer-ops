@@ -62,6 +62,38 @@ const NOTE_STATUS_LABELS = [
 ];
 
 // =============================================
+// TABLE EXISTENCE CHECK
+// =============================================
+
+/**
+ * Check if inventory tables exist in the database.
+ * Result is cached for the request lifetime.
+ */
+function inventoryTablesExist() {
+    static $exists = null;
+    if ($exists !== null) return $exists;
+    
+    try {
+        dbFetchValue("SELECT 1 FROM inventory_items LIMIT 1");
+        $exists = true;
+    } catch (\PDOException $e) {
+        $exists = false;
+    }
+    return $exists;
+}
+
+/**
+ * Guard function: redirects to dashboard with a flash message
+ * if inventory tables have not been created yet.
+ */
+function requireInventoryTables() {
+    if (!inventoryTablesExist()) {
+        setFlash('error', 'Οι πίνακες αποθέματος δεν έχουν δημιουργηθεί. Εκτελέστε πρώτα το <a href="migrate_v3.php">migrate_v3.php</a>.');
+        redirect('dashboard.php');
+    }
+}
+
+// =============================================
 // STATUS BADGE HELPERS
 // =============================================
 

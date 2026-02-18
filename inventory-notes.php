@@ -7,6 +7,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
+requireInventoryTables();
 requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
 
 $user = getCurrentUser();

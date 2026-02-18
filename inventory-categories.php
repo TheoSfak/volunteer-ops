@@ -6,6 +6,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
+requireInventoryTables();
 
 if (!canManageInventory()) {
     setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης.');
