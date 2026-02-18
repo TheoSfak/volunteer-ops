@@ -721,6 +721,11 @@ $appDescription = getSetting('app_description', '');
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'inventory-shelf' ? 'active' : '' ?>" href="inventory-shelf.php">
+                    <i class="bi bi-grid-3x3"></i> Υλικά Ραφιού
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'inventory-book' ? 'active' : '' ?>" href="inventory-book.php">
                     <i class="bi bi-upc-scan"></i> Χρέωση / Επιστροφή
                 </a>
