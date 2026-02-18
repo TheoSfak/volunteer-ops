@@ -6,13 +6,13 @@
             <div class="container-fluid">
                 <div class="row align-items-center">
                     <div class="col-md-6 text-center text-md-start">
-                        <span class="text-muted">
+                        <span class="text-muted fs-6">
                             &copy; <?= date('Y') ?> VolunteerOps. Με επιφύλαξη παντός δικαιώματος.
                         </span>
                     </div>
                     <div class="col-md-6 text-center text-md-end">
-                        <span class="text-muted">
-                            Made with <span class="text-danger">&hearts;</span> by Theodore Sfakianakis
+                        <span class="fw-semibold fs-6">
+                            Made with <span class="text-danger">&hearts;</span> by <span class="text-primary">Theodore Sfakianakis</span>
                         </span>
                     </div>
                 </div>
