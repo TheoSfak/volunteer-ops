@@ -702,6 +702,11 @@ $appDescription = getSetting('app_description', '');
             <?php endif; ?>
             <?php if (isAdmin()): ?>
             <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'volunteer-positions' ? 'active' : '' ?>" href="volunteer-positions.php">
+                    <i class="bi bi-person-badge"></i> Θέσεις Εθελοντών
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'mission-types' ? 'active' : '' ?>" href="mission-types.php">
                     <i class="bi bi-tags"></i> Τύποι Αποστολών
                 </a>
