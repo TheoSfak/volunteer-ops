@@ -465,6 +465,36 @@ function runMigrations() {
     return ['executed' => $executed, 'errors' => $errors];
 }
 
+function patchConfigVersion($version) {
+    $configFile = __DIR__ . '/config.php';
+    
+    if (!file_exists($configFile) || !is_writable($configFile)) {
+        updateLog('Αδυναμία ενημέρωσης έκδοσης στο config.php (δεν είναι εγγράψιμο)', 'warning');
+        return false;
+    }
+    
+    $content = file_get_contents($configFile);
+    $cleanVersion = ltrim($version, 'v'); // Remove 'v' prefix if present
+    
+    // Replace APP_VERSION constant value
+    $newContent = preg_replace(
+        "/define\s*\(\s*'APP_VERSION'\s*,\s*'[^']*'\s*\)/",
+        "define('APP_VERSION', '{$cleanVersion}')",
+        $content,
+        1,
+        $count
+    );
+    
+    if ($count > 0) {
+        file_put_contents($configFile, $newContent);
+        updateLog("APP_VERSION ενημερώθηκε σε {$cleanVersion}");
+        return true;
+    } else {
+        updateLog('Δεν βρέθηκε η σταθερά APP_VERSION στο config.php', 'warning');
+        return false;
+    }
+}
+
 function getBackups() {
     $backupDir = BACKUP_DIR;
     $backups = [];
@@ -655,9 +685,11 @@ if (isPost()) {
                     rmdir($download['temp_dir']);
                 }
                 
+                // Step 7: Force-update APP_VERSION in config.php
+                patchConfigVersion($version);
+                
                 updateLog("=== ΕΝΗΜΕΡΩΣΗ ΟΛΟΚΛΗΡΩΘΗΚΕ ===");
                 
-                // Update version in config if needed
                 setFlash('success', "Η ενημέρωση στην έκδοση {$version} ολοκληρώθηκε επιτυχώς!");
                 
                 // Clear OPcache if available
