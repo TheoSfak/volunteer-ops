@@ -1,20 +1,23 @@
 <?php
 /**
- * VolunteerOps - Departments Management
+ * VolunteerOps - Σώματα (Corps/Units) Management
+ * Manages functional departments (Διασωστών, Πρόνοιας, Υγειονομική, etc.)
+ * City-based branches (Ηράκλειο, Χερσόνησος) are managed in branches.php
  */
 
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 requireRole([ROLE_SYSTEM_ADMIN]);
 
-$pageTitle = 'Τμήματα';
+$pageTitle = 'Σώματα';
 
-// Get departments with stats
+// Get only functional departments (NOT warehouse/branch departments)
 $departments = dbFetchAll(
     "SELECT d.*,
             (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id) as users_count,
             (SELECT COUNT(*) FROM missions m WHERE m.department_id = d.id AND m.deleted_at IS NULL) as missions_count
      FROM departments d
+     WHERE (d.has_inventory = 0 OR d.has_inventory IS NULL)
      ORDER BY d.name"
 );
 
@@ -40,14 +43,14 @@ if (isPost()) {
                         [$name, $description, $isActive, $id]
                     );
                     logAudit('update', 'departments', $id);
-                    setFlash('success', 'Το τμήμα ενημερώθηκε.');
+                    setFlash('success', 'Το σώμα ενημερώθηκε.');
                 } else {
                     $newId = dbInsert(
                         "INSERT INTO departments (name, description, is_active, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())",
                         [$name, $description, $isActive]
                     );
                     logAudit('create', 'departments', $newId);
-                    setFlash('success', 'Το τμήμα δημιουργήθηκε.');
+                    setFlash('success', 'Το σώμα δημιουργήθηκε.');
                 }
             }
             break;
@@ -62,11 +65,11 @@ if (isPost()) {
                 $missionsCount = dbFetchValue("SELECT COUNT(*) FROM missions WHERE department_id = ? AND deleted_at IS NULL", [$id]);
                 
                 if ($usersCount > 0 || $missionsCount > 0) {
-                    setFlash('error', 'Δεν μπορείτε να διαγράψετε τμήμα με χρήστες ή αποστολές.');
+                    setFlash('error', 'Δεν μπορείτε να διαγράψετε σώμα με χρήστες ή αποστολές.');
                 } else {
                     dbExecute("DELETE FROM departments WHERE id = ?", [$id]);
                     logAudit('delete', 'departments', $id);
-                    setFlash('success', 'Το τμήμα διαγράφηκε.');
+                    setFlash('success', 'Το σώμα διαγράφηκε.');
                 }
             }
             break;
@@ -79,11 +82,14 @@ include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h1 class="h3 mb-0">
-        <i class="bi bi-building me-2"></i>Τμήματα
-    </h1>
+    <div>
+        <h1 class="h3 mb-0">
+            <i class="bi bi-shield me-2"></i>Σώματα
+        </h1>
+        <p class="text-muted mb-0 mt-1">Λειτουργικά σώματα (π.χ. Διασωστών, Πρόνοιας). Τα τμήματα πόλεων διαχειρίζονται στα <a href="branches.php">Παραρτήματα</a>.</p>
+    </div>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#deptModal">
-        <i class="bi bi-plus-lg me-1"></i>Νέο Τμήμα
+        <i class="bi bi-plus-lg me-1"></i>Νέο Σώμα
     </button>
 </div>
 
@@ -91,7 +97,7 @@ include __DIR__ . '/includes/header.php';
 
 <?php if (empty($departments)): ?>
     <div class="alert alert-info">
-        <i class="bi bi-info-circle me-2"></i>Δεν υπάρχουν τμήματα.
+        <i class="bi bi-info-circle me-2"></i>Δεν υπάρχουν σώματα.
     </div>
 <?php else: ?>
     <div class="table-responsive">
@@ -130,7 +136,7 @@ include __DIR__ . '/includes/header.php';
                                 <i class="bi bi-pencil"></i>
                             </button>
                             <?php if ($d['users_count'] == 0 && $d['missions_count'] == 0): ?>
-                                <form method="post" class="d-inline" onsubmit="return confirm('Διαγραφή τμήματος;')">
+                                <form method="post" class="d-inline" onsubmit="return confirm('Διαγραφή σώματος;')">
                                     <?= csrfField() ?>
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="id" value="<?= $d['id'] ?>">
@@ -157,7 +163,7 @@ include __DIR__ . '/includes/header.php';
                 <input type="hidden" name="id" id="deptId">
                 
                 <div class="modal-header">
-                    <h5 class="modal-title" id="deptModalTitle">Νέο Τμήμα</h5>
+                    <h5 class="modal-title" id="deptModalTitle">Νέο Σώμα</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
@@ -190,7 +196,7 @@ function editDept(dept) {
     document.getElementById('deptName').value = dept.name;
     document.getElementById('deptDesc').value = dept.description || '';
     document.getElementById('deptActive').checked = dept.is_active == 1;
-    document.getElementById('deptModalTitle').textContent = 'Επεξεργασία Τμήματος';
+    document.getElementById('deptModalTitle').textContent = 'Επεξεργασία Σώματος';
     
     new bootstrap.Modal(document.getElementById('deptModal')).show();
 }
@@ -200,7 +206,7 @@ document.getElementById('deptModal').addEventListener('hidden.bs.modal', functio
     document.getElementById('deptAction').value = 'create';
     document.getElementById('deptId').value = '';
     document.getElementById('deptForm').reset();
-    document.getElementById('deptModalTitle').textContent = 'Νέο Τμήμα';
+    document.getElementById('deptModalTitle').textContent = 'Νέο Σώμα';
 });
 </script>
 

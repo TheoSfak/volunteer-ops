@@ -689,9 +689,18 @@ $appDescription = getSetting('app_description', '');
             </li>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'departments' ? 'active' : '' ?>" href="departments.php">
-                    <i class="bi bi-building"></i> Τμήματα
+                    <i class="bi bi-shield"></i> Σώματα
                 </a>
             </li>
+            <?php endif; ?>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'branches' ? 'active' : '' ?>" href="branches.php">
+                    <i class="bi bi-geo-alt-fill"></i> Παραρτήματα
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (isAdmin()): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'mission-types' ? 'active' : '' ?>" href="mission-types.php">
                     <i class="bi bi-tags"></i> Τύποι Αποστολών
@@ -703,6 +712,44 @@ $appDescription = getSetting('app_description', '');
                 </a>
             </li>
             <?php endif; ?>
+            
+            <div class="sidebar-section">Απόθεμα</div>
+            
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'inventory' ? 'active' : '' ?>" href="inventory.php">
+                    <i class="bi bi-box-seam"></i> Υλικά
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'inventory-book' ? 'active' : '' ?>" href="inventory-book.php">
+                    <i class="bi bi-upc-scan"></i> Χρέωση / Επιστροφή
+                </a>
+            </li>
+            <?php if (isAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'inventory-notes' ? 'active' : '' ?>" href="inventory-notes.php">
+                    <i class="bi bi-sticky"></i> Σημειώσεις Υλικών
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'inventory-categories' ? 'active' : '' ?>" href="inventory-categories.php">
+                    <i class="bi bi-tags"></i> Κατηγορίες Υλικών
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'inventory-locations' ? 'active' : '' ?>" href="inventory-locations.php">
+                    <i class="bi bi-geo-alt"></i> Τοποθεσίες
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'inventory-warehouses' ? 'active' : '' ?>" href="inventory-warehouses.php">
+                    <i class="bi bi-building"></i> Αποθήκες
+                </a>
+            </li>
+            <?php endif; ?>
+            <!-- Παραρτήματα: accessible via Διοίκηση → Παραρτήματα -->
             
             <div class="sidebar-section">Gamification</div>
             

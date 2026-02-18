@@ -29,6 +29,28 @@
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/gr.js"></script>
     
     <script>
+        // Sidebar scroll position persistence
+        (function() {
+            var sidebar = document.getElementById('sidebar');
+            if (sidebar) {
+                // Restore scroll position
+                var saved = sessionStorage.getItem('sidebarScroll');
+                if (saved !== null) {
+                    sidebar.scrollTop = parseInt(saved, 10);
+                }
+                // Save scroll position before navigating away
+                sidebar.querySelectorAll('a').forEach(function(link) {
+                    link.addEventListener('click', function() {
+                        sessionStorage.setItem('sidebarScroll', sidebar.scrollTop);
+                    });
+                });
+                // Also save on beforeunload for form submits etc
+                window.addEventListener('beforeunload', function() {
+                    sessionStorage.setItem('sidebarScroll', sidebar.scrollTop);
+                });
+            }
+        })();
+
         // Sidebar toggle for mobile
         function toggleSidebar() {
             document.getElementById('sidebar').classList.toggle('show');

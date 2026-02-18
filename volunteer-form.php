@@ -21,8 +21,11 @@ if ($id) {
     $pageTitle = 'Επεξεργασία: ' . $volunteer['name'];
 }
 
-// Get departments
-$departments = dbFetchAll("SELECT id, name FROM departments ORDER BY name");
+// Get departments (only functional corps, not warehouse/branch departments)
+$departments = dbFetchAll("SELECT id, name FROM departments WHERE (has_inventory = 0 OR has_inventory IS NULL) ORDER BY name");
+
+// Get warehouses (departments with inventory)
+$warehouses = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
 
 $errors = [];
 
@@ -35,6 +38,7 @@ if (isPost()) {
         'phone' => post('phone'),
         'role' => post('role', ROLE_VOLUNTEER),
         'department_id' => post('department_id') ?: null,
+        'warehouse_id' => post('warehouse_id') ?: null,
         'is_active' => isset($_POST['is_active']) ? 1 : 0,
     ];
     
@@ -88,12 +92,12 @@ if (isPost()) {
             // Update
             dbExecute(
                 "UPDATE users SET 
-                 name = ?, email = ?, phone = ?, role = ?, department_id = ?, is_active = ?,
+                 name = ?, email = ?, phone = ?, role = ?, department_id = ?, warehouse_id = ?, is_active = ?,
                  volunteer_type = ?, cohort_year = ?, updated_at = NOW()
                  WHERE id = ?",
                 [
                     $data['name'], $data['email'], $data['phone'],
-                    $data['role'], $data['department_id'], $data['is_active'],
+                    $data['role'], $data['department_id'], $data['warehouse_id'], $data['is_active'],
                     $volunteerType, $cohortYear, $id
                 ]
             );
@@ -112,11 +116,11 @@ if (isPost()) {
             // Create
             $id = dbInsert(
                 "INSERT INTO users 
-                 (name, email, password, phone, role, department_id, is_active, volunteer_type, cohort_year, total_points, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                 (name, email, password, phone, role, department_id, warehouse_id, is_active, volunteer_type, cohort_year, total_points, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                 [
                     $data['name'], $data['email'], password_hash($password, PASSWORD_DEFAULT),
-                    $data['phone'], $data['role'], $data['department_id'], $data['is_active'],
+                    $data['phone'], $data['role'], $data['department_id'], $data['warehouse_id'], $data['is_active'],
                     $volunteerType, $cohortYear
                 ]
             );
@@ -139,6 +143,7 @@ $form = $volunteer ?: [
     'phone' => '',
     'role' => ROLE_VOLUNTEER,
     'department_id' => $currentUser['department_id'],
+    'warehouse_id' => $currentUser['warehouse_id'] ?? null,
     'is_active' => 1,
     'volunteer_type' => VTYPE_VOLUNTEER,
     'cohort_year' => null,
@@ -228,9 +233,9 @@ include __DIR__ . '/includes/header.php';
                     <small class="text-muted">Για δόκιμους διασώστες - χρησιμοποιείται για στατιστικά ανά χρονιά</small>
                 </div>
                 <div class="col-md-6 mb-3">
-                    <label class="form-label">Τμήμα</label>
+                    <label class="form-label"><i class="bi bi-shield me-1"></i>Σώμα</label>
                     <select class="form-select" name="department_id">
-                        <option value="">- Χωρίς τμήμα -</option>
+                        <option value="">- Χωρίς σώμα -</option>
                         <?php foreach ($departments as $d): ?>
                             <?php 
                             // Dept admins see only their department
@@ -241,6 +246,21 @@ include __DIR__ . '/includes/header.php';
                             </option>
                         <?php endforeach; ?>
                     </select>
+                </div>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label"><i class="bi bi-geo-alt-fill me-1"></i>Παράρτημα / Πόλη</label>
+                    <select class="form-select" name="warehouse_id">
+                        <option value="">- Χωρίς παράρτημα -</option>
+                        <?php foreach ($warehouses as $wh): ?>
+                            <option value="<?= $wh['id'] ?>" <?= ($form['warehouse_id'] ?? '') == $wh['id'] ? 'selected' : '' ?>>
+                                <?= h($wh['name']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <small class="text-muted">Σε ποιο παράρτημα/πόλη ανήκει ο εθελοντής</small>
                 </div>
             </div>
             
