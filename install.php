@@ -4,19 +4,29 @@
  * Comprehensive installation wizard with debug & demo data options
  */
 
-// ============================================================
-// FULL DEBUG MODE - Show ALL errors
-// ============================================================
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
-ini_set('log_errors', 1);
-ini_set('error_log', __DIR__ . '/install_errors.log');
+// Check if already installed first
+$alreadyInstalled = file_exists(__DIR__ . '/config.local.php');
 
-// Custom error handler for detailed output
-set_error_handler(function($severity, $message, $file, $line) {
-    throw new ErrorException($message, 0, $severity, $file, $line);
-});
+// Only enable full debug mode if NOT already installed
+if (!$alreadyInstalled) {
+    // ============================================================
+    // FULL DEBUG MODE - Show ALL errors (during installation only)
+    // ============================================================
+    error_reporting(E_ALL);
+    ini_set('display_errors', 1);
+    ini_set('display_startup_errors', 1);
+    ini_set('log_errors', 1);
+    ini_set('error_log', __DIR__ . '/install_errors.log');
+
+    // Custom error handler for detailed output
+    set_error_handler(function($severity, $message, $file, $line) {
+        throw new ErrorException($message, 0, $severity, $file, $line);
+    });
+} else {
+    // Already installed - minimal errors
+    error_reporting(0);
+    ini_set('display_errors', 0);
+}
 
 // Track all operations for debug output
 $debugLog = [];
@@ -38,7 +48,7 @@ $errorDetails = '';
 $success = '';
 
 // Check if already installed
-if (file_exists(__DIR__ . '/config.local.php') && $step < 5) {
+if ($alreadyInstalled && $step < 5) {
     $step = 5; // Go to completion
 }
 
@@ -114,6 +124,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
                     
                     logDebug("SQL εκτελέστηκε: {$executed} statements, {$skipped} παραλήφθηκαν", 'success');
+                    
+                    // Import inventory schema (v3.0.0+)
+                    $inventorySchemaFile = __DIR__ . '/sql/inventory_schema.sql';
+                    if (file_exists($inventorySchemaFile)) {
+                        logDebug('Αρχείο inventory_schema.sql βρέθηκε', 'success');
+                        $invSql = file_get_contents($inventorySchemaFile);
+                        $invSql = preg_replace('/^--.*$/m', '', $invSql); // Remove comments
+                        
+                        // Separate triggers (between DELIMITER $$ ... DELIMITER ;) from regular SQL
+                        $triggerSql = '';
+                        if (preg_match('/DELIMITER\s+\$\$(.*?)DELIMITER\s+;/s', $invSql, $m)) {
+                            $triggerSql = $m[1];
+                        }
+                        // Remove trigger block from main SQL
+                        $invSql = preg_replace('/DELIMITER\s+\$\$.*?DELIMITER\s+;/s', '', $invSql);
+                        
+                        $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
+                        $invStatements = array_filter(array_map('trim', explode(';', $invSql)));
+                        $invExecuted = 0;
+                        $invSkipped = 0;
+                        
+                        foreach ($invStatements as $statement) {
+                            if (!empty($statement) && strlen($statement) > 5) {
+                                try {
+                                    $pdo->exec($statement);
+                                    $invExecuted++;
+                                } catch (PDOException $e) {
+                                    if (strpos($e->getMessage(), 'already exists') === false && 
+                                        strpos($e->getMessage(), 'Duplicate') === false) {
+                                        logDebug("Inventory SQL warning: " . $e->getMessage(), 'warning');
+                                    }
+                                    $invSkipped++;
+                                }
+                            }
+                        }
+                        
+                        // Execute triggers separately (split on $$)
+                        if (!empty($triggerSql)) {
+                            $triggerStatements = array_filter(array_map('trim', explode('$$', $triggerSql)));
+                            foreach ($triggerStatements as $trigger) {
+                                $trigger = trim($trigger);
+                                if (!empty($trigger) && stripos($trigger, 'CREATE TRIGGER') !== false) {
+                                    try {
+                                        $pdo->exec($trigger);
+                                        $invExecuted++;
+                                        logDebug('Trigger created successfully', 'success');
+                                    } catch (PDOException $e) {
+                                        if (strpos($e->getMessage(), 'already exists') === false) {
+                                            logDebug("Trigger warning: " . $e->getMessage(), 'warning');
+                                        }
+                                        $invSkipped++;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
+                        logDebug("Inventory SQL: {$invExecuted} statements, {$invSkipped} παραλήφθηκαν", 'success');
+                    }
                     
                     // Verify tables exist
                     $tables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
@@ -330,8 +399,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Πλατεία Συντάγματος, Αθήνα',
             'department_id' => $deptIds[1] ?? 1,
             'status' => 'OPEN',
-            'start_datetime' => date('Y-m-d H:i:s', strtotime('+3 days 09:00')),
-            'end_datetime' => date('Y-m-d H:i:s', strtotime('+3 days 14:00')),
+            'start_date' => date('Y-m-d H:i:s', strtotime('+3 days 09:00')),
+            'end_date' => date('Y-m-d H:i:s', strtotime('+3 days 14:00')),
         ],
         [
             'title' => 'Καθαρισμός Παραλίας',
@@ -339,8 +408,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Παραλία Γλυφάδας',
             'department_id' => $deptIds[3] ?? 1,
             'status' => 'OPEN',
-            'start_datetime' => date('Y-m-d H:i:s', strtotime('+5 days 08:00')),
-            'end_datetime' => date('Y-m-d H:i:s', strtotime('+5 days 13:00')),
+            'start_date' => date('Y-m-d H:i:s', strtotime('+5 days 08:00')),
+            'end_date' => date('Y-m-d H:i:s', strtotime('+5 days 13:00')),
         ],
         [
             'title' => 'Υποστήριξη Μαθητών - Κέντρο Μελέτης',
@@ -348,8 +417,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Δημοτική Βιβλιοθήκη Αθηνών',
             'department_id' => $deptIds[2] ?? 1,
             'status' => 'DRAFT',
-            'start_datetime' => date('Y-m-d H:i:s', strtotime('+7 days 16:00')),
-            'end_datetime' => date('Y-m-d H:i:s', strtotime('+7 days 20:00')),
+            'start_date' => date('Y-m-d H:i:s', strtotime('+7 days 16:00')),
+            'end_date' => date('Y-m-d H:i:s', strtotime('+7 days 20:00')),
         ],
         [
             'title' => 'Ιατρείο Αστέγων',
@@ -357,8 +426,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Κέντρο Αστέγων, Πειραιάς',
             'department_id' => $deptIds[0] ?? 1,
             'status' => 'OPEN',
-            'start_datetime' => date('Y-m-d H:i:s', strtotime('+2 days 18:00')),
-            'end_datetime' => date('Y-m-d H:i:s', strtotime('+2 days 22:00')),
+            'start_date' => date('Y-m-d H:i:s', strtotime('+2 days 18:00')),
+            'end_date' => date('Y-m-d H:i:s', strtotime('+2 days 22:00')),
         ],
         [
             'title' => 'Επίσκεψη σε Γηροκομείο',
@@ -366,8 +435,8 @@ function installDemoData(PDO $pdo) {
             'location' => 'Γηροκομείο Αγία Ειρήνη, Νέα Σμύρνη',
             'department_id' => $deptIds[4] ?? 1,
             'status' => 'OPEN',
-            'start_datetime' => date('Y-m-d H:i:s', strtotime('+4 days 10:00')),
-            'end_datetime' => date('Y-m-d H:i:s', strtotime('+4 days 13:00')),
+            'start_date' => date('Y-m-d H:i:s', strtotime('+4 days 10:00')),
+            'end_date' => date('Y-m-d H:i:s', strtotime('+4 days 13:00')),
         ],
         [
             'title' => 'Δενδροφύτευση Πάρκου',
@@ -375,13 +444,13 @@ function installDemoData(PDO $pdo) {
             'location' => 'Πάρκο Τρίτση, Ίλιον',
             'department_id' => $deptIds[3] ?? 1,
             'status' => 'COMPLETED',
-            'start_datetime' => date('Y-m-d H:i:s', strtotime('-10 days 09:00')),
-            'end_datetime' => date('Y-m-d H:i:s', strtotime('-10 days 15:00')),
+            'start_date' => date('Y-m-d H:i:s', strtotime('-10 days 09:00')),
+            'end_date' => date('Y-m-d H:i:s', strtotime('-10 days 15:00')),
         ],
     ];
     
     $missionIds = [];
-    $stmt = $pdo->prepare("INSERT INTO missions (title, description, location, department_id, status, start_datetime, end_datetime, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())");
+    $stmt = $pdo->prepare("INSERT INTO missions (title, description, location, department_id, status, start_date, end_date, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())");
     foreach ($missions as $mission) {
         $stmt->execute([
             $mission['title'],
@@ -389,8 +458,8 @@ function installDemoData(PDO $pdo) {
             $mission['location'],
             $mission['department_id'],
             $mission['status'],
-            $mission['start_datetime'],
-            $mission['end_datetime']
+            $mission['start_date'],
+            $mission['end_date']
         ]);
         $missionIds[] = $pdo->lastInsertId();
     }
@@ -444,7 +513,7 @@ function installDemoData(PDO $pdo) {
     logDebug('Δημιουργία demo πόντων...');
     foreach (array_slice($volunteerIds, 0, 4) as $volId) {
         $points = rand(50, 200);
-        $stmt = $pdo->prepare("INSERT INTO volunteer_points (user_id, points, reason, description, pointable_type, pointable_id, created_at) VALUES (?, ?, 'Ολοκλήρωση αποστολής', ?, 'mission', ?, NOW()) ON DUPLICATE KEY UPDATE points = points");
+        $stmt = $pdo->prepare("INSERT INTO volunteer_points (volunteer_id, points, source_type, source_id, description, created_at) VALUES (?, ?, 'mission', ?, ?, NOW()) ON DUPLICATE KEY UPDATE points = points");
         $stmt->execute([$volId, $points, $missionIds[5] ?? 1, 'Συμμετοχή σε αποστολή']);
         
         // Update user total points
