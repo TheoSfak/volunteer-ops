@@ -248,6 +248,26 @@ include __DIR__ . '/includes/header.php';
                         </p>
                     </div>
                     <div class="col-md-6">
+                        <p><strong>Ταυτότητα:</strong> <?= h($volunteer['id_card'] ?: '-') ?></p>
+                        <p><strong>Α.Μ.Κ.Α.:</strong> <?= h($volunteer['amka'] ?: '-') ?></p>
+                        <p><strong>Άδεια Οδήγησης:</strong> <?= h($volunteer['driving_license'] ?: '-') ?></p>
+                        <p><strong>Αρ. Κυκλοφορίας:</strong> <?= h($volunteer['vehicle_plate'] ?: '-') ?></p>
+                    </div>
+                </div>
+                
+                <hr>
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6 class="text-muted mb-2"><i class="bi bi-person-badge me-1"></i>Μεγέθη Στολής</h6>
+                        <p><strong>Παντελόνι:</strong> <?= h($volunteer['pants_size'] ?: '-') ?></p>
+                        <p><strong>Χιτώνιο:</strong> <?= h($volunteer['shirt_size'] ?: '-') ?></p>
+                        <p><strong>Μπλούζα:</strong> <?= h($volunteer['blouse_size'] ?: '-') ?></p>
+                        <p><strong>Fleece:</strong> <?= h($volunteer['fleece_size'] ?: '-') ?></p>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="text-muted mb-2"><i class="bi bi-journal-text me-1"></i>Μητρώα</h6>
+                        <p><strong>Μητρώο ΕΠΙΔΡΑΣΙΣ:</strong> <?= h($volunteer['registry_epidrasis'] ?: '-') ?></p>
+                        <p><strong>Μητρώο Γ.Γ.Π.Π.:</strong> <?= h($volunteer['registry_ggpp'] ?: '-') ?></p>
                         <?php if ($profile): ?>
                             <p><strong>Πόλη:</strong> <?= h($profile['city'] ?: '-') ?></p>
                             <p><strong>Ομάδα Αίματος:</strong> <?= h($profile['blood_type'] ?: '-') ?></p>
