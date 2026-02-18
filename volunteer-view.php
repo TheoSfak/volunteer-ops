@@ -13,9 +13,10 @@ if (!$id) {
 }
 
 $volunteer = dbFetchOne(
-    "SELECT u.*, d.name as department_name 
+    "SELECT u.*, d.name as department_name, wh.name as warehouse_name 
      FROM users u 
      LEFT JOIN departments d ON u.department_id = d.id 
+     LEFT JOIN departments wh ON u.warehouse_id = wh.id 
      WHERE u.id = ?",
     [$id]
 );
@@ -107,7 +108,7 @@ $participations = dbFetchAll(
 // Get stats
 $stats = [
     'total_shifts' => dbFetchValue(
-        "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = 'APPROVED'",
+        "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = '" . PARTICIPATION_APPROVED . "'",
         [$id]
     ),
     'attended_shifts' => dbFetchValue(
@@ -119,7 +120,7 @@ $stats = [
         [$id]
     ),
     'pending_requests' => dbFetchValue(
-        "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = 'PENDING'",
+        "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = '" . PARTICIPATION_PENDING . "'",
         [$id]
     ),
 ];
@@ -229,7 +230,14 @@ include __DIR__ . '/includes/header.php';
                 <div class="row">
                     <div class="col-md-6">
                         <p><strong>Τηλέφωνο:</strong> <?= h($volunteer['phone'] ?: '-') ?></p>
-                        <p><strong>Τμήμα:</strong> <?= h($volunteer['department_name'] ?: '-') ?></p>
+                        <p><strong>Σώμα:</strong> <?= h($volunteer['department_name'] ?: '-') ?></p>
+                        <p><strong>Παράρτημα:</strong> 
+                            <?php if ($volunteer['warehouse_name']): ?>
+                                <span class="badge bg-info"><i class="bi bi-geo-alt-fill me-1"></i><?= h($volunteer['warehouse_name']) ?></span>
+                            <?php else: ?>
+                                -
+                            <?php endif; ?>
+                        </p>
                         <p><strong>Ρόλος:</strong> <?= roleBadge($volunteer['role']) ?></p>
                         <p><strong>Κατάσταση:</strong> 
                             <?php if ($volunteer['is_active']): ?>

@@ -14,6 +14,7 @@ $user = getCurrentUser();
 $search = get('search', '');
 $role = get('role', '');
 $departmentId = get('department_id', '');
+$warehouseId = get('warehouse_id', '');
 $status = get('status', '');
 $page = max(1, (int) get('page', 1));
 $perPage = 20;
@@ -39,6 +40,11 @@ if ($departmentId) {
     $params[] = $departmentId;
 }
 
+if ($warehouseId) {
+    $where[] = "u.warehouse_id = ?";
+    $params[] = $warehouseId;
+}
+
 if ($status === 'active') {
     $where[] = "u.is_active = 1";
 } elseif ($status === 'inactive') {
@@ -59,17 +65,18 @@ $pagination = paginate($total, $page, $perPage);
 
 // Get volunteers (optimized with JOINs)
 $volunteers = dbFetchAll(
-    "SELECT u.*, d.name as department_name,
+    "SELECT u.*, d.name as department_name, wh.name as warehouse_name,
             COALESCE(pr_stats.shifts_count, 0) as shifts_count,
             COALESCE(pr_stats.total_hours, 0) as total_hours
      FROM users u
      LEFT JOIN departments d ON u.department_id = d.id
+     LEFT JOIN departments wh ON u.warehouse_id = wh.id
      LEFT JOIN (
          SELECT volunteer_id, 
                 COUNT(*) as shifts_count,
                 COALESCE(SUM(actual_hours), 0) as total_hours
          FROM participation_requests 
-         WHERE status = 'APPROVED' OR attended = 1
+         WHERE status = '" . PARTICIPATION_APPROVED . "' OR attended = 1
          GROUP BY volunteer_id
      ) pr_stats ON u.id = pr_stats.volunteer_id
      WHERE $whereClause
@@ -80,6 +87,9 @@ $volunteers = dbFetchAll(
 
 // Get departments for filter
 $departments = dbFetchAll("SELECT id, name FROM departments ORDER BY name");
+
+// Get warehouses for filter
+$warehouses = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
 
 // Handle actions
 if (isPost()) {
@@ -174,12 +184,23 @@ include __DIR__ . '/includes/header.php';
             </div>
             <?php if ($user['role'] === ROLE_SYSTEM_ADMIN): ?>
             <div class="col-md-2">
-                <label class="form-label">Τμήμα</label>
+                <label class="form-label">Σώμα</label>
                 <select name="department_id" class="form-select">
                     <option value="">Όλα</option>
                     <?php foreach ($departments as $d): ?>
                         <option value="<?= $d['id'] ?>" <?= $departmentId == $d['id'] ? 'selected' : '' ?>>
                             <?= h($d['name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Παράρτημα</label>
+                <select name="warehouse_id" class="form-select">
+                    <option value="">Όλες</option>
+                    <?php foreach ($warehouses as $wh): ?>
+                        <option value="<?= $wh['id'] ?>" <?= $warehouseId == $wh['id'] ? 'selected' : '' ?>>
+                            <?= h($wh['name']) ?>
                         </option>
                     <?php endforeach; ?>
                 </select>
@@ -215,7 +236,8 @@ include __DIR__ . '/includes/header.php';
                 <tr>
                     <th>Εθελοντής</th>
                     <th>Ρόλος</th>
-                    <th>Τμήμα</th>
+                    <th>Σώμα</th>
+                    <th>Παράρτημα</th>
                     <th class="text-center">Βάρδιες</th>
                     <th class="text-center">Πόντοι</th>
                     <th>Κατάσταση</th>
@@ -236,6 +258,13 @@ include __DIR__ . '/includes/header.php';
                         </td>
                         <td><?= roleBadge($v['role']) ?></td>
                         <td><?= h($v['department_name'] ?? '-') ?></td>
+                        <td>
+                            <?php if ($v['warehouse_name']): ?>
+                                <span class="badge bg-info"><i class="bi bi-building me-1"></i><?= h($v['warehouse_name']) ?></span>
+                            <?php else: ?>
+                                <span class="text-muted">-</span>
+                            <?php endif; ?>
+                        </td>
                         <td class="text-center">
                             <?= $v['shifts_count'] ?>
                             <?php if ($v['total_hours'] > 0): ?>

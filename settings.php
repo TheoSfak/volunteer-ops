@@ -44,6 +44,10 @@ $defaults = [
     'smtp_encryption' => 'tls',
     'smtp_from_email' => '',
     'smtp_from_name' => 'VolunteerOps',
+    'inventory_overdue_days' => '3',
+    'inventory_default_warehouse' => '',
+    'inventory_require_location' => '0',
+    'inventory_require_notes' => '0',
 ];
 
 foreach ($defaults as $key => $value) {
@@ -192,6 +196,31 @@ if (isPost()) {
         }
         $activeTab = 'smtp';
         
+    } elseif ($action === 'save_inventory') {
+        // Save inventory settings
+        $invFields = ['inventory_overdue_days', 'inventory_default_warehouse', 'inventory_require_location', 'inventory_require_notes'];
+        
+        foreach ($invFields as $field) {
+            $value = isset($_POST[$field]) ? $_POST[$field] : '';
+            
+            if (in_array($field, ['inventory_require_location', 'inventory_require_notes'])) {
+                $value = isset($_POST[$field]) ? '1' : '0';
+            }
+            
+            $exists = dbFetchValue("SELECT COUNT(*) FROM settings WHERE setting_key = ?", [$field]);
+            if ($exists) {
+                dbExecute("UPDATE settings SET setting_value = ?, updated_at = NOW() WHERE setting_key = ?", [$value, $field]);
+            } else {
+                dbInsert("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$field, $value]);
+            }
+            $settings[$field] = $value;
+        }
+        
+        clearSettingsCache();
+        logAudit('update_settings', 'settings', null, 'Ρυθμίσεις Αποθέματος');
+        setFlash('success', 'Οι ρυθμίσεις αποθέματος αποθηκεύτηκαν.');
+        redirect('settings.php?tab=inventory');
+        
     } elseif ($action === 'save_notifications') {
         // Save notification settings
         foreach ($_POST['notifications'] ?? [] as $code => $enabled) {
@@ -266,6 +295,11 @@ include __DIR__ . '/includes/header.php';
     <li class="nav-item">
         <a class="nav-link <?= $activeTab === 'notifications' ? 'active' : '' ?>" href="settings.php?tab=notifications">
             <i class="bi bi-bell me-1"></i>Ειδοποιήσεις
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $activeTab === 'inventory' ? 'active' : '' ?>" href="settings.php?tab=inventory">
+            <i class="bi bi-box-seam me-1"></i>Απόθεμα
         </a>
     </li>
     <li class="nav-item">
@@ -438,6 +472,26 @@ include __DIR__ . '/includes/header.php';
                                value="<?= h($settings['resend_mission_hours_before']) ?>" min="1" max="720" required>
                         <small class="text-muted">Αν μια βάρδια δεν έχει συμπληρωθεί, στείλε email προς όλους τους χρήστες Χ ώρες πριν (προεπιλογή: 48)</small>
                     </div>
+                    
+                    <hr>
+                    <h6 class="text-muted"><i class="bi bi-terminal me-1"></i>Cron Jobs (Linux)</h6>
+                    <p class="small text-muted mb-2">Προσθέστε τις παρακάτω εντολές στο crontab (<code>crontab -e</code>). Αλλάξτε το path ανάλογα με τον server σας:</p>
+                    <div class="bg-dark text-light p-3 rounded small" style="font-family: monospace; white-space: pre-wrap;">
+# Καθημερινές εργασίες (08:00)
+0 8 * * * /usr/bin/php /home/USERNAME/public_html/volunteerops/cron_daily.php
+
+# Υπενθυμίσεις βαρδιών (κάθε 6 ώρες)
+0 */6 * * * /usr/bin/php /home/USERNAME/public_html/volunteerops/cron_shift_reminders.php
+
+# Αποστολές χωρίς εθελοντές (09:00)
+0 9 * * * /usr/bin/php /home/USERNAME/public_html/volunteerops/cron_incomplete_missions.php
+
+# Υπενθυμίσεις εργασιών (κάθε 6 ώρες)
+0 */6 * * * /usr/bin/php /home/USERNAME/public_html/volunteerops/cron_task_reminders.php</div>
+                    <small class="text-muted mt-2 d-block">
+                        <i class="bi bi-info-circle me-1"></i>Αντικαταστήστε <code>USERNAME</code> με το username του hosting σας και 
+                        <code>/home/USERNAME/public_html/volunteerops/</code> με το πλήρες path εγκατάστασης.
+                    </small>
                 </div>
             </div>
             
@@ -760,6 +814,156 @@ function previewTemplate(id) {
         </div>
     </div>
 </form>
+<?php endif; ?>
+
+<!-- Inventory Settings Tab -->
+<?php if ($activeTab === 'inventory'): ?>
+<?php
+$warehouses = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
+$invLocations = dbFetchAll("SELECT l.*, d.name AS warehouse_name FROM inventory_locations l LEFT JOIN departments d ON l.department_id = d.id WHERE l.is_active = 1 ORDER BY l.name");
+$invStats = [
+    'total_items' => (int)dbFetchValue("SELECT COUNT(*) FROM inventory_items WHERE is_active = 1"),
+    'booked' => (int)dbFetchValue("SELECT COUNT(*) FROM inventory_items WHERE status = 'booked' AND is_active = 1"),
+    'locations' => count($invLocations),
+    'warehouses' => count($warehouses),
+];
+?>
+<div class="row">
+    <div class="col-lg-7">
+        <form method="post">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="save_inventory">
+            
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-box-seam me-1"></i>Ρυθμίσεις Αποθέματος</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Ημέρες μέχρι εκπρόθεσμο (κόκκινο)</label>
+                        <input type="number" class="form-control" name="inventory_overdue_days" 
+                               value="<?= h($settings['inventory_overdue_days']) ?>" min="1" max="365">
+                        <small class="text-muted">Μετά από πόσες ημέρες χωρίς επιστροφή εμφανίζεται ως εκπρόθεσμο (προεπιλογή: 3). Εφαρμόζεται όταν δεν έχει οριστεί ημερομηνία επιστροφής.</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Προεπιλεγμένη Αποθήκη</label>
+                        <select class="form-select" name="inventory_default_warehouse">
+                            <option value="">— Καμία —</option>
+                            <?php foreach ($warehouses as $wh): ?>
+                                <option value="<?= $wh['id'] ?>" <?= $settings['inventory_default_warehouse'] == $wh['id'] ? 'selected' : '' ?>>
+                                    <?= h($wh['name']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="text-muted">Προεπιλεγμένη αποθήκη για νέα υλικά.</small>
+                    </div>
+                    
+                    <hr>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="inventory_require_location" id="invReqLoc"
+                               <?= $settings['inventory_require_location'] === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="invReqLoc">
+                            Υποχρεωτική τοποθεσία στη φόρμα υλικού
+                        </label>
+                        <small class="text-muted d-block">Αν είναι ενεργό, η τοποθεσία θα είναι υποχρεωτική κατά τη δημιουργία/επεξεργασία υλικού.</small>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="inventory_require_notes" id="invReqNotes"
+                               <?= $settings['inventory_require_notes'] === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="invReqNotes">
+                            Υποχρεωτικές σημειώσεις στη χρέωση
+                        </label>
+                        <small class="text-muted d-block">Αν είναι ενεργό, οι σημειώσεις θα είναι υποχρεωτικές κατά τη χρέωση υλικού.</small>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg me-1"></i>Αποθήκευση
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+    
+    <div class="col-lg-5">
+        <!-- Inventory Stats -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-bar-chart me-1"></i>Στατιστικά Αποθέματος</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tr>
+                        <td>Σύνολο Υλικών</td>
+                        <td class="text-end"><strong><?= $invStats['total_items'] ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Χρεωμένα</td>
+                        <td class="text-end"><strong class="text-warning"><?= $invStats['booked'] ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Αποθήκες</td>
+                        <td class="text-end"><strong><?= $invStats['warehouses'] ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Τοποθεσίες</td>
+                        <td class="text-end"><strong><?= $invStats['locations'] ?></strong></td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Quick Links -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-link-45deg me-1"></i>Γρήγορη Διαχείριση</h5>
+            </div>
+            <div class="card-body d-grid gap-2">
+                <a href="inventory-warehouses.php" class="btn btn-outline-primary">
+                    <i class="bi bi-building me-1"></i>Διαχείριση Αποθηκών
+                </a>
+                <a href="inventory-categories.php" class="btn btn-outline-primary">
+                    <i class="bi bi-tags me-1"></i>Κατηγορίες Υλικών
+                </a>
+                <a href="inventory-notes.php" class="btn btn-outline-primary">
+                    <i class="bi bi-sticky me-1"></i>Σημειώσεις / Ελλείψεις
+                </a>
+                <a href="inventory.php" class="btn btn-outline-secondary">
+                    <i class="bi bi-box-seam me-1"></i>Όλα τα Υλικά
+                </a>
+            </div>
+        </div>
+        
+        <!-- Locations List -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-geo-alt me-1"></i>Τοποθεσίες (<?= count($invLocations) ?>)</h5>
+            </div>
+            <div class="card-body p-0">
+                <?php if (empty($invLocations)): ?>
+                    <p class="text-muted text-center py-3">Δεν υπάρχουν τοποθεσίες.</p>
+                <?php else: ?>
+                    <div class="list-group list-group-flush" style="max-height: 300px; overflow-y: auto;">
+                        <?php foreach ($invLocations as $loc): ?>
+                            <div class="list-group-item d-flex justify-content-between align-items-center py-2">
+                                <div>
+                                    <strong><?= h($loc['name']) ?></strong>
+                                    <?php if ($loc['warehouse_name']): ?>
+                                        <br><small class="text-muted"><?= h($loc['warehouse_name']) ?></small>
+                                    <?php endif; ?>
+                                </div>
+                                <span class="badge bg-secondary"><?= h($loc['location_type']) ?></span>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
 <?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
