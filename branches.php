@@ -10,6 +10,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
+requireInventoryTables();
 requireRole([ROLE_SYSTEM_ADMIN]);
 
 $pageTitle = 'Παραρτήματα';

@@ -6,6 +6,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
+requireInventoryTables();
 
 $id      = get('id');
 $barcode = get('barcode');

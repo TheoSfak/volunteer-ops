@@ -5,6 +5,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
+requireInventoryTables();
 
 // Only admins can create/edit inventory items
 if (!canManageInventory()) {

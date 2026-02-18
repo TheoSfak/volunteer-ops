@@ -427,10 +427,31 @@ function runMigrations() {
             }
             $cleanSql = implode("\n", $cleanLines);
             
-            $statements = array_filter(array_map('trim', explode(';', $cleanSql)));
+            // Handle DELIMITER blocks (for triggers/procedures)
+            // Split into regular statements and DELIMITER blocks
+            $allStatements = [];
+            if (preg_match('/DELIMITER\s/', $cleanSql)) {
+                // Process DELIMITER blocks
+                $parts = preg_split('/(DELIMITER\s+\S+)/', $cleanSql, -1, PREG_SPLIT_DELIM_CAPTURE);
+                $currentDelimiter = ';';
+                foreach ($parts as $part) {
+                    $part = trim($part);
+                    if (empty($part)) continue;
+                    if (preg_match('/^DELIMITER\s+(\S+)$/', $part, $m)) {
+                        $currentDelimiter = $m[1];
+                        continue;
+                    }
+                    $stmts = array_filter(array_map('trim', explode($currentDelimiter, $part)));
+                    foreach ($stmts as $s) {
+                        if (!empty($s)) $allStatements[] = $s;
+                    }
+                }
+            } else {
+                $allStatements = array_filter(array_map('trim', explode(';', $cleanSql)));
+            }
             $stmtErrors = 0;
             
-            foreach ($statements as $stmt) {
+            foreach ($allStatements as $stmt) {
                 if (!empty($stmt)) {
                     try {
                         dbExecute($stmt);
