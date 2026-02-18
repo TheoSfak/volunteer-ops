@@ -27,6 +27,9 @@ $departments = dbFetchAll("SELECT id, name FROM departments WHERE (has_inventory
 // Get warehouses (departments with inventory)
 $warehouses = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
 
+// Get volunteer positions
+$volunteerPositions = dbFetchAll("SELECT id, name, color, icon FROM volunteer_positions WHERE is_active = 1 ORDER BY sort_order ASC, name ASC");
+
 $errors = [];
 
 if (isPost()) {
@@ -40,6 +43,7 @@ if (isPost()) {
         'department_id' => post('department_id') ?: null,
         'warehouse_id' => post('warehouse_id') ?: null,
         'is_active' => isset($_POST['is_active']) ? 1 : 0,
+        'position_id' => post('position_id') ?: null,
         'id_card' => post('id_card') ?: null,
         'amka' => post('amka') ?: null,
         'driving_license' => post('driving_license') ?: null,
@@ -103,7 +107,7 @@ if (isPost()) {
             dbExecute(
                 "UPDATE users SET 
                  name = ?, email = ?, phone = ?, role = ?, department_id = ?, warehouse_id = ?, is_active = ?,
-                 volunteer_type = ?, cohort_year = ?,
+                 volunteer_type = ?, cohort_year = ?, position_id = ?,
                  id_card = ?, amka = ?, driving_license = ?, vehicle_plate = ?,
                  pants_size = ?, shirt_size = ?, blouse_size = ?, fleece_size = ?,
                  registry_epidrasis = ?, registry_ggpp = ?, updated_at = NOW()
@@ -111,7 +115,7 @@ if (isPost()) {
                 [
                     $data['name'], $data['email'], $data['phone'],
                     $data['role'], $data['department_id'], $data['warehouse_id'], $data['is_active'],
-                    $volunteerType, $cohortYear,
+                    $volunteerType, $cohortYear, $data['position_id'],
                     $data['id_card'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
                     $data['registry_epidrasis'], $data['registry_ggpp'], $id
@@ -132,14 +136,14 @@ if (isPost()) {
             // Create
             $id = dbInsert(
                 "INSERT INTO users 
-                 (name, email, password, phone, role, department_id, warehouse_id, is_active, volunteer_type, cohort_year,
+                 (name, email, password, phone, role, department_id, warehouse_id, is_active, volunteer_type, cohort_year, position_id,
                   id_card, amka, driving_license, vehicle_plate, pants_size, shirt_size, blouse_size, fleece_size,
                   registry_epidrasis, registry_ggpp, total_points, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                 [
                     $data['name'], $data['email'], password_hash($password, PASSWORD_DEFAULT),
                     $data['phone'], $data['role'], $data['department_id'], $data['warehouse_id'], $data['is_active'],
-                    $volunteerType, $cohortYear,
+                    $volunteerType, $cohortYear, $data['position_id'],
                     $data['id_card'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
                     $data['registry_epidrasis'], $data['registry_ggpp']
@@ -168,6 +172,7 @@ $form = $volunteer ?: [
     'is_active' => 1,
     'volunteer_type' => VTYPE_VOLUNTEER,
     'cohort_year' => null,
+    'position_id' => null,
     'id_card' => '',
     'amka' => '',
     'driving_license' => '',
@@ -251,6 +256,21 @@ include __DIR__ . '/includes/header.php';
                             </option>
                         <?php endforeach; ?>
                     </select>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label"><i class="bi bi-person-badge me-1"></i>Θέση / Ρόλος στην Οργάνωση</label>
+                    <select class="form-select" name="position_id">
+                        <option value="">— Χωρίς θέση —</option>
+                        <?php foreach ($volunteerPositions as $pos): ?>
+                            <option value="<?= $pos['id'] ?>" <?= ($form['position_id'] ?? '') == $pos['id'] ? 'selected' : '' ?>>
+                                <?= h($pos['name']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <small class="text-muted">Οργανωτικός ρόλος εντός του σώματος. <a href="volunteer-positions.php" target="_blank">Διαχείριση θέσεων</a></small>
                 </div>
             </div>
             

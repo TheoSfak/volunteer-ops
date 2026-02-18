@@ -13,10 +13,12 @@ if (!$id) {
 }
 
 $volunteer = dbFetchOne(
-    "SELECT u.*, d.name as department_name, wh.name as warehouse_name 
+    "SELECT u.*, d.name as department_name, wh.name as warehouse_name,
+            vp.name as position_name, vp.color as position_color, vp.icon as position_icon
      FROM users u 
      LEFT JOIN departments d ON u.department_id = d.id 
      LEFT JOIN departments wh ON u.warehouse_id = wh.id 
+     LEFT JOIN volunteer_positions vp ON u.position_id = vp.id
      WHERE u.id = ?",
     [$id]
 );
@@ -167,7 +169,14 @@ include __DIR__ . '/includes/header.php';
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h1 class="h3 mb-0"><?= h($volunteer['name']) ?><?= volunteerTypeBadge($volunteer['volunteer_type'] ?? VTYPE_VOLUNTEER) ?></h1>
+        <h1 class="h3 mb-0"><?= h($volunteer['name']) ?><?= volunteerTypeBadge($volunteer['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
+            <?php if (!empty($volunteer['position_name'])): ?>
+                <span class="badge bg-<?= h($volunteer['position_color'] ?? 'secondary') ?> ms-1">
+                    <?php if ($volunteer['position_icon']): ?><i class="<?= h($volunteer['position_icon']) ?> me-1"></i><?php endif; ?>
+                    <?= h($volunteer['position_name']) ?>
+                </span>
+            <?php endif; ?>
+        </h1>
         <small class="text-muted"><?= h($volunteer['email']) ?></small>
     </div>
     <div>
@@ -249,6 +258,14 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="col-md-6">
                         <p><strong>Ταυτότητα:</strong> <?= h($volunteer['id_card'] ?: '-') ?></p>
+                        <?php if (!empty($volunteer['position_name'])): ?>
+                        <p><strong>Θέση / Ρόλος:</strong>
+                            <span class="badge bg-<?= h($volunteer['position_color'] ?? 'secondary') ?>">
+                                <?php if ($volunteer['position_icon']): ?><i class="<?= h($volunteer['position_icon']) ?> me-1"></i><?php endif; ?>
+                                <?= h($volunteer['position_name']) ?>
+                            </span>
+                        </p>
+                        <?php endif; ?>
                         <p><strong>Α.Μ.Κ.Α.:</strong> <?= h($volunteer['amka'] ?: '-') ?></p>
                         <p><strong>Άδεια Οδήγησης:</strong> <?= h($volunteer['driving_license'] ?: '-') ?></p>
                         <p><strong>Αρ. Κυκλοφορίας:</strong> <?= h($volunteer['vehicle_plate'] ?: '-') ?></p>
