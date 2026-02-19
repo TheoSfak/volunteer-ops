@@ -415,6 +415,21 @@ function runMigrations() {
         try {
             $sql = file_get_contents($file);
             
+            // Parse special directives BEFORE stripping comments
+            // -- mkdir: relative/path  → creates directory relative to app root
+            foreach (explode("\n", $sql) as $line) {
+                if (preg_match('/^--\s*mkdir:\s*(.+)$/i', trim($line), $m)) {
+                    $dirPath = __DIR__ . '/' . trim($m[1], '/\\ ');
+                    if (!is_dir($dirPath)) {
+                        mkdir($dirPath, 0755, true)
+                            ? updateLog("  Δημιουργήθηκε φάκελος: " . trim($m[1]))
+                            : updateLog("  Αποτυχία δημιουργίας φακέλου: " . trim($m[1]), 'error');
+                    } else {
+                        updateLog("  Φάκελος ήδη υπάρχει: " . trim($m[1]));
+                    }
+                }
+            }
+
             // Remove SQL comments (lines starting with --)
             $lines = explode("\n", $sql);
             $cleanLines = [];
