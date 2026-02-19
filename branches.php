@@ -195,7 +195,7 @@ include __DIR__ . '/includes/header.php';
 <div class="alert alert-info d-flex align-items-start gap-3 mb-4">
     <i class="bi bi-info-circle-fill fs-4 mt-1"></i>
     <div>
-        <strong>Πώς λειτουργεί:</strong> Κάθε παράρτημα (π.χ. «Ηράκλειο», «Χερσόνησος») αντιστοιχεί ταυτόχρονα σε:
+        <strong>Πώς λειτουργεί:</strong> Κάθε παράρτημα αντιστοιχεί ταυτόχρονα σε:
         <ul class="mb-0 mt-1">
             <li><i class="bi bi-people text-primary me-1"></i><strong>Τμήμα εθελοντών</strong> — επιλέγεται στην <em>Αποθήκη/Πόλη</em> κατά την επεξεργασία εθελοντή</li>
             <li><i class="bi bi-box-seam text-success me-1"></i><strong>Αποθήκη υλικών</strong> — επιλέγεται ως αποθήκη στα υλικά αποθέματος</li>
@@ -225,7 +225,7 @@ include __DIR__ . '/includes/header.php';
                     ?>
                     <div class="col-md-6">
                         <div class="card h-100 <?= !$b['is_active'] ? 'bg-light border-secondary' : 'border-0 shadow-sm' ?>">
-                            <div class="card-header d-flex justify-content-between align-items-center <?= $b['is_active'] ? 'bg-primary text-white' : 'bg-secondary text-white' ?>">
+                            <div class="card-header d-flex justify-content-between align-items-center <?= $b['is_active'] ? 'bg-primary bg-opacity-10 text-dark border-bottom' : 'bg-secondary bg-opacity-10 text-dark border-bottom' ?>">
                                 <h5 class="mb-0">
                                     <i class="bi bi-geo-alt-fill me-1"></i><?= h($b['name']) ?>
                                 </h5>
