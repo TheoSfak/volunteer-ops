@@ -89,9 +89,13 @@ include __DIR__ . '/../includes/header.php';
                         <p class="text-muted">Ανεβάστε ένα CSV αρχείο με τους εθελοντές που θέλετε να εισάγετε.</p>
                         
                         <div class="alert alert-info">
-                            <i class="bi bi-info-circle"></i> 
-                            <strong>Μορφή αρχείου:</strong> CSV με headers: Όνομα, Email, Τηλέφωνο, Τμήμα ID, Ρόλος
-                            <br>
+                            <i class="bi bi-info-circle"></i>
+                            <strong>Μορφή αρχείου:</strong> CSV με headers (υποχρεωτικά: <strong>Όνομα, Email, Τμήμα ID, Ρόλος</strong>).<br>
+                            Προαιρετικά: Τηλέφωνο, Ταυτότητα, ΑΜΚΑ, Δίπλωμα Οδήγησης, Πινακίδα Οχήματος, Παντελόνι, Μπλούζα, Μπλάκετ, Fleece, Μητρώο Επίδρασης, Μητρώο ΓΓΠΠ, Τύπος Εθελοντή, Διεύθυνση, Πόλη, ΤΚ, Επαφή Έκτακτης Ανάγκης, Τηλ. Επαφής Έκτακτης, Ομάδα Αίματος, Βιογραφικό, Ιατρικές Σημειώσεις, Διαθ. Καθημερινές, Διαθ. Σαββ/κα, Διαθ. Βράδια, Έχει Δίπλωμα Οδήγησης, Έχει Πρώτες Βοήθειες.<br>
+                            <strong>Τύπος Εθελοντή:</strong> VOLUNTEER / TRAINEE_RESCUER / RESCUER<br>
+                            <strong>Ρόλος:</strong> VOLUNTEER / SHIFT_LEADER / DEPARTMENT_ADMIN / SYSTEM_ADMIN<br>
+                            <strong>Boolean πεδία:</strong> Ναι = 1, Όχι = 0
+                            <br class="mt-1">
                             <a href="templates/volunteers_template.csv" class="alert-link">
                                 <i class="bi bi-download"></i> Κατέβασμα Υποδείγματος
                             </a>
@@ -159,17 +163,22 @@ include __DIR__ . '/../includes/header.php';
                                             <th>Τηλέφωνο</th>
                                             <th>Τμήμα ID</th>
                                             <th>Ρόλος</th>
+                                            <th>Τύπος Εθελοντή</th>
+                                            <th>Ταυτότητα</th>
+                                            <th>Πόλη</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         <?php foreach (array_slice($rows, 0, 5) as $row): ?>
-                                            <?php $values = array_values((array) $row); ?>
                                             <tr>
-                                                <td><?= h($values[0]) ?></td>
-                                                <td><?= h($values[1]) ?></td>
-                                                <td><?= h($values[2] ?? '') ?></td>
-                                                <td><?= h($values[3]) ?></td>
-                                                <td><?= h($values[4]) ?></td>
+                                                <td><?= h($row['Όνομα'] ?? '') ?></td>
+                                                <td><?= h($row['Email'] ?? '') ?></td>
+                                                <td><?= h($row['Τηλέφωνο'] ?? '') ?></td>
+                                                <td><?= h($row['Τμήμα ID'] ?? '') ?></td>
+                                                <td><?= h($row['Ρόλος'] ?? '') ?></td>
+                                                <td><?= h($row['Τύπος Εθελοντή'] ?? '') ?></td>
+                                                <td><?= h($row['Ταυτότητα'] ?? '') ?></td>
+                                                <td><?= h($row['Πόλη'] ?? '') ?></td>
                                             </tr>
                                         <?php endforeach; ?>
                                     </tbody>
