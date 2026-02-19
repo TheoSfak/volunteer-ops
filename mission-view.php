@@ -125,6 +125,17 @@ if (isPost()) {
                 dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_OPEN, $id]);
                 logAudit('publish', 'missions', $id);
 
+                // Auto-create a shift if none exist
+                $shiftCount = (int) dbFetchValue("SELECT COUNT(*) FROM shifts WHERE mission_id = ?", [$id]);
+                if ($shiftCount === 0) {
+                    dbInsert(
+                        "INSERT INTO shifts (mission_id, start_time, end_time, max_volunteers, min_volunteers, created_at, updated_at)
+                         VALUES (?, ?, ?, 5, 1, NOW(), NOW())",
+                        [$id, $mission['start_datetime'], $mission['end_datetime']]
+                    );
+                    logAudit('auto_create_shift', 'shifts', $id, 'Αυτόματη δημιουργία βαρδίας κατά τη δημοσίευση');
+                }
+
                 // Notify volunteers if checkbox was checked (default: yes)
                 if (isset($_POST['notify_volunteers'])) {
                     $volunteers = dbFetchAll(
