@@ -137,14 +137,31 @@ include __DIR__ . '/includes/header.php';
                 <h5 class="mb-0"><i class="bi bi-upc me-2"></i>Αναζήτηση με Barcode</h5>
             </div>
             <div class="card-body">
-                <form method="post" class="d-flex gap-2">
+                <form method="post" class="d-flex gap-2" id="barcodeLookupForm">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="barcode_lookup">
-                    <input type="text" class="form-control" name="barcode" placeholder="Σαρώστε ή πληκτρολογήστε barcode..." autofocus>
-                    <button type="submit" class="btn btn-primary">
+                    <input type="text" class="form-control" name="barcode" id="barcodeInput"
+                           placeholder="Σαρώστε ή πληκτρολογήστε barcode..." autofocus autocomplete="off">
+                    <button type="submit" class="btn btn-primary" title="Αναζήτηση">
                         <i class="bi bi-search"></i>
                     </button>
+                    <button type="button" class="btn btn-outline-primary" id="btnCamScan" title="Σάρωση με κάμερα κινητού">
+                        <i class="bi bi-camera"></i>
+                    </button>
                 </form>
+
+                <!-- Camera scanner area (hidden until activated) -->
+                <div id="camScanArea" class="mt-3" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <small class="text-primary fw-semibold">
+                            <i class="bi bi-camera-video me-1"></i>Στρέψε την κάμερα στο QR code ή barcode
+                        </small>
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="btnStopScan">
+                            <i class="bi bi-x-circle me-1"></i>Κλείσιμο
+                        </button>
+                    </div>
+                    <div id="qrReader" style="width:100%; max-width:420px; border-radius:8px; overflow:hidden;"></div>
+                </div>
             </div>
         </div>
 
@@ -274,3 +291,63 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
+
+<!-- html5-qrcode: loaded after jQuery (which comes from footer.php) -->
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+(function () {
+    var html5QrCode = null;
+
+    var btnStart = document.getElementById('btnCamScan');
+    var btnStop  = document.getElementById('btnStopScan');
+    var scanArea = document.getElementById('camScanArea');
+    var input    = document.getElementById('barcodeInput');
+    var form     = document.getElementById('barcodeLookupForm');
+
+    function stopScanner(cb) {
+        if (html5QrCode) {
+            html5QrCode.stop().catch(function() {}).then(function() {
+                html5QrCode = null;
+                scanArea.style.display = 'none';
+                btnStart.disabled = false;
+                if (cb) cb();
+            });
+        } else {
+            scanArea.style.display = 'none';
+            btnStart.disabled = false;
+            if (cb) cb();
+        }
+    }
+
+    btnStart.addEventListener('click', function () {
+        scanArea.style.display = 'block';
+        btnStart.disabled = true;
+
+        html5QrCode = new Html5Qrcode('qrReader');
+        html5QrCode.start(
+            { facingMode: 'environment' }, // back camera
+            { fps: 10, qrbox: { width: 280, height: 160 } },
+            function (decodedText) {
+                // Strip URL prefix if the QR encoded a full URL (e.g. /inventory-view.php?barcode=XX)
+                var barcode = decodedText;
+                try {
+                    var url = new URL(decodedText);
+                    var b = url.searchParams.get('barcode');
+                    if (b) barcode = b;
+                } catch (e) { /* not a URL, use raw text */ }
+
+                input.value = barcode;
+                stopScanner(function () { form.submit(); });
+            },
+            function () { /* per-frame decode errors — ignore */ }
+        ).catch(function (err) {
+            alert('Δεν ήταν δυνατή η πρόσβαση στην κάμερα.\n' + err);
+            stopScanner();
+        });
+    });
+
+    btnStop.addEventListener('click', function () {
+        stopScanner();
+    });
+}());
+</script>
