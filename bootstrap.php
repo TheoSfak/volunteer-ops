@@ -14,6 +14,7 @@ require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/email.php';
+require_once __DIR__ . '/includes/newsletter-functions.php';
 require_once __DIR__ . '/includes/migrations.php';
 // inventory-functions.php is loaded on-demand by inventory pages and branches.php only
 

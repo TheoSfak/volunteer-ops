@@ -780,6 +780,14 @@ $appDescription = getSetting('app_description', '');
             </li>
             
             <?php if (isSystemAdmin()): ?>
+            <div class="sidebar-section">Επικοινωνία</div>
+            
+            <li class="nav-item">
+                <a class="nav-link <?= in_array($currentPage, ['newsletters', 'newsletter-form', 'newsletter-view', 'newsletter-log']) ? 'active' : '' ?>" href="newsletters.php">
+                    <i class="bi bi-envelope-paper"></i> Ενημερωτικά
+                </a>
+            </li>
+            
             <div class="sidebar-section">Σύστημα</div>
             
             <li class="nav-item">
