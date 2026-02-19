@@ -70,9 +70,15 @@ if (isPost()) {
         if (!empty($_FILES['app_logo']['name'])) {
             $file = $_FILES['app_logo'];
             $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/svg+xml', 'image/webp'];
+            $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'];
             $maxSize = 2 * 1024 * 1024; // 2MB
-            
-            if (!in_array($file['type'], $allowedTypes)) {
+
+            // Detect MIME from actual file content, not browser-supplied header
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $detectedMime = $finfo->file($file['tmp_name']);
+            $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+
+            if (!in_array($detectedMime, $allowedTypes) || !in_array($ext, $allowedExtensions)) {
                 setFlash('error', 'Μη αποδεκτός τύπος αρχείου. Επιτρέπονται: JPG, PNG, GIF, SVG, WebP.');
                 redirect('settings.php?tab=general');
             }
@@ -94,9 +100,8 @@ if (isPost()) {
                 unlink($uploadDir . $oldLogo);
             }
             
-            // Generate unique filename
-            $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
-            $newFilename = 'logo_' . time() . '.' . strtolower($ext);
+            // Generate unique filename (use already-validated extension)
+            $newFilename = 'logo_' . time() . '.' . $ext;
             
             if (move_uploaded_file($file['tmp_name'], $uploadDir . $newFilename)) {
                 // Save logo setting

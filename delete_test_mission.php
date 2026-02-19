@@ -3,6 +3,8 @@
  * Delete test mission
  */
 require_once __DIR__ . '/bootstrap.php';
+requireLogin();
+requireRole([ROLE_SYSTEM_ADMIN]);
 
 echo "Searching for test missions...\n\n";
 

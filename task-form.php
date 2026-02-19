@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
@@ -6,7 +6,7 @@ requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
 $pageTitle = 'Φόρμα Εργασίας';
 $user = getCurrentUser();
 
-$id = get('id');
+$id = (int) get('id');
 $isEdit = !empty($id);
 $task = null;
 

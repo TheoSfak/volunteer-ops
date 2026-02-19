@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Inventory Warehouses Management
  * Manage warehouse departments (multi-tenancy for inventory).
@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
 requireRole([ROLE_SYSTEM_ADMIN]);

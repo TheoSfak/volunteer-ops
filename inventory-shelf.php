@@ -1,10 +1,11 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Υλικά Ραφιού (Shelf Materials)
  * Excel-style inline editing of consumable shelf items with expiry tracking.
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
 

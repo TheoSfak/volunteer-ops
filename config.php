@@ -11,13 +11,15 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.3.1');
-define('BASE_URL', 'http://localhost/volunteerops');
+define('APP_VERSION', '3.4.0');
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
     require_once __DIR__ . '/config.local.php';
 }
+
+// BASE_URL can be overridden in config.local.php
+if (!defined('BASE_URL')) define('BASE_URL', 'http://localhost/volunteerops');
 
 // Database defaults - overridden by config.local.php
 if (!defined('DB_HOST')) define('DB_HOST', 'localhost');
@@ -35,7 +37,7 @@ define('SESSION_LIFETIME', 7200); // 2 hours
 date_default_timezone_set('Europe/Athens');
 
 // Debug mode - SET TO false IN PRODUCTION
-if (!defined('DEBUG_MODE')) define('DEBUG_MODE', true);
+if (!defined('DEBUG_MODE')) define('DEBUG_MODE', false);
 
 if (DEBUG_MODE) {
     error_reporting(E_ALL);

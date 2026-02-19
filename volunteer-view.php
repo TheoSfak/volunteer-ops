@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Volunteer View
  */
@@ -7,7 +7,7 @@ require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_SHIFT_LEADER]);
 
-$id = get('id');
+$id = (int) get('id');
 if (!$id) {
     redirect('volunteers.php');
 }

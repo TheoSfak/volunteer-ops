@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Παραρτήματα (Regional Branches)
  * Manage city-based departments that serve dual purpose:
@@ -9,6 +9,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
 requireRole([ROLE_SYSTEM_ADMIN]);
