@@ -318,15 +318,6 @@ include __DIR__ . '/includes/header.php';
                                                     <i class="bi bi-trash"></i>
                                                 </button>
                                             </div>
-                                            <!-- + button to add row after this one -->
-                                            <form method="post" class="d-inline ms-1">
-                                                <?= csrfField() ?>
-                                                <input type="hidden" name="action" value="add_after">
-                                                <input type="hidden" name="after_id" value="<?= $item['id'] ?>">
-                                                <button type="submit" class="btn btn-outline-success btn-sm" title="Προσθήκη γραμμής κάτω">
-                                                    <i class="bi bi-plus"></i>
-                                                </button>
-                                            </form>
                                         </td>
                                     </tr>
                                 <?php endif; ?>
