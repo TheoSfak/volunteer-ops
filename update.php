@@ -711,9 +711,43 @@ if (isPost()) {
                 // Step 4: Apply update
                 $updateResult = applyUpdate($contentDir);
                 
-                // Step 5: Run migrations
+                // Step 5: Run SQL file migrations
                 $migrations = runMigrations();
-                
+
+                // Step 5b: Run PHP schema migrations from the freshly applied migrations.php
+                // (the version loaded in memory via bootstrap is the OLD one, so we
+                //  re-read the new file, rename the function, and eval it)
+                updateLog('Εκτέλεση PHP schema migrations από ενημερωμένο αρχείο...');
+                try {
+                    $newMigrCode = @file_get_contents(__DIR__ . '/includes/migrations.php');
+                    if ($newMigrCode) {
+                        // Rename function so PHP won't complain about redeclaration
+                        $newMigrCode = preg_replace(
+                            '/function\s+runSchemaMigrations\s*\(/',
+                            'function _runSchemaMigrations_postupdate(',
+                            $newMigrCode
+                        );
+                        // Remove the function_exists guard (opening if + its closing brace)
+                        $newMigrCode = preg_replace(
+                            '/if\s*\(\s*!\s*function_exists\s*\([^)]+\)\s*\)\s*\{/',
+                            '',
+                            $newMigrCode,
+                            1
+                        );
+                        // Remove the last lone closing brace that belongs to function_exists block
+                        $newMigrCode = preg_replace('/\}(\s*)$/', '$1', $newMigrCode);
+                        // Strip PHP open tag for eval
+                        $newMigrCode = preg_replace('/<\?php\b/', '', $newMigrCode);
+                        eval($newMigrCode);
+                        if (function_exists('_runSchemaMigrations_postupdate')) {
+                            _runSchemaMigrations_postupdate();
+                            updateLog('PHP schema migrations εκτελέστηκαν επιτυχώς');
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    updateLog('PHP schema migrations warning: ' . $e->getMessage(), 'warning');
+                }
+
                 // Step 6: Cleanup
                 if (is_dir($download['temp_dir'])) {
                     // Simple cleanup - just remove temp files
