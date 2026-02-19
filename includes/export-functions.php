@@ -112,7 +112,7 @@ function exportMissionsToCsv($filters = []) {
  * Export volunteers to CSV (all fields incl. volunteer_profiles)
  */
 function exportVolunteersToCsv($filters = []) {
-    $where = ['u.deleted_at IS NULL'];
+    $where = ['u.is_active = 1'];
     $params = [];
 
     if (!empty($filters['role'])) {
