@@ -109,79 +109,138 @@ function exportMissionsToCsv($filters = []) {
 }
 
 /**
- * Export volunteers to CSV
+ * Export volunteers to CSV (all fields incl. volunteer_profiles)
  */
 function exportVolunteersToCsv($filters = []) {
-    $where = ['u.is_active = 1'];
+    $where = ['u.deleted_at IS NULL'];
     $params = [];
-    
+
     if (!empty($filters['role'])) {
         $where[] = 'u.role = ?';
         $params[] = $filters['role'];
     }
-    
     if (!empty($filters['department_id'])) {
         $where[] = 'u.department_id = ?';
         $params[] = $filters['department_id'];
     }
-    
-    $sql = "SELECT 
+
+    $sql = "SELECT
                 u.id,
                 u.name,
                 u.email,
                 u.phone,
-                d.name AS department,
+                u.id_card,
+                u.amka,
+                u.driving_license,
+                u.vehicle_plate,
+                u.pants_size,
+                u.shirt_size,
+                u.blouse_size,
+                u.fleece_size,
+                u.registry_epidrasis,
+                u.registry_ggpp,
                 u.role,
+                u.volunteer_type,
                 u.is_active,
-                u.total_points
+                u.total_points,
+                d.name  AS department,
+                wh.name AS warehouse,
+                vp.address,
+                vp.city,
+                vp.postal_code,
+                vp.emergency_contact_name,
+                vp.emergency_contact_phone,
+                vp.blood_type,
+                vp.bio,
+                vp.medical_notes,
+                vp.available_weekdays,
+                vp.available_weekends,
+                vp.available_nights,
+                vp.has_driving_license,
+                vp.has_first_aid
             FROM users u
-            LEFT JOIN departments d ON u.department_id = d.id
+            LEFT JOIN departments d  ON u.department_id  = d.id
+            LEFT JOIN departments wh ON u.warehouse_id   = wh.id
+            LEFT JOIN volunteer_profiles vp ON vp.user_id = u.id
             WHERE " . implode(' AND ', $where) . "
             ORDER BY u.name";
-    
+
     $volunteers = dbFetchAll($sql, $params);
-    
-    // Clean output buffer
-    if (ob_get_level()) {
-        ob_end_clean();
-    }
-    
-    // Set headers
+
+    if (ob_get_level()) ob_end_clean();
+
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="volunteers_' . date('Y-m-d_His') . '.csv"');
-    
-    $output = fopen('php://output', 'w');
-    fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
-    
-    // Headers
-    fputcsv($output, [
-        'ID',
-        'Όνομα',
-        'Email',
-        'Τηλέφωνο',
-        'Τμήμα',
-        'Ρόλος',
-        'Ενεργός',
-        'Πόντοι'
+
+    $out = fopen('php://output', 'w');
+    fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
+
+    $roleLabels = [
+        ROLE_SYSTEM_ADMIN    => 'SYSTEM_ADMIN',
+        ROLE_DEPARTMENT_ADMIN => 'DEPARTMENT_ADMIN',
+        ROLE_SHIFT_LEADER    => 'SHIFT_LEADER',
+        ROLE_VOLUNTEER       => 'VOLUNTEER',
+    ];
+    $vtypes = ['VOLUNTEER' => 'VOLUNTEER', 'TRAINEE_RESCUER' => 'TRAINEE_RESCUER', 'RESCUER' => 'RESCUER'];
+
+    fputcsv($out, [
+        'ID', 'Όνομα', 'Email', 'Τηλέφωνο', 'Ταυτότητα', 'ΑΜΚΑ',
+        'Δίπλωμα Οδήγησης', 'Πινακίδα Οχήματος',
+        'Παντελόνι', 'Μπλούζα', 'Μπλάκετ', 'Fleece',
+        'Μητρώο Επίδρασης', 'Μητρώο ΓΓΠΠ',
+        'Ρόλος', 'Τύπος Εθελοντή', 'Ενεργός', 'Πόντοι',
+        'Τμήμα', 'Αποθήκη/Παράρτημα',
+        'Διεύθυνση', 'Πόλη', 'ΤΚ',
+        'Επαφή Έκτακτης Ανάγκης', 'Τηλ. Επαφής Έκτακτης',
+        'Ομάδα Αίματος', 'Βιογραφικό', 'Ιατρικές Σημειώσεις',
+        'Διαθ. Καθημερινές', 'Διαθ. Σαββ/κα', 'Διαθ. Βράδια',
+        'Έχει Δίπλωμα Οδήγησης', 'Έχει Πρώτες Βοήθειες',
     ]);
-    
-    // Data
+
+    $yn = fn($v) => $v ? 'Ναι' : 'Όχι';
+
     foreach ($volunteers as $v) {
-        fputcsv($output, [
+        fputcsv($out, [
             $v['id'],
             $v['name'],
             $v['email'],
             $v['phone'],
+            $v['id_card'],
+            $v['amka'],
+            $v['driving_license'],
+            $v['vehicle_plate'],
+            $v['pants_size'],
+            $v['shirt_size'],
+            $v['blouse_size'],
+            $v['fleece_size'],
+            $v['registry_epidrasis'],
+            $v['registry_ggpp'],
+            $roleLabels[$v['role']] ?? $v['role'],
+            $v['volunteer_type'] ?? 'VOLUNTEER',
+            $yn($v['is_active']),
+            $v['total_points'],
             $v['department'],
-            $GLOBALS['ROLE_LABELS'][$v['role']] ?? $v['role'],
-            $v['is_active'] ? 'Ναι' : 'Όχι',
-            $v['total_points']
+            $v['warehouse'],
+            $v['address'],
+            $v['city'],
+            $v['postal_code'],
+            $v['emergency_contact_name'],
+            $v['emergency_contact_phone'],
+            $v['blood_type'],
+            $v['bio'],
+            $v['medical_notes'],
+            $yn($v['available_weekdays']),
+            $yn($v['available_weekends']),
+            $yn($v['available_nights']),
+            $yn($v['has_driving_license']),
+            $yn($v['has_first_aid']),
         ]);
     }
-    
-    fclose($output);
+
+    fclose($out);
     exit;
 }
+
 
 /**
  * Export participations to CSV
