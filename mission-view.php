@@ -120,6 +120,43 @@ if (isPost()) {
             }
             break;
             
+        case 'resend_email':
+            if (isAdmin() && $mission['status'] === STATUS_OPEN) {
+                $allUsers = dbFetchAll(
+                    "SELECT id, name, email FROM users WHERE is_active = 1 AND deleted_at IS NULL"
+                );
+                $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id;
+                $appName = getSetting('app_name', 'VolunteerOps');
+                $sent = 0;
+                foreach ($allUsers as $v) {
+                    sendNotification(
+                        $v['id'],
+                        'Υπενθύμιση Αποστολής: ' . $mission['title'],
+                        'Η αποστολή είναι ακόμα ανοιχτή και αναζητά εθελοντές. Δείτε τις διαθέσιμες βάρδιες.'
+                    );
+                    if (!empty($v['email'])) {
+                        $subject = '[' . $appName . '] Υπενθύμιση Αποστολής: ' . $mission['title'];
+                        $body = '
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+  <h2 style="color:#fd7e14">Υπενθύμιση Αποστολής</h2>
+  <p>Γεια σου <strong>' . htmlspecialchars($v['name']) . '</strong>,</p>
+  <p>Η παρακάτω αποστολή είναι ακόμα ανοιχτή και αναζητά εθελοντές:</p>
+  <h3 style="color:#198754">' . htmlspecialchars($mission['title']) . '</h3>
+  ' . (!empty($mission['description']) ? '<p>' . nl2br(htmlspecialchars($mission['description'])) . '</p>' : '') . '
+  <p>
+    <a href="' . $missionUrl . '" style="background:#fd7e14;color:#fff;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block">Δείτε την Αποστολή</a>
+  </p>
+  <p style="color:#6c757d;font-size:0.9em">&mdash; ' . $appName . '</p>
+</div>';
+                        sendEmail($v['email'], $subject, $body);
+                        $sent++;
+                    }
+                }
+                logAudit('resend_mission_email', 'missions', $id);
+                setFlash('success', 'Στάλθηκε υπενθύμιση σε ' . $sent . ' χρήστες.');
+            }
+            break;
+
         case 'publish':
             if (isAdmin() && $mission['status'] === STATUS_DRAFT) {
                 dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_OPEN, $id]);
@@ -136,11 +173,10 @@ if (isPost()) {
                     logAudit('auto_create_shift', 'shifts', $id, 'Αυτόματη δημιουργία βαρδίας κατά τη δημοσίευση');
                 }
 
-                // Notify volunteers if checkbox was checked (default: yes)
+                // Notify all active users if checkbox was checked (default: yes)
                 if (isset($_POST['notify_volunteers'])) {
                     $volunteers = dbFetchAll(
-                        "SELECT id, name, email FROM users WHERE role = ? AND is_active = 1",
-                        [ROLE_VOLUNTEER]
+                        "SELECT id, name, email FROM users WHERE is_active = 1 AND deleted_at IS NULL"
                     );
                     $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id;
                     $appName = getSetting('app_name', 'VolunteerOps');
@@ -170,7 +206,7 @@ if (isPost()) {
                         }
                     }
                     $count = count($volunteers);
-                    setFlash('success', 'Η αποστολή δημοσιεύτηκε και στάλθηκε ειδοποίηση σε ' . $count . ' εθελοντές.');
+                    setFlash('success', 'Η αποστολή δημοσιεύτηκε και στάλθηκε ειδοποίηση σε ' . $count . ' χρήστες.');
                 } else {
                     setFlash('success', 'Η αποστολή δημοσιεύτηκε.');
                 }
@@ -592,7 +628,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="form-check mb-2">
                                 <input class="form-check-input" type="checkbox" name="notify_volunteers" id="notifyVolunteers" value="1" checked>
                                 <label class="form-check-label small" for="notifyVolunteers">
-                                    <i class="bi bi-envelope me-1"></i>Αποστολή email σε όλους τους εθελοντές
+                                    <i class="bi bi-envelope me-1"></i>Αποστολή email σε όλους τους χρήστες
                                 </label>
                             </div>
                             <button type="submit" class="btn btn-success w-100">
@@ -607,6 +643,13 @@ include __DIR__ . '/includes/header.php';
                             <input type="hidden" name="action" value="close">
                             <button type="submit" class="btn btn-warning w-100">
                                 <i class="bi bi-lock me-1"></i>Κλείσιμο Αιτήσεων
+                            </button>
+                        </form>
+                        <form method="post">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="resend_email">
+                            <button type="submit" class="btn btn-outline-primary w-100">
+                                <i class="bi bi-envelope-arrow-up me-1"></i>Επαναποστολή Email
                             </button>
                         </form>
                         <a href="attendance.php?mission_id=<?= $mission['id'] ?>" class="btn btn-info w-100">
