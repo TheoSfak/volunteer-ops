@@ -14,7 +14,8 @@ if (!defined('VOLUNTEEROPS')) {
  * Run all pending migrations.
  * Add new migrations at the bottom of the $migrations array.
  */
-function runMigrations(): void {
+if (!function_exists('runSchemaMigrations')) {
+function runSchemaMigrations(): void {
     // Read current schema version (0 = fresh install, no migrations tracked yet)
     try {
         $currentVersion = (int) dbFetchValue(
@@ -99,7 +100,8 @@ function runMigrations(): void {
             [(string) $highest]
         );
     }
-}
+} // end function runSchemaMigrations
+} // end function_exists check
 
 // Run on every request (fast: single SELECT if already up-to-date)
-runMigrations();
+runSchemaMigrations();
