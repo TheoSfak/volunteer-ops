@@ -234,65 +234,77 @@ $countUrl = 'newsletter-form.php?action=count_recipients';
     </div>
 </form>
 
-<!-- Summernote CDN -->
+<!-- Summernote CSS (can load early, no JS dependency) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.css">
+
+<?php include __DIR__ . '/includes/footer.php'; ?>
+
+<!-- Summernote JS — loaded AFTER footer.php so jQuery is available -->
 <script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/lang/summernote-el-GR.min.js"></script>
 
 <script>
-// Summernote init
-$('#bodyHtml').summernote({
-    lang: 'el-GR',
-    height: 420,
-    toolbar: [
-        ['style', ['style']],
-        ['font', ['bold','italic','underline','clear']],
-        ['color', ['color']],
-        ['para', ['ul','ol','paragraph']],
-        ['table', ['table']],
-        ['insert', ['link','picture','hr']],
-        ['view', ['fullscreen','codeview']]
-    ],
-    callbacks: {
-        onInit: function() { updateRecipientCount(); }
-    }
-});
-
-// Insert tag into Summernote body
-document.querySelectorAll('.tag-insert').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-        $('#bodyHtml').summernote('insertText', this.dataset.tag);
+$(function() {
+    // Summernote init
+    $('#bodyHtml').summernote({
+        lang: 'el-GR',
+        height: 420,
+        toolbar: [
+            ['style', ['style']],
+            ['font', ['bold','italic','underline','clear']],
+            ['color', ['color']],
+            ['para', ['ul','ol','paragraph']],
+            ['table', ['table']],
+            ['insert', ['link','picture','hr']],
+            ['view', ['fullscreen','codeview']]
+        ],
+        callbacks: {
+            onInit: function() { updateRecipientCount(); }
+        }
     });
-});
 
-// Load from template
-document.getElementById('loadTemplate').addEventListener('change', function() {
-    var sel = this.options[this.selectedIndex];
-    if (!sel.value) return;
-    if (!confirm('Αντικατάσταση θέματος και σώματος από το πρότυπο "' + sel.text + '";')) return;
-    document.getElementById('subjectField').value = sel.dataset.subject;
-    $('#bodyHtml').summernote('code', sel.dataset.body);
-    this.value = '';
-});
+    // Insert tag into Summernote at cursor position.
+    // Use mousedown + preventDefault to prevent focus/cursor loss before click fires.
+    $(document).on('mousedown', '.tag-insert', function(e) {
+        e.preventDefault(); // keeps Summernote focused so cursor stays in place
+        $('#bodyHtml').summernote('insertText', $(this).data('tag'));
+    });
 
-// Live recipient count
-function updateRecipientCount() {
-    var roles = [];
-    document.querySelectorAll('.role-check:checked').forEach(function(cb) { roles.push(cb.value); });
-    var deptId = document.getElementById('deptFilter').value;
-    var params = new URLSearchParams();
-    roles.forEach(function(r) { params.append('roles[]', r); });
-    if (deptId) params.append('dept_id', deptId);
-    fetch('<?= $countUrl ?>&' + params.toString())
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            document.getElementById('recipientCount').textContent = data.count;
-        });
-}
-document.querySelectorAll('.role-check').forEach(function(cb) {
-    cb.addEventListener('change', updateRecipientCount);
+    // Load from template
+    $('#loadTemplate').on('change', function() {
+        var sel = this.options[this.selectedIndex];
+        if (!sel.value) return;
+        if (!confirm('Αντικατάσταση θέματος και σώματος από το πρότυπο "' + sel.text + '";')) return;
+        $('#subjectField').val($(sel).data('subject'));
+        $('#bodyHtml').summernote('code', $(sel).data('body'));
+        this.value = '';
+    });
+
+    // Force Summernote to sync textarea content before form submit
+    $('#newsletterForm').on('submit', function() {
+        var html = $('#bodyHtml').summernote('code');
+        $('textarea[name="body_html"]').val(html);
+    });
+
+    // Live recipient count
+    function updateRecipientCount() {
+        var roles = [];
+        $('.role-check:checked').each(function() { roles.push(this.value); });
+        var deptId = $('#deptFilter').val();
+        var params = new URLSearchParams();
+        $.each(roles, function(i, r) { params.append('roles[]', r); });
+        if (deptId) params.append('dept_id', deptId);
+        fetch('<?= $countUrl ?>&' + params.toString())
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                $('#recipientCount').text(data.count);
+            })
+            .catch(function() {
+                $('#recipientCount').text('—');
+            });
+    }
+
+    $('.role-check').on('change', updateRecipientCount);
+    $('#deptFilter').on('change', updateRecipientCount);
 });
-document.getElementById('deptFilter').addEventListener('change', updateRecipientCount);
 </script>
-
-<?php include __DIR__ . '/includes/footer.php'; ?>
