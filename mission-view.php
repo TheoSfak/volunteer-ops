@@ -124,7 +124,46 @@ if (isPost()) {
             if (isAdmin() && $mission['status'] === STATUS_DRAFT) {
                 dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_OPEN, $id]);
                 logAudit('publish', 'missions', $id);
-                setFlash('success', 'Η αποστολή δημοσιεύτηκε.');
+
+                // Notify volunteers if checkbox was checked (default: yes)
+                if (isset($_POST['notify_volunteers'])) {
+                    $volunteers = dbFetchAll(
+                        "SELECT id, name, email FROM users WHERE role = ? AND is_active = 1",
+                        [ROLE_VOLUNTEER]
+                    );
+                    $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id;
+                    $appName = getSetting('app_name', 'VolunteerOps');
+                    foreach ($volunteers as $v) {
+                        // In-app notification
+                        sendNotification(
+                            $v['id'],
+                            'Νέα Αποστολή: ' . $mission['title'],
+                            'Μια νέα αποστολή δημοσιεύτηκε και αναζητά εθελοντές. Δείτε τις διαθέσιμες βάρδιες.'
+                        );
+                        // Email
+                        if (!empty($v['email'])) {
+                            $subject = '[' . $appName . '] Νέα Αποστολή: ' . $mission['title'];
+                            $body = '
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+  <h2 style="color:#0d6efd">Νέα Αποστολή Διαθέσιμη</h2>
+  <p>Γεια σου <strong>' . htmlspecialchars($v['name']) . '</strong>,</p>
+  <p>Μια νέα αποστολή δημοσιεύτηκε και αναζητά εθελοντές:</p>
+  <h3 style="color:#198754">' . htmlspecialchars($mission['title']) . '</h3>
+  ' . (!empty($mission['description']) ? '<p>' . nl2br(htmlspecialchars($mission['description'])) . '</p>' : '') . '
+  <p>
+    <a href="' . $missionUrl . '" style="background:#0d6efd;color:#fff;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block">Δείτε την Αποστολή</a>
+  </p>
+  <p style="color:#6c757d;font-size:0.9em">— ' . $appName . '</p>
+</div>';
+                            sendEmail($v['email'], $subject, $body);
+                        }
+                    }
+                    $count = count($volunteers);
+                    setFlash('success', 'Η αποστολή δημοσιεύτηκε και στάλθηκε ειδοποίηση σε ' . $count . ' εθελοντές.');
+                } else {
+                    setFlash('success', 'Η αποστολή δημοσιεύτηκε.');
+                }
+
                 redirect('mission-view.php?id=' . $id);
             }
             break;
@@ -539,6 +578,12 @@ include __DIR__ . '/includes/header.php';
                         <form method="post">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="publish">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" name="notify_volunteers" id="notifyVolunteers" value="1" checked>
+                                <label class="form-check-label small" for="notifyVolunteers">
+                                    <i class="bi bi-envelope me-1"></i>Αποστολή email σε όλους τους εθελοντές
+                                </label>
+                            </div>
                             <button type="submit" class="btn btn-success w-100">
                                 <i class="bi bi-send me-1"></i>Δημοσίευση
                             </button>
