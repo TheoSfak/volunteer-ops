@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.5.0');
+define('APP_VERSION', '3.5.1');
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
@@ -19,7 +19,17 @@ if (file_exists(__DIR__ . '/config.local.php')) {
 }
 
 // BASE_URL can be overridden in config.local.php
-if (!defined('BASE_URL')) define('BASE_URL', 'http://localhost/volunteerops');
+// If not set, auto-detect from the server environment (works on both localhost and production)
+if (!defined('BASE_URL')) {
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $docRoot = rtrim(str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+    $appRoot = rtrim(str_replace('\\', '/', __DIR__), '/');
+    $subPath = ($docRoot && strpos($appRoot, $docRoot) === 0)
+        ? substr($appRoot, strlen($docRoot))
+        : '';
+    define('BASE_URL', $scheme . '://' . $host . $subPath);
+}
 
 // Database defaults - overridden by config.local.php
 if (!defined('DB_HOST')) define('DB_HOST', 'localhost');
