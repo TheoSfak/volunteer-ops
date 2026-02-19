@@ -60,13 +60,55 @@ function runSchemaMigrations(): void {
         ],
 
         // ── Add future migrations below this line ──────────────────────────
-        // [
-        //     'version'     => 2,
-        //     'description' => 'Example: add foo column to bar table',
-        //     'up' => function () {
-        //         dbExecute("ALTER TABLE bar ADD COLUMN foo VARCHAR(100) NULL");
-        //     },
-        // ],
+
+        [
+            'version'     => 2,
+            'description' => 'Create inventory booking triggers (trg_booking_insert, trg_booking_return)',
+            'up' => function () {
+                // Only run if inventory_bookings table exists
+                $tableExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME = 'inventory_bookings'"
+                );
+                if (!$tableExists) return;
+
+                $pdo = db();
+
+                // trg_booking_insert: mark item as booked on active booking insert
+                // Uses WHERE ... AND NEW.status = 'active' instead of IF/BEGIN/END
+                // so it works without DELIMITER in PDO
+                $pdo->exec("DROP TRIGGER IF EXISTS `trg_booking_insert`");
+                $pdo->exec("
+                    CREATE TRIGGER `trg_booking_insert`
+                    AFTER INSERT ON `inventory_bookings`
+                    FOR EACH ROW
+                      UPDATE `inventory_items`
+                      SET `status`              = 'booked',
+                          `booked_by_user_id`   = NEW.user_id,
+                          `booked_by_name`      = NEW.volunteer_name,
+                          `booking_date`        = NEW.created_at,
+                          `expected_return_date`= NEW.expected_return_date
+                      WHERE `id` = NEW.item_id
+                        AND NEW.status = 'active'
+                ");
+
+                // trg_booking_return: mark item as available when booking returned/lost
+                // Uses IF() function instead of IF/THEN/END IF to avoid BEGIN/END
+                $pdo->exec("DROP TRIGGER IF EXISTS `trg_booking_return`");
+                $pdo->exec("
+                    CREATE TRIGGER `trg_booking_return`
+                    AFTER UPDATE ON `inventory_bookings`
+                    FOR EACH ROW
+                      UPDATE `inventory_items`
+                      SET `status`            = IF(NEW.status IN ('returned','lost') AND OLD.status NOT IN ('returned','lost'), 'available',   `status`),
+                          `booked_by_user_id` = IF(NEW.status IN ('returned','lost') AND OLD.status NOT IN ('returned','lost'), NULL,          `booked_by_user_id`),
+                          `booked_by_name`    = IF(NEW.status IN ('returned','lost') AND OLD.status NOT IN ('returned','lost'), NULL,          `booked_by_name`),
+                          `booking_date`      = IF(NEW.status IN ('returned','lost') AND OLD.status NOT IN ('returned','lost'), NULL,          `booking_date`)
+                      WHERE `id` = NEW.item_id
+                ");
+            },
+        ],
 
     ];
     // ────────────────────────────────────────────────────────────────────────
