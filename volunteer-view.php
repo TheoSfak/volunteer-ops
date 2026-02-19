@@ -72,10 +72,84 @@ if (isPost()) {
         setFlash('success', 'Τα προσωπικά δεδομένα διαγράφηκαν επιτυχώς.');
         redirect('volunteers.php');
     }
+
+    if ($action === 'upload_document') {
+        if (!isAdmin()) {
+            setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
+            redirect('volunteer-view.php?id=' . $id);
+        }
+        $label = trim(post('doc_label'));
+        if (empty($label)) {
+            setFlash('error', 'Παρακαλώ δώστε τίτλο στο αρχείο.');
+            redirect('volunteer-view.php?id=' . $id . '#documents');
+        }
+        if (empty($_FILES['doc_file']['tmp_name'])) {
+            setFlash('error', 'Παρακαλώ επιλέξτε αρχείο.');
+            redirect('volunteer-view.php?id=' . $id . '#documents');
+        }
+        $allowedMime = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif',
+                        'image/webp', 'application/msword',
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+        $allowedExt  = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'doc', 'docx'];
+        $tmpName     = $_FILES['doc_file']['tmp_name'];
+        $origName    = basename($_FILES['doc_file']['name']);
+        $ext         = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+        $finfo       = new finfo(FILEINFO_MIME_TYPE);
+        $mime        = $finfo->file($tmpName);
+        if (!in_array($ext, $allowedExt) || !in_array($mime, $allowedMime)) {
+            setFlash('error', 'Μη επιτρεπτός τύπος αρχείου. Επιτρέπονται: PDF, JPG, PNG, DOC, DOCX.');
+            redirect('volunteer-view.php?id=' . $id . '#documents');
+        }
+        $maxSize = 15 * 1024 * 1024; // 15MB
+        if ($_FILES['doc_file']['size'] > $maxSize) {
+            setFlash('error', 'Το αρχείο υπερβαίνει το μέγιστο επιτρεπτό μέγεθος (15MB).');
+            redirect('volunteer-view.php?id=' . $id . '#documents');
+        }
+        $storedName = 'vdoc_' . $id . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+        $destDir    = __DIR__ . '/uploads/volunteer-docs/';
+        if (!is_dir($destDir)) mkdir($destDir, 0755, true);
+        if (!move_uploaded_file($tmpName, $destDir . $storedName)) {
+            setFlash('error', 'Αποτυχία αποθήκευσης αρχείου.');
+            redirect('volunteer-view.php?id=' . $id . '#documents');
+        }
+        dbInsert(
+            "INSERT INTO volunteer_documents (user_id, label, original_name, stored_name, mime_type, file_size, uploaded_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+            [$id, $label, $origName, $storedName, $mime, $_FILES['doc_file']['size'], getCurrentUserId()]
+        );
+        logAudit('upload_document', 'volunteer_documents', $id, $label);
+        setFlash('success', 'Το αρχείο «' . h($label) . '» ανέβηκε επιτυχώς.');
+        redirect('volunteer-view.php?id=' . $id . '#documents');
+    }
+
+    if ($action === 'delete_document') {
+        if (!isAdmin()) {
+            setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
+            redirect('volunteer-view.php?id=' . $id);
+        }
+        $docId = (int) post('doc_id');
+        $doc   = dbFetchOne("SELECT * FROM volunteer_documents WHERE id = ? AND user_id = ?", [$docId, $id]);
+        if ($doc) {
+            $filePath = __DIR__ . '/uploads/volunteer-docs/' . $doc['stored_name'];
+            if (file_exists($filePath)) unlink($filePath);
+            dbExecute("DELETE FROM volunteer_documents WHERE id = ?", [$docId]);
+            logAudit('delete_document', 'volunteer_documents', $docId, $doc['label']);
+            setFlash('success', 'Το αρχείο διαγράφηκε.');
+        }
+        redirect('volunteer-view.php?id=' . $id . '#documents');
+    }
 }
 
 // Get profile
 $profile = dbFetchOne("SELECT * FROM volunteer_profiles WHERE user_id = ?", [$id]);
+
+// Get documents
+$documents = dbFetchAll(
+    "SELECT vd.*, u.name as uploader_name FROM volunteer_documents vd
+     LEFT JOIN users u ON vd.uploaded_by = u.id
+     WHERE vd.user_id = ? ORDER BY vd.created_at DESC",
+    [$id]
+);
 
 // Get skills
 $skills = dbFetchAll(
@@ -485,6 +559,60 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
         
+        <!-- Documents -->
+        <div class="card mb-4" id="documents">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-folder2-open me-1"></i>Αρχεία & Έγγραφα</h5>
+                <?php if (isAdmin()): ?>
+                <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#uploadDocModal">
+                    <i class="bi bi-upload me-1"></i>Ανέβασμα
+                </button>
+                <?php endif; ?>
+            </div>
+            <div class="card-body p-0">
+                <?php if (empty($documents)): ?>
+                    <p class="text-muted p-3 mb-0">Δεν υπάρχουν αρχεία.</p>
+                <?php else: ?>
+                    <ul class="list-group list-group-flush">
+                        <?php foreach ($documents as $doc): ?>
+                            <?php
+                                $isImage = str_starts_with($doc['mime_type'], 'image/');
+                                $icon    = $isImage ? 'bi-file-image text-info' : 'bi-file-pdf text-danger';
+                                if ($doc['mime_type'] === 'application/msword' || $doc['mime_type'] === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+                                    $icon = 'bi-file-word text-primary';
+                                }
+                                $sizeKb = round($doc['file_size'] / 1024);
+                            ?>
+                            <li class="list-group-item">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <div>
+                                        <i class="bi <?= $icon ?> me-1"></i>
+                                        <a href="volunteer-doc-download.php?id=<?= $doc['id'] ?>&volunteer=<?= $id ?>" target="_blank" class="fw-semibold text-decoration-none">
+                                            <?= h($doc['label']) ?>
+                                        </a>
+                                        <br>
+                                        <small class="text-muted"><?= h($doc['original_name']) ?> &middot; <?= $sizeKb ?>KB &middot; <?= formatDate($doc['created_at']) ?></small>
+                                        <br>
+                                        <small class="text-muted"><i class="bi bi-person me-1"></i><?= h($doc['uploader_name']) ?></small>
+                                    </div>
+                                    <?php if (isAdmin()): ?>
+                                    <form method="post" onsubmit="return confirm('Διαγραφή αρχείου;')">
+                                        <?= csrfField() ?>
+                                        <input type="hidden" name="action" value="delete_document">
+                                        <input type="hidden" name="doc_id" value="<?= $doc['id'] ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                    <?php endif; ?>
+                                </div>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <!-- Points History -->
         <div class="card">
             <div class="card-header">
@@ -510,6 +638,39 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<!-- Upload Document Modal -->
+<?php if (isAdmin()): ?>
+<div class="modal fade" id="uploadDocModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-upload me-2"></i>Ανέβασμα Αρχείου</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" enctype="multipart/form-data">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="upload_document">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Τίτλος / Περιγραφή <span class="text-danger">*</span></label>
+                        <input type="text" name="doc_label" class="form-control" placeholder="π.χ. Δίπλωμα Α' Βοηθειών, Πτυχίο ΑΕΙ..." required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Αρχείο <span class="text-danger">*</span></label>
+                        <input type="file" name="doc_file" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx" required>
+                        <div class="form-text">Επιτρεπτοί τύποι: PDF, JPG, PNG, DOC, DOCX. Μέγιστο μέγεθος: 15MB</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-success"><i class="bi bi-upload me-1"></i>Ανέβασμα</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- Delete Personal Data Modal -->
 <div class="modal fade" id="deleteDataModal" tabindex="-1">
