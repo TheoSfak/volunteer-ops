@@ -1,10 +1,11 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Inventory Booking (Checkout / Return)
  * Allows booking an item to a volunteer / returning it.
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
 

@@ -1,10 +1,11 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Inventory Item View
  * Displays item details, booking history, notes, and quick actions.
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
 

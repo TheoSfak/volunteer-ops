@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - View Mission
  */
@@ -6,7 +6,7 @@
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 
-$id = get('id');
+$id = (int) get('id');
 if (!$id) {
     redirect('missions.php');
 }
@@ -34,8 +34,8 @@ $user = getCurrentUser();
 // Get shifts
 $shifts = dbFetchAll(
     "SELECT s.*,
-            (SELECT COUNT(*) FROM participation_requests WHERE shift_id = s.id AND status = 'APPROVED') as approved_count,
-            (SELECT COUNT(*) FROM participation_requests WHERE shift_id = s.id AND status = 'PENDING') as pending_count
+            (SELECT COUNT(*) FROM participation_requests WHERE shift_id = s.id AND status = '" . PARTICIPATION_APPROVED . "') as approved_count,
+            (SELECT COUNT(*) FROM participation_requests WHERE shift_id = s.id AND status = '" . PARTICIPATION_PENDING . "') as pending_count
      FROM shifts s
      WHERE s.mission_id = ?
      ORDER BY s.start_time ASC",
@@ -82,9 +82,10 @@ $availableVolunteers = [];
 if (isAdmin()) {
     $availableVolunteers = dbFetchAll(
         "SELECT id, name, email FROM users 
-         WHERE role = 'VOLUNTEER' 
+         WHERE role = ? 
            AND is_active = 1
-         ORDER BY name"
+         ORDER BY name",
+        [ROLE_VOLUNTEER]
     );
 }
 

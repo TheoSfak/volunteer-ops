@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Inventory Notes Management (Admin)
  * Centralized view of all inventory notes/deficiencies.
@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
 requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);

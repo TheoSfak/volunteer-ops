@@ -106,36 +106,62 @@ function hasRole($role) {
 }
 
 /**
- * Login user
+ * Login user — with brute-force protection (5 attempts / 15 minutes per IP)
+ * and session fixation prevention.
  */
 function login($email, $password) {
+    $ip  = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $key = 'login_attempts_' . md5($ip);
+
+    // --- Rate limiting ---
+    $attempts = $_SESSION[$key] ?? ['count' => 0, 'since' => time()];
+
+    // Reset window if older than 15 minutes
+    if ((time() - $attempts['since']) > 900) {
+        $attempts = ['count' => 0, 'since' => time()];
+    }
+
+    if ($attempts['count'] >= 5) {
+        $wait = max(0, (int)ceil((900 - (time() - $attempts['since'])) / 60));
+        return [
+            'success' => false,
+            'message' => "Πολλές αποτυχημένες συνδέσεις. Παρακαλώ περιμένετε $wait λεπτά και δοκιμάστε ξανά.",
+        ];
+    }
+
+    // --- Lookup user ---
     $user = dbFetchOne("SELECT * FROM users WHERE email = ?", [$email]);
-    
-    if (!$user) {
+
+    if (!$user || !password_verify($password, $user['password'])) {
+        $attempts['count']++;
+        $_SESSION[$key] = $attempts;
         return ['success' => false, 'message' => 'Λάθος email ή κωδικός.'];
     }
-    
+
     if (!$user['is_active']) {
         return ['success' => false, 'message' => 'Ο λογαριασμός σας είναι απενεργοποιημένος.'];
     }
-    
-    if (!password_verify($password, $user['password'])) {
-        return ['success' => false, 'message' => 'Λάθος email ή κωδικός.'];
-    }
-    
-    // Set session
-    $_SESSION['user_id'] = $user['id'];
-    $_SESSION['user_name'] = $user['name'];
+
+    // --- Success: clear rate-limit, regenerate session, set data ---
+    unset($_SESSION[$key]);
+
+    // Prevent session fixation: bind the session to the new authenticated user
+    session_regenerate_id(true);
+    // Regenerate CSRF token for the new session
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+
+    $_SESSION['user_id']    = $user['id'];
+    $_SESSION['user_name']  = $user['name'];
     $_SESSION['user_email'] = $user['email'];
-    $_SESSION['user_role'] = $user['role'];
+    $_SESSION['user_role']  = $user['role'];
     $_SESSION['login_time'] = time();
-    
+
     // Update last login
     dbExecute("UPDATE users SET updated_at = NOW() WHERE id = ?", [$user['id']]);
-    
+
     // Log action
-    logAudit('login', 'users', $user['id'], null, ['ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown']);
-    
+    logAudit('login', 'users', $user['id'], null, ['ip' => $ip]);
+
     return ['success' => true, 'user' => $user];
 }
 

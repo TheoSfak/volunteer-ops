@@ -29,24 +29,26 @@ if (isAdmin()) {
             array_merge([$year], $params)
         ),
         'missions_open' => dbFetchValue(
-            "SELECT COUNT(*) FROM missions m WHERE status = 'OPEN' AND YEAR(start_datetime) = ? $departmentFilter",
+            "SELECT COUNT(*) FROM missions m WHERE status = '" . STATUS_OPEN . "' AND YEAR(start_datetime) = ? $departmentFilter",
             array_merge([$year], $params)
         ),
         'missions_completed' => dbFetchValue(
-            "SELECT COUNT(*) FROM missions m WHERE status = 'COMPLETED' AND YEAR(start_datetime) = ? $departmentFilter",
+            "SELECT COUNT(*) FROM missions m WHERE status = '" . STATUS_COMPLETED . "' AND YEAR(start_datetime) = ? $departmentFilter",
             array_merge([$year], $params)
         ),
         'volunteers_total' => dbFetchValue(
-            "SELECT COUNT(*) FROM users WHERE role = 'VOLUNTEER'"
+            "SELECT COUNT(*) FROM users WHERE role = ?",
+            [ROLE_VOLUNTEER]
         ),
         'volunteers_active' => dbFetchValue(
-            "SELECT COUNT(*) FROM users WHERE role = 'VOLUNTEER' AND is_active = 1"
+            "SELECT COUNT(*) FROM users WHERE role = ? AND is_active = 1",
+            [ROLE_VOLUNTEER]
         ),
         'pending_requests' => dbFetchValue(
             "SELECT COUNT(*) FROM participation_requests pr 
              JOIN shifts s ON pr.shift_id = s.id 
              JOIN missions m ON s.mission_id = m.id 
-             WHERE pr.status = 'PENDING' $departmentFilter",
+             WHERE pr.status = '" . PARTICIPATION_PENDING . "' $departmentFilter",
             $params
         ),
         'total_hours_this_month' => dbFetchValue(
@@ -75,44 +77,54 @@ if (isAdmin()) {
     // Calculate completion rate
     $completedThisMonth = dbFetchValue(
         "SELECT COUNT(*) FROM missions m 
-         WHERE status = 'COMPLETED' AND DATE_FORMAT(start_datetime, '%Y-%m') = ? $departmentFilter",
+         WHERE status = '" . STATUS_COMPLETED . "' AND DATE_FORMAT(start_datetime, '%Y-%m') = ? $departmentFilter",
         array_merge([$currentMonth], $params)
     );
     $totalThisMonth = dbFetchValue(
         "SELECT COUNT(*) FROM missions m 
-         WHERE DATE_FORMAT(start_datetime, '%Y-%m') = ? AND status != 'DRAFT' $departmentFilter",
+         WHERE DATE_FORMAT(start_datetime, '%Y-%m') = ? AND status != '" . STATUS_DRAFT . "' $departmentFilter",
         array_merge([$currentMonth], $params)
     );
     $stats['completion_rate'] = $totalThisMonth > 0 ? round(($completedThisMonth / $totalThisMonth) * 100) : 0;
     
-    // Get monthly stats for chart (last 6 months)
+    // Get monthly stats for chart (last 6 months) — 2 queries instead of 18
+    $sixMonthsAgo = date('Y-m-01', strtotime('-5 months'));
+    $nextMonth    = date('Y-m-01', strtotime('+1 month'));
+
+    $missionRows = dbFetchAll(
+        "SELECT DATE_FORMAT(start_datetime, '%Y-%m') as month, COUNT(*) as missions
+         FROM missions m
+         WHERE start_datetime >= ? AND start_datetime < ? $departmentFilter
+         GROUP BY DATE_FORMAT(start_datetime, '%Y-%m')",
+        array_merge([$sixMonthsAgo, $nextMonth], $params)
+    );
+    $missionsMap = array_column($missionRows, 'missions', 'month');
+
+    $prRows = dbFetchAll(
+        "SELECT DATE_FORMAT(s.start_time, '%Y-%m') as month,
+                COUNT(DISTINCT pr.volunteer_id) as volunteers,
+                COALESCE(SUM(pr.actual_hours), 0) as hours
+         FROM participation_requests pr
+         JOIN shifts s ON pr.shift_id = s.id
+         JOIN missions m ON s.mission_id = m.id
+         WHERE pr.attended = 1 AND s.start_time >= ? AND s.start_time < ? $departmentFilter
+         GROUP BY DATE_FORMAT(s.start_time, '%Y-%m')",
+        array_merge([$sixMonthsAgo, $nextMonth], $params)
+    );
+    $volunteersMap = array_column($prRows, 'volunteers', 'month');
+    $hoursMap      = array_column($prRows, 'hours', 'month');
+
     $monthlyStats = [];
     for ($i = 5; $i >= 0; $i--) {
         $month = date('Y-m', strtotime("-$i months"));
-        $monthLabel = date('M Y', strtotime("-$i months"));
         $monthlyStats[] = [
-            'month' => $monthLabel,
-            'missions' => dbFetchValue(
-                "SELECT COUNT(*) FROM missions m WHERE DATE_FORMAT(start_datetime, '%Y-%m') = ? $departmentFilter",
-                array_merge([$month], $params)
-            ),
-            'volunteers' => dbFetchValue(
-                "SELECT COUNT(DISTINCT pr.volunteer_id) FROM participation_requests pr
-                 JOIN shifts s ON pr.shift_id = s.id
-                 JOIN missions m ON s.mission_id = m.id
-                 WHERE pr.attended = 1 AND DATE_FORMAT(s.start_time, '%Y-%m') = ? $departmentFilter",
-                array_merge([$month], $params)
-            ),
-            'hours' => dbFetchValue(
-                "SELECT COALESCE(SUM(pr.actual_hours), 0) FROM participation_requests pr
-                 JOIN shifts s ON pr.shift_id = s.id
-                 JOIN missions m ON s.mission_id = m.id
-                 WHERE pr.attended = 1 AND DATE_FORMAT(s.start_time, '%Y-%m') = ? $departmentFilter",
-                array_merge([$month], $params)
-            ),
+            'month'      => date('M Y', strtotime("-$i months")),
+            'missions'   => (int)($missionsMap[$month]   ?? 0),
+            'volunteers' => (int)($volunteersMap[$month] ?? 0),
+            'hours'      => (float)($hoursMap[$month]    ?? 0),
         ];
     }
-    
+
     // Top volunteers this month
     $topVolunteers = dbFetchAll(
         "SELECT u.id, u.name, u.total_points, 
@@ -122,11 +134,11 @@ if (isAdmin()) {
          LEFT JOIN participation_requests pr ON u.id = pr.volunteer_id 
              AND pr.attended = 1 
              AND DATE_FORMAT((SELECT start_time FROM shifts WHERE id = pr.shift_id), '%Y-%m') = ?
-         WHERE u.role = 'VOLUNTEER' AND u.is_active = 1
+         WHERE u.role = ? AND u.is_active = 1
          GROUP BY u.id
          ORDER BY u.total_points DESC
          LIMIT 5",
-        [$currentMonth]
+        [$currentMonth, ROLE_VOLUNTEER]
     );
     
     // Recent missions
@@ -152,7 +164,7 @@ if (isAdmin()) {
          JOIN users u ON pr.volunteer_id = u.id
          JOIN shifts s ON pr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
-         WHERE pr.status = 'PENDING' $departmentFilter
+         WHERE pr.status = '" . PARTICIPATION_PENDING . "' $departmentFilter
          ORDER BY pr.created_at DESC
          LIMIT 10",
         $params
@@ -161,12 +173,12 @@ if (isAdmin()) {
     // Volunteer statistics
     $stats = [
         'my_shifts' => dbFetchValue(
-            "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = 'APPROVED'",
-            [$user['id']]
+            "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = ?",
+            [$user['id'], PARTICIPATION_APPROVED]
         ),
         'pending_requests' => dbFetchValue(
-            "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = 'PENDING'",
-            [$user['id']]
+            "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = ?",
+            [$user['id'], PARTICIPATION_PENDING]
         ),
         'total_hours' => dbFetchValue(
             "SELECT COALESCE(SUM(
@@ -175,33 +187,34 @@ if (isAdmin()) {
             ), 0)
             FROM participation_requests pr
             JOIN shifts s ON pr.shift_id = s.id
-            WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1",
-            [$user['id']]
+            WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1",
+            [$user['id'], PARTICIPATION_APPROVED]
         ),
         'total_points' => $user['total_points'] ?? 0,
     ];
-    
+
     // My upcoming shifts
     $myShifts = dbFetchAll(
         "SELECT s.*, m.title as mission_title, m.location, pr.status as participation_status
          FROM participation_requests pr
          JOIN shifts s ON pr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
-         WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND s.start_time >= NOW()
+         WHERE pr.volunteer_id = ? AND pr.status = ? AND s.start_time >= NOW()
          ORDER BY s.start_time ASC
          LIMIT 5",
-        [$user['id']]
+        [$user['id'], PARTICIPATION_APPROVED]
     );
-    
+
     // Available missions to join
     $availableMissions = dbFetchAll(
         "SELECT m.*, d.name as department_name,
                 (SELECT COUNT(*) FROM shifts WHERE mission_id = m.id) as shift_count
          FROM missions m
          LEFT JOIN departments d ON m.department_id = d.id
-         WHERE m.status = 'OPEN' AND m.start_datetime >= NOW()
+         WHERE m.status = ? AND m.start_datetime >= NOW()
          ORDER BY m.start_datetime ASC
-         LIMIT 5"
+         LIMIT 5",
+        [STATUS_OPEN]
     );
 }
 

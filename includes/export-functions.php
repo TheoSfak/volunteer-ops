@@ -4,6 +4,11 @@
  * CSV export utilities for missions, volunteers, participations, and statistics
  */
 
+// Prevent direct access
+if (!defined('VOLUNTEEROPS')) {
+    die('Direct access not permitted');
+}
+
 /**
  * Export missions to CSV
  */
@@ -284,7 +289,7 @@ function exportStatisticsToCsv($period = 'monthly') {
                     COUNT(DISTINCT pr.volunteer_id) AS unique_volunteers
                 FROM missions m
                 LEFT JOIN shifts s ON m.id = s.mission_id
-                LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = 'PARTICIPATION_APPROVED'
+                LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = '" . PARTICIPATION_APPROVED . "'
                 WHERE m.start_datetime >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
                 GROUP BY DATE_FORMAT(m.start_datetime, '%Y-%m')
                 ORDER BY period DESC";
@@ -299,7 +304,7 @@ function exportStatisticsToCsv($period = 'monthly') {
                     COUNT(DISTINCT pr.volunteer_id) AS unique_volunteers
                 FROM missions m
                 LEFT JOIN shifts s ON m.id = s.mission_id
-                LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = 'PARTICIPATION_APPROVED'
+                LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = '" . PARTICIPATION_APPROVED . "'
                 GROUP BY YEAR(m.start_datetime)
                 ORDER BY period DESC";
     }

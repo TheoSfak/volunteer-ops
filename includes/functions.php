@@ -8,9 +8,14 @@ if (!defined('VOLUNTEEROPS')) {
 }
 
 /**
- * Redirect to a page
+ * Redirect to a page.
+ * Relative paths are resolved against BASE_URL so the Location header
+ * is always an absolute URI (required by RFC 7231).
  */
 function redirect($url) {
+    if (!preg_match('/^https?:\/\//i', $url)) {
+        $url = rtrim(BASE_URL, '/') . '/' . ltrim($url, '/');
+    }
     header("Location: $url");
     exit;
 }
@@ -113,16 +118,16 @@ function calculateHours($start, $end) {
  */
 function statusBadge($status, $type = 'status') {
     if ($type === 'participation') {
-        $colors = $GLOBALS['PARTICIPATION_COLORS'];
-        $labels = $GLOBALS['PARTICIPATION_LABELS'];
+        $colors = PARTICIPATION_COLORS;
+        $labels = PARTICIPATION_LABELS;
     } else {
-        $colors = $GLOBALS['STATUS_COLORS'];
-        $labels = $GLOBALS['STATUS_LABELS'];
+        $colors = STATUS_COLORS;
+        $labels = STATUS_LABELS;
     }
-    
+
     $color = $colors[$status] ?? 'secondary';
     $label = $labels[$status] ?? $status;
-    
+
     return '<span class="badge bg-' . $color . '">' . h($label) . '</span>';
 }
 
@@ -131,15 +136,15 @@ function statusBadge($status, $type = 'status') {
  */
 function roleBadge($role) {
     $colors = [
-        ROLE_SYSTEM_ADMIN => 'danger',
+        ROLE_SYSTEM_ADMIN     => 'danger',
         ROLE_DEPARTMENT_ADMIN => 'warning',
-        ROLE_SHIFT_LEADER => 'info',
-        ROLE_VOLUNTEER => 'primary',
+        ROLE_SHIFT_LEADER     => 'info',
+        ROLE_VOLUNTEER        => 'primary',
     ];
-    
+
     $color = $colors[$role] ?? 'secondary';
-    $label = $GLOBALS['ROLE_LABELS'][$role] ?? $role;
-    
+    $label = ROLE_LABELS[$role] ?? $role;
+
     return '<span class="badge bg-' . $color . '">' . h($label) . '</span>';
 }
 
@@ -197,21 +202,30 @@ function csrfField() {
 /**
  * Verify CSRF token
  */
+/**
+ * Verify CSRF token. On success, rotate the token so it cannot be reused.
+ */
 function verifyCsrf() {
     if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
         setFlash('error', 'Μη έγκυρο αίτημα. Παρακαλώ δοκιμάστε ξανά.');
-        redirect($_SERVER['HTTP_REFERER'] ?? 'dashboard.php');
+        // Do NOT use HTTP_REFERER — it is attacker-controlled and enables open redirect
+        redirect('dashboard.php');
     }
+    // Rotate token after successful check to prevent replay
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
 /**
- * Sanitize input
+ * Sanitize input — trims whitespace only.
+ * Do NOT strip HTML here: data must be stored as-is and escaped at output
+ * with h(). Stripping tags here corrupts rich-text fields (email templates,
+ * mission descriptions with formatting, etc.).
  */
 function sanitize($input) {
     if (is_array($input)) {
         return array_map('sanitize', $input);
     }
-    return trim(strip_tags($input));
+    return trim($input ?? '');
 }
 
 /**
@@ -280,32 +294,56 @@ function paginate($totalItems, $currentPage = 1, $perPage = 20) {
 }
 
 /**
- * Render pagination links
+ * Render pagination links.
+ * Automatically preserves all current GET query parameters so filters are
+ * never lost when clicking to a different page.
+ * The legacy $baseUrl parameter is accepted but ignored.
  */
-function paginationLinks($pagination, $baseUrl = '?') {
+function paginationLinks($pagination, $baseUrl = null) {
     if ($pagination['total_pages'] <= 1) return '';
-    
-    $html = '<nav><ul class="pagination justify-content-center">';
-    
+
+    // Build base URL from current request, stripping any existing 'page' param
+    $params = $_GET;
+    unset($params['page']);
+    $base = '?' . ($params ? http_build_query($params) . '&' : '');
+
+    $html  = '<nav aria-label="Σελιδοποίηση"><ul class="pagination justify-content-center">';
+
     // Previous
     if ($pagination['has_prev']) {
-        $html .= '<li class="page-item"><a class="page-link" href="' . $baseUrl . 'page=' . ($pagination['current_page'] - 1) . '">«</a></li>';
+        $html .= '<li class="page-item"><a class="page-link" href="' . h($base) . 'page=' . ($pagination['current_page'] - 1) . '">«</a></li>';
+    } else {
+        $html .= '<li class="page-item disabled"><span class="page-link">«</span></li>';
     }
-    
-    // Pages
-    for ($i = 1; $i <= $pagination['total_pages']; $i++) {
-        if ($i == $pagination['current_page']) {
+
+    // Pages — collapse long ranges with ellipsis
+    $current    = $pagination['current_page'];
+    $total      = $pagination['total_pages'];
+    $showAlways = [1, $total];
+
+    for ($i = 1; $i <= $total; $i++) {
+        $near = abs($i - $current) <= 2;
+        if (!$near && !in_array($i, $showAlways)) {
+            // Show a single ellipsis placeholder (only once per gap)
+            if ($i === 2 || $i === $total - 1) {
+                $html .= '<li class="page-item disabled"><span class="page-link">…</span></li>';
+            }
+            continue;
+        }
+        if ($i === $current) {
             $html .= '<li class="page-item active"><span class="page-link">' . $i . '</span></li>';
         } else {
-            $html .= '<li class="page-item"><a class="page-link" href="' . $baseUrl . 'page=' . $i . '">' . $i . '</a></li>';
+            $html .= '<li class="page-item"><a class="page-link" href="' . h($base) . 'page=' . $i . '">' . $i . '</a></li>';
         }
     }
-    
+
     // Next
     if ($pagination['has_next']) {
-        $html .= '<li class="page-item"><a class="page-link" href="' . $baseUrl . 'page=' . ($pagination['current_page'] + 1) . '">»</a></li>';
+        $html .= '<li class="page-item"><a class="page-link" href="' . h($base) . 'page=' . ($pagination['current_page'] + 1) . '">»</a></li>';
+    } else {
+        $html .= '<li class="page-item disabled"><span class="page-link">»</span></li>';
     }
-    
+
     $html .= '</ul></nav>';
     return $html;
 }
@@ -336,48 +374,35 @@ function jsonResponse($data, $statusCode = 200) {
 }
 
 /**
- * Get application setting from database (with caching)
+ * Get application setting from database (with per-request static cache)
+ * Using static instead of $_SESSION prevents stale values across users
+ * when an admin updates settings.
  */
 function getSetting($key, $default = null) {
-    // Check session cache first
-    if (!isset($_SESSION['app_settings_cache'])) {
-        $_SESSION['app_settings_cache'] = [];
-        $_SESSION['app_settings_loaded_at'] = time();
-    }
-    
-    // Reload cache if older than 5 minutes
-    if ((time() - ($_SESSION['app_settings_loaded_at'] ?? 0)) > 300) {
-        $_SESSION['app_settings_cache'] = [];
-        $_SESSION['app_settings_loaded_at'] = time();
-    }
-    
-    // Return from session cache if exists
-    if (isset($_SESSION['app_settings_cache'][$key])) {
-        return $_SESSION['app_settings_cache'][$key];
-    }
-    
-    // Load from database
-    try {
-        if (empty($_SESSION['app_settings_cache'])) {
+    static $cache = null;
+
+    if ($cache === null) {
+        $cache = [];
+        try {
             $rows = dbFetchAll("SELECT setting_key, setting_value FROM settings");
             foreach ($rows as $row) {
-                $_SESSION['app_settings_cache'][$row['setting_key']] = $row['setting_value'];
+                $cache[$row['setting_key']] = $row['setting_value'];
             }
+        } catch (Exception $e) {
+            // Database might not be ready
+            return $default;
         }
-        
-        return $_SESSION['app_settings_cache'][$key] ?? $default;
-    } catch (Exception $e) {
-        // Database might not be ready
-        return $default;
     }
+
+    return $cache[$key] ?? $default;
 }
 
 /**
- * Clear settings cache
+ * Clear settings cache (forces reload on next getSetting() call)
  */
 function clearSettingsCache() {
-    unset($_SESSION['app_settings_cache']);
-    unset($_SESSION['app_settings_loaded_at']);
+    // No-op for backward compatibility — static cache auto-resets per request.
+    // Call getSetting() after saving settings; new request will fetch fresh data.
 }
 
 /**

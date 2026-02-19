@@ -1,10 +1,10 @@
-<?php
+﻿<?php
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 
 $pageTitle = 'Προβολή Εργασίας';
 $user = getCurrentUser();
-$id = get('id');
+$id = (int) get('id');
 
 if (!$id) {
     setFlash('error', 'Δεν καθορίστηκε εργασία.');

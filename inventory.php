@@ -1,10 +1,11 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Inventory List
  * Main inventory page with search, filters, and pagination.
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
 

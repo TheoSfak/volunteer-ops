@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Volunteer Form (Create/Edit)
  */
@@ -7,7 +7,7 @@ require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
 
-$id = get('id');
+$id = (int) get('id');
 $volunteer = null;
 $pageTitle = 'Νέος Εθελοντής';
 $currentUser = getCurrentUser();

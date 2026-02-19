@@ -1,10 +1,11 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Inventory Categories Management
  * Admin page to manage inventory categories.
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
 

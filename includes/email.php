@@ -54,9 +54,10 @@ function getEmailTemplates(): array {
  * Get notification setting by code
  */
 function getNotificationSetting(string $code): ?array {
-    return dbFetchOne("SELECT ns.*, et.code as template_code FROM notification_settings ns 
+    $result = dbFetchOne("SELECT ns.*, et.code as template_code FROM notification_settings ns 
                        LEFT JOIN email_templates et ON ns.email_template_id = et.id 
                        WHERE ns.code = ?", [$code]);
+    return $result ?: null;
 }
 
 /**
@@ -124,12 +125,15 @@ function sendSmtpEmail(string $to, string $subject, string $htmlBody, array $smt
         $port = $smtp['port'];
         $encryption = $smtp['encryption'];
         
-        // SSL context for TLS/SSL
+        // SSL context — peer verification is enabled by default (secure).
+        // To allow self-signed certs in a dev/intranet environment,
+        // add: define('SMTP_VERIFY_SSL', false); in config.local.php
+        $verifySsl = defined('SMTP_VERIFY_SSL') ? SMTP_VERIFY_SSL : true;
         $context = stream_context_create([
             'ssl' => [
-                'verify_peer' => false,
-                'verify_peer_name' => false,
-                'allow_self_signed' => true
+                'verify_peer'       => $verifySsl,
+                'verify_peer_name'  => $verifySsl,
+                'allow_self_signed' => !$verifySsl,
             ]
         ]);
         

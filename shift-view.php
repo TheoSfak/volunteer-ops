@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Shift View & Manage Participants
  */
@@ -6,7 +6,7 @@
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 
-$id = get('id');
+$id = (int) get('id');
 if (!$id) {
     redirect('shifts.php');
 }
@@ -97,7 +97,7 @@ if (isPost()) {
                 );
                 
                 dbExecute(
-                    "UPDATE participation_requests SET status = 'APPROVED', decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
+                    "UPDATE participation_requests SET status = '" . PARTICIPATION_APPROVED . "', decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
                     [$user['id'], $prId]
                 );
                 
@@ -137,7 +137,7 @@ if (isPost()) {
                 );
                 
                 dbExecute(
-                    "UPDATE participation_requests SET status = 'REJECTED', rejection_reason = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
+                    "UPDATE participation_requests SET status = '" . PARTICIPATION_REJECTED . "', rejection_reason = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
                     [$reason, $user['id'], $prId]
                 );
                 
@@ -178,32 +178,40 @@ if (isPost()) {
         case 'mark_attended':
             if ($canManage) {
                 $actualHours = (float) post('actual_hours');
-                dbExecute(
-                    "UPDATE participation_requests SET attended = 1, actual_hours = ?, updated_at = NOW() WHERE id = ?",
-                    [$actualHours, $prId]
-                );
-                
-                // Award points
-                $pr = dbFetchOne("SELECT * FROM participation_requests WHERE id = ?", [$prId]);
-                if ($pr) {
-                    $hours = $actualHours ?: calculateShiftHours($shift);
-                    $points = calculatePoints($shift, $hours);
-                    
-                    dbInsert(
-                        "INSERT INTO volunteer_points 
-                         (user_id, points, reason, description, pointable_type, pointable_id, created_at)
-                         VALUES (?, ?, ?, ?, 'App\\\\Models\\\\Shift', ?, NOW())",
-                        [$pr['volunteer_id'], $points, 'shift_attendance', "Βάρδια: " . $shift['mission_title'], $id]
-                    );
-                    
+
+                db()->beginTransaction();
+                try {
                     dbExecute(
-                        "UPDATE users SET total_points = total_points + ? WHERE id = ?",
-                        [$points, $pr['volunteer_id']]
+                        "UPDATE participation_requests SET attended = 1, actual_hours = ?, updated_at = NOW() WHERE id = ?",
+                        [$actualHours, $prId]
                     );
-                    
-                    logAudit('mark_attended', 'participation_requests', $prId, "Points: $points");
+
+                    // Award points
+                    $pr = dbFetchOne("SELECT * FROM participation_requests WHERE id = ?", [$prId]);
+                    if ($pr) {
+                        $hours = $actualHours ?: calculateShiftHours($shift);
+                        $points = calculatePoints($shift, $hours);
+
+                        dbInsert(
+                            "INSERT INTO volunteer_points 
+                             (user_id, points, reason, description, pointable_type, pointable_id, created_at)
+                             VALUES (?, ?, ?, ?, 'App\\\\Models\\\\Shift', ?, NOW())",
+                            [$pr['volunteer_id'], $points, 'shift_attendance', "Βάρδια: " . $shift['mission_title'], $id]
+                        );
+
+                        dbExecute(
+                            "UPDATE users SET total_points = total_points + ? WHERE id = ?",
+                            [$points, $pr['volunteer_id']]
+                        );
+
+                        logAudit('mark_attended', 'participation_requests', $prId, "Points: $points");
+                    }
+                    db()->commit();
+                    setFlash('success', 'Η παρουσία καταγράφηκε και δόθηκαν πόντοι.');
+                } catch (Exception $e) {
+                    db()->rollBack();
+                    setFlash('error', 'Σφάλμα κατά την καταγραφή παρουσίας. Παρακαλώ δοκιμάστε ξανά.');
                 }
-                setFlash('success', 'Η παρουσία καταγράφηκε και δόθηκαν πόντοι.');
             }
             break;
             
@@ -336,10 +344,11 @@ if ($canManage) {
     }
     $availableVolunteers = dbFetchAll(
         "SELECT id, name, email FROM users 
-         WHERE role = 'VOLUNTEER' 
+         WHERE role = ? 
            AND is_active = 1
            $excludeClause 
-         ORDER BY name"
+         ORDER BY name",
+        [ROLE_VOLUNTEER]
     );
 }
 
