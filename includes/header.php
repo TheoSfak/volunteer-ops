@@ -688,6 +688,11 @@ $appDescription = getSetting('app_description', '');
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'inactive-volunteers' ? 'active' : '' ?>" href="inactive-volunteers.php">
+                    <i class="bi bi-person-x"></i> Ανενεργοί Εθελοντές
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'departments' ? 'active' : '' ?>" href="departments.php">
                     <i class="bi bi-shield"></i> Σώματα
                 </a>

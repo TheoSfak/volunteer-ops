@@ -37,11 +37,11 @@ if (isAdmin()) {
             array_merge([$year], $params)
         ),
         'volunteers_total' => dbFetchValue(
-            "SELECT COUNT(*) FROM users WHERE role = ?",
+            "SELECT COUNT(*) FROM users WHERE role = ? AND deleted_at IS NULL",
             [ROLE_VOLUNTEER]
         ),
         'volunteers_active' => dbFetchValue(
-            "SELECT COUNT(*) FROM users WHERE role = ? AND is_active = 1",
+            "SELECT COUNT(*) FROM users WHERE role = ? AND is_active = 1 AND deleted_at IS NULL",
             [ROLE_VOLUNTEER]
         ),
         'pending_requests' => dbFetchValue(
