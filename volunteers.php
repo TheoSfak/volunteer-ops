@@ -19,8 +19,8 @@ $status = get('status', '');
 $page = max(1, (int) get('page', 1));
 $perPage = 20;
 
-// Build query
-$where = ['1=1'];
+// Build query — always show active users that haven't been soft-deleted
+$where = ['u.is_active = 1', 'u.deleted_at IS NULL'];
 $params = [];
 
 if ($search) {
@@ -43,12 +43,6 @@ if ($departmentId) {
 if ($warehouseId) {
     $where[] = "u.warehouse_id = ?";
     $params[] = $warehouseId;
-}
-
-if ($status === 'active') {
-    $where[] = "u.is_active = 1";
-} elseif ($status === 'inactive') {
-    $where[] = "u.is_active = 0";
 }
 
 // Dept admins see only their department
@@ -139,6 +133,30 @@ if (isPost()) {
             logAudit('change_department', 'users', $userId);
             setFlash('success', 'Το τμήμα άλλαξε.');
             break;
+
+        case 'delete_user':
+            if ($user['role'] !== ROLE_SYSTEM_ADMIN) {
+                setFlash('error', 'Δεν έχετε δικαίωμα σε αυτή την ενέργεια.');
+                break;
+            }
+            $targetUser = dbFetchOne("SELECT * FROM users WHERE id = ? AND deleted_at IS NULL", [$userId]);
+            if ($targetUser) {
+                if ($targetUser['id'] == $user['id']) {
+                    setFlash('error', 'Δεν μπορείτε να διαγράψετε τον εαυτό σας.');
+                } elseif ($targetUser['role'] === ROLE_SYSTEM_ADMIN) {
+                    setFlash('error', 'Δεν μπορείτε να διαγράψετε διαχειριστή συστήματος.');
+                } else {
+                    dbExecute(
+                        "UPDATE users SET deleted_at = NOW(), deleted_by = ?, is_active = 0, updated_at = NOW() WHERE id = ?",
+                        [$user['id'], $userId]
+                    );
+                    logAudit('soft_delete_user', 'users', $userId);
+                    setFlash('success', 'Ο χρήστης διαγράφηκε. Τα δεδομένα του διατηρούνται.');
+                }
+            } else {
+                setFlash('error', 'Ο χρήστης δεν βρέθηκε.');
+            }
+            break;
     }
     
     redirect('volunteers.php?' . http_build_query($_GET));
@@ -206,14 +224,6 @@ include __DIR__ . '/includes/header.php';
                 </select>
             </div>
             <?php endif; ?>
-            <div class="col-md-2">
-                <label class="form-label">Κατάσταση</label>
-                <select name="status" class="form-select">
-                    <option value="">Όλοι</option>
-                    <option value="active" <?= $status === 'active' ? 'selected' : '' ?>>Ενεργοί</option>
-                    <option value="inactive" <?= $status === 'inactive' ? 'selected' : '' ?>>Ανενεργοί</option>
-                </select>
-            </div>
             <div class="col-md-2 d-flex align-items-end">
                 <button type="submit" class="btn btn-outline-primary w-100">
                     <i class="bi bi-search me-1"></i>Αναζήτηση
@@ -318,6 +328,14 @@ include __DIR__ . '/includes/header.php';
                                                 </button>
                                             </form>
                                         </li>
+                                        <?php if (isSystemAdmin() && $v['role'] !== ROLE_SYSTEM_ADMIN): ?>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li>
+                                            <a class="dropdown-item text-danger" href="#" data-bs-toggle="modal" data-bs-target="#deleteModal<?= $v['id'] ?>">
+                                                <i class="bi bi-trash me-1"></i>Διαγραφή
+                                            </a>
+                                        </li>
+                                        <?php endif; ?>
                                     <?php endif; ?>
                                 </ul>
                             </div>
@@ -354,6 +372,44 @@ include __DIR__ . '/includes/header.php';
                                     </div>
                                 </div>
                             </div>
+
+                            <?php if (isSystemAdmin() && $v['id'] != $user['id'] && $v['role'] !== ROLE_SYSTEM_ADMIN): ?>
+                            <!-- Soft Delete Confirmation Modal -->
+                            <div class="modal fade" id="deleteModal<?= $v['id'] ?>">
+                                <div class="modal-dialog">
+                                    <div class="modal-content">
+                                        <form method="post">
+                                            <?= csrfField() ?>
+                                            <input type="hidden" name="action" value="delete_user">
+                                            <input type="hidden" name="user_id" value="<?= $v['id'] ?>">
+                                            <div class="modal-header bg-danger text-white">
+                                                <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Διαγραφή Εθελοντή</h5>
+                                                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                            </div>
+                                            <div class="modal-body">
+                                                <div class="alert alert-warning mb-3">
+                                                    <i class="bi bi-shield-check me-1"></i>
+                                                    <strong>Τα δεδομένα διατηρούνται!</strong><br>
+                                                    Ο χρήστης κρύβεται από όλες τις σελίδες αλλά το ιστορικό του μένει ανέπαφο.
+                                                </div>
+                                                <p>Πρόκειται να διαγράψετε τον/την <strong><?= h($v['name']) ?></strong>:</p>
+                                                <ul>
+                                                    <li>Συμμετοχές σε βάρδιες: <strong><?= $v['shifts_count'] ?></strong></li>
+                                                    <li>Συνολικοί πόντοι: <strong><?= number_format($v['total_points']) ?></strong></li>
+                                                </ul>
+                                                <p class="text-danger mb-0"><i class="bi bi-info-circle me-1"></i>Ο χρήστης θα μπορεί να αποκατασταθεί από τη σελίδα <em>Διαγραμμένοι Χρήστες</em>.</p>
+                                            </div>
+                                            <div class="modal-footer">
+                                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                                                <button type="submit" class="btn btn-danger">
+                                                    <i class="bi bi-trash me-1"></i>Διαγραφή
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            <?php endif; ?>
                         </td>
                     </tr>
                 <?php endforeach; ?>

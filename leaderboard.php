@@ -33,7 +33,7 @@ switch ($period) {
 
 // For all-time, we can use total_points from users table
 if ($period === 'all') {
-    $whereClause = 'u.is_active = 1';
+    $whereClause = 'u.is_active = 1 AND u.deleted_at IS NULL';
     if ($departmentId) {
         $whereClause .= " AND u.department_id = ?";
         $params[] = $departmentId;
@@ -55,7 +55,7 @@ if ($period === 'all') {
     );
 } else {
     // Calculate from volunteer_points table
-    $whereClause = 'u.is_active = 1';
+    $whereClause = 'u.is_active = 1 AND u.deleted_at IS NULL';
     if ($departmentId) {
         $whereClause .= " AND u.department_id = ?";
         $params[] = $departmentId;
@@ -92,7 +92,7 @@ $myRank = null;
 $currentUser = getCurrentUser();
 if ($period === 'all') {
     $myRank = dbFetchValue(
-        "SELECT COUNT(*) + 1 FROM users WHERE total_points > ? AND is_active = 1",
+        "SELECT COUNT(*) + 1 FROM users WHERE total_points > ? AND is_active = 1 AND deleted_at IS NULL",
         [$currentUser['total_points']]
     );
 }
