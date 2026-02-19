@@ -59,6 +59,9 @@ include __DIR__ . '/includes/header.php';
     </h1>
     <div class="d-flex gap-2">
         <?php if (canManageInventory()): ?>
+            <button type="button" class="btn btn-outline-primary" id="btnPrintSelected" style="display:none;" onclick="printSelected()" title="Εκτύπωση ετικετών για επιλεγμένα υλικά">
+                <i class="bi bi-qr-code me-1"></i>Εκτύπωση επιλεγμένων (<span id="selectedCount">0</span>)
+            </button>
             <a href="inventory-form.php" class="btn btn-primary">
                 <i class="bi bi-plus-lg me-1"></i>Νέο Υλικό
             </a>
@@ -194,6 +197,11 @@ include __DIR__ . '/includes/header.php';
                 <table class="table table-hover align-middle mb-0">
                     <thead class="table-light">
                         <tr>
+                            <?php if (canManageInventory()): ?>
+                            <th style="width:36px;">
+                                <input type="checkbox" class="form-check-input" id="chkAll" title="Επιλογή όλων">
+                            </th>
+                            <?php endif; ?>
                             <th>Barcode</th>
                             <th>Όνομα</th>
                             <th>Κατηγορία</th>
@@ -209,6 +217,11 @@ include __DIR__ . '/includes/header.php';
                     <tbody>
                         <?php foreach ($items as $item): ?>
                             <tr>
+                                <?php if (canManageInventory()): ?>
+                                <td>
+                                    <input type="checkbox" class="form-check-input item-chk" value="<?= $item['id'] ?>">
+                                </td>
+                                <?php endif; ?>
                                 <td>
                                     <code class="text-primary"><?= h($item['barcode']) ?></code>
                                 </td>
@@ -295,3 +308,50 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
+
+<?php if (canManageInventory()): ?>
+<script>
+(function () {
+    var btnPrint   = document.getElementById('btnPrintSelected');
+    var countSpan  = document.getElementById('selectedCount');
+    var chkAll     = document.getElementById('chkAll');
+
+    function getChecked() {
+        return Array.from(document.querySelectorAll('.item-chk:checked')).map(cb => cb.value);
+    }
+
+    function updateBar() {
+        var ids = getChecked();
+        if (ids.length > 0) {
+            btnPrint.style.display = '';
+            countSpan.textContent  = ids.length;
+        } else {
+            btnPrint.style.display = 'none';
+        }
+        // update select-all state
+        var all  = document.querySelectorAll('.item-chk');
+        chkAll.indeterminate = ids.length > 0 && ids.length < all.length;
+        chkAll.checked       = ids.length > 0 && ids.length === all.length;
+    }
+
+    // Individual checkboxes
+    document.querySelectorAll('.item-chk').forEach(function (cb) {
+        cb.addEventListener('change', updateBar);
+    });
+
+    // Select‑all
+    chkAll.addEventListener('change', function () {
+        document.querySelectorAll('.item-chk').forEach(function (cb) {
+            cb.checked = chkAll.checked;
+        });
+        updateBar();
+    });
+
+    window.printSelected = function () {
+        var ids = getChecked();
+        if (ids.length === 0) return;
+        window.open('inventory-label.php?ids=' + ids.join(','), '_blank');
+    };
+}());
+</script>
+<?php endif; ?>
