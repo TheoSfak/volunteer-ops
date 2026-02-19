@@ -125,6 +125,9 @@ include __DIR__ . '/includes/header.php';
             </a>
         <?php endif; ?>
         <?php if (canManageInventory()): ?>
+            <a href="inventory-label.php?id=<?= $item['id'] ?>" class="btn btn-outline-primary" target="_blank" title="Εκτύπωση QR ετικέτας">
+                <i class="bi bi-qr-code me-1"></i>Ετικέτα
+            </a>
             <a href="inventory-form.php?id=<?= $item['id'] ?>" class="btn btn-outline-secondary">
                 <i class="bi bi-pencil me-1"></i>Επεξεργασία
             </a>
