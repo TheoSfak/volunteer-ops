@@ -1,6 +1,6 @@
 <?php
-require_once __DIR__ . '/../bootstrap.php';
-require_once __DIR__ . '/../includes/import-functions.php';
+require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/import-functions.php';
 requireRole([ROLE_SYSTEM_ADMIN]);
 
 $pageTitle = 'Εισαγωγή Εθελοντών από CSV';
@@ -12,7 +12,7 @@ if ($step == '2' && isPost()) {
     
     if (!isset($_FILES['csv_file']) || $_FILES['csv_file']['error'] !== UPLOAD_ERR_OK) {
         setFlash('error', 'Σφάλμα κατά το ανέβασμα του αρχείου.');
-        redirect('exports/import-volunteers.php');
+        redirect('import-volunteers.php');
     }
     
     $tempFile = $_FILES['csv_file']['tmp_name'];
@@ -20,7 +20,7 @@ if ($step == '2' && isPost()) {
     
     if (!$result['success']) {
         setFlash('error', $result['error']);
-        redirect('exports/import-volunteers.php');
+        redirect('import-volunteers.php');
     }
     
     // Validate all rows
@@ -43,7 +43,7 @@ if ($step == '3' && isPost()) {
     
     if (!isset($_SESSION['import_data'])) {
         setFlash('error', 'Δεν βρέθηκαν δεδομένα για εισαγωγή.');
-        redirect('exports/import-volunteers.php');
+        redirect('import-volunteers.php');
     }
     
     $rows = $_SESSION['import_data'];
@@ -53,10 +53,10 @@ if ($step == '3' && isPost()) {
     unset($_SESSION['import_data']);
     unset($_SESSION['import_errors']);
     
-    redirect('exports/import-volunteers.php?step=4');
+    redirect('import-volunteers.php?step=4');
 }
 
-include __DIR__ . '/../includes/header.php';
+include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="container-fluid py-4">
@@ -96,7 +96,7 @@ include __DIR__ . '/../includes/header.php';
                             <strong>Ρόλος:</strong> VOLUNTEER / SHIFT_LEADER / DEPARTMENT_ADMIN / SYSTEM_ADMIN<br>
                             <strong>Boolean πεδία:</strong> Ναι = 1, Όχι = 0
                             <br class="mt-1">
-                            <a href="templates/volunteers_template.csv" class="alert-link">
+                            <a href="exports/templates/volunteers_template.csv" class="alert-link">
                                 <i class="bi bi-download"></i> Κατέβασμα Υποδείγματος
                             </a>
                         </div>
@@ -276,4 +276,4 @@ include __DIR__ . '/../includes/header.php';
     </div>
 </div>
 
-<?php include __DIR__ . '/../includes/footer.php'; ?>
+<?php include __DIR__ . '/includes/footer.php'; ?>
