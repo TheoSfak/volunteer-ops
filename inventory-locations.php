@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Inventory Locations Management
  * Admin page to manage inventory locations (physical positions within warehouses).
@@ -14,21 +14,21 @@ if (isTraineeRescuer()) {
 }
 
 if (!canManageInventory()) {
-    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+    setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης.');
     redirect('inventory.php');
 }
 
-$pageTitle = '??p??es?e? ??????';
+$pageTitle = 'Τοποθεσίες Υλικών';
 
 // Get warehouses for dropdown
 $warehouses = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
 
 // Location types
 $locationTypes = [
-    'warehouse' => '?p?????',
-    'vehicle'   => '???�a',
-    'room'      => '??�?t??',
-    'other'     => '????',
+    'warehouse' => 'Αποθήκη',
+    'vehicle'   => 'Όχημα',
+    'room'      => 'Δωμάτιο',
+    'other'     => 'Άλλο',
 ];
 
 // Handle POST actions
@@ -45,7 +45,7 @@ if (isPost()) {
         $notes        = trim(post('notes'));
 
         if (empty($name)) {
-            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+            setFlash('error', 'Το όνομα τοποθεσίας είναι υποχρεωτικό.');
         } else {
             try {
                 dbInsert("
@@ -53,9 +53,9 @@ if (isPost()) {
                     VALUES (?, ?, ?, ?, ?, ?)
                 ", [$name, $locationType, $departmentId, $address, $capacity, $notes]);
                 logAudit('inventory_location_create', 'inventory_locations', 0);
-                setFlash('success', '? t?p??es?a d?�?????????e: ' . $name);
+                setFlash('success', 'Η τοποθεσία δημιουργήθηκε: ' . $name);
             } catch (Exception $e) {
-                setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+                setFlash('error', 'Σφάλμα δημιουργίας τοποθεσίας.');
             }
         }
         redirect('inventory-locations.php');
@@ -71,7 +71,7 @@ if (isPost()) {
         $notes        = trim(post('notes'));
 
         if (empty($name)) {
-            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+            setFlash('error', 'Το όνομα τοποθεσίας είναι υποχρεωτικό.');
         } else {
             try {
                 dbExecute("
@@ -80,9 +80,9 @@ if (isPost()) {
                     WHERE id = ?
                 ", [$name, $locationType, $departmentId, $address, $capacity, $notes, $locId]);
                 logAudit('inventory_location_update', 'inventory_locations', $locId);
-                setFlash('success', '? t?p??es?a e??�e?????e.');
+                setFlash('success', 'Η τοποθεσία ενημερώθηκε.');
             } catch (Exception $e) {
-                setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+                setFlash('error', 'Σφάλμα ενημέρωσης τοποθεσίας.');
             }
         }
         redirect('inventory-locations.php');
@@ -93,7 +93,7 @@ if (isPost()) {
         $isActive = (int)post('is_active');
         dbExecute("UPDATE inventory_locations SET is_active = ? WHERE id = ?", [$isActive, $locId]);
         logAudit('inventory_location_toggle', 'inventory_locations', $locId);
-        setFlash('success', $isActive ? '? t?p??es?a e?e???p??????e.' : '? t?p??es?a ape?e???p??????e.');
+        setFlash('success', $isActive ? 'Η τοποθεσία ενεργοποιήθηκε.' : 'Η τοποθεσία απενεργοποιήθηκε.');
         redirect('inventory-locations.php');
     }
 }
@@ -127,7 +127,7 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-geo-alt me-2"></i><?= h($pageTitle) ?>
     </h1>
     <a href="inventory.php" class="btn btn-outline-secondary">
-        <i class="bi bi-arrow-left me-1"></i>?????
+        <i class="bi bi-arrow-left me-1"></i>Υλικά
     </a>
 </div>
 
@@ -140,7 +140,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-body text-center py-5">
                     <i class="bi bi-geo-alt text-muted" style="font-size: 3rem;"></i>
-                    <p class="text-muted mt-3">?e? ?p?????? t?p??es?e?. ??�??????ste �?a.</p>
+                    <p class="text-muted mt-3">Δεν υπάρχουν τοποθεσίες. Δημιουργήστε μία.</p>
                 </div>
             </div>
         <?php else: ?>
@@ -150,11 +150,11 @@ include __DIR__ . '/includes/header.php';
                         <table class="table table-hover align-middle mb-0">
                             <thead>
                                 <tr>
-                                    <th>??p??es?a</th>
-                                    <th>??p??</th>
-                                    <th>?p?????</th>
-                                    <th class="text-center">?????</th>
-                                    <th>?at?stas?</th>
+                                    <th>Τοποθεσία</th>
+                                    <th>Τύπος</th>
+                                    <th>Αποθήκη</th>
+                                    <th class="text-center">Υλικά</th>
+                                    <th>Κατάσταση</th>
                                     <th></th>
                                 </tr>
                             </thead>
@@ -191,14 +191,14 @@ include __DIR__ . '/includes/header.php';
                                         </td>
                                         <td>
                                             <?php if ($loc['is_active']): ?>
-                                                <span class="badge bg-success">??e???</span>
+                                                <span class="badge bg-success">Ενεργή</span>
                                             <?php else: ?>
-                                                <span class="badge bg-secondary">??e?e???</span>
+                                                <span class="badge bg-secondary">Ανενεργή</span>
                                             <?php endif; ?>
                                         </td>
                                         <td class="text-end">
                                             <div class="btn-group btn-group-sm">
-                                                <a href="?edit=<?= $loc['id'] ?>" class="btn btn-outline-secondary" title="?pe?e??as?a">
+                                                <a href="?edit=<?= $loc['id'] ?>" class="btn btn-outline-secondary" title="Επεξεργασία">
                                                     <i class="bi bi-pencil"></i>
                                                 </a>
                                                 <form method="post" class="d-inline">
@@ -207,8 +207,8 @@ include __DIR__ . '/includes/header.php';
                                                     <input type="hidden" name="location_id" value="<?= $loc['id'] ?>">
                                                     <input type="hidden" name="is_active" value="<?= $loc['is_active'] ? 0 : 1 ?>">
                                                     <button type="submit" class="btn btn-outline-<?= $loc['is_active'] ? 'warning' : 'success' ?>"
-                                                            title="<?= $loc['is_active'] ? '?pe?e???p???s?' : '??e???p???s?' ?>"
-                                                            onclick="return confirm('<?= $loc['is_active'] ? '?pe?e???p???s?' : '??e???p???s?' ?> t?p??es?a?;')">
+                                                            title="<?= $loc['is_active'] ? 'Απενεργοποίηση' : 'Ενεργοποίηση' ?>"
+                                                            onclick="return confirm('<?= $loc['is_active'] ? 'Απενεργοποίηση' : 'Ενεργοποίηση' ?> τοποθεσίας;')">
                                                         <i class="bi bi-<?= $loc['is_active'] ? 'pause' : 'play' ?>"></i>
                                                     </button>
                                                 </form>
@@ -230,7 +230,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card-header bg-success text-white">
                 <h5 class="mb-0">
                     <i class="bi bi-<?= $editLoc ? 'pencil' : 'plus-lg' ?> me-1"></i>
-                    <?= $editLoc ? '?pe?e??as?a ??p??es?a?' : '??a ??p??es?a' ?>
+                    <?= $editLoc ? 'Επεξεργασία Τοποθεσίας' : 'Νέα Τοποθεσία' ?>
                 </h5>
             </div>
             <div class="card-body">
@@ -242,14 +242,14 @@ include __DIR__ . '/includes/header.php';
                     <?php endif; ?>
 
                     <div class="mb-3">
-                        <label class="form-label">???�a ??p??es?a? *</label>
+                        <label class="form-label">Όνομα Τοποθεσίας *</label>
                         <input type="text" class="form-control" name="name" required
                                value="<?= h($editLoc['name'] ?? '') ?>"
-                               placeholder="p.?. ?e?t???? ?p?????, ???�a ??G-1234">
+                               placeholder="π.χ. Κεντρική Αποθήκη, Όχημα ΑΒΓ-1234">
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">??p??</label>
+                        <label class="form-label">Τύπος</label>
                         <select class="form-select" name="location_type">
                             <?php foreach ($locationTypes as $key => $label): ?>
                                 <option value="<?= $key ?>" <?= ($editLoc['location_type'] ?? 'warehouse') === $key ? 'selected' : '' ?>>
@@ -260,44 +260,44 @@ include __DIR__ . '/includes/header.php';
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">?p?????</label>
+                        <label class="form-label">Αποθήκη</label>
                         <select class="form-select" name="department_id">
-                            <option value="">� ?a�?a �</option>
+                            <option value="">— Καμία —</option>
                             <?php foreach ($warehouses as $wh): ?>
                                 <option value="<?= $wh['id'] ?>" <?= ($editLoc['department_id'] ?? '') == $wh['id'] ? 'selected' : '' ?>>
                                     <?= h($wh['name']) ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
-                        <small class="text-muted">Se p??a ap????? a???e? ? t?p??es?a.</small>
+                        <small class="text-muted">Σε ποια αποθήκη ανήκει η τοποθεσία.</small>
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">??e????s?</label>
+                        <label class="form-label">Διεύθυνση</label>
                         <input type="text" class="form-control" name="address"
                                value="<?= h($editLoc['address'] ?? '') ?>"
-                               placeholder="p.?. ?e?f. ???s?? 120, ?????e??">
+                               placeholder="π.χ. Λεωφ. Κνωσού 120, Ηράκλειο">
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">????t???t?ta</label>
+                        <label class="form-label">Χωρητικότητα</label>
                         <input type="number" class="form-control" name="capacity" min="0"
                                value="<?= h($editLoc['capacity'] ?? '') ?>"
-                               placeholder="????st?? a???�?? ??????">
+                               placeholder="Μέγιστος αριθμός υλικών">
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">S?�e??se??</label>
+                        <label class="form-label">Σημειώσεις</label>
                         <textarea class="form-control" name="notes" rows="2"
-                                  placeholder="?.?. 2?? ???f??, ??f? ?1"><?= h($editLoc['notes'] ?? '') ?></textarea>
+                                  placeholder="Π.χ. 2ος όροφος, ράφι Α1"><?= h($editLoc['notes'] ?? '') ?></textarea>
                     </div>
 
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-success flex-fill">
-                            <i class="bi bi-check-lg me-1"></i><?= $editLoc ? '???�???s?' : '??�??????a' ?>
+                            <i class="bi bi-check-lg me-1"></i><?= $editLoc ? 'Ενημέρωση' : 'Δημιουργία' ?>
                         </button>
                         <?php if ($editLoc): ?>
-                            <a href="inventory-locations.php" class="btn btn-outline-secondary">?????s?</a>
+                            <a href="inventory-locations.php" class="btn btn-outline-secondary">Ακύρωση</a>
                         <?php endif; ?>
                     </div>
                 </form>

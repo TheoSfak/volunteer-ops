@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Inventory Label Printer
  * Generates printable QR code labels for inventory items.
@@ -9,7 +9,7 @@ require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
 if (isTraineeRescuer()) {
-    setFlash('error', '?e? ??ete p??s�as? se a?t? t? se??da.');
+    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
     redirect('dashboard.php');
 }
 
