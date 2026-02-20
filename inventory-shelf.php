@@ -1,6 +1,6 @@
-﻿<?php
+<?php
 /**
- * VolunteerOps - Υλικά Ραφιού (Shelf Materials)
+ * VolunteerOps - ????? ?af??? (Shelf Materials)
  * Excel-style inline editing of consumable shelf items with expiry tracking.
  */
 
@@ -8,13 +8,17 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
+if (isTraineeRescuer()) {
+    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+    redirect('dashboard.php');
+}
 
 if (!canManageInventory()) {
-    setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης.');
+    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
     redirect('inventory.php');
 }
 
-$pageTitle = 'Υλικά Ραφιού';
+$pageTitle = '????? ?af???';
 $user = getCurrentUser();
 
 // =============================================
@@ -62,7 +66,7 @@ if (isPost()) {
             $deptId = post('department_id') ?: null;
             
             if (empty($name)) {
-                setFlash('error', 'Το όνομα είναι υποχρεωτικό.');
+                setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
                 redirect('inventory-shelf.php');
             }
             
@@ -74,7 +78,7 @@ if (isPost()) {
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [$name, $quantity, $shelf ?: null, $expiryDate, $notes ?: null, $deptId, $maxSort + 1, getCurrentUserId()]
             );
-            setFlash('success', 'Το υλικό προστέθηκε επιτυχώς.');
+            setFlash('success', '?? ????? p??st????e ep?t????.');
             redirect('inventory-shelf.php');
             break;
             
@@ -88,10 +92,10 @@ if (isPost()) {
             
             dbInsert(
                 "INSERT INTO inventory_shelf_items (name, quantity, shelf, sort_order, created_by) VALUES (?, 1, ?, ?, ?)",
-                ['Νέο υλικό', null, $afterSort + 1, getCurrentUserId()]
+                ['??? ?????', null, $afterSort + 1, getCurrentUserId()]
             );
             $newId = dbFetchValue("SELECT LAST_INSERT_ID()");
-            setFlash('success', 'Προστέθηκε νέα γραμμή. Επεξεργαστείτε τα στοιχεία.');
+            setFlash('success', '???st????e ??a ??a��?. ?pe?e??aste?te ta st???e?a.');
             redirect('inventory-shelf.php#row-' . $newId);
             break;
             
@@ -105,7 +109,7 @@ if (isPost()) {
             $deptId = post('department_id') ?: null;
             
             if (empty($name)) {
-                setFlash('error', 'Το όνομα είναι υποχρεωτικό.');
+                setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
                 redirect('inventory-shelf.php');
             }
             
@@ -113,7 +117,7 @@ if (isPost()) {
                 "UPDATE inventory_shelf_items SET name = ?, quantity = ?, shelf = ?, expiry_date = ?, notes = ?, department_id = ? WHERE id = ?",
                 [$name, $quantity, $shelf ?: null, $expiryDate, $notes ?: null, $deptId, $id]
             );
-            setFlash('success', 'Το υλικό ενημερώθηκε.');
+            setFlash('success', '?? ????? e??�e?????e.');
             redirect('inventory-shelf.php');
             break;
             
@@ -122,7 +126,7 @@ if (isPost()) {
             $item = dbFetchOne("SELECT name FROM inventory_shelf_items WHERE id = ?", [$id]);
             if ($item) {
                 dbExecute("DELETE FROM inventory_shelf_items WHERE id = ?", [$id]);
-                setFlash('success', 'Το υλικό "' . $item['name'] . '" διαγράφηκε.');
+                setFlash('success', '?? ????? "' . $item['name'] . '" d?a???f??e.');
             }
             redirect('inventory-shelf.php');
             break;
@@ -158,19 +162,19 @@ foreach ($items as &$item) {
         
         if ($totalDays < 0) {
             $item['expiry_class'] = 'danger';
-            $item['expiry_label'] = 'Έληξε';
+            $item['expiry_label'] = '????e';
         } elseif ($totalDays <= 90) {
             $item['expiry_class'] = 'warning';
             $months = round($totalDays / 30);
-            $item['expiry_label'] = $months <= 1 ? 'Λιγότερο από 1 μήνα' : "{$months} μήνες";
+            $item['expiry_label'] = $months <= 1 ? '????te?? ap? 1 �??a' : "{$months} �??e?";
         } elseif ($totalDays <= 180) {
             $item['expiry_class'] = 'success';
             $months = round($totalDays / 30);
-            $item['expiry_label'] = "{$months} μήνες";
+            $item['expiry_label'] = "{$months} �??e?";
         } else {
             $item['expiry_class'] = 'success';
             $months = round($totalDays / 30);
-            $item['expiry_label'] = "{$months} μήνες";
+            $item['expiry_label'] = "{$months} �??e?";
         }
     }
 }
@@ -186,14 +190,14 @@ include __DIR__ . '/includes/header.php';
 
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1 class="h3 mb-0"><i class="bi bi-grid-3x3 me-2"></i>Υλικά Ραφιού</h1>
+        <h1 class="h3 mb-0"><i class="bi bi-grid-3x3 me-2"></i>????? ?af???</h1>
         <div>
-            <span class="badge bg-secondary me-2"><?= $totalItems ?> υλικά</span>
+            <span class="badge bg-secondary me-2"><?= $totalItems ?> ?????</span>
             <?php if ($expiredCount > 0): ?>
-                <span class="badge bg-danger me-2"><?= $expiredCount ?> ληγμένα</span>
+                <span class="badge bg-danger me-2"><?= $expiredCount ?> ???�??a</span>
             <?php endif; ?>
             <?php if ($warningCount > 0): ?>
-                <span class="badge bg-warning text-dark"><?= $warningCount ?> κοντά σε λήξη</span>
+                <span class="badge bg-warning text-dark"><?= $warningCount ?> ???t? se ????</span>
             <?php endif; ?>
         </div>
     </div>
@@ -202,9 +206,9 @@ include __DIR__ . '/includes/header.php';
     
     <!-- Legend -->
     <div class="mb-3 d-flex gap-3 align-items-center small text-muted">
-        <span><i class="bi bi-circle-fill text-success"></i> > 6 μήνες</span>
-        <span><i class="bi bi-circle-fill text-warning"></i> 3-6 μήνες</span>
-        <span><i class="bi bi-circle-fill text-danger"></i> Έληξε / < 3 μήνες</span>
+        <span><i class="bi bi-circle-fill text-success"></i> > 6 �??e?</span>
+        <span><i class="bi bi-circle-fill text-warning"></i> 3-6 �??e?</span>
+        <span><i class="bi bi-circle-fill text-danger"></i> ????e / < 3 �??e?</span>
     </div>
     
     <!-- Items Table -->
@@ -215,12 +219,12 @@ include __DIR__ . '/includes/header.php';
                     <thead class="table-light">
                         <tr>
                             <th style="width: 30px">#</th>
-                            <th>Όνομα</th>
-                            <th style="width: 90px" class="text-center">Ποσότητα</th>
-                            <th style="width: 150px">Ράφι</th>
-                            <th style="width: 160px">Ημερομηνία Λήξης</th>
-                            <th style="width: 40px" class="text-center">Κατάσταση</th>
-                            <th style="width: 130px" class="text-center">Ενέργειες</th>
+                            <th>???�a</th>
+                            <th style="width: 90px" class="text-center">??s?t?ta</th>
+                            <th style="width: 150px">??f?</th>
+                            <th style="width: 160px">?�e??�???a ?????</th>
+                            <th style="width: 40px" class="text-center">?at?stas?</th>
+                            <th style="width: 130px" class="text-center">?????e?e?</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -228,7 +232,7 @@ include __DIR__ . '/includes/header.php';
                             <tr>
                                 <td colspan="7" class="text-center text-muted py-4">
                                     <i class="bi bi-inbox fs-2 d-block mb-2"></i>
-                                    Δεν υπάρχουν υλικά ραφιού. Προσθέστε το πρώτο παρακάτω.
+                                    ?e? ?p?????? ????? ?af???. ???s??ste t? p??t? pa?a??t?.
                                 </td>
                             </tr>
                         <?php else: ?>
@@ -243,28 +247,28 @@ include __DIR__ . '/includes/header.php';
                                                 <input type="hidden" name="action" value="edit">
                                                 <input type="hidden" name="id" value="<?= $item['id'] ?>">
                                                 <div class="col-md-3">
-                                                    <label class="form-label small mb-0">Όνομα</label>
+                                                    <label class="form-label small mb-0">???�a</label>
                                                     <input type="text" name="name" class="form-control form-control-sm" value="<?= h($item['name']) ?>" required>
                                                 </div>
                                                 <div class="col-md-1">
-                                                    <label class="form-label small mb-0">Ποσότ.</label>
+                                                    <label class="form-label small mb-0">??s?t.</label>
                                                     <input type="number" name="quantity" class="form-control form-control-sm" value="<?= $item['quantity'] ?>" min="0" required>
                                                 </div>
                                                 <div class="col-md-2">
-                                                    <label class="form-label small mb-0">Ράφι</label>
+                                                    <label class="form-label small mb-0">??f?</label>
                                                     <input type="text" name="shelf" class="form-control form-control-sm" value="<?= h($item['shelf'] ?? '') ?>">
                                                 </div>
                                                 <div class="col-md-2">
-                                                    <label class="form-label small mb-0">Ημ. Λήξης</label>
+                                                    <label class="form-label small mb-0">?�. ?????</label>
                                                     <input type="date" name="expiry_date" class="form-control form-control-sm" value="<?= $item['expiry_date'] ?? '' ?>">
                                                 </div>
                                                 <div class="col-md-2">
-                                                    <label class="form-label small mb-0">Σημειώσεις</label>
+                                                    <label class="form-label small mb-0">S?�e??se??</label>
                                                     <input type="text" name="notes" class="form-control form-control-sm" value="<?= h($item['notes'] ?? '') ?>">
                                                 </div>
                                                 <input type="hidden" name="department_id" value="<?= $item['department_id'] ?? '' ?>">
                                                 <div class="col-md-2">
-                                                    <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-lg"></i> Αποθήκευση</button>
+                                                    <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-lg"></i> ?p????e?s?</button>
                                                     <a href="inventory-shelf.php" class="btn btn-outline-secondary btn-sm"><i class="bi bi-x"></i></a>
                                                 </div>
                                             </form>
@@ -287,14 +291,14 @@ include __DIR__ . '/includes/header.php';
                                             <?php if (!empty($item['shelf'])): ?>
                                                 <i class="bi bi-bookshelf me-1"></i><?= h($item['shelf']) ?>
                                             <?php else: ?>
-                                                <span class="text-muted">—</span>
+                                                <span class="text-muted">�</span>
                                             <?php endif; ?>
                                         </td>
                                         <td>
                                             <?php if (!empty($item['expiry_date'])): ?>
                                                 <?= formatDate($item['expiry_date']) ?>
                                             <?php else: ?>
-                                                <span class="text-muted">—</span>
+                                                <span class="text-muted">�</span>
                                             <?php endif; ?>
                                         </td>
                                         <td class="text-center">
@@ -303,13 +307,13 @@ include __DIR__ . '/includes/header.php';
                                                    title="<?= h($item['expiry_label']) ?>"
                                                    data-bs-toggle="tooltip"></i>
                                             <?php else: ?>
-                                                <span class="text-muted">—</span>
+                                                <span class="text-muted">�</span>
                                             <?php endif; ?>
                                         </td>
                                         <td class="text-center">
                                             <div class="btn-group btn-group-sm">
                                                 <a href="inventory-shelf.php?edit=<?= $item['id'] ?>#row-<?= $item['id'] ?>" 
-                                                   class="btn btn-outline-primary" title="Επεξεργασία">
+                                                   class="btn btn-outline-primary" title="?pe?e??as?a">
                                                     <i class="bi bi-pencil"></i>
                                                 </a>
                                                 <button type="button" class="btn btn-outline-danger" 
@@ -332,7 +336,7 @@ include __DIR__ . '/includes/header.php';
     <!-- Add New Item Form -->
     <div class="card shadow-sm mt-4">
         <div class="card-header bg-primary text-white">
-            <i class="bi bi-plus-circle me-2"></i>Προσθήκη Νέου Υλικού
+            <i class="bi bi-plus-circle me-2"></i>???s???? ???? ??????
         </div>
         <div class="card-body">
             <form method="post">
@@ -340,30 +344,30 @@ include __DIR__ . '/includes/header.php';
                 <input type="hidden" name="action" value="add">
                 <div class="row g-3">
                     <div class="col-md-3">
-                        <label class="form-label">Όνομα <span class="text-danger">*</span></label>
-                        <input type="text" name="name" class="form-control" required placeholder="π.χ. Γάζες αποστειρωμένες">
+                        <label class="form-label">???�a <span class="text-danger">*</span></label>
+                        <input type="text" name="name" class="form-control" required placeholder="p.?. G??e? ap?ste???�??e?">
                     </div>
                     <div class="col-md-1">
-                        <label class="form-label">Ποσότητα</label>
+                        <label class="form-label">??s?t?ta</label>
                         <input type="number" name="quantity" class="form-control" value="1" min="0">
                     </div>
                     <div class="col-md-2">
-                        <label class="form-label">Ράφι</label>
-                        <input type="text" name="shelf" class="form-control" placeholder="π.χ. Α1">
+                        <label class="form-label">??f?</label>
+                        <input type="text" name="shelf" class="form-control" placeholder="p.?. ?1">
                     </div>
                     <div class="col-md-2">
-                        <label class="form-label">Ημ. Λήξης</label>
+                        <label class="form-label">?�. ?????</label>
                         <input type="date" name="expiry_date" class="form-control">
                     </div>
                     <div class="col-md-2">
-                        <label class="form-label">Σημειώσεις</label>
-                        <input type="text" name="notes" class="form-control" placeholder="Προαιρετικά">
+                        <label class="form-label">S?�e??se??</label>
+                        <input type="text" name="notes" class="form-control" placeholder="???a??et???">
                     </div>
                     <?php if (!empty($departments)): ?>
                     <div class="col-md-2">
-                        <label class="form-label">Παράρτημα</label>
+                        <label class="form-label">?a???t?�a</label>
                         <select name="department_id" class="form-select">
-                            <option value="">—</option>
+                            <option value="">�</option>
                             <?php foreach ($departments as $dept): ?>
                                 <option value="<?= $dept['id'] ?>"><?= h($dept['name']) ?></option>
                             <?php endforeach; ?>
@@ -373,7 +377,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 <div class="mt-3">
                     <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-plus-circle me-1"></i>Προσθήκη
+                        <i class="bi bi-plus-circle me-1"></i>???s????
                     </button>
                 </div>
             </form>
@@ -390,15 +394,15 @@ include __DIR__ . '/includes/header.php';
                 <input type="hidden" name="action" value="delete">
                 <input type="hidden" name="id" id="deleteId">
                 <div class="modal-header bg-danger text-white">
-                    <h5 class="modal-title"><i class="bi bi-trash me-2"></i>Διαγραφή Υλικού</h5>
+                    <h5 class="modal-title"><i class="bi bi-trash me-2"></i>??a??af? ??????</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p>Είστε σίγουροι ότι θέλετε να διαγράψετε το υλικό <strong id="deleteName"></strong>;</p>
+                    <p>??ste s??????? ?t? ???ete ?a d?a????ete t? ????? <strong id="deleteName"></strong>;</p>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
-                    <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>Διαγραφή</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">?????s?</button>
+                    <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>??a??af?</button>
                 </div>
             </form>
         </div>

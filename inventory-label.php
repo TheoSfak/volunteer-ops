@@ -8,6 +8,10 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
+if (isTraineeRescuer()) {
+    setFlash('error', '?e? ??ete p??s�as? se a?t? t? se??da.');
+    redirect('dashboard.php');
+}
 
 if (!canManageInventory()) {
     setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης.');

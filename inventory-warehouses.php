@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Inventory Warehouses Management
  * Manage warehouse departments (multi-tenancy for inventory).
@@ -9,9 +9,13 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
+if (isTraineeRescuer()) {
+    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+    redirect('dashboard.php');
+}
 requireRole([ROLE_SYSTEM_ADMIN]);
 
-$pageTitle = 'Αποθήκες';
+$pageTitle = '?p????e?';
 
 // Handle POST
 if (isPost()) {
@@ -24,14 +28,14 @@ if (isPost()) {
         $barcodePrefix = strtoupper(trim(post('barcode_prefix', 'INV')));
 
         if (empty($name)) {
-            setFlash('error', 'Το όνομα είναι υποχρεωτικό.');
+            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
             redirect('inventory-warehouses.php');
         }
 
         // Check duplicate name
         $exists = dbFetchOne("SELECT id FROM departments WHERE name = ?", [$name]);
         if ($exists) {
-            setFlash('error', 'Υπάρχει ήδη τμήμα με αυτό το όνομα.');
+            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
             redirect('inventory-warehouses.php');
         }
 
@@ -46,7 +50,7 @@ if (isPost()) {
         );
 
         logAudit('warehouse_create', 'departments', $id);
-        setFlash('success', 'Η αποθήκη δημιουργήθηκε: ' . $name);
+        setFlash('success', '? ap????? d?�?????????e: ' . $name);
         redirect('inventory-warehouses.php');
     }
 
@@ -57,14 +61,14 @@ if (isPost()) {
         $barcodePrefix = strtoupper(trim(post('barcode_prefix', 'INV')));
 
         if (empty($name)) {
-            setFlash('error', 'Το όνομα είναι υποχρεωτικό.');
+            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
             redirect('inventory-warehouses.php');
         }
 
         // Check duplicate name
         $exists = dbFetchOne("SELECT id FROM departments WHERE name = ? AND id != ?", [$name, $id]);
         if ($exists) {
-            setFlash('error', 'Υπάρχει ήδη τμήμα με αυτό το όνομα.');
+            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
             redirect('inventory-warehouses.php');
         }
 
@@ -79,7 +83,7 @@ if (isPost()) {
         );
 
         logAudit('warehouse_update', 'departments', $id);
-        setFlash('success', 'Η αποθήκη ενημερώθηκε.');
+        setFlash('success', '? ap????? e??�e?????e.');
         redirect('inventory-warehouses.php');
     }
 
@@ -90,7 +94,7 @@ if (isPost()) {
             $newActive = $dept['is_active'] ? 0 : 1;
             dbExecute("UPDATE departments SET is_active = ? WHERE id = ?", [$newActive, $id]);
             logAudit('warehouse_toggle', 'departments', $id);
-            setFlash('success', $newActive ? 'Η αποθήκη ενεργοποιήθηκε.' : 'Η αποθήκη απενεργοποιήθηκε.');
+            setFlash('success', $newActive ? '? ap????? e?e???p??????e.' : '? ap????? ape?e???p??????e.');
         }
         redirect('inventory-warehouses.php');
     }
@@ -102,7 +106,7 @@ if (isPost()) {
         // Verify warehouse exists
         $wh = dbFetchOne("SELECT id, name FROM departments WHERE id = ? AND has_inventory = 1", [$warehouseId]);
         if (!$wh) {
-            setFlash('error', 'Η αποθήκη δεν βρέθηκε.');
+            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
             redirect('inventory-warehouses.php');
         }
 
@@ -113,7 +117,7 @@ if (isPost()) {
         }
 
         logAudit('warehouse_assign_items', 'departments', $warehouseId);
-        setFlash('success', "Ανατέθηκαν {$affected} υλικά στην αποθήκη: " . $wh['name']);
+        setFlash('success', "??at????a? {$affected} ????? st?? ap?????: " . $wh['name']);
         redirect('inventory-warehouses.php');
     }
 }
@@ -148,7 +152,7 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-building me-2"></i><?= h($pageTitle) ?>
     </h1>
     <a href="inventory.php" class="btn btn-outline-secondary">
-        <i class="bi bi-arrow-left me-1"></i>Υλικά
+        <i class="bi bi-arrow-left me-1"></i>?????
     </a>
 </div>
 
@@ -156,7 +160,7 @@ include __DIR__ . '/includes/header.php';
 <div class="alert alert-warning d-flex align-items-center gap-3">
     <i class="bi bi-exclamation-triangle-fill fs-4"></i>
     <div class="flex-grow-1">
-        <strong><?= $unassignedCount ?> υλικά</strong> δεν έχουν ανατεθεί σε αποθήκη.
+        <strong><?= $unassignedCount ?> ?????</strong> de? ????? a?ate?e? se ap?????.
     </div>
     <?php if (!empty($warehouses)): ?>
     <form method="post" class="d-flex gap-2">
@@ -164,13 +168,13 @@ include __DIR__ . '/includes/header.php';
         <input type="hidden" name="action" value="assign_items">
         <input type="hidden" name="scope" value="unassigned">
         <select class="form-select form-select-sm" name="warehouse_id" style="max-width: 200px;" required>
-            <option value="">Επιλέξτε αποθήκη</option>
+            <option value="">?p????te ap?????</option>
             <?php foreach ($warehouses as $wh): ?>
                 <option value="<?= $wh['id'] ?>"><?= h($wh['name']) ?></option>
             <?php endforeach; ?>
         </select>
-        <button type="submit" class="btn btn-sm btn-warning" onclick="return confirm('Ανάθεση <?= $unassignedCount ?> υλικών στην επιλεγμένη αποθήκη;')">
-            <i class="bi bi-arrow-right me-1"></i>Ανάθεση
+        <button type="submit" class="btn btn-sm btn-warning" onclick="return confirm('????es? <?= $unassignedCount ?> ?????? st?? ep??e?�??? ap?????;')">
+            <i class="bi bi-arrow-right me-1"></i>????es?
         </button>
     </form>
     <?php endif; ?>
@@ -184,7 +188,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-body text-center py-5">
                     <i class="bi bi-building text-muted" style="font-size: 3rem;"></i>
-                    <p class="text-muted mt-3">Δεν υπάρχουν αποθήκες. Δημιουργήστε μία.</p>
+                    <p class="text-muted mt-3">?e? ?p?????? ap????e?. ??�??????ste �?a.</p>
                 </div>
             </div>
         <?php else: ?>
@@ -202,7 +206,7 @@ include __DIR__ . '/includes/header.php';
                                     <i class="bi bi-building me-1"></i><?= h($wh['name']) ?>
                                 </h5>
                                 <?php if (!$wh['is_active']): ?>
-                                    <span class="badge bg-dark">Ανενεργή</span>
+                                    <span class="badge bg-dark">??e?e???</span>
                                 <?php endif; ?>
                             </div>
                             <div class="card-body">
@@ -210,25 +214,25 @@ include __DIR__ . '/includes/header.php';
                                     <div class="col-6">
                                         <div class="text-center p-2 bg-light rounded">
                                             <div class="fs-4 fw-bold text-primary"><?= $wh['item_count'] ?></div>
-                                            <small class="text-muted">Υλικά</small>
+                                            <small class="text-muted">?????</small>
                                         </div>
                                     </div>
                                     <div class="col-6">
                                         <div class="text-center p-2 bg-light rounded">
                                             <div class="fs-4 fw-bold text-warning"><?= $wh['booked_count'] ?></div>
-                                            <small class="text-muted">Χρεωμένα</small>
+                                            <small class="text-muted">??e?�??a</small>
                                         </div>
                                     </div>
                                     <div class="col-6">
                                         <div class="text-center p-2 bg-light rounded">
                                             <div class="fs-4 fw-bold text-info"><?= $wh['location_count'] ?></div>
-                                            <small class="text-muted">Τοποθεσίες</small>
+                                            <small class="text-muted">??p??es?e?</small>
                                         </div>
                                     </div>
                                     <div class="col-6">
                                         <div class="text-center p-2 bg-light rounded">
                                             <div class="fs-4 fw-bold text-success"><?= $wh['user_count'] ?></div>
-                                            <small class="text-muted">Μέλη</small>
+                                            <small class="text-muted">????</small>
                                         </div>
                                     </div>
                                 </div>
@@ -245,7 +249,7 @@ include __DIR__ . '/includes/header.php';
 
                                 <div class="d-flex gap-2 mt-3">
                                     <a href="inventory.php?dept=<?= $wh['id'] ?>" class="btn btn-sm btn-outline-primary flex-fill">
-                                        <i class="bi bi-box-seam me-1"></i>Υλικά
+                                        <i class="bi bi-box-seam me-1"></i>?????
                                     </a>
                                     <a href="?edit=<?= $wh['id'] ?>" class="btn btn-sm btn-outline-secondary">
                                         <i class="bi bi-pencil"></i>
@@ -255,7 +259,7 @@ include __DIR__ . '/includes/header.php';
                                         <input type="hidden" name="action" value="toggle_active">
                                         <input type="hidden" name="id" value="<?= $wh['id'] ?>">
                                         <button type="submit" class="btn btn-sm btn-outline-<?= $wh['is_active'] ? 'warning' : 'success' ?>"
-                                                onclick="return confirm('<?= $wh['is_active'] ? 'Απενεργοποίηση' : 'Ενεργοποίηση' ?> αποθήκης;')">
+                                                onclick="return confirm('<?= $wh['is_active'] ? '?pe?e???p???s?' : '??e???p???s?' ?> ap??????;')">
                                             <i class="bi bi-<?= $wh['is_active'] ? 'pause' : 'play' ?>"></i>
                                         </button>
                                     </form>
@@ -274,7 +278,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card-header bg-success text-white">
                 <h5 class="mb-0">
                     <i class="bi bi-<?= $editItem ? 'pencil' : 'plus-lg' ?> me-1"></i>
-                    <?= $editItem ? 'Επεξεργασία Αποθήκης' : 'Νέα Αποθήκη' ?>
+                    <?= $editItem ? '?pe?e??as?a ?p??????' : '??a ?p?????' ?>
                 </h5>
             </div>
             <div class="card-body">
@@ -293,32 +297,32 @@ include __DIR__ . '/includes/header.php';
                     ?>
 
                     <div class="mb-3">
-                        <label class="form-label">Όνομα Αποθήκης *</label>
+                        <label class="form-label">???�a ?p?????? *</label>
                         <input type="text" class="form-control" name="name" required
                                value="<?= h($editItem['name'] ?? '') ?>"
-                               placeholder="π.χ. Αποθήκη Ηρακλείου">
+                               placeholder="p.?. ?p????? ??a??e???">
                     </div>
 
                     <div class="mb-3">
                         <label class="form-label">Barcode Prefix</label>
                         <input type="text" class="form-control" name="barcode_prefix" maxlength="10"
                                value="<?= h($editSettings['barcode_prefix'] ?? 'INV') ?>"
-                               placeholder="π.χ. HER">
-                        <small class="text-muted">Πρόθεμα για αυτόματη δημιουργία barcode</small>
+                               placeholder="p.?. HER">
+                        <small class="text-muted">????e�a ??a a?t?�at? d?�??????a barcode</small>
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">Σημειώσεις</label>
+                        <label class="form-label">S?�e??se??</label>
                         <textarea class="form-control" name="notes" rows="2"
-                                  placeholder="Διεύθυνση, τηλέφωνο, κ.λπ."><?= h($editSettings['notes'] ?? '') ?></textarea>
+                                  placeholder="??e????s?, t???f???, ?.?p."><?= h($editSettings['notes'] ?? '') ?></textarea>
                     </div>
 
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-success flex-fill">
-                            <i class="bi bi-check-lg me-1"></i><?= $editItem ? 'Ενημέρωση' : 'Δημιουργία' ?>
+                            <i class="bi bi-check-lg me-1"></i><?= $editItem ? '???�???s?' : '??�??????a' ?>
                         </button>
                         <?php if ($editItem): ?>
-                            <a href="inventory-warehouses.php" class="btn btn-outline-secondary">Ακύρωση</a>
+                            <a href="inventory-warehouses.php" class="btn btn-outline-secondary">?????s?</a>
                         <?php endif; ?>
                     </div>
                 </form>

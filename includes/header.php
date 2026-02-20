@@ -728,6 +728,7 @@ $appDescription = getSetting('app_description', '');
             </li>
             <?php endif; ?>
             
+            <?php if (!isTraineeRescuer()): ?>
             <div class="sidebar-section">Απόθεμα</div>
             
             <li class="nav-item">
@@ -770,6 +771,7 @@ $appDescription = getSetting('app_description', '');
             </li>
             <?php endif; ?>
             <!-- Παραρτήματα: accessible via Διοίκηση → Παραρτήματα -->
+            <?php endif; // !isTraineeRescuer ?>
             
             <div class="sidebar-section">Gamification</div>
             
