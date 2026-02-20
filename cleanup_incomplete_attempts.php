@@ -15,7 +15,7 @@ if (isPost()) {
     verifyCsrf();
     
     // Delete all incomplete attempts
-    $deleted = dbExecute("DELETE FROM exam_attempts WHERE completed_at IS NULL");
+    $deleted = dbExecute("DELETE FROM exam_attempts WHERE submitted_at IS NULL");
     
     setFlash('success', "Διαγράφηκαν {$deleted} μη-ολοκληρωμένες προσπάθειες.");
     redirect('cleanup_incomplete_attempts.php');
@@ -31,7 +31,7 @@ $incompleteAttempts = dbFetchAll("
     FROM exam_attempts ea
     INNER JOIN users u ON ea.user_id = u.id
     INNER JOIN training_exams te ON ea.exam_id = te.id
-    WHERE ea.completed_at IS NULL
+    WHERE ea.submitted_at IS NULL
     ORDER BY ea.created_at DESC
 ");
 
