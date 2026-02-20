@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Inventory Item Create/Edit Form
  */
@@ -7,16 +7,20 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
+if (isTraineeRescuer()) {
+    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+    redirect('dashboard.php');
+}
 
 // Only admins can create/edit inventory items
 if (!canManageInventory()) {
-    setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης.');
+    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
     redirect('inventory.php');
 }
 
 $id     = get('id');
 $isEdit = !empty($id);
-$pageTitle = $isEdit ? 'Επεξεργασία Υλικού' : 'Νέο Υλικό';
+$pageTitle = $isEdit ? '?pe?e??as?a ??????' : '??? ?????';
 
 $user = getCurrentUser();
 
@@ -25,12 +29,12 @@ $item = null;
 if ($isEdit) {
     $item = getInventoryItem($id);
     if (!$item) {
-        setFlash('error', 'Το υλικό δεν βρέθηκε.');
+        setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
         redirect('inventory.php');
     }
     // Department admin can only edit own department's items
     if ($user['role'] === ROLE_DEPARTMENT_ADMIN && $item['department_id'] && $item['department_id'] != $user['department_id']) {
-        setFlash('error', 'Δεν έχετε δικαίωμα επεξεργασίας αυτού του υλικού.');
+        setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
         redirect('inventory.php');
     }
 }
@@ -53,7 +57,7 @@ if (isPost()) {
         // Soft delete
         dbExecute("UPDATE inventory_items SET is_active = 0 WHERE id = ?", [$id]);
         logAudit('inventory_delete', 'inventory_items', $id);
-        setFlash('success', 'Το υλικό διαγράφηκε επιτυχώς.');
+        setFlash('success', '?? ????? d?a???f??e ep?t????.');
         redirect('inventory.php');
     }
 
@@ -73,7 +77,7 @@ if (isPost()) {
 
     // Validation
     if (empty($data['name'])) {
-        $errors[] = 'Το όνομα είναι υποχρεωτικό.';
+        $errors[] = '?? ???�a e??a? ?p???e?t???.';
     }
 
     // Barcode validation
@@ -103,7 +107,7 @@ if (isPost()) {
                 ]);
 
                 logAudit('inventory_update', 'inventory_items', $id);
-                setFlash('success', 'Το υλικό ενημερώθηκε επιτυχώς.');
+                setFlash('success', '?? ????? e??�e?????e ep?t????.');
             } else {
                 $newId = dbInsert("
                     INSERT INTO inventory_items 
@@ -117,13 +121,13 @@ if (isPost()) {
                 ]);
 
                 logAudit('inventory_create', 'inventory_items', $newId);
-                setFlash('success', 'Το υλικό δημιουργήθηκε επιτυχώς.');
+                setFlash('success', '?? ????? d?�?????????e ep?t????.');
                 redirect('inventory-view.php?id=' . $newId);
             }
 
             redirect('inventory.php');
         } catch (Exception $e) {
-            $errors[] = 'Σφάλμα αποθήκευσης: ' . $e->getMessage();
+            $errors[] = 'Sf??�a ap????e?s??: ' . $e->getMessage();
         }
     }
 }
@@ -142,7 +146,7 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-box-seam me-2"></i><?= h($pageTitle) ?>
     </h1>
     <a href="<?= $isEdit ? 'inventory-view.php?id=' . $id : 'inventory.php' ?>" class="btn btn-outline-secondary">
-        <i class="bi bi-arrow-left me-1"></i>Πίσω
+        <i class="bi bi-arrow-left me-1"></i>??s?
     </a>
 </div>
 
@@ -164,7 +168,7 @@ include __DIR__ . '/includes/header.php';
         <div class="col-lg-8">
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0">Βασικές Πληροφορίες</h5>
+                    <h5 class="mb-0">?as???? ?????f???e?</h5>
                 </div>
                 <div class="card-body">
                     <div class="row">
@@ -175,31 +179,31 @@ include __DIR__ . '/includes/header.php';
                                        value="<?= h($item['barcode'] ?? post('barcode', $suggestedBarcode)) ?>" 
                                        required pattern="[A-Za-z0-9\-_]{3,50}">
                                 <?php if (!$isEdit): ?>
-                                    <button type="button" class="btn btn-outline-secondary" id="btnGenerateBarcode" title="Δημιουργία barcode">
+                                    <button type="button" class="btn btn-outline-secondary" id="btnGenerateBarcode" title="??�??????a barcode">
                                         <i class="bi bi-arrow-clockwise"></i>
                                     </button>
                                 <?php endif; ?>
                             </div>
-                            <small class="form-text text-muted">3-50 χαρακτήρες: γράμματα, αριθμοί, -, _</small>
+                            <small class="form-text text-muted">3-50 ?a?a?t??e?: ???��ata, a???�??, -, _</small>
                         </div>
                         <div class="col-md-8 mb-3">
-                            <label for="name" class="form-label">Όνομα *</label>
+                            <label for="name" class="form-label">???�a *</label>
                             <input type="text" class="form-control" id="name" name="name"
                                    value="<?= h($item['name'] ?? post('name')) ?>" required>
                         </div>
                     </div>
 
                     <div class="mb-3">
-                        <label for="description" class="form-label">Περιγραφή</label>
+                        <label for="description" class="form-label">?e????af?</label>
                         <textarea class="form-control" id="description" name="description" rows="3"
                         ><?= h($item['description'] ?? post('description')) ?></textarea>
                     </div>
 
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label for="category_id" class="form-label">Κατηγορία</label>
+                            <label for="category_id" class="form-label">?at?????a</label>
                             <select class="form-select" id="category_id" name="category_id">
-                                <option value="">-- Επιλέξτε --</option>
+                                <option value="">-- ?p????te --</option>
                                 <?php foreach ($categories as $cat): ?>
                                     <option value="<?= $cat['id'] ?>" <?= ($item['category_id'] ?? post('category_id')) == $cat['id'] ? 'selected' : '' ?>>
                                         <?= $cat['icon'] ?> <?= h($cat['name']) ?>
@@ -208,12 +212,12 @@ include __DIR__ . '/includes/header.php';
                             </select>
                         </div>
                         <div class="col-md-3 mb-3">
-                            <label for="quantity" class="form-label">Ποσότητα</label>
+                            <label for="quantity" class="form-label">??s?t?ta</label>
                             <input type="number" class="form-control" id="quantity" name="quantity"
                                    value="<?= h($item['quantity'] ?? post('quantity', 1)) ?>" min="1">
                         </div>
                         <div class="col-md-3 mb-3">
-                            <label for="status" class="form-label">Κατάσταση</label>
+                            <label for="status" class="form-label">?at?stas?</label>
                             <select class="form-select" id="status" name="status">
                                 <?php foreach (INVENTORY_STATUS_LABELS as $key => $label): ?>
                                     <option value="<?= $key ?>" <?= ($item['status'] ?? post('status', 'available')) === $key ? 'selected' : '' ?>>
@@ -228,14 +232,14 @@ include __DIR__ . '/includes/header.php';
 
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0">Τοποθεσία</h5>
+                    <h5 class="mb-0">??p??es?a</h5>
                 </div>
                 <div class="card-body">
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label for="location_id" class="form-label">Αποθήκη / Τοποθεσία</label>
+                            <label for="location_id" class="form-label">?p????? / ??p??es?a</label>
                             <select class="form-select" id="location_id" name="location_id">
-                                <option value="">-- Επιλέξτε --</option>
+                                <option value="">-- ?p????te --</option>
                                 <?php foreach ($locations as $loc): ?>
                                     <option value="<?= $loc['id'] ?>" <?= ($item['location_id'] ?? post('location_id')) == $loc['id'] ? 'selected' : '' ?>>
                                         <?= h($loc['name']) ?>
@@ -244,10 +248,10 @@ include __DIR__ . '/includes/header.php';
                             </select>
                         </div>
                         <div class="col-md-6 mb-3">
-                            <label for="location_notes" class="form-label">Λεπτομέρειες Θέσης</label>
+                            <label for="location_notes" class="form-label">?ept?�??e?e? T?s??</label>
                             <input type="text" class="form-control" id="location_notes" name="location_notes"
                                    value="<?= h($item['location_notes'] ?? post('location_notes')) ?>"
-                                   placeholder="π.χ. Ράφι Α1, 2ος όροφος">
+                                   placeholder="p.?. ??f? ?1, 2?? ???f??">
                         </div>
                     </div>
                 </div>
@@ -259,29 +263,29 @@ include __DIR__ . '/includes/header.php';
             <?php if (isSystemAdmin()): ?>
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-building me-1"></i>Αποθήκη</h5>
+                    <h5 class="mb-0"><i class="bi bi-building me-1"></i>?p?????</h5>
                 </div>
                 <div class="card-body">
                     <select class="form-select" name="department_id" required>
-                        <option value="">— Επιλέξτε αποθήκη —</option>
+                        <option value="">� ?p????te ap????? �</option>
                         <?php foreach ($departments as $dept): ?>
                             <option value="<?= $dept['id'] ?>" <?= ($item['department_id'] ?? post('department_id')) == $dept['id'] ? 'selected' : '' ?>>
                                 <?= h($dept['name']) ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
-                    <small class="form-text text-muted">Σε ποια αποθήκη ανήκει αυτό το υλικό.</small>
+                    <small class="form-text text-muted">Se p??a ap????? a???e? a?t? t? ?????.</small>
                 </div>
             </div>
             <?php endif; ?>
 
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0">Κατάσταση Υλικού</h5>
+                    <h5 class="mb-0">?at?stas? ??????</h5>
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
-                        <label for="condition_notes" class="form-label">Σημειώσεις Κατάστασης</label>
+                        <label for="condition_notes" class="form-label">S?�e??se?? ?at?stas??</label>
                         <textarea class="form-control" id="condition_notes" name="condition_notes" rows="3"
                         ><?= h($item['condition_notes'] ?? post('condition_notes')) ?></textarea>
                     </div>
@@ -292,10 +296,10 @@ include __DIR__ . '/includes/header.php';
                 <div class="card-body d-grid gap-2">
                     <button type="submit" class="btn btn-primary btn-lg">
                         <i class="bi bi-check-lg me-1"></i>
-                        <?= $isEdit ? 'Αποθήκευση Αλλαγών' : 'Δημιουργία Υλικού' ?>
+                        <?= $isEdit ? '?p????e?s? ???a???' : '??�??????a ??????' ?>
                     </button>
                     <a href="<?= $isEdit ? 'inventory-view.php?id=' . $id : 'inventory.php' ?>" class="btn btn-outline-secondary">
-                        Ακύρωση
+                        ?????s?
                     </a>
                 </div>
             </div>
@@ -303,12 +307,12 @@ include __DIR__ . '/includes/header.php';
             <?php if ($isEdit): ?>
             <div class="card border-danger">
                 <div class="card-header bg-danger text-white">
-                    <h5 class="mb-0">Επικίνδυνη Ζώνη</h5>
+                    <h5 class="mb-0">?p????d??? ????</h5>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted small">Η διαγραφή υλικού είναι μη αναστρέψιμη.</p>
+                    <p class="text-muted small">? d?a??af? ?????? e??a? �? a?ast????�?.</p>
                     <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#deleteModal">
-                        <i class="bi bi-trash me-1"></i>Διαγραφή Υλικού
+                        <i class="bi bi-trash me-1"></i>??a??af? ??????
                     </button>
                 </div>
             </div>
@@ -326,25 +330,25 @@ include __DIR__ . '/includes/header.php';
                 <?= csrfField() ?>
                 <input type="hidden" name="action" value="delete">
                 <div class="modal-header bg-danger text-white">
-                    <h5 class="modal-title">Επιβεβαίωση Διαγραφής</h5>
+                    <h5 class="modal-title">?p?�e�a??s? ??a??af??</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p>Είστε σίγουροι ότι θέλετε να διαγράψετε το υλικό <strong><?= h($item['name']) ?></strong> (<?= h($item['barcode']) ?>);</p>
+                    <p>??ste s??????? ?t? ???ete ?a d?a????ete t? ????? <strong><?= h($item['name']) ?></strong> (<?= h($item['barcode']) ?>);</p>
                     <?php
                     $activeBookings = dbFetchValue("SELECT COUNT(*) FROM inventory_bookings WHERE item_id = ? AND status = 'active'", [$id]);
                     if ($activeBookings > 0):
                     ?>
                         <div class="alert alert-warning">
                             <i class="bi bi-exclamation-triangle me-1"></i>
-                            Αυτό το υλικό έχει <?= $activeBookings ?> ενεργή/ές χρέωση/εις!
+                            ??t? t? ????? ??e? <?= $activeBookings ?> e?e???/?? ????s?/e??!
                         </div>
                     <?php endif; ?>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">?????s?</button>
                     <button type="submit" class="btn btn-danger">
-                        <i class="bi bi-trash me-1"></i>Διαγραφή
+                        <i class="bi bi-trash me-1"></i>??a??af?
                     </button>
                 </div>
             </form>

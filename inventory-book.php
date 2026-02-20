@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Inventory Booking (Checkout / Return)
  * Allows booking an item to a volunteer / returning it.
@@ -8,10 +8,14 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
+if (isTraineeRescuer()) {
+    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+    redirect('dashboard.php');
+}
 
 $user = getCurrentUser();
 
-$pageTitle = 'Χρέωση Υλικού';
+$pageTitle = '????s? ??????';
 
 // Pre-select item if passed via GET
 $preselectedItemId = (int)get('item_id', 0);
@@ -19,7 +23,7 @@ $preselectedItem   = null;
 if ($preselectedItemId) {
     $preselectedItem = getInventoryItem($preselectedItemId);
     if ($preselectedItem && !checkInventoryAccess($preselectedItemId)) {
-        setFlash('error', 'Δεν έχετε πρόσβαση σε αυτό το υλικό.');
+        setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
         redirect('inventory.php');
     }
 }
@@ -49,7 +53,7 @@ if (isPost()) {
         $result = createInventoryBooking($itemId, $userId, $data);
 
         if ($result['success']) {
-            setFlash('success', 'Η χρέωση καταγράφηκε επιτυχώς.');
+            setFlash('success', '? ????s? ?ata???f??e ep?t????.');
             redirect('inventory-view.php?id=' . $itemId);
         } else {
             setFlash('error', $result['error']);
@@ -64,7 +68,7 @@ if (isPost()) {
         $result = returnInventoryItem($bookingId, $returnNotes);
 
         if ($result['success']) {
-            setFlash('success', 'Η επιστροφή καταγράφηκε. Διάρκεια: ' . round($result['hours'], 1) . ' ώρες.');
+            setFlash('success', '? ep?st??f? ?ata???f??e. ?????e?a: ' . round($result['hours'], 1) . ' ??e?.');
         } else {
             setFlash('error', $result['error']);
         }
@@ -77,7 +81,7 @@ if (isPost()) {
         if ($item) {
             redirect('inventory-book.php?item_id=' . $item['id']);
         } else {
-            setFlash('error', 'Δεν βρέθηκε υλικό με barcode: ' . $barcode);
+            setFlash('error', '?e? �?????e ????? �e barcode: ' . $barcode);
             redirect('inventory-book.php');
         }
     }
@@ -124,7 +128,7 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-upc-scan me-2"></i><?= h($pageTitle) ?>
     </h1>
     <a href="inventory.php" class="btn btn-outline-secondary">
-        <i class="bi bi-arrow-left me-1"></i>Πίσω
+        <i class="bi bi-arrow-left me-1"></i>??s?
     </a>
 </div>
 
@@ -134,18 +138,18 @@ include __DIR__ . '/includes/header.php';
         <!-- Barcode Lookup -->
         <div class="card mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-upc me-2"></i>Αναζήτηση με Barcode</h5>
+                <h5 class="mb-0"><i class="bi bi-upc me-2"></i>??a??t?s? �e Barcode</h5>
             </div>
             <div class="card-body">
                 <form method="post" class="d-flex gap-2" id="barcodeLookupForm">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="barcode_lookup">
                     <input type="text" class="form-control" name="barcode" id="barcodeInput"
-                           placeholder="Σαρώστε ή πληκτρολογήστε barcode..." autofocus autocomplete="off">
-                    <button type="submit" class="btn btn-primary" title="Αναζήτηση">
+                           placeholder="Sa??ste ? p???t??????ste barcode..." autofocus autocomplete="off">
+                    <button type="submit" class="btn btn-primary" title="??a??t?s?">
                         <i class="bi bi-search"></i>
                     </button>
-                    <button type="button" class="btn btn-outline-primary" id="btnCamScan" title="Σάρωση με κάμερα κινητού">
+                    <button type="button" class="btn btn-outline-primary" id="btnCamScan" title="S???s? �e ??�e?a ????t??">
                         <i class="bi bi-camera"></i>
                     </button>
                 </form>
@@ -154,10 +158,10 @@ include __DIR__ . '/includes/header.php';
                 <div id="camScanArea" class="mt-3" style="display:none;">
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <small class="text-primary fw-semibold">
-                            <i class="bi bi-camera-video me-1"></i>Στρέψε την κάμερα στο QR code ή barcode
+                            <i class="bi bi-camera-video me-1"></i>St???e t?? ??�e?a st? QR code ? barcode
                         </small>
                         <button type="button" class="btn btn-sm btn-outline-danger" id="btnStopScan">
-                            <i class="bi bi-x-circle me-1"></i>Κλείσιμο
+                            <i class="bi bi-x-circle me-1"></i>??e?s?�?
                         </button>
                     </div>
                     <div id="qrReader" style="width:100%; max-width:420px; border-radius:8px; overflow:hidden;"></div>
@@ -168,12 +172,12 @@ include __DIR__ . '/includes/header.php';
         <!-- Booking Form -->
         <div class="card mb-4">
             <div class="card-header bg-success text-white">
-                <h5 class="mb-0"><i class="bi bi-box-arrow-right me-2"></i>Νέα Χρέωση</h5>
+                <h5 class="mb-0"><i class="bi bi-box-arrow-right me-2"></i>??a ????s?</h5>
             </div>
             <div class="card-body">
                 <?php if ($preselectedItem && $preselectedItem['status'] !== 'available'): ?>
                     <div class="alert alert-warning">
-                        Το υλικό <strong><?= h($preselectedItem['name']) ?></strong> δεν είναι διαθέσιμο αυτή τη στιγμή.
+                        ?? ????? <strong><?= h($preselectedItem['name']) ?></strong> de? e??a? d?a??s?�? a?t? t? st??�?.
                     </div>
                 <?php else: ?>
                     <form method="post">
@@ -181,9 +185,9 @@ include __DIR__ . '/includes/header.php';
                         <input type="hidden" name="action" value="book">
 
                         <div class="mb-3">
-                            <label class="form-label">Υλικό *</label>
+                            <label class="form-label">????? *</label>
                             <select class="form-select" name="item_id" required>
-                                <option value="">-- Επιλέξτε υλικό --</option>
+                                <option value="">-- ?p????te ????? --</option>
                                 <?php foreach ($availableItems as $ai): ?>
                                     <option value="<?= $ai['id'] ?>" <?= $preselectedItemId == $ai['id'] ? 'selected' : '' ?>>
                                         [<?= h($ai['barcode']) ?>] <?= $ai['category_icon'] ?? '' ?> <?= h($ai['name']) ?>
@@ -194,9 +198,9 @@ include __DIR__ . '/includes/header.php';
 
                         <?php if (isAdmin() && !empty($volunteers)): ?>
                         <div class="mb-3">
-                            <label class="form-label">Εθελοντής *</label>
+                            <label class="form-label">??e???t?? *</label>
                             <select class="form-select" name="user_id" required>
-                                <option value="">-- Επιλέξτε εθελοντή --</option>
+                                <option value="">-- ?p????te e?e???t? --</option>
                                 <?php foreach ($volunteers as $vol): ?>
                                     <option value="<?= $vol['id'] ?>" <?= $vol['id'] == getCurrentUserId() ? 'selected' : '' ?>>
                                         <?= h($vol['name']) ?> (<?= h($vol['email']) ?>)
@@ -207,24 +211,24 @@ include __DIR__ . '/includes/header.php';
                         <?php else: ?>
                             <input type="hidden" name="user_id" value="<?= getCurrentUserId() ?>">
                             <div class="mb-3">
-                                <label class="form-label">Εθελοντής</label>
+                                <label class="form-label">??e???t??</label>
                                 <input type="text" class="form-control" value="<?= h($user['name']) ?>" disabled>
                             </div>
                         <?php endif; ?>
 
                         <div class="mb-3">
-                            <label class="form-label">Αποστολή *</label>
+                            <label class="form-label">?p?st??? *</label>
                             <input type="text" class="form-control" name="mission_location" 
-                                   placeholder="π.χ. Αποστολή Ηράκλεια 2026" required>
+                                   placeholder="p.?. ?p?st??? ?????e?a 2026" required>
                         </div>
 
                         <div class="mb-3">
-                            <label class="form-label">Σημειώσεις</label>
-                            <textarea class="form-control" name="notes" rows="2" placeholder="Προαιρετικές σημειώσεις..."></textarea>
+                            <label class="form-label">S?�e??se??</label>
+                            <textarea class="form-control" name="notes" rows="2" placeholder="???a??et???? s?�e??se??..."></textarea>
                         </div>
 
                         <button type="submit" class="btn btn-success btn-lg w-100">
-                            <i class="bi bi-box-arrow-right me-1"></i>Χρέωση Υλικού
+                            <i class="bi bi-box-arrow-right me-1"></i>????s? ??????
                         </button>
                     </form>
                 <?php endif; ?>
@@ -236,11 +240,11 @@ include __DIR__ . '/includes/header.php';
     <div class="col-lg-5">
         <div class="card">
             <div class="card-header bg-warning">
-                <h5 class="mb-0"><i class="bi bi-box-arrow-in-left me-2"></i>Ενεργές Χρεώσεις (<?= count($activeBookings) ?>)</h5>
+                <h5 class="mb-0"><i class="bi bi-box-arrow-in-left me-2"></i>??e???? ??e?se?? (<?= count($activeBookings) ?>)</h5>
             </div>
             <div class="card-body p-0">
                 <?php if (empty($activeBookings)): ?>
-                    <p class="text-muted text-center py-4">Δεν υπάρχουν ενεργές χρεώσεις.</p>
+                    <p class="text-muted text-center py-4">?e? ?p?????? e?e???? ??e?se??.</p>
                 <?php else: ?>
                     <div class="list-group list-group-flush">
                         <?php foreach ($activeBookings as $ab): ?>
@@ -256,7 +260,7 @@ include __DIR__ . '/includes/header.php';
                                         <strong><?= h($ab['item_name'] ?? $ab['name'] ?? '') ?></strong>
                                         <br>
                                         <small class="text-muted">
-                                            <code><?= h($ab['barcode']) ?></code> — 
+                                            <code><?= h($ab['barcode']) ?></code> � 
                                             <?= h($ab['volunteer_name'] ?? $ab['user_name'] ?? '') ?>
                                         </small>
                                     </div>
@@ -265,20 +269,20 @@ include __DIR__ . '/includes/header.php';
                                     </span>
                                 </div>
                                 <small class="text-muted d-block mb-2">
-                                    Χρέωση: <?= formatDateTime($ab['created_at']) ?>
+                                    ????s?: <?= formatDateTime($ab['created_at']) ?>
                                     <?php if ($ab['mission_location']): ?>
                                         <br><i class="bi bi-geo-alt"></i> <?= h($ab['mission_location']) ?>
                                     <?php endif; ?>
                                 </small>
                                 <!-- Return Button -->
-                                <form method="post" class="d-flex gap-2" onsubmit="return confirm('Επιβεβαίωση επιστροφής;')">
+                                <form method="post" class="d-flex gap-2" onsubmit="return confirm('?p?�e�a??s? ep?st??f??;')">
                                     <?= csrfField() ?>
                                     <input type="hidden" name="action" value="return">
                                     <input type="hidden" name="booking_id" value="<?= $ab['id'] ?>">
                                     <input type="text" class="form-control form-control-sm" name="return_notes" 
-                                           placeholder="Σημείωση επιστροφής...">
+                                           placeholder="S?�e??s? ep?st??f??...">
                                     <button type="submit" class="btn btn-sm btn-outline-success flex-shrink-0">
-                                        <i class="bi bi-box-arrow-in-left"></i> Επιστροφή
+                                        <i class="bi bi-box-arrow-in-left"></i> ?p?st??f?
                                     </button>
                                 </form>
                             </div>
@@ -339,9 +343,9 @@ include __DIR__ . '/includes/header.php';
                 input.value = barcode;
                 stopScanner(function () { form.submit(); });
             },
-            function () { /* per-frame decode errors — ignore */ }
+            function () { /* per-frame decode errors � ignore */ }
         ).catch(function (err) {
-            alert('Δεν ήταν δυνατή η πρόσβαση στην κάμερα.\n' + err);
+            alert('?e? ?ta? d??at? ? p??s�as? st?? ??�e?a.\n' + err);
             stopScanner();
         });
     });

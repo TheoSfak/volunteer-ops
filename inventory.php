@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Inventory List
  * Main inventory page with search, filters, and pagination.
@@ -8,6 +8,10 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
+if (isTraineeRescuer()) {
+    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+    redirect('dashboard.php');
+}
 
 $user = getCurrentUser();
 
@@ -30,7 +34,7 @@ $search     = get('search');
 $page       = max(1, (int)get('page', 1));
 $perPage    = 20;
 
-$pageTitle = 'Υλικά & Εξοπλισμός';
+$pageTitle = '????? & ???p??s�??';
 
 // Build filters array
 $filters = [];
@@ -59,11 +63,11 @@ include __DIR__ . '/includes/header.php';
     </h1>
     <div class="d-flex gap-2">
         <?php if (canManageInventory()): ?>
-            <button type="button" class="btn btn-outline-primary" id="btnPrintSelected" style="display:none;" onclick="printSelected()" title="Εκτύπωση ετικετών για επιλεγμένα υλικά">
-                <i class="bi bi-qr-code me-1"></i>Εκτύπωση επιλεγμένων (<span id="selectedCount">0</span>)
+            <button type="button" class="btn btn-outline-primary" id="btnPrintSelected" style="display:none;" onclick="printSelected()" title="??t?p?s? et??et?? ??a ep??e?�??a ?????">
+                <i class="bi bi-qr-code me-1"></i>??t?p?s? ep??e?�???? (<span id="selectedCount">0</span>)
             </button>
             <a href="inventory-form.php" class="btn btn-primary">
-                <i class="bi bi-plus-lg me-1"></i>Νέο Υλικό
+                <i class="bi bi-plus-lg me-1"></i>??? ?????
             </a>
         <?php endif; ?>
     </div>
@@ -75,7 +79,7 @@ include __DIR__ . '/includes/header.php';
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body text-center py-3">
                 <div class="fs-2 fw-bold text-dark"><?= $stats['total'] ?></div>
-                <small class="text-muted">Σύνολο</small>
+                <small class="text-muted">S?????</small>
             </div>
         </div>
     </div>
@@ -83,7 +87,7 @@ include __DIR__ . '/includes/header.php';
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body text-center py-3">
                 <div class="fs-2 fw-bold text-success"><?= $stats['available'] ?></div>
-                <small class="text-muted">Διαθέσιμα</small>
+                <small class="text-muted">??a??s?�a</small>
             </div>
         </div>
     </div>
@@ -91,7 +95,7 @@ include __DIR__ . '/includes/header.php';
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body text-center py-3">
                 <div class="fs-2 fw-bold text-primary"><?= $stats['booked'] ?></div>
-                <small class="text-muted">Χρεωμένα</small>
+                <small class="text-muted">??e?�??a</small>
             </div>
         </div>
     </div>
@@ -99,7 +103,7 @@ include __DIR__ . '/includes/header.php';
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body text-center py-3">
                 <div class="fs-2 fw-bold text-warning"><?= $stats['maintenance'] ?></div>
-                <small class="text-muted">Συντήρηση</small>
+                <small class="text-muted">S??t???s?</small>
             </div>
         </div>
     </div>
@@ -107,7 +111,7 @@ include __DIR__ . '/includes/header.php';
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body text-center py-3">
                 <div class="fs-2 fw-bold text-danger"><?= $stats['damaged'] ?></div>
-                <small class="text-muted">Χαλασμένα</small>
+                <small class="text-muted">?a?as�??a</small>
             </div>
         </div>
     </div>
@@ -118,12 +122,12 @@ include __DIR__ . '/includes/header.php';
     <div class="card-body">
         <form method="get" class="row g-3">
             <div class="col-md-3">
-                <input type="text" class="form-control" name="search" placeholder="Αναζήτηση (barcode, όνομα)..." 
+                <input type="text" class="form-control" name="search" placeholder="??a??t?s? (barcode, ???�a)..." 
                        value="<?= h($search) ?>">
             </div>
             <div class="col-md-2">
                 <select class="form-select" name="status">
-                    <option value="">Όλες οι καταστάσεις</option>
+                    <option value="">??e? ?? ?atast?se??</option>
                     <?php foreach (INVENTORY_STATUS_LABELS as $key => $label): ?>
                         <option value="<?= $key ?>" <?= $status === $key ? 'selected' : '' ?>>
                             <?= h($label) ?>
@@ -133,7 +137,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="col-md-3">
                 <select class="form-select" name="category_id">
-                    <option value="">Όλες οι κατηγορίες</option>
+                    <option value="">??e? ?? ?at?????e?</option>
                     <?php foreach ($categories as $cat): ?>
                         <option value="<?= $cat['id'] ?>" <?= $categoryId == $cat['id'] ? 'selected' : '' ?>>
                             <?= $cat['icon'] ?> <?= h($cat['name']) ?>
@@ -143,11 +147,11 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="col-md-2">
                 <button type="submit" class="btn btn-outline-primary w-100">
-                    <i class="bi bi-search me-1"></i>Φίλτρο
+                    <i class="bi bi-search me-1"></i>F??t??
                 </button>
             </div>
             <div class="col-md-2">
-                <a href="inventory.php" class="btn btn-outline-secondary w-100">Καθαρισμός</a>
+                <a href="inventory.php" class="btn btn-outline-secondary w-100">?a?a??s�??</a>
             </div>
         </form>
     </div>
@@ -160,9 +164,9 @@ include __DIR__ . '/includes/header.php';
         <form method="post" class="d-flex align-items-center gap-3">
             <?= csrfField() ?>
             <input type="hidden" name="action" value="set_department_filter">
-            <label class="form-label mb-0 fw-bold"><i class="bi bi-building me-1"></i>Αποθήκη:</label>
+            <label class="form-label mb-0 fw-bold"><i class="bi bi-building me-1"></i>?p?????:</label>
             <select class="form-select form-select-sm" name="dept_filter" style="max-width: 250px;" onchange="this.form.submit()">
-                <option value="all" <?= getCurrentInventoryDepartment() === 'all' ? 'selected' : '' ?>>Όλες οι αποθήκες</option>
+                <option value="all" <?= getCurrentInventoryDepartment() === 'all' ? 'selected' : '' ?>>??e? ?? ap????e?</option>
                 <?php foreach ($departments as $dept): ?>
                     <option value="<?= $dept['id'] ?>" <?= getCurrentInventoryDepartment() == $dept['id'] ? 'selected' : '' ?>>
                         <?= h($dept['name']) ?>
@@ -171,7 +175,7 @@ include __DIR__ . '/includes/header.php';
             </select>
             <?php if (isSystemAdmin()): ?>
                 <a href="inventory-warehouses.php" class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-gear me-1"></i>Διαχείριση
+                    <i class="bi bi-gear me-1"></i>??a?e???s?
                 </a>
             <?php endif; ?>
         </form>
@@ -185,10 +189,10 @@ include __DIR__ . '/includes/header.php';
         <?php if (empty($items)): ?>
             <div class="text-center py-5">
                 <i class="bi bi-box-seam text-muted" style="font-size: 3rem;"></i>
-                <p class="text-muted mt-3">Δεν βρέθηκαν υλικά.</p>
+                <p class="text-muted mt-3">?e? �?????a? ?????.</p>
                 <?php if (canManageInventory()): ?>
                     <a href="inventory-form.php" class="btn btn-primary">
-                        <i class="bi bi-plus-lg me-1"></i>Προσθήκη Υλικού
+                        <i class="bi bi-plus-lg me-1"></i>???s???? ??????
                     </a>
                 <?php endif; ?>
             </div>
@@ -199,19 +203,19 @@ include __DIR__ . '/includes/header.php';
                         <tr>
                             <?php if (canManageInventory()): ?>
                             <th style="width:36px;">
-                                <input type="checkbox" class="form-check-input" id="chkAll" title="Επιλογή όλων">
+                                <input type="checkbox" class="form-check-input" id="chkAll" title="?p????? ????">
                             </th>
                             <?php endif; ?>
                             <th>Barcode</th>
-                            <th>Όνομα</th>
-                            <th>Κατηγορία</th>
-                            <th>Τοποθεσία</th>
+                            <th>???�a</th>
+                            <th>?at?????a</th>
+                            <th>??p??es?a</th>
                             <?php if (isSystemAdmin()): ?>
-                                <th>Τμήμα</th>
+                                <th>?�?�a</th>
                             <?php endif; ?>
-                            <th>Κατάσταση</th>
-                            <th>Χρεωμένο σε</th>
-                            <th class="text-end">Ενέργειες</th>
+                            <th>?at?stas?</th>
+                            <th>??e?�??? se</th>
+                            <th class="text-end">?????e?e?</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -231,9 +235,9 @@ include __DIR__ . '/includes/header.php';
                                     </a>
                                     <?php if (!empty($item['open_notes_count']) && $item['open_notes_count'] > 0): ?>
                                         <a href="inventory-view.php?id=<?= $item['id'] ?>#notes" class="text-decoration-none ms-1"
-                                           title="<?= $item['open_notes_count'] ?> ανοιχτό/ά σχόλιο/α" data-bs-toggle="tooltip">
+                                           title="<?= $item['open_notes_count'] ?> a????t?/? s?????/a" data-bs-toggle="tooltip">
                                             <span class="badge bg-warning text-dark">
-                                                <i class="bi bi-exclamation-triangle-fill me-1"></i>ΣΧΟΛΙΟ!
+                                                <i class="bi bi-exclamation-triangle-fill me-1"></i>S?????!
                                             </span>
                                         </a>
                                     <?php endif; ?>
@@ -249,7 +253,7 @@ include __DIR__ . '/includes/header.php';
                                 </td>
                                 <td><?= h($item['location_name'] ?? '-') ?></td>
                                 <?php if (isSystemAdmin()): ?>
-                                    <td><?= h($item['dept_name'] ?? 'Γενικό') ?></td>
+                                    <td><?= h($item['dept_name'] ?? 'Ge????') ?></td>
                                 <?php endif; ?>
                                 <td><?= inventoryStatusBadge($item['status']) ?></td>
                                 <td>
@@ -277,16 +281,16 @@ include __DIR__ . '/includes/header.php';
                                 </td>
                                 <td class="text-end">
                                     <div class="btn-group btn-group-sm">
-                                        <a href="inventory-view.php?id=<?= $item['id'] ?>" class="btn btn-outline-primary" title="Προβολή">
+                                        <a href="inventory-view.php?id=<?= $item['id'] ?>" class="btn btn-outline-primary" title="???�???">
                                             <i class="bi bi-eye"></i>
                                         </a>
                                         <?php if ($item['status'] === 'available'): ?>
-                                            <a href="inventory-book.php?item_id=<?= $item['id'] ?>" class="btn btn-outline-success" title="Χρέωση">
+                                            <a href="inventory-book.php?item_id=<?= $item['id'] ?>" class="btn btn-outline-success" title="????s?">
                                                 <i class="bi bi-box-arrow-right"></i>
                                             </a>
                                         <?php endif; ?>
                                         <?php if (canManageInventory()): ?>
-                                            <a href="inventory-form.php?id=<?= $item['id'] ?>" class="btn btn-outline-secondary" title="Επεξεργασία">
+                                            <a href="inventory-form.php?id=<?= $item['id'] ?>" class="btn btn-outline-secondary" title="?pe?e??as?a">
                                                 <i class="bi bi-pencil"></i>
                                             </a>
                                         <?php endif; ?>
@@ -339,7 +343,7 @@ include __DIR__ . '/includes/header.php';
         cb.addEventListener('change', updateBar);
     });
 
-    // Select‑all
+    // Select-all
     chkAll.addEventListener('change', function () {
         document.querySelectorAll('.item-chk').forEach(function (cb) {
             cb.checked = chkAll.checked;

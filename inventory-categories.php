@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Inventory Categories Management
  * Admin page to manage inventory categories.
@@ -8,13 +8,17 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/inventory-functions.php';
 requireLogin();
 requireInventoryTables();
+if (isTraineeRescuer()) {
+    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+    redirect('dashboard.php');
+}
 
 if (!canManageInventory()) {
-    setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης.');
+    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
     redirect('inventory.php');
 }
 
-$pageTitle = 'Κατηγορίες Υλικών';
+$pageTitle = '?at?????e? ??????';
 
 // Handle POST actions
 if (isPost()) {
@@ -24,12 +28,12 @@ if (isPost()) {
     if ($action === 'create') {
         $name        = trim(post('name'));
         $description = post('description');
-        $icon        = post('icon', '📦');
+        $icon        = post('icon', '??');
         $color       = post('color', '#6c757d');
         $sortOrder   = (int)post('sort_order', 0);
 
         if (empty($name)) {
-            setFlash('error', 'Το όνομα κατηγορίας είναι υποχρεωτικό.');
+            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
         } else {
             try {
                 dbInsert("
@@ -37,9 +41,9 @@ if (isPost()) {
                     VALUES (?, ?, ?, ?, ?)
                 ", [$name, $description, $icon, $color, $sortOrder]);
                 logAudit('inventory_category_create', 'inventory_categories', 0);
-                setFlash('success', 'Η κατηγορία δημιουργήθηκε.');
+                setFlash('success', '? ?at?????a d?�?????????e.');
             } catch (Exception $e) {
-                setFlash('error', 'Σφάλμα: Η κατηγορία υπάρχει ήδη ή παρουσιάστηκε πρόβλημα.');
+                setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
             }
         }
         redirect('inventory-categories.php');
@@ -49,12 +53,12 @@ if (isPost()) {
         $catId       = (int)post('category_id');
         $name        = trim(post('name'));
         $description = post('description');
-        $icon        = post('icon', '📦');
+        $icon        = post('icon', '??');
         $color       = post('color', '#6c757d');
         $sortOrder   = (int)post('sort_order', 0);
 
         if (empty($name)) {
-            setFlash('error', 'Το όνομα κατηγορίας είναι υποχρεωτικό.');
+            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
         } else {
             try {
                 dbExecute("
@@ -63,9 +67,9 @@ if (isPost()) {
                     WHERE id = ?
                 ", [$name, $description, $icon, $color, $sortOrder, $catId]);
                 logAudit('inventory_category_update', 'inventory_categories', $catId);
-                setFlash('success', 'Η κατηγορία ενημερώθηκε.');
+                setFlash('success', '? ?at?????a e??�e?????e.');
             } catch (Exception $e) {
-                setFlash('error', 'Σφάλμα ενημέρωσης κατηγορίας.');
+                setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
             }
         }
         redirect('inventory-categories.php');
@@ -76,7 +80,7 @@ if (isPost()) {
         $isActive = (int)post('is_active');
         dbExecute("UPDATE inventory_categories SET is_active = ? WHERE id = ?", [$isActive, $catId]);
         logAudit('inventory_category_toggle', 'inventory_categories', $catId);
-        setFlash('success', $isActive ? 'Η κατηγορία ενεργοποιήθηκε.' : 'Η κατηγορία απενεργοποιήθηκε.');
+        setFlash('success', $isActive ? '? ?at?????a e?e???p??????e.' : '? ?at?????a ape?e???p??????e.');
         redirect('inventory-categories.php');
     }
 }
@@ -109,7 +113,7 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-tags me-2"></i><?= h($pageTitle) ?>
     </h1>
     <a href="inventory.php" class="btn btn-outline-secondary">
-        <i class="bi bi-arrow-left me-1"></i>Πίσω στα Υλικά
+        <i class="bi bi-arrow-left me-1"></i>??s? sta ?????
     </a>
 </div>
 
@@ -119,7 +123,7 @@ include __DIR__ . '/includes/header.php';
         <div class="card mb-4">
             <div class="card-header">
                 <h5 class="mb-0">
-                    <?= $editCat ? 'Επεξεργασία Κατηγορίας' : 'Νέα Κατηγορία' ?>
+                    <?= $editCat ? '?pe?e??as?a ?at?????a?' : '??a ?at?????a' ?>
                 </h5>
             </div>
             <div class="card-body">
@@ -131,31 +135,31 @@ include __DIR__ . '/includes/header.php';
                     <?php endif; ?>
 
                     <div class="mb-3">
-                        <label class="form-label">Όνομα *</label>
+                        <label class="form-label">???�a *</label>
                         <input type="text" class="form-control" name="name" 
                                value="<?= h($editCat['name'] ?? '') ?>" required>
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label">Περιγραφή</label>
+                        <label class="form-label">?e????af?</label>
                         <textarea class="form-control" name="description" rows="2"
                         ><?= h($editCat['description'] ?? '') ?></textarea>
                     </div>
 
                     <div class="row">
                         <div class="col-md-4 mb-3">
-                            <label class="form-label">Εικονίδιο</label>
+                            <label class="form-label">??????d??</label>
                             <input type="text" class="form-control text-center fs-4" name="icon" 
-                                   value="<?= h($editCat['icon'] ?? '📦') ?>" maxlength="5">
+                                   value="<?= h($editCat['icon'] ?? '??') ?>" maxlength="5">
                             <small class="form-text text-muted">Emoji</small>
                         </div>
                         <div class="col-md-4 mb-3">
-                            <label class="form-label">Χρώμα</label>
+                            <label class="form-label">???�a</label>
                             <input type="color" class="form-control form-control-color w-100" name="color" 
                                    value="<?= h($editCat['color'] ?? '#6c757d') ?>">
                         </div>
                         <div class="col-md-4 mb-3">
-                            <label class="form-label">Σειρά</label>
+                            <label class="form-label">Se???</label>
                             <input type="number" class="form-control" name="sort_order" 
                                    value="<?= (int)($editCat['sort_order'] ?? 0) ?>" min="0">
                         </div>
@@ -164,10 +168,10 @@ include __DIR__ . '/includes/header.php';
                     <div class="d-flex gap-2">
                         <button type="submit" class="btn btn-primary">
                             <i class="bi bi-check-lg me-1"></i>
-                            <?= $editCat ? 'Αποθήκευση' : 'Δημιουργία' ?>
+                            <?= $editCat ? '?p????e?s?' : '??�??????a' ?>
                         </button>
                         <?php if ($editCat): ?>
-                            <a href="inventory-categories.php" class="btn btn-outline-secondary">Ακύρωση</a>
+                            <a href="inventory-categories.php" class="btn btn-outline-secondary">?????s?</a>
                         <?php endif; ?>
                     </div>
                 </form>
@@ -180,17 +184,17 @@ include __DIR__ . '/includes/header.php';
         <div class="card">
             <div class="card-body p-0">
                 <?php if (empty($categories)): ?>
-                    <p class="text-muted text-center py-4">Δεν υπάρχουν κατηγορίες.</p>
+                    <p class="text-muted text-center py-4">?e? ?p?????? ?at?????e?.</p>
                 <?php else: ?>
                     <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
                             <thead class="table-light">
                                 <tr>
                                     <th style="width: 50px;">#</th>
-                                    <th>Κατηγορία</th>
-                                    <th class="text-center">Υλικά</th>
-                                    <th class="text-center">Κατάσταση</th>
-                                    <th class="text-end">Ενέργειες</th>
+                                    <th>?at?????a</th>
+                                    <th class="text-center">?????</th>
+                                    <th class="text-center">?at?stas?</th>
+                                    <th class="text-end">?????e?e?</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -211,15 +215,15 @@ include __DIR__ . '/includes/header.php';
                                         </td>
                                         <td class="text-center">
                                             <?php if ($cat['is_active']): ?>
-                                                <span class="badge bg-success">Ενεργή</span>
+                                                <span class="badge bg-success">??e???</span>
                                             <?php else: ?>
-                                                <span class="badge bg-secondary">Ανενεργή</span>
+                                                <span class="badge bg-secondary">??e?e???</span>
                                             <?php endif; ?>
                                         </td>
                                         <td class="text-end">
                                             <div class="btn-group btn-group-sm">
                                                 <a href="inventory-categories.php?edit=<?= $cat['id'] ?>" 
-                                                   class="btn btn-outline-secondary" title="Επεξεργασία">
+                                                   class="btn btn-outline-secondary" title="?pe?e??as?a">
                                                     <i class="bi bi-pencil"></i>
                                                 </a>
                                                 <form method="post" class="d-inline">
@@ -228,7 +232,7 @@ include __DIR__ . '/includes/header.php';
                                                     <input type="hidden" name="category_id" value="<?= $cat['id'] ?>">
                                                     <input type="hidden" name="is_active" value="<?= $cat['is_active'] ? 0 : 1 ?>">
                                                     <button type="submit" class="btn btn-outline-<?= $cat['is_active'] ? 'warning' : 'success' ?> btn-sm"
-                                                            title="<?= $cat['is_active'] ? 'Απενεργοποίηση' : 'Ενεργοποίηση' ?>">
+                                                            title="<?= $cat['is_active'] ? '?pe?e???p???s?' : '??e???p???s?' ?>">
                                                         <i class="bi bi-<?= $cat['is_active'] ? 'pause' : 'play' ?>"></i>
                                                     </button>
                                                 </form>
