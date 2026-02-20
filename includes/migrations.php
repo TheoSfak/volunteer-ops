@@ -267,6 +267,33 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 7,
+            'description' => 'Revert submitted_at rename back to completed_at (nullable) on quiz_attempts and exam_attempts',
+            'up' => function () {
+                // quiz_attempts: submitted_at -> completed_at TIMESTAMP NULL
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'quiz_attempts'
+                       AND COLUMN_NAME  = 'submitted_at'"
+                );
+                if ($col) {
+                    dbExecute("ALTER TABLE quiz_attempts CHANGE COLUMN submitted_at completed_at TIMESTAMP NULL DEFAULT NULL");
+                }
+                // exam_attempts: submitted_at -> completed_at TIMESTAMP NULL
+                $col2 = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'exam_attempts'
+                       AND COLUMN_NAME  = 'submitted_at'"
+                );
+                if ($col2) {
+                    dbExecute("ALTER TABLE exam_attempts CHANGE COLUMN submitted_at completed_at TIMESTAMP NULL DEFAULT NULL");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
