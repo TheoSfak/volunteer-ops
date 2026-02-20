@@ -238,7 +238,7 @@ $liveExams = dbFetchAll("
     </h1>
     <div class="d-flex gap-2">
         <button class="btn btn-sm btn-outline-primary" id="customizeBtn" title="Προσαρμογή Dashboard">
-            <i class="bi bi-gear"></i> Προσαρμογή
+            <i class="bi bi-gear"></i><span class="d-none d-sm-inline"> Προσαρμογή</span>
         </button>
         <select class="form-select form-select-sm" onchange="location.href='?year='+this.value" style="width: auto;">
             <?php for ($y = date('Y'); $y >= date('Y') - 5; $y--): ?>
@@ -391,7 +391,7 @@ $liveExams = dbFetchAll("
             </div>
         </div>
     <?php else: ?>
-        <div class="col-md-6 col-lg-3">
+        <div class="col-6 col-md-6 col-lg-3">
             <div class="card stats-card primary">
                 <div class="card-body">
                     <div class="d-flex justify-content-between">
@@ -406,7 +406,7 @@ $liveExams = dbFetchAll("
                 </div>
             </div>
         </div>
-        <div class="col-md-6 col-lg-3">
+        <div class="col-6 col-md-6 col-lg-3">
             <div class="card stats-card warning">
                 <div class="card-body">
                     <div class="d-flex justify-content-between">
@@ -421,7 +421,7 @@ $liveExams = dbFetchAll("
                 </div>
             </div>
         </div>
-        <div class="col-md-6 col-lg-3">
+        <div class="col-6 col-md-6 col-lg-3">
             <div class="card stats-card success">
                 <div class="card-body">
                     <div class="d-flex justify-content-between">
@@ -436,7 +436,7 @@ $liveExams = dbFetchAll("
                 </div>
             </div>
         </div>
-        <div class="col-md-6 col-lg-3">
+        <div class="col-6 col-md-6 col-lg-3">
             <div class="card stats-card danger">
                 <div class="card-body">
                     <div class="d-flex justify-content-between">
@@ -1067,7 +1067,7 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0"><i class="bi bi-calendar-check me-2"></i>Οι Επόμενες Βάρδιες μου</h5>
-                    <a href="my-shifts.php" class="btn btn-sm btn-outline-primary">Όλες</a>
+                    <a href="my-participations.php" class="btn btn-sm btn-outline-primary">Όλες</a>
                 </div>
                 <div class="card-body p-0">
                     <?php if (empty($myShifts)): ?>
