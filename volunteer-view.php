@@ -280,8 +280,8 @@ $examAttempts = dbFetchAll(
      FROM exam_attempts ea
      INNER JOIN training_exams te ON ea.exam_id = te.id
      INNER JOIN training_categories tc ON te.category_id = tc.id
-     WHERE ea.user_id = ? AND ea.submitted_at IS NOT NULL
-     ORDER BY ea.submitted_at DESC",
+     WHERE ea.user_id = ? AND ea.completed_at IS NOT NULL
+     ORDER BY ea.completed_at DESC",
     [$id]
 );
 
@@ -292,8 +292,8 @@ $quizAttempts = dbFetchAll(
      FROM quiz_attempts qa
      INNER JOIN training_quizzes tq ON qa.quiz_id = tq.id
      INNER JOIN training_categories tc ON tq.category_id = tc.id
-     WHERE qa.user_id = ? AND qa.submitted_at IS NOT NULL
-     ORDER BY qa.submitted_at DESC",
+     WHERE qa.user_id = ? AND qa.completed_at IS NOT NULL
+     ORDER BY qa.completed_at DESC",
     [$id]
 );
 
@@ -522,7 +522,7 @@ include __DIR__ . '/includes/header.php';
                                                 <strong><?= $exam['percentage'] ?>%</strong>
                                                 <small class="text-muted">(<?= $exam['score'] ?>/<?= $exam['total_questions'] ?>)</small>
                                             </div>
-                                            <small class="text-muted d-block"><?= formatDateTime($exam['submitted_at']) ?></small>
+                                            <small class="text-muted d-block"><?= formatDateTime($exam['completed_at']) ?></small>
                                         </div>
                                     </div>
                                 </a>
@@ -545,7 +545,7 @@ include __DIR__ . '/includes/header.php';
                                                 <strong><?= $quiz['percentage'] ?>%</strong>
                                                 <small class="text-muted">(<?= $quiz['score'] ?>/<?= $quiz['total_questions'] ?>)</small>
                                             </div>
-                                            <small class="text-muted d-block"><?= formatDateTime($quiz['submitted_at']) ?></small>
+                                            <small class="text-muted d-block"><?= formatDateTime($quiz['completed_at']) ?></small>
                                         </div>
                                     </div>
                                 </a>

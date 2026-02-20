@@ -89,14 +89,14 @@ $examQuery = "
         ea.score,
         te.questions_per_attempt as total_questions,
         ea.passed,
-        ea.submitted_at as completed_at,
+        ea.completed_at,
         ea.time_taken_seconds,
         ROUND((ea.score / NULLIF(te.questions_per_attempt, 0) * 100), 2) as percentage
     FROM exam_attempts ea
     INNER JOIN users u ON ea.user_id = u.id
     INNER JOIN training_exams te ON ea.exam_id = te.id
     INNER JOIN training_categories tc ON te.category_id = tc.id
-    WHERE ea.submitted_at IS NOT NULL $examWhere
+    WHERE ea.completed_at IS NOT NULL $examWhere
 ";
 
 // Base query for QUIZZES (filters injected inside WHERE)
@@ -115,14 +115,14 @@ $quizQuery = "
         qa.score,
         (SELECT COUNT(*) FROM training_quiz_questions tqqc WHERE tqqc.quiz_id = qa.quiz_id) as total_questions,
         NULL as passed,
-        qa.submitted_at as completed_at,
+        qa.completed_at,
         qa.time_taken_seconds,
         ROUND((qa.score / NULLIF((SELECT COUNT(*) FROM training_quiz_questions tqqc2 WHERE tqqc2.quiz_id = qa.quiz_id), 0) * 100), 2) as percentage
     FROM quiz_attempts qa
     INNER JOIN users u ON qa.user_id = u.id
     INNER JOIN training_quizzes tq ON qa.quiz_id = tq.id
     INNER JOIN training_categories tc ON tq.category_id = tc.id
-    WHERE qa.submitted_at IS NOT NULL $quizWhere
+    WHERE qa.completed_at IS NOT NULL $quizWhere
 ";
 
 // Build combined query and params based on filter type
