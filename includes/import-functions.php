@@ -26,13 +26,28 @@ function parseCsvFile($filePath) {
         rewind($handle);
     }
 
-    $headers = fgetcsv($handle);
+    // Auto-detect delimiter: read first line, count tabs vs commas
+    $firstLine = fgets($handle);
+    if ($firstLine === false) {
+        fclose($handle);
+        return ['success' => false, 'error' => 'Το αρχείο δεν περιέχει headers.'];
+    }
+    $delimiter = substr_count($firstLine, "\t") >= substr_count($firstLine, ',') ? "\t" : ',';
+    // Rewind to re-parse headers properly through fgetcsv
+    $pos = ftell($handle) - strlen($firstLine);
+    // Seek back to start of first line (after BOM)
+    fseek($handle, $pos);
+
+    $headers = fgetcsv($handle, 0, $delimiter);
     if ($headers === false) {
         fclose($handle);
         return ['success' => false, 'error' => 'Το αρχείο δεν περιέχει headers.'];
     }
 
-    while (($row = fgetcsv($handle)) !== false) {
+    // Strip stray quotes and whitespace from header names
+    $headers = array_map(fn($h) => trim(trim($h), '"'), $headers);
+
+    while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
         if (count($row) === count($headers)) {
             $rows[] = array_combine($headers, $row);
         }
@@ -100,7 +115,7 @@ function validateVolunteerData(array $row, int $rowNumber): array {
     }
 
     $vtype = _col($row, 'Τύπος Εθελοντή');
-    if ($vtype !== null && !in_array($vtype, $validTypes)) {
+    if ($vtype !== null && $vtype !== '0' && !in_array($vtype, $validTypes)) {
         $errors[] = "Γραμμή $rowNumber: Πεδίο 'Τύπος Εθελοντή' — μη έγκυρη τιμή '$vtype'. Επιτρεπτοί: " . implode(', ', $validTypes);
     }
 
@@ -147,7 +162,8 @@ function importVolunteersFromCsv(array $rows, bool $dryRun = false): array {
         if ($phone !== null) $phone = preg_replace('/[\s\-\.]+/', '', $phone);
         $deptId           = (int) trim($row['Τμήμα ID']);
         $role             = trim($row['Ρόλος']);
-        $volunteerType    = _col($row, 'Τύπος Εθελοντή') ?? 'VOLUNTEER';
+        $rawType          = _col($row, 'Τύπος Εθελοντή');
+        $volunteerType    = ($rawType && $rawType !== '0') ? $rawType : 'VOLUNTEER';
         $idCard           = _col($row, 'Ταυτότητα');
         $amka             = _col($row, 'ΑΜΚΑ');
         $drivingLicense   = _col($row, 'Δίπλωμα Οδήγησης');
