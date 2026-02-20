@@ -204,7 +204,11 @@ if (isPost()) {
                         $dst = imagecreatetruecolor(250, 250);
                         imagecopyresampled($dst, $src, 0, 0, $cropX, $cropY, 250, 250, $cropSize, $cropSize);
                         $filename = $user['id'] . '.jpg';
-                        $savePath = __DIR__ . '/uploads/avatars/' . $filename;
+                        $avatarDir = __DIR__ . '/uploads/avatars/';
+                        if (!is_dir($avatarDir)) {
+                            mkdir($avatarDir, 0755, true);
+                        }
+                        $savePath = $avatarDir . $filename;
                         imagejpeg($dst, $savePath, 90);
                         imagedestroy($src);
                         imagedestroy($dst);
