@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Inventory Notes Management (Admin)
  * Centralized view of all inventory notes/deficiencies.
@@ -16,7 +16,7 @@ if (isTraineeRescuer()) {
 requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
 
 $user = getCurrentUser();
-$pageTitle = 'S?�e??se?? ??????';
+$pageTitle = 'Σημειώσεις Υλικών';
 
 // Handle POST actions
 if (isPost()) {
@@ -30,13 +30,13 @@ if (isPost()) {
         $validStatuses = array_keys(NOTE_STATUS_LABELS);
 
         if (!in_array($newStatus, $validStatuses)) {
-            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+            setFlash('error', 'Μη έγκυρη κατάσταση.');
             redirect('inventory-notes.php');
         }
 
         $note = dbFetchOne("SELECT * FROM inventory_notes WHERE id = ?", [$noteId]);
         if (!$note) {
-            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+            setFlash('error', 'Η σημείωση δεν βρέθηκε.');
             redirect('inventory-notes.php');
         }
 
@@ -79,7 +79,7 @@ if (isPost()) {
         );
 
         logAudit('inventory_note_status', 'inventory_notes', $noteId);
-        setFlash('success', '? ?at?stas? e??�e?????e se: ' . NOTE_STATUS_LABELS[$newStatus]);
+        setFlash('success', 'Η κατάσταση ενημερώθηκε σε: ' . NOTE_STATUS_LABELS[$newStatus]);
         redirect('inventory-notes.php?' . http_build_query(array_filter([
             'status'   => get('status'),
             'priority' => get('priority'),
@@ -95,7 +95,7 @@ if (isPost()) {
 
         $note = dbFetchOne("SELECT * FROM inventory_notes WHERE id = ?", [$noteId]);
         if (!$note) {
-            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+            setFlash('error', 'Η σημείωση δεν βρέθηκε.');
             redirect('inventory-notes.php');
         }
 
@@ -120,7 +120,7 @@ if (isPost()) {
         ", [$user['id'], $resolutionNotes, json_encode($history, JSON_UNESCAPED_UNICODE), $noteId]);
 
         logAudit('inventory_note_resolve', 'inventory_notes', $noteId);
-        setFlash('success', '? s?�e??s? ep??????e ep?t????.');
+        setFlash('success', 'Η σημείωση επιλύθηκε επιτυχώς.');
         redirect('inventory-notes.php?' . http_build_query(array_filter([
             'status'   => get('status'),
             'priority' => get('priority'),
@@ -133,7 +133,7 @@ if (isPost()) {
         $noteId = (int)post('note_id');
         dbExecute("DELETE FROM inventory_notes WHERE id = ?", [$noteId]);
         logAudit('inventory_note_delete', 'inventory_notes', $noteId);
-        setFlash('success', '? s?�e??s? d?a???f??e.');
+        setFlash('success', 'Η σημείωση διαγράφηκε.');
         redirect('inventory-notes.php');
     }
 }
@@ -238,7 +238,7 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-sticky me-2"></i><?= h($pageTitle) ?>
     </h1>
     <a href="inventory.php" class="btn btn-outline-secondary">
-        <i class="bi bi-arrow-left me-1"></i>?????
+        <i class="bi bi-arrow-left me-1"></i>Υλικά
     </a>
 </div>
 
@@ -249,7 +249,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card border-0 shadow-sm h-100 <?= $filterStatus === 'pending' ? 'border-warning border-2' : '' ?>">
                 <div class="card-body text-center py-3">
                     <div class="fs-2 fw-bold text-warning"><?= $statsPending ?></div>
-                    <small class="text-muted">????e�e??</small>
+                    <small class="text-muted">Εκκρεμείς</small>
                 </div>
             </div>
         </a>
@@ -259,7 +259,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card border-0 shadow-sm h-100 <?= $filterStatus === 'in_progress' ? 'border-info border-2' : '' ?>">
                 <div class="card-body text-center py-3">
                     <div class="fs-2 fw-bold text-info"><?= $statsProgress ?></div>
-                    <small class="text-muted">Se ???????</small>
+                    <small class="text-muted">Σε Εξέλιξη</small>
                 </div>
             </div>
         </a>
@@ -269,7 +269,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card border-0 shadow-sm h-100 <?= $filterStatus === 'resolved' ? 'border-success border-2' : '' ?>">
                 <div class="card-body text-center py-3">
                     <div class="fs-2 fw-bold text-success"><?= $statsResolved ?></div>
-                    <small class="text-muted">?p???�??e?</small>
+                    <small class="text-muted">Επιλυμένες</small>
                 </div>
             </div>
         </a>
@@ -279,7 +279,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card border-0 shadow-sm h-100 <?= $filterPriority === 'urgent' ? 'border-danger border-2' : '' ?>">
                 <div class="card-body text-center py-3">
                     <div class="fs-2 fw-bold text-danger"><?= $statsUrgent ?></div>
-                    <small class="text-muted">?pe????ta</small>
+                    <small class="text-muted">Επείγοντα</small>
                 </div>
             </div>
         </a>
@@ -289,7 +289,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body text-center py-3">
                     <div class="fs-2 fw-bold text-dark"><?= $statsTotal ?></div>
-                    <small class="text-muted">S?????</small>
+                    <small class="text-muted">Σύνολο</small>
                 </div>
             </div>
         </a>
@@ -301,12 +301,12 @@ include __DIR__ . '/includes/header.php';
     <div class="card-body">
         <form method="get" class="row g-3">
             <div class="col-md-3">
-                <input type="text" class="form-control" name="search" placeholder="??a??t?s?..." 
+                <input type="text" class="form-control" name="search" placeholder="Αναζήτηση..." 
                        value="<?= h($filterSearch) ?>">
             </div>
             <div class="col-md-2">
                 <select class="form-select" name="status">
-                    <option value="">??e? ?? ?atast?se??</option>
+                    <option value="">Όλες οι καταστάσεις</option>
                     <?php foreach (NOTE_STATUS_LABELS as $key => $label): ?>
                         <option value="<?= $key ?>" <?= $filterStatus === $key ? 'selected' : '' ?>>
                             <?= h($label) ?>
@@ -316,7 +316,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="col-md-2">
                 <select class="form-select" name="priority">
-                    <option value="">??e? ?? e?/???</option>
+                    <option value="">Όλες οι εν/κές</option>
                     <?php foreach (NOTE_PRIORITY_LABELS as $key => $label): ?>
                         <option value="<?= $key ?>" <?= $filterPriority === $key ? 'selected' : '' ?>>
                             <?= h($label) ?>
@@ -326,7 +326,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="col-md-2">
                 <select class="form-select" name="type">
-                    <option value="">???? ?? t?p??</option>
+                    <option value="">Όλοι οι τύποι</option>
                     <?php foreach (NOTE_TYPE_LABELS as $key => $label): ?>
                         <option value="<?= $key ?>" <?= $filterType === $key ? 'selected' : '' ?>>
                             <?= h($label) ?>
@@ -340,7 +340,7 @@ include __DIR__ . '/includes/header.php';
                 </button>
             </div>
             <div class="col-md-2">
-                <a href="inventory-notes.php" class="btn btn-outline-secondary w-100">?a?a??s�??</a>
+                <a href="inventory-notes.php" class="btn btn-outline-secondary w-100">Καθαρισμός</a>
             </div>
         </form>
     </div>
@@ -349,13 +349,13 @@ include __DIR__ . '/includes/header.php';
 <!-- Notes List -->
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0">S?�e??se?? (<?= $total ?>)</h5>
+        <h5 class="mb-0">Σημειώσεις (<?= $total ?>)</h5>
     </div>
     <div class="card-body p-0">
         <?php if (empty($notes)): ?>
             <div class="text-center py-5">
                 <i class="bi bi-sticky text-muted" style="font-size: 3rem;"></i>
-                <p class="text-muted mt-3">?e? �?????a? s?�e??se??.</p>
+                <p class="text-muted mt-3">Δεν βρέθηκαν σημειώσεις.</p>
             </div>
         <?php else: ?>
             <?php foreach ($notes as $note): ?>
@@ -415,21 +415,21 @@ include __DIR__ . '/includes/header.php';
                                     <p class="mb-1"><?= nl2br(h($note['content'])) ?></p>
                                     <small class="text-muted">
                                         <?= $noteTypeIcon ?> <?= h(NOTE_TYPE_LABELS[$note['note_type']] ?? $note['note_type']) ?>
-                                        � <?= h($note['author_name'] ?? 'S?st?�a') ?>
-                                        � <?= formatDateTime($note['created_at']) ?>
+                                        · <?= h($note['author_name'] ?? 'Σύστημα') ?>
+                                        · <?= formatDateTime($note['created_at']) ?>
                                     </small>
 
                                     <?php if ($note['status'] === 'resolved' && $note['resolved_at']): ?>
                                         <div class="mt-2 p-2 bg-success bg-opacity-10 rounded">
                                             <small class="text-success">
                                                 <i class="bi bi-check-circle-fill me-1"></i>
-                                                ?p??????e: <?= formatDateTime($note['resolved_at']) ?>
+                                                Επιλύθηκε: <?= formatDateTime($note['resolved_at']) ?>
                                                 <?php if ($note['resolved_by_name']): ?>
-                                                    ap? <?= h($note['resolved_by_name']) ?>
+                                                    από <?= h($note['resolved_by_name']) ?>
                                                 <?php endif; ?>
                                             </small>
                                             <?php if ($note['resolution_notes']): ?>
-                                                <br><small class="text-muted ms-3">? <?= h($note['resolution_notes']) ?></small>
+                                                <br><small class="text-muted ms-3">→ <?= h($note['resolution_notes']) ?></small>
                                             <?php endif; ?>
                                         </div>
                                     <?php endif; ?>
@@ -470,9 +470,9 @@ include __DIR__ . '/includes/header.php';
                                         <input type="hidden" name="note_id" value="<?= $note['id'] ?>">
                                         <div class="input-group input-group-sm">
                                             <input type="text" class="form-control" name="resolution_notes" 
-                                                   placeholder="S????? ep???s??...">
+                                                   placeholder="Σχόλιο επίλυσης...">
                                             <button type="submit" class="btn btn-success" 
-                                                    onclick="return confirm('?p?�e�a??s? ep???s??;')">
+                                                    onclick="return confirm('Επιβεβαίωση επίλυσης;')">
                                                 <i class="bi bi-check-lg me-1"></i>OK
                                             </button>
                                         </div>
@@ -488,12 +488,12 @@ include __DIR__ . '/includes/header.php';
                                             <input type="hidden" name="note_id" value="<?= $note['id'] ?>">
                                             <input type="hidden" name="new_status" value="archived">
                                             <button type="submit" class="btn btn-sm btn-outline-secondary">
-                                                <i class="bi bi-archive me-1"></i>???e????t?s?
+                                                <i class="bi bi-archive me-1"></i>Αρχειοθέτηση
                                             </button>
                                         </form>
                                     <?php endif; ?>
                                     <?php if (isSystemAdmin()): ?>
-                                        <form method="post" class="d-inline" onsubmit="return confirm('???st??? d?a??af? s?�e??s??;')">
+                                        <form method="post" class="d-inline" onsubmit="return confirm('Οριστική διαγραφή σημείωσης;')">
                                             <?= csrfField() ?>
                                             <input type="hidden" name="action" value="delete_note">
                                             <input type="hidden" name="note_id" value="<?= $note['id'] ?>">

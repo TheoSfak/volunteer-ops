@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Inventory Item View
  * Displays item details, booking history, notes, and quick actions.
@@ -27,17 +27,17 @@ if ($barcode) {
 }
 
 if (!$item) {
-    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+    setFlash('error', 'Το υλικό δεν βρέθηκε.');
     redirect('inventory.php');
 }
 
 // Check access
 if (!checkInventoryAccess($item['id'])) {
-    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+    setFlash('error', 'Δεν έχετε πρόσβαση σε αυτό το υλικό.');
     redirect('inventory.php');
 }
 
-$pageTitle = $item['name'] . ' � ???�??? ??????';
+$pageTitle = $item['name'] . ' — Προβολή Υλικού';
 
 // Handle status change (admin only)
 if (isPost() && canManageInventory()) {
@@ -50,10 +50,10 @@ if (isPost() && canManageInventory()) {
         if (in_array($newStatus, $validStatuses) && $item['status'] !== 'booked') {
             dbExecute("UPDATE inventory_items SET status = ? WHERE id = ?", [$newStatus, $id]);
             logAudit('inventory_status_change', 'inventory_items', $id);
-            setFlash('success', '? ?at?stas? e??�e?????e.');
+            setFlash('success', 'Η κατάσταση ενημερώθηκε.');
             redirect('inventory-view.php?id=' . $id);
         } else {
-            setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
+            setFlash('error', 'Δεν μπορείτε να αλλάξετε κατάσταση χρεωμένου υλικού.');
             redirect('inventory-view.php?id=' . $id);
         }
     }
@@ -63,7 +63,7 @@ if (isPost() && canManageInventory()) {
         $returnNotes = post('return_notes');
         $result = returnInventoryItem($bookingId, $returnNotes);
         if ($result['success']) {
-            setFlash('success', '? ep?st??f? ?ata???f??e ep?t????. ?????e?a: ' . round($result['hours'], 1) . ' ??e?.');
+            setFlash('success', 'Η επιστροφή καταγράφηκε επιτυχώς. Διάρκεια: ' . round($result['hours'], 1) . ' ώρες.');
         } else {
             setFlash('error', $result['error']);
         }
@@ -83,7 +83,7 @@ if (isPost() && canManageInventory()) {
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ", [$id, $item['name'], $noteType, $content, $priority, $user['id'], $user['name']]);
             logAudit('inventory_note_add', 'inventory_notes', $id);
-            setFlash('success', '? s?�e??s? p??st????e.');
+            setFlash('success', 'Η σημείωση προστέθηκε.');
         }
         redirect('inventory-view.php?id=' . $id);
     }
@@ -125,19 +125,19 @@ include __DIR__ . '/includes/header.php';
     <div class="d-flex gap-2">
         <?php if ($item['status'] === 'available'): ?>
             <a href="inventory-book.php?item_id=<?= $item['id'] ?>" class="btn btn-success">
-                <i class="bi bi-box-arrow-right me-1"></i>????s?
+                <i class="bi bi-box-arrow-right me-1"></i>Χρέωση
             </a>
         <?php endif; ?>
         <?php if (canManageInventory()): ?>
-            <a href="inventory-label.php?id=<?= $item['id'] ?>" class="btn btn-outline-primary" target="_blank" title="??t?p?s? QR et???ta?">
-                <i class="bi bi-qr-code me-1"></i>?t???ta
+            <a href="inventory-label.php?id=<?= $item['id'] ?>" class="btn btn-outline-primary" target="_blank" title="Εκτύπωση QR ετικέτας">
+                <i class="bi bi-qr-code me-1"></i>Ετικέτα
             </a>
             <a href="inventory-form.php?id=<?= $item['id'] ?>" class="btn btn-outline-secondary">
-                <i class="bi bi-pencil me-1"></i>?pe?e??as?a
+                <i class="bi bi-pencil me-1"></i>Επεξεργασία
             </a>
         <?php endif; ?>
         <a href="inventory.php" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left me-1"></i>??s?
+            <i class="bi bi-arrow-left me-1"></i>Πίσω
         </a>
     </div>
 </div>
@@ -147,7 +147,7 @@ include __DIR__ . '/includes/header.php';
     <div class="col-lg-8">
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">?????f???e? ??????</h5>
+                <h5 class="mb-0">Πληροφορίες Υλικού</h5>
                 <?= inventoryStatusBadge($item['status']) ?>
             </div>
             <div class="card-body">
@@ -157,46 +157,46 @@ include __DIR__ . '/includes/header.php';
                         <code class="fs-5 text-primary"><?= h($item['barcode']) ?></code>
                     </div>
                     <div class="col-md-4">
-                        <strong class="text-muted d-block mb-1">?at?????a</strong>
+                        <strong class="text-muted d-block mb-1">Κατηγορία</strong>
                         <?php if ($item['category_name']): ?>
                             <span class="badge" style="background-color: <?= h($item['category_color']) ?>">
                                 <?= $item['category_icon'] ?> <?= h($item['category_name']) ?>
                             </span>
                         <?php else: ?>
-                            <span class="text-muted">�</span>
+                            <span class="text-muted">—</span>
                         <?php endif; ?>
                     </div>
                     <div class="col-md-4">
-                        <strong class="text-muted d-block mb-1">??s?t?ta</strong>
+                        <strong class="text-muted d-block mb-1">Ποσότητα</strong>
                         <?= (int)$item['quantity'] ?>
                     </div>
                     <div class="col-md-4">
-                        <strong class="text-muted d-block mb-1">??p??es?a</strong>
-                        <?= h($item['location_name'] ?? '�') ?>
+                        <strong class="text-muted d-block mb-1">Τοποθεσία</strong>
+                        <?= h($item['location_name'] ?? '—') ?>
                         <?php if ($item['location_notes']): ?>
                             <br><small class="text-muted"><?= h($item['location_notes']) ?></small>
                         <?php endif; ?>
                     </div>
                     <div class="col-md-4">
-                        <strong class="text-muted d-block mb-1">?�?�a</strong>
-                        <?= h($item['dept_name'] ?? 'Ge????') ?>
+                        <strong class="text-muted d-block mb-1">Τμήμα</strong>
+                        <?= h($item['dept_name'] ?? 'Γενικό') ?>
                     </div>
                     <div class="col-md-4">
-                        <strong class="text-muted d-block mb-1">??�?????????e</strong>
+                        <strong class="text-muted d-block mb-1">Δημιουργήθηκε</strong>
                         <?= formatDateTime($item['created_at']) ?>
                         <?php if ($item['creator_name']): ?>
-                            <br><small class="text-muted">ap? <?= h($item['creator_name']) ?></small>
+                            <br><small class="text-muted">από <?= h($item['creator_name']) ?></small>
                         <?php endif; ?>
                     </div>
                     <?php if (!empty($item['description'])): ?>
                         <div class="col-12">
-                            <strong class="text-muted d-block mb-1">?e????af?</strong>
+                            <strong class="text-muted d-block mb-1">Περιγραφή</strong>
                             <?= nl2br(h($item['description'])) ?>
                         </div>
                     <?php endif; ?>
                     <?php if (!empty($item['condition_notes'])): ?>
                         <div class="col-12">
-                            <strong class="text-muted d-block mb-1">?at?stas? ??????</strong>
+                            <strong class="text-muted d-block mb-1">Κατάσταση Υλικού</strong>
                             <?= nl2br(h($item['condition_notes'])) ?>
                         </div>
                     <?php endif; ?>
@@ -208,7 +208,7 @@ include __DIR__ . '/includes/header.php';
         <?php if ($activeBooking): ?>
         <div class="card mb-4 border-primary">
             <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-person-fill me-2"></i>??e??? ????s?</h5>
+                <h5 class="mb-0"><i class="bi bi-person-fill me-2"></i>Ενεργή Χρέωση</h5>
                 <?php
                 $overdueInfo = calculateOverdueStatus(
                     $activeBooking['created_at'],
@@ -222,29 +222,29 @@ include __DIR__ . '/includes/header.php';
             <div class="card-body">
                 <div class="row g-3">
                     <div class="col-md-4">
-                        <strong class="text-muted d-block mb-1">??e???t??</strong>
+                        <strong class="text-muted d-block mb-1">Εθελοντής</strong>
                         <?= h($activeBooking['volunteer_name']) ?>
                         <?php if ($activeBooking['user_phone']): ?>
                             <br><small><i class="bi bi-telephone"></i> <?= h($activeBooking['user_phone']) ?></small>
                         <?php endif; ?>
                     </div>
                     <div class="col-md-4">
-                        <strong class="text-muted d-block mb-1">?�/??a ????s??</strong>
+                        <strong class="text-muted d-block mb-1">Ημ/νία Χρέωσης</strong>
                         <?= formatDateTime($activeBooking['created_at']) ?>
                     </div>
                     <div class="col-md-4">
-                        <strong class="text-muted d-block mb-1">??a�. ?p?st??f?</strong>
-                        <?= $activeBooking['expected_return_date'] ? formatDate($activeBooking['expected_return_date']) : '�' ?>
+                        <strong class="text-muted d-block mb-1">Αναμ. Επιστροφή</strong>
+                        <?= $activeBooking['expected_return_date'] ? formatDate($activeBooking['expected_return_date']) : '—' ?>
                     </div>
                     <?php if ($activeBooking['mission_location']): ?>
                         <div class="col-md-6">
-                            <strong class="text-muted d-block mb-1">??p??es?a ?p?st????</strong>
+                            <strong class="text-muted d-block mb-1">Τοποθεσία Αποστολής</strong>
                             <?= h($activeBooking['mission_location']) ?>
                         </div>
                     <?php endif; ?>
                     <?php if ($activeBooking['notes']): ?>
                         <div class="col-md-6">
-                            <strong class="text-muted d-block mb-1">S?�e??se??</strong>
+                            <strong class="text-muted d-block mb-1">Σημειώσεις</strong>
                             <?= h($activeBooking['notes']) ?>
                         </div>
                     <?php endif; ?>
@@ -259,13 +259,13 @@ include __DIR__ . '/includes/header.php';
                     <input type="hidden" name="booking_id" value="<?= $activeBooking['id'] ?>">
                     <div class="row g-2 align-items-end">
                         <div class="col-md-8">
-                            <label class="form-label">S?�e??se?? ?p?st??f??</label>
-                            <input type="text" class="form-control" name="return_notes" placeholder="p.?. Se ?a?? ?at?stas?">
+                            <label class="form-label">Σημειώσεις Επιστροφής</label>
+                            <input type="text" class="form-control" name="return_notes" placeholder="π.χ. Σε καλή κατάσταση">
                         </div>
                         <div class="col-md-4">
                             <button type="submit" class="btn btn-warning w-100" 
-                                    onclick="return confirm('?p?�e�a??s? ep?st??f?? ??????;')">
-                                <i class="bi bi-box-arrow-in-left me-1"></i>?p?st??f?
+                                    onclick="return confirm('Επιβεβαίωση επιστροφής υλικού;')">
+                                <i class="bi bi-box-arrow-in-left me-1"></i>Επιστροφή
                             </button>
                         </div>
                     </div>
@@ -278,22 +278,22 @@ include __DIR__ . '/includes/header.php';
         <!-- Booking History -->
         <div class="card mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>?st????? ??e?se??</h5>
+                <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Ιστορικό Χρεώσεων</h5>
             </div>
             <div class="card-body p-0">
                 <?php if (empty($bookings)): ?>
-                    <p class="text-muted text-center py-4">?e? ?p?????? ??e?se??.</p>
+                    <p class="text-muted text-center py-4">Δεν υπάρχουν χρεώσεις.</p>
                 <?php else: ?>
                     <div class="table-responsive">
                         <table class="table table-sm table-hover align-middle mb-0">
                             <thead class="table-light">
                                 <tr>
-                                    <th>??e???t??</th>
-                                    <th>?�/??a</th>
-                                    <th>??p??es?a</th>
-                                    <th>?at?stas?</th>
-                                    <th>?p?st??f?</th>
-                                    <th>??e?</th>
+                                    <th>Εθελοντής</th>
+                                    <th>Ημ/νία</th>
+                                    <th>Τοποθεσία</th>
+                                    <th>Κατάσταση</th>
+                                    <th>Επιστροφή</th>
+                                    <th>Ώρες</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -301,17 +301,17 @@ include __DIR__ . '/includes/header.php';
                                     <tr>
                                         <td><?= h($booking['volunteer_name'] ?? $booking['user_name']) ?></td>
                                         <td><small><?= formatDateTime($booking['created_at']) ?></small></td>
-                                        <td><small><?= h($booking['mission_location'] ?? '�') ?></small></td>
+                                        <td><small><?= h($booking['mission_location'] ?? '—') ?></small></td>
                                         <td><?= bookingStatusBadge($booking['status']) ?></td>
                                         <td>
                                             <?php if ($booking['return_date']): ?>
                                                 <small><?= formatDateTime($booking['return_date']) ?></small>
                                             <?php else: ?>
-                                                �
+                                                —
                                             <?php endif; ?>
                                         </td>
                                         <td>
-                                            <?= $booking['actual_hours'] ? round($booking['actual_hours'], 1) . '?' : '�' ?>
+                                            <?= $booking['actual_hours'] ? round($booking['actual_hours'], 1) . 'ω' : '—' ?>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -329,7 +329,7 @@ include __DIR__ . '/includes/header.php';
         <?php if (canManageInventory() && $item['status'] !== 'booked'): ?>
         <div class="card mb-4">
             <div class="card-header">
-                <h5 class="mb-0">???a?? ?at?stas??</h5>
+                <h5 class="mb-0">Αλλαγή Κατάστασης</h5>
             </div>
             <div class="card-body">
                 <form method="post">
@@ -353,7 +353,7 @@ include __DIR__ . '/includes/header.php';
         <!-- Notes -->
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-sticky me-2"></i>S?�e??se??</h5>
+                <h5 class="mb-0"><i class="bi bi-sticky me-2"></i>Σημειώσεις</h5>
                 <span class="badge bg-secondary"><?= count($notes) ?></span>
             </div>
             <div class="card-body">
@@ -363,7 +363,7 @@ include __DIR__ . '/includes/header.php';
                     <input type="hidden" name="action" value="add_note">
                     <div class="mb-2">
                         <textarea class="form-control form-control-sm" name="note_content" rows="2" 
-                                  placeholder="G???te s?�e??s?..." required></textarea>
+                                  placeholder="Γράψτε σημείωση..." required></textarea>
                     </div>
                     <div class="d-flex gap-2 mb-2">
                         <select class="form-select form-select-sm" name="note_type" style="max-width: 130px;">
@@ -378,24 +378,24 @@ include __DIR__ . '/includes/header.php';
                         </select>
                     </div>
                     <button type="submit" class="btn btn-sm btn-primary w-100">
-                        <i class="bi bi-plus me-1"></i>???s????
+                        <i class="bi bi-plus me-1"></i>Προσθήκη
                     </button>
                 </form>
 
                 <!-- Notes List -->
                 <?php if (empty($notes)): ?>
-                    <p class="text-muted small text-center">?e? ?p?????? s?�e??se??.</p>
+                    <p class="text-muted small text-center">Δεν υπάρχουν σημειώσεις.</p>
                 <?php else: ?>
                     <div class="list-group list-group-flush">
                         <?php foreach ($notes as $note): ?>
                             <div class="list-group-item px-0">
                                 <div class="d-flex justify-content-between align-items-start mb-1">
-                                    <small class="text-muted"><?= h($note['author_name'] ?? 'S?st?�a') ?></small>
+                                    <small class="text-muted"><?= h($note['author_name'] ?? 'Σύστημα') ?></small>
                                     <?= notePriorityBadge($note['priority']) ?>
                                 </div>
                                 <p class="mb-1 small"><?= nl2br(h($note['content'])) ?></p>
                                 <small class="text-muted">
-                                    <?= h(NOTE_TYPE_LABELS[$note['note_type']] ?? $note['note_type']) ?> � 
+                                    <?= h(NOTE_TYPE_LABELS[$note['note_type']] ?? $note['note_type']) ?> · 
                                     <?= formatDateTime($note['created_at']) ?>
                                 </small>
                             </div>
