@@ -26,7 +26,7 @@ $allSkills = dbFetchAll("SELECT * FROM skills ORDER BY category, name");
 // Get stats
 $stats = [
     'total_shifts' => dbFetchValue(
-        "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = 'APPROVED'",
+        "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = '" . PARTICIPATION_APPROVED . "'",
         [$user['id']]
     ),
     'total_hours' => dbFetchValue(
@@ -36,7 +36,7 @@ $stats = [
         ), 0)
         FROM participation_requests pr
         JOIN shifts s ON pr.shift_id = s.id
-        WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1",
+        WHERE pr.volunteer_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "' AND pr.attended = 1",
         [$user['id']]
     ),
     'achievements' => dbFetchValue(
@@ -47,12 +47,15 @@ $stats = [
 
 // Get exam attempts history
 $examAttempts = dbFetchAll("
-    SELECT ea.*, te.title as exam_title, tc.name as category_name, tc.icon as category_icon
+    SELECT ea.id, ea.exam_id, ea.score, ea.passed, ea.time_taken_seconds, ea.submitted_at,
+           te.title as exam_title, te.questions_per_attempt as total_questions,
+           te.passing_percentage,
+           tc.name as category_name, tc.icon as category_icon
     FROM exam_attempts ea
     INNER JOIN training_exams te ON ea.exam_id = te.id
     INNER JOIN training_categories tc ON te.category_id = tc.id
     WHERE ea.user_id = ?
-    ORDER BY ea.completed_at DESC
+    ORDER BY ea.submitted_at DESC
 ", [$user['id']]);
 
 $errors = [];
@@ -170,6 +173,60 @@ if (isPost()) {
                 [$user['id']]
             );
             break;
+
+        case 'update_photo':
+            if (!empty($_FILES['photo']['name']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
+                $file = $_FILES['photo'];
+                $allowedMime = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+                $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                $mime = finfo_file($finfo, $file['tmp_name']);
+                finfo_close($finfo);
+
+                if (!in_array($mime, $allowedMime)) {
+                    $errors[] = 'Επιτρέπονται μόνο αρχεία εικόνας (JPG, PNG, GIF, WebP).';
+                } elseif ($file['size'] > 5 * 1024 * 1024) {
+                    $errors[] = 'Το αρχείο δεν μπορεί να είναι μεγαλύτερο από 5MB.';
+                } else {
+                    $src = match($mime) {
+                        'image/jpeg' => imagecreatefromjpeg($file['tmp_name']),
+                        'image/png'  => imagecreatefrompng($file['tmp_name']),
+                        'image/gif'  => imagecreatefromgif($file['tmp_name']),
+                        'image/webp' => imagecreatefromwebp($file['tmp_name']),
+                        default      => false,
+                    };
+                    if ($src) {
+                        $srcW = imagesx($src);
+                        $srcH = imagesy($src);
+                        // Center-crop to square, then resize to 250×250
+                        $cropSize = min($srcW, $srcH);
+                        $cropX = (int)(($srcW - $cropSize) / 2);
+                        $cropY = (int)(($srcH - $cropSize) / 2);
+                        $dst = imagecreatetruecolor(250, 250);
+                        imagecopyresampled($dst, $src, 0, 0, $cropX, $cropY, 250, 250, $cropSize, $cropSize);
+                        $filename = $user['id'] . '.jpg';
+                        $savePath = __DIR__ . '/uploads/avatars/' . $filename;
+                        imagejpeg($dst, $savePath, 90);
+                        imagedestroy($src);
+                        imagedestroy($dst);
+                        dbExecute("UPDATE users SET profile_photo = ?, updated_at = NOW() WHERE id = ?", [$filename, $user['id']]);
+                        logAudit('update_photo', 'users', $user['id']);
+                        $user = dbFetchOne("SELECT * FROM users WHERE id = ?", [$user['id']]);
+                        $success = 'Η φωτογραφία προφίλ ενημερώθηκε.';
+                    } else {
+                        $errors[] = 'Αδυναμία επεξεργασίας της εικόνας.';
+                    }
+                }
+            } elseif (post('delete_photo') === '1') {
+                if (!empty($user['profile_photo'])) {
+                    $oldFile = __DIR__ . '/uploads/avatars/' . $user['profile_photo'];
+                    if (file_exists($oldFile)) unlink($oldFile);
+                }
+                dbExecute("UPDATE users SET profile_photo = NULL, updated_at = NOW() WHERE id = ?", [$user['id']]);
+                logAudit('delete_photo', 'users', $user['id']);
+                $user = dbFetchOne("SELECT * FROM users WHERE id = ?", [$user['id']]);
+                $success = 'Η φωτογραφία διαγράφηκε.';
+            }
+            break;
     }
 }
 
@@ -278,11 +335,18 @@ include __DIR__ . '/includes/header.php';
                                     </div>
                                 </div>
                             </td>
-                            <td><?= passFailBadge($attempt['passed']) ?></td>
                             <td>
-                                <?= formatDateTime($attempt['completed_at']) ?>
+                                <?php if ($attempt['passed']): ?>
+                                    <span class="badge bg-success">Επιτυχία</span>
+                                <?php else: ?>
+                                    <span class="badge bg-danger">Αποτυχία</span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <?= formatDateTime($attempt['submitted_at']) ?>
                                 <?php if ($attempt['time_taken_seconds']): ?>
-                                    <br><small class="text-muted"><?= formatDuration($attempt['time_taken_seconds']) ?></small>
+                                    <?php $mins = floor($attempt['time_taken_seconds'] / 60); $secs = $attempt['time_taken_seconds'] % 60; ?>
+                                    <br><small class="text-muted"><?= $mins ?>λ <?= $secs ?>δ</small>
                                 <?php endif; ?>
                             </td>
                             <td>
@@ -429,6 +493,48 @@ include __DIR__ . '/includes/header.php';
     </div>
     
     <div class="col-lg-4">
+        <!-- Profile Photo -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-camera me-1"></i>Φωτογραφία Προφίλ</h5>
+            </div>
+            <div class="card-body text-center">
+                <?php if (!empty($user['profile_photo']) && file_exists(__DIR__ . '/uploads/avatars/' . $user['profile_photo'])): ?>
+                    <img src="<?= BASE_URL ?>/uploads/avatars/<?= h($user['profile_photo']) ?>?t=<?= time() ?>"
+                         class="rounded-circle mb-3" style="width:120px;height:120px;object-fit:cover;" alt="Φωτογραφία Προφίλ">
+                <?php else: ?>
+                    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center mx-auto mb-3"
+                         style="width:120px;height:120px;font-size:3rem;">
+                        <i class="bi bi-person-fill"></i>
+                    </div>
+                <?php endif; ?>
+
+                <form method="post" enctype="multipart/form-data">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="update_photo">
+                    <div class="mb-2">
+                        <input type="file" class="form-control form-control-sm" name="photo" accept="image/*" required>
+                        <div class="form-text">JPG, PNG, GIF, WebP — μέγιστο 5MB</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm w-100">
+                        <i class="bi bi-upload me-1"></i>Ανέβασμα
+                    </button>
+                </form>
+
+                <?php if (!empty($user['profile_photo'])): ?>
+                    <form method="post" class="mt-2">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="update_photo">
+                        <input type="hidden" name="delete_photo" value="1">
+                        <button type="submit" class="btn btn-outline-danger btn-sm w-100"
+                                onclick="return confirm('Διαγραφή φωτογραφίας;')">
+                            <i class="bi bi-trash me-1"></i>Διαγραφή
+                        </button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <!-- Change Password -->
         <div class="card mb-4">
             <div class="card-header">

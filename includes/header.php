@@ -815,7 +815,11 @@ $appDescription = getSetting('app_description', '');
             <div class="d-flex align-items-center ms-auto">
                 <div class="dropdown">
                     <button class="btn btn-link text-dark dropdown-toggle text-decoration-none" type="button" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                        <i class="bi bi-person-circle me-1"></i>
+                        <?php if (!empty($currentUser['profile_photo']) && file_exists(__DIR__ . '/../uploads/avatars/' . $currentUser['profile_photo'])): ?>
+                            <img src="<?= BASE_URL ?>/uploads/avatars/<?= h($currentUser['profile_photo']) ?>" class="rounded-circle me-1" style="width:30px;height:30px;object-fit:cover;" alt="">
+                        <?php else: ?>
+                            <i class="bi bi-person-circle me-1"></i>
+                        <?php endif; ?>
                         <?= h($currentUser['name'] ?? 'Χρήστης') ?><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">

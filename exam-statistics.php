@@ -13,11 +13,11 @@ $searchTerm = get('search', '');
 $page = max(1, (int)get('page', 1));
 $perPage = 50;
 
-// Get available years from cohort_year
+// Get available years from user created_at (cohort_year column does not exist)
 $availableYears = dbFetchAll("
-    SELECT DISTINCT cohort_year 
+    SELECT DISTINCT YEAR(created_at) as cohort_year 
     FROM users 
-    WHERE cohort_year IS NOT NULL 
+    WHERE created_at IS NOT NULL 
     ORDER BY cohort_year DESC
 ");
 
@@ -32,8 +32,8 @@ $examParams = [];
 $quizParams = [];
 
 if ($filterYear !== 'all') {
-    $examFilters[] = "u.cohort_year = ?";
-    $quizFilters[] = "u.cohort_year = ?";
+    $examFilters[] = "YEAR(u.created_at) = ?";
+    $quizFilters[] = "YEAR(u.created_at) = ?";
     $examParams[] = $filterYear;
     $quizParams[] = $filterYear;
 }
@@ -80,23 +80,23 @@ $examQuery = "
         'EXAM' as attempt_type,
         u.id as user_id,
         u.name as user_name,
-        u.cohort_year,
+        NULL as cohort_year,
         te.id as exam_id,
         te.title as exam_title,
         NULL as quiz_id,
         NULL as quiz_title,
         tc.name as category_name,
         ea.score,
-        ea.total_questions,
+        te.questions_per_attempt as total_questions,
         ea.passed,
-        ea.completed_at,
+        ea.submitted_at as completed_at,
         ea.time_taken_seconds,
-        ROUND((ea.score / ea.total_questions * 100), 2) as percentage
+        ROUND((ea.score / NULLIF(te.questions_per_attempt, 0) * 100), 2) as percentage
     FROM exam_attempts ea
     INNER JOIN users u ON ea.user_id = u.id
     INNER JOIN training_exams te ON ea.exam_id = te.id
     INNER JOIN training_categories tc ON te.category_id = tc.id
-    WHERE ea.completed_at IS NOT NULL $examWhere
+    WHERE ea.submitted_at IS NOT NULL $examWhere
 ";
 
 // Base query for QUIZZES (filters injected inside WHERE)
@@ -106,23 +106,23 @@ $quizQuery = "
         'QUIZ' as attempt_type,
         u.id as user_id,
         u.name as user_name,
-        u.cohort_year,
+        NULL as cohort_year,
         NULL as exam_id,
         NULL as exam_title,
         tq.id as quiz_id,
         tq.title as quiz_title,
         tc.name as category_name,
         qa.score,
-        qa.total_questions,
-        qa.passed,
-        qa.completed_at,
+        (SELECT COUNT(*) FROM training_quiz_questions tqqc WHERE tqqc.quiz_id = qa.quiz_id) as total_questions,
+        NULL as passed,
+        qa.submitted_at as completed_at,
         qa.time_taken_seconds,
-        ROUND((qa.score / qa.total_questions * 100), 2) as percentage
+        ROUND((qa.score / NULLIF((SELECT COUNT(*) FROM training_quiz_questions tqqc2 WHERE tqqc2.quiz_id = qa.quiz_id), 0) * 100), 2) as percentage
     FROM quiz_attempts qa
     INNER JOIN users u ON qa.user_id = u.id
     INNER JOIN training_quizzes tq ON qa.quiz_id = tq.id
     INNER JOIN training_categories tc ON tq.category_id = tc.id
-    WHERE qa.completed_at IS NOT NULL $quizWhere
+    WHERE qa.submitted_at IS NOT NULL $quizWhere
 ";
 
 // Build combined query and params based on filter type

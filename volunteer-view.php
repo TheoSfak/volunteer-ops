@@ -138,6 +138,59 @@ if (isPost()) {
         }
         redirect('volunteer-view.php?id=' . $id . '#documents');
     }
+
+    if ($action === 'upload_photo') {
+        if (!isAdmin()) {
+            setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
+            redirect('volunteer-view.php?id=' . $id);
+        }
+        if (!empty($_FILES['photo']['name']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
+            $file = $_FILES['photo'];
+            $allowedMime = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime = finfo_file($finfo, $file['tmp_name']);
+            finfo_close($finfo);
+            if (!in_array($mime, $allowedMime)) {
+                setFlash('error', 'Επιτρέπονται μόνο αρχεία εικόνας (JPG, PNG, GIF, WebP).');
+            } elseif ($file['size'] > 5 * 1024 * 1024) {
+                setFlash('error', 'Το αρχείο δεν μπορεί να είναι μεγαλύτερο από 5MB.');
+            } else {
+                $src = match($mime) {
+                    'image/jpeg' => imagecreatefromjpeg($file['tmp_name']),
+                    'image/png'  => imagecreatefrompng($file['tmp_name']),
+                    'image/gif'  => imagecreatefromgif($file['tmp_name']),
+                    'image/webp' => imagecreatefromwebp($file['tmp_name']),
+                    default      => false,
+                };
+                if ($src) {
+                    $srcW = imagesx($src);
+                    $srcH = imagesy($src);
+                    $cropSize = min($srcW, $srcH);
+                    $cropX = (int)(($srcW - $cropSize) / 2);
+                    $cropY = (int)(($srcH - $cropSize) / 2);
+                    $dst = imagecreatetruecolor(250, 250);
+                    imagecopyresampled($dst, $src, 0, 0, $cropX, $cropY, 250, 250, $cropSize, $cropSize);
+                    $filename = $id . '.jpg';
+                    $savePath = __DIR__ . '/uploads/avatars/' . $filename;
+                    imagejpeg($dst, $savePath, 90);
+                    imagedestroy($src);
+                    imagedestroy($dst);
+                    dbExecute("UPDATE users SET profile_photo = ?, updated_at = NOW() WHERE id = ?", [$filename, $id]);
+                    logAudit('upload_photo', 'users', $id);
+                    setFlash('success', 'Η φωτογραφία προφίλ ενημερώθηκε.');
+                } else {
+                    setFlash('error', 'Αδυναμία επεξεργασίας της εικόνας.');
+                }
+            }
+        } elseif (post('delete_photo') === '1') {
+            $oldFile = __DIR__ . '/uploads/avatars/' . $id . '.jpg';
+            if (file_exists($oldFile)) unlink($oldFile);
+            dbExecute("UPDATE users SET profile_photo = NULL, updated_at = NOW() WHERE id = ?", [$id]);
+            logAudit('delete_photo', 'users', $id);
+            setFlash('success', 'Η φωτογραφία διαγράφηκε.');
+        }
+        redirect('volunteer-view.php?id=' . $id);
+    }
 }
 
 // Get profile
@@ -218,23 +271,25 @@ $pointsHistory = dbFetchAll(
 // Get exam and quiz attempts
 $examAttempts = dbFetchAll(
     "SELECT ea.*, te.title as exam_title, tc.name as category_name,
-            ROUND((ea.score / ea.total_questions * 100), 2) as percentage
+            te.questions_per_attempt as total_questions, te.passing_percentage,
+            ROUND((ea.score / NULLIF(te.questions_per_attempt, 0) * 100), 2) as percentage
      FROM exam_attempts ea
      INNER JOIN training_exams te ON ea.exam_id = te.id
      INNER JOIN training_categories tc ON te.category_id = tc.id
-     WHERE ea.user_id = ? AND ea.completed_at IS NOT NULL
-     ORDER BY ea.completed_at DESC",
+     WHERE ea.user_id = ? AND ea.submitted_at IS NOT NULL
+     ORDER BY ea.submitted_at DESC",
     [$id]
 );
 
 $quizAttempts = dbFetchAll(
     "SELECT qa.*, tq.title as quiz_title, tc.name as category_name,
-            ROUND((qa.score / qa.total_questions * 100), 2) as percentage
+            (SELECT COUNT(*) FROM training_quiz_questions tqqc WHERE tqqc.quiz_id = qa.quiz_id) as total_questions,
+            ROUND((qa.score / NULLIF((SELECT COUNT(*) FROM training_quiz_questions tqqc2 WHERE tqqc2.quiz_id = qa.quiz_id), 0) * 100), 2) as percentage
      FROM quiz_attempts qa
      INNER JOIN training_quizzes tq ON qa.quiz_id = tq.id
      INNER JOIN training_categories tc ON tq.category_id = tc.id
-     WHERE qa.user_id = ? AND qa.completed_at IS NOT NULL
-     ORDER BY qa.completed_at DESC",
+     WHERE qa.user_id = ? AND qa.submitted_at IS NOT NULL
+     ORDER BY qa.submitted_at DESC",
     [$id]
 );
 
@@ -463,7 +518,7 @@ include __DIR__ . '/includes/header.php';
                                                 <strong><?= $exam['percentage'] ?>%</strong>
                                                 <small class="text-muted">(<?= $exam['score'] ?>/<?= $exam['total_questions'] ?>)</small>
                                             </div>
-                                            <small class="text-muted d-block"><?= formatDateTime($exam['completed_at']) ?></small>
+                                            <small class="text-muted d-block"><?= formatDateTime($exam['submitted_at']) ?></small>
                                         </div>
                                     </div>
                                 </a>
@@ -482,16 +537,11 @@ include __DIR__ . '/includes/header.php';
                                             <small class="text-muted"><?= h($quiz['category_name']) ?></small>
                                         </div>
                                         <div class="text-end">
-                                            <?php if ($quiz['passed']): ?>
-                                                <span class="badge bg-success">Επιτυχία</span>
-                                            <?php else: ?>
-                                                <span class="badge bg-danger">Αποτυχία</span>
-                                            <?php endif; ?>
                                             <div class="mt-1">
                                                 <strong><?= $quiz['percentage'] ?>%</strong>
                                                 <small class="text-muted">(<?= $quiz['score'] ?>/<?= $quiz['total_questions'] ?>)</small>
                                             </div>
-                                            <small class="text-muted d-block"><?= formatDateTime($quiz['completed_at']) ?></small>
+                                            <small class="text-muted d-block"><?= formatDateTime($quiz['submitted_at']) ?></small>
                                         </div>
                                     </div>
                                 </a>
@@ -509,6 +559,55 @@ include __DIR__ . '/includes/header.php';
     </div>
     
     <div class="col-lg-4">
+        <!-- Profile Photo -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-camera me-1"></i>Φωτογραφία Προφίλ</h5>
+            </div>
+            <div class="card-body text-center">
+                <?php
+                $volunteerPhoto = $volunteer['profile_photo'] ?? null;
+                $photoExists = $volunteerPhoto && file_exists(__DIR__ . '/uploads/avatars/' . $volunteerPhoto);
+                ?>
+                <?php if ($photoExists): ?>
+                    <img src="<?= BASE_URL ?>/uploads/avatars/<?= h($volunteerPhoto) ?>?t=<?= time() ?>"
+                         class="rounded-circle mb-3" style="width:120px;height:120px;object-fit:cover;" alt="">
+                <?php else: ?>
+                    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center mx-auto mb-3"
+                         style="width:120px;height:120px;font-size:3rem;">
+                        <i class="bi bi-person-fill"></i>
+                    </div>
+                <?php endif; ?>
+                <h5 class="mb-1"><?= h($volunteer['name']) ?></h5>
+                <small class="text-muted d-block mb-3"><?= h($volunteer['email']) ?></small>
+
+                <?php if (isAdmin()): ?>
+                    <form method="post" enctype="multipart/form-data">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="upload_photo">
+                        <div class="mb-2">
+                            <input type="file" class="form-control form-control-sm" name="photo" accept="image/*" required>
+                            <div class="form-text">JPG, PNG, GIF, WebP — μέγιστο 5MB</div>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-sm w-100">
+                            <i class="bi bi-upload me-1"></i>Ανέβασμα
+                        </button>
+                    </form>
+                    <?php if ($photoExists): ?>
+                        <form method="post" class="mt-2">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="upload_photo">
+                            <input type="hidden" name="delete_photo" value="1">
+                            <button type="submit" class="btn btn-outline-danger btn-sm w-100"
+                                    onclick="return confirm('Διαγραφή φωτογραφίας;')">
+                                <i class="bi bi-trash me-1"></i>Διαγραφή
+                            </button>
+                        </form>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <!-- Skills -->
         <div class="card mb-4">
             <div class="card-header">

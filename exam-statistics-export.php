@@ -21,8 +21,8 @@ $examParams = [];
 $quizParams = [];
 
 if ($filterYear !== 'all') {
-    $examFilters[] = "u.cohort_year = ?";
-    $quizFilters[] = "u.cohort_year = ?";
+    $examFilters[] = "YEAR(u.created_at) = ?";
+    $quizFilters[] = "YEAR(u.created_at) = ?";
     $examParams[] = $filterYear;
     $quizParams[] = $filterYear;
 }
@@ -59,14 +59,14 @@ $quizWhere = !empty($quizFilters) ? ' AND ' . implode(' AND ', $quizFilters) : '
 $query = "
     SELECT 
         u.name as volunteer_name,
-        u.cohort_year,
+        YEAR(u.created_at) as cohort_year,
         'Διαγώνισμα' as type,
         te.title as exam_title,
         tc.name as category_name,
-        ea.completed_at,
+        ea.submitted_at as completed_at,
         ea.score,
-        ea.total_questions,
-        ROUND((ea.score / ea.total_questions * 100), 2) as percentage,
+        te.questions_per_attempt as total_questions,
+        ROUND((ea.score / NULLIF(te.questions_per_attempt, 0) * 100), 2) as percentage,
         CASE WHEN ea.passed = 1 THEN 'Επιτυχία' ELSE 'Αποτυχία' END as status,
         FLOOR(ea.time_taken_seconds / 60) as time_minutes,
         (ea.time_taken_seconds % 60) as time_seconds
@@ -74,7 +74,7 @@ $query = "
     INNER JOIN users u ON ea.user_id = u.id
     INNER JOIN training_exams te ON ea.exam_id = te.id
     INNER JOIN training_categories tc ON te.category_id = tc.id
-    WHERE ea.completed_at IS NOT NULL $examWhere
+    WHERE ea.submitted_at IS NOT NULL $examWhere
 ";
 $params = $examParams;
 
@@ -83,22 +83,22 @@ if ($filterType === 'quizzes') {
     $query = "
         SELECT 
             u.name as volunteer_name,
-            u.cohort_year,
+            YEAR(u.created_at) as cohort_year,
             'Κουίζ' as type,
             tq.title as exam_title,
             tc.name as category_name,
-            qa.completed_at,
+            qa.submitted_at as completed_at,
             qa.score,
-            qa.total_questions,
-            ROUND((qa.score / qa.total_questions * 100), 2) as percentage,
-            CASE WHEN qa.passed = 1 THEN 'Επιτυχία' ELSE 'Αποτυχία' END as status,
+            (SELECT COUNT(*) FROM training_quiz_questions tqqc WHERE tqqc.quiz_id = qa.quiz_id) as total_questions,
+            ROUND((qa.score / NULLIF((SELECT COUNT(*) FROM training_quiz_questions tqqc2 WHERE tqqc2.quiz_id = qa.quiz_id), 0) * 100), 2) as percentage,
+            'Κουίζ' as status,
             FLOOR(qa.time_taken_seconds / 60) as time_minutes,
             (qa.time_taken_seconds % 60) as time_seconds
         FROM quiz_attempts qa
         INNER JOIN users u ON qa.user_id = u.id
         INNER JOIN training_quizzes tq ON qa.quiz_id = tq.id
         INNER JOIN training_categories tc ON tq.category_id = tc.id
-        WHERE qa.completed_at IS NOT NULL $quizWhere
+        WHERE qa.submitted_at IS NOT NULL $quizWhere
     ";
     $params = $quizParams;
 } elseif ($filterType !== 'exams') {
@@ -107,22 +107,22 @@ if ($filterType === 'quizzes') {
     UNION ALL
     SELECT 
         u.name as volunteer_name,
-        u.cohort_year,
+        YEAR(u.created_at) as cohort_year,
         'Κουίζ' as type,
         tq.title as exam_title,
         tc.name as category_name,
-        qa.completed_at,
+        qa.submitted_at as completed_at,
         qa.score,
-        qa.total_questions,
-        ROUND((qa.score / qa.total_questions * 100), 2) as percentage,
-        CASE WHEN qa.passed = 1 THEN 'Επιτυχία' ELSE 'Αποτυχία' END as status,
+        (SELECT COUNT(*) FROM training_quiz_questions tqqc WHERE tqqc.quiz_id = qa.quiz_id) as total_questions,
+        ROUND((qa.score / NULLIF((SELECT COUNT(*) FROM training_quiz_questions tqqc2 WHERE tqqc2.quiz_id = qa.quiz_id), 0) * 100), 2) as percentage,
+        'Κουίζ' as status,
         FLOOR(qa.time_taken_seconds / 60) as time_minutes,
         (qa.time_taken_seconds % 60) as time_seconds
     FROM quiz_attempts qa
     INNER JOIN users u ON qa.user_id = u.id
     INNER JOIN training_quizzes tq ON qa.quiz_id = tq.id
     INNER JOIN training_categories tc ON tq.category_id = tc.id
-    WHERE qa.completed_at IS NOT NULL $quizWhere
+    WHERE qa.submitted_at IS NOT NULL $quizWhere
     ";
     $params = array_merge($examParams, $quizParams);
 }
