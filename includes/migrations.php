@@ -238,6 +238,35 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 6,
+            'description' => 'Create skill_categories table and migrate existing categories',
+            'up' => function () {
+                // Create skill_categories table
+                $tbl = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'skill_categories'"
+                );
+                if (!$tbl) {
+                    dbExecute("CREATE TABLE skill_categories (
+                        id   INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(100) NOT NULL UNIQUE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                }
+                // Migrate existing distinct category names from skills table
+                $existing = dbFetchAll(
+                    "SELECT DISTINCT category FROM skills WHERE category IS NOT NULL AND category != ''"
+                );
+                foreach ($existing as $row) {
+                    dbExecute(
+                        "INSERT IGNORE INTO skill_categories (name) VALUES (?)",
+                        [$row['category']]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
