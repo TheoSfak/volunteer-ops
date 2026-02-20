@@ -172,6 +172,10 @@ if (isPost()) {
                     imagecopyresampled($dst, $src, 0, 0, $cropX, $cropY, 250, 250, $cropSize, $cropSize);
                     $filename = $id . '.jpg';
                     $savePath = __DIR__ . '/uploads/avatars/' . $filename;
+                    $avatarDir = dirname($savePath);
+                    if (!is_dir($avatarDir)) {
+                        mkdir($avatarDir, 0755, true);
+                    }
                     imagejpeg($dst, $savePath, 90);
                     imagedestroy($src);
                     imagedestroy($dst);
