@@ -76,29 +76,29 @@ function validateVolunteerData(array $row, int $rowNumber): array {
 
     $phone = _col($row, 'Τηλέφωνο');
     if ($phone !== null && !preg_match('/^\d{10}$/', $phone)) {
-        $errors[] = "Γραμμή $rowNumber: Μη έγκυρο τηλέφωνο (πρέπει να είναι 10 ψηφία).";
+        $errors[] = "Γραμμή $rowNumber: Πεδίο 'Τηλέφωνο' — μη έγκυρη τιμή '$phone' (πρέπει να είναι ακριβώς 10 ψηφία).";
     }
 
     $deptId = trim($row['Τμήμα ID'] ?? '');
     if (empty($deptId) || !is_numeric($deptId)) {
-        $errors[] = "Γραμμή $rowNumber: Το ID τμήματος είναι υποχρεωτικό.";
+        $errors[] = "Γραμμή $rowNumber: Πεδίο 'Τμήμα ID' — απαιτείται αριθμητικό ID τμήματος (τιμή: '$deptId').";
     } else {
         $dept = dbFetchOne("SELECT id FROM departments WHERE id = ?", [(int)$deptId]);
         if (!$dept) {
-            $errors[] = "Γραμμή $rowNumber: Τμήμα με ID $deptId δεν βρέθηκε.";
+            $errors[] = "Γραμμή $rowNumber: Πεδίο 'Τμήμα ID' — δεν βρέθηκε τμήμα με ID $deptId.";
         }
     }
 
     $role = trim($row['Ρόλος'] ?? '');
     if (empty($role)) {
-        $errors[] = "Γραμμή $rowNumber: Ο ρόλος είναι υποχρεωτικός.";
+        $errors[] = "Γραμμή $rowNumber: Πεδίο 'Ρόλος' — υποχρεωτικό.";
     } elseif (!in_array($role, $validRoles)) {
-        $errors[] = "Γραμμή $rowNumber: Μη έγκυρος ρόλος ($role). Επιτρεπτοί: " . implode(', ', $validRoles);
+        $errors[] = "Γραμμή $rowNumber: Πεδίο 'Ρόλος' — μη έγκυρη τιμή '$role'. Επιτρεπτοί: " . implode(', ', $validRoles);
     }
 
     $vtype = _col($row, 'Τύπος Εθελοντή');
     if ($vtype !== null && !in_array($vtype, $validTypes)) {
-        $errors[] = "Γραμμή $rowNumber: Μη έγκυρος τύπος εθελοντή ($vtype). Επιτρεπτοί: " . implode(', ', $validTypes);
+        $errors[] = "Γραμμή $rowNumber: Πεδίο 'Τύπος Εθελοντή' — μη έγκυρη τιμή '$vtype'. Επιτρεπτοί: " . implode(', ', $validTypes);
     }
 
     return $errors;
