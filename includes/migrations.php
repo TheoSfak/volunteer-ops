@@ -222,6 +222,22 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 5,
+            'description' => 'Add cohort_year to users',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'users'
+                       AND COLUMN_NAME  = 'cohort_year'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN cohort_year SMALLINT NULL DEFAULT NULL AFTER profile_photo");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
