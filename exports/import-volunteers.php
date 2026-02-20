@@ -238,6 +238,13 @@ include __DIR__ . '/../includes/header.php';
                             <?php endif; ?>
                         <?php endif; ?>
                         
+                        <?php if (($results['skipped'] ?? 0) > 0): ?>
+                            <div class="alert alert-info">
+                                <i class="bi bi-skip-forward"></i>
+                                Παραλείφθηκαν <?= $results['skipped'] ?> εγγραφές — το email υπάρχει ήδη στο σύστημα.
+                            </div>
+                        <?php endif; ?>
+
                         <?php if ($results['failed'] > 0): ?>
                             <div class="alert alert-danger">
                                 <i class="bi bi-exclamation-triangle"></i> 

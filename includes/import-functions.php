@@ -72,11 +72,6 @@ function validateVolunteerData(array $row, int $rowNumber): array {
         $errors[] = "Γραμμή $rowNumber: Το email είναι υποχρεωτικό.";
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = "Γραμμή $rowNumber: Μη έγκυρο email ($email).";
-    } else {
-        $existing = dbFetchOne("SELECT id FROM users WHERE email = ?", [$email]);
-        if ($existing) {
-            $errors[] = "Γραμμή $rowNumber: Το email $email υπάρχει ήδη.";
-        }
     }
 
     $phone = _col($row, 'Τηλέφωνο');
@@ -114,7 +109,7 @@ function validateVolunteerData(array $row, int $rowNumber): array {
  * Inserts into users + volunteer_profiles.
  */
 function importVolunteersFromCsv(array $rows, bool $dryRun = false): array {
-    $results = ['success' => 0, 'failed' => 0, 'errors' => [], 'passwords' => []];
+    $results = ['success' => 0, 'skipped' => 0, 'failed' => 0, 'errors' => [], 'passwords' => []];
 
     foreach ($rows as $index => $row) {
         $rowNumber = $index + 2;
@@ -131,12 +126,20 @@ function importVolunteersFromCsv(array $rows, bool $dryRun = false): array {
             continue;
         }
 
+        // Skip silently if email already exists
+        $email = trim($row['Email']);
+        $existing = dbFetchOne("SELECT id FROM users WHERE email = ?", [$email]);
+        if ($existing) {
+            $results['skipped']++;
+            continue;
+        }
+
         $password       = substr(md5(uniqid(rand(), true)), 0, 10);
         $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
 
         // ── users row ──
         $name             = trim($row['Όνομα']);
-        $email            = trim($row['Email']);
+        $email            = trim($row['Email']); // already checked above
         $phone            = _col($row, 'Τηλέφωνο');
         $deptId           = (int) trim($row['Τμήμα ID']);
         $role             = trim($row['Ρόλος']);
