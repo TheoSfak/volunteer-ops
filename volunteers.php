@@ -17,7 +17,9 @@ $departmentId = get('department_id', '');
 $warehouseId = get('warehouse_id', '');
 $status = get('status', '');
 $page = max(1, (int) get('page', 1));
-$perPage = 20;
+$allowedPerPage = [10, 20, 30, 50, 100];
+$perPage = (int) get('per_page', 20);
+if (!in_array($perPage, $allowedPerPage)) $perPage = 20;
 
 // Build query — always show active users that haven't been soft-deleted
 $where = ['u.is_active = 1', 'u.deleted_at IS NULL'];
@@ -74,7 +76,7 @@ $volunteers = dbFetchAll(
          GROUP BY volunteer_id
      ) pr_stats ON u.id = pr_stats.volunteer_id
      WHERE $whereClause
-     ORDER BY u.name ASC
+     ORDER BY u.cohort_year DESC, u.name ASC
      LIMIT {$pagination['offset']}, {$pagination['per_page']}",
     $params
 );
@@ -229,6 +231,13 @@ include __DIR__ . '/includes/header.php';
                     <i class="bi bi-search me-1"></i>Αναζήτηση
                 </button>
             </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <select name="per_page" class="form-select" onchange="this.form.submit()" title="Εγγραφές ανά σελίδα">
+                    <?php foreach ([10, 20, 30, 50, 100] as $pp): ?>
+                        <option value="<?= $pp ?>" <?= $perPage == $pp ? 'selected' : '' ?>><?= $pp ?> ανά σελίδα</option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
         </form>
     </div>
 </div>
@@ -240,14 +249,19 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-info-circle me-2"></i>Δεν βρέθηκαν εθελοντές.
     </div>
 <?php else: ?>
+    <div class="d-flex justify-content-between align-items-center mb-2 small text-muted">
+        <span>Σύνολο: <strong><?= $pagination['total'] ?></strong> εθελοντές</span>
+        <span>Σελίδα <?= $pagination['current_page'] ?> από <?= $pagination['total_pages'] ?></span>
+    </div>
     <div class="table-responsive">
-        <table class="table table-hover align-middle">
-            <thead>
+        <table class="table table-sm table-hover align-middle">
+            <thead class="table-light">
                 <tr>
                     <th>Εθελοντής</th>
                     <th>Ρόλος</th>
                     <th>Σώμα</th>
                     <th>Παράρτημα</th>
+                    <th class="text-center">Χρονιά</th>
                     <th class="text-center">Βάρδιες</th>
                     <th class="text-center">Πόντοι</th>
                     <th>Κατάσταση</th>
@@ -256,15 +270,12 @@ include __DIR__ . '/includes/header.php';
             </thead>
             <tbody>
                 <?php foreach ($volunteers as $v): ?>
-                    <tr class="<?= !$v['is_active'] ? 'table-secondary' : '' ?>">
+                    <tr class="<?= !$v['is_active'] ? 'table-secondary text-muted' : '' ?>">
                         <td>
-                            <a href="volunteer-view.php?id=<?= $v['id'] ?>" class="text-decoration-none">
-                                <strong><?= h($v['name']) ?></strong><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
-                            </a>
-                            <br><small class="text-muted"><?= h($v['email']) ?></small>
-                            <?php if ($v['phone']): ?>
-                                <br><small class="text-muted"><i class="bi bi-telephone"></i> <?= h($v['phone']) ?></small>
-                            <?php endif; ?>
+                            <a href="volunteer-view.php?id=<?= $v['id'] ?>" class="text-decoration-none fw-semibold">
+                                <?= h($v['name']) ?>
+                            </a><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
+                            <br><small class="text-muted"><?= h($v['email']) ?><?= $v['phone'] ? ' · ' . h($v['phone']) : '' ?></small>
                         </td>
                         <td><?= roleBadge($v['role']) ?></td>
                         <td><?= h($v['department_name'] ?? '-') ?></td>
@@ -276,9 +287,16 @@ include __DIR__ . '/includes/header.php';
                             <?php endif; ?>
                         </td>
                         <td class="text-center">
+                            <?php if ($v['cohort_year']): ?>
+                                <span class="badge bg-secondary"><?= (int)$v['cohort_year'] ?></span>
+                            <?php else: ?>
+                                <span class="text-muted">—</span>
+                            <?php endif; ?>
+                        </td>
+                        <td class="text-center">
                             <?= $v['shifts_count'] ?>
                             <?php if ($v['total_hours'] > 0): ?>
-                                <br><small class="text-muted"><?= number_format($v['total_hours'], 1) ?> ώρες</small>
+                                <br><small class="text-muted"><?= number_format($v['total_hours'], 1) ?> ώρ.</small>
                             <?php endif; ?>
                         </td>
                         <td class="text-center">
