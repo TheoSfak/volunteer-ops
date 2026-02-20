@@ -170,7 +170,7 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-people me-2"></i>Εθελοντές
     </h1>
     <div class="d-flex gap-2">
-        <a href="exports/import-volunteers.php" class="btn btn-outline-primary">
+        <a href="import-volunteers.php" class="btn btn-outline-primary">
             <i class="bi bi-upload me-1"></i>Εισαγωγή CSV
         </a>
         <a href="exports/export-volunteers.php?role=<?= h($role) ?>&department_id=<?= h($departmentId) ?>" 
