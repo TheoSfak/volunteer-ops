@@ -47,7 +47,7 @@ $stats = [
 
 // Get exam attempts history
 $examAttempts = dbFetchAll("
-    SELECT ea.id, ea.exam_id, ea.score, ea.passed, ea.time_taken_seconds, ea.submitted_at,
+    SELECT ea.id, ea.exam_id, ea.score, ea.passed, ea.time_taken_seconds, ea.completed_at,
            te.title as exam_title, te.questions_per_attempt as total_questions,
            te.passing_percentage,
            tc.name as category_name, tc.icon as category_icon
@@ -55,7 +55,7 @@ $examAttempts = dbFetchAll("
     INNER JOIN training_exams te ON ea.exam_id = te.id
     INNER JOIN training_categories tc ON te.category_id = tc.id
     WHERE ea.user_id = ?
-    ORDER BY ea.submitted_at DESC
+    ORDER BY ea.completed_at DESC
 ", [$user['id']]);
 
 $errors = [];
@@ -347,7 +347,7 @@ include __DIR__ . '/includes/header.php';
                                 <?php endif; ?>
                             </td>
                             <td>
-                                <?= formatDateTime($attempt['submitted_at']) ?>
+                                <?= formatDateTime($attempt['completed_at']) ?>
                                 <?php if ($attempt['time_taken_seconds']): ?>
                                     <?php $mins = floor($attempt['time_taken_seconds'] / 60); $secs = $attempt['time_taken_seconds'] % 60; ?>
                                     <br><small class="text-muted"><?= $mins ?>λ <?= $secs ?>δ</small>
