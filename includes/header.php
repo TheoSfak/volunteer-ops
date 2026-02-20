@@ -717,6 +717,11 @@ $appDescription = getSetting('app_description', '');
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'skills' ? 'active' : '' ?>" href="skills.php">
+                    <i class="bi bi-stars"></i> Δεξιότητες
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'reports' ? 'active' : '' ?>" href="reports.php">
                     <i class="bi bi-graph-up"></i> Αναφορές
                 </a>
