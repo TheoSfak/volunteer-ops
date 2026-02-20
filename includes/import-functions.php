@@ -75,8 +75,11 @@ function validateVolunteerData(array $row, int $rowNumber): array {
     }
 
     $phone = _col($row, 'Τηλέφωνο');
-    if ($phone !== null && !preg_match('/^\d{10}$/', $phone)) {
-        $errors[] = "Γραμμή $rowNumber: Πεδίο 'Τηλέφωνο' — μη έγκυρη τιμή '$phone' (πρέπει να είναι ακριβώς 10 ψηφία).";
+    if ($phone !== null) {
+        $phoneClean = preg_replace('/[\s\-\.]+/', '', $phone);
+        if (!preg_match('/^\d{10}$/', $phoneClean)) {
+            $errors[] = "Γραμμή $rowNumber: Πεδίο 'Τηλέφωνο' — μη έγκυρη τιμή '$phone' (πρέπει να είναι 10 ψηφία, με ή χωρίς κενά).";
+        }
     }
 
     $deptId = trim($row['Τμήμα ID'] ?? '');
@@ -141,6 +144,7 @@ function importVolunteersFromCsv(array $rows, bool $dryRun = false): array {
         $name             = trim($row['Όνομα']);
         $email            = trim($row['Email']); // already checked above
         $phone            = _col($row, 'Τηλέφωνο');
+        if ($phone !== null) $phone = preg_replace('/[\s\-\.]+/', '', $phone);
         $deptId           = (int) trim($row['Τμήμα ID']);
         $role             = trim($row['Ρόλος']);
         $volunteerType    = _col($row, 'Τύπος Εθελοντή') ?? 'VOLUNTEER';
