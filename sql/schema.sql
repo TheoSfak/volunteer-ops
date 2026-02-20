@@ -736,15 +736,13 @@ CREATE TABLE IF NOT EXISTS `quiz_attempts` (
     `quiz_id` INT UNSIGNED NOT NULL,
     `user_id` INT UNSIGNED NOT NULL,
     `score` INT DEFAULT 0,
-    `total_questions` INT DEFAULT 0,
-    `started_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `completed_at` TIMESTAMP NULL,
     `time_taken_seconds` INT NULL,
+    `submitted_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`quiz_id`) REFERENCES `training_quizzes`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     INDEX `idx_quiz_attempts_user` (`user_id`),
     INDEX `idx_quiz_attempts_quiz` (`quiz_id`),
-    INDEX `idx_quiz_attempts_completed` (`completed_at`)
+    INDEX `idx_quiz_attempts_submitted` (`submitted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
@@ -756,17 +754,14 @@ CREATE TABLE IF NOT EXISTS `exam_attempts` (
     `user_id` INT UNSIGNED NOT NULL,
     `selected_questions_json` JSON NOT NULL COMMENT 'Array of question IDs that were randomly selected',
     `score` INT DEFAULT 0,
-    `total_questions` INT DEFAULT 0,
-    `passing_percentage` INT DEFAULT 70,
     `passed` TINYINT(1) DEFAULT 0,
-    `started_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    `completed_at` TIMESTAMP NULL,
     `time_taken_seconds` INT NULL,
+    `submitted_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`exam_id`) REFERENCES `training_exams`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     UNIQUE KEY `unique_exam_attempt` (`exam_id`, `user_id`),
     INDEX `idx_exam_attempts_user` (`user_id`),
-    INDEX `idx_exam_attempts_completed` (`completed_at`),
+    INDEX `idx_exam_attempts_submitted` (`submitted_at`),
     INDEX `idx_exam_attempts_passed` (`passed`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

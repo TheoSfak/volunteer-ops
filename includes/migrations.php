@@ -183,6 +183,45 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 4,
+            'description' => 'Rename completed_at to submitted_at in exam/quiz attempts; add profile_photo to users',
+            'up' => function () {
+                // 1. exam_attempts: completed_at -> submitted_at
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'exam_attempts'
+                       AND COLUMN_NAME  = 'completed_at'"
+                );
+                if ($col) {
+                    dbExecute("ALTER TABLE exam_attempts CHANGE COLUMN completed_at submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP");
+                }
+
+                // 2. quiz_attempts: completed_at -> submitted_at
+                $col2 = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'quiz_attempts'
+                       AND COLUMN_NAME  = 'completed_at'"
+                );
+                if ($col2) {
+                    dbExecute("ALTER TABLE quiz_attempts CHANGE COLUMN completed_at submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP");
+                }
+
+                // 3. users: add profile_photo
+                $col3 = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'users'
+                       AND COLUMN_NAME  = 'profile_photo'"
+                );
+                if (!$col3) {
+                    dbExecute("ALTER TABLE users ADD COLUMN profile_photo VARCHAR(255) NULL DEFAULT NULL AFTER phone");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
