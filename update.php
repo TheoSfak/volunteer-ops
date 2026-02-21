@@ -313,10 +313,14 @@ function extractUpdate($zipFile, $tempDir) {
 
 function applyUpdate($sourceDir) {
     updateLog('Εφαρμογή ενημέρωσης...');
+    updateLog("Source dir: {$sourceDir}");
+    updateLog("Target dir: " . __DIR__);
     
     $targetDir = __DIR__;
     $updated = 0;
     $skipped = 0;
+    $failed = 0;
+    $failedFiles = [];
     
     // Files/folders to preserve (never overwrite)
     $preserve = [
@@ -328,13 +332,20 @@ function applyUpdate($sourceDir) {
         'install_errors.log'
     ];
     
+    // Normalize source dir path (remove trailing slash)
+    $sourceDir = rtrim($sourceDir, '/\\');
+    $sourceDirLen = strlen($sourceDir) + 1; // +1 for the separator
+    
     $iterator = new RecursiveIteratorIterator(
         new RecursiveDirectoryIterator($sourceDir, RecursiveDirectoryIterator::SKIP_DOTS),
         RecursiveIteratorIterator::SELF_FIRST
     );
     
     foreach ($iterator as $item) {
-        $relativePath = str_replace($sourceDir . '/', '', $item->getPathname());
+        // Use substr for reliable path extraction (works on both Windows & Linux)
+        $relativePath = substr($item->getPathname(), $sourceDirLen);
+        // Normalize to forward slashes
+        $relativePath = str_replace('\\', '/', $relativePath);
         $targetPath = $targetDir . '/' . $relativePath;
         
         // Check if should preserve
@@ -353,23 +364,45 @@ function applyUpdate($sourceDir) {
         
         if ($item->isDir()) {
             if (!is_dir($targetPath)) {
-                mkdir($targetPath, 0755, true);
+                if (!@mkdir($targetPath, 0755, true)) {
+                    updateLog("ΣΦΑΛΜΑ: Αδυναμία δημιουργίας φακέλου: {$relativePath}", 'error');
+                    $failed++;
+                }
             }
         } else {
             // Create directory if needed
             $dir = dirname($targetPath);
             if (!is_dir($dir)) {
-                mkdir($dir, 0755, true);
+                @mkdir($dir, 0755, true);
             }
             
-            copy($item->getPathname(), $targetPath);
-            $updated++;
+            // Copy with error checking
+            if (@copy($item->getPathname(), $targetPath)) {
+                $updated++;
+                // Make file writable for future updates
+                @chmod($targetPath, 0644);
+            } else {
+                $failed++;
+                $failedFiles[] = $relativePath;
+                $err = error_get_last();
+                updateLog("ΣΦΑΛΜΑ copy: {$relativePath} — " . ($err['message'] ?? 'unknown error'), 'error');
+            }
         }
     }
     
-    updateLog("Ενημερώθηκαν {$updated} αρχεία, παραλήφθηκαν {$skipped}");
+    updateLog("Ενημερώθηκαν {$updated} αρχεία, παραλήφθηκαν {$skipped}, ΑΠΟΤΥΧΙΑ {$failed}");
     
-    return ['updated' => $updated, 'skipped' => $skipped];
+    if ($failed > 0) {
+        updateLog("Αρχεία που απέτυχαν: " . implode(', ', array_slice($failedFiles, 0, 20)), 'error');
+    }
+    
+    // Clear OPcache immediately after file copy so PHP sees new files
+    if (function_exists('opcache_reset')) {
+        opcache_reset();
+        updateLog('OPcache cleared μετά την αντιγραφή αρχείων');
+    }
+    
+    return ['updated' => $updated, 'skipped' => $skipped, 'failed' => $failed, 'failed_files' => $failedFiles];
 }
 
 function runMigrations() {
@@ -711,6 +744,12 @@ if (isPost()) {
                 // Step 4: Apply update
                 $updateResult = applyUpdate($contentDir);
                 
+                // Check for copy failures
+                if (!empty($updateResult['failed']) && $updateResult['failed'] > 0) {
+                    updateLog("ΠΡΟΕΙΔΟΠΟΙΗΣΗ: {$updateResult['failed']} αρχεία δεν αντιγράφηκαν!", 'warning');
+                }
+                updateLog("Αρχεία που ενημερώθηκαν: {$updateResult['updated']}");
+                
                 // Step 5: Run SQL file migrations
                 $migrations = runMigrations();
 
@@ -748,11 +787,21 @@ if (isPost()) {
                     updateLog('PHP schema migrations warning: ' . $e->getMessage(), 'warning');
                 }
 
-                // Step 6: Cleanup
+                // Step 6: Cleanup temp directory
                 if (is_dir($download['temp_dir'])) {
-                    // Simple cleanup - just remove temp files
-                    array_map('unlink', glob($download['temp_dir'] . '/*'));
-                    rmdir($download['temp_dir']);
+                    $cleanIterator = new RecursiveIteratorIterator(
+                        new RecursiveDirectoryIterator($download['temp_dir'], RecursiveDirectoryIterator::SKIP_DOTS),
+                        RecursiveIteratorIterator::CHILD_FIRST
+                    );
+                    foreach ($cleanIterator as $cleanItem) {
+                        if ($cleanItem->isDir()) {
+                            @rmdir($cleanItem->getPathname());
+                        } else {
+                            @unlink($cleanItem->getPathname());
+                        }
+                    }
+                    @rmdir($download['temp_dir']);
+                    updateLog('Temp directory cleaned up');
                 }
                 
                 // Step 7: Force-update APP_VERSION in config.php
@@ -760,12 +809,13 @@ if (isPost()) {
                 
                 updateLog("=== ΕΝΗΜΕΡΩΣΗ ΟΛΟΚΛΗΡΩΘΗΚΕ ===");
                 
-                setFlash('success', "Η ενημέρωση στην έκδοση {$version} ολοκληρώθηκε επιτυχώς!");
-                
-                // Clear OPcache if available
+                // Clear OPcache BEFORE redirect so the new files are served
                 if (function_exists('opcache_reset')) {
                     opcache_reset();
+                    updateLog('OPcache cleared');
                 }
+                
+                setFlash('success', "Η ενημέρωση στην έκδοση {$version} ολοκληρώθηκε επιτυχώς! Ενημερώθηκαν {$updateResult['updated']} αρχεία." . (!empty($updateResult['failed']) ? " ΠΡΟΣΟΧΗ: {$updateResult['failed']} αρχεία απέτυχαν!" : ''));
                 
                 redirect('update.php');
                 break;
