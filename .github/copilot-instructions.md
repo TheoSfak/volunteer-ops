@@ -188,14 +188,16 @@ sendNotification($userId, 'Τίτλος', 'Μήνυμα');
 Existing notification codes: `participation_approved`, `participation_rejected`, `admin_added_volunteer`, `shift_reminder`, `mission_canceled`.
 To add new: INSERT into `notification_settings` + `email_templates` in `sql/schema.sql`.
 
-### Version Bump & Release (do on every feature commit)
+### Version Bump & Release (REQUIRED on every commit to GitHub)
+**Every single commit must include a version bump, tag, AND GitHub release. No exceptions.**
 ```powershell
-# 1. Bump APP_VERSION in config.php (both xampp and volunteer-ops-github)
-# 2. Copy changed files to volunteer-ops-github/
-# 3. git add . && git commit -m "feat: description vX.Y.Z"
-# 4. git tag vX.Y.Z && git push origin main --tags
-# 5. gh release create vX.Y.Z --title "..." --notes "..."
+# 1. Bump APP_VERSION in config.php (both xampp AND volunteer-ops-github)
+# 2. Copy all changed files to volunteer-ops-github/
+# 3. git add . ; git commit -m "feat: description vX.Y.Z"
+# 4. git tag vX.Y.Z ; git push origin main --tags
+# 5. gh release create vX.Y.Z --title "vX.Y.Z - Short description" --notes "## What's New`n`n### feat: ...\n- bullet points"
 ```
+Version format: `MAJOR.MINOR.PATCH` — increment PATCH for fixes/small features, MINOR for significant features.
 
 ### Delete Confirmations
 Missions and shifts with participants require Bootstrap modal showing affected volunteers, then notifications to all.
@@ -297,6 +299,6 @@ if ($isEdit && !$item) {
 3. **Missing CSRF**: Every POST form needs `<?= csrfField() ?>`
 4. **English in UI**: All user-visible text must be Greek
 5. **Hardcoded emails**: Use `sendNotificationEmail()` with DB templates, not raw `sendEmail()`
-6. **Skipping version bump**: Bump `APP_VERSION` in `config.php` and create a `gh release` on every feature commit
+6. **Skipping version bump/tag/release**: Every GitHub commit MUST bump `APP_VERSION`, create a git tag, AND create a `gh release` — all three, every time
 7. **calculatePoints/calculateShiftHours**: Defined locally in `shift-view.php`, not in a global include
 8. **Direct DB queries**: Use helper functions (dbFetchAll, etc.), never raw PDO
