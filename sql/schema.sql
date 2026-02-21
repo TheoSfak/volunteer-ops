@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS `users` (
     `email` VARCHAR(255) NOT NULL UNIQUE,
     `password` VARCHAR(255) NOT NULL,
     `phone` VARCHAR(20) NULL,
-    `profile_photo` VARCHAR(255) NULL DEFAULT NULL,
     `role` ENUM('SYSTEM_ADMIN', 'DEPARTMENT_ADMIN', 'SHIFT_LEADER', 'VOLUNTEER') DEFAULT 'VOLUNTEER',
     `volunteer_type` ENUM('VOLUNTEER','TRAINEE_RESCUER','RESCUER') NOT NULL DEFAULT 'VOLUNTEER',
     `cohort_year` YEAR NULL COMMENT 'Χρονιά σειράς δοκίμων διασωστών',
@@ -586,6 +585,35 @@ INSERT INTO `email_templates` (`code`, `name`, `subject`, `body_html`, `descript
 'Αποστέλλεται όταν ο εθελοντής κερδίζει πόντους',
 '{{app_name}}, {{user_name}}, {{points}}, {{mission_title}}, {{shift_date}}, {{total_points}}');
 
+('admin_added_volunteer', 'Προσθήκη από Διαχειριστή', 'Ο διαχειριστής σας τοποθέτησε απευθείας σε βάρδια',
+'<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #2c3e50; color: white; padding: 20px; text-align: center;">
+        <h1>📋 Τοποθέτηση σε Βάρδια</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Ο διαχειριστής σας τοποθέτησε απευθείας στην παρακάτω βάρδια:</p>
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #2c3e50;">
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+            <p><strong>Ημερομηνία:</strong> {{shift_date}}</p>
+            <p><strong>Ώρα:</strong> {{shift_time}}</p>
+            <p><strong>Τοποθεσία:</strong> {{location}}</p>
+        </div>
+        {{#admin_notes}}<div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin: 15px 0;">
+            <p><strong>Σημείωση διαχειριστή:</strong> {{admin_notes}}</p>
+        </div>{{/admin_notes}}
+        <p>Παρακαλούμε να είστε στην τοποθεσία έγκαιρα.</p>
+        <p style="text-align: center; margin-top: 30px;">
+            <a href="{{login_url}}" style="background: #2c3e50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;">Σύνδεση στην Πλατφόρμα</a>
+        </p>
+    </div>
+    <div style="padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;">
+        {{app_name}} - Σύστημα Διαχείρισης Εθελοντών
+    </div>
+</div>',
+'Αποστέλλεται στον εθελοντή όταν ο διαχειριστής τον προσθέτει απευθείας σε βάρδια (shift-view ή mission-view)',
+'{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}, {{admin_notes}}, {{login_url}}');
+
 -- Default notification settings
 INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabled`, `email_template_id`) VALUES
 ('new_mission', 'Νέα Αποστολή', 'Όταν δημοσιεύεται νέα αποστολή', 1, (SELECT id FROM email_templates WHERE code = 'new_mission')),
@@ -595,7 +623,8 @@ INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabl
 ('mission_canceled', 'Ακύρωση Αποστολής', 'Όταν ακυρώνεται αποστολή', 1, (SELECT id FROM email_templates WHERE code = 'mission_canceled')),
 ('shift_canceled', 'Ακύρωση Βάρδιας', 'Όταν ακυρώνεται βάρδια', 1, (SELECT id FROM email_templates WHERE code = 'shift_canceled')),
 ('points_earned', 'Κέρδος Πόντων', 'Όταν ο εθελοντής κερδίζει πόντους', 0, (SELECT id FROM email_templates WHERE code = 'points_earned')),
-('welcome', 'Καλωσόρισμα', 'Μετά την εγγραφή νέου χρήστη', 1, (SELECT id FROM email_templates WHERE code = 'welcome'));
+('welcome', 'Καλωσόρισμα', 'Μετά την εγγραφή νέου χρήστη', 1, (SELECT id FROM email_templates WHERE code = 'welcome')),
+('admin_added_volunteer', 'Προσθήκη από Διαχειριστή', 'Όταν ο διαχειριστής προσθέτει εθελοντή απευθείας σε βάρδια', 1, (SELECT id FROM email_templates WHERE code = 'admin_added_volunteer'));
 
 -- =============================================
 -- TRAINING MODULE TABLES
@@ -736,13 +765,15 @@ CREATE TABLE IF NOT EXISTS `quiz_attempts` (
     `quiz_id` INT UNSIGNED NOT NULL,
     `user_id` INT UNSIGNED NOT NULL,
     `score` INT DEFAULT 0,
+    `total_questions` INT DEFAULT 0,
+    `started_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `completed_at` TIMESTAMP NULL,
     `time_taken_seconds` INT NULL,
-    `submitted_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`quiz_id`) REFERENCES `training_quizzes`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     INDEX `idx_quiz_attempts_user` (`user_id`),
     INDEX `idx_quiz_attempts_quiz` (`quiz_id`),
-    INDEX `idx_quiz_attempts_submitted` (`submitted_at`)
+    INDEX `idx_quiz_attempts_completed` (`completed_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
@@ -754,14 +785,17 @@ CREATE TABLE IF NOT EXISTS `exam_attempts` (
     `user_id` INT UNSIGNED NOT NULL,
     `selected_questions_json` JSON NOT NULL COMMENT 'Array of question IDs that were randomly selected',
     `score` INT DEFAULT 0,
+    `total_questions` INT DEFAULT 0,
+    `passing_percentage` INT DEFAULT 70,
     `passed` TINYINT(1) DEFAULT 0,
+    `started_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `completed_at` TIMESTAMP NULL,
     `time_taken_seconds` INT NULL,
-    `submitted_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`exam_id`) REFERENCES `training_exams`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     UNIQUE KEY `unique_exam_attempt` (`exam_id`, `user_id`),
     INDEX `idx_exam_attempts_user` (`user_id`),
-    INDEX `idx_exam_attempts_submitted` (`submitted_at`),
+    INDEX `idx_exam_attempts_completed` (`completed_at`),
     INDEX `idx_exam_attempts_passed` (`passed`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

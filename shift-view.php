@@ -278,8 +278,37 @@ if (isPost()) {
                          VALUES (?, ?, 'APPROVED', ?, ?, NOW(), NOW(), NOW())",
                         [$id, $volunteerId, $notes, $user['id']]
                     );
+                    
+                    // Fetch volunteer and shift info for notification
+                    $volunteerInfo = dbFetchOne("SELECT name, email FROM users WHERE id = ?", [$volunteerId]);
+                    $shiftInfo     = dbFetchOne(
+                        "SELECT s.*, m.title as mission_title, m.location FROM shifts s JOIN missions m ON s.mission_id = m.id WHERE s.id = ?",
+                        [$id]
+                    );
+                    
+                    // Send email notification
+                    sendNotificationEmail(
+                        'admin_added_volunteer',
+                        $volunteerInfo['email'],
+                        [
+                            'user_name'     => $volunteerInfo['name'],
+                            'mission_title' => $shiftInfo['mission_title'],
+                            'shift_date'    => formatDateTime($shiftInfo['start_time'], 'd/m/Y'),
+                            'shift_time'    => formatDateTime($shiftInfo['start_time'], 'H:i') . ' - ' . formatDateTime($shiftInfo['end_time'], 'H:i'),
+                            'location'      => $shiftInfo['location'] ?: 'Θα ανακοινωθεί',
+                            'admin_notes'   => $notes ?: 'Προστεθήκατε από τον διαχειριστή.',
+                        ]
+                    );
+                    
+                    // In-app notification
+                    sendNotification(
+                        (int) $volunteerId,
+                        'Τοποθετήθηκατε σε βάρδια',
+                        'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shiftInfo['mission_title'] . ' - ' . formatDateTime($shiftInfo['start_time'])
+                    );
+                    
                     logAudit('add_volunteer', 'participation_requests', null, "Shift $id, User $volunteerId");
-                    setFlash('success', 'Ο εθελοντής προστέθηκε στη βάρδια.');
+                    setFlash('success', 'Ο εθελοντής προστέθηκε στη βάρδια και ενημερώθηκε με email.');
                 }
             }
             break;
