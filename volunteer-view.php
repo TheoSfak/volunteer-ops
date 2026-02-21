@@ -78,47 +78,56 @@ if (isPost()) {
             setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
             redirect('volunteer-view.php?id=' . $id);
         }
-        $label = trim(post('doc_label'));
-        if (empty($label)) {
-            setFlash('error', 'Παρακαλώ δώστε τίτλο στο αρχείο.');
-            redirect('volunteer-view.php?id=' . $id . '#documents');
-        }
-        if (empty($_FILES['doc_file']['tmp_name'])) {
-            setFlash('error', 'Παρακαλώ επιλέξτε αρχείο.');
+        if (empty($_FILES['doc_files']['name'][0])) {
+            setFlash('error', 'Παρακαλώ επιλέξτε τουλάχιστον ένα αρχείο.');
             redirect('volunteer-view.php?id=' . $id . '#documents');
         }
         $allowedMime = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif',
                         'image/webp', 'application/msword',
                         'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
         $allowedExt  = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'doc', 'docx'];
-        $tmpName     = $_FILES['doc_file']['tmp_name'];
-        $origName    = basename($_FILES['doc_file']['name']);
-        $ext         = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
-        $finfo       = new finfo(FILEINFO_MIME_TYPE);
-        $mime        = $finfo->file($tmpName);
-        if (!in_array($ext, $allowedExt) || !in_array($mime, $allowedMime)) {
-            setFlash('error', 'Μη επιτρεπτός τύπος αρχείου. Επιτρέπονται: PDF, JPG, PNG, DOC, DOCX.');
-            redirect('volunteer-view.php?id=' . $id . '#documents');
-        }
-        $maxSize = 15 * 1024 * 1024; // 15MB
-        if ($_FILES['doc_file']['size'] > $maxSize) {
-            setFlash('error', 'Το αρχείο υπερβαίνει το μέγιστο επιτρεπτό μέγεθος (15MB).');
-            redirect('volunteer-view.php?id=' . $id . '#documents');
-        }
-        $storedName = 'vdoc_' . $id . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
-        $destDir    = __DIR__ . '/uploads/volunteer-docs/';
+        $destDir     = __DIR__ . '/uploads/volunteer-docs/';
         if (!is_dir($destDir)) mkdir($destDir, 0755, true);
-        if (!move_uploaded_file($tmpName, $destDir . $storedName)) {
-            setFlash('error', 'Αποτυχία αποθήκευσης αρχείου.');
-            redirect('volunteer-view.php?id=' . $id . '#documents');
+        $uploadedCount = 0;
+        $errors        = [];
+        $fileCount     = count($_FILES['doc_files']['name']);
+        for ($i = 0; $i < $fileCount; $i++) {
+            if (empty($_FILES['doc_files']['tmp_name'][$i])) continue;
+            $tmpName  = $_FILES['doc_files']['tmp_name'][$i];
+            $origName = basename($_FILES['doc_files']['name'][$i]);
+            $ext      = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+            $finfo    = new finfo(FILEINFO_MIME_TYPE);
+            $mime     = $finfo->file($tmpName);
+            if (!in_array($ext, $allowedExt) || !in_array($mime, $allowedMime)) {
+                $errors[] = 'Μη επιτρεπτός τύπος: ' . $origName;
+                continue;
+            }
+            $maxSize = 15 * 1024 * 1024; // 15MB
+            if ($_FILES['doc_files']['size'][$i] > $maxSize) {
+                $errors[] = 'Υπέρβαση μεγέθους (15MB): ' . $origName;
+                continue;
+            }
+            $label      = pathinfo($origName, PATHINFO_FILENAME);
+            $storedName = 'vdoc_' . $id . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+            if (!move_uploaded_file($tmpName, $destDir . $storedName)) {
+                $errors[] = 'Αποτυχία αποθήκευσης: ' . $origName;
+                continue;
+            }
+            dbInsert(
+                "INSERT INTO volunteer_documents (user_id, label, original_name, stored_name, mime_type, file_size, uploaded_by, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+                [$id, $label, $origName, $storedName, $mime, $_FILES['doc_files']['size'][$i], getCurrentUserId()]
+            );
+            logAudit('upload_document', 'volunteer_documents', $id, $origName);
+            $uploadedCount++;
         }
-        dbInsert(
-            "INSERT INTO volunteer_documents (user_id, label, original_name, stored_name, mime_type, file_size, uploaded_by, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
-            [$id, $label, $origName, $storedName, $mime, $_FILES['doc_file']['size'], getCurrentUserId()]
-        );
-        logAudit('upload_document', 'volunteer_documents', $id, $label);
-        setFlash('success', 'Το αρχείο «' . h($label) . '» ανέβηκε επιτυχώς.');
+        if ($uploadedCount > 0) {
+            $msg = 'Ανέβηκαν επιτυχώς ' . $uploadedCount . ' αρχεία.';
+            if (!empty($errors)) $msg .= ' Σφάλματα: ' . implode(', ', $errors);
+            setFlash('success', $msg);
+        } else {
+            setFlash('error', 'Κανένα αρχείο δεν ανέβηκε.' . (!empty($errors) ? ' ' . implode(', ', $errors) : ''));
+        }
         redirect('volunteer-view.php?id=' . $id . '#documents');
     }
 
@@ -663,21 +672,37 @@ include __DIR__ . '/includes/header.php';
         </div>
         
         <!-- Documents -->
+        <?php
+            $docCount   = count($documents);
+            $docsPreview = array_slice($documents, 0, 5);
+        ?>
         <div class="card mb-4" id="documents">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-folder2-open me-1"></i>Αρχεία & Έγγραφα</h5>
-                <?php if (isAdmin()): ?>
-                <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#uploadDocModal">
-                    <i class="bi bi-upload me-1"></i>Ανέβασμα
-                </button>
-                <?php endif; ?>
+                <h5 class="mb-0">
+                    <i class="bi bi-folder2-open me-1"></i>Αρχεία & Έγγραφα
+                    <?php if ($docCount > 0): ?>
+                    <span class="badge bg-secondary ms-1"><?= $docCount ?></span>
+                    <?php endif; ?>
+                </h5>
+                <div class="d-flex gap-2">
+                    <?php if ($docCount > 5): ?>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#allDocsModal">
+                        <i class="bi bi-list-ul me-1"></i>Όλα (<?= $docCount ?>)
+                    </button>
+                    <?php endif; ?>
+                    <?php if (isAdmin()): ?>
+                    <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#uploadDocModal">
+                        <i class="bi bi-upload me-1"></i>Ανέβασμα
+                    </button>
+                    <?php endif; ?>
+                </div>
             </div>
             <div class="card-body p-0">
                 <?php if (empty($documents)): ?>
                     <p class="text-muted p-3 mb-0">Δεν υπάρχουν αρχεία.</p>
                 <?php else: ?>
                     <ul class="list-group list-group-flush">
-                        <?php foreach ($documents as $doc): ?>
+                        <?php foreach ($docsPreview as $doc): ?>
                             <?php
                                 $isImage = str_starts_with($doc['mime_type'], 'image/');
                                 $icon    = $isImage ? 'bi-file-image text-info' : 'bi-file-pdf text-danger';
@@ -687,19 +712,17 @@ include __DIR__ . '/includes/header.php';
                                 $sizeKb = round($doc['file_size'] / 1024);
                             ?>
                             <li class="list-group-item">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <div>
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div class="text-truncate me-2" style="max-width:220px">
                                         <i class="bi <?= $icon ?> me-1"></i>
                                         <a href="volunteer-doc-download.php?id=<?= $doc['id'] ?>&volunteer=<?= $id ?>" target="_blank" class="fw-semibold text-decoration-none">
-                                            <?= h($doc['label']) ?>
+                                            <?= h($doc['original_name']) ?>
                                         </a>
                                         <br>
-                                        <small class="text-muted"><?= h($doc['original_name']) ?> &middot; <?= $sizeKb ?>KB &middot; <?= formatDate($doc['created_at']) ?></small>
-                                        <br>
-                                        <small class="text-muted"><i class="bi bi-person me-1"></i><?= h($doc['uploader_name']) ?></small>
+                                        <small class="text-muted"><?= $sizeKb ?>KB &middot; <?= formatDate($doc['created_at']) ?></small>
                                     </div>
                                     <?php if (isAdmin()): ?>
-                                    <form method="post" onsubmit="return confirm('Διαγραφή αρχείου;')">
+                                    <form method="post" onsubmit="return confirm('Διαγραφή αρχείου;')" class="flex-shrink-0">
                                         <?= csrfField() ?>
                                         <input type="hidden" name="action" value="delete_document">
                                         <input type="hidden" name="doc_id" value="<?= $doc['id'] ?>">
@@ -712,6 +735,13 @@ include __DIR__ . '/includes/header.php';
                             </li>
                         <?php endforeach; ?>
                     </ul>
+                    <?php if ($docCount > 5): ?>
+                    <div class="p-2 text-center border-top">
+                        <button type="button" class="btn btn-sm btn-link text-secondary" data-bs-toggle="modal" data-bs-target="#allDocsModal">
+                            <i class="bi bi-chevron-down me-1"></i>Εμφάνιση όλων των <?= $docCount ?> αρχείων
+                        </button>
+                    </div>
+                    <?php endif; ?>
                 <?php endif; ?>
             </div>
         </div>
@@ -748,7 +778,7 @@ include __DIR__ . '/includes/header.php';
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-upload me-2"></i>Ανέβασμα Αρχείου</h5>
+                <h5 class="modal-title"><i class="bi bi-upload me-2"></i>Ανέβασμα Αρχείων</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form method="post" enctype="multipart/form-data">
@@ -756,13 +786,13 @@ include __DIR__ . '/includes/header.php';
                 <input type="hidden" name="action" value="upload_document">
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">Τίτλος / Περιγραφή <span class="text-danger">*</span></label>
-                        <input type="text" name="doc_label" class="form-control" placeholder="π.χ. Δίπλωμα Α' Βοηθειών, Πτυχίο ΑΕΙ..." required>
+                        <label class="form-label fw-semibold">Αρχεία <span class="text-danger">*</span></label>
+                        <input type="file" name="doc_files[]" id="docFilesInput" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx" multiple required>
+                        <div class="form-text">Επιτρεπτοί τύποι: PDF, JPG, PNG, DOC, DOCX. Μέγιστο μέγεθος ανά αρχείο: 15MB. Μπορείτε να επιλέξετε πολλά αρχεία ταυτόχρονα.</div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold">Αρχείο <span class="text-danger">*</span></label>
-                        <input type="file" name="doc_file" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.doc,.docx" required>
-                        <div class="form-text">Επιτρεπτοί τύποι: PDF, JPG, PNG, DOC, DOCX. Μέγιστο μέγεθος: 15MB</div>
+                    <div id="selectedFilesList" class="d-none">
+                        <label class="form-label fw-semibold text-muted small">Επιλεγμένα αρχεία:</label>
+                        <ul class="list-unstyled small mb-0" id="fileNamesUl"></ul>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -770,6 +800,88 @@ include __DIR__ . '/includes/header.php';
                     <button type="submit" class="btn btn-success"><i class="bi bi-upload me-1"></i>Ανέβασμα</button>
                 </div>
             </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- All Documents Modal -->
+<?php if (!empty($documents)): ?>
+<div class="modal fade" id="allDocsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-folder2-open me-2"></i>Όλα τα Αρχεία <span class="badge bg-secondary"><?= $docCount ?></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <!-- Search -->
+                <div class="p-3 border-bottom bg-light">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" id="docSearchInput" class="form-control" placeholder="Αναζήτηση αρχείου..." autocomplete="off">
+                        <span class="input-group-text text-muted" id="docSearchCount"><?= $docCount ?> αρχεία</span>
+                    </div>
+                </div>
+                <!-- File table -->
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm mb-0" id="allDocsTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width:40%">Αρχείο</th>
+                                <th>Μέγεθος</th>
+                                <th>Ημερομηνία</th>
+                                <th>Ανέβηκε από</th>
+                                <?php if (isAdmin()): ?><th></th><?php endif; ?>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php foreach ($documents as $doc): ?>
+                            <?php
+                                $isImage = str_starts_with($doc['mime_type'], 'image/');
+                                $icon    = $isImage ? 'bi-file-image text-info' : 'bi-file-pdf text-danger';
+                                if ($doc['mime_type'] === 'application/msword' || $doc['mime_type'] === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+                                    $icon = 'bi-file-word text-primary';
+                                }
+                                $sizeKb = round($doc['file_size'] / 1024);
+                            ?>
+                            <tr class="doc-row">
+                                <td>
+                                    <i class="bi <?= $icon ?> me-1"></i>
+                                    <a href="volunteer-doc-download.php?id=<?= $doc['id'] ?>&volunteer=<?= $id ?>" target="_blank" class="fw-semibold text-decoration-none doc-name">
+                                        <?= h($doc['original_name']) ?>
+                                    </a>
+                                </td>
+                                <td class="text-muted small align-middle"><?= $sizeKb ?>KB</td>
+                                <td class="text-muted small align-middle"><?= formatDate($doc['created_at']) ?></td>
+                                <td class="text-muted small align-middle"><?= h($doc['uploader_name']) ?></td>
+                                <?php if (isAdmin()): ?>
+                                <td class="align-middle">
+                                    <form method="post" onsubmit="return confirm('Διαγραφή αρχείου;')">
+                                        <?= csrfField() ?>
+                                        <input type="hidden" name="action" value="delete_document">
+                                        <input type="hidden" name="doc_id" value="<?= $doc['id'] ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                                <?php endif; ?>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="noDocsFound" class="d-none text-center text-muted py-4"><i class="bi bi-search me-1"></i>Δεν βρέθηκαν αρχεία.</div>
+            </div>
+            <div class="modal-footer justify-content-between">
+                <small class="text-muted">Σύνολο: <?= $docCount ?> αρχεία</small>
+                <?php if (isAdmin()): ?>
+                <button type="button" class="btn btn-sm btn-success" data-bs-dismiss="modal" data-bs-toggle="modal" data-bs-target="#uploadDocModal">
+                    <i class="bi bi-upload me-1"></i>Ανέβασμα νέων
+                </button>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 </div>
@@ -815,3 +927,65 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+
+    // --- Upload preview ---
+    const uploadInput = document.getElementById('docFilesInput');
+    if (uploadInput) {
+        uploadInput.addEventListener('change', function () {
+            const list = document.getElementById('selectedFilesList');
+            const ul   = document.getElementById('fileNamesUl');
+            ul.innerHTML = '';
+            if (this.files.length > 0) {
+                Array.from(this.files).forEach(function (f) {
+                    const li = document.createElement('li');
+                    li.innerHTML = '<i class="bi bi-file-earmark me-1"></i>' + f.name +
+                        ' <span class="text-muted">(' + (f.size > 1048576
+                            ? (f.size / 1048576).toFixed(1) + ' MB'
+                            : Math.round(f.size / 1024) + ' KB') + ')</span>';
+                    ul.appendChild(li);
+                });
+                list.classList.remove('d-none');
+            } else {
+                list.classList.add('d-none');
+            }
+        });
+    }
+
+    // --- All-docs modal live search ---
+    const searchInput = document.getElementById('docSearchInput');
+    if (searchInput) {
+        searchInput.addEventListener('input', function () {
+            const q       = this.value.trim().toLowerCase();
+            const rows    = document.querySelectorAll('#allDocsTable .doc-row');
+            const counter = document.getElementById('docSearchCount');
+            const noFound = document.getElementById('noDocsFound');
+            let visible   = 0;
+            rows.forEach(function (row) {
+                const name = row.querySelector('.doc-name').textContent.trim().toLowerCase();
+                if (!q || name.includes(q)) {
+                    row.classList.remove('d-none');
+                    visible++;
+                } else {
+                    row.classList.add('d-none');
+                }
+            });
+            counter.textContent = visible + ' αρχεία';
+            noFound.classList.toggle('d-none', visible > 0);
+            document.querySelector('#allDocsTable').classList.toggle('d-none', visible === 0);
+        });
+
+        // Reset search when modal closes
+        const allDocsModal = document.getElementById('allDocsModal');
+        if (allDocsModal) {
+            allDocsModal.addEventListener('hidden.bs.modal', function () {
+                searchInput.value = '';
+                searchInput.dispatchEvent(new Event('input'));
+            });
+        }
+    }
+
+});
+</script>
