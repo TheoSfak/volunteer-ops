@@ -42,7 +42,7 @@ if (isPost()) {
         
         // Verify ownership and status
         $pr = dbFetchOne(
-            "SELECT * FROM participation_requests WHERE id = ? AND volunteer_id = ? AND status = 'PENDING'",
+            "SELECT * FROM participation_requests WHERE id = ? AND volunteer_id = ? AND status = '" . PARTICIPATION_PENDING . "'",
             [$prId, $user['id']]
         );
         

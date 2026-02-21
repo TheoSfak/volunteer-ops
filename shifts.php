@@ -72,8 +72,8 @@ $shifts = dbFetchAll(
             COALESCE(pr_pending.count, 0) as pending_count
      FROM shifts s
      JOIN missions m ON s.mission_id = m.id
-     LEFT JOIN (SELECT shift_id, COUNT(*) as count FROM participation_requests WHERE status = 'APPROVED' GROUP BY shift_id) pr_approved ON s.id = pr_approved.shift_id
-     LEFT JOIN (SELECT shift_id, COUNT(*) as count FROM participation_requests WHERE status = 'PENDING' GROUP BY shift_id) pr_pending ON s.id = pr_pending.shift_id
+     LEFT JOIN (SELECT shift_id, COUNT(*) as count FROM participation_requests WHERE status = '" . PARTICIPATION_APPROVED . "' GROUP BY shift_id) pr_approved ON s.id = pr_approved.shift_id
+     LEFT JOIN (SELECT shift_id, COUNT(*) as count FROM participation_requests WHERE status = '" . PARTICIPATION_PENDING . "' GROUP BY shift_id) pr_pending ON s.id = pr_pending.shift_id
      WHERE $whereClause
      ORDER BY s.start_time DESC
      LIMIT {$pagination['offset']}, {$pagination['per_page']}",
@@ -165,8 +165,8 @@ include __DIR__ . '/includes/header.php';
                     ?>
                     <tr class="<?= $isPast ? 'table-secondary' : '' ?>">
                         <td>
-                            <strong><?= h(!empty($shift['title']) ? $shift['title'] : 'Βάρδια #' . $shift['id']) ?></strong>
-                            <?php if (!empty($shift['description'])): ?>
+                            <strong><?= h($shift['title'] ?: 'Βάρδια #' . $shift['id']) ?></strong>
+                            <?php if ($shift['description']): ?>
                                 <br><small class="text-muted"><?= h(mb_substr($shift['description'], 0, 50)) ?>...</small>
                             <?php endif; ?>
                         </td>

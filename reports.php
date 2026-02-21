@@ -45,7 +45,7 @@ $stats['missions_total'] = dbFetchValue(
 );
 
 $stats['missions_completed'] = dbFetchValue(
-    "SELECT COUNT(*) FROM missions m WHERE $missionWhere AND m.status = 'COMPLETED'",
+    "SELECT COUNT(*) FROM missions m WHERE $missionWhere AND m.status = '" . STATUS_COMPLETED . "'",
     $missionParams
 );
 
@@ -60,7 +60,7 @@ $stats['participations_approved'] = dbFetchValue(
     "SELECT COUNT(*) FROM participation_requests pr 
      JOIN shifts s ON pr.shift_id = s.id 
      JOIN missions m ON s.mission_id = m.id 
-     WHERE $shiftWhere AND pr.status = 'APPROVED'",
+     WHERE $shiftWhere AND pr.status = '" . PARTICIPATION_APPROVED . "'",
     $shiftParams
 );
 
@@ -95,7 +95,7 @@ $stats['unique_volunteers'] = dbFetchValue(
     "SELECT COUNT(*) FROM participation_requests pr 
      JOIN shifts s ON pr.shift_id = s.id 
      JOIN missions m ON s.mission_id = m.id 
-     WHERE $shiftWhere AND pr.status = 'APPROVED'",
+     WHERE $shiftWhere AND pr.status = '" . PARTICIPATION_APPROVED . "'",
     $shiftParams
 );
 
@@ -119,7 +119,7 @@ switch ($reportType) {
         break;
         
     case 'volunteers':
-        $volWhere = "pr.status = 'APPROVED' AND DATE(s.start_time) BETWEEN ? AND ?";
+        $volWhere = "pr.status = '" . PARTICIPATION_APPROVED . "' AND DATE(s.start_time) BETWEEN ? AND ?";
         $volParams = [$startDate, $endDate];
         if ($departmentId) {
             $volWhere .= " AND m.department_id = ?";

@@ -32,8 +32,8 @@ $user = getCurrentUser();
 // Get all shifts with approved participants
 $shifts = dbFetchAll(
     "SELECT s.*, 
-            (SELECT COUNT(*) FROM participation_requests WHERE shift_id = s.id AND status = 'APPROVED') as approved_count,
-            (SELECT COUNT(*) FROM participation_requests WHERE shift_id = s.id AND status = 'APPROVED' AND attended = 1) as attended_count
+            (SELECT COUNT(*) FROM participation_requests WHERE shift_id = s.id AND status = '" . PARTICIPATION_APPROVED . "') as approved_count,
+            (SELECT COUNT(*) FROM participation_requests WHERE shift_id = s.id AND status = '" . PARTICIPATION_APPROVED . "' AND attended = 1) as attended_count
      FROM shifts s
      WHERE s.mission_id = ?
      ORDER BY s.start_time ASC",
@@ -46,7 +46,7 @@ $participants = dbFetchAll(
      FROM participation_requests pr
      JOIN users u ON pr.volunteer_id = u.id
      JOIN shifts s ON pr.shift_id = s.id
-     WHERE s.mission_id = ? AND pr.status = 'APPROVED'
+     WHERE s.mission_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "'
      ORDER BY s.start_time ASC, u.name ASC",
     [$missionId]
 );
@@ -89,7 +89,7 @@ if (isPost()) {
         
         // Get all approved for this shift
         $approvedIds = dbFetchAll(
-            "SELECT id FROM participation_requests WHERE shift_id = ? AND status = 'APPROVED'",
+            "SELECT id FROM participation_requests WHERE shift_id = ? AND status = '" . PARTICIPATION_APPROVED . "'",
             [$shiftId]
         );
         
@@ -114,7 +114,7 @@ if (isPost()) {
             "SELECT pr.*, s.start_time, s.end_time
              FROM participation_requests pr
              JOIN shifts s ON pr.shift_id = s.id
-             WHERE pr.shift_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1 AND pr.points_awarded = 0",
+             WHERE pr.shift_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "' AND pr.attended = 1 AND pr.points_awarded = 0",
             [$shiftId]
         );
         

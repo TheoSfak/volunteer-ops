@@ -4,6 +4,11 @@
  * This script sends reminders for approved shifts happening within configured hours
  */
 
+// CLI only - prevent web access
+if (php_sapi_name() !== 'cli') {
+    die('This script can only be run from command line.');
+}
+
 if (!defined('VOLUNTEEROPS')) {
     require_once __DIR__ . '/bootstrap.php';
 }
@@ -21,7 +26,7 @@ try {
          FROM shifts s 
          INNER JOIN missions m ON s.mission_id = m.id 
          WHERE s.start_time BETWEEN ? AND ? 
-         AND (m.status = 'OPEN' OR m.status = 'CLOSED')",
+         AND (m.status = '" . STATUS_OPEN . "' OR m.status = '" . STATUS_CLOSED . "')",
         [$now, $futureTime]
     );
 } catch (Exception $e) {

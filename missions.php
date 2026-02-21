@@ -9,7 +9,7 @@ requireLogin();
 $user = getCurrentUser();
 
 // Filters
-$status = get('status', 'OPEN');
+$status = get('status', STATUS_OPEN);
 $department = get('department');
 $missionType = (int)get('mission_type', 0);
 $search = get('search');
@@ -18,11 +18,11 @@ $perPage = 20;
 
 // Dynamic page title
 $statusTitles = [
-    'OPEN' => 'Ενεργές Αποστολές',
-    'CLOSED' => 'Κλειστές Αποστολές',
-    'COMPLETED' => 'Ολοκληρωμένες Αποστολές',
-    'DRAFT' => 'Πρόχειρες Αποστολές',
-    'CANCELED' => 'Ακυρωμένες Αποστολές'
+    STATUS_OPEN => 'Ενεργές Αποστολές',
+    STATUS_CLOSED => 'Κλειστές Αποστολές',
+    STATUS_COMPLETED => 'Ολοκληρωμένες Αποστολές',
+    STATUS_DRAFT => 'Πρόχειρες Αποστολές',
+    STATUS_CANCELED => 'Ακυρωμένες Αποστολές'
 ];
 $pageTitle = $statusTitles[$status] ?? 'Αποστολές';
 
@@ -70,7 +70,7 @@ $missions = dbFetchAll(
             (SELECT COUNT(*) FROM shifts WHERE mission_id = m.id) as shift_count,
             (SELECT COUNT(*) FROM shifts s 
              JOIN participation_requests pr ON pr.shift_id = s.id 
-             WHERE s.mission_id = m.id AND pr.status = 'APPROVED') as volunteer_count
+             WHERE s.mission_id = m.id AND pr.status = '" . PARTICIPATION_APPROVED . "') as volunteer_count
      FROM missions m
      LEFT JOIN departments d ON m.department_id = d.id
      LEFT JOIN users u ON m.created_by = u.id

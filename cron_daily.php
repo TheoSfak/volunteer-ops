@@ -7,6 +7,11 @@
  * php C:\xampp\htdocs\volunteerops\cron_daily.php
  */
 
+// CLI only - prevent web access
+if (php_sapi_name() !== 'cli') {
+    die('This script can only be run from command line.');
+}
+
 require_once __DIR__ . '/bootstrap.php';
 
 echo "==============================================\n";
