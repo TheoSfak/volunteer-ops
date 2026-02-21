@@ -174,6 +174,45 @@ if (isPost()) {
                 setFlash('success', 'Η αίτηση απορρίφθηκε και ο εθελοντής ειδοποιήθηκε.');
             }
             break;
+
+        case 'reactivate':
+            if ($canManage) {
+                $pr = dbFetchOne(
+                    "SELECT pr.*, u.name, u.email FROM participation_requests pr JOIN users u ON pr.volunteer_id = u.id WHERE pr.id = ?",
+                    [$prId]
+                );
+
+                if (!$pr) {
+                    setFlash('error', 'Δεν βρέθηκε η αίτηση.');
+                } else {
+                    dbExecute(
+                        "UPDATE participation_requests SET status = '" . PARTICIPATION_APPROVED . "', rejection_reason = NULL, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
+                        [$user['id'], $prId]
+                    );
+
+                    // Send email notification (reuse participation_approved template)
+                    if (isNotificationEnabled('participation_approved')) {
+                        sendNotificationEmail('participation_approved', $pr['email'], [
+                            'user_name'     => $pr['name'],
+                            'mission_title' => $shift['mission_title'],
+                            'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
+                            'shift_time'    => formatDateTime($shift['start_time'], 'H:i'),
+                            'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
+                        ]);
+                    }
+
+                    // In-app notification
+                    sendNotification(
+                        (int) $pr['volunteer_id'],
+                        'Επανενεργοποίηση Συμμετοχής',
+                        'Η συμμετοχή σας στη βάρδια "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') επανενεργοποιήθηκε και είναι πλέον εγκεκριμένη.'
+                    );
+
+                    logAudit('reactivate', 'participation_requests', $prId, "Volunteer: {$pr['volunteer_id']}");
+                    setFlash('success', 'Ο εθελοντής επανενεργοποιήθηκε και ειδοποιήθηκε.');
+                }
+            }
+            break;
             
         case 'mark_attended':
             if ($canManage) {
@@ -555,6 +594,13 @@ include __DIR__ . '/includes/header.php';
                                                             title="Ακύρωση έγκρισης">
                                                         <i class="bi bi-x-lg"></i>
                                                     </button>
+                                                <?php elseif (in_array($p['status'], [PARTICIPATION_REJECTED, PARTICIPATION_CANCELED_BY_ADMIN, PARTICIPATION_CANCELED_BY_USER]) && !$p['attended']): ?>
+                                                    <button type="button" class="btn btn-sm btn-outline-success reactivate-btn"
+                                                            data-id="<?= $p['id'] ?>"
+                                                            data-name="<?= h($p['name']) ?>"
+                                                            title="Επανενεργοποίηση">
+                                                        <i class="bi bi-arrow-clockwise me-1"></i>Επανενεργοποίηση
+                                                    </button>
                                                 <?php elseif ($p['attended']): ?>
                                                     <span class="text-success">
                                                         <?= $p['actual_hours'] ? number_format($p['actual_hours'], 1) . ' ώρες' : '' ?>
@@ -806,6 +852,36 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<!-- Reactivate Volunteer Modal -->
+<div class="modal fade" id="reactivateModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" id="reactivateForm">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="reactivate">
+                <input type="hidden" name="participation_id" id="reactivateParticipationId">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-arrow-clockwise me-1"></i>Επανενεργοποίηση Εθελοντή</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Θέλετε να επανενεργοποιήσετε τη συμμετοχή του <strong id="reactivateVolunteerName"></strong>;</p>
+                    <div class="alert alert-info mb-0">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Η αίτηση θα οριστεί ως <strong>ΕΓΚΕΚΡΙΜΕΝΗ</strong> και ο εθελοντής θα ειδοποιηθεί με email.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Άκυρο</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Επανενεργοποίηση
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Delete Shift Confirmation Modal -->
 <?php 
 $activeParticipants = array_filter($participants, function($p) {
@@ -916,6 +992,19 @@ document.querySelectorAll('.reject-btn').forEach(function(btn) {
         
         var modal = new bootstrap.Modal(document.getElementById('rejectModal'));
         modal.show();
+    });
+});
+
+// Reactivate buttons
+document.querySelectorAll('.reactivate-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        document.getElementById('reactivateParticipationId').value = this.getAttribute('data-id');
+        document.getElementById('reactivateVolunteerName').textContent = this.getAttribute('data-name');
+
+        new bootstrap.Modal(document.getElementById('reactivateModal')).show();
     });
 });
 
