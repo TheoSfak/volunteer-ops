@@ -367,18 +367,20 @@ if (isPost()) {
                             );
                             
                             // Send notification email
-                            sendNotificationEmail(
-                                'admin_added_volunteer',
-                                $volunteer['email'],
-                                [
-                                    'user_name'     => $volunteer['name'],
-                                    'mission_title' => $shift['mission_title'],
-                                    'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
-                                    'shift_time'    => formatDateTime($shift['start_time'], 'H:i') . ' - ' . formatDateTime($shift['end_time'], 'H:i'),
-                                    'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
-                                    'admin_notes'   => $adminNotes ?: 'Προστεθήκατε από τον διαχειριστή.',
-                                ]
-                            );
+                            if ($volunteer && !empty($volunteer['email']) && isNotificationEnabled('admin_added_volunteer')) {
+                                sendNotificationEmail(
+                                    'admin_added_volunteer',
+                                    $volunteer['email'],
+                                    [
+                                        'user_name'     => $volunteer['name'],
+                                        'mission_title' => $shift['mission_title'],
+                                        'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
+                                        'shift_time'    => formatDateTime($shift['start_time'], 'H:i') . ' - ' . formatDateTime($shift['end_time'], 'H:i'),
+                                        'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
+                                        'admin_notes'   => $adminNotes ?: 'Προστεθήκατε από τον διαχειριστή.',
+                                    ]
+                                );
+                            }
                             
                             // Send in-app notification
                             sendNotification(
