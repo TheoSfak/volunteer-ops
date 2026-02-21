@@ -368,23 +368,23 @@ if (isPost()) {
                             
                             // Send notification email
                             sendNotificationEmail(
-                                'participation_approved',
+                                'admin_added_volunteer',
                                 $volunteer['email'],
                                 [
-                                    'user_name' => $volunteer['name'],
+                                    'user_name'     => $volunteer['name'],
                                     'mission_title' => $shift['mission_title'],
-                                    'shift_date' => formatDateTime($shift['start_time'], 'd/m/Y'),
-                                    'shift_time' => formatDateTime($shift['start_time'], 'H:i'),
-                                    'location' => $shift['location'] ?: 'Θα ανακοινωθεί',
-                                    'admin_notes' => $adminNotes ?: 'Προστέθηκατε χειροκίνητα από διαχειριστή.'
+                                    'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
+                                    'shift_time'    => formatDateTime($shift['start_time'], 'H:i') . ' - ' . formatDateTime($shift['end_time'], 'H:i'),
+                                    'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
+                                    'admin_notes'   => $adminNotes ?: 'Προστεθήκατε από τον διαχειριστή.',
                                 ]
                             );
                             
                             // Send in-app notification
                             sendNotification(
                                 $volunteerId,
-                                'Εγκρίθηκε η συμμετοχή σας',
-                                'Προστεθήκατε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time'])
+                                'Τοποθετήθηκατε σε βάρδια',
+                                'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time'])
                             );
                             
                             logAudit('manual_add_volunteer', 'participation_requests', $prId);
