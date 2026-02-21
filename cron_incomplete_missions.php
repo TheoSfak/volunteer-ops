@@ -4,6 +4,11 @@
  * This script sends alerts for missions/shifts that are approaching and haven't been filled
  */
 
+// CLI only - prevent web access
+if (php_sapi_name() !== 'cli') {
+    die('This script can only be run from command line.');
+}
+
 if (!defined('VOLUNTEEROPS')) {
     require_once __DIR__ . '/bootstrap.php';
 }
@@ -30,7 +35,7 @@ $incompleteShifts = dbFetchAll(
      INNER JOIN missions m ON s.mission_id = m.id 
      LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = ?
      WHERE s.start_time BETWEEN ? AND ? 
-     AND m.status = 'OPEN'
+     AND m.status = '" . STATUS_OPEN . "'
      GROUP BY s.id
      HAVING available_spots > 0",
     [PARTICIPATION_APPROVED, $now, $futureTime]

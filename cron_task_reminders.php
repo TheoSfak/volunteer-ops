@@ -4,6 +4,11 @@
  * This script sends reminders for tasks with deadlines within 24 hours
  */
 
+// CLI only - prevent web access
+if (php_sapi_name() !== 'cli') {
+    die('This script can only be run from command line.');
+}
+
 if (!defined('VOLUNTEEROPS')) {
     require_once __DIR__ . '/bootstrap.php';
 }

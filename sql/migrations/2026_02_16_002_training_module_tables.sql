@@ -188,17 +188,13 @@ CREATE TABLE IF NOT EXISTS `user_answers` (
 CREATE TABLE IF NOT EXISTS `training_user_progress` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `user_id` INT UNSIGNED NOT NULL,
-    `category_id` INT UNSIGNED NOT NULL,
-    `materials_viewed_json` JSON NULL,
-    `quizzes_completed` INT DEFAULT 0,
-    `exams_passed` INT DEFAULT 0,
-    `last_activity` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `material_id` INT UNSIGNED NOT NULL,
+    `completed` TINYINT(1) DEFAULT 0,
+    `completed_at` TIMESTAMP NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
-    FOREIGN KEY (`category_id`) REFERENCES `training_categories`(`id`) ON DELETE CASCADE,
-    UNIQUE KEY `unique_user_category` (`user_id`, `category_id`),
-    INDEX `idx_progress_user` (`user_id`),
-    INDEX `idx_progress_category` (`category_id`)
+    FOREIGN KEY (`material_id`) REFERENCES `training_materials`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY `unique_user_material` (`user_id`, `material_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================

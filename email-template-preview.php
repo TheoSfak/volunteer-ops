@@ -11,13 +11,15 @@ requireRole([ROLE_SYSTEM_ADMIN]);
 $id = (int)get('id', 0);
 
 if (!$id) {
-    die('Template not found');
+    echo '<div style="padding: 20px; color: #721c24; background-color: #f8d7da; border: 1px solid #f5c6cb;">Το πρότυπο δεν βρέθηκε.</div>';
+    exit;
 }
 
 $template = dbFetchOne("SELECT * FROM email_templates WHERE id = ?", [$id]);
 
 if (!$template) {
-    die('Template not found');
+    echo '<div style="padding: 20px; color: #721c24; background-color: #f8d7da; border: 1px solid #f5c6cb;">Το πρότυπο δεν βρέθηκε.</div>';
+    exit;
 }
 
 // Sample data for preview

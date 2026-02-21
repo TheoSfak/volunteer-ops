@@ -13,6 +13,7 @@ if (isLoggedIn()) {
 $error = '';
 
 if (isPost()) {
+    verifyCsrf();
     $email = post('email');
     $password = $_POST['password'] ?? ''; // Don't sanitize password
     
@@ -100,6 +101,7 @@ $appLogo = getSetting('app_logo', '');
             <?php endif; ?>
             
             <form method="post" action="">
+                <?= csrfField() ?>
                 <div class="mb-3">
                     <label for="email" class="form-label">Email</label>
                     <div class="input-group">
