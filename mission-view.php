@@ -342,20 +342,35 @@ if (isPost()) {
                     $volunteer = dbFetchOne("SELECT name, email FROM users WHERE id = ?", [$volunteerId]);
                     
                     foreach ($shiftIds as $shiftId) {
-                        // Check if already exists
-                        $existing = dbFetchValue(
-                            "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND shift_id = ?",
+                        // Check if already has an active (PENDING/APPROVED) participation
+                        $existingPr = dbFetchOne(
+                            "SELECT id, status FROM participation_requests WHERE volunteer_id = ? AND shift_id = ?",
                             [$volunteerId, $shiftId]
                         );
                         
-                        if (!$existing) {
-                            // Add volunteer directly as approved
-                            $prId = dbInsert(
-                                "INSERT INTO participation_requests 
-                                 (volunteer_id, shift_id, status, admin_notes, decided_by, decided_at, created_at, updated_at) 
-                                 VALUES (?, ?, ?, ?, ?, NOW(), NOW(), NOW())",
-                                [$volunteerId, $shiftId, PARTICIPATION_APPROVED, $adminNotes, $user['id']]
-                            );
+                        if ($existingPr && in_array($existingPr['status'], [PARTICIPATION_PENDING, PARTICIPATION_APPROVED])) {
+                            // Already active — skip
+                            $skippedCount++;
+                        } else {
+                            if ($existingPr) {
+                                // Reactivate existing rejected/canceled record
+                                dbExecute(
+                                    "UPDATE participation_requests 
+                                     SET status = ?, rejection_reason = NULL, admin_notes = ?, 
+                                         decided_by = ?, decided_at = NOW(), updated_at = NOW() 
+                                     WHERE id = ?",
+                                    [PARTICIPATION_APPROVED, $adminNotes, $user['id'], $existingPr['id']]
+                                );
+                                $prId = $existingPr['id'];
+                            } else {
+                                // Insert new record
+                                $prId = dbInsert(
+                                    "INSERT INTO participation_requests 
+                                     (volunteer_id, shift_id, status, admin_notes, decided_by, decided_at, created_at, updated_at) 
+                                     VALUES (?, ?, ?, ?, ?, NOW(), NOW(), NOW())",
+                                    [$volunteerId, $shiftId, PARTICIPATION_APPROVED, $adminNotes, $user['id']]
+                                );
+                            }
                             
                             // Get shift info with mission details
                             $shift = dbFetchOne(
@@ -391,8 +406,6 @@ if (isPost()) {
                             
                             logAudit('manual_add_volunteer', 'participation_requests', $prId);
                             $addedCount++;
-                        } else {
-                            $skippedCount++;
                         }
                     }
                     
