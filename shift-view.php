@@ -302,26 +302,39 @@ if (isPost()) {
                 $volunteerId = post('volunteer_id');
                 $notes = post('admin_notes');
                 
-                // Check if already in this shift
+                // Check if already in this shift (any status)
                 $exists = dbFetchOne(
-                    "SELECT id FROM participation_requests WHERE shift_id = ? AND volunteer_id = ?",
+                    "SELECT id, status FROM participation_requests WHERE shift_id = ? AND volunteer_id = ?",
                     [$id, $volunteerId]
                 );
                 
-                if ($exists) {
-                    setFlash('error', 'Ο εθελοντής έχει ήδη αίτηση σε αυτή τη βάρδια.');
+                if ($exists && in_array($exists['status'], [PARTICIPATION_APPROVED, PARTICIPATION_PENDING])) {
+                    // Already active — block
+                    setFlash('error', 'Ο εθελοντής έχει ήδη ενεργή αίτηση σε αυτή τη βάρδια.');
                 } else {
-                    dbInsert(
-                        "INSERT INTO participation_requests 
-                         (shift_id, volunteer_id, status, admin_notes, decided_by, decided_at, created_at, updated_at)
-                         VALUES (?, ?, 'APPROVED', ?, ?, NOW(), NOW(), NOW())",
-                        [$id, $volunteerId, $notes, $user['id']]
-                    );
+                    if ($exists) {
+                        // Reactivate existing rejected/canceled record
+                        dbExecute(
+                            "UPDATE participation_requests 
+                             SET status = 'APPROVED', rejection_reason = NULL, admin_notes = ?, 
+                                 decided_by = ?, decided_at = NOW(), updated_at = NOW() 
+                             WHERE id = ?",
+                            [$notes, $user['id'], $exists['id']]
+                        );
+                    } else {
+                        // Insert new record
+                        dbInsert(
+                            "INSERT INTO participation_requests 
+                             (shift_id, volunteer_id, status, admin_notes, decided_by, decided_at, created_at, updated_at)
+                             VALUES (?, ?, 'APPROVED', ?, ?, NOW(), NOW(), NOW())",
+                            [$id, $volunteerId, $notes, $user['id']]
+                        );
+                    }
                     
                     // Fetch volunteer info for notification
                     $volunteerInfo = dbFetchOne("SELECT name, email FROM users WHERE id = ?", [$volunteerId]);
                     
-                    // Send email notification (use already-loaded $shift variable)
+                    // Send email notification
                     if ($volunteerInfo && !empty($volunteerInfo['email']) && isNotificationEnabled('admin_added_volunteer')) {
                         sendNotificationEmail(
                             'admin_added_volunteer',
@@ -400,13 +413,18 @@ foreach ($participants as $p) {
 $isPast = strtotime($shift['end_time']) < time();
 $isActive = strtotime($shift['start_time']) <= time() && strtotime($shift['end_time']) >= time();
 
-// Get available volunteers for manual add
+// Get available volunteers for manual add (exclude only PENDING/APPROVED — rejected/canceled can be re-added)
 $availableVolunteers = [];
 if ($canManage) {
-    $existingIds = array_column($participants, 'volunteer_id');
+    $activeIds = [];
+    foreach ($participants as $p) {
+        if (in_array($p['status'], [PARTICIPATION_PENDING, PARTICIPATION_APPROVED])) {
+            $activeIds[] = (int) $p['volunteer_id'];
+        }
+    }
     $excludeClause = '';
-    if (!empty($existingIds)) {
-        $excludeClause = 'AND id NOT IN (' . implode(',', array_map('intval', $existingIds)) . ')';
+    if (!empty($activeIds)) {
+        $excludeClause = 'AND id NOT IN (' . implode(',', $activeIds) . ')';
     }
     $availableVolunteers = dbFetchAll(
         "SELECT id, name, email FROM users 
