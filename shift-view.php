@@ -111,13 +111,19 @@ if (isPost()) {
                 
                 // Send notification
                 if ($prInfo && isNotificationEnabled('participation_approved')) {
+                    $gcalLink = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+                        . '&text=' . rawurlencode($shift['mission_title'])
+                        . '&dates=' . date('Ymd\THis', strtotime($shift['start_time'])) . '/' . date('Ymd\THis', strtotime($shift['end_time']))
+                        . '&details=' . rawurlencode('Βάρδια εθελοντισμού')
+                        . '&location=' . rawurlencode($shift['location'] ?: '');
                     // Send email
                     sendNotificationEmail('participation_approved', $prInfo['email'], [
-                        'user_name' => $prInfo['name'],
+                        'user_name'     => $prInfo['name'],
                         'mission_title' => $shift['mission_title'],
-                        'shift_date' => formatDateTime($shift['start_time'], 'd/m/Y'),
-                        'shift_time' => formatDateTime($shift['start_time'], 'H:i'),
-                        'location' => $shift['location'] ?: 'Θα ανακοινωθεί'
+                        'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
+                        'shift_time'    => formatDateTime($shift['start_time'], 'H:i'),
+                        'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
+                        'gcal_link'     => $gcalLink,
                     ]);
                     
                     // Send in-app notification
@@ -200,12 +206,18 @@ if (isPost()) {
 
                     // Send email notification (reuse participation_approved template)
                     if (isNotificationEnabled('participation_approved')) {
+                        $gcalLink = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+                            . '&text=' . rawurlencode($shift['mission_title'])
+                            . '&dates=' . date('Ymd\THis', strtotime($shift['start_time'])) . '/' . date('Ymd\THis', strtotime($shift['end_time']))
+                            . '&details=' . rawurlencode('Βάρδια εθελοντισμού')
+                            . '&location=' . rawurlencode($shift['location'] ?: '');
                         sendNotificationEmail('participation_approved', $pr['email'], [
                             'user_name'     => $pr['name'],
                             'mission_title' => $shift['mission_title'],
                             'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
                             'shift_time'    => formatDateTime($shift['start_time'], 'H:i'),
                             'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
+                            'gcal_link'     => $gcalLink,
                         ]);
                     }
 
@@ -344,6 +356,11 @@ if (isPost()) {
                     
                     // Send email notification
                     if ($volunteerInfo && !empty($volunteerInfo['email']) && isNotificationEnabled('admin_added_volunteer')) {
+                        $gcalLink = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+                            . '&text=' . rawurlencode($shift['mission_title'])
+                            . '&dates=' . date('Ymd\THis', strtotime($shift['start_time'])) . '/' . date('Ymd\THis', strtotime($shift['end_time']))
+                            . '&details=' . rawurlencode('Βάρδια εθελοντισμού')
+                            . '&location=' . rawurlencode($shift['location'] ?: '');
                         sendNotificationEmail(
                             'admin_added_volunteer',
                             $volunteerInfo['email'],
@@ -354,6 +371,7 @@ if (isPost()) {
                                 'shift_time'    => formatDateTime($shift['start_time'], 'H:i') . ' - ' . formatDateTime($shift['end_time'], 'H:i'),
                                 'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
                                 'admin_notes'   => $notes ?: 'Προστεθήκατε από τον διαχειριστή.',
+                                'gcal_link'     => $gcalLink,
                             ]
                         );
                     }
