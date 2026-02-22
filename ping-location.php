@@ -15,7 +15,14 @@ if (!isPost()) {
     exit;
 }
 
-verifyCsrf();
+// AJAX-safe CSRF check (verifyCsrf() redirects on failure which breaks fetch)
+if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
+    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
+    exit;
+}
+// Rotate token and return new one so JS stays in sync
+$_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+$newCsrf = $_SESSION['csrf_token'];
 
 $userId  = getCurrentUserId();
 $shiftId = (int) post('shift_id');
@@ -52,4 +59,4 @@ try {
     exit;
 }
 
-echo json_encode(['ok' => true, 'ts' => date('H:i:s')]);
+echo json_encode(['ok' => true, 'ts' => date('H:i:s'), 'new_csrf' => $newCsrf]);
