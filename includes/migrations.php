@@ -985,6 +985,51 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 15,
+            'description' => 'Create inventory_kits and inventory_kit_items tables',
+            'up' => function () {
+                $table1 = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME = 'inventory_kits'"
+                );
+                if (!$table1) {
+                    dbExecute(
+                        "CREATE TABLE inventory_kits (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            barcode VARCHAR(50) NOT NULL UNIQUE,
+                            name VARCHAR(255) NOT NULL,
+                            description TEXT NULL,
+                            department_id INT UNSIGNED NULL,
+                            created_by INT UNSIGNED NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
+                            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $table2 = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME = 'inventory_kit_items'"
+                );
+                if (!$table2) {
+                    dbExecute(
+                        "CREATE TABLE inventory_kit_items (
+                            kit_id INT UNSIGNED NOT NULL,
+                            item_id INT UNSIGNED NOT NULL,
+                            PRIMARY KEY (kit_id, item_id),
+                            FOREIGN KEY (kit_id) REFERENCES inventory_kits(id) ON DELETE CASCADE,
+                            FOREIGN KEY (item_id) REFERENCES inventory_items(id) ON DELETE CASCADE
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

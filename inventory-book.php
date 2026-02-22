@@ -28,10 +28,46 @@ if ($preselectedItemId) {
     }
 }
 
+// Pre-select kit if passed via GET
+$preselectedKitId = (int)get('kit_id', 0);
+$preselectedKit   = null;
+if ($preselectedKitId) {
+    $preselectedKit = getInventoryKit($preselectedKitId);
+    if (!$preselectedKit) {
+        setFlash('error', 'Το σετ δεν βρέθηκε.');
+        redirect('inventory-book.php');
+    }
+}
+
 // Handle POST
 if (isPost()) {
     verifyCsrf();
     $action = post('action');
+
+    if ($action === 'book_kit') {
+        $kitId     = (int)post('kit_id');
+        $userId    = (int)post('user_id', getCurrentUserId());
+        $data = [
+            'mission_location'     => post('mission_location'),
+            'notes'                => post('notes'),
+            'expected_return_date' => post('expected_return_date') ?: null,
+        ];
+
+        if (!empty($data['expected_return_date'])) {
+            $parsed = DateTime::createFromFormat('d/m/Y', $data['expected_return_date']);
+            if ($parsed) $data['expected_return_date'] = $parsed->format('Y-m-d');
+        }
+
+        $result = bookInventoryKit($kitId, $userId, $data);
+
+        if ($result['success']) {
+            setFlash('success', $result['message']);
+            redirect('inventory-book.php');
+        } else {
+            setFlash('error', $result['error']);
+            redirect('inventory-book.php?kit_id=' . $kitId);
+        }
+    }
 
     if ($action === 'book') {
         $itemId    = (int)post('item_id');
@@ -77,11 +113,19 @@ if (isPost()) {
 
     if ($action === 'barcode_lookup') {
         $barcode = trim(post('barcode'));
+        
+        // Check if it's a kit first
+        $kit = getInventoryKitByBarcode($barcode);
+        if ($kit) {
+            redirect('inventory-book.php?kit_id=' . $kit['id']);
+        }
+        
+        // If not a kit, check if it's an item
         $item = getInventoryItemByBarcode($barcode);
         if ($item) {
             redirect('inventory-book.php?item_id=' . $item['id']);
         } else {
-            setFlash('error', 'Δεν βρέθηκε υλικό με barcode: ' . $barcode);
+            setFlash('error', 'Δεν βρέθηκε υλικό ή σετ με barcode: ' . $barcode);
             redirect('inventory-book.php');
         }
     }
@@ -175,7 +219,70 @@ include __DIR__ . '/includes/header.php';
                 <h5 class="mb-0"><i class="bi bi-box-arrow-right me-2"></i>Νέα Χρέωση</h5>
             </div>
             <div class="card-body">
-                <?php if ($preselectedItem && $preselectedItem['status'] !== 'available'): ?>
+                <?php if ($preselectedKit): ?>
+                    <div class="alert alert-info">
+                        <h5 class="alert-heading"><i class="bi bi-briefcase me-2"></i>Σετ Εξοπλισμού: <?= h($preselectedKit['name']) ?></h5>
+                        <p class="mb-0">Πρόκειται να χρεωθείτε όλα τα διαθέσιμα υλικά αυτού του σετ.</p>
+                    </div>
+                    
+                    <h6 class="mb-3">Περιεχόμενα Σετ:</h6>
+                    <ul class="list-group mb-4">
+                        <?php foreach ($preselectedKit['items'] as $item): ?>
+                            <?php 
+                                $isAvail = $item['status'] === 'available' && $item['is_active'] == 1;
+                                $badgeClass = $isAvail ? 'bg-success' : 'bg-danger';
+                                $statusText = $isAvail ? 'Διαθέσιμο' : ($item['status'] === 'booked' ? 'Χρεωμένο' : 'Μη διαθέσιμο');
+                            ?>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <?= $item['category_icon'] ?? '📦' ?> <?= h($item['name']) ?>
+                                    <br><small class="text-muted font-monospace"><?= h($item['barcode']) ?></small>
+                                </div>
+                                <span class="badge <?= $badgeClass ?> rounded-pill"><?= $statusText ?></span>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+
+                    <form method="post">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="book_kit">
+                        <input type="hidden" name="kit_id" value="<?= $preselectedKit['id'] ?>">
+
+                        <?php if (isAdmin() && !empty($volunteers)): ?>
+                        <div class="mb-3">
+                            <label class="form-label">Εθελοντής *</label>
+                            <select class="form-select" name="user_id" required>
+                                <option value="">-- Επιλέξτε εθελοντή --</option>
+                                <?php foreach ($volunteers as $vol): ?>
+                                    <option value="<?= $vol['id'] ?>" <?= $vol['id'] == getCurrentUserId() ? 'selected' : '' ?>>
+                                        <?= h($vol['name']) ?> (<?= h($vol['email']) ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <?php endif; ?>
+
+                        <div class="mb-3">
+                            <label class="form-label">Αποστολή / Τοποθεσία</label>
+                            <input type="text" class="form-control" name="mission_location" placeholder="π.χ. Αποστολή Πάρνηθα">
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Σημειώσεις</label>
+                            <textarea class="form-control" name="notes" rows="2" placeholder="Προαιρετικές σημειώσεις..."></textarea>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Αναμενόμενη Επιστροφή</label>
+                            <input type="text" class="form-control datepicker" name="expected_return_date" placeholder="ΗΗ/ΜΜ/ΕΕΕΕ">
+                        </div>
+
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="bi bi-check-circle me-1"></i>Χρέωση Όλων των Διαθέσιμων Υλικών
+                        </button>
+                    </form>
+
+                <?php elseif ($preselectedItem && $preselectedItem['status'] !== 'available'): ?>
                     <div class="alert alert-warning">
                         Το υλικό <strong><?= h($preselectedItem['name']) ?></strong> δεν είναι διαθέσιμο αυτή τη στιγμή.
                     </div>
