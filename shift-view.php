@@ -435,12 +435,10 @@ if ($canManage) {
         $excludeClause = 'AND id NOT IN (' . implode(',', $activeIds) . ')';
     }
     $availableVolunteers = dbFetchAll(
-        "SELECT id, name, email FROM users 
-         WHERE role = ? 
-           AND is_active = 1
+        "SELECT id, name, email, role FROM users 
+         WHERE is_active = 1
            $excludeClause 
-         ORDER BY name",
-        [ROLE_VOLUNTEER]
+         ORDER BY name"
     );
 }
 
@@ -775,11 +773,11 @@ include __DIR__ . '/includes/header.php';
                     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
                     <link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" rel="stylesheet" />
                     <div class="mb-3">
-                        <label class="form-label">Επιλογή Εθελοντή <span class="text-danger">*</span></label>
+                        <label class="form-label">Επιλογή Χρήστη <span class="text-danger">*</span></label>
                         <select class="form-select" name="volunteer_id" required id="volunteerSelect">
-                            <option value="">Αναζήτηση εθελοντή...</option>
+                            <option value="">Αναζήτηση χρήστη...</option>
                             <?php foreach ($availableVolunteers as $v): ?>
-                                <option value="<?= $v['id'] ?>"><?= h($v['name']) ?> (<?= h($v['email']) ?>)</option>
+                                <option value="<?= $v['id'] ?>"><?= h($v['name']) ?> (<?= h($v['email']) ?>) — <?= h(ROLE_LABELS[$v['role']] ?? $v['role']) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
