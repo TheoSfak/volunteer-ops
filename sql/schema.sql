@@ -583,7 +583,7 @@ INSERT INTO `email_templates` (`code`, `name`, `subject`, `body_html`, `descript
     </div>
 </div>',
 'Αποστέλλεται όταν ο εθελοντής κερδίζει πόντους',
-'{{app_name}}, {{user_name}}, {{points}}, {{mission_title}}, {{shift_date}}, {{total_points}}');
+'{{app_name}}, {{user_name}}, {{points}}, {{mission_title}}, {{shift_date}}, {{total_points}}'),
 
 ('admin_added_volunteer', 'Προσθήκη από Διαχειριστή', 'Ο διαχειριστής σας τοποθέτησε απευθείας σε βάρδια',
 '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
