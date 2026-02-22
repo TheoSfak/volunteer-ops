@@ -575,13 +575,31 @@ $appDescription = getSetting('app_description', '');
             
             .top-navbar .dropdown-toggle {
                 max-width: 65vw;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
+                overflow: visible;
                 display: inline-flex;
                 align-items: center;
+                flex-wrap: wrap;
                 font-size: 0.85rem;
                 padding: 0.25rem 0.4rem;
+            }
+
+            .top-navbar .dropdown-toggle .user-name-text {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                max-width: 35vw;
+            }
+
+            .user-type-badge-mobile {
+                display: block;
+                width: 100%;
+                margin-top: 2px;
+                font-size: 0.7rem;
+            }
+
+            .d-flex.ms-auto {
+                margin-right: auto !important;
+                margin-left: 0.5rem !important;
             }
             
             .content-wrapper {
@@ -859,7 +877,9 @@ $appDescription = getSetting('app_description', '');
                         <?php else: ?>
                             <i class="bi bi-person-circle me-1 flex-shrink-0"></i>
                         <?php endif; ?>
-                        <span class="user-name-text"><?= h($currentUser['name'] ?? 'Χρήστης') ?></span><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
+                        <span class="user-name-text"><?= h($currentUser['name'] ?? 'Χρήστης') ?></span>
+                        <span class="user-type-badge d-none d-md-inline"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_VOLUNTEER) ?></span>
+                        <span class="user-type-badge-mobile d-md-none"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_VOLUNTEER) ?></span>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i>Το Προφίλ μου</a></li>
