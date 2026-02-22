@@ -73,9 +73,14 @@ include __DIR__ . '/includes/header.php';
     <h1 class="h3 mb-0">
         <i class="bi bi-list-check me-2"></i>Οι Αιτήσεις μου
     </h1>
-    <a href="missions.php" class="btn btn-primary">
-        <i class="bi bi-search me-1"></i>Αναζήτηση Αποστολών
-    </a>
+    <div class="d-flex gap-2">
+        <a href="volunteer-report.php?id=<?= getCurrentUserId() ?>" target="_blank" class="btn btn-outline-secondary">
+            <i class="bi bi-file-earmark-text me-1"></i>Αναφορά Δραστηριότητας
+        </a>
+        <a href="missions.php" class="btn btn-primary">
+            <i class="bi bi-search me-1"></i>Αναζήτηση Αποστολών
+        </a>
+    </div>
 </div>
 
 <?= showFlash() ?>
