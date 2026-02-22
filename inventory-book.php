@@ -111,6 +111,21 @@ if (isPost()) {
         redirect('inventory-book.php');
     }
 
+    if ($action === 'return_kit') {
+        $kitId       = (int)post('kit_id');
+        $returnNotes = post('return_notes');
+        $userId      = getCurrentUserId();
+
+        $result = returnInventoryKit($kitId, $userId, $returnNotes);
+
+        if ($result['success']) {
+            setFlash('success', $result['message']);
+        } else {
+            setFlash('error', $result['error']);
+        }
+        redirect('inventory-book.php');
+    }
+
     if ($action === 'barcode_lookup') {
         $barcode = trim(post('barcode'));
         
@@ -216,13 +231,21 @@ include __DIR__ . '/includes/header.php';
         <!-- Booking Form -->
         <div class="card mb-4">
             <div class="card-header bg-success text-white">
-                <h5 class="mb-0"><i class="bi bi-box-arrow-right me-2"></i>Νέα Χρέωση</h5>
+                <h5 class="mb-0"><i class="bi bi-box-arrow-right me-2"></i>Νέα Χρέωση / Επιστροφή</h5>
             </div>
             <div class="card-body">
                 <?php if ($preselectedKit): ?>
+                    <?php
+                        $availableCount = 0;
+                        $bookedCount = 0;
+                        foreach ($preselectedKit['items'] as $item) {
+                            if ($item['status'] === 'available' && $item['is_active'] == 1) $availableCount++;
+                            if ($item['status'] === 'booked') $bookedCount++;
+                        }
+                    ?>
                     <div class="alert alert-info">
                         <h5 class="alert-heading"><i class="bi bi-briefcase me-2"></i>Σετ Εξοπλισμού: <?= h($preselectedKit['name']) ?></h5>
-                        <p class="mb-0">Πρόκειται να χρεωθείτε όλα τα διαθέσιμα υλικά αυτού του σετ.</p>
+                        <p class="mb-0">Διαθέσιμα για χρέωση: <strong><?= $availableCount ?></strong> | Χρεωμένα: <strong><?= $bookedCount ?></strong></p>
                     </div>
                     
                     <h6 class="mb-3">Περιεχόμενα Σετ:</h6>
@@ -243,7 +266,9 @@ include __DIR__ . '/includes/header.php';
                         <?php endforeach; ?>
                     </ul>
 
-                    <form method="post">
+                    <?php if ($availableCount > 0): ?>
+                    <form method="post" class="mb-4 border-bottom pb-4">
+                        <h6 class="mb-3 text-success"><i class="bi bi-box-arrow-right me-1"></i>Χρέωση Διαθέσιμων Υλικών</h6>
                         <?= csrfField() ?>
                         <input type="hidden" name="action" value="book_kit">
                         <input type="hidden" name="kit_id" value="<?= $preselectedKit['id'] ?>">
@@ -278,14 +303,69 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <button type="submit" class="btn btn-success w-100">
-                            <i class="bi bi-check-circle me-1"></i>Χρέωση Όλων των Διαθέσιμων Υλικών
+                            <i class="bi bi-check-circle me-1"></i>Χρέωση Όλων των Διαθέσιμων Υλικών (<?= $availableCount ?>)
                         </button>
                     </form>
+                    <?php endif; ?>
+
+                    <?php if ($bookedCount > 0): ?>
+                    <form method="post" onsubmit="return confirm('Είστε σίγουροι ότι θέλετε να επιστρέψετε τα χρεωμένα υλικά αυτού του σετ;')">
+                        <h6 class="mb-3 text-warning"><i class="bi bi-box-arrow-in-left me-1"></i>Επιστροφή Χρεωμένων Υλικών</h6>
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="return_kit">
+                        <input type="hidden" name="kit_id" value="<?= $preselectedKit['id'] ?>">
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Σημειώσεις Επιστροφής</label>
+                            <input type="text" class="form-control" name="return_notes" placeholder="π.χ. Όλα σε καλή κατάσταση">
+                        </div>
+
+                        <button type="submit" class="btn btn-warning w-100">
+                            <i class="bi bi-arrow-return-left me-1"></i>Επιστροφή Χρεωμένων Υλικών (<?= $bookedCount ?>)
+                        </button>
+                    </form>
+                    <?php endif; ?>
 
                 <?php elseif ($preselectedItem && $preselectedItem['status'] !== 'available'): ?>
                     <div class="alert alert-warning">
-                        Το υλικό <strong><?= h($preselectedItem['name']) ?></strong> δεν είναι διαθέσιμο αυτή τη στιγμή.
+                        Το υλικό <strong><?= h($preselectedItem['name']) ?></strong> δεν είναι διαθέσιμο αυτή τη στιγμή (Κατάσταση: <?= h($preselectedItem['status']) ?>).
                     </div>
+                    
+                    <?php if ($preselectedItem['status'] === 'booked'): ?>
+                        <?php
+                            // Find active booking for this item
+                            $activeBooking = dbFetchOne("
+                                SELECT id, user_id 
+                                FROM inventory_bookings 
+                                WHERE item_id = ? AND status IN ('active', 'overdue')
+                                ORDER BY created_at DESC LIMIT 1
+                            ", [$preselectedItem['id']]);
+                            
+                            $canReturn = $activeBooking && (isAdmin() || $activeBooking['user_id'] == getCurrentUserId());
+                        ?>
+                        <?php if ($canReturn): ?>
+                            <form method="post" onsubmit="return confirm('Επιβεβαίωση επιστροφής;')">
+                                <h6 class="mb-3 text-warning"><i class="bi bi-box-arrow-in-left me-1"></i>Επιστροφή Υλικού</h6>
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="return">
+                                <input type="hidden" name="booking_id" value="<?= $activeBooking['id'] ?>">
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Σημειώσεις Επιστροφής</label>
+                                    <input type="text" class="form-control" name="return_notes" placeholder="π.χ. Σε καλή κατάσταση">
+                                </div>
+
+                                <button type="submit" class="btn btn-warning w-100">
+                                    <i class="bi bi-arrow-return-left me-1"></i>Επιστροφή Υλικού
+                                </button>
+                            </form>
+                        <?php else: ?>
+                            <div class="alert alert-danger mt-3">
+                                Το υλικό είναι χρεωμένο σε άλλον εθελοντή. Δεν έχετε δικαίωμα επιστροφής.
+                            </div>
+                        <?php endif; ?>
+                    <?php endif; ?>
+
                 <?php else: ?>
                     <form method="post">
                         <?= csrfField() ?>
