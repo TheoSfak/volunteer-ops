@@ -611,7 +611,35 @@ include __DIR__ . '/includes/header.php';
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-// ── Map ───────────────────────────────────────────────────────────────────────
+// ── Constants & helpers (MUST be before IIFE that uses them) ──────────────────
+const fieldStatusColor = { on_way: '#fd7e14', on_site: '#198754', needs_help: '#dc3545' };
+const fsIcon  = { on_way: '🚗', on_site: '✅', needs_help: '🆘' };
+const fsBg    = { on_way: '#fff3cd', on_site: '#d1e7dd', needs_help: '#f8d7da' };
+
+// Pulsing volunteer dot HTML
+function pulseHtml(color) {
+    return '<div style="position:relative;width:22px;height:22px;">'
+        + '<div style="position:absolute;top:3px;left:3px;width:16px;height:16px;'
+        +   'background:' + color + ';border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>'
+        + '<div style="position:absolute;top:0;left:0;width:22px;height:22px;'
+        +   'background:' + color + ';border-radius:50%;opacity:0.4;animation:vol-ping 1.5s ease-out infinite"></div>'
+        + '</div>';
+}
+
+function renderVolunteerPins(pins) {
+    if (!volunteerLayerGroup) return;
+    volunteerLayerGroup.clearLayers();
+    const statusLabel = { on_way: '🚗 Σε Κίνηση', on_site: '✅ Επί Τόπου', needs_help: '🆘 Χρειάζεται Βοήθεια' };
+    pins.forEach(p => {
+        const color = fieldStatusColor[p.field_status] || '#0d6efd';
+        const icon  = L.divIcon({ className: '', html: pulseHtml(color), iconSize: [22, 22], iconAnchor: [11, 11] });
+        L.marker([p.lat, p.lng], { icon })
+         .addTo(volunteerLayerGroup)
+         .bindPopup('<strong>' + p.name + '</strong><br>' + (statusLabel[p.field_status] || '—') + ' στις ' + p.ts);
+    });
+}
+
+// ── Map initialization ────────────────────────────────────────────────────────
 let opsMap = null;
 let volunteerLayerGroup = null;
 
@@ -630,9 +658,9 @@ let volunteerLayerGroup = null;
     }).addTo(opsMap);
 
     const icons = {
-        green:  L.divIcon({className:'', html:'<div style="background:#198754;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>'}),
-        orange: L.divIcon({className:'', html:'<div style="background:#fd7e14;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>'}),
-        red:    L.divIcon({className:'', html:'<div style="background:#dc3545;width:18px;height:18px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>'}),
+        green:  L.divIcon({className:'', html:'<div style="background:#198754;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>', iconSize:[16,16], iconAnchor:[8,8]}),
+        orange: L.divIcon({className:'', html:'<div style="background:#fd7e14;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>', iconSize:[16,16], iconAnchor:[8,8]}),
+        red:    L.divIcon({className:'', html:'<div style="background:#dc3545;width:18px;height:18px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>', iconSize:[18,18], iconAnchor:[9,9]}),
     };
 
     missionPins.forEach(p => {
@@ -642,43 +670,23 @@ let volunteerLayerGroup = null;
          .bindPopup(`<strong>${p.title}</strong><br><a href="${p.url}">Προβολή Αποστολής →</a>`);
     });
 
-    if (missionPins.length > 1) {
-        const bounds = L.latLngBounds(missionPins.map(p => [p.lat, p.lng]));
-        opsMap.fitBounds(bounds, {padding:[30,30]});
-    }
-
     volunteerLayerGroup = L.layerGroup().addTo(opsMap);
     renderVolunteerPins(volPins);
+
+    // Fit bounds to include ALL pins (missions + volunteers)
+    const allCoords = [
+        ...missionPins.map(p => [p.lat, p.lng]),
+        ...volPins.map(p => [p.lat, p.lng])
+    ];
+    if (allCoords.length > 1) {
+        opsMap.fitBounds(L.latLngBounds(allCoords), {padding: [30, 30]});
+    } else if (allCoords.length === 1) {
+        opsMap.setView(allCoords[0], 14);
+    }
+
     // Force redraw in case container had a layout pass before Leaflet init
-    setTimeout(() => opsMap.invalidateSize(), 100);
+    setTimeout(() => opsMap.invalidateSize(), 200);
 })();
-
-// Pulsing volunteer dot HTML
-function pulseHtml(color) {
-    return '<div style="position:relative;width:22px;height:22px;">'
-        + '<div style="position:absolute;top:3px;left:3px;width:16px;height:16px;'
-        +   'background:' + color + ';border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>'
-        + '<div style="position:absolute;top:0;left:0;width:22px;height:22px;'
-        +   'background:' + color + ';border-radius:50%;opacity:0.4;animation:vol-ping 1.5s ease-out infinite"></div>'
-        + '</div>';
-}
-
-const fieldStatusColor = { on_way: '#fd7e14', on_site: '#198754', needs_help: '#dc3545' };
-const fsIcon  = { on_way: '🚗', on_site: '✅', needs_help: '🆘' };
-const fsBg    = { on_way: '#fff3cd', on_site: '#d1e7dd', needs_help: '#f8d7da' };
-
-function renderVolunteerPins(pins) {
-    if (!volunteerLayerGroup) return;
-    volunteerLayerGroup.clearLayers();
-    pins.forEach(p => {
-        const color = fieldStatusColor[p.field_status] || '#0d6efd';
-        const icon  = L.divIcon({ className: '', html: pulseHtml(color), iconSize: [22, 22], iconAnchor: [11, 11] });
-        const statusLabel = { on_way: '🚗 Σε Κίνηση', on_site: '✅ Επί Τόπου', needs_help: '🆘 Χρειάζεται Βοήθεια' };
-        L.marker([p.lat, p.lng], { icon })
-         .addTo(volunteerLayerGroup)
-         .bindPopup('<strong>' + p.name + '</strong><br>' + (statusLabel[p.field_status] || '—') + ' στις ' + p.ts);
-    });
-}
 
 // ── Countdown timers ──────────────────────────────────────────────────────────
 function updateCountdowns() {
@@ -740,8 +748,16 @@ function liveRefresh() {
                 });
             }
 
-            // Refresh GPS volunteer pins on map
-            if (data.pins) renderVolunteerPins(data.pins);
+            // Refresh GPS volunteer pins on map + re-center if needed
+            if (data.pins && data.pins.length) {
+                renderVolunteerPins(data.pins);
+                // If map is at default Greece view (zoom 7), center on the first volunteer
+                if (opsMap && opsMap.getZoom() <= 7) {
+                    opsMap.setView([data.pins[0].lat, data.pins[0].lng], 14);
+                }
+            } else if (data.pins) {
+                renderVolunteerPins(data.pins);
+            }
 
             // Real-time alert banner update
             if (data.alerts !== undefined) updateAlertBanner(data.alerts);
