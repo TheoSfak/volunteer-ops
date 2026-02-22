@@ -177,8 +177,7 @@ $appDescription = getSetting('app_description', '');
             border-bottom: 1px solid rgba(255,255,255,0.3);
             position: sticky;
             top: 0;
-            z-index: 100;
-            overflow: hidden;
+            z-index: 1020;
         }
         
         /* User Dropdown Styling */
@@ -192,6 +191,7 @@ $appDescription = getSetting('app_description', '');
             left: auto !important;
             top: 100% !important;
             transform: none !important;
+            z-index: 1050 !important;
             min-width: 220px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             border-radius: 8px;
