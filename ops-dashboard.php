@@ -177,7 +177,7 @@ if (get('ajax') === '1') {
                  JOIN users u ON vp.user_id = u.id
                  LEFT JOIN participation_requests pr ON pr.volunteer_id = vp.user_id AND pr.shift_id = vp.shift_id
                  WHERE vp.shift_id IN ($ph)
-                   AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+                   AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
                    AND vp.id = (SELECT MAX(vp2.id) FROM volunteer_pings vp2
                                 WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id)",
                 $shiftIds
@@ -275,7 +275,7 @@ foreach ($missions as $m) {
     }
 }
 
-// ── Latest GPS pings per volunteer (last 15 min, active shifts only) ─────────
+// ── Latest GPS pings per volunteer (last 2 hours, active shifts only) ───────
 $volunteerPins = [];
 if ($hasPingsTable && !empty($shiftIds)) {
     try {
@@ -287,7 +287,7 @@ if ($hasPingsTable && !empty($shiftIds)) {
              JOIN users u ON vp.user_id = u.id
              LEFT JOIN participation_requests pr ON pr.volunteer_id = vp.user_id AND pr.shift_id = vp.shift_id
              WHERE vp.shift_id IN ($placeholders2)
-               AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+               AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
                AND vp.id = (
                    SELECT MAX(vp2.id) FROM volunteer_pings vp2
                    WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id
@@ -511,7 +511,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <!-- ── Right: map ── -->
-    <?php if (!empty($mapPins)): ?>
+    <?php if (!empty($mapPins) || !empty($volunteerPins)): ?>
     <div class="col-lg-5">
         <div class="card sticky-top" style="top:80px;">
             <div class="card-header">
