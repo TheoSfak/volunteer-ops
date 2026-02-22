@@ -27,7 +27,8 @@ if (!$shift) {
 
 $pageTitle = $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time']);
 $user = getCurrentUser();
-$canManage = isAdmin() || hasRole(ROLE_SHIFT_LEADER);
+$missionCompleted = ($shift['mission_status'] === STATUS_COMPLETED);
+$canManage = (isAdmin() || hasRole(ROLE_SHIFT_LEADER)) && !$missionCompleted;
 
 // Get participants
 $participants = dbFetchAll(
@@ -55,7 +56,14 @@ if (isPost()) {
     verifyCsrf();
     $action = post('action');
     $prId = post('participation_id');
-    
+
+    // Block all management actions when mission is COMPLETED
+    $adminActions = ['approve', 'reject', 'reactivate', 'mark_attended', 'delete', 'add_volunteer', 'update_notes'];
+    if ($missionCompleted && in_array($action, $adminActions)) {
+        setFlash('error', 'Η αποστολή είναι ολοκληρωμένη. Αλλάξτε πρώτα την κατάσταση σε «Κλειστή» για να κάνετε αλλαγές.');
+        redirect('shift-view.php?id=' . $id);
+    }
+
     switch ($action) {
         case 'apply':
             if ($shift['mission_status'] !== 'OPEN') {
@@ -459,6 +467,17 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?= showFlash() ?>
+
+<?php if ($missionCompleted && (isAdmin() || hasRole(ROLE_SHIFT_LEADER))): ?>
+<div class="alert alert-warning d-flex align-items-center gap-2 mb-4">
+    <i class="bi bi-lock-fill fs-5"></i>
+    <div>
+        <strong>Η αποστολή είναι ολοκληρωμένη.</strong>
+        Δεν μπορείτε να προσθέσετε/αφαιρέσετε εθελοντές ή να αλλάξετε παρουσίες.
+        <a href="mission-view.php?id=<?= $shift['mission_id'] ?>" class="alert-link">Αλλάξτε πρώτα την κατάσταση σε «Κλειστή»</a> για να κάνετε αλλαγές.
+    </div>
+</div>
+<?php endif; ?>
 
 <div class="row">
     <div class="col-lg-8">
