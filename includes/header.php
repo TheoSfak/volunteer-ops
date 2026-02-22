@@ -587,6 +587,13 @@ $appDescription = getSetting('app_description', '');
                     <i class="bi bi-speedometer2"></i> Πίνακας Ελέγχου
                 </a>
             </li>
+            <?php if (isAdmin() || hasRole(ROLE_SHIFT_LEADER)): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'ops-dashboard' ? 'active' : '' ?>" href="ops-dashboard.php">
+                    <i class="bi bi-broadcast text-danger"></i> Επιχειρησιακό
+                </a>
+            </li>
+            <?php endif; ?>
             
             <div class="sidebar-section">Αποστολές</div>
             
