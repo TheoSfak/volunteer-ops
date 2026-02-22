@@ -184,6 +184,8 @@ CREATE TABLE IF NOT EXISTS `participation_requests` (
     `admin_notes` TEXT NULL,
     `attendance_confirmed_at` TIMESTAMP NULL,
     `attendance_confirmed_by` INT UNSIGNED NULL,
+    `field_status` ENUM('on_way','on_site','needs_help') NULL DEFAULT NULL,
+    `field_status_updated_at` TIMESTAMP NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (`shift_id`) REFERENCES `shifts`(`id`) ON DELETE CASCADE,
@@ -911,5 +913,21 @@ CREATE INDEX IF NOT EXISTS `idx_tasks_deadline` ON `tasks`(`deadline`);
 CREATE INDEX IF NOT EXISTS `idx_tasks_created_by` ON `tasks`(`created_by`);
 CREATE INDEX IF NOT EXISTS `idx_task_assignments_user` ON `task_assignments`(`user_id`);
 CREATE INDEX IF NOT EXISTS `idx_task_comments_task` ON `task_comments`(`task_id`);
+
+-- =============================================
+-- VOLUNTEER GPS PINGS
+-- =============================================
+CREATE TABLE IF NOT EXISTS `volunteer_pings` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT UNSIGNED NOT NULL,
+    `shift_id` INT UNSIGNED NOT NULL,
+    `lat` DECIMAL(10, 8) NOT NULL,
+    `lng` DECIMAL(11, 8) NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`shift_id`) REFERENCES `shifts`(`id`) ON DELETE CASCADE,
+    INDEX `idx_pings_shift_time` (`shift_id`, `created_at`),
+    INDEX `idx_pings_user_shift` (`user_id`, `shift_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -11,7 +11,7 @@ requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_SHIFT_LEADER]);
 $pageTitle = 'Επιχειρησιακό Dashboard';
 $currentUser = getCurrentUser();
 
-// ── Handle quick attendance POST ─────────────────────────────────────────────
+// ── Handle quick attendance POST & broadcast ─────────────────────────────────
 if (isPost()) {
     verifyCsrf();
     $action = post('action');
@@ -34,6 +34,26 @@ if (isPost()) {
                 [$actualHours, $prId]
             );
             logAudit('mark_attended', 'participation_requests', $prId);
+        }
+
+    } elseif ($action === 'broadcast') {
+        $missionId    = (int) post('mission_id');
+        $broadcastMsg = trim(post('broadcast_message', ''));
+        if ($missionId && $broadcastMsg) {
+            $mission = dbFetchOne("SELECT title FROM missions WHERE id = ?", [$missionId]);
+            if ($mission) {
+                $vols = dbFetchAll(
+                    "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
+                     JOIN shifts s ON pr.shift_id = s.id
+                     WHERE s.mission_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "'",
+                    [$missionId]
+                );
+                foreach ($vols as $v) {
+                    sendNotification($v['volunteer_id'], '📢 ' . h($mission['title']), $broadcastMsg, 'info');
+                }
+                logAudit('broadcast', 'missions', $missionId);
+                setFlash('success', 'Η ανακοίνωση εστάλη σε ' . count($vols) . ' εθελοντές.');
+            }
         }
     }
 
@@ -109,11 +129,50 @@ if (get('ajax') === '1') {
             ];
         }
     }
-    echo json_encode(['ts' => date('H:i:s'), 'shifts' => $payload]);
+    // Fetch live volunteer pins & field statuses for AJAX refresh
+    $livePins = [];
+    if (!empty($shiftIds)) {
+        $ph = implode(',', array_fill(0, count($shiftIds), '?'));
+        $pingRowsAjax = dbFetchAll(
+            "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.created_at, u.name, pr.field_status
+             FROM volunteer_pings vp
+             JOIN users u ON vp.user_id = u.id
+             LEFT JOIN participation_requests pr ON pr.volunteer_id = vp.user_id AND pr.shift_id = vp.shift_id
+             WHERE vp.shift_id IN ($ph)
+               AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+               AND vp.id = (SELECT MAX(vp2.id) FROM volunteer_pings vp2
+                            WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id)",
+            $shiftIds
+        );
+        foreach ($pingRowsAjax as $p) {
+            $livePins[] = [
+                'lat'          => (float)$p['lat'],
+                'lng'          => (float)$p['lng'],
+                'name'         => $p['name'],
+                'field_status' => $p['field_status'],
+                'ts'           => date('H:i', strtotime($p['created_at'])),
+            ];
+        }
+    }
+    // Also send current field_status per chip for live updates
+    $liveStatus = [];
+    if (!empty($shiftIds)) {
+        $ph = implode(',', array_fill(0, count($shiftIds), '?'));
+        $fsRows = dbFetchAll(
+            "SELECT pr.id as pr_id, pr.field_status, pr.field_status_updated_at
+             FROM participation_requests pr
+             WHERE pr.shift_id IN ($ph) AND pr.status = '" . PARTICIPATION_APPROVED . "'",
+            $shiftIds
+        );
+        foreach ($fsRows as $fs) {
+            $liveStatus['pr_' . $fs['pr_id']] = $fs['field_status'];
+        }
+    }
+    echo json_encode(['ts' => date('H:i:s'), 'shifts' => $payload, 'pins' => $livePins, 'field_status' => $liveStatus]);
     exit;
 }
 
-// ── Compute alerts (understaffed shifts starting in < 2h) ────────────────────
+// ── Compute alerts (understaffed shifts + volunteers needing help) ────────────
 $alerts = [];
 $now = time();
 foreach ($missions as $m) {
@@ -124,11 +183,32 @@ foreach ($missions as $m) {
         $alreadyActive  = $secsToStart <= 0 && strtotime($s['end_time']) > $now;
         if ($isUnderstaffed && ($startingSoon || $alreadyActive)) {
             $alerts[] = [
+                'type'          => 'understaffed',
                 'mission_title' => $m['title'],
                 'shift_id'      => $s['shift_id'],
                 'start_time'    => $s['start_time'],
                 'approved'      => $s['approved'],
                 'min'           => $s['min_volunteers'],
+            ];
+        }
+    }
+}
+// 🆘 Needs-help alerts from field_status
+foreach ($approvedVolunteers as $shiftId => $vols) {
+    foreach ($vols as $v) {
+        if (($v['field_status'] ?? '') === 'needs_help') {
+            // find mission title
+            $mTitle = '';
+            foreach ($missions as $m) {
+                foreach ($m['shifts'] as $s) {
+                    if ($s['shift_id'] == $shiftId) { $mTitle = $m['title']; break 2; }
+                }
+            }
+            $alerts[] = [
+                'type'    => 'needs_help',
+                'name'    => $v['name'],
+                'shift_id'=> $shiftId,
+                'mission_title' => $mTitle,
             ];
         }
     }
@@ -157,12 +237,15 @@ foreach ($missions as $m) {
 }
 
 // ── Approved volunteers per shift for quick list ──────────────────────────────
-$shiftIds = array_merge(...array_map(fn($m) => array_column($m['shifts'], 'shift_id'), array_values($missions)));
+$shiftIds = !empty($missions)
+    ? array_merge(...array_map(fn($m) => array_column($m['shifts'], 'shift_id'), array_values($missions)))
+    : [];
 $approvedVolunteers = [];
 if (!empty($shiftIds)) {
     $placeholders = implode(',', array_fill(0, count($shiftIds), '?'));
     $rows = dbFetchAll(
-        "SELECT pr.id as pr_id, pr.shift_id, pr.attended, u.name, u.phone
+        "SELECT pr.id as pr_id, pr.shift_id, pr.attended, pr.field_status, pr.field_status_updated_at,
+                u.id as user_id, u.name, u.phone
          FROM participation_requests pr
          JOIN users u ON pr.volunteer_id = u.id
          WHERE pr.shift_id IN ($placeholders) AND pr.status = '" . PARTICIPATION_APPROVED . "'
@@ -171,6 +254,35 @@ if (!empty($shiftIds)) {
     );
     foreach ($rows as $r) {
         $approvedVolunteers[$r['shift_id']][] = $r;
+    }
+}
+
+// ── Latest GPS pings per volunteer (last 15 min, active shifts only) ─────────
+$volunteerPins = [];
+if (!empty($shiftIds)) {
+    $placeholders2 = implode(',', array_fill(0, count($shiftIds), '?'));
+    $pingRows = dbFetchAll(
+        "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.created_at, u.name,
+                pr.field_status
+         FROM volunteer_pings vp
+         JOIN users u ON vp.user_id = u.id
+         LEFT JOIN participation_requests pr ON pr.volunteer_id = vp.user_id AND pr.shift_id = vp.shift_id
+         WHERE vp.shift_id IN ($placeholders2)
+           AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+           AND vp.id = (
+               SELECT MAX(vp2.id) FROM volunteer_pings vp2
+               WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id
+           )",
+        $shiftIds
+    );
+    foreach ($pingRows as $pr) {
+        $volunteerPins[] = [
+            'lat'          => (float)$pr['lat'],
+            'lng'          => (float)$pr['lng'],
+            'name'         => $pr['name'],
+            'field_status' => $pr['field_status'],
+            'ts'           => date('H:i', strtotime($pr['created_at'])),
+        ];
     }
 }
 
@@ -212,7 +324,17 @@ include __DIR__ . '/includes/header.php';
 <div id="alertBanner">
 <?php if (!empty($alerts)): ?>
     <?php foreach ($alerts as $al): ?>
+    <?php if ($al['type'] === 'needs_help'): ?>
     <div class="alert alert-danger py-2 d-flex align-items-center gap-2">
+        <i class="bi bi-sos fs-5"></i>
+        <div>
+            🆘 <strong><?= h($al['name']) ?></strong> χρειάζεται βοήθεια στην αποστολή
+            <strong><?= h($al['mission_title']) ?></strong>!
+            <a href="shift-view.php?id=<?= $al['shift_id'] ?>" class="alert-link ms-2">Βάρδια →</a>
+        </div>
+    </div>
+    <?php else: ?>
+    <div class="alert alert-warning py-2 d-flex align-items-center gap-2">
         <i class="bi bi-exclamation-triangle-fill fs-5"></i>
         <div>
             <strong><?= h($al['mission_title']) ?></strong> —
@@ -221,6 +343,7 @@ include __DIR__ . '/includes/header.php';
             <a href="shift-view.php?id=<?= $al['shift_id'] ?>" class="alert-link ms-2">Διαχείριση →</a>
         </div>
     </div>
+    <?php endif; ?>
     <?php endforeach; ?>
 <?php endif; ?>
 </div>
@@ -253,6 +376,11 @@ include __DIR__ . '/includes/header.php';
                     <?php if ($m['department_name']): ?>
                         <span class="badge bg-secondary"><?= h($m['department_name']) ?></span>
                     <?php endif; ?>
+                    <button type="button" class="btn btn-sm btn-warning"
+                            data-bs-toggle="modal" data-bs-target="#broadcastModal-<?= $m['id'] ?>"
+                            title="Broadcast σε εθελοντές">
+                        <i class="bi bi-megaphone-fill"></i>
+                    </button>
                     <a href="mission-view.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-primary">
                         <i class="bi bi-arrow-right"></i>
                     </a>
@@ -319,11 +447,25 @@ include __DIR__ . '/includes/header.php';
 
                     <!-- Volunteer chips + quick attendance -->
                     <?php if (!empty($shiftVols)): ?>
+                    <?php
+                    $fsIcon  = ['on_way' => '🚗', 'on_site' => '✅', 'needs_help' => '🆘'];
+                    $fsBg    = ['on_way' => '#fff3cd', 'on_site' => '#d1e7dd', 'needs_help' => '#f8d7da'];
+                    ?>
                     <div class="mt-2">
                         <?php foreach ($shiftVols as $v): ?>
-                        <span class="vol-chip <?= $v['attended'] ? 'attended' : '' ?>">
+                        <?php
+                            $fs       = $v['field_status'] ?? null;
+                            $chipBg   = $v['attended'] ? '#d1e7dd' : ($fs ? ($fsBg[$fs] ?? '#e9ecef') : '#e9ecef');
+                            $chipTitle= $fs ? ($fsIcon[$fs] ?? '') . ' ' . date('H:i', strtotime($v['field_status_updated_at'] ?? 'now')) : '';
+                        ?>
+                        <span class="vol-chip <?= $v['attended'] ? 'attended' : '' ?>"
+                              style="background:<?= $chipBg ?>;"
+                              title="<?= h($chipTitle) ?>"
+                              id="chip-<?= $v['pr_id'] ?>">
                             <?php if ($v['attended']): ?>
                                 <i class="bi bi-check-circle-fill text-success me-1"></i>
+                            <?php elseif ($fs): ?>
+                                <?= $fsIcon[$fs] ?? '' ?>
                             <?php endif; ?>
                             <?= h($v['name']) ?>
                             <?php if (!$v['attended'] && $isActive): ?>
@@ -370,19 +512,55 @@ include __DIR__ . '/includes/header.php';
 
 <?php endif; ?>
 
+<!-- Broadcast Modals (one per mission) -->
+<?php foreach ($missions as $m): ?>
+<div class="modal fade" id="broadcastModal-<?= $m['id'] ?>" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning">
+                <h5 class="modal-title">
+                    <i class="bi bi-megaphone-fill me-2"></i>Ανακοίνωση: <?= h($m['title']) ?>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="broadcast">
+                <input type="hidden" name="mission_id" value="<?= $m['id'] ?>">
+                <div class="modal-body">
+                    <p class="text-muted small">Το μήνυμα θα αποσταλεί ως ειδοποίηση σε <strong>όλους τους εγκεκριμένους εθελοντές</strong> αυτής της αποστολής.</p>
+                    <textarea name="broadcast_message" class="form-control" rows="4"
+                              placeholder="Πληκτρολογήστε το μήνυμα..."
+                              required maxlength="500"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-warning">
+                        <i class="bi bi-megaphone-fill me-1"></i>Αποστολή Broadcast
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endforeach; ?>
+
 <!-- Leaflet CSS -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 // ── Map ───────────────────────────────────────────────────────────────────────
+let opsMap = null;
+let volunteerLayerGroup = null;
+
 <?php if (!empty($mapPins)): ?>
 (function() {
     const pins = <?= json_encode(array_values($mapPins)) ?>;
-    const map  = L.map('mapPanel').setView([pins[0].lat, pins[0].lng], 10);
+    opsMap = L.map('mapPanel').setView([pins[0].lat, pins[0].lng], 10);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'
-    }).addTo(map);
+    }).addTo(opsMap);
 
     const icons = {
         green:  L.divIcon({className:'', html:'<div style="background:#198754;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>'}),
@@ -393,16 +571,46 @@ include __DIR__ . '/includes/header.php';
     pins.forEach(p => {
         const icon = p.urgent ? icons.red : (icons[p.color] || icons.green);
         L.marker([p.lat, p.lng], {icon})
-         .addTo(map)
+         .addTo(opsMap)
          .bindPopup(`<strong>${p.title}</strong><br><a href="${p.url}">Προβολή Αποστολής →</a>`);
     });
 
     if (pins.length > 1) {
         const bounds = L.latLngBounds(pins.map(p => [p.lat, p.lng]));
-        map.fitBounds(bounds, {padding:[30,30]});
+        opsMap.fitBounds(bounds, {padding:[30,30]});
     }
+
+    volunteerLayerGroup = L.layerGroup().addTo(opsMap);
+    renderVolunteerPins(<?= json_encode($volunteerPins) ?>);
 })();
 <?php endif; ?>
+
+// Pulsing volunteer dot HTML
+function pulseHtml(color) {
+    return '<div style="position:relative;width:22px;height:22px;">'
+        + '<div style="position:absolute;top:3px;left:3px;width:16px;height:16px;'
+        +   'background:' + color + ';border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>'
+        + '<div style="position:absolute;top:0;left:0;width:22px;height:22px;'
+        +   'background:' + color + ';border-radius:50%;opacity:0.4;animation:vol-ping 1.5s ease-out infinite"></div>'
+        + '</div>';
+}
+
+const fieldStatusColor = { on_way: '#fd7e14', on_site: '#198754', needs_help: '#dc3545' };
+const fsIcon  = { on_way: '🚗', on_site: '✅', needs_help: '🆘' };
+const fsBg    = { on_way: '#fff3cd', on_site: '#d1e7dd', needs_help: '#f8d7da' };
+
+function renderVolunteerPins(pins) {
+    if (!volunteerLayerGroup) return;
+    volunteerLayerGroup.clearLayers();
+    pins.forEach(p => {
+        const color = fieldStatusColor[p.field_status] || '#0d6efd';
+        const icon  = L.divIcon({ className: '', html: pulseHtml(color), iconSize: [22, 22] });
+        const statusLabel = { on_way: '🚗 Σε Κίνηση', on_site: '✅ Επί Τόπου', needs_help: '🆘 Χρειάζεται Βοήθεια' };
+        L.marker([p.lat, p.lng], { icon })
+         .addTo(volunteerLayerGroup)
+         .bindPopup('<strong>' + p.name + '</strong><br>' + (statusLabel[p.field_status] || '—') + ' στις ' + p.ts);
+    });
+}
 
 // ── Countdown timers ──────────────────────────────────────────────────────────
 function updateCountdowns() {
@@ -412,7 +620,7 @@ function updateCountdowns() {
         const now   = Date.now();
         if (now < start) {
             const diff = Math.floor((start - now) / 1000);
-            const h = Math.floor(diff / 3600), m = Math.floor((diff % 3600) / 60), s = diff % 60;
+            const h = Math.floor(diff / 3600), m = Math.floor((diff % 3600) / 60);
             el.textContent = `(σε ${h}ω ${m}λ)`;
             el.className = 'countdown text-muted ms-2';
         } else if (now <= end) {
@@ -439,29 +647,44 @@ function liveRefresh() {
         .then(r => r.json())
         .then(data => {
             tsEl.textContent = data.ts;
+
+            // Update shift counters & progress bars
             Object.entries(data.shifts).forEach(([key, s]) => {
                 const id = key.replace('shift_', '');
                 const pct = s.max > 0 ? Math.min(Math.round(s.approved / s.max * 100), 100) : 0;
                 const color = s.approved < s.min ? 'danger' : (pct < 60 ? 'warning' : 'success');
-
                 const appr = document.getElementById('appr-' + id);
                 const pend = document.getElementById('pend-' + id);
                 const att  = document.getElementById('att-'  + id);
                 const bar  = document.getElementById('bar-'  + id);
-
                 if (appr) appr.textContent = s.approved + ' Εγκ.';
                 if (pend) pend.textContent = s.pending  + ' Εκκρ.';
                 if (att)  att.textContent  = s.attended + ' Παρόντες';
-                if (bar) {
-                    bar.style.width = pct + '%';
-                    bar.className = 'progress-bar bg-' + color;
-                }
+                if (bar) { bar.style.width = pct + '%'; bar.className = 'progress-bar bg-' + color; }
             });
+
+            // Update volunteer chip background from field_status
+            if (data.field_status) {
+                Object.entries(data.field_status).forEach(([key, fs]) => {
+                    const prId = key.replace('pr_', '');
+                    const chip = document.getElementById('chip-' + prId);
+                    if (chip && fs) chip.style.background = fsBg[fs] || '#e9ecef';
+                });
+            }
+
+            // Refresh GPS volunteer pins on map
+            if (data.pins) renderVolunteerPins(data.pins);
         })
         .catch(() => {})
         .finally(() => { if (spinner) spinner.classList.add('d-none'); });
 }
 setInterval(liveRefresh, 30000);
 </script>
+<style>
+@keyframes vol-ping {
+  0%   { transform: scale(0.8); opacity: 0.6; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+</style>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

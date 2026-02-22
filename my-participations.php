@@ -61,10 +61,16 @@ if (isPost()) {
 }
 
 // Group by status
-$pending = array_filter($participations, fn($p) => $p['status'] === 'PENDING');
+$pending  = array_filter($participations, fn($p) => $p['status'] === 'PENDING');
 $approved = array_filter($participations, fn($p) => $p['status'] === 'APPROVED');
 $rejected = array_filter($participations, fn($p) => $p['status'] === 'REJECTED');
 $canceled = array_filter($participations, fn($p) => in_array($p['status'], ['CANCELED_BY_USER', 'CANCELED_BY_ADMIN']));
+
+// Active NOW: approved shifts currently in progress
+$now = time();
+$activeNow = array_filter($approved, fn($p) =>
+    strtotime($p['start_time']) <= $now && strtotime($p['end_time']) > $now
+);
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -84,6 +90,80 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?= showFlash() ?>
+
+<?php if (!empty($activeNow)): ?>
+<!-- ═══════════════════════════════════════════════════════════
+     LIVE OPS PANEL — Βάρδιες Τώρα σε Εξέλιξη
+═══════════════════════════════════════════════════════════ -->
+<div id="liveOpsPanel" class="mb-4">
+    <div class="alert alert-danger d-flex align-items-center gap-2 mb-3">
+        <span class="spinner-grow spinner-grow-sm text-danger" role="status"></span>
+        <strong>Είστε σε ενεργή βάρδια!</strong> Ενημερώστε την κατάστασή σας και τη θέση σας.
+    </div>
+
+    <?php foreach ($activeNow as $p): ?>
+    <?php
+        $fieldStatus = $p['field_status'] ?? null;
+        $statusLabels = ['on_way' => '🚗 Σε Κίνηση', 'on_site' => '✅ Επί Τόπου', 'needs_help' => '🆘 Χρειάζεται Βοήθεια'];
+        $statusColors = ['on_way' => 'warning', 'on_site' => 'success', 'needs_help' => 'danger'];
+    ?>
+    <div class="card border-danger mb-3">
+        <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+            <div>
+                <i class="bi bi-broadcast-pin me-2"></i>
+                <strong><?= h($p['mission_title']) ?></strong>
+                <span class="ms-2 text-white-50 small"><?= date('H:i', strtotime($p['start_time'])) ?> – <?= date('H:i', strtotime($p['end_time'])) ?></span>
+            </div>
+            <?php if ($fieldStatus): ?>
+                <span class="badge bg-light text-dark" id="statusBadge-<?= $p['id'] ?>"><?= $statusLabels[$fieldStatus] ?? '' ?></span>
+            <?php else: ?>
+                <span class="badge bg-light text-dark" id="statusBadge-<?= $p['id'] ?>">— Χωρίς κατάσταση</span>
+            <?php endif; ?>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+
+                <!-- GPS Ping -->
+                <div class="col-md-5">
+                    <p class="small text-muted mb-2"><i class="bi bi-geo-alt-fill me-1 text-primary"></i><strong>Αναφορά Θέσης (GPS)</strong></p>
+                    <button type="button"
+                            class="btn btn-primary w-100 btn-ping"
+                            data-pr-id="<?= $p['id'] ?>"
+                            data-shift-id="<?= $p['shift_id'] ?>"
+                            onclick="sendGpsPing(this)">
+                        <i class="bi bi-send-fill me-1"></i>Αποστολή Θέσης
+                    </button>
+                    <div class="mt-1 small text-muted" id="pingStatus-<?= $p['id'] ?>"></div>
+                </div>
+
+                <!-- Field Status -->
+                <div class="col-md-7">
+                    <p class="small text-muted mb-2"><i class="bi bi-activity me-1 text-success"></i><strong>Κατάσταση Πεδίου</strong></p>
+                    <div class="btn-group w-100" role="group" id="statusBtns-<?= $p['id'] ?>">
+                        <button type="button"
+                                class="btn btn-sm <?= $fieldStatus === 'on_way' ? 'btn-warning' : 'btn-outline-warning' ?>"
+                                onclick="setStatus(this, <?= $p['id'] ?>, 'on_way')">
+                            🚗 Σε Κίνηση
+                        </button>
+                        <button type="button"
+                                class="btn btn-sm <?= $fieldStatus === 'on_site' ? 'btn-success' : 'btn-outline-success' ?>"
+                                onclick="setStatus(this, <?= $p['id'] ?>, 'on_site')">
+                            ✅ Επί Τόπου
+                        </button>
+                        <button type="button"
+                                class="btn btn-sm <?= $fieldStatus === 'needs_help' ? 'btn-danger' : 'btn-outline-danger' ?>"
+                                onclick="setStatus(this, <?= $p['id'] ?>, 'needs_help')">
+                            🆘 Βοήθεια!
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+    <?php endforeach; ?>
+</div>
+<?php endif; ?>
 
 <!-- Stats Cards -->
 <div class="row mb-4">
@@ -341,5 +421,103 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 <?php endif; ?>
+
+<script>
+const CSRF_TOKEN = '<?= $_SESSION['csrf_token'] ?? '' ?>';
+
+// ── GPS Ping ─────────────────────────────────────────────────────────────────
+function sendGpsPing(btn) {
+    if (!navigator.geolocation) {
+        showPingStatus(btn.dataset.prId, 'Το GPS δεν υποστηρίζεται', 'danger');
+        return;
+    }
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Εντοπισμός...';
+
+    navigator.geolocation.getCurrentPosition(
+        (pos) => {
+            const body = new URLSearchParams({
+                csrf_token: CSRF_TOKEN,
+                shift_id:   btn.dataset.shiftId,
+                lat:        pos.coords.latitude,
+                lng:        pos.coords.longitude,
+            });
+            fetch('ping-location.php', { method: 'POST', body })
+                .then(r => r.json())
+                .then(d => {
+                    if (d.ok) {
+                        showPingStatus(btn.dataset.prId, '✅ Θέση εστάλη (' + d.ts + ')', 'success');
+                    } else {
+                        showPingStatus(btn.dataset.prId, '❌ ' + d.error, 'danger');
+                    }
+                })
+                .catch(() => showPingStatus(btn.dataset.prId, '❌ Σφάλμα αποστολής', 'danger'))
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-send-fill me-1"></i>Αποστολή Θέσης';
+                });
+        },
+        (err) => {
+            showPingStatus(btn.dataset.prId, '❌ Δεν επιτράπηκε πρόσβαση GPS', 'danger');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-send-fill me-1"></i>Αποστολή Θέσης';
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+    );
+}
+
+function showPingStatus(prId, msg, type) {
+    const el = document.getElementById('pingStatus-' + prId);
+    if (el) el.innerHTML = '<span class="text-' + type + '">' + msg + '</span>';
+}
+
+// ── Field Status ─────────────────────────────────────────────────────────────
+function setStatus(btn, prId, status) {
+    const body = new URLSearchParams({
+        csrf_token: CSRF_TOKEN,
+        pr_id:   prId,
+        status:  status,
+    });
+    // Optimistically disable all buttons in group
+    const group = document.getElementById('statusBtns-' + prId);
+    if (group) group.querySelectorAll('button').forEach(b => b.disabled = true);
+
+    fetch('volunteer-status.php', { method: 'POST', body })
+        .then(r => r.json())
+        .then(d => {
+            if (d.ok) {
+                // Update badge
+                const badge = document.getElementById('statusBadge-' + prId);
+                if (badge) badge.textContent = d.label;
+
+                // Re-style buttons
+                const colorMap = { on_way: 'warning', on_site: 'success', needs_help: 'danger' };
+                if (group) {
+                    group.querySelectorAll('button').forEach(b => {
+                        const s = b.getAttribute('onclick').match(/'([^']+)'\s*\)$/)?.[1];
+                        if (s) {
+                            const c = colorMap[s];
+                            b.className = 'btn btn-sm ' + (s === d.status ? 'btn-' + c : 'btn-outline-' + c);
+                        }
+                        b.disabled = false;
+                    });
+                }
+
+                if (status === 'needs_help') {
+                    // Flash the panel red
+                    const panel = btn.closest('.card');
+                    if (panel) { panel.style.animation = 'pulse-red 0.5s 3'; }
+                }
+            }
+        })
+        .catch(() => { if (group) group.querySelectorAll('button').forEach(b => b.disabled = false); });
+}
+</script>
+<style>
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220,53,69,0); }
+  50%      { box-shadow: 0 0 0 10px rgba(220,53,69,0.4); }
+}
+</style>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
