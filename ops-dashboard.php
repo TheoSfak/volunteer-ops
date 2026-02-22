@@ -574,10 +574,16 @@ include __DIR__ . '/includes/header.php';
 let opsMap = null;
 let volunteerLayerGroup = null;
 
-<?php if (!empty($mapPins)): ?>
 (function() {
-    const pins = <?= json_encode(array_values($mapPins)) ?>;
-    opsMap = L.map('mapPanel').setView([pins[0].lat, pins[0].lng], 10);
+    const missionPins = <?= json_encode(array_values($mapPins)) ?>;
+    const volPins     = <?= json_encode(array_values($volunteerPins)) ?>;
+
+    // Determine map center: missions first, then volunteer GPS, then Greece default
+    let center = [37.97, 23.73], zoom = 7;
+    if (missionPins.length)   { center = [missionPins[0].lat, missionPins[0].lng]; zoom = 10; }
+    else if (volPins.length)  { center = [volPins[0].lat,     volPins[0].lng];     zoom = 13; }
+
+    opsMap = L.map('mapPanel').setView(center, zoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'
     }).addTo(opsMap);
@@ -588,22 +594,21 @@ let volunteerLayerGroup = null;
         red:    L.divIcon({className:'', html:'<div style="background:#dc3545;width:18px;height:18px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>'}),
     };
 
-    pins.forEach(p => {
+    missionPins.forEach(p => {
         const icon = p.urgent ? icons.red : (icons[p.color] || icons.green);
         L.marker([p.lat, p.lng], {icon})
          .addTo(opsMap)
          .bindPopup(`<strong>${p.title}</strong><br><a href="${p.url}">Προβολή Αποστολής →</a>`);
     });
 
-    if (pins.length > 1) {
-        const bounds = L.latLngBounds(pins.map(p => [p.lat, p.lng]));
+    if (missionPins.length > 1) {
+        const bounds = L.latLngBounds(missionPins.map(p => [p.lat, p.lng]));
         opsMap.fitBounds(bounds, {padding:[30,30]});
     }
 
     volunteerLayerGroup = L.layerGroup().addTo(opsMap);
-    renderVolunteerPins(<?= json_encode($volunteerPins) ?>);
+    renderVolunteerPins(volPins);
 })();
-<?php endif; ?>
 
 // Pulsing volunteer dot HTML
 function pulseHtml(color) {
