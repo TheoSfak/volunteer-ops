@@ -849,6 +849,26 @@ if (isPost()) {
                 }
                 redirect('update.php');
                 break;
+
+            case 'mass_delete_backups':
+                $names = $_POST['backup_names'] ?? [];
+                if (empty($names)) {
+                    setFlash('error', 'Δεν επιλέξατε κανένα backup.');
+                    redirect('update.php');
+                }
+                $deleted = 0;
+                $failed  = 0;
+                foreach ($names as $name) {
+                    $path = BACKUP_DIR . '/' . basename($name);
+                    if (deleteBackup($path)) { $deleted++; } else { $failed++; }
+                }
+                if ($failed === 0) {
+                    setFlash('success', "Διαγράφηκαν {$deleted} backups επιτυχώς.");
+                } else {
+                    setFlash('warning', "Διαγράφηκαν {$deleted} backups, {$failed} αποτυχίες.");
+                }
+                redirect('update.php');
+                break;
         }
     } catch (Exception $e) {
         updateLog('ΣΦΑΛΜΑ: ' . $e->getMessage(), 'error');
@@ -986,59 +1006,100 @@ include __DIR__ . '/includes/header.php';
                 <?php if (empty($backups)): ?>
                     <p class="text-muted text-center mb-0">Δεν υπάρχουν backups</p>
                 <?php else: ?>
-                    <div class="table-responsive">
-                        <table class="table table-sm table-hover mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Ημερομηνία</th>
-                                    <th>Έκδοση</th>
-                                    <th>Μέγεθος</th>
-                                    <th>Βάση</th>
-                                    <th class="text-end">Ενέργειες</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($backups as $backup): ?>
-                                <tr>
-                                    <td>
-                                        <i class="bi bi-folder me-1 text-warning"></i>
-                                        <?= h(str_replace('_', ' ', str_replace('backup_', '', $backup['name']))) ?>
-                                    </td>
-                                    <td><?= h($backup['version']) ?></td>
-                                    <td><?= formatBytes($backup['size']) ?></td>
-                                    <td>
-                                        <?php if ($backup['db_included']): ?>
-                                            <span class="badge bg-success">Ναι</span>
-                                        <?php else: ?>
-                                            <span class="badge bg-secondary">Όχι</span>
-                                        <?php endif; ?>
-                                    </td>
-                                    <td class="text-end">
-                                        <form method="post" class="d-inline" onsubmit="return confirm('Επαναφορά από αυτό το backup; Η τρέχουσα κατάσταση θα χαθεί.');">
-                                            <?= csrfField() ?>
-                                            <input type="hidden" name="action" value="restore_backup">
-                                            <input type="hidden" name="backup_name" value="<?= h($backup['name']) ?>">
-                                            <button type="submit" class="btn btn-sm btn-outline-warning">
-                                                <i class="bi bi-arrow-counterclockwise"></i>
-                                            </button>
-                                        </form>
-                                        <form method="post" class="d-inline" onsubmit="return confirm('Διαγραφή αυτού του backup;');">
-                                            <?= csrfField() ?>
-                                            <input type="hidden" name="action" value="delete_backup">
-                                            <input type="hidden" name="backup_name" value="<?= h($backup['name']) ?>">
-                                            <button type="submit" class="btn btn-sm btn-outline-danger">
-                                                <i class="bi bi-trash"></i>
-                                            </button>
-                                        </form>
-                                    </td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
+                    <form method="post" id="massDeleteForm">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="mass_delete_backups">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="form-check mb-0">
+                                <input class="form-check-input" type="checkbox" id="selectAllBackups">
+                                <label class="form-check-label fw-semibold" for="selectAllBackups">Επιλογή όλων</label>
+                            </div>
+                            <button type="button" id="massDeleteBtn" class="btn btn-sm btn-danger d-none"
+                                    onclick="if(confirm('Διαγραφή επιλεγμένων backups; Η ενέργεια δεν αναιρείται.')) document.getElementById(\'massDeleteForm\').submit();">
+                                <i class="bi bi-trash me-1"></i>Διαγραφή επιλεγμένων (<span id="selCount">0</span>)
+                            </button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th style="width:36px"></th>
+                                        <th>Ημερομηνία</th>
+                                        <th>Έκδοση</th>
+                                        <th>Μέγεθος</th>
+                                        <th>Βάση</th>
+                                        <th class="text-end">Ενέργειες</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($backups as $backup): ?>
+                                    <tr>
+                                        <td>
+                                            <input class="form-check-input backup-checkbox" type="checkbox"
+                                                   name="backup_names[]" value="<?= h($backup['name']) ?>">
+                                        </td>
+                                        <td>
+                                            <i class="bi bi-folder me-1 text-warning"></i>
+                                            <?= h(str_replace('_', ' ', str_replace('backup_', '', $backup['name']))) ?>
+                                        </td>
+                                        <td><?= h($backup['version']) ?></td>
+                                        <td><?= formatBytes($backup['size']) ?></td>
+                                        <td>
+                                            <?php if ($backup['db_included']): ?>
+                                                <span class="badge bg-success">Ναι</span>
+                                            <?php else: ?>
+                                                <span class="badge bg-secondary">Όχι</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="text-end">
+                                            <form method="post" class="d-inline" onsubmit="return confirm('Επαναφορά από αυτό το backup; Η τρέχουσα κατάσταση θα χαθεί.');">
+                                                <?= csrfField() ?>
+                                                <input type="hidden" name="action" value="restore_backup">
+                                                <input type="hidden" name="backup_name" value="<?= h($backup['name']) ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline-warning">
+                                                    <i class="bi bi-arrow-counterclockwise"></i>
+                                                </button>
+                                            </form>
+                                            <form method="post" class="d-inline" onsubmit="return confirm('Διαγραφή αυτού του backup;');">
+                                                <?= csrfField() ?>
+                                                <input type="hidden" name="action" value="delete_backup">
+                                                <input type="hidden" name="backup_name" value="<?= h($backup['name']) ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </form>
                 <?php endif; ?>
             </div>
         </div>
+        <script>
+        (function () {
+            const selectAll = document.getElementById('selectAllBackups');
+            const btn       = document.getElementById('massDeleteBtn');
+            const counter   = document.getElementById('selCount');
+            if (!selectAll) return;
+            function updateBtn() {
+                const checked = document.querySelectorAll('.backup-checkbox:checked').length;
+                counter.textContent = checked;
+                btn.classList.toggle('d-none', checked === 0);
+            }
+            selectAll.addEventListener('change', function () {
+                document.querySelectorAll('.backup-checkbox').forEach(c => c.checked = this.checked);
+                updateBtn();
+            });
+            document.querySelectorAll('.backup-checkbox').forEach(c => c.addEventListener('change', function () {
+                selectAll.checked = document.querySelectorAll('.backup-checkbox').length ===
+                                    document.querySelectorAll('.backup-checkbox:checked').length;
+                updateBtn();
+            }));
+        })();
+        </script>
     </div>
     
     <!-- Sidebar -->
