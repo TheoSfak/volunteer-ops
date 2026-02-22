@@ -790,6 +790,47 @@ if (isPost()) {
                     updateLog('PHP schema migrations warning: ' . $e->getMessage(), 'warning');
                 }
 
+                // Step 5c: Direct SQL fallback — ensure critical v13 tables/columns exist
+                // regardless of whether the eval approach succeeded
+                updateLog('Εφαρμογή κρίσιμων SQL migrations (fallback)...');
+                try {
+                    $fsCol = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='participation_requests' AND COLUMN_NAME='field_status'");
+                    if (!$fsCol) {
+                        dbExecute("ALTER TABLE participation_requests ADD COLUMN field_status ENUM('on_way','on_site','needs_help') NULL DEFAULT NULL");
+                        updateLog('  + field_status column added');
+                    }
+                    $fsUpdCol = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='participation_requests' AND COLUMN_NAME='field_status_updated_at'");
+                    if (!$fsUpdCol) {
+                        dbExecute("ALTER TABLE participation_requests ADD COLUMN field_status_updated_at TIMESTAMP NULL DEFAULT NULL");
+                        updateLog('  + field_status_updated_at column added');
+                    }
+                    $vpTable = dbFetchOne("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='volunteer_pings'");
+                    if (!$vpTable) {
+                        dbExecute("CREATE TABLE volunteer_pings (
+                            id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            user_id     INT UNSIGNED NOT NULL,
+                            shift_id    INT UNSIGNED NOT NULL,
+                            lat         DECIMAL(10,8) NOT NULL,
+                            lng         DECIMAL(11,8) NOT NULL,
+                            created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            CONSTRAINT fk_vp_user  FOREIGN KEY (user_id)  REFERENCES users(id)  ON DELETE CASCADE,
+                            CONSTRAINT fk_vp_shift FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
+                            INDEX idx_pings_shift_time (shift_id, created_at),
+                            INDEX idx_pings_user_shift (user_id, shift_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                        updateLog('  + volunteer_pings table created');
+                    }
+                    // Update schema version to 13 if lower
+                    $curVer = (int) dbFetchValue("SELECT setting_value FROM settings WHERE setting_key='db_schema_version'");
+                    if ($curVer < 13) {
+                        dbExecute("INSERT INTO settings (setting_key,setting_value,updated_at) VALUES ('db_schema_version','13',NOW()) ON DUPLICATE KEY UPDATE setting_value='13',updated_at=NOW()");
+                        updateLog('  + db_schema_version set to 13');
+                    }
+                    updateLog('SQL fallback migrations ολοκληρώθηκαν');
+                } catch (\Throwable $e) {
+                    updateLog('SQL fallback migrations error: ' . $e->getMessage(), 'error');
+                }
+
                 // Step 6: Cleanup temp directory
                 if (is_dir($download['temp_dir'])) {
                     $cleanIterator = new RecursiveIteratorIterator(
