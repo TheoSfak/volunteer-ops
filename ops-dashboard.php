@@ -637,12 +637,50 @@ function renderVolunteerPins(pins) {
     if (!volunteerLayerGroup) return;
     volunteerLayerGroup.clearLayers();
     const statusLabel = { on_way: '🚗 Σε Κίνηση', on_site: '✅ Επί Τόπου', needs_help: '🆘 Χρειάζεται Βοήθεια' };
+
+    // Group pins by location (round to ~11m precision to catch nearby volunteers)
+    const groups = {};
     pins.forEach(p => {
-        const color = fieldStatusColor[p.field_status] || '#0d6efd';
-        const icon  = L.divIcon({ className: '', html: pulseHtml(color), iconSize: [22, 22], iconAnchor: [11, 11] });
-        L.marker([p.lat, p.lng], { icon })
+        const key = parseFloat(p.lat).toFixed(4) + ',' + parseFloat(p.lng).toFixed(4);
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(p);
+    });
+
+    Object.values(groups).forEach(group => {
+        // Use the worst status color for the group icon (needs_help > on_way > on_site > default)
+        const priority = { needs_help: 3, on_way: 2, on_site: 1 };
+        let worstColor = '#0d6efd';
+        let worstPriority = 0;
+        group.forEach(p => {
+            const pr = priority[p.field_status] || 0;
+            if (pr > worstPriority) { worstPriority = pr; worstColor = fieldStatusColor[p.field_status]; }
+        });
+        if (worstPriority === 0 && group.length > 0) {
+            const firstStatus = group[0].field_status;
+            worstColor = fieldStatusColor[firstStatus] || '#0d6efd';
+        }
+
+        // Build popup with all names
+        const popupLines = group.map(p =>
+            '<strong>' + p.name + '</strong> — ' + (statusLabel[p.field_status] || '—') + ' <small>στις ' + p.ts + '</small>'
+        ).join('<br>');
+
+        const countBadge = group.length > 1
+            ? '<div style="position:absolute;top:-6px;right:-6px;background:#fff;color:#333;border-radius:50%;width:18px;height:18px;font-size:11px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 1px 3px #0005;">' + group.length + '</div>'
+            : '';
+
+        const dotHtml = '<div style="position:relative;width:22px;height:22px;">'
+            + '<div style="position:absolute;top:3px;left:3px;width:16px;height:16px;'
+            +   'background:' + worstColor + ';border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>'
+            + '<div style="position:absolute;top:0;left:0;width:22px;height:22px;'
+            +   'background:' + worstColor + ';border-radius:50%;opacity:0.4;animation:vol-ping 1.5s ease-out infinite"></div>'
+            + countBadge + '</div>';
+
+        const icon = L.divIcon({ className: '', html: dotHtml, iconSize: [22, 22], iconAnchor: [11, 11] });
+        const avg = { lat: group[0].lat, lng: group[0].lng };
+        L.marker([avg.lat, avg.lng], { icon })
          .addTo(volunteerLayerGroup)
-         .bindPopup('<strong>' + p.name + '</strong><br>' + (statusLabel[p.field_status] || '—') + ' στις ' + p.ts);
+         .bindPopup(popupLines, { maxWidth: 300 });
     });
 }
 
