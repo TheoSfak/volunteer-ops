@@ -16,6 +16,7 @@ $role = get('role', '');
 $departmentId = get('department_id', '');
 $warehouseId = get('warehouse_id', '');
 $status = get('status', '');
+$skillId = (int) get('skill_id', 0);
 $page = max(1, (int) get('page', 1));
 $allowedPerPage = [10, 20, 30, 50, 100];
 $perPage = (int) get('per_page', 20);
@@ -47,6 +48,13 @@ if ($warehouseId) {
     $params[] = $warehouseId;
 }
 
+// Skill filter — JOIN user_skills when a skill is selected
+$skillJoin = '';
+if ($skillId) {
+    $skillJoin = "INNER JOIN user_skills usk ON usk.user_id = u.id AND usk.skill_id = ?";
+    array_unshift($params, $skillId);
+}
+
 // Dept admins see only their department
 if ($user['role'] === ROLE_DEPARTMENT_ADMIN) {
     $where[] = "u.department_id = ?";
@@ -56,7 +64,7 @@ if ($user['role'] === ROLE_DEPARTMENT_ADMIN) {
 $whereClause = implode(' AND ', $where);
 
 // Count total
-$total = dbFetchValue("SELECT COUNT(*) FROM users u WHERE $whereClause", $params);
+$total = dbFetchValue("SELECT COUNT(*) FROM users u $skillJoin WHERE $whereClause", $params);
 $pagination = paginate($total, $page, $perPage);
 
 // Get volunteers (optimized with JOINs)
@@ -65,6 +73,7 @@ $volunteers = dbFetchAll(
             COALESCE(pr_stats.shifts_count, 0) as shifts_count,
             COALESCE(pr_stats.total_hours, 0) as total_hours
      FROM users u
+     $skillJoin
      LEFT JOIN departments d ON u.department_id = d.id
      LEFT JOIN departments wh ON u.warehouse_id = wh.id
      LEFT JOIN (
@@ -86,6 +95,9 @@ $departments = dbFetchAll("SELECT id, name FROM departments ORDER BY name");
 
 // Get warehouses for filter
 $warehouses = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
+
+// Get all skills for filter dropdown (grouped)
+$allSkillsForFilter = dbFetchAll("SELECT * FROM skills ORDER BY category, name");
 
 // Handle actions
 if (isPost()) {
@@ -226,11 +238,39 @@ include __DIR__ . '/includes/header.php';
                 </select>
             </div>
             <?php endif; ?>
+            <div class="col-md-3">
+                <label class="form-label">Δεξιότητα</label>
+                <select name="skill_id" class="form-select">
+                    <option value="">Όλες οι δεξιότητες</option>
+                    <?php
+                    $currentCat = '';
+                    foreach ($allSkillsForFilter as $sk):
+                        $cat = $sk['category'] ?: 'Γενικά';
+                        if ($cat !== $currentCat):
+                            if ($currentCat !== '') echo '</optgroup>';
+                            $currentCat = $cat;
+                            echo '<optgroup label="' . h($cat) . '">';
+                        endif;
+                    ?>
+                        <option value="<?= $sk['id'] ?>" <?= $skillId == $sk['id'] ? 'selected' : '' ?>>
+                            <?= h($sk['name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                    <?php if ($currentCat !== '') echo '</optgroup>'; ?>
+                </select>
+            </div>
             <div class="col-md-2 d-flex align-items-end">
                 <button type="submit" class="btn btn-outline-primary w-100">
                     <i class="bi bi-search me-1"></i>Αναζήτηση
                 </button>
             </div>
+            <?php if ($search || $role || $departmentId || $warehouseId || $skillId): ?>
+            <div class="col-md-1 d-flex align-items-end">
+                <a href="volunteers.php" class="btn btn-outline-secondary w-100" title="Καθαρισμός φίλτρων">
+                    <i class="bi bi-x-lg"></i>
+                </a>
+            </div>
+            <?php endif; ?>
             <div class="col-md-2 d-flex align-items-end">
                 <select name="per_page" class="form-select" onchange="this.form.submit()" title="Εγγραφές ανά σελίδα">
                     <?php foreach ([10, 20, 30, 50, 100] as $pp): ?>
