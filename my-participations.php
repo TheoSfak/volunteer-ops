@@ -10,11 +10,6 @@ requireLogin();
 $pageTitle = 'Οι Αιτήσεις μου';
 $user = getCurrentUser();
 
-// Admins redirect to shifts management
-if (isAdmin()) {
-    redirect('shifts.php');
-}
-
 // Get all participations for current user
 $participations = dbFetchAll(
     "SELECT pr.*, 
