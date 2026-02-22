@@ -357,6 +357,20 @@ function sendNotificationEmail(string $notificationCode, string $to, array $vari
     $appName = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'app_name'") ?? 'VolunteerOps';
     $variables['app_name'] = $appName;
     $variables['login_url'] = rtrim(BASE_URL ?? 'http://localhost/volunteerops', '/') . '/login.php';
+
+    // Inject logo_html — resolves to an <img> if a logo is configured, empty string otherwise
+    $logoFile = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'app_logo'") ?? '';
+    if (!empty($logoFile)) {
+        $baseUrl = rtrim(BASE_URL ?? 'http://localhost/volunteerops', '/');
+        $logoUrl = $baseUrl . '/uploads/logos/' . $logoFile;
+        $variables['logo_html'] = '<div style="margin:0 auto 14px;line-height:1;">'
+            . '<img src="' . $logoUrl . '" alt="' . htmlspecialchars($appName, ENT_QUOTES) . '" '
+            . 'style="max-height:64px;max-width:200px;object-fit:contain;display:inline-block;">'
+            . '</div>';
+    } else {
+        $variables['logo_html'] = '';
+    }
+
     
     // Replace variables
     $subject = replaceTemplateVariables($template['subject'], $variables);
