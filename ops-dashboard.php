@@ -510,24 +510,27 @@ include __DIR__ . '/includes/header.php';
         <?php endforeach; ?>
     </div>
 
-    <!-- ── Right: map ── -->
-    <?php if (!empty($mapPins) || !empty($volunteerPins)): ?>
+    <!-- ── Right: map (always visible) ── -->
     <div class="col-lg-5">
         <div class="card sticky-top" style="top:80px;">
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-map me-1"></i>Χάρτης Αποστολών</h5>
+                <?php if (empty($mapPins) && empty($volunteerPins)): ?>
+                <small class="text-muted">Δεν υπάρχουν δεδομένα</small>
+                <?php else: ?>
+                <small class="text-muted"><?= count($volunteerPins) ?> εθελοντές στον χάρτη</small>
+                <?php endif; ?>
             </div>
             <div class="card-body p-0">
                 <div id="mapPanel"></div>
             </div>
             <div class="card-footer small text-muted">
-                <span class="me-3"><i class="bi bi-circle-fill text-success"></i> Επαρκής στελέχωση</span>
-                <span class="me-3"><i class="bi bi-circle-fill text-warning"></i> Μερική στελέχωση</span>
+                <span class="me-3"><i class="bi bi-circle-fill text-primary"></i> GPS εθελοντή</span>
+                <span class="me-3"><i class="bi bi-circle-fill text-success"></i> Επαρκής</span>
                 <span><i class="bi bi-circle-fill text-danger"></i> Υποστελεχωμένη</span>
             </div>
         </div>
     </div>
-    <?php endif; ?>
 </div>
 
 <?php endif; ?>
