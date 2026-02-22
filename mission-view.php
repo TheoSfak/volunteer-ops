@@ -87,6 +87,18 @@ if (isAdmin()) {
     );
 }
 
+// Get debrief if mission is completed
+$debrief = null;
+if ($mission['status'] === STATUS_COMPLETED) {
+    $debrief = dbFetchOne(
+        "SELECT md.*, u.name as submitter_name 
+         FROM mission_debriefs md
+         JOIN users u ON md.submitted_by = u.id
+         WHERE md.mission_id = ?",
+        [$id]
+    );
+}
+
 // Handle actions
 if (isPost()) {
     verifyCsrf();
@@ -224,10 +236,8 @@ if (isPost()) {
             
         case 'complete':
             if (isAdmin() && $mission['status'] === STATUS_CLOSED) {
-                dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_COMPLETED, $id]);
-                logAudit('complete', 'missions', $id);
-                setFlash('success', 'Η αποστολή ολοκληρώθηκε.');
-                redirect('mission-view.php?id=' . $id);
+                // Redirect to debrief form instead of completing immediately
+                redirect('mission-debrief.php?id=' . $id);
             }
             break;
             
@@ -583,6 +593,66 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
         
+        <?php if ($debrief): ?>
+        <!-- Mission Debrief -->
+        <div class="card mb-4 border-success">
+            <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Αναφορά Μετά την Αποστολή (Debrief)</h5>
+                <small>Υποβλήθηκε από: <?= h($debrief['submitter_name']) ?></small>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <strong>Επίτευξη Στόχων:</strong><br>
+                        <?php if ($debrief['objectives_met'] === 'YES'): ?>
+                            <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Ναι, πλήρως</span>
+                        <?php elseif ($debrief['objectives_met'] === 'PARTIAL'): ?>
+                            <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle-fill me-1"></i>Μερικώς</span>
+                        <?php else: ?>
+                            <span class="badge bg-danger"><i class="bi bi-x-circle-fill me-1"></i>Όχι</span>
+                        <?php endif; ?>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Συνολική Αξιολόγηση:</strong><br>
+                        <div class="text-warning fs-5">
+                            <?= str_repeat('★', $debrief['rating']) ?><?= str_repeat('☆', 5 - $debrief['rating']) ?>
+                            <span class="text-muted fs-6 ms-1">(<?= $debrief['rating'] ?>/5)</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <strong>Σύνοψη:</strong>
+                    <div class="p-3 bg-light rounded mt-1">
+                        <?= nl2br(h($debrief['summary'])) ?>
+                    </div>
+                </div>
+                
+                <?php if ($debrief['incidents']): ?>
+                <div class="mb-3">
+                    <strong class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Συμβάντα / Ατυχήματα:</strong>
+                    <div class="p-3 bg-light border-start border-danger border-4 mt-1">
+                        <?= nl2br(h($debrief['incidents'])) ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+                
+                <?php if ($debrief['equipment_issues']): ?>
+                <div class="mb-3">
+                    <strong class="text-warning text-dark"><i class="bi bi-tools me-1"></i>Προβλήματα Εξοπλισμού:</strong>
+                    <div class="p-3 bg-light border-start border-warning border-4 mt-1">
+                        <?= nl2br(h($debrief['equipment_issues'])) ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+                
+                <div class="text-muted small text-end mt-3">
+                    <i class="bi bi-clock me-1"></i>Υποβλήθηκε: <?= formatDateTime($debrief['created_at']) ?>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+        
         <!-- Shifts -->
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -722,7 +792,7 @@ include __DIR__ . '/includes/header.php';
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="complete">
                             <button type="submit" class="btn btn-primary w-100">
-                                <i class="bi bi-check-circle me-1"></i>Ολοκλήρωση
+                                <i class="bi bi-check-circle me-1"></i>Ολοκλήρωση & Αναφορά
                             </button>
                         </form>
                     <?php endif; ?>
