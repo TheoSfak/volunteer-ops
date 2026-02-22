@@ -1015,7 +1015,7 @@ include __DIR__ . '/includes/header.php';
                                 <label class="form-check-label fw-semibold" for="selectAllBackups">Επιλογή όλων</label>
                             </div>
                             <button type="button" id="massDeleteBtn" class="btn btn-sm btn-danger d-none"
-                                    onclick="if(confirm('Διαγραφή επιλεγμένων backups; Η ενέργεια δεν αναιρείται.')) document.getElementById(\'massDeleteForm\').submit();">
+                                    onclick="massDeleteBackups()">
                                 <i class="bi bi-trash me-1"></i>Διαγραφή επιλεγμένων (<span id="selCount">0</span>)
                             </button>
                         </div>
@@ -1079,6 +1079,11 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
         <script>
+        function massDeleteBackups() {
+            if (confirm('Διαγραφή επιλεγμένων backups; Η ενέργεια δεν αναιρείται.')) {
+                document.getElementById('massDeleteForm').submit();
+            }
+        }
         (function () {
             const selectAll = document.getElementById('selectAllBackups');
             const btn       = document.getElementById('massDeleteBtn');
