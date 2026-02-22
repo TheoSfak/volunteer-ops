@@ -114,6 +114,41 @@ foreach ($missionRows as $row) {
     ];
 }
 
+// ── Pre-compute shiftIds, approvedVolunteers (needed by ajax + alerts) ─────────
+$shiftIds = !empty($missions)
+    ? array_merge(...array_map(fn($m) => array_column($m['shifts'], 'shift_id'), array_values($missions)))
+    : [];
+
+// Detect if new columns / tables exist on this DB server
+$hasFieldStatus = !empty($shiftIds) && (bool) dbFetchValue(
+    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'participation_requests' AND COLUMN_NAME = 'field_status'"
+);
+$hasPingsTable = (bool) dbFetchValue(
+    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'volunteer_pings'"
+);
+
+$approvedVolunteers = [];
+if (!empty($shiftIds)) {
+    $placeholders = implode(',', array_fill(0, count($shiftIds), '?'));
+    $fsSelect = $hasFieldStatus
+        ? ', pr.field_status, pr.field_status_updated_at'
+        : ', NULL as field_status, NULL as field_status_updated_at';
+    $rows = dbFetchAll(
+        "SELECT pr.id as pr_id, pr.shift_id, pr.attended{$fsSelect},
+                u.id as user_id, u.name, u.phone
+         FROM participation_requests pr
+         JOIN users u ON pr.volunteer_id = u.id
+         WHERE pr.shift_id IN ($placeholders) AND pr.status = '" . PARTICIPATION_APPROVED . "'
+         ORDER BY u.name",
+        $shiftIds
+    );
+    foreach ($rows as $r) {
+        $approvedVolunteers[$r['shift_id']][] = $r;
+    }
+}
+
 // ── Ajax endpoint: return JSON for live refresh ───────────────────────────────
 if (get('ajax') === '1') {
     header('Content-Type: application/json');
@@ -129,44 +164,48 @@ if (get('ajax') === '1') {
             ];
         }
     }
-    // Fetch live volunteer pins & field statuses for AJAX refresh
-    $livePins = [];
-    if (!empty($shiftIds)) {
-        $ph = implode(',', array_fill(0, count($shiftIds), '?'));
-        $pingRowsAjax = dbFetchAll(
-            "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.created_at, u.name, pr.field_status
-             FROM volunteer_pings vp
-             JOIN users u ON vp.user_id = u.id
-             LEFT JOIN participation_requests pr ON pr.volunteer_id = vp.user_id AND pr.shift_id = vp.shift_id
-             WHERE vp.shift_id IN ($ph)
-               AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
-               AND vp.id = (SELECT MAX(vp2.id) FROM volunteer_pings vp2
-                            WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id)",
-            $shiftIds
-        );
-        foreach ($pingRowsAjax as $p) {
-            $livePins[] = [
-                'lat'          => (float)$p['lat'],
-                'lng'          => (float)$p['lng'],
-                'name'         => $p['name'],
-                'field_status' => $p['field_status'],
-                'ts'           => date('H:i', strtotime($p['created_at'])),
-            ];
-        }
-    }
-    // Also send current field_status per chip for live updates
+    // Live GPS pins & field statuses (only if tables/columns exist)
+    $livePins   = [];
     $liveStatus = [];
-    if (!empty($shiftIds)) {
-        $ph = implode(',', array_fill(0, count($shiftIds), '?'));
-        $fsRows = dbFetchAll(
-            "SELECT pr.id as pr_id, pr.field_status, pr.field_status_updated_at
-             FROM participation_requests pr
-             WHERE pr.shift_id IN ($ph) AND pr.status = '" . PARTICIPATION_APPROVED . "'",
-            $shiftIds
-        );
-        foreach ($fsRows as $fs) {
-            $liveStatus['pr_' . $fs['pr_id']] = $fs['field_status'];
-        }
+    if ($hasPingsTable && !empty($shiftIds)) {
+        try {
+            $ph = implode(',', array_fill(0, count($shiftIds), '?'));
+            $fsCol = $hasFieldStatus ? ', pr.field_status' : ', NULL as field_status';
+            $pingRowsAjax = dbFetchAll(
+                "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.created_at, u.name{$fsCol}
+                 FROM volunteer_pings vp
+                 JOIN users u ON vp.user_id = u.id
+                 LEFT JOIN participation_requests pr ON pr.volunteer_id = vp.user_id AND pr.shift_id = vp.shift_id
+                 WHERE vp.shift_id IN ($ph)
+                   AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+                   AND vp.id = (SELECT MAX(vp2.id) FROM volunteer_pings vp2
+                                WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id)",
+                $shiftIds
+            );
+            foreach ($pingRowsAjax as $p) {
+                $livePins[] = [
+                    'lat'          => (float)$p['lat'],
+                    'lng'          => (float)$p['lng'],
+                    'name'         => $p['name'],
+                    'field_status' => $p['field_status'],
+                    'ts'           => date('H:i', strtotime($p['created_at'])),
+                ];
+            }
+        } catch (Exception $e) { /* table not yet migrated */ }
+    }
+    if ($hasFieldStatus && !empty($shiftIds)) {
+        try {
+            $ph = implode(',', array_fill(0, count($shiftIds), '?'));
+            $fsRows = dbFetchAll(
+                "SELECT pr.id as pr_id, pr.field_status
+                 FROM participation_requests pr
+                 WHERE pr.shift_id IN ($ph) AND pr.status = '" . PARTICIPATION_APPROVED . "'",
+                $shiftIds
+            );
+            foreach ($fsRows as $fs) {
+                $liveStatus['pr_' . $fs['pr_id']] = $fs['field_status'];
+            }
+        } catch (Exception $e) { /* column not yet migrated */ }
     }
     echo json_encode(['ts' => date('H:i:s'), 'shifts' => $payload, 'pins' => $livePins, 'field_status' => $liveStatus]);
     exit;
@@ -236,54 +275,35 @@ foreach ($missions as $m) {
     }
 }
 
-// ── Approved volunteers per shift for quick list ──────────────────────────────
-$shiftIds = !empty($missions)
-    ? array_merge(...array_map(fn($m) => array_column($m['shifts'], 'shift_id'), array_values($missions)))
-    : [];
-$approvedVolunteers = [];
-if (!empty($shiftIds)) {
-    $placeholders = implode(',', array_fill(0, count($shiftIds), '?'));
-    $rows = dbFetchAll(
-        "SELECT pr.id as pr_id, pr.shift_id, pr.attended, pr.field_status, pr.field_status_updated_at,
-                u.id as user_id, u.name, u.phone
-         FROM participation_requests pr
-         JOIN users u ON pr.volunteer_id = u.id
-         WHERE pr.shift_id IN ($placeholders) AND pr.status = '" . PARTICIPATION_APPROVED . "'
-         ORDER BY u.name",
-        $shiftIds
-    );
-    foreach ($rows as $r) {
-        $approvedVolunteers[$r['shift_id']][] = $r;
-    }
-}
-
 // ── Latest GPS pings per volunteer (last 15 min, active shifts only) ─────────
 $volunteerPins = [];
-if (!empty($shiftIds)) {
-    $placeholders2 = implode(',', array_fill(0, count($shiftIds), '?'));
-    $pingRows = dbFetchAll(
-        "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.created_at, u.name,
-                pr.field_status
-         FROM volunteer_pings vp
-         JOIN users u ON vp.user_id = u.id
-         LEFT JOIN participation_requests pr ON pr.volunteer_id = vp.user_id AND pr.shift_id = vp.shift_id
-         WHERE vp.shift_id IN ($placeholders2)
-           AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
-           AND vp.id = (
-               SELECT MAX(vp2.id) FROM volunteer_pings vp2
-               WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id
-           )",
-        $shiftIds
-    );
-    foreach ($pingRows as $pr) {
-        $volunteerPins[] = [
-            'lat'          => (float)$pr['lat'],
-            'lng'          => (float)$pr['lng'],
-            'name'         => $pr['name'],
-            'field_status' => $pr['field_status'],
-            'ts'           => date('H:i', strtotime($pr['created_at'])),
-        ];
-    }
+if ($hasPingsTable && !empty($shiftIds)) {
+    try {
+        $placeholders2 = implode(',', array_fill(0, count($shiftIds), '?'));
+        $fsCol2 = $hasFieldStatus ? ', pr.field_status' : ', NULL as field_status';
+        $pingRows = dbFetchAll(
+            "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.created_at, u.name{$fsCol2}
+             FROM volunteer_pings vp
+             JOIN users u ON vp.user_id = u.id
+             LEFT JOIN participation_requests pr ON pr.volunteer_id = vp.user_id AND pr.shift_id = vp.shift_id
+             WHERE vp.shift_id IN ($placeholders2)
+               AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+               AND vp.id = (
+                   SELECT MAX(vp2.id) FROM volunteer_pings vp2
+                   WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id
+               )",
+            $shiftIds
+        );
+        foreach ($pingRows as $pr) {
+            $volunteerPins[] = [
+                'lat'          => (float)$pr['lat'],
+                'lng'          => (float)$pr['lng'],
+                'name'         => $pr['name'],
+                'field_status' => $pr['field_status'],
+                'ts'           => date('H:i', strtotime($pr['created_at'])),
+            ];
+        }
+    } catch (Exception $e) { /* table not yet migrated */ }
 }
 
 include __DIR__ . '/includes/header.php';

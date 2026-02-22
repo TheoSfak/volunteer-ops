@@ -43,10 +43,15 @@ if (!$pr) {
 }
 
 // Update field status
-dbExecute(
-    "UPDATE participation_requests SET field_status = ?, field_status_updated_at = NOW() WHERE id = ?",
-    [$status, $prId]
-);
+try {
+    dbExecute(
+        "UPDATE participation_requests SET field_status = ?, field_status_updated_at = NOW() WHERE id = ?",
+        [$status, $prId]
+    );
+} catch (Exception $e) {
+    echo json_encode(['ok' => false, 'error' => 'Η λειτουργία status δεν είναι διαθέσιμη ακόμη (χρειάζεται migration βάσης).']);
+    exit;
+}
 
 // If needs_help → notify all admins + shift leader
 if ($status === 'needs_help') {
