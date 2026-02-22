@@ -55,6 +55,16 @@ if (isPost()) {
                 setFlash('success', 'Η ανακοίνωση εστάλη σε ' . count($vols) . ' εθελοντές.');
             }
         }
+    } elseif ($action === 'dismiss_help') {
+        $prId = (int) post('pr_id');
+        if ($prId) {
+            dbExecute(
+                "UPDATE participation_requests SET field_status = NULL, field_status_updated_at = NOW() WHERE id = ?",
+                [$prId]
+            );
+            logAudit('dismiss_help', 'participation_requests', $prId);
+            setFlash('success', 'Η ειδοποίηση βοήθειας απορρίφθηκε.');
+        }
     }
 
     redirect('ops-dashboard.php');
@@ -251,6 +261,7 @@ if (get('ajax') === '1') {
                     'type'          => 'needs_help',
                     'name'          => $v['name'],
                     'shift_id'      => $shiftId,
+                    'pr_id'         => $v['pr_id'],
                     'mission_title' => $mTitle,
                 ];
             }
@@ -314,6 +325,7 @@ foreach ($approvedVolunteers as $shiftId => $vols) {
                 'type'    => 'needs_help',
                 'name'    => $v['name'],
                 'shift_id'=> $shiftId,
+                'pr_id'   => $v['pr_id'],
                 'mission_title' => $mTitle,
             ];
         }
@@ -412,13 +424,19 @@ include __DIR__ . '/includes/header.php';
 <?php if (!empty($alerts)): ?>
     <?php foreach ($alerts as $al): ?>
     <?php if ($al['type'] === 'needs_help'): ?>
-    <div class="alert alert-danger py-2 d-flex align-items-center gap-2">
+    <div class="alert alert-danger py-2 d-flex align-items-center gap-2 alert-dismissible fade show">
         <i class="bi bi-sos fs-5"></i>
-        <div>
+        <div class="flex-grow-1">
             🆘 <strong><?= h($al['name']) ?></strong> χρειάζεται βοήθεια στην αποστολή
             <strong><?= h($al['mission_title']) ?></strong>!
             <a href="shift-view.php?id=<?= $al['shift_id'] ?>" class="alert-link ms-2">Βάρδια →</a>
         </div>
+        <form method="post" class="m-0 p-0">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="dismiss_help">
+            <input type="hidden" name="pr_id" value="<?= $al['pr_id'] ?>">
+            <button type="submit" class="btn-close" aria-label="Close"></button>
+        </form>
     </div>
     <?php else: ?>
     <div class="alert alert-warning py-2 d-flex align-items-center gap-2">
@@ -931,11 +949,17 @@ function updateAlertBanner(alerts) {
     alerts.forEach(al => {
         if (al.type === 'needs_help') {
             newNeedsHelp.add(al.name);
-            html += `<div class="alert alert-danger py-2 d-flex align-items-center gap-2">`
+            html += `<div class="alert alert-danger py-2 d-flex align-items-center gap-2 alert-dismissible fade show">`
                   + `<i class="bi bi-sos fs-5"></i>`
-                  + `<div>🆘 <strong>${al.name}</strong> χρειάζεται βοήθεια στην αποστολή `
+                  + `<div class="flex-grow-1">🆘 <strong>${al.name}</strong> χρειάζεται βοήθεια στην αποστολή `
                   + `<strong>${al.mission_title}</strong>!`
-                  + ` <a href="shift-view.php?id=${al.shift_id}" class="alert-link ms-2">Βάρδια →</a></div></div>`;
+                  + ` <a href="shift-view.php?id=${al.shift_id}" class="alert-link ms-2">Βάρδια →</a></div>`
+                  + `<form method="post" class="m-0 p-0">`
+                  + `<?= csrfField() ?>`
+                  + `<input type="hidden" name="action" value="dismiss_help">`
+                  + `<input type="hidden" name="pr_id" value="${al.pr_id}">`
+                  + `<button type="submit" class="btn-close" aria-label="Close"></button>`
+                  + `</form></div>`;
         } else if (al.type === 'understaffed') {
             html += `<div class="alert alert-warning py-2 d-flex align-items-center gap-2">`
                   + `<i class="bi bi-exclamation-triangle-fill fs-5"></i>`
