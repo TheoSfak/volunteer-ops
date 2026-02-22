@@ -147,6 +147,25 @@ CREATE TABLE IF NOT EXISTS `missions` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- MISSION DEBRIEFS TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_debriefs` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `submitted_by` INT UNSIGNED NOT NULL,
+    `summary` TEXT NOT NULL,
+    `objectives_met` ENUM('YES', 'PARTIAL', 'NO') NOT NULL,
+    `incidents` TEXT NULL,
+    `equipment_issues` TEXT NULL,
+    `rating` TINYINT UNSIGNED NOT NULL CHECK (`rating` BETWEEN 1 AND 5),
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`submitted_by`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY `unique_mission_debrief` (`mission_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- SHIFTS TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS `shifts` (
