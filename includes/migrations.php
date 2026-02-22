@@ -852,6 +852,49 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 12,
+            'description' => 'Add Google Calendar button to participation_approved and admin_added_volunteer emails',
+            'up' => function () {
+                $btn = function (string $url, string $lbl, string $c) : string {
+                    return '<div style="text-align:center;margin:28px 0 4px;">'
+                         . '<a href="' . $url . '" style="background:' . $c . ';color:#ffffff;text-decoration:none;'
+                         . 'padding:13px 38px;border-radius:8px;font-size:15px;font-weight:700;display:inline-block;letter-spacing:0.3px;">'
+                         . $lbl . '</a></div>';
+                };
+                $gcalBtn = $btn('{{gcal_link}}', '&#128197; Προσθήκη στο Google Calendar', '#1a73e8');
+
+                // ── participation_approved ────────────────────────────────────────────────
+                $current = dbFetchValue("SELECT body_html FROM email_templates WHERE code = 'participation_approved'");
+                if ($current) {
+                    // Insert gcal button right before closing </div> of body block
+                    $updated = str_replace(
+                        $btn('{{login_url}}', 'Δείτε τις Λεπτομέρειες', '#16a34a'),
+                        $btn('{{login_url}}', 'Δείτε τις Λεπτομέρειες', '#16a34a') . $gcalBtn,
+                        $current
+                    );
+                    dbExecute(
+                        "UPDATE email_templates SET body_html = ?, available_variables = ? WHERE code = 'participation_approved'",
+                        [$updated, '{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}, {{login_url}}, {{gcal_link}}']
+                    );
+                }
+
+                // ── admin_added_volunteer ─────────────────────────────────────────────────
+                $current = dbFetchValue("SELECT body_html FROM email_templates WHERE code = 'admin_added_volunteer'");
+                if ($current) {
+                    $updated = str_replace(
+                        $btn('{{login_url}}', 'Σύνδεση στην Πλατφόρμα', '#1e3a5f'),
+                        $btn('{{login_url}}', 'Σύνδεση στην Πλατφόρμα', '#1e3a5f') . $gcalBtn,
+                        $current
+                    );
+                    dbExecute(
+                        "UPDATE email_templates SET body_html = ?, available_variables = ? WHERE code = 'admin_added_volunteer'",
+                        [$updated, '{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}, {{admin_notes}}, {{login_url}}, {{gcal_link}}']
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
