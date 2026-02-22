@@ -207,7 +207,45 @@ if (get('ajax') === '1') {
             }
         } catch (Exception $e) { /* column not yet migrated */ }
     }
-    echo json_encode(['ts' => date('H:i:s'), 'shifts' => $payload, 'pins' => $livePins, 'field_status' => $liveStatus]);
+    // needs_help alerts for real-time banner update
+    $alertsAjax = [];
+    foreach ($approvedVolunteers as $shiftId => $vols) {
+        foreach ($vols as $v) {
+            if (($v['field_status'] ?? '') === 'needs_help') {
+                $mTitle = '';
+                foreach ($missions as $m) {
+                    foreach ($m['shifts'] as $s) {
+                        if ($s['shift_id'] == $shiftId) { $mTitle = $m['title']; break 2; }
+                    }
+                }
+                $alertsAjax[] = [
+                    'type'          => 'needs_help',
+                    'name'          => $v['name'],
+                    'shift_id'      => $shiftId,
+                    'mission_title' => $mTitle,
+                ];
+            }
+        }
+    }
+    foreach ($missions as $m) {
+        foreach ($m['shifts'] as $s) {
+            $secsToStart = strtotime($s['start_time']) - time();
+            $isUnderstaffed = $s['approved'] < $s['min_volunteers'];
+            $startingSoon   = $secsToStart > 0 && $secsToStart < 7200;
+            $alreadyActive  = $secsToStart <= 0 && strtotime($s['end_time']) > time();
+            if ($isUnderstaffed && ($startingSoon || $alreadyActive)) {
+                $alertsAjax[] = [
+                    'type'          => 'understaffed',
+                    'mission_title' => $m['title'],
+                    'shift_id'      => $s['shift_id'],
+                    'start_time'    => $s['start_time'],
+                    'approved'      => $s['approved'],
+                    'min'           => $s['min_volunteers'],
+                ];
+            }
+        }
+    }
+    echo json_encode(['ts' => date('H:i:s'), 'shifts' => $payload, 'pins' => $livePins, 'field_status' => $liveStatus, 'alerts' => $alertsAjax]);
     exit;
 }
 
@@ -376,7 +414,7 @@ include __DIR__ . '/includes/header.php';
 
 <div class="row g-4">
     <!-- ── Left: mission cards ── -->
-    <div class="col-lg-<?= !empty($mapPins) ? '7' : '12' ?>">
+    <div class="col-lg-7">
 
         <?php foreach ($missions as $m): ?>
         <?php
@@ -611,6 +649,8 @@ let volunteerLayerGroup = null;
 
     volunteerLayerGroup = L.layerGroup().addTo(opsMap);
     renderVolunteerPins(volPins);
+    // Force redraw in case container had a layout pass before Leaflet init
+    setTimeout(() => opsMap.invalidateSize(), 100);
 })();
 
 // Pulsing volunteer dot HTML
@@ -632,7 +672,7 @@ function renderVolunteerPins(pins) {
     volunteerLayerGroup.clearLayers();
     pins.forEach(p => {
         const color = fieldStatusColor[p.field_status] || '#0d6efd';
-        const icon  = L.divIcon({ className: '', html: pulseHtml(color), iconSize: [22, 22] });
+        const icon  = L.divIcon({ className: '', html: pulseHtml(color), iconSize: [22, 22], iconAnchor: [11, 11] });
         const statusLabel = { on_way: '🚗 Σε Κίνηση', on_site: '✅ Επί Τόπου', needs_help: '🆘 Χρειάζεται Βοήθεια' };
         L.marker([p.lat, p.lng], { icon })
          .addTo(volunteerLayerGroup)
@@ -665,7 +705,7 @@ function updateCountdowns() {
 updateCountdowns();
 setInterval(updateCountdowns, 30000);
 
-// ── Live refresh (every 30s) ──────────────────────────────────────────────────
+// ── Live refresh (every 15s) ──────────────────────────────────────────────────────
 function liveRefresh() {
     const spinner = document.getElementById('refreshSpinner');
     const tsEl    = document.getElementById('lastRefresh');
@@ -702,11 +742,51 @@ function liveRefresh() {
 
             // Refresh GPS volunteer pins on map
             if (data.pins) renderVolunteerPins(data.pins);
+
+            // Real-time alert banner update
+            if (data.alerts !== undefined) updateAlertBanner(data.alerts);
         })
         .catch(() => {})
         .finally(() => { if (spinner) spinner.classList.add('d-none'); });
 }
-setInterval(liveRefresh, 30000);
+
+let _prevNeedsHelp = new Set(
+    <?php echo json_encode(array_map(fn($a) => $a['name'] ?? '', array_filter($alerts ?? [], fn($a) => $a['type'] === 'needs_help'))); ?>
+);
+
+function updateAlertBanner(alerts) {
+    const banner = document.getElementById('alertBanner');
+    if (!banner) return;
+    let html = '';
+    let newNeedsHelp = new Set();
+    alerts.forEach(al => {
+        if (al.type === 'needs_help') {
+            newNeedsHelp.add(al.name);
+            html += `<div class="alert alert-danger py-2 d-flex align-items-center gap-2">`
+                  + `<i class="bi bi-sos fs-5"></i>`
+                  + `<div>🆘 <strong>${al.name}</strong> χρειάζεται βοήθεια στην αποστολή `
+                  + `<strong>${al.mission_title}</strong>!`
+                  + ` <a href="shift-view.php?id=${al.shift_id}" class="alert-link ms-2">Βάρδια →</a></div></div>`;
+        } else if (al.type === 'understaffed') {
+            html += `<div class="alert alert-warning py-2 d-flex align-items-center gap-2">`
+                  + `<i class="bi bi-exclamation-triangle-fill fs-5"></i>`
+                  + `<div><strong>${al.mission_title}</strong> — Βάρδια ${al.start_time}: `
+                  + `μόνο <strong>${al.approved}/${al.min}</strong> εθελοντές εγκεκριμένοι!`
+                  + ` <a href="shift-view.php?id=${al.shift_id}" class="alert-link ms-2">Διαχείριση →</a></div></div>`;
+        }
+    });
+    banner.innerHTML = html;
+    // Flash banner red if new needs_help volunteer appeared
+    newNeedsHelp.forEach(name => {
+        if (!_prevNeedsHelp.has(name)) {
+            banner.style.transition = 'background 0.5s';
+            banner.style.background = '#f8d7da';
+            setTimeout(() => { banner.style.background = ''; banner.style.transition = ''; }, 1500);
+        }
+    });
+    _prevNeedsHelp = newNeedsHelp;
+}
+setInterval(liveRefresh, 15000);
 </script>
 <style>
 @keyframes vol-ping {
