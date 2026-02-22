@@ -895,6 +895,65 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 13,
+            'description' => 'Add field_status to participation_requests + create volunteer_pings table (GPS live ops)',
+            'up' => function () {
+                // Add field_status column
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'participation_requests'
+                       AND COLUMN_NAME  = 'field_status'"
+                );
+                if (!$col) {
+                    dbExecute(
+                        "ALTER TABLE participation_requests
+                         ADD COLUMN field_status ENUM('on_way','on_site','needs_help') NULL DEFAULT NULL
+                         AFTER admin_notes"
+                    );
+                }
+
+                // Add field_status_updated_at column
+                $col2 = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'participation_requests'
+                       AND COLUMN_NAME  = 'field_status_updated_at'"
+                );
+                if (!$col2) {
+                    dbExecute(
+                        "ALTER TABLE participation_requests
+                         ADD COLUMN field_status_updated_at TIMESTAMP NULL DEFAULT NULL
+                         AFTER field_status"
+                    );
+                }
+
+                // Create volunteer_pings table
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME = 'volunteer_pings'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE volunteer_pings (
+                            id        INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            user_id   INT UNSIGNED NOT NULL,
+                            shift_id  INT UNSIGNED NOT NULL,
+                            lat       DECIMAL(10, 8) NOT NULL,
+                            lng       DECIMAL(11, 8) NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (user_id)  REFERENCES users(id)  ON DELETE CASCADE,
+                            FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
+                            INDEX idx_pings_shift_time (shift_id, created_at),
+                            INDEX idx_pings_user_shift (user_id, shift_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
