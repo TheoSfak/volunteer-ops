@@ -241,7 +241,45 @@ if (isPost()) {
                     [STATUS_CANCELED, $reason, $user['id'], $id]
                 );
                 logAudit('cancel', 'missions', $id, null, ['reason' => $reason]);
-                setFlash('success', 'Η αποστολή ακυρώθηκε.');
+
+                // Notify all volunteers with PENDING or APPROVED participation in any shift
+                $cancelShifts = dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$id]);
+                $cancelShiftIds = array_column($cancelShifts, 'id');
+                $notifiedCancel = [];
+                if (!empty($cancelShiftIds)) {
+                    $ph = implode(',', array_fill(0, count($cancelShiftIds), '?'));
+                    $cancelParticipants = dbFetchAll(
+                        "SELECT DISTINCT pr.volunteer_id, u.name, u.email
+                         FROM participation_requests pr
+                         JOIN users u ON pr.volunteer_id = u.id
+                         WHERE pr.shift_id IN ($ph) AND pr.status IN ('PENDING','APPROVED')",
+                        $cancelShiftIds
+                    );
+                    foreach ($cancelParticipants as $cp) {
+                        if (in_array($cp['volunteer_id'], $notifiedCancel)) continue;
+                        $notifiedCancel[] = $cp['volunteer_id'];
+                        // In-app
+                        sendNotification(
+                            $cp['volunteer_id'],
+                            'Ακύρωση Αποστολής: ' . $mission['title'],
+                            'Η αποστολή ακυρώθηκε' . ($reason ? '. Λόγος: ' . $reason : '') . '. Οι αιτήσεις σας ακυρώθηκαν αυτόματα.'
+                        );
+                        // Email
+                        if (!empty($cp['email'])) {
+                            sendNotificationEmail('mission_canceled', $cp['email'], [
+                                'user_name'     => $cp['name'],
+                                'mission_title' => $mission['title'],
+                                'reason'        => $reason ?: 'Δεν δόθηκε αιτιολογία.',
+                            ]);
+                        }
+                    }
+                }
+
+                $msg = 'Η αποστολή ακυρώθηκε.';
+                if (!empty($notifiedCancel)) {
+                    $msg .= ' Ειδοποιήθηκαν ' . count($notifiedCancel) . ' εθελοντές.';
+                }
+                setFlash('success', $msg);
                 redirect('missions.php');
             }
             break;
@@ -251,36 +289,36 @@ if (isPost()) {
                 // Get all shifts for this mission
                 $missionShifts = dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$id]);
                 $shiftIds = array_column($missionShifts, 'id');
-                
+                $notifiedUsers = [];
+
                 if (!empty($shiftIds)) {
-                    // Get all affected participants
+                    // Get all affected participants (PENDING or APPROVED)
                     $placeholders = implode(',', array_fill(0, count($shiftIds), '?'));
                     $affectedParticipants = dbFetchAll(
-                        "SELECT DISTINCT pr.volunteer_id, u.name, u.email, s.start_time
+                        "SELECT DISTINCT pr.volunteer_id, u.name, u.email
                          FROM participation_requests pr 
                          JOIN users u ON pr.volunteer_id = u.id 
-                         JOIN shifts s ON pr.shift_id = s.id
                          WHERE pr.shift_id IN ($placeholders) AND pr.status IN ('PENDING', 'APPROVED')",
                         $shiftIds
                     );
                     
-                    // Send notifications to all affected volunteers
-                    $notifiedUsers = [];
-                    if (isNotificationEnabled('mission_cancelled')) {
-                        foreach ($affectedParticipants as $participant) {
-                            if (!in_array($participant['volunteer_id'], $notifiedUsers)) {
-                                dbInsert(
-                                    "INSERT INTO notifications (user_id, type, title, message, data, created_at) 
-                                     VALUES (?, 'mission_deleted', ?, ?, ?, NOW())",
-                                    [
-                                        $participant['volunteer_id'],
-                                        'Ακύρωση Αποστολής',
-                                        'Η αποστολή "' . $mission['title'] . '" διαγράφηκε. Όλες οι αιτήσεις σας για αυτή την αποστολή ακυρώθηκαν αυτόματα.',
-                                        json_encode(['mission_id' => $id])
-                                    ]
-                                );
-                                $notifiedUsers[] = $participant['volunteer_id'];
-                            }
+                    // Notify each affected volunteer once
+                    foreach ($affectedParticipants as $participant) {
+                        if (in_array($participant['volunteer_id'], $notifiedUsers)) continue;
+                        $notifiedUsers[] = $participant['volunteer_id'];
+                        // In-app
+                        sendNotification(
+                            $participant['volunteer_id'],
+                            'Διαγραφή Αποστολής: ' . $mission['title'],
+                            'Η αποστολή "' . $mission['title'] . '" διαγράφηκε. Όλες οι αιτήσεις σας ακυρώθηκαν αυτόματα.'
+                        );
+                        // Email
+                        if (!empty($participant['email'])) {
+                            sendNotificationEmail('mission_canceled', $participant['email'], [
+                                'user_name'     => $participant['name'],
+                                'mission_title' => $mission['title'],
+                                'reason'        => 'Η αποστολή διαγράφηκε από διαχειριστή.',
+                            ]);
                         }
                     }
                     
@@ -293,7 +331,7 @@ if (isPost()) {
                 
                 // Soft delete mission
                 dbExecute("UPDATE missions SET deleted_at = NOW(), updated_at = NOW() WHERE id = ?", [$id]);
-                logAudit('delete', 'missions', $id, 'Notified ' . count($notifiedUsers ?? []) . ' volunteers');
+                logAudit('delete', 'missions', $id, 'Notified ' . count($notifiedUsers) . ' volunteers');
                 
                 $msg = 'Η αποστολή διαγράφηκε.';
                 if (!empty($notifiedUsers)) {
