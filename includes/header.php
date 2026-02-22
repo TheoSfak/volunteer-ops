@@ -783,6 +783,11 @@ $appDescription = getSetting('app_description', '');
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'inventory-kits' ? 'active' : '' ?>" href="inventory-kits.php">
+                    <i class="bi bi-briefcase"></i> Σετ Εξοπλισμού
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'inventory-shelf' ? 'active' : '' ?>" href="inventory-shelf.php">
                     <i class="bi bi-grid-3x3"></i> Υλικά Ραφιού
                 </a>

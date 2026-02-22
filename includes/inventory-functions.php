@@ -657,3 +657,151 @@ function getInventoryLocations($deptId = null) {
 function getInventoryDepartments() {
     return dbFetchAll("SELECT id, name FROM departments WHERE is_active = 1 AND has_inventory = 1 ORDER BY name");
 }
+
+// =============================================
+// EQUIPMENT KITS (ΣΕΤ ΕΞΟΠΛΙΣΜΟΥ)
+// =============================================
+
+/**
+ * Get a kit by ID, including its items
+ */
+function getInventoryKit($id) {
+    $kit = dbFetchOne("SELECT k.*, d.name as department_name, u.name as creator_name 
+                       FROM inventory_kits k 
+                       LEFT JOIN departments d ON k.department_id = d.id 
+                       LEFT JOIN users u ON k.created_by = u.id 
+                       WHERE k.id = ?", [$id]);
+    if (!$kit) return null;
+    
+    $kit['items'] = dbFetchAll("SELECT i.*, c.icon as category_icon 
+                                FROM inventory_kit_items ki 
+                                JOIN inventory_items i ON ki.item_id = i.id 
+                                LEFT JOIN inventory_categories c ON i.category_id = c.id 
+                                WHERE ki.kit_id = ? 
+                                ORDER BY i.name", [$id]);
+    return $kit;
+}
+
+/**
+ * Get a kit by barcode
+ */
+function getInventoryKitByBarcode($barcode) {
+    $kit = dbFetchOne("SELECT * FROM inventory_kits WHERE barcode = ?", [$barcode]);
+    if (!$kit) return null;
+    return getInventoryKit($kit['id']);
+}
+
+/**
+ * Create a new kit
+ */
+function createInventoryKit($data, $itemIds) {
+    try {
+        $pdo = db();
+        $pdo->beginTransaction();
+        
+        $kitId = dbInsert(
+            "INSERT INTO inventory_kits (barcode, name, description, department_id, created_by) 
+             VALUES (?, ?, ?, ?, ?)",
+            [
+                $data['barcode'],
+                $data['name'],
+                $data['description'] ?? null,
+                $data['department_id'] ?: null,
+                getCurrentUserId()
+            ]
+        );
+        
+        foreach ($itemIds as $itemId) {
+            dbInsert("INSERT INTO inventory_kit_items (kit_id, item_id) VALUES (?, ?)", [$kitId, $itemId]);
+        }
+        
+        $pdo->commit();
+        return ['success' => true, 'id' => $kitId];
+    } catch (Exception $e) {
+        if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+        return ['success' => false, 'error' => 'Σφάλμα κατά τη δημιουργία του σετ: ' . $e->getMessage()];
+    }
+}
+
+/**
+ * Update an existing kit
+ */
+function updateInventoryKit($id, $data, $itemIds) {
+    try {
+        $pdo = db();
+        $pdo->beginTransaction();
+        
+        dbExecute(
+            "UPDATE inventory_kits SET barcode = ?, name = ?, description = ?, department_id = ? WHERE id = ?",
+            [
+                $data['barcode'],
+                $data['name'],
+                $data['description'] ?? null,
+                $data['department_id'] ?: null,
+                $id
+            ]
+        );
+        
+        dbExecute("DELETE FROM inventory_kit_items WHERE kit_id = ?", [$id]);
+        foreach ($itemIds as $itemId) {
+            dbInsert("INSERT INTO inventory_kit_items (kit_id, item_id) VALUES (?, ?)", [$id, $itemId]);
+        }
+        
+        $pdo->commit();
+        return ['success' => true];
+    } catch (Exception $e) {
+        if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+        return ['success' => false, 'error' => 'Σφάλμα κατά την ενημέρωση του σετ: ' . $e->getMessage()];
+    }
+}
+
+/**
+ * Delete a kit
+ */
+function deleteInventoryKit($id) {
+    try {
+        dbExecute("DELETE FROM inventory_kits WHERE id = ?", [$id]);
+        return ['success' => true];
+    } catch (Exception $e) {
+        return ['success' => false, 'error' => 'Σφάλμα κατά τη διαγραφή του σετ: ' . $e->getMessage()];
+    }
+}
+
+/**
+ * Book all available items in a kit
+ */
+function bookInventoryKit($kitId, $userId, $data) {
+    $kit = getInventoryKit($kitId);
+    if (!$kit) return ['success' => false, 'error' => 'Το σετ δεν βρέθηκε.'];
+    
+    $bookedCount = 0;
+    $failedCount = 0;
+    $messages = [];
+    
+    foreach ($kit['items'] as $item) {
+        if ($item['status'] === 'available' && $item['is_active'] == 1) {
+            $res = createInventoryBooking($item['id'], $userId, $data);
+            if ($res['success']) {
+                $bookedCount++;
+            } else {
+                $failedCount++;
+                $messages[] = "{$item['name']}: " . $res['error'];
+            }
+        } else {
+            $failedCount++;
+            $statusLabel = $item['status'] === 'booked' ? 'Χρεωμένο' : ($item['status'] === 'maintenance' ? 'Συντήρηση' : 'Φθορά');
+            $messages[] = "{$item['name']}: Μη διαθέσιμο ($statusLabel)";
+        }
+    }
+    
+    if ($bookedCount > 0) {
+        $msg = "Χρεώθηκαν επιτυχώς $bookedCount υλικά από το σετ '{$kit['name']}'.";
+        if ($failedCount > 0) {
+            $msg .= " Δεν χρεώθηκαν $failedCount υλικά: " . implode(', ', $messages);
+        }
+        return ['success' => true, 'message' => $msg];
+    } else {
+        return ['success' => false, 'error' => "Κανένα υλικό από το σετ δεν ήταν διαθέσιμο για χρέωση. Λεπτομέρειες: " . implode(', ', $messages)];
+    }
+}
+
