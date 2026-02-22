@@ -85,7 +85,9 @@ $missionRows = dbFetchAll(
      JOIN shifts s ON s.mission_id = m.id
      LEFT JOIN departments d ON m.department_id = d.id
      LEFT JOIN participation_requests pr ON pr.shift_id = s.id
-     WHERE m.status = '" . STATUS_OPEN . "' AND m.deleted_at IS NULL
+     WHERE m.status IN ('" . STATUS_OPEN . "', '" . STATUS_COMPLETED . "') 
+       AND m.deleted_at IS NULL
+       AND (m.status = '" . STATUS_OPEN . "' OR (m.status = '" . STATUS_COMPLETED . "' AND m.end_datetime >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)))
      GROUP BY s.id
      ORDER BY m.is_urgent DESC, m.start_datetime ASC, s.start_time ASC",
     []
