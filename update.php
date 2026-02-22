@@ -773,8 +773,11 @@ if (isPost()) {
                             $newMigrCode,
                             1
                         );
-                        // Remove the last lone closing brace that belongs to function_exists block
-                        $newMigrCode = preg_replace('/\}(\s*)$/', '$1', $newMigrCode);
+                        // Remove the closing brace of the function_exists wrapper
+                        // It appears as "} // end function_exists check" (or similar comment)
+                        $newMigrCode = preg_replace('/\}\s*\/\/\s*end function_exists[^\n]*\n?/i', '', $newMigrCode, 1);
+                        // Also strip any auto-call at the bottom (we call it explicitly below)
+                        $newMigrCode = preg_replace('/^\s*runSchemaMigrations\s*\(\s*\)\s*;\s*$/m', '', $newMigrCode);
                         // Strip PHP open tag for eval
                         $newMigrCode = preg_replace('/<\?php\b/', '', $newMigrCode);
                         eval($newMigrCode);
