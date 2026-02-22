@@ -805,3 +805,55 @@ function bookInventoryKit($kitId, $userId, $data) {
     }
 }
 
+/**
+ * Return all currently booked items in a kit
+ */
+function returnInventoryKit($kitId, $userId, $returnNotes = '') {
+    $kit = getInventoryKit($kitId);
+    if (!$kit) return ['success' => false, 'error' => 'Το σετ δεν βρέθηκε.'];
+    
+    $returnedCount = 0;
+    $failedCount = 0;
+    $messages = [];
+    
+    $isAdmin = isAdmin();
+    
+    foreach ($kit['items'] as $item) {
+        if ($item['status'] === 'booked') {
+            // Find the active booking for this item
+            $booking = dbFetchOne("
+                SELECT id, user_id 
+                FROM inventory_bookings 
+                WHERE item_id = ? AND status IN ('active', 'overdue')
+                ORDER BY created_at DESC LIMIT 1
+            ", [$item['id']]);
+            
+            if ($booking) {
+                // Check if user is allowed to return it
+                if ($isAdmin || $booking['user_id'] == $userId) {
+                    $res = returnInventoryItem($booking['id'], $returnNotes);
+                    if ($res['success']) {
+                        $returnedCount++;
+                    } else {
+                        $failedCount++;
+                        $messages[] = "{$item['name']}: " . $res['error'];
+                    }
+                } else {
+                    $failedCount++;
+                    $messages[] = "{$item['name']}: Χρεωμένο σε άλλον εθελοντή";
+                }
+            }
+        }
+    }
+    
+    if ($returnedCount > 0) {
+        $msg = "Επιστράφηκαν επιτυχώς $returnedCount υλικά από το σετ '{$kit['name']}'.";
+        if ($failedCount > 0) {
+            $msg .= " Δεν επιστράφηκαν $failedCount υλικά: " . implode(', ', $messages);
+        }
+        return ['success' => true, 'message' => $msg];
+    } else {
+        return ['success' => false, 'error' => "Κανένα υλικό από το σετ δεν ήταν χρεωμένο (ή δεν έχετε δικαίωμα επιστροφής)."];
+    }
+}
+
