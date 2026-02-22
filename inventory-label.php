@@ -20,24 +20,36 @@ if (!canManageInventory()) {
 
 $id  = (int)get('id');
 $ids = get('ids');
+$kitId = (int)get('kit_id');
 
-if ($id > 0) {
+$items = [];
+
+if ($kitId > 0) {
+    $kitObj = getInventoryKit($kitId);
+    if ($kitObj) {
+        // Format kit to look like an item for the label printer
+        $items[] = [
+            'id' => 'K' . $kitObj['id'],
+            'barcode' => $kitObj['barcode'],
+            'name' => 'ΣΕΤ: ' . $kitObj['name']
+        ];
+    }
+} elseif ($id > 0) {
     $itemObj = getInventoryItem($id);
-    $items   = $itemObj ? [$itemObj] : [];
+    if ($itemObj) $items[] = $itemObj;
 } elseif (!empty($ids)) {
     $idList = array_filter(array_map('intval', explode(',', $ids)));
-    $items  = [];
     foreach ($idList as $iid) {
         $it = getInventoryItem($iid);
         if ($it) $items[] = $it;
     }
 } else {
-    setFlash('error', 'Δεν επιλέχθηκε υλικό για εκτύπωση.');
+    setFlash('error', 'Δεν επιλέχθηκε υλικό ή σετ για εκτύπωση.');
     redirect('inventory.php');
 }
 
 if (empty($items)) {
-    setFlash('error', 'Δεν βρέθηκε κανένα υλικό.');
+    setFlash('error', 'Δεν βρέθηκε κανένα υλικό ή σετ.');
     redirect('inventory.php');
 }
 

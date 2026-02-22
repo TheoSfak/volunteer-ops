@@ -98,6 +98,9 @@ include __DIR__ . '/includes/header.php';
                                     <i class="bi bi-upc-scan"></i>
                                 </a>
                                 <?php if (isAdmin()): ?>
+                                <a href="inventory-label.php?kit_id=<?= $k['id'] ?>" class="btn btn-sm btn-outline-secondary" title="Εκτύπωση Ετικέτας" target="_blank">
+                                    <i class="bi bi-printer"></i>
+                                </a>
                                 <a href="inventory-kit-form.php?id=<?= $k['id'] ?>" class="btn btn-sm btn-outline-primary" title="Επεξεργασία">
                                     <i class="bi bi-pencil"></i>
                                 </a>
