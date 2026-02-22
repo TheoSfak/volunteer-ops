@@ -574,7 +574,7 @@ $appDescription = getSetting('app_description', '');
             }
             
             .top-navbar .dropdown-toggle {
-                max-width: 65vw;
+                max-width: 75vw;
                 overflow: visible;
                 display: inline-flex;
                 align-items: center;
@@ -587,7 +587,7 @@ $appDescription = getSetting('app_description', '');
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-                max-width: 35vw;
+                max-width: 55vw;
             }
 
             .user-type-badge-mobile {
@@ -596,11 +596,7 @@ $appDescription = getSetting('app_description', '');
                 margin-top: 2px;
                 font-size: 0.7rem;
             }
-
-            .d-flex.ms-auto {
-                margin-right: auto !important;
-                margin-left: 0.5rem !important;
-            }
+            
             
             .content-wrapper {
                 padding: 1rem;
