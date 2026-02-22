@@ -324,6 +324,9 @@ include __DIR__ . '/includes/header.php';
     <div>
         <a href="volunteer-form.php?id=<?= $id ?>" class="btn btn-outline-primary">
             <i class="bi bi-pencil me-1"></i>Επεξεργασία
+        </a>
+        <a href="volunteer-report.php?id=<?= $id ?>" target="_blank" class="btn btn-outline-secondary">
+            <i class="bi bi-file-earmark-text me-1"></i>Αναφορά
         </a>        <?php if (isSystemAdmin()): ?>
             <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteDataModal">
                 <i class="bi bi-shield-x me-1"></i>Διαγραφή Προσωπικών Δεδομένων
