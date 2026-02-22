@@ -430,33 +430,47 @@ include __DIR__ . '/includes/header.php';
                         <h6 class="text-muted mb-2"><i class="bi bi-journal-text me-1"></i>Μητρώα</h6>
                         <p><strong>Μητρώο ΕΠΙΔΡΑΣΙΣ:</strong> <?= h($volunteer['registry_epidrasis'] ?: '-') ?></p>
                         <p><strong>Μητρώο Γ.Γ.Π.Π.:</strong> <?= h($volunteer['registry_ggpp'] ?: '-') ?></p>
-                        <?php if ($profile): ?>
-                            <p><strong>Πόλη:</strong> <?= h($profile['city'] ?: '-') ?></p>
-                            <p><strong>Ομάδα Αίματος:</strong> <?= h($profile['blood_type'] ?: '-') ?></p>
-                            <p><strong>Επαφή Έκτακτης Ανάγκης:</strong><br>
-                                <?= h($profile['emergency_contact_name'] ?: '-') ?> 
-                                <?= $profile['emergency_contact_phone'] ? '(' . h($profile['emergency_contact_phone']) . ')' : '' ?>
-                            </p>
-                        <?php endif; ?>
                     </div>
                 </div>
-                
-                <?php if ($profile && $profile['bio']): ?>
-                    <hr>
-                    <p><strong>Βιογραφικό:</strong></p>
-                    <p><?= nl2br(h($profile['bio'])) ?></p>
-                <?php endif; ?>
-                
+
                 <?php if ($profile): ?>
-                    <hr>
-                    <p><strong>Διαθεσιμότητα:</strong></p>
-                    <p>
-                        <?php if ($profile['available_weekdays']): ?><span class="badge bg-info">Καθημερινές</span><?php endif; ?>
-                        <?php if ($profile['available_weekends']): ?><span class="badge bg-info">Σαββατοκύριακα</span><?php endif; ?>
-                        <?php if ($profile['available_nights']): ?><span class="badge bg-info">Νυχτερινές</span><?php endif; ?>
-                        <?php if ($profile['has_driving_license']): ?><span class="badge bg-secondary">Δίπλωμα Οδήγησης</span><?php endif; ?>
-                        <?php if ($profile['has_first_aid']): ?><span class="badge bg-success">Πρώτες Βοήθειες</span><?php endif; ?>
-                    </p>
+                <hr>
+                <h6 class="text-muted mb-3"><i class="bi bi-person-lines-fill me-1"></i>Προφίλ Εθελοντή</h6>
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Ομάδα Αίματος:</strong> <?= h($profile['blood_type'] ?: '-') ?></p>
+                        <p><strong>Διεύθυνση:</strong>
+                            <?php
+                                $addrParts = array_filter([
+                                    $profile['address'] ?? '',
+                                    $profile['city'] ?? '',
+                                    $profile['postal_code'] ?? '',
+                                ]);
+                                echo $addrParts ? h(implode(', ', $addrParts)) : '-';
+                            ?>
+                        </p>
+                        <?php if ($profile['bio']): ?>
+                        <p><strong>Βιογραφικό:</strong><br><?= nl2br(h($profile['bio'])) ?></p>
+                        <?php endif; ?>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Επαφή Έκτακτης Ανάγκης:</strong><br>
+                            <?= h($profile['emergency_contact_name'] ?: '-') ?>
+                            <?= $profile['emergency_contact_phone'] ? ' (' . h($profile['emergency_contact_phone']) . ')' : '' ?>
+                        </p>
+                        <p><strong>Διαθεσιμότητα:</strong><br>
+                            <?php if ($profile['available_weekdays']): ?><span class="badge bg-info me-1">Καθημερινές</span><?php endif; ?>
+                            <?php if ($profile['available_weekends']): ?><span class="badge bg-info me-1">Σαββατοκύριακα</span><?php endif; ?>
+                            <?php if ($profile['available_nights']): ?><span class="badge bg-secondary me-1">Νυχτερινές</span><?php endif; ?>
+                            <?php if (!$profile['available_weekdays'] && !$profile['available_weekends'] && !$profile['available_nights']): ?><span class="text-muted">-</span><?php endif; ?>
+                        </p>
+                        <p><strong>Πιστοποιήσεις:</strong><br>
+                            <?php if ($profile['has_driving_license'] ?? 0): ?><span class="badge bg-secondary me-1">Δίπλωμα Οδήγησης</span><?php endif; ?>
+                            <?php if ($profile['has_first_aid'] ?? 0): ?><span class="badge bg-success me-1">Πρώτες Βοήθειες</span><?php endif; ?>
+                            <?php if (!($profile['has_driving_license'] ?? 0) && !($profile['has_first_aid'] ?? 0)): ?><span class="text-muted">-</span><?php endif; ?>
+                        </p>
+                    </div>
+                </div>
                 <?php endif; ?>
             </div>
         </div>
