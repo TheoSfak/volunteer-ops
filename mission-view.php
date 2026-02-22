@@ -81,11 +81,9 @@ if ($canAccessChat) {
 $availableVolunteers = [];
 if (isAdmin()) {
     $availableVolunteers = dbFetchAll(
-        "SELECT id, name, email FROM users 
-         WHERE role = ? 
-           AND is_active = 1
-         ORDER BY name",
-        [ROLE_VOLUNTEER]
+        "SELECT id, name, email, role FROM users 
+         WHERE is_active = 1
+         ORDER BY name"
     );
 }
 
@@ -920,12 +918,12 @@ document.querySelectorAll('.apply-btn').forEach(function(btn) {
                 </div>
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label class="form-label">Επιλογή Εθελοντή</label>
+                        <label class="form-label">Επιλογή Χρήστη</label>
                         <select class="form-select" name="volunteer_id" required>
-                            <option value="">-- Επιλέξτε εθελοντή --</option>
+                            <option value="">-- Επιλέξτε χρήστη --</option>
                             <?php foreach ($availableVolunteers as $vol): ?>
                                 <option value="<?= $vol['id'] ?>">
-                                    <?= h($vol['name']) ?> (<?= h($vol['email']) ?>)
+                                    <?= h($vol['name']) ?> (<?= h($vol['email']) ?>) — <?= h(ROLE_LABELS[$vol['role']] ?? $vol['role']) ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
