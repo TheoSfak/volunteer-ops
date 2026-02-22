@@ -21,6 +21,9 @@ if ($id) {
     $pageTitle = 'Επεξεργασία: ' . $volunteer['name'];
 }
 
+// Load extended profile (volunteer_profiles table)
+$profile = $id ? dbFetchOne("SELECT * FROM volunteer_profiles WHERE user_id = ?", [$id]) : null;
+
 // Get departments (only functional corps, not warehouse/branch departments)
 $departments = dbFetchAll("SELECT id, name FROM departments WHERE (has_inventory = 0 OR has_inventory IS NULL) ORDER BY name");
 
@@ -152,6 +155,43 @@ if (isPost()) {
             logAudit('create', 'users', $id);
             setFlash('success', 'Ο εθελοντής δημιουργήθηκε.');
         }
+        
+        // Upsert volunteer_profiles (bio, address, emergency contact, availability, etc.)
+        $profileFields = [
+            'bio'                     => post('bio'),
+            'address'                 => post('address'),
+            'city'                    => post('city'),
+            'postal_code'             => post('postal_code'),
+            'emergency_contact_name'  => post('emergency_contact_name'),
+            'emergency_contact_phone' => post('emergency_contact_phone'),
+            'blood_type'              => post('blood_type'),
+            'available_weekdays'      => isset($_POST['available_weekdays']) ? 1 : 0,
+            'available_weekends'      => isset($_POST['available_weekends']) ? 1 : 0,
+            'available_nights'        => isset($_POST['available_nights']) ? 1 : 0,
+            'has_first_aid'           => isset($_POST['has_first_aid']) ? 1 : 0,
+        ];
+        $existingProfile = dbFetchOne("SELECT id FROM volunteer_profiles WHERE user_id = ?", [$id]);
+        if ($existingProfile) {
+            dbExecute(
+                "UPDATE volunteer_profiles SET 
+                 bio=?, address=?, city=?, postal_code=?,
+                 emergency_contact_name=?, emergency_contact_phone=?, blood_type=?,
+                 available_weekdays=?, available_weekends=?, available_nights=?, has_first_aid=?,
+                 updated_at=NOW() WHERE user_id=?",
+                array_merge(array_values($profileFields), [$id])
+            );
+        } else {
+            dbInsert(
+                "INSERT INTO volunteer_profiles 
+                 (user_id, bio, address, city, postal_code,
+                  emergency_contact_name, emergency_contact_phone, blood_type,
+                  available_weekdays, available_weekends, available_nights, has_first_aid,
+                  created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+                array_merge([$id], array_values($profileFields))
+            );
+        }
+        
         redirect('volunteer-view.php?id=' . $id);
         } catch (Exception $e) {
             error_log('Volunteer form error: ' . $e->getMessage());
@@ -383,6 +423,87 @@ include __DIR__ . '/includes/header.php';
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Μητρώο Γ.Γ.Π.Π.</label>
                     <input type="text" class="form-control" name="registry_ggpp" value="<?= h($form['registry_ggpp'] ?? '') ?>" placeholder="Αριθμός Μητρώου">
+                </div>
+            </div>
+            
+            <hr>
+            <h5 class="mb-3"><i class="bi bi-person-lines-fill me-2"></i>Προφίλ Εθελοντή</h5>
+
+            <div class="mb-3">
+                <label class="form-label">Σύντομο Βιογραφικό</label>
+                <textarea class="form-control" name="bio" rows="3"><?= h($profile['bio'] ?? '') ?></textarea>
+            </div>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Ομάδα Αίματος</label>
+                    <select class="form-select" name="blood_type">
+                        <option value="">-</option>
+                        <?php foreach (['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', '0+', '0-'] as $bt): ?>
+                            <option value="<?= $bt ?>" <?= ($profile['blood_type'] ?? '') === $bt ? 'selected' : '' ?>><?= $bt ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+
+            <h6 class="mb-2">Διεύθυνση</h6>
+            <div class="mb-3">
+                <label class="form-label">Οδός / Αριθμός</label>
+                <input type="text" class="form-control" name="address" value="<?= h($profile['address'] ?? '') ?>">
+            </div>
+            <div class="row">
+                <div class="col-md-8 mb-3">
+                    <label class="form-label">Πόλη</label>
+                    <input type="text" class="form-control" name="city" value="<?= h($profile['city'] ?? '') ?>">
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Τ.Κ.</label>
+                    <input type="text" class="form-control" name="postal_code" value="<?= h($profile['postal_code'] ?? '') ?>">
+                </div>
+            </div>
+
+            <h6 class="mb-2">Επαφή Έκτακτης Ανάγκης</h6>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Όνομα</label>
+                    <input type="text" class="form-control" name="emergency_contact_name" value="<?= h($profile['emergency_contact_name'] ?? '') ?>">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Τηλέφωνο</label>
+                    <input type="tel" class="form-control" name="emergency_contact_phone" value="<?= h($profile['emergency_contact_phone'] ?? '') ?>">
+                </div>
+            </div>
+
+            <h6 class="mb-2">Διαθεσιμότητα</h6>
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="available_weekdays" id="avail_weekdays"
+                               <?= ($profile['available_weekdays'] ?? 1) ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="avail_weekdays">Καθημερινές</label>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="available_weekends" id="avail_weekends"
+                               <?= ($profile['available_weekends'] ?? 1) ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="avail_weekends">Σαββατοκύριακα</label>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="available_nights" id="avail_nights"
+                               <?= ($profile['available_nights'] ?? 0) ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="avail_nights">Νυχτερινές</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="has_first_aid" id="has_first_aid"
+                           <?= ($profile['has_first_aid'] ?? 0) ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="has_first_aid">Πιστοποίηση Πρώτων Βοηθειών</label>
                 </div>
             </div>
             
