@@ -828,10 +828,11 @@ let volunteerLayerGroup = null;
         attribution: '© OpenStreetMap'
     }).addTo(opsMap);
 
+    const svgPin = (color) => `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="${color}" viewBox="0 0 16 16" style="filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.4));"><path d="M8 16s6-5.686 6-10A6 6 0 0 0 2 6c0 4.314 6 10 6 10m0-7a3 3 0 1 1 0-6 3 3 0 0 1 0 6"/></svg>`;
     const icons = {
-        green:  L.divIcon({className:'', html:'<div style="background:#198754;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>', iconSize:[16,16], iconAnchor:[8,8]}),
-        orange: L.divIcon({className:'', html:'<div style="background:#fd7e14;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>', iconSize:[16,16], iconAnchor:[8,8]}),
-        red:    L.divIcon({className:'', html:'<div style="background:#dc3545;width:18px;height:18px;border-radius:50%;border:2px solid #fff;box-shadow:0 1px 4px #0004"></div>', iconSize:[18,18], iconAnchor:[9,9]}),
+        green:  L.divIcon({className:'', html: svgPin('#198754'), iconSize:[32,32], iconAnchor:[16,32], popupAnchor:[0,-32]}),
+        orange: L.divIcon({className:'', html: svgPin('#fd7e14'), iconSize:[32,32], iconAnchor:[16,32], popupAnchor:[0,-32]}),
+        red:    L.divIcon({className:'', html: svgPin('#dc3545'), iconSize:[32,32], iconAnchor:[16,32], popupAnchor:[0,-32]}),
     };
 
     missionPins.forEach(p => {
