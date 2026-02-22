@@ -119,6 +119,35 @@ $shiftIds = !empty($missions)
     ? array_merge(...array_map(fn($m) => array_column($m['shifts'], 'shift_id'), array_values($missions)))
     : [];
 
+// ── Split missions into "in progress" vs "upcoming" ──────────────────────────
+$now = time();
+$activeMissions  = [];
+$upcomingMissions = [];
+foreach ($missions as $mid => $m) {
+    $hasActiveShift = false;
+    foreach ($m['shifts'] as $s) {
+        $sStart = strtotime($s['start_time']);
+        $sEnd   = strtotime($s['end_time']);
+        if ($sStart <= $now && $sEnd > $now) {
+            $hasActiveShift = true;
+            break;
+        }
+    }
+    // Also consider mission-level: if any shift hasn't ended yet but at least one started
+    if (!$hasActiveShift) {
+        $mStart = strtotime($m['start_datetime']);
+        $mEnd   = strtotime($m['end_datetime']);
+        if ($mStart <= $now && $mEnd > $now) {
+            $hasActiveShift = true;
+        }
+    }
+    if ($hasActiveShift) {
+        $activeMissions[$mid] = $m;
+    } else {
+        $upcomingMissions[$mid] = $m;
+    }
+}
+
 // Detect if new columns / tables exist on this DB server
 $hasFieldStatus = !empty($shiftIds) && (bool) dbFetchValue(
     "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
@@ -416,7 +445,13 @@ include __DIR__ . '/includes/header.php';
     <!-- ── Left: mission cards ── -->
     <div class="col-lg-7">
 
-        <?php foreach ($missions as $m): ?>
+        <?php if (empty($activeMissions)): ?>
+            <div class="alert alert-info mb-4">
+                <i class="bi bi-info-circle me-2"></i>Δεν υπάρχουν αποστολές σε εξέλιξη αυτή τη στιγμή.
+            </div>
+        <?php endif; ?>
+
+        <?php foreach ($activeMissions as $m): ?>
         <?php
             $isUrgent = (bool)$m['is_urgent'];
             $totalApproved = array_sum(array_column($m['shifts'], 'approved'));
@@ -546,6 +581,79 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
         <?php endforeach; ?>
+
+        <!-- ── Upcoming missions (collapsible) ── -->
+        <?php if (!empty($upcomingMissions)): ?>
+        <div class="text-center my-3">
+            <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#upcomingSection" aria-expanded="false">
+                <i class="bi bi-calendar-event me-1"></i>Δείτε τις επερχόμενες αποστολές
+                <span class="badge bg-secondary ms-1"><?= count($upcomingMissions) ?></span>
+            </button>
+        </div>
+        <div class="collapse" id="upcomingSection">
+        <?php foreach ($upcomingMissions as $m): ?>
+        <?php
+            $isUrgent = (bool)$m['is_urgent'];
+            $totalApproved = array_sum(array_column($m['shifts'], 'approved'));
+            $totalMax      = array_sum(array_column($m['shifts'], 'max_volunteers'));
+        ?>
+        <div class="card mb-4 ops-mission-card <?= $isUrgent ? 'urgent' : '' ?>" style="opacity:0.85;">
+            <div class="card-header d-flex align-items-center justify-content-between">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-info text-dark"><i class="bi bi-clock"></i> ΕΠΕΡΧΟΜΕΝΗ</span>
+                    <?php if ($isUrgent): ?>
+                        <span class="badge bg-danger"><i class="bi bi-lightning-fill"></i> ΕΠΕΙΓΟΝ</span>
+                    <?php endif; ?>
+                    <h5 class="mb-0"><?= h($m['title']) ?></h5>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <?php if ($m['department_name']): ?>
+                        <span class="badge bg-secondary"><?= h($m['department_name']) ?></span>
+                    <?php endif; ?>
+                    <a href="mission-view.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-arrow-right"></i>
+                    </a>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-3 mb-2 text-muted small">
+                    <?php if ($m['location']): ?>
+                        <span><i class="bi bi-geo-alt me-1"></i><?= h($m['location']) ?></span>
+                    <?php endif; ?>
+                    <span><i class="bi bi-calendar me-1"></i><?= formatDateTime($m['start_datetime']) ?> – <?= formatDateTime($m['end_datetime']) ?></span>
+                    <span><i class="bi bi-people me-1"></i><?= $totalApproved ?> / <?= $totalMax ?> εθελοντές</span>
+                </div>
+                <?php foreach ($m['shifts'] as $s): ?>
+                <?php
+                    $pct = $s['max_volunteers'] > 0 ? round(($s['approved'] / $s['max_volunteers']) * 100) : 0;
+                    $barColor = $s['approved'] < $s['min_volunteers'] ? 'danger' : ($pct < 60 ? 'warning' : 'success');
+                ?>
+                <div class="shift-row mb-2">
+                    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                        <div>
+                            <span class="badge bg-info text-dark me-1">ΠΡΟΣΕΧΩΣ</span>
+                            <strong><?= formatDateTime($s['start_time']) ?></strong>
+                            <span class="text-muted"> – <?= date('H:i', strtotime($s['end_time'])) ?></span>
+                        </div>
+                        <div>
+                            <span class="badge bg-success"><?= $s['approved'] ?> Εγκ.</span>
+                            <span class="badge bg-warning text-dark"><?= $s['pending'] ?> Εκκρ.</span>
+                            <a href="shift-view.php?id=<?= $s['shift_id'] ?>" class="btn btn-xs btn-outline-secondary btn-sm">
+                                <i class="bi bi-pencil"></i>
+                            </a>
+                        </div>
+                    </div>
+                    <div class="progress mt-2" style="height:6px;">
+                        <div class="progress-bar bg-<?= $barColor ?>" style="width:<?= min($pct,100) ?>%"></div>
+                    </div>
+                    <small class="text-muted"><?= $s['approved'] ?>/<?= $s['max_volunteers'] ?> (min: <?= $s['min_volunteers'] ?>)</small>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
     </div>
 
     <!-- ── Right: map (always visible) ── -->
