@@ -58,7 +58,8 @@ function dbFetchAll($sql, $params = []) {
 function dbFetchOne($sql, $params = []) {
     $stmt = db()->prepare($sql);
     $stmt->execute($params);
-    return $stmt->fetch();
+    $result = $stmt->fetch();
+    return $result === false ? null : $result;
 }
 
 function dbFetchValue($sql, $params = []) {
