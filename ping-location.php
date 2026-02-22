@@ -42,9 +42,14 @@ if (!$pr) {
 }
 
 // Insert ping
-dbInsert(
-    "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, created_at) VALUES (?, ?, ?, ?, NOW())",
-    [$userId, $shiftId, $lat, $lng]
-);
+try {
+    dbInsert(
+        "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, created_at) VALUES (?, ?, ?, ?, NOW())",
+        [$userId, $shiftId, $lat, $lng]
+    );
+} catch (Exception $e) {
+    echo json_encode(['ok' => false, 'error' => 'Η λειτουργία GPS δεν είναι διαθέσιμη ακόμη (χρειάζεται migration βάσης).']);
+    exit;
+}
 
 echo json_encode(['ok' => true, 'ts' => date('H:i:s')]);
