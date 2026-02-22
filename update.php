@@ -1006,83 +1006,94 @@ include __DIR__ . '/includes/header.php';
                 <?php if (empty($backups)): ?>
                     <p class="text-muted text-center mb-0">Δεν υπάρχουν backups</p>
                 <?php else: ?>
-                    <form method="post" id="massDeleteForm">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="form-check mb-0">
+                            <input class="form-check-input" type="checkbox" id="selectAllBackups">
+                            <label class="form-check-label fw-semibold" for="selectAllBackups">Επιλογή όλων</label>
+                        </div>
+                        <button type="button" id="massDeleteBtn" class="btn btn-sm btn-danger d-none"
+                                onclick="massDeleteBackups()">
+                            <i class="bi bi-trash me-1"></i>Διαγραφή επιλεγμένων (<span id="selCount">0</span>)
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th style="width:36px"></th>
+                                    <th>Ημερομηνία</th>
+                                    <th>Έκδοση</th>
+                                    <th>Μέγεθος</th>
+                                    <th>Βάση</th>
+                                    <th class="text-end">Ενέργειες</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($backups as $backup): ?>
+                                <tr>
+                                    <td>
+                                        <input class="form-check-input backup-checkbox" type="checkbox"
+                                               data-name="<?= h($backup['name']) ?>">
+                                    </td>
+                                    <td>
+                                        <i class="bi bi-folder me-1 text-warning"></i>
+                                        <?= h(str_replace('_', ' ', str_replace('backup_', '', $backup['name']))) ?>
+                                    </td>
+                                    <td><?= h($backup['version']) ?></td>
+                                    <td><?= formatBytes($backup['size']) ?></td>
+                                    <td>
+                                        <?php if ($backup['db_included']): ?>
+                                            <span class="badge bg-success">Ναι</span>
+                                        <?php else: ?>
+                                            <span class="badge bg-secondary">Όχι</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="text-end">
+                                        <form method="post" class="d-inline" onsubmit="return confirm('Επαναφορά από αυτό το backup; Η τρέχουσα κατάσταση θα χαθεί.');">
+                                            <?= csrfField() ?>
+                                            <input type="hidden" name="action" value="restore_backup">
+                                            <input type="hidden" name="backup_name" value="<?= h($backup['name']) ?>">
+                                            <button type="submit" class="btn btn-sm btn-outline-warning">
+                                                <i class="bi bi-arrow-counterclockwise"></i>
+                                            </button>
+                                        </form>
+                                        <form method="post" class="d-inline" onsubmit="return confirm('Διαγραφή αυτού του backup;');">
+                                            <?= csrfField() ?>
+                                            <input type="hidden" name="action" value="delete_backup">
+                                            <input type="hidden" name="backup_name" value="<?= h($backup['name']) ?>">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <!-- Hidden form for mass delete — lives OUTSIDE the table forms -->
+                    <form method="post" id="massDeleteForm" class="d-none">
                         <?= csrfField() ?>
                         <input type="hidden" name="action" value="mass_delete_backups">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <div class="form-check mb-0">
-                                <input class="form-check-input" type="checkbox" id="selectAllBackups">
-                                <label class="form-check-label fw-semibold" for="selectAllBackups">Επιλογή όλων</label>
-                            </div>
-                            <button type="button" id="massDeleteBtn" class="btn btn-sm btn-danger d-none"
-                                    onclick="massDeleteBackups()">
-                                <i class="bi bi-trash me-1"></i>Διαγραφή επιλεγμένων (<span id="selCount">0</span>)
-                            </button>
-                        </div>
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover mb-0">
-                                <thead>
-                                    <tr>
-                                        <th style="width:36px"></th>
-                                        <th>Ημερομηνία</th>
-                                        <th>Έκδοση</th>
-                                        <th>Μέγεθος</th>
-                                        <th>Βάση</th>
-                                        <th class="text-end">Ενέργειες</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($backups as $backup): ?>
-                                    <tr>
-                                        <td>
-                                            <input class="form-check-input backup-checkbox" type="checkbox"
-                                                   name="backup_names[]" value="<?= h($backup['name']) ?>">
-                                        </td>
-                                        <td>
-                                            <i class="bi bi-folder me-1 text-warning"></i>
-                                            <?= h(str_replace('_', ' ', str_replace('backup_', '', $backup['name']))) ?>
-                                        </td>
-                                        <td><?= h($backup['version']) ?></td>
-                                        <td><?= formatBytes($backup['size']) ?></td>
-                                        <td>
-                                            <?php if ($backup['db_included']): ?>
-                                                <span class="badge bg-success">Ναι</span>
-                                            <?php else: ?>
-                                                <span class="badge bg-secondary">Όχι</span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td class="text-end">
-                                            <form method="post" class="d-inline" onsubmit="return confirm('Επαναφορά από αυτό το backup; Η τρέχουσα κατάσταση θα χαθεί.');">
-                                                <?= csrfField() ?>
-                                                <input type="hidden" name="action" value="restore_backup">
-                                                <input type="hidden" name="backup_name" value="<?= h($backup['name']) ?>">
-                                                <button type="submit" class="btn btn-sm btn-outline-warning">
-                                                    <i class="bi bi-arrow-counterclockwise"></i>
-                                                </button>
-                                            </form>
-                                            <form method="post" class="d-inline" onsubmit="return confirm('Διαγραφή αυτού του backup;');">
-                                                <?= csrfField() ?>
-                                                <input type="hidden" name="action" value="delete_backup">
-                                                <input type="hidden" name="backup_name" value="<?= h($backup['name']) ?>">
-                                                <button type="submit" class="btn btn-sm btn-outline-danger">
-                                                    <i class="bi bi-trash"></i>
-                                                </button>
-                                            </form>
-                                        </td>
-                                    </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
                     </form>
                 <?php endif; ?>
             </div>
         </div>
         <script>
         function massDeleteBackups() {
-            if (confirm('Διαγραφή επιλεγμένων backups; Η ενέργεια δεν αναιρείται.')) {
-                document.getElementById('massDeleteForm').submit();
-            }
+            if (!confirm('Διαγραφή επιλεγμένων backups; Η ενέργεια δεν αναιρείται.')) return;
+            const form = document.getElementById('massDeleteForm');
+            // Remove any previously injected inputs
+            form.querySelectorAll('input[name="backup_names[]"]').forEach(el => el.remove());
+            // Inject one hidden input per checked checkbox
+            document.querySelectorAll('.backup-checkbox:checked').forEach(function (cb) {
+                const inp = document.createElement('input');
+                inp.type  = 'hidden';
+                inp.name  = 'backup_names[]';
+                inp.value = cb.dataset.name;
+                form.appendChild(inp);
+            });
+            form.submit();
         }
         (function () {
             const selectAll = document.getElementById('selectAllBackups');
