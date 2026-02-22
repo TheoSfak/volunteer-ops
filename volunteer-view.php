@@ -148,6 +148,27 @@ if (isPost()) {
         redirect('volunteer-view.php?id=' . $id . '#documents');
     }
 
+    if ($action === 'update_skills') {
+        if (!isAdmin()) {
+            setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
+            redirect('volunteer-view.php?id=' . $id);
+        }
+        dbExecute("DELETE FROM user_skills WHERE user_id = ?", [$id]);
+        if (!empty($_POST['skills'])) {
+            foreach ($_POST['skills'] as $skillId => $level) {
+                if (!empty($level)) {
+                    dbInsert(
+                        "INSERT INTO user_skills (user_id, skill_id, level) VALUES (?, ?, ?)",
+                        [$id, (int)$skillId, $level]
+                    );
+                }
+            }
+        }
+        logAudit('update_skills', 'users', $id);
+        setFlash('success', 'Οι δεξιότητες ενημερώθηκαν.');
+        redirect('volunteer-view.php?id=' . $id . '#skills');
+    }
+
     if ($action === 'upload_photo') {
         if (!isAdmin()) {
             setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
@@ -225,6 +246,15 @@ $skills = dbFetchAll(
      ORDER BY s.category, s.name",
     [$id]
 );
+
+// All available skills for the admin edit form
+$allSkills = dbFetchAll("SELECT * FROM skills ORDER BY category, name");
+
+// Build quick lookup: skill_id => level for current user
+$userSkillMap = [];
+foreach ($skills as $sk) {
+    $userSkillMap[$sk['id']] = $sk['level'];
+}
 
 // Get achievements
 $achievements = dbFetchAll(
@@ -653,29 +683,85 @@ include __DIR__ . '/includes/header.php';
         </div>
 
         <!-- Skills -->
-        <div class="card mb-4">
-            <div class="card-header">
+        <div class="card mb-4" id="skills">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-tools me-1"></i>Δεξιότητες</h5>
+                <?php if (isAdmin()): ?>
+                <button class="btn btn-sm btn-outline-primary" type="button"
+                        data-bs-toggle="collapse" data-bs-target="#skillsEditForm">
+                    <i class="bi bi-pencil me-1"></i>Επεξεργασία
+                </button>
+                <?php endif; ?>
             </div>
             <div class="card-body">
-                <?php if (empty($skills)): ?>
-                    <p class="text-muted">Δεν έχουν καταχωρηθεί δεξιότητες.</p>
-                <?php else: ?>
-                    <?php 
-                    $currentCat = '';
-                    foreach ($skills as $sk): 
-                        if ($sk['category'] !== $currentCat):
-                            $currentCat = $sk['category'];
-                    ?>
-                        <strong class="text-muted small d-block mt-2"><?= h($currentCat) ?></strong>
+                <!-- Current skills display -->
+                <div id="skillsDisplay">
+                    <?php if (empty($skills)): ?>
+                        <p class="text-muted mb-0">Δεν έχουν καταχωρηθεί δεξιότητες.</p>
+                    <?php else: ?>
+                        <?php
+                        $currentCat = '';
+                        foreach ($skills as $sk):
+                            if ($sk['category'] !== $currentCat):
+                                $currentCat = $sk['category'];
+                        ?>
+                            <strong class="text-muted small d-block mt-2"><?= h($currentCat) ?></strong>
+                        <?php endif; ?>
+                            <span class="badge bg-primary mb-1">
+                                <?= h($sk['name']) ?>
+                                <?php if ($sk['level']): ?>
+                                    <span class="badge bg-light text-dark"><?= h($sk['level']) ?></span>
+                                <?php endif; ?>
+                            </span>
+                        <?php endforeach; ?>
                     <?php endif; ?>
-                        <span class="badge bg-primary mb-1">
-                            <?= h($sk['name']) ?>
-                            <?php if ($sk['level']): ?>
-                                <span class="badge bg-light text-dark"><?= h($sk['level']) ?></span>
-                            <?php endif; ?>
-                        </span>
-                    <?php endforeach; ?>
+                </div>
+
+                <?php if (isAdmin()): ?>
+                <!-- Edit form (collapsed by default) -->
+                <div class="collapse mt-3" id="skillsEditForm">
+                    <hr>
+                    <form method="post" action="volunteer-view.php?id=<?= $id ?>">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="update_skills">
+                        <?php if (empty($allSkills)): ?>
+                            <p class="text-muted">Δεν υπάρχουν διαθέσιμες δεξιότητες. <a href="skills.php">Διαχείριση δεξιοτήτων</a></p>
+                        <?php else: ?>
+                            <?php
+                            $catGrouped = [];
+                            foreach ($allSkills as $s) {
+                                $catGrouped[$s['category'] ?: 'Γενικά'][] = $s;
+                            }
+                            ?>
+                            <?php foreach ($catGrouped as $cat => $catSkills): ?>
+                                <h6 class="text-muted mt-3 mb-2"><?= h($cat) ?></h6>
+                                <div class="row">
+                                    <?php foreach ($catSkills as $s): ?>
+                                    <div class="col-md-4 mb-2">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <select class="form-select form-select-sm" name="skills[<?= $s['id'] ?>]">
+                                                <option value="">— <?= h($s['name']) ?> —</option>
+                                                <?php foreach (['Αρχάριος','Μέτριος','Προχωρημένος','Εμπειρογνώμων'] as $lvl): ?>
+                                                    <option value="<?= $lvl ?>" <?= (($userSkillMap[$s['id']] ?? '') === $lvl) ? 'selected' : '' ?>>
+                                                        <?= $lvl ?>
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endforeach; ?>
+                            <div class="mt-3">
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    <i class="bi bi-check-lg me-1"></i>Αποθήκευση Δεξιοτήτων
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm"
+                                        data-bs-toggle="collapse" data-bs-target="#skillsEditForm">Ακύρωση</button>
+                            </div>
+                        <?php endif; ?>
+                    </form>
+                </div>
                 <?php endif; ?>
             </div>
         </div>
