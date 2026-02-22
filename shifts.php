@@ -165,8 +165,8 @@ include __DIR__ . '/includes/header.php';
                     ?>
                     <tr class="<?= $isPast ? 'table-secondary' : '' ?>">
                         <td>
-                            <strong><?= h($shift['title'] ?: 'Βάρδια #' . $shift['id']) ?></strong>
-                            <?php if ($shift['description']): ?>
+                            <strong><?= h(($shift['title'] ?? '') ?: 'Βάρδια #' . $shift['id']) ?></strong>
+                            <?php if (!empty($shift['description'])): ?>
                                 <br><small class="text-muted"><?= h(mb_substr($shift['description'], 0, 50)) ?>...</small>
                             <?php endif; ?>
                         </td>
