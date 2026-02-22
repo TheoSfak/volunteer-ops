@@ -178,6 +178,7 @@ $appDescription = getSetting('app_description', '');
             position: sticky;
             top: 0;
             z-index: 100;
+            overflow: hidden;
         }
         
         /* User Dropdown Styling */
@@ -562,6 +563,30 @@ $appDescription = getSetting('app_description', '');
             .sidebar-overlay.show {
                 display: block;
             }
+            
+            .main-content {
+                overflow-x: hidden;
+                max-width: 100vw;
+            }
+            
+            .top-navbar {
+                padding: 0.6rem 0.8rem;
+            }
+            
+            .top-navbar .dropdown-toggle {
+                max-width: 65vw;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                display: inline-flex;
+                align-items: center;
+                font-size: 0.85rem;
+                padding: 0.25rem 0.4rem;
+            }
+            
+            .content-wrapper {
+                padding: 1rem;
+            }
         }
     </style>
 </head>
@@ -830,11 +855,11 @@ $appDescription = getSetting('app_description', '');
                 <div class="dropdown">
                     <button class="btn btn-link text-dark dropdown-toggle text-decoration-none" type="button" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                         <?php if (!empty($currentUser['profile_photo']) && file_exists(__DIR__ . '/../uploads/avatars/' . $currentUser['profile_photo'])): ?>
-                            <img src="<?= BASE_URL ?>/uploads/avatars/<?= h($currentUser['profile_photo']) ?>" class="rounded-circle me-1" style="width:30px;height:30px;object-fit:cover;" alt="">
+                            <img src="<?= BASE_URL ?>/uploads/avatars/<?= h($currentUser['profile_photo']) ?>" class="rounded-circle me-1 flex-shrink-0" style="width:30px;height:30px;object-fit:cover;" alt="">
                         <?php else: ?>
-                            <i class="bi bi-person-circle me-1"></i>
+                            <i class="bi bi-person-circle me-1 flex-shrink-0"></i>
                         <?php endif; ?>
-                        <?= h($currentUser['name'] ?? 'Χρήστης') ?><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
+                        <span class="user-name-text"><?= h($currentUser['name'] ?? 'Χρήστης') ?></span><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i>Το Προφίλ μου</a></li>
