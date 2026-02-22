@@ -294,6 +294,122 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 8,
+            'description' => 'Insert admin_added_volunteer and points_earned email templates and notification settings',
+            'up' => function () {
+                // admin_added_volunteer email template
+                $existing = dbFetchOne("SELECT id FROM email_templates WHERE code = 'admin_added_volunteer'");
+                if (!$existing) {
+                    $bodyHtml  = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">';
+                    $bodyHtml .= '<div style="background: #2c3e50; color: white; padding: 20px; text-align: center;">';
+                    $bodyHtml .= '<h1>&#128203; Τοποθέτηση σε Βάρδια</h1>';
+                    $bodyHtml .= '</div>';
+                    $bodyHtml .= '<div style="padding: 30px; background: #fff;">';
+                    $bodyHtml .= '<h2>Γεια σας {{user_name}},</h2>';
+                    $bodyHtml .= '<p>Ο διαχειριστής σας τοποθέτησε απευθείας στην παρακάτω βάρδια:</p>';
+                    $bodyHtml .= '<div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #2c3e50;">';
+                    $bodyHtml .= '<p><strong>Αποστολή:</strong> {{mission_title}}</p>';
+                    $bodyHtml .= '<p><strong>Ημερομηνία:</strong> {{shift_date}}</p>';
+                    $bodyHtml .= '<p><strong>Ώρα:</strong> {{shift_time}}</p>';
+                    $bodyHtml .= '<p><strong>Τοποθεσία:</strong> {{location}}</p>';
+                    $bodyHtml .= '</div>';
+                    $bodyHtml .= '{{#admin_notes}}<div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin: 15px 0;">';
+                    $bodyHtml .= '<p><strong>Σημείωση διαχειριστή:</strong> {{admin_notes}}</p>';
+                    $bodyHtml .= '</div>{{/admin_notes}}';
+                    $bodyHtml .= '<p>Παρακαλούμε να είστε στην τοποθεσία έγκαιρα.</p>';
+                    $bodyHtml .= '<p style="text-align: center; margin-top: 30px;">';
+                    $bodyHtml .= '<a href="{{login_url}}" style="background: #2c3e50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px;">Σύνδεση στην Πλατφόρμα</a>';
+                    $bodyHtml .= '</p>';
+                    $bodyHtml .= '</div>';
+                    $bodyHtml .= '<div style="padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;">';
+                    $bodyHtml .= '{{app_name}} - Σύστημα Διαχείρισης Εθελοντών';
+                    $bodyHtml .= '</div>';
+                    $bodyHtml .= '</div>';
+
+                    dbInsert(
+                        "INSERT INTO email_templates (code, name, subject, body_html, description, available_variables)
+                         VALUES (?, ?, ?, ?, ?, ?)",
+                        [
+                            'admin_added_volunteer',
+                            'Προσθήκη από Διαχειριστή',
+                            'Ο διαχειριστής σας τοποθέτησε απευθείας σε βάρδια',
+                            $bodyHtml,
+                            'Αποστέλλεται στον εθελοντή όταν ο διαχειριστής τον προσθέτει απευθείας σε βάρδια',
+                            '{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}, {{admin_notes}}, {{login_url}}',
+                        ]
+                    );
+                }
+
+                // points_earned email template
+                $existing2 = dbFetchOne("SELECT id FROM email_templates WHERE code = 'points_earned'");
+                if (!$existing2) {
+                    $bodyHtml2  = '<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">';
+                    $bodyHtml2 .= '<div style="background: #27ae60; color: white; padding: 20px; text-align: center;">';
+                    $bodyHtml2 .= '<h1>&#127881; Συγχαρητήρια!</h1>';
+                    $bodyHtml2 .= '</div>';
+                    $bodyHtml2 .= '<div style="padding: 30px; background: #fff;">';
+                    $bodyHtml2 .= '<h2>Γεια σας {{user_name}},</h2>';
+                    $bodyHtml2 .= '<p style="font-size: 24px; text-align: center; color: #27ae60;"><strong>+{{points}} πόντοι</strong></p>';
+                    $bodyHtml2 .= '<div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">';
+                    $bodyHtml2 .= '<p><strong>Βάρδια:</strong> {{shift_date}}</p>';
+                    $bodyHtml2 .= '<p><strong>Αποστολή:</strong> {{mission_title}}</p>';
+                    $bodyHtml2 .= '</div>';
+                    $bodyHtml2 .= '<p>Συνολικοί πόντοι: <strong>{{total_points}}</strong></p>';
+                    $bodyHtml2 .= '</div>';
+                    $bodyHtml2 .= '<div style="padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;">';
+                    $bodyHtml2 .= '{{app_name}}';
+                    $bodyHtml2 .= '</div>';
+                    $bodyHtml2 .= '</div>';
+
+                    dbInsert(
+                        "INSERT INTO email_templates (code, name, subject, body_html, description, available_variables)
+                         VALUES (?, ?, ?, ?, ?, ?)",
+                        [
+                            'points_earned',
+                            'Κέρδος Πόντων',
+                            'Κερδίσατε {{points}} πόντους!',
+                            $bodyHtml2,
+                            'Αποστέλλεται όταν ο εθελοντής κερδίζει πόντους',
+                            '{{app_name}}, {{user_name}}, {{points}}, {{mission_title}}, {{shift_date}}, {{total_points}}',
+                        ]
+                    );
+                }
+
+                // admin_added_volunteer notification setting
+                $ns1 = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'admin_added_volunteer'");
+                if (!$ns1) {
+                    $tmplId = dbFetchValue("SELECT id FROM email_templates WHERE code = 'admin_added_volunteer'");
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, ?)",
+                        [
+                            'admin_added_volunteer',
+                            'Προσθήκη από Διαχειριστή',
+                            'Όταν ο διαχειριστής προσθέτει εθελοντή απευθείας σε βάρδια',
+                            $tmplId,
+                        ]
+                    );
+                }
+
+                // points_earned notification setting
+                $ns2 = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'points_earned'");
+                if (!$ns2) {
+                    $tmplId2 = dbFetchValue("SELECT id FROM email_templates WHERE code = 'points_earned'");
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 0, ?)",
+                        [
+                            'points_earned',
+                            'Κέρδος Πόντων',
+                            'Όταν ο εθελοντής κερδίζει πόντους',
+                            $tmplId2,
+                        ]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
