@@ -599,6 +599,194 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 10,
+            'description' => 'Add {{logo_html}} to all email template headers',
+            'up' => function () {
+                // ── Shared builder helpers (same as v9 but $hdr includes {{logo_html}}) ──
+
+                $outer = function (string $h, string $b, string $f) : string {
+                    return '<div style="background:#eef2f7;padding:28px 0 40px;font-family:Helvetica Neue,Arial,sans-serif;">'
+                         . '<div style="max-width:600px;margin:0 auto;">'
+                         . $h . $b . $f
+                         . '</div></div>';
+                };
+
+                // Header now includes {{logo_html}} before the icon/title
+                $hdr = function (string $c, string $icon, string $title) : string {
+                    return '<div style="background:' . $c . ';padding:30px 40px 26px;border-radius:12px 12px 0 0;text-align:center;">'
+                         . '{{logo_html}}'
+                         . '<p style="color:rgba(255,255,255,0.7);font-size:11px;letter-spacing:2px;text-transform:uppercase;margin:0 0 8px;">{{app_name}}</p>'
+                         . '<div style="font-size:36px;line-height:1;margin:0 0 8px;">' . $icon . '</div>'
+                         . '<h1 style="color:#fff;margin:0;font-size:23px;font-weight:700;line-height:1.3;">' . $title . '</h1>'
+                         . '</div>';
+                };
+
+                $bdy = function (string $inner) : string {
+                    return '<div style="background:#fff;padding:36px 40px 40px;border-radius:0 0 12px 12px;box-shadow:0 4px 20px rgba(0,0,0,0.07);">'
+                         . $inner . '</div>';
+                };
+
+                $ftr = function () : string {
+                    return '<div style="text-align:center;padding:18px 0 0;color:#9ca3af;font-size:12px;line-height:1.9;">'
+                         . '<p style="margin:0;"><strong style="color:#6b7280;">{{app_name}}</strong> &bull; Σύστημα Διαχείρισης Εθελοντών</p>'
+                         . '<p style="margin:0;">Αυτό το μήνυμα στάλθηκε αυτόματα από το σύστημα.</p>'
+                         . '</div>';
+                };
+
+                $card = function (string $c, array $rows) : string {
+                    $html = '<div style="background:#f9fafb;border-left:4px solid ' . $c . ';padding:2px 20px;border-radius:0 8px 8px 0;margin:20px 0;">';
+                    foreach ($rows as [$l, $v]) {
+                        $html .= '<div style="padding:7px 0;font-size:14px;border-bottom:1px solid #f3f4f6;">'
+                               . '<span style="color:#9ca3af;display:inline-block;min-width:130px;">' . $l . '</span>'
+                               . '<span style="color:#111827;font-weight:600;">' . $v . '</span></div>';
+                    }
+                    return $html . '</div>';
+                };
+
+                $btn = function (string $url, string $lbl, string $c) : string {
+                    return '<div style="text-align:center;margin:28px 0 4px;">'
+                         . '<a href="' . $url . '" style="background:' . $c . ';color:#ffffff;text-decoration:none;'
+                         . 'padding:13px 38px;border-radius:8px;font-size:15px;font-weight:700;display:inline-block;letter-spacing:0.3px;">'
+                         . $lbl . '</a></div>';
+                };
+
+                $greet = function () : string {
+                    return '<h2 style="color:#1f2937;font-size:18px;font-weight:700;margin:0 0 14px;">Γεια σας {{user_name}},</h2>';
+                };
+
+                $p = function (string $txt) : string {
+                    return '<p style="color:#4b5563;line-height:1.65;font-size:15px;margin:0 0 14px;">' . $txt . '</p>';
+                };
+
+                // ── WELCOME ──────────────────────────────────────────────────────────────
+                $inner = $greet()
+                    . $p('Ευχαριστούμε που εγγραφήκατε στην πλατφόρμα εθελοντισμού <strong>{{app_name}}</strong>. Είστε πλέον μέλος της ομάδας μας!')
+                    . '<div style="background:#eff6ff;border-left:4px solid #2563eb;padding:14px 20px;border-radius:0 8px 8px 0;margin:20px 0;">'
+                    . '<p style="color:#1e40af;font-weight:700;font-size:14px;margin:0 0 8px;">Τι μπορείτε να κάνετε:</p>'
+                    . '<div style="font-size:14px;color:#374151;line-height:1.9;">'
+                    . '<div>&#10003;&nbsp; Δείτε τις διαθέσιμες αποστολές</div>'
+                    . '<div>&#10003;&nbsp; Δηλώσετε συμμετοχή σε βάρδιες</div>'
+                    . '<div>&#10003;&nbsp; Κερδίσετε πόντους και επιτεύγματα</div>'
+                    . '</div></div>'
+                    . $btn('{{login_url}}', 'Σύνδεση στην Πλατφόρμα', '#2563eb');
+                $html = $outer($hdr('#2563eb', '&#127881;', 'Καλώς ήρθατε!'), $bdy($inner), $ftr());
+                dbExecute("UPDATE email_templates SET body_html = ? WHERE code = 'welcome'", [$html]);
+
+                // ── PARTICIPATION APPROVED ────────────────────────────────────────────────
+                $inner = $greet()
+                    . $p('Χαρούμαστε να σας ενημερώσουμε ότι η αίτηση συμμετοχής σας <strong>εγκρίθηκε</strong>! Σας περιμένουμε στη βάρδια!')
+                    . $card('#16a34a', [
+                        ['Αποστολή:', '{{mission_title}}'],
+                        ['Ημερομηνία:', '{{shift_date}}'],
+                        ['Ώρα:', '{{shift_time}}'],
+                        ['Τοποθεσία:', '{{location}}'],
+                    ])
+                    . $p('Παρακαλούμε να είστε στην τοποθεσία έγκαιρα. Σε περίπτωση αδυναμίας, ενημερώστε μας το συντομότερο.')
+                    . $btn('{{login_url}}', 'Δείτε τις Λεπτομέρειες', '#16a34a');
+                $html = $outer($hdr('#16a34a', '&#10003;', 'Η Συμμετοχή σας Εγκρίθηκε!'), $bdy($inner), $ftr());
+                dbExecute("UPDATE email_templates SET body_html = ? WHERE code = 'participation_approved'", [$html]);
+
+                // ── PARTICIPATION REJECTED ────────────────────────────────────────────────
+                $inner = $greet()
+                    . $p('Δυστυχώς, η αίτηση συμμετοχής σας <strong>δεν εγκρίθηκε</strong> αυτή τη φορά.')
+                    . $card('#dc2626', [
+                        ['Αποστολή:', '{{mission_title}}'],
+                        ['Βάρδια:', '{{shift_date}}'],
+                    ])
+                    . $p('Ελπίζουμε να σας δούμε στην επόμενη ευκαιρία! Μπορείτε να δηλώσετε συμμετοχή σε άλλες διαθέσιμες βάρδιες.')
+                    . $btn('{{login_url}}', 'Δείτε Άλλες Βάρδιες', '#dc2626');
+                $html = $outer($hdr('#dc2626', '&#9888;', 'Ενημέρωση Αίτησης Συμμετοχής'), $bdy($inner), $ftr());
+                dbExecute("UPDATE email_templates SET body_html = ? WHERE code = 'participation_rejected'", [$html]);
+
+                // ── SHIFT REMINDER ────────────────────────────────────────────────────────
+                $inner = $greet()
+                    . $p('Σας υπενθυμίζουμε ότι <strong>αύριο</strong> έχετε μια προγραμματισμένη βάρδια. Είστε έτοιμοι;')
+                    . $card('#d97706', [
+                        ['Αποστολή:', '{{mission_title}}'],
+                        ['Ημερομηνία:', '{{shift_date}}'],
+                        ['Ώρα:', '{{shift_time}}'],
+                        ['Τοποθεσία:', '{{location}}'],
+                    ])
+                    . $p('Σε περίπτωση αδυναμίας, παρακαλούμε ενημερώστε μας το συντομότερο δυνατό.')
+                    . $btn('{{login_url}}', 'Δείτε τη Βάρδια', '#d97706');
+                $html = $outer($hdr('#d97706', '&#9200;', 'Υπενθύμιση Αυριανής Βάρδιας'), $bdy($inner), $ftr());
+                dbExecute("UPDATE email_templates SET body_html = ? WHERE code = 'shift_reminder'", [$html]);
+
+                // ── NEW MISSION ───────────────────────────────────────────────────────────
+                $inner = '<h2 style="color:#1f2937;font-size:20px;font-weight:700;margin:0 0 12px;">{{mission_title}}</h2>'
+                    . $p('{{mission_description}}')
+                    . $card('#7c3aed', [
+                        ['Τοποθεσία:', '{{location}}'],
+                        ['Έναρξη:', '{{start_date}}'],
+                        ['Λήξη:', '{{end_date}}'],
+                    ])
+                    . $p('Βιαστείτε — οι θέσεις είναι περιορισμένες! Δηλώστε συμμετοχή σήμερα.')
+                    . $btn('{{mission_url}}', 'Δηλώστε Συμμετοχή', '#7c3aed');
+                $html = $outer($hdr('#7c3aed', '&#128640;', 'Νέα Αποστολή Διαθέσιμη!'), $bdy($inner), $ftr());
+                dbExecute("UPDATE email_templates SET body_html = ? WHERE code = 'new_mission'", [$html]);
+
+                // ── MISSION CANCELED ──────────────────────────────────────────────────────
+                $inner = $greet()
+                    . $p('Σας ενημερώνουμε ότι η παρακάτω αποστολή <strong>ακυρώθηκε</strong>.')
+                    . $card('#dc2626', [
+                        ['Αποστολή:', '{{mission_title}}'],
+                    ])
+                    . $p('Ζητούμε συγγνώμη για την αναστάτωση. Ελπίζουμε να σας δούμε σε μελλοντικές αποστολές!')
+                    . $btn('{{login_url}}', 'Δείτε Άλλες Αποστολές', '#dc2626');
+                $html = $outer($hdr('#dc2626', '&#9888;', 'Ακύρωση Αποστολής'), $bdy($inner), $ftr());
+                dbExecute("UPDATE email_templates SET body_html = ? WHERE code = 'mission_canceled'", [$html]);
+
+                // ── SHIFT CANCELED ────────────────────────────────────────────────────────
+                $inner = $greet()
+                    . $p('Σας ενημερώνουμε ότι η βάρδια στην οποία είχατε δηλώσει συμμετοχή <strong>ακυρώθηκε</strong>.')
+                    . $card('#dc2626', [
+                        ['Αποστολή:', '{{mission_title}}'],
+                        ['Βάρδια:', '{{shift_date}}'],
+                        ['Ώρα:', '{{shift_time}}'],
+                    ])
+                    . $p('Ζητούμε συγγνώμη για την αναστάτωση. Μπορείτε να δηλώσετε συμμετοχή σε άλλες διαθέσιμες βάρδιες.')
+                    . $btn('{{login_url}}', 'Δείτε Άλλες Βάρδιες', '#dc2626');
+                $html = $outer($hdr('#dc2626', '&#9888;', 'Ακύρωση Βάρδιας'), $bdy($inner), $ftr());
+                dbExecute("UPDATE email_templates SET body_html = ? WHERE code = 'shift_canceled'", [$html]);
+
+                // ── POINTS EARNED ─────────────────────────────────────────────────────────
+                $inner = $greet()
+                    . $p('Συγχαρητήρια! Ολοκληρώσατε μια βάρδια και κερδίσατε πόντους!')
+                    . '<div style="background:#fefce8;border-left:4px solid #d97706;padding:16px 20px;border-radius:0 8px 8px 0;margin:20px 0;text-align:center;">'
+                    . '<div style="font-size:38px;margin:0 0 6px;">&#127942;</div>'
+                    . '<div style="font-size:42px;font-weight:800;color:#d97706;line-height:1;">+{{points}}</div>'
+                    . '<div style="font-size:13px;color:#92400e;margin:6px 0 0;letter-spacing:0.5px;text-transform:uppercase;">πόντοι κερδήθηκαν</div>'
+                    . '</div>'
+                    . $card('#d97706', [
+                        ['Αποστολή:', '{{mission_title}}'],
+                        ['Βάρδια:', '{{shift_date}}'],
+                        ['Σύνολο πόντων:', '{{total_points}}'],
+                    ])
+                    . $btn('{{login_url}}', 'Δείτε τους Πόντους σας', '#d97706');
+                $html = $outer($hdr('#d97706', '&#9733;', 'Κερδίσατε Πόντους!'), $bdy($inner), $ftr());
+                dbExecute("UPDATE email_templates SET body_html = ? WHERE code = 'points_earned'", [$html]);
+
+                // ── ADMIN ADDED VOLUNTEER ─────────────────────────────────────────────────
+                $inner = $greet()
+                    . $p('Ο διαχειριστής σας τοποθέτησε <strong>απευθείας</strong> στην παρακάτω βάρδια:')
+                    . $card('#1e3a5f', [
+                        ['Αποστολή:', '{{mission_title}}'],
+                        ['Ημερομηνία:', '{{shift_date}}'],
+                        ['Ώρα:', '{{shift_time}}'],
+                        ['Τοποθεσία:', '{{location}}'],
+                    ])
+                    . '{{#admin_notes}}<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0;font-size:14px;">'
+                    . '<strong style="color:#92400e;">Σημείωση διαχειριστή:</strong> '
+                    . '<span style="color:#78350f;">{{admin_notes}}</span>'
+                    . '</div>{{/admin_notes}}'
+                    . $p('Παρακαλούμε να είστε στην τοποθεσία έγκαιρα.')
+                    . $btn('{{login_url}}', 'Σύνδεση στην Πλατφόρμα', '#1e3a5f');
+                $html = $outer($hdr('#1e3a5f', '&#128203;', 'Τοποθέτηση σε Βάρδια'), $bdy($inner), $ftr());
+                dbExecute("UPDATE email_templates SET body_html = ? WHERE code = 'admin_added_volunteer'", [$html]);
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
