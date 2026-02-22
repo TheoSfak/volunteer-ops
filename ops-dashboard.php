@@ -563,9 +563,16 @@ include __DIR__ . '/includes/header.php';
                 <div id="mapPanel"></div>
             </div>
             <div class="card-footer small text-muted">
-                <span class="me-3"><i class="bi bi-circle-fill text-primary"></i> GPS εθελοντή</span>
-                <span class="me-3"><i class="bi bi-circle-fill text-success"></i> Επαρκής</span>
-                <span><i class="bi bi-circle-fill text-danger"></i> Υποστελεχωμένη</span>
+                <div class="mb-1"><strong>Αποστολές:</strong>
+                    <span class="me-2"><i class="bi bi-geo-alt-fill text-success"></i> Πλήρης</span>
+                    <span class="me-2"><i class="bi bi-geo-alt-fill" style="color:#fd7e14"></i> Μερικώς</span>
+                    <span><i class="bi bi-geo-alt-fill text-danger"></i> Υποστελεχωμένη</span>
+                </div>
+                <div><strong>Εθελοντές:</strong>
+                    <span class="me-2"><i class="bi bi-circle-fill" style="color:#fd7e14"></i> Σε Κίνηση</span>
+                    <span class="me-2"><i class="bi bi-circle-fill text-success"></i> Επί Τόπου</span>
+                    <span><i class="bi bi-circle-fill text-danger"></i> Βοήθεια</span>
+                </div>
             </div>
         </div>
     </div>
