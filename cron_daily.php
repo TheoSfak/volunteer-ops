@@ -20,18 +20,23 @@ echo "Started at: " . date('Y-m-d H:i:s') . "\n";
 echo "==============================================\n\n";
 
 // 1. Task Deadline Reminders
-echo "[1/3] Processing Task Deadline Reminders...\n";
+echo "[1/4] Processing Task Deadline Reminders...\n";
 include __DIR__ . '/cron_task_reminders.php';
 echo "\n";
 
 // 2. Shift Reminders
-echo "[2/3] Processing Shift Reminders...\n";
+echo "[2/4] Processing Shift Reminders...\n";
 include __DIR__ . '/cron_shift_reminders.php';
 echo "\n";
 
 // 3. Incomplete Mission Alerts
-echo "[3/3] Processing Incomplete Mission Alerts...\n";
+echo "[3/4] Processing Incomplete Mission Alerts...\n";
 include __DIR__ . '/cron_incomplete_missions.php';
+echo "\n";
+
+// 4. Certificate Expiry Reminders
+echo "[4/4] Processing Certificate Expiry Reminders...\n";
+include __DIR__ . '/cron_certificate_expiry.php';
 echo "\n";
 
 echo "==============================================\n";

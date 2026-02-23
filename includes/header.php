@@ -768,6 +768,18 @@ $appDescription = getSetting('app_description', '');
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'certificates' ? 'active' : '' ?>" href="certificates.php">
+                    <i class="bi bi-award"></i> Πιστοποιητικά
+                </a>
+            </li>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'certificate-types' ? 'active' : '' ?>" href="certificate-types.php">
+                    <i class="bi bi-award-fill"></i> Τύποι Πιστοποιητικών
+                </a>
+            </li>
+            <?php endif; ?>
+            <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'reports' ? 'active' : '' ?>" href="reports.php">
                     <i class="bi bi-graph-up"></i> Αναφορές
                 </a>

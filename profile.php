@@ -367,6 +367,91 @@ include __DIR__ . '/includes/header.php';
 </div>
 <?php endif; ?>
 
+<!-- My Certificates -->
+<?php
+$myCertificates = dbFetchAll(
+    "SELECT vc.*, ct.name as type_name, ct.is_required
+     FROM volunteer_certificates vc
+     JOIN certificate_types ct ON vc.certificate_type_id = ct.id
+     WHERE vc.user_id = ?
+     ORDER BY ct.is_required DESC, ct.name",
+    [$user['id']]
+);
+$myRequiredMissing = dbFetchAll(
+    "SELECT ct.name FROM certificate_types ct
+     WHERE ct.is_required = 1 AND ct.is_active = 1
+       AND ct.id NOT IN (SELECT certificate_type_id FROM volunteer_certificates WHERE user_id = ?)
+     ORDER BY ct.name",
+    [$user['id']]
+);
+?>
+<?php if (!empty($myCertificates) || !empty($myRequiredMissing)): ?>
+<div class="card mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-award me-1"></i>Τα Πιστοποιητικά μου</h5>
+    </div>
+    <div class="card-body">
+        <?php if (!empty($myCertificates)): ?>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Τύπος</th>
+                        <th>Ημ. Έκδοσης</th>
+                        <th>Ημ. Λήξης</th>
+                        <th>Κατάσταση</th>
+                        <th>Φορέας</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($myCertificates as $cert):
+                        $certBadge = '<span class="badge bg-secondary">Αόριστη</span>';
+                        $rowClass = '';
+                        if ($cert['expiry_date']) {
+                            $daysLeft = (int) ((strtotime($cert['expiry_date']) - time()) / 86400);
+                            if ($daysLeft < 0) {
+                                $certBadge = '<span class="badge bg-danger">Ληγμένο (' . abs($daysLeft) . ' ημ.)</span>';
+                                $rowClass = 'table-danger';
+                            } elseif ($daysLeft <= 30) {
+                                $certBadge = '<span class="badge bg-warning text-dark">Λήγει σε ' . $daysLeft . ' ημ.</span>';
+                                $rowClass = 'table-warning';
+                            } else {
+                                $certBadge = '<span class="badge bg-success">Ενεργό</span>';
+                            }
+                        }
+                    ?>
+                    <tr class="<?= $rowClass ?>">
+                        <td class="fw-semibold">
+                            <?php if ($cert['is_required']): ?>
+                                <i class="bi bi-exclamation-circle text-danger me-1" title="Υποχρεωτικό"></i>
+                            <?php endif; ?>
+                            <?= h($cert['type_name']) ?>
+                        </td>
+                        <td><?= formatDate($cert['issue_date']) ?></td>
+                        <td><?= $cert['expiry_date'] ? formatDate($cert['expiry_date']) : '—' ?></td>
+                        <td><?= $certBadge ?></td>
+                        <td class="text-muted small"><?= h($cert['issuing_body'] ?? '—') ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php endif; ?>
+
+        <?php if (!empty($myRequiredMissing)): ?>
+        <div class="alert alert-warning <?= !empty($myCertificates) ? 'mt-3' : '' ?> mb-0">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            <strong>Ελλείποντα υποχρεωτικά:</strong>
+            <?php foreach ($myRequiredMissing as $mr): ?>
+                <span class="badge bg-danger ms-1"><?= h($mr['name']) ?></span>
+            <?php endforeach; ?>
+            <div class="form-text mt-1">Επικοινωνήστε με τη διοίκηση για την καταχώρησή τους.</div>
+        </div>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
+
 <div class="row">
     <div class="col-lg-8">
         <!-- Profile Form -->

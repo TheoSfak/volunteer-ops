@@ -371,6 +371,45 @@ CREATE TABLE IF NOT EXISTS `user_notification_preferences` (
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- CERTIFICATE TYPES TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `certificate_types` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(150) NOT NULL,
+    `description` TEXT NULL,
+    `default_validity_months` INT UNSIGNED NULL COMMENT 'NULL = no expiry',
+    `is_required` TINYINT(1) NOT NULL DEFAULT 0,
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- VOLUNTEER CERTIFICATES TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `volunteer_certificates` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT UNSIGNED NOT NULL,
+    `certificate_type_id` INT UNSIGNED NOT NULL,
+    `issue_date` DATE NOT NULL,
+    `expiry_date` DATE NULL COMMENT 'NULL = never expires',
+    `issuing_body` VARCHAR(255) NULL,
+    `certificate_number` VARCHAR(100) NULL,
+    `document_id` INT UNSIGNED NULL,
+    `notes` TEXT NULL,
+    `reminder_sent_30` TINYINT(1) NOT NULL DEFAULT 0,
+    `reminder_sent_7` TINYINT(1) NOT NULL DEFAULT 0,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_user_cert` (`user_id`, `certificate_type_id`),
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`certificate_type_id`) REFERENCES `certificate_types`(`id`) ON DELETE RESTRICT,
+    FOREIGN KEY (`document_id`) REFERENCES `volunteer_documents`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- =============================================
@@ -647,7 +686,24 @@ INSERT INTO `email_templates` (`code`, `name`, `subject`, `body_html`, `descript
     </div>
 </div>',
 'Αποστέλλεται στον εθελοντή όταν ο διαχειριστής τον προσθέτει απευθείας σε βάρδια (shift-view ή mission-view)',
-'{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}, {{admin_notes}}, {{login_url}}');
+'{{app_name}}, {{user_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}, {{admin_notes}}, {{login_url}}'),
+
+('certificate_expiry_reminder', 'Υπενθύμιση Λήξης Πιστοποιητικού', 'Υπενθύμιση: Το πιστοποιητικό σας «{{certificate_type}}» λήγει σε {{days_remaining}} ημέρες',
+'<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #f39c12; color: white; padding: 20px; text-align: center;">
+        <h1>⚠ Λήξη Πιστοποιητικού</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Αγαπητέ/ή {{user_name}},</h2>
+        <p>Σας ενημερώνουμε ότι το πιστοποιητικό σας <strong>«{{certificate_type}}»</strong> λήγει στις <strong>{{expiry_date}}</strong> (σε {{days_remaining}} ημέρες).</p>
+        <p>Παρακαλούμε φροντίστε για την ανανέωσή του εγκαίρως.</p>
+    </div>
+    <div style="padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;">
+        {{app_name}} - Σύστημα Διαχείρισης Εθελοντών
+    </div>
+</div>',
+'Αποστέλλεται όταν πλησιάζει η λήξη ενός πιστοποιητικού εθελοντή',
+'{{app_name}}, {{user_name}}, {{certificate_type}}, {{expiry_date}}, {{days_remaining}}');
 
 -- Default notification settings
 INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabled`, `email_template_id`) VALUES
@@ -659,7 +715,21 @@ INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabl
 ('shift_canceled', 'Ακύρωση Βάρδιας', 'Όταν ακυρώνεται βάρδια', 1, (SELECT id FROM email_templates WHERE code = 'shift_canceled')),
 ('points_earned', 'Κέρδος Πόντων', 'Όταν ο εθελοντής κερδίζει πόντους', 0, (SELECT id FROM email_templates WHERE code = 'points_earned')),
 ('welcome', 'Καλωσόρισμα', 'Μετά την εγγραφή νέου χρήστη', 1, (SELECT id FROM email_templates WHERE code = 'welcome')),
-('admin_added_volunteer', 'Προσθήκη από Διαχειριστή', 'Όταν ο διαχειριστής προσθέτει εθελοντή απευθείας σε βάρδια', 1, (SELECT id FROM email_templates WHERE code = 'admin_added_volunteer'));
+('admin_added_volunteer', 'Προσθήκη από Διαχειριστή', 'Όταν ο διαχειριστής προσθέτει εθελοντή απευθείας σε βάρδια', 1, (SELECT id FROM email_templates WHERE code = 'admin_added_volunteer')),
+('certificate_expiry_reminder', 'Υπενθύμιση Λήξης Πιστοποιητικού', 'Όταν πλησιάζει η λήξη ενός πιστοποιητικού του εθελοντή', 1, (SELECT id FROM email_templates WHERE code = 'certificate_expiry_reminder'));
+
+-- Default certificate types
+INSERT INTO `certificate_types` (`name`, `description`, `default_validity_months`, `is_required`) VALUES
+('Πρώτες Βοήθειες', 'Πιστοποίηση Πρώτων Βοηθειών (BLS)', 24, 1),
+('BLS/AED', 'Βασική Υποστήριξη Ζωής & Αυτόματος Εξωτερικός Απινιδωτής', 24, 0),
+('Δίπλωμα Οδήγησης', 'Άδεια οδήγησης αυτοκινήτου / μοτοσυκλέτας', NULL, 0),
+('PHTLS', 'Prehospital Trauma Life Support', 48, 0);
+
+-- Default certificate settings
+INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
+('certificate_reminder_days_first', '30'),
+('certificate_reminder_days_urgent', '7')
+ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
 
 -- =============================================
 -- TRAINING MODULE TABLES
