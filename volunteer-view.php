@@ -470,42 +470,180 @@ $quizAttempts = dbFetchAll(
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <div>
-        <h1 class="h3 mb-0"><?= h($volunteer['name']) ?><?= volunteerTypeBadge($volunteer['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
-            <?php if (!empty($volunteer['position_name'])): ?>
-                <span class="badge bg-<?= h($volunteer['position_color'] ?? 'secondary') ?> ms-1">
-                    <?php if ($volunteer['position_icon']): ?><i class="<?= h($volunteer['position_icon']) ?> me-1"></i><?php endif; ?>
-                    <?= h($volunteer['position_name']) ?>
-                </span>
+<style>
+/* Volunteer Profile Beautification */
+.hero-profile {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 1rem;
+    padding: 1.5rem;
+    color: #fff;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 8px 32px rgba(102,126,234,.25);
+    position: relative;
+    overflow: hidden;
+}
+.hero-profile::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -20%;
+    width: 300px;
+    height: 300px;
+    background: rgba(255,255,255,.06);
+    border-radius: 50%;
+}
+.hero-profile .hero-avatar {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid rgba(255,255,255,.4);
+    box-shadow: 0 4px 15px rgba(0,0,0,.2);
+}
+.hero-profile .hero-avatar-placeholder {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(255,255,255,.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    border: 3px solid rgba(255,255,255,.4);
+}
+.hero-profile .hero-actions .btn {
+    border-color: rgba(255,255,255,.4);
+    color: #fff;
+    backdrop-filter: blur(4px);
+    background: rgba(255,255,255,.1);
+    font-size: .82rem;
+    padding: .35rem .75rem;
+}
+.hero-profile .hero-actions .btn:hover {
+    background: rgba(255,255,255,.25);
+    border-color: rgba(255,255,255,.7);
+}
+.vp-stat-card {
+    border: none;
+    border-radius: .75rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,.06);
+    transition: transform .2s, box-shadow .2s;
+    overflow: hidden;
+}
+.vp-stat-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 6px 20px rgba(0,0,0,.1);
+}
+.vp-stat-card .stat-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: .6rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    color: #fff;
+    flex-shrink: 0;
+}
+.vp-stat-card .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1;
+}
+.vp-card {
+    border: none;
+    border-radius: .75rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,.05);
+    transition: box-shadow .2s;
+    overflow: hidden;
+}
+.vp-card:hover { box-shadow: 0 4px 18px rgba(0,0,0,.09); }
+.vp-card .card-header {
+    background: #fff;
+    border-bottom: 2px solid #eee;
+    padding: .75rem 1rem;
+}
+.vp-card .card-header h5 { font-size: .95rem; font-weight: 600; }
+.vp-card.border-accent-primary .card-header { border-bottom-color: #667eea; }
+.vp-card.border-accent-success .card-header { border-bottom-color: #10b981; }
+.vp-card.border-accent-info .card-header { border-bottom-color: #06b6d4; }
+.vp-card.border-accent-warning .card-header { border-bottom-color: #f59e0b; }
+.vp-card.border-accent-danger .card-header { border-bottom-color: #ef4444; }
+.vp-card.border-accent-secondary .card-header { border-bottom-color: #6c757d; }
+.vp-info-label { color: #6c757d; font-size: .82rem; margin-bottom: .15rem; }
+.vp-info-value { font-weight: 500; font-size: .92rem; margin-bottom: .75rem; }
+@media (max-width: 768px) {
+    .hero-profile { padding: 1rem; text-align: center; }
+    .hero-profile .d-flex { flex-direction: column; gap: .75rem; }
+    .hero-profile .hero-actions { justify-content: center !important; flex-wrap: wrap; }
+    .vp-stat-card .card-body { padding: .65rem !important; }
+    .vp-stat-card .stat-value { font-size: 1.2rem; }
+}
+</style>
+
+<!-- Hero Profile Header -->
+<div class="hero-profile">
+    <div class="d-flex align-items-center gap-3">
+        <?php
+        $vpPhoto = $volunteer['profile_photo'] ?? null;
+        $vpPhotoExists = $vpPhoto && file_exists(__DIR__ . '/uploads/avatars/' . $vpPhoto);
+        ?>
+        <?php if ($vpPhotoExists): ?>
+            <img src="<?= BASE_URL ?>/uploads/avatars/<?= h($vpPhoto) ?>?t=<?= time() ?>" class="hero-avatar" alt="">
+        <?php else: ?>
+            <div class="hero-avatar-placeholder"><i class="bi bi-person-fill"></i></div>
+        <?php endif; ?>
+        <div class="flex-grow-1">
+            <h1 class="h4 mb-1 text-white fw-bold">
+                <?= h($volunteer['name']) ?>
+                <?= volunteerTypeBadge($volunteer['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
+                <?php if (!empty($volunteer['position_name'])): ?>
+                    <span class="badge bg-<?= h($volunteer['position_color'] ?? 'secondary') ?> ms-1" style="font-size:.7rem">
+                        <?php if ($volunteer['position_icon']): ?><i class="<?= h($volunteer['position_icon']) ?> me-1"></i><?php endif; ?>
+                        <?= h($volunteer['position_name']) ?>
+                    </span>
+                <?php endif; ?>
+            </h1>
+            <div style="opacity:.85">
+                <i class="bi bi-envelope me-1"></i><?= h($volunteer['email']) ?>
+                <?php if ($volunteer['phone']): ?>
+                    <span class="ms-3"><i class="bi bi-telephone me-1"></i><?= h($volunteer['phone']) ?></span>
+                <?php endif; ?>
+                <?php if ($volunteer['department_name']): ?>
+                    <span class="ms-3"><i class="bi bi-building me-1"></i><?= h($volunteer['department_name']) ?></span>
+                <?php endif; ?>
+            </div>
+            <div class="mt-1">
+                <?php if ($volunteer['is_active']): ?>
+                    <span class="badge bg-success" style="font-size:.72rem"><i class="bi bi-check-circle me-1"></i>Ενεργός</span>
+                <?php else: ?>
+                    <span class="badge bg-secondary" style="font-size:.72rem">Ανενεργός</span>
+                <?php endif; ?>
+                <?= roleBadge($volunteer['role']) ?>
+                <span class="badge bg-light text-dark ms-1" style="font-size:.72rem"><i class="bi bi-calendar3 me-1"></i>Μέλος από <?= formatDate($volunteer['created_at']) ?></span>
+            </div>
+        </div>
+        <div class="hero-actions d-flex gap-2 flex-shrink-0">
+            <a href="volunteer-form.php?id=<?= $id ?>" class="btn btn-sm"><i class="bi bi-pencil me-1"></i>Επεξεργασία</a>
+            <a href="volunteer-report.php?id=<?= $id ?>" target="_blank" class="btn btn-sm"><i class="bi bi-file-earmark-text me-1"></i>Αναφορά</a>
+            <?php if (isSystemAdmin()): ?>
+                <button type="button" class="btn btn-sm" data-bs-toggle="modal" data-bs-target="#deleteDataModal">
+                    <i class="bi bi-shield-x me-1"></i>Διαγραφή Δεδομένων
+                </button>
             <?php endif; ?>
-        </h1>
-        <small class="text-muted"><?= h($volunteer['email']) ?></small>
-    </div>
-    <div>
-        <a href="volunteer-form.php?id=<?= $id ?>" class="btn btn-outline-primary">
-            <i class="bi bi-pencil me-1"></i>Επεξεργασία
-        </a>
-        <a href="volunteer-report.php?id=<?= $id ?>" target="_blank" class="btn btn-outline-secondary">
-            <i class="bi bi-file-earmark-text me-1"></i>Αναφορά
-        </a>        <?php if (isSystemAdmin()): ?>
-            <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteDataModal">
-                <i class="bi bi-shield-x me-1"></i>Διαγραφή Προσωπικών Δεδομένων
-            </button>
-        <?php endif; ?>        <a href="volunteers.php" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left me-1"></i>Πίσω
-        </a>
+            <a href="volunteers.php" class="btn btn-sm"><i class="bi bi-arrow-left me-1"></i>Πίσω</a>
+        </div>
     </div>
 </div>
 
 <!-- Annual Mission Attendance Progress -->
-<div class="card mb-4 border-<?= $attendanceColor ?>">
+<div class="card vp-card mb-4" style="border-left: 4px solid var(--bs-<?= $attendanceColor ?>)">
     <div class="card-body py-3">
         <div class="d-flex justify-content-between align-items-center mb-2">
             <div>
-                <i class="bi bi-calendar-check me-1"></i>
+                <i class="bi bi-calendar-check text-<?= $attendanceColor ?> me-1"></i>
                 <strong>Παρουσίες Αποστολών <?= $currentYear ?></strong>
-                <span class="text-muted ms-2">(στόχος: <?= $attendanceGoal ?> για παραμονή ενεργού μέλους)</span>
+                <span class="text-muted ms-2 d-none d-md-inline">(στόχος: <?= $attendanceGoal ?>)</span>
             </div>
             <div>
                 <span class="badge bg-<?= $attendanceColor ?> fs-6"><?= $missionAttendance ?> / <?= $attendanceGoal ?></span>
@@ -531,35 +669,47 @@ include __DIR__ . '/includes/header.php';
 
 <!-- Stats Cards -->
 <div class="row g-3 mb-4">
-    <div class="col-md-3">
-        <div class="card stats-card primary">
-            <div class="card-body text-center">
-                <h3 class="mb-0"><?= $stats['total_shifts'] ?></h3>
-                <small class="text-muted">Βάρδιες (εγκεκ.)</small>
+    <div class="col-6 col-md-3">
+        <div class="card vp-stat-card">
+            <div class="card-body d-flex align-items-center gap-3 py-3 px-3">
+                <div class="stat-icon" style="background:linear-gradient(135deg,#667eea,#764ba2)"><i class="bi bi-calendar2-check"></i></div>
+                <div>
+                    <div class="stat-value text-dark"><?= $stats['total_shifts'] ?></div>
+                    <small class="text-muted">Βάρδιες</small>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card stats-card success">
-            <div class="card-body text-center">
-                <h3 class="mb-0"><?= $stats['attended_shifts'] ?></h3>
-                <small class="text-muted">Παρουσίες</small>
+    <div class="col-6 col-md-3">
+        <div class="card vp-stat-card">
+            <div class="card-body d-flex align-items-center gap-3 py-3 px-3">
+                <div class="stat-icon" style="background:linear-gradient(135deg,#10b981,#059669)"><i class="bi bi-person-check"></i></div>
+                <div>
+                    <div class="stat-value text-dark"><?= $stats['attended_shifts'] ?></div>
+                    <small class="text-muted">Παρουσίες</small>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card stats-card info">
-            <div class="card-body text-center">
-                <h3 class="mb-0"><?= number_format($stats['total_hours'], 1) ?></h3>
-                <small class="text-muted">Ώρες</small>
+    <div class="col-6 col-md-3">
+        <div class="card vp-stat-card">
+            <div class="card-body d-flex align-items-center gap-3 py-3 px-3">
+                <div class="stat-icon" style="background:linear-gradient(135deg,#06b6d4,#0891b2)"><i class="bi bi-clock-history"></i></div>
+                <div>
+                    <div class="stat-value text-dark"><?= number_format($stats['total_hours'], 1) ?></div>
+                    <small class="text-muted">Ώρες</small>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card stats-card warning">
-            <div class="card-body text-center">
-                <h3 class="mb-0"><?= number_format($volunteer['total_points']) ?></h3>
-                <small class="text-muted">Πόντοι</small>
+    <div class="col-6 col-md-3">
+        <div class="card vp-stat-card">
+            <div class="card-body d-flex align-items-center gap-3 py-3 px-3">
+                <div class="stat-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><i class="bi bi-star-fill"></i></div>
+                <div>
+                    <div class="stat-value text-dark"><?= number_format($volunteer['total_points']) ?></div>
+                    <small class="text-muted">Πόντοι</small>
+                </div>
             </div>
         </div>
     </div>
@@ -568,60 +718,60 @@ include __DIR__ . '/includes/header.php';
 <div class="row">
     <div class="col-lg-8">
         <!-- Profile Info -->
-        <div class="card mb-4">
+        <div class="card vp-card border-accent-primary mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-person me-1"></i>Στοιχεία Προφίλ</h5>
+                <h5 class="mb-0"><i class="bi bi-person-vcard text-primary me-2"></i>Στοιχεία Προφίλ</h5>
             </div>
             <div class="card-body">
-                <div class="row">
+                <div class="row g-2">
                     <div class="col-md-6">
-                        <p><strong>Τηλέφωνο:</strong> <?= h($volunteer['phone'] ?: '-') ?></p>
-                        <p><strong>Σώμα:</strong> <?= h($volunteer['department_name'] ?: '-') ?></p>
-                        <p><strong>Παράρτημα:</strong> 
+                        <div class="vp-info-label"><i class="bi bi-telephone me-1"></i>Τηλέφωνο</div>
+                        <div class="vp-info-value"><?= h($volunteer['phone'] ?: '-') ?></div>
+                        <div class="vp-info-label"><i class="bi bi-building me-1"></i>Σώμα</div>
+                        <div class="vp-info-value"><?= h($volunteer['department_name'] ?: '-') ?></div>
+                        <div class="vp-info-label"><i class="bi bi-geo-alt me-1"></i>Παράρτημα</div>
+                        <div class="vp-info-value">
                             <?php if ($volunteer['warehouse_name']): ?>
                                 <span class="badge bg-info"><i class="bi bi-geo-alt-fill me-1"></i><?= h($volunteer['warehouse_name']) ?></span>
-                            <?php else: ?>
-                                -
-                            <?php endif; ?>
-                        </p>
-                        <p><strong>Ρόλος:</strong> <?= roleBadge($volunteer['role']) ?></p>
-                        <p><strong>Κατάσταση:</strong> 
-                            <?php if ($volunteer['is_active']): ?>
-                                <span class="badge bg-success">Ενεργός</span>
-                            <?php else: ?>
-                                <span class="badge bg-secondary">Ανενεργός</span>
-                            <?php endif; ?>
-                        </p>
+                            <?php else: ?>-<?php endif; ?>
+                        </div>
                     </div>
                     <div class="col-md-6">
-                        <p><strong>Ταυτότητα:</strong> <?= h($volunteer['id_card'] ?: '-') ?></p>
+                        <div class="vp-info-label"><i class="bi bi-card-text me-1"></i>Ταυτότητα</div>
+                        <div class="vp-info-value"><?= h($volunteer['id_card'] ?: '-') ?></div>
                         <?php if (!empty($volunteer['position_name'])): ?>
-                        <p><strong>Θέση / Ρόλος:</strong>
+                        <div class="vp-info-label"><i class="bi bi-person-gear me-1"></i>Θέση / Ρόλος</div>
+                        <div class="vp-info-value">
                             <span class="badge bg-<?= h($volunteer['position_color'] ?? 'secondary') ?>">
                                 <?php if ($volunteer['position_icon']): ?><i class="<?= h($volunteer['position_icon']) ?> me-1"></i><?php endif; ?>
                                 <?= h($volunteer['position_name']) ?>
                             </span>
-                        </p>
+                        </div>
                         <?php endif; ?>
-                        <p><strong>Α.Μ.Κ.Α.:</strong> <?= h($volunteer['amka'] ?: '-') ?></p>
-                        <p><strong>Άδεια Οδήγησης:</strong> <?= h($volunteer['driving_license'] ?: '-') ?></p>
-                        <p><strong>Αρ. Κυκλοφορίας:</strong> <?= h($volunteer['vehicle_plate'] ?: '-') ?></p>
+                        <div class="vp-info-label"><i class="bi bi-hash me-1"></i>Α.Μ.Κ.Α.</div>
+                        <div class="vp-info-value"><?= h($volunteer['amka'] ?: '-') ?></div>
+                        <div class="vp-info-label"><i class="bi bi-car-front me-1"></i>Άδεια Οδήγησης / Όχημα</div>
+                        <div class="vp-info-value"><?= h($volunteer['driving_license'] ?: '-') ?> <?= $volunteer['vehicle_plate'] ? '/ ' . h($volunteer['vehicle_plate']) : '' ?></div>
                     </div>
                 </div>
                 
-                <hr>
-                <div class="row">
+                <hr class="my-3">
+                <div class="row g-2">
                     <div class="col-md-6">
-                        <h6 class="text-muted mb-2"><i class="bi bi-person-badge me-1"></i>Μεγέθη Στολής</h6>
-                        <p><strong>Παντελόνι:</strong> <?= h($volunteer['pants_size'] ?: '-') ?></p>
-                        <p><strong>Χιτώνιο:</strong> <?= h($volunteer['shirt_size'] ?: '-') ?></p>
-                        <p><strong>Μπλούζα:</strong> <?= h($volunteer['blouse_size'] ?: '-') ?></p>
-                        <p><strong>Fleece:</strong> <?= h($volunteer['fleece_size'] ?: '-') ?></p>
+                        <h6 class="text-primary mb-2" style="font-size:.85rem"><i class="bi bi-person-badge me-1"></i>Μεγέθη Στολής</h6>
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            <span class="badge bg-light text-dark border"><i class="bi bi-slash-circle me-1"></i>Παντ: <?= h($volunteer['pants_size'] ?: '-') ?></span>
+                            <span class="badge bg-light text-dark border"><i class="bi bi-slash-circle me-1"></i>Χιτ: <?= h($volunteer['shirt_size'] ?: '-') ?></span>
+                            <span class="badge bg-light text-dark border"><i class="bi bi-slash-circle me-1"></i>Μπλ: <?= h($volunteer['blouse_size'] ?: '-') ?></span>
+                            <span class="badge bg-light text-dark border"><i class="bi bi-slash-circle me-1"></i>Fl: <?= h($volunteer['fleece_size'] ?: '-') ?></span>
+                        </div>
                     </div>
                     <div class="col-md-6">
-                        <h6 class="text-muted mb-2"><i class="bi bi-journal-text me-1"></i>Μητρώα</h6>
-                        <p><strong>Μητρώο ΕΠΙΔΡΑΣΙΣ:</strong> <?= h($volunteer['registry_epidrasis'] ?: '-') ?></p>
-                        <p><strong>Μητρώο Γ.Γ.Π.Π.:</strong> <?= h($volunteer['registry_ggpp'] ?: '-') ?></p>
+                        <h6 class="text-primary mb-2" style="font-size:.85rem"><i class="bi bi-journal-text me-1"></i>Μητρώα</h6>
+                        <div class="vp-info-label">ΕΠΙΔΡΑΣΙΣ</div>
+                        <div class="vp-info-value"><?= h($volunteer['registry_epidrasis'] ?: '-') ?></div>
+                        <div class="vp-info-label">Γ.Γ.Π.Π.</div>
+                        <div class="vp-info-value"><?= h($volunteer['registry_ggpp'] ?: '-') ?></div>
                     </div>
                 </div>
 
@@ -682,9 +832,9 @@ include __DIR__ . '/includes/header.php';
         </div>
 
         <!-- Skills -->
-        <div class="card mb-4" id="skills">
+        <div class="card vp-card border-accent-info mb-4" id="skills">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-tools me-1"></i>Δεξιότητες</h5>
+                <h5 class="mb-0"><i class="bi bi-tools text-info me-2"></i>Δεξιότητες</h5>
                 <?php if (isAdmin()): ?>
                 <button class="btn btn-sm btn-outline-primary" type="button"
                         data-bs-toggle="collapse" data-bs-target="#skillsEditForm">
@@ -766,9 +916,9 @@ include __DIR__ . '/includes/header.php';
         </div>
 
         <!-- Certificates -->
-        <div class="card mb-4" id="certificates">
+        <div class="card vp-card border-accent-warning mb-4" id="certificates">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-award me-1"></i>Πιστοποιητικά</h5>
+                <h5 class="mb-0"><i class="bi bi-award text-warning me-2"></i>Πιστοποιητικά</h5>
                 <?php if (isAdmin()): ?>
                 <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addCertModal">
                     <i class="bi bi-plus-circle me-1"></i>Προσθήκη
@@ -862,9 +1012,9 @@ include __DIR__ . '/includes/header.php';
         </div>
 
         <!-- Participations -->
-        <div class="card mb-4">
+        <div class="card vp-card border-accent-success mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-calendar-check me-1"></i>Πρόσφατες Συμμετοχές</h5>
+                <h5 class="mb-0"><i class="bi bi-calendar-check text-success me-2"></i>Πρόσφατες Συμμετοχές</h5>
             </div>
             <div class="card-body">
                 <?php if (empty($participations)): ?>
@@ -906,9 +1056,9 @@ include __DIR__ . '/includes/header.php';
         </div>
         
         <!-- Exam & Quiz History -->
-        <div class="card mb-4">
+        <div class="card vp-card border-accent-secondary mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-file-earmark-text me-1"></i>Ιστορικό Εξετάσεων & Κουίζ</h5>
+                <h5 class="mb-0"><i class="bi bi-file-earmark-text text-secondary me-2"></i>Ιστορικό Εξετάσεων & Κουίζ</h5>
             </div>
             <div class="card-body">
                 <?php if (empty($examAttempts) && empty($quizAttempts)): ?>
@@ -976,9 +1126,9 @@ include __DIR__ . '/includes/header.php';
     
     <div class="col-lg-4">
         <!-- Profile Photo -->
-        <div class="card mb-4">
+        <div class="card vp-card border-accent-primary mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-camera me-1"></i>Φωτογραφία Προφίλ</h5>
+                <h5 class="mb-0"><i class="bi bi-camera text-primary me-2"></i>Φωτογραφία Προφίλ</h5>
             </div>
             <div class="card-body text-center">
                 <?php
@@ -1025,9 +1175,9 @@ include __DIR__ . '/includes/header.php';
         </div>
         
         <!-- Achievements -->
-        <div class="card mb-4">
+        <div class="card vp-card border-accent-warning mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-trophy me-1"></i>Επιτεύγματα</h5>
+                <h5 class="mb-0"><i class="bi bi-trophy text-warning me-2"></i>Επιτεύγματα</h5>
             </div>
             <div class="card-body">
                 <?php if (empty($achievements)): ?>
@@ -1051,10 +1201,10 @@ include __DIR__ . '/includes/header.php';
             $docCount   = count($documents);
             $docsPreview = array_slice($documents, 0, 5);
         ?>
-        <div class="card mb-4" id="documents">
+        <div class="card vp-card border-accent-danger mb-4" id="documents">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">
-                    <i class="bi bi-folder2-open me-1"></i>Αρχεία & Έγγραφα
+                    <i class="bi bi-folder2-open text-danger me-2"></i>Αρχεία & Έγγραφα
                     <?php if ($docCount > 0): ?>
                     <span class="badge bg-secondary ms-1"><?= $docCount ?></span>
                     <?php endif; ?>
