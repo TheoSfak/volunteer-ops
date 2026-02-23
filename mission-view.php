@@ -87,17 +87,14 @@ if (isAdmin()) {
     );
 }
 
-// Get debrief if mission is completed
-$debrief = null;
-if ($mission['status'] === STATUS_COMPLETED) {
-    $debrief = dbFetchOne(
-        "SELECT md.*, u.name as submitter_name 
-         FROM mission_debriefs md
-         JOIN users u ON md.submitted_by = u.id
-         WHERE md.mission_id = ?",
-        [$id]
-    );
-}
+// Get debrief if it exists (even if status is not completed yet, e.g. reopened)
+$debrief = dbFetchOne(
+    "SELECT md.*, u.name as submitter_name 
+     FROM mission_debriefs md
+     JOIN users u ON md.submitted_by = u.id
+     WHERE md.mission_id = ?",
+    [$id]
+);
 
 // Handle actions
 if (isPost()) {
@@ -238,6 +235,15 @@ if (isPost()) {
             if (isAdmin() && $mission['status'] === STATUS_CLOSED) {
                 // Redirect to debrief form instead of completing immediately
                 redirect('mission-debrief.php?id=' . $id);
+            }
+            break;
+            
+        case 'complete_only':
+            if (isAdmin() && $mission['status'] === STATUS_CLOSED) {
+                dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_COMPLETED, $id]);
+                logAudit('complete_only', 'missions', $id);
+                setFlash('success', 'Η αποστολή ολοκληρώθηκε (χωρίς αλλαγή στην αναφορά).');
+                redirect('mission-view.php?id=' . $id);
             }
             break;
             
@@ -788,13 +794,32 @@ include __DIR__ . '/includes/header.php';
                         <a href="attendance.php?mission_id=<?= $mission['id'] ?>" class="btn btn-info w-100">
                             <i class="bi bi-clipboard-check me-1"></i>Διαχείριση Παρουσιών
                         </a>
-                        <form method="post">
-                            <?= csrfField() ?>
-                            <input type="hidden" name="action" value="complete">
-                            <button type="submit" class="btn btn-primary w-100">
+                        <?php if ($debrief): ?>
+                            <button type="button" class="btn btn-primary w-100" onclick="confirmDebriefEdit()">
                                 <i class="bi bi-check-circle me-1"></i>Ολοκλήρωση & Αναφορά
                             </button>
-                        </form>
+                            <script>
+                            function confirmDebriefEdit() {
+                                if (confirm('Υπάρχει ήδη αναφορά (debrief) για αυτή την αποστολή.\n\nΘέλετε να την επεξεργαστείτε;\n\nΠατήστε "OK" για επεξεργασία, ή "Ακύρωση" για απλή ολοκλήρωση της αποστολής χωρίς αλλαγή στην αναφορά.')) {
+                                    window.location.href = 'mission-debrief.php?id=<?= $mission['id'] ?>';
+                                } else {
+                                    document.getElementById('completeOnlyForm').submit();
+                                }
+                            }
+                            </script>
+                            <form id="completeOnlyForm" method="post" style="display:none;">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="complete_only">
+                            </form>
+                        <?php else: ?>
+                            <form method="post">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="complete">
+                                <button type="submit" class="btn btn-primary w-100">
+                                    <i class="bi bi-check-circle me-1"></i>Ολοκλήρωση & Αναφορά
+                                </button>
+                            </form>
+                        <?php endif; ?>
                     <?php endif; ?>
                     
                     <?php if (in_array($mission['status'], [STATUS_DRAFT, STATUS_OPEN])): ?>
