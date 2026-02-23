@@ -89,9 +89,9 @@ if (isAdmin()) {
 
 // Get debrief if it exists (even if status is not completed yet, e.g. reopened)
 $debrief = dbFetchOne(
-    "SELECT md.*, u.name as submitter_name 
+    "SELECT md.*, COALESCE(u.name, 'Άγνωστος') as submitter_name 
      FROM mission_debriefs md
-     JOIN users u ON md.submitted_by = u.id
+     LEFT JOIN users u ON md.submitted_by = u.id
      WHERE md.mission_id = ?",
     [$id]
 );
