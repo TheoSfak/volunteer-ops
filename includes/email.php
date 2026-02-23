@@ -8,16 +8,19 @@ if (!defined('VOLUNTEEROPS')) {
 }
 
 /**
- * Get SMTP settings from database
+ * Get SMTP settings from database (cached per request)
  */
 function getSmtpSettings(): array {
+    static $cached = null;
+    if ($cached !== null) return $cached;
+
     $settings = [];
     $rows = dbFetchAll("SELECT setting_key, setting_value FROM settings WHERE setting_key LIKE 'smtp_%'");
     foreach ($rows as $row) {
         $settings[$row['setting_key']] = $row['setting_value'];
     }
     
-    return [
+    $cached = [
         'host' => $settings['smtp_host'] ?? '',
         'port' => (int)($settings['smtp_port'] ?? 587),
         'username' => $settings['smtp_username'] ?? '',
@@ -26,6 +29,7 @@ function getSmtpSettings(): array {
         'from_email' => $settings['smtp_from_email'] ?? '',
         'from_name' => $settings['smtp_from_name'] ?? 'VolunteerOps',
     ];
+    return $cached;
 }
 
 /**
@@ -353,13 +357,13 @@ function sendNotificationEmail(string $notificationCode, string $to, array $vari
         return ['success' => false, 'message' => 'Δεν βρέθηκε το template'];
     }
     
-    // Add default variables
-    $appName = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'app_name'") ?? 'VolunteerOps';
+    // Add default variables (using getSetting() which is cached per request — zero extra queries)
+    $appName = getSetting('app_name', 'VolunteerOps');
     $variables['app_name'] = $appName;
     $variables['login_url'] = rtrim(BASE_URL ?? 'http://localhost/volunteerops', '/') . '/login.php';
 
     // Inject logo_html — resolves to an <img> if a logo is configured, empty string otherwise
-    $logoFile = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'app_logo'") ?? '';
+    $logoFile = getSetting('app_logo', '');
     if (!empty($logoFile)) {
         $baseUrl = rtrim(BASE_URL ?? 'http://localhost/volunteerops', '/');
         $logoUrl = $baseUrl . '/uploads/logos/' . $logoFile;

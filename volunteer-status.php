@@ -20,7 +20,6 @@ if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_to
     echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
     exit;
 }
-$newCsrf = $_SESSION['csrf_token'];
 
 $userId  = getCurrentUserId();
 $prId    = (int) post('pr_id');
@@ -58,22 +57,17 @@ try {
     exit;
 }
 
-// If needs_help → notify all admins + shift leader
+// If needs_help → notify all admins + shift leader (single bulk INSERT)
 if ($status === 'needs_help') {
     $currentUser = getCurrentUser();
     $notifyTitle   = '🆘 Χρειάζεται Βοήθεια!';
     $notifyMessage = h($currentUser['name']) . ' χρειάζεται βοήθεια στην αποστολή «' . $pr['mission_title'] . '». Ανοίξτε το Επιχ. Dashboard.';
 
-    // Notify all system/department admins
+    // Collect all recipient IDs (admins + mission shift leaders)
     $admins = dbFetchAll(
         "SELECT id FROM users WHERE role IN ('" . ROLE_SYSTEM_ADMIN . "', '" . ROLE_DEPARTMENT_ADMIN . "') AND is_active = 1",
         []
     );
-    foreach ($admins as $admin) {
-        sendNotification($admin['id'], $notifyTitle, $notifyMessage, 'danger');
-    }
-
-    // Also notify shift leaders approved for same mission
     $leaders = dbFetchAll(
         "SELECT DISTINCT u.id FROM users u
          JOIN participation_requests pr2 ON pr2.volunteer_id = u.id
@@ -81,8 +75,12 @@ if ($status === 'needs_help') {
          WHERE s.mission_id = ? AND u.role = '" . ROLE_SHIFT_LEADER . "' AND u.is_active = 1 AND pr2.status = '" . PARTICIPATION_APPROVED . "'",
         [$pr['mission_id']]
     );
-    foreach ($leaders as $leader) {
-        sendNotification($leader['id'], $notifyTitle, $notifyMessage, 'danger');
+    $recipientIds = array_unique(array_merge(
+        array_column($admins, 'id'),
+        array_column($leaders, 'id')
+    ));
+    if (!empty($recipientIds)) {
+        sendBulkNotifications($recipientIds, $notifyTitle, $notifyMessage, 'danger');
     }
 
     logAudit('needs_help', 'participation_requests', $prId);
@@ -94,4 +92,4 @@ $labels = [
     'needs_help'  => '🆘 Χρειάζεται Βοήθεια',
 ];
 
-echo json_encode(['ok' => true, 'label' => $labels[$status], 'status' => $status, 'new_csrf' => $newCsrf]);
+echo json_encode(['ok' => true, 'label' => $labels[$status], 'status' => $status]);

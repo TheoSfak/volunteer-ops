@@ -45,31 +45,40 @@ if (isPost()) {
         
         // Anonymize user data
         $anonymizedEmail = 'deleted_' . $id . '_' . time() . '@deleted.local';
-        dbExecute(
-            "UPDATE users SET 
-             name = ?, 
-             email = ?, 
-             phone = NULL, 
-             is_active = 0,
-             updated_at = NOW() 
-             WHERE id = ?",
-            ['[Διαγραμμένος Χρήστης]', $anonymizedEmail, $id]
-        );
         
-        // Delete volunteer profile
-        dbExecute("DELETE FROM volunteer_profiles WHERE user_id = ?", [$id]);
-        
-        // Delete user skills
-        dbExecute("DELETE FROM user_skills WHERE user_id = ?", [$id]);
-        
-        // Delete user achievements
-        dbExecute("DELETE FROM user_achievements WHERE user_id = ?", [$id]);
-        
-        // Delete notifications
-        dbExecute("DELETE FROM notifications WHERE user_id = ?", [$id]);
-        
-        logAudit('delete_personal_data', 'users', $id, 'GDPR data deletion');
-        setFlash('success', 'Τα προσωπικά δεδομένα διαγράφηκαν επιτυχώς.');
+        db()->beginTransaction();
+        try {
+            dbExecute(
+                "UPDATE users SET 
+                 name = ?, 
+                 email = ?, 
+                 phone = NULL, 
+                 is_active = 0,
+                 updated_at = NOW() 
+                 WHERE id = ?",
+                ['[Διαγραμμένος Χρήστης]', $anonymizedEmail, $id]
+            );
+            
+            // Delete volunteer profile
+            dbExecute("DELETE FROM volunteer_profiles WHERE user_id = ?", [$id]);
+            
+            // Delete user skills
+            dbExecute("DELETE FROM user_skills WHERE user_id = ?", [$id]);
+            
+            // Delete user achievements
+            dbExecute("DELETE FROM user_achievements WHERE user_id = ?", [$id]);
+            
+            // Delete notifications
+            dbExecute("DELETE FROM notifications WHERE user_id = ?", [$id]);
+            
+            logAudit('delete_personal_data', 'users', $id, 'GDPR data deletion');
+            
+            db()->commit();
+            setFlash('success', 'Τα προσωπικά δεδομένα διαγράφηκαν επιτυχώς.');
+        } catch (Exception $e) {
+            db()->rollBack();
+            setFlash('error', 'Σφάλμα κατά τη διαγραφή προσωπικών δεδομένων.');
+        }
         redirect('volunteers.php');
     }
 
