@@ -597,83 +597,138 @@ include __DIR__ . '/includes/header.php';
 <div class="row">
     <div class="col-lg-8">
         <!-- Mission Details -->
-        <div class="card mb-4">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Λεπτομέρειες</h5>
+        <?php
+        $startDt = new DateTime($mission['start_datetime']);
+        $endDt   = new DateTime($mission['end_datetime']);
+        $diff    = $startDt->diff($endDt);
+        $totalHours = round(($diff->days * 24) + $diff->h + ($diff->i / 60), 1);
+        ?>
+        <div class="card mb-4" style="border:2px solid #0d6efd;border-radius:10px;overflow:hidden">
+            <div class="card-header d-flex justify-content-between align-items-center py-2" style="background:linear-gradient(135deg,#dbeafe 0%,#eff6ff 100%);border-bottom:2px solid #0d6efd">
+                <h6 class="mb-0 fw-bold text-dark"><i class="bi bi-info-circle-fill me-2 text-primary"></i>Λεπτομέρειες</h6>
                 <?= statusBadge($mission['status']) ?>
             </div>
-            <div class="card-body">
+            <div class="card-body py-3 px-3">
+
                 <?php if ($mission['status'] === STATUS_CANCELED && $mission['cancellation_reason']): ?>
-                    <div class="alert alert-danger">
-                        <i class="bi bi-x-circle me-1"></i>
+                    <div class="alert alert-danger py-2 mb-3">
+                        <i class="bi bi-x-circle-fill me-1"></i>
                         <strong>Λόγος Ακύρωσης:</strong> <?= h($mission['cancellation_reason']) ?>
                     </div>
                 <?php endif; ?>
-                
+
                 <?php if ($mission['description']): ?>
-                    <p><?= nl2br(h($mission['description'])) ?></p>
-                    <hr>
+                    <div class="mb-3 p-2 rounded-2 text-dark" style="background:#f0f6ff;border:1px solid #bfdbfe;font-size:.93rem">
+                        <?= nl2br(h($mission['description'])) ?>
+                    </div>
                 <?php endif; ?>
-                
-                <div class="row">
-                    <div class="col-md-6">
-                        <p><strong><i class="bi bi-geo-alt me-1"></i>Τοποθεσία:</strong><br>
-                        <?= h($mission['location']) ?>
-                        <?php if ($mission['location_details']): ?>
-                            <br><small class="text-muted"><?= h($mission['location_details']) ?></small>
-                        <?php endif; ?>
-                        </p>
-                        
-                        <p><strong><i class="bi bi-building me-1"></i>Τμήμα:</strong><br>
-                        <?= h($mission['department_name'] ?? '-') ?></p>
-                        
-                        <p><strong><i class="bi bi-tag me-1"></i>Τύπος:</strong><br>
-                        <?= h($GLOBALS['MISSION_TYPES'][$mission['type']] ?? $mission['type']) ?></p>
+
+                <!-- Info grid -->
+                <div class="row g-2 mb-3">
+                    <!-- Location -->
+                    <div class="col-sm-6">
+                        <div class="d-flex align-items-start gap-2 p-2 rounded-2 h-100" style="background:#f8faff;border:1px solid #dbeafe">
+                            <div class="text-primary mt-1" style="font-size:1.1rem"><i class="bi bi-geo-alt-fill"></i></div>
+                            <div>
+                                <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.05em;font-size:.72rem">Τοποθεσία</div>
+                                <div class="fw-semibold text-dark" style="font-size:.9rem"><?= h($mission['location']) ?></div>
+                                <?php if ($mission['location_details']): ?>
+                                    <div class="text-muted" style="font-size:.8rem"><?= h($mission['location_details']) ?></div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
                     </div>
-                    <div class="col-md-6">
-                        <p><strong><i class="bi bi-calendar-event me-1"></i>Έναρξη:</strong><br>
-                        <?= formatDateGreek($mission['start_datetime']) ?><br>
-                        <small class="text-muted"><?= formatDateTime($mission['start_datetime'], 'H:i') ?></small></p>
-                        
-                        <p><strong><i class="bi bi-calendar-check me-1"></i>Λήξη:</strong><br>
-                        <?= formatDateGreek($mission['end_datetime']) ?><br>
-                        <small class="text-muted"><?= formatDateTime($mission['end_datetime'], 'H:i') ?></small></p>
-                        
-                        <p><strong><i class="bi bi-person me-1"></i>Δημιουργός:</strong><br>
-                        <?= h($mission['creator_name'] ?? '-') ?></p>
-                        
-                        <?php if ($mission['responsible_user_id']): ?>
-                            <p><strong><i class="bi bi-star me-1 text-warning"></i>Υπεύθυνος:</strong><br>
-                            <span class="badge bg-warning text-dark"><?= h($mission['responsible_name']) ?></span></p>
-                        <?php endif; ?>
+                    <!-- Department -->
+                    <div class="col-sm-6">
+                        <div class="d-flex align-items-start gap-2 p-2 rounded-2 h-100" style="background:#f8faff;border:1px solid #dbeafe">
+                            <div class="text-primary mt-1" style="font-size:1.1rem"><i class="bi bi-building-fill"></i></div>
+                            <div>
+                                <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.05em;font-size:.72rem">Τμήμα</div>
+                                <div class="fw-semibold text-dark" style="font-size:.9rem"><?= h($mission['department_name'] ?? '-') ?></div>
+                            </div>
+                        </div>
                     </div>
+                    <!-- Type -->
+                    <div class="col-sm-6">
+                        <div class="d-flex align-items-start gap-2 p-2 rounded-2 h-100" style="background:#f8faff;border:1px solid #dbeafe">
+                            <div class="text-primary mt-1" style="font-size:1.1rem"><i class="bi bi-tag-fill"></i></div>
+                            <div>
+                                <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.05em;font-size:.72rem">Τύπος</div>
+                                <div class="fw-semibold text-dark" style="font-size:.9rem"><?= h($GLOBALS['MISSION_TYPES'][$mission['type']] ?? $mission['type']) ?></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Creator -->
+                    <div class="col-sm-6">
+                        <div class="d-flex align-items-start gap-2 p-2 rounded-2 h-100" style="background:#f8faff;border:1px solid #dbeafe">
+                            <div class="text-primary mt-1" style="font-size:1.1rem"><i class="bi bi-person-fill"></i></div>
+                            <div>
+                                <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.05em;font-size:.72rem">Δημιουργός</div>
+                                <div class="fw-semibold text-dark" style="font-size:.9rem"><?= h($mission['creator_name'] ?? '-') ?></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Start datetime -->
+                    <div class="col-sm-6">
+                        <div class="d-flex align-items-start gap-2 p-2 rounded-2 h-100" style="background:#f0fdf4;border:1px solid #bbf7d0">
+                            <div class="text-success mt-1" style="font-size:1.1rem"><i class="bi bi-calendar-event-fill"></i></div>
+                            <div>
+                                <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.05em;font-size:.72rem">Έναρξη</div>
+                                <div class="fw-semibold text-dark" style="font-size:.9rem"><?= formatDateGreek($mission['start_datetime']) ?></div>
+                                <div class="text-success fw-bold" style="font-size:.9rem"><?= formatDateTime($mission['start_datetime'], 'H:i') ?></div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- End datetime -->
+                    <div class="col-sm-6">
+                        <div class="d-flex align-items-start gap-2 p-2 rounded-2 h-100" style="background:#fff7ed;border:1px solid #fed7aa">
+                            <div class="text-warning mt-1" style="font-size:1.1rem"><i class="bi bi-calendar-check-fill"></i></div>
+                            <div>
+                                <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.05em;font-size:.72rem">Λήξη</div>
+                                <div class="fw-semibold text-dark" style="font-size:.9rem"><?= formatDateGreek($mission['end_datetime']) ?></div>
+                                <div class="fw-bold" style="font-size:.9rem;color:#d97706"><?= formatDateTime($mission['end_datetime'], 'H:i') ?></div>
+                            </div>
+                        </div>
+                    </div>
+                    <?php if ($mission['responsible_user_id']): ?>
+                    <!-- Responsible -->
+                    <div class="col-sm-6">
+                        <div class="d-flex align-items-start gap-2 p-2 rounded-2 h-100" style="background:#fefce8;border:1px solid #fde68a">
+                            <div class="mt-1" style="font-size:1.1rem;color:#d97706"><i class="bi bi-star-fill"></i></div>
+                            <div>
+                                <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.05em;font-size:.72rem">Υπεύθυνος</div>
+                                <span class="badge bg-warning text-dark mt-1"><?= h($mission['responsible_name']) ?></span>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
-                
-                <!-- Mission Hours -->
-                <?php
-                $startDt = new DateTime($mission['start_datetime']);
-                $endDt = new DateTime($mission['end_datetime']);
-                $diff = $startDt->diff($endDt);
-                $totalHours = ($diff->days * 24) + $diff->h + ($diff->i / 60);
-                $totalHours = round($totalHours, 1);
-                ?>
-                <div class="alert alert-info alert-permanent mt-3 mb-0">
-                    <h4 class="alert-heading mb-0 text-center">
-                        <i class="bi bi-clock-fill me-2"></i>ΩΡΕΣ ΑΠΟΣΤΟΛΗΣ: <?= $totalHours ?> ΩΡΕΣ
-                    </h4>
+
+                <!-- Hours banner -->
+                <div class="d-flex align-items-center justify-content-center gap-2 rounded-2 py-2 px-3" style="background:linear-gradient(90deg,#0d6efd18 0%,#0d6efd0a 100%);border:1.5px solid #bfdbfe">
+                    <i class="bi bi-clock-fill text-primary" style="font-size:1.1rem"></i>
+                    <span class="fw-bold text-primary" style="font-size:1rem">Διάρκεια Αποστολής:</span>
+                    <span class="badge bg-primary px-3 py-2" style="font-size:.95rem"><?= $totalHours ?> ώρες</span>
                 </div>
-                
+
                 <?php if ($mission['requirements']): ?>
-                    <hr>
-                    <p><strong><i class="bi bi-list-check me-1"></i>Απαιτήσεις:</strong></p>
-                    <p><?= nl2br(h($mission['requirements'])) ?></p>
+                    <div class="mt-3">
+                        <div class="text-muted small fw-semibold mb-1 text-uppercase" style="letter-spacing:.05em"><i class="bi bi-list-check me-1"></i>Απαιτήσεις</div>
+                        <div class="p-2 rounded-2 text-dark" style="background:#f8faff;border:1px solid #dbeafe;font-size:.93rem">
+                            <?= nl2br(h($mission['requirements'])) ?>
+                        </div>
+                    </div>
                 <?php endif; ?>
-                
+
                 <?php if ($mission['notes']): ?>
-                    <hr>
-                    <p><strong><i class="bi bi-sticky me-1"></i>Σημειώσεις:</strong></p>
-                    <p><?= nl2br(h($mission['notes'])) ?></p>
+                    <div class="mt-3">
+                        <div class="text-muted small fw-semibold mb-1 text-uppercase" style="letter-spacing:.05em"><i class="bi bi-sticky-fill me-1"></i>Σημειώσεις</div>
+                        <div class="p-2 rounded-2 text-dark" style="background:#fffdf0;border-left:3px solid #fbbf24;font-size:.93rem">
+                            <?= nl2br(h($mission['notes'])) ?>
+                        </div>
+                    </div>
                 <?php endif; ?>
+
             </div>
         </div>
         
