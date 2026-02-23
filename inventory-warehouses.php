@@ -201,8 +201,8 @@ include __DIR__ . '/includes/header.php';
                     ?>
                     <div class="col-md-6">
                         <div class="card h-100 <?= !$wh['is_active'] ? 'bg-light border-secondary' : 'border-primary' ?> border-2">
-                            <div class="card-header d-flex justify-content-between align-items-center <?= $wh['is_active'] ? 'bg-primary text-white' : 'bg-secondary text-white' ?>">
-                                <h5 class="mb-0">
+                            <div class="card-header d-flex justify-content-between align-items-center <?= $wh['is_active'] ? 'bg-light border-primary' : 'bg-light border-secondary' ?>">
+                                <h5 class="mb-0 text-dark">
                                     <i class="bi bi-building me-1"></i><?= h($wh['name']) ?>
                                 </h5>
                                 <?php if (!$wh['is_active']): ?>
