@@ -388,6 +388,12 @@ if (isPost()) {
         case 'apply':
             $shiftId = post('shift_id');
             $volunteerNotes = post('volunteer_notes');
+            // Block volunteer apply if mission has expired
+            $missionExpired = in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED]) && strtotime($mission['end_datetime']) < time();
+            if ($missionExpired && !isAdmin()) {
+                setFlash('error', 'Η αποστολή είναι ακόμα ανοιχτή αλλά ο χρόνος διεξαγωγής έχει παρέλθει. Δεν μπορείτε να υποβάλετε αίτηση.');
+                redirect('mission-view.php?id=' . $id);
+            }
             if ($shiftId && !isAdmin()) {
                 // Check if already applied
                 $existing = dbFetchValue(
@@ -544,6 +550,16 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?php if ($isOverdue && !isAdmin()): ?>
+<div class="alert alert-warning d-flex align-items-center gap-2 mb-4">
+    <i class="bi bi-clock-history fs-4 text-warning"></i>
+    <div>
+        Η αποστολή είναι ακόμα ανοιχτή αλλά <strong>ο χρόνος διεξαγωγής έχει παρέλθει</strong>.
+        Δεν μπορείτε να υποβάλετε αίτηση συμμετοχής.
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if ($isOverdue && isAdmin()):
     $elapsed = time() - strtotime($mission['end_datetime']);
@@ -778,12 +794,16 @@ include __DIR__ . '/includes/header.php';
                                             <?php if (!isAdmin()): ?>
                                                 <?php if (isset($userParticipations[$shift['id']])): ?>
                                                     <?= statusBadge($userParticipations[$shift['id']], 'participation') ?>
-                                                <?php elseif (!$isPast && !$isFull && $mission['status'] === STATUS_OPEN): ?>
+                                                <?php elseif (!$isPast && !$isFull && $mission['status'] === STATUS_OPEN && !$isOverdue): ?>
                                                     <button type="button" class="btn btn-sm btn-primary apply-btn" 
                                                             data-shift-id="<?= $shift['id'] ?>"
                                                             data-shift-date="<?= formatDateTime($shift['start_time'], 'd/m/Y H:i') ?>">
                                                         <i class="bi bi-hand-index"></i> Αίτηση
                                                     </button>
+                                                <?php elseif ($isOverdue && $mission['status'] === STATUS_OPEN): ?>
+                                                    <span class="badge bg-secondary" title="Ο χρόνος διεξαγωγής έχει παρέλθει" data-bs-toggle="tooltip">
+                                                        <i class="bi bi-clock-history me-1"></i>Έληξε
+                                                    </span>
                                                 <?php endif; ?>
                                             <?php else: ?>
                                                 <a href="shift-view.php?id=<?= $shift['id'] ?>" class="btn btn-sm btn-outline-primary">
