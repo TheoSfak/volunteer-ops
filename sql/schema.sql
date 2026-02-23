@@ -720,8 +720,8 @@ INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabl
 
 -- Default certificate types
 INSERT INTO `certificate_types` (`name`, `description`, `default_validity_months`, `is_required`) VALUES
-('Πρώτες Βοήθειες', 'Πιστοποίηση Πρώτων Βοηθειών (BLS)', 24, 1),
-('BLS/AED', 'Βασική Υποστήριξη Ζωής & Αυτόματος Εξωτερικός Απινιδωτής', 24, 0),
+('Πρώτες Βοήθειες', 'Πιστοποίηση Πρώτων Βοηθειών (BLS)', 36, 1),
+('BLS/AED', 'Βασική Υποστήριξη Ζωής & Αυτόματος Εξωτερικός Απινιδωτής', 36, 0),
 ('Δίπλωμα Οδήγησης', 'Άδεια οδήγησης αυτοκινήτου / μοτοσυκλέτας', NULL, 0),
 ('PHTLS', 'Prehospital Trauma Life Support', 48, 0);
 

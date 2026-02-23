@@ -256,10 +256,9 @@ if (isPost()) {
         } elseif (dbFetchOne("SELECT id FROM volunteer_certificates WHERE user_id = ? AND certificate_type_id = ?", [$id, $typeId])) {
             setFlash('error', 'Ο εθελοντής έχει ήδη πιστοποιητικό αυτού του τύπου. Επεξεργαστείτε το υπάρχον.');
         } else {
-            // Auto-calculate expiry: use type's validity or default 36 months (3 years)
+            // Auto-calculate expiry: always 3 years from issue date if not provided
             if (!$expiryDate) {
-                $months = $certType['default_validity_months'] ?: 36;
-                $expiryDate = date('Y-m-d', strtotime($issueDate . ' + ' . $months . ' months'));
+                $expiryDate = date('Y-m-d', strtotime($issueDate . ' + 3 years'));
             }
             $newCertId = dbInsert(
                 "INSERT INTO volunteer_certificates (user_id, certificate_type_id, issue_date, expiry_date, issuing_body, certificate_number, notes, created_by)
@@ -1290,7 +1289,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="col-md-6 mb-3">
                             <label class="form-label fw-semibold">Ημ. Λήξης</label>
                             <input type="date" name="expiry_date" class="form-control" id="addExpiryDate">
-                            <div class="form-text">Κενό = 3 χρόνια ή ισχύς τύπου</div>
+                            <div class="form-text">Κενό = αυτόματα 3 χρόνια από έκδοση (διορθώσιμο)</div>
                         </div>
                     </div>
                     <div class="mb-3">
@@ -1400,17 +1399,13 @@ document.addEventListener('DOMContentLoaded', function() {
     
     function autoCalcExpiry() {
         if (!certType || !issueDate || !expiryDate) return;
-        const selected = certType.options[certType.selectedIndex];
-        const validity = selected ? selected.getAttribute('data-validity') : '';
-        // Default 36 months (3 years) if type has no specific validity
-        const months = validity ? parseInt(validity) : 36;
-        if (issueDate.value && !expiryDate.value) {
+        // Always default to 3 years (36 months) from issue date
+        if (issueDate.value) {
             const d = new Date(issueDate.value);
-            d.setMonth(d.getMonth() + months);
+            d.setFullYear(d.getFullYear() + 3);
             expiryDate.value = d.toISOString().split('T')[0];
         }
     }
-    if (certType) certType.addEventListener('change', autoCalcExpiry);
     if (issueDate) issueDate.addEventListener('change', autoCalcExpiry);
 });
 </script>
