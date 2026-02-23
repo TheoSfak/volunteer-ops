@@ -246,19 +246,203 @@ $liveExams = dbFetchAll("
 ");
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h1 class="h3 mb-0">
-        <i class="bi bi-speedometer2 me-2"></i>Πίνακας Ελέγχου
-    </h1>
-    <div class="d-flex gap-2">
-        <button class="btn btn-sm btn-outline-primary" id="customizeBtn" title="Προσαρμογή Dashboard">
-            <i class="bi bi-gear"></i><span class="d-none d-sm-inline"> Προσαρμογή</span>
-        </button>
-        <select class="form-select form-select-sm" onchange="location.href='?year='+this.value" style="width: auto;">
-            <?php for ($y = date('Y'); $y >= date('Y') - 5; $y--): ?>
-                <option value="<?= $y ?>" <?= $year == $y ? 'selected' : '' ?>><?= $y ?></option>
-            <?php endfor; ?>
-        </select>
+<style>
+/* ===== Dashboard Beautification ===== */
+.dash-hero {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 1rem;
+    padding: 1.25rem 1.5rem;
+    color: #fff;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 8px 32px rgba(102,126,234,.22);
+    position: relative;
+    overflow: hidden;
+}
+.dash-hero::before {
+    content: '';
+    position: absolute;
+    top: -60%;
+    right: -15%;
+    width: 320px;
+    height: 320px;
+    background: rgba(255,255,255,.06);
+    border-radius: 50%;
+    pointer-events: none;
+}
+.dash-hero::after {
+    content: '';
+    position: absolute;
+    bottom: -40%;
+    left: -10%;
+    width: 200px;
+    height: 200px;
+    background: rgba(255,255,255,.04);
+    border-radius: 50%;
+    pointer-events: none;
+}
+.dash-hero .hero-controls .btn {
+    border-color: rgba(255,255,255,.4);
+    color: #fff;
+    background: rgba(255,255,255,.1);
+    backdrop-filter: blur(4px);
+    font-size: .82rem;
+}
+.dash-hero .hero-controls .btn:hover { background: rgba(255,255,255,.25); border-color: rgba(255,255,255,.6); }
+.dash-hero .hero-controls select { background: rgba(255,255,255,.15); color: #fff; border-color: rgba(255,255,255,.3); }
+.dash-hero .hero-controls select option { color: #333; background: #fff; }
+.ds-stat {
+    border: none;
+    border-radius: .85rem;
+    box-shadow: 0 3px 15px rgba(0,0,0,.06);
+    transition: transform .2s ease, box-shadow .2s ease;
+    overflow: hidden;
+    position: relative;
+}
+.ds-stat:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 25px rgba(0,0,0,.12);
+}
+.ds-stat .stat-icon-box {
+    width: 52px;
+    height: 52px;
+    border-radius: .75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    color: #fff;
+    flex-shrink: 0;
+}
+.ds-stat .stat-number {
+    font-size: 1.75rem;
+    font-weight: 800;
+    line-height: 1;
+    background: linear-gradient(135deg, #333 0%, #555 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.ds-stat .stat-label {
+    font-size: .78rem;
+    color: #888;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+.ds-stat .stat-trend {
+    font-size: .75rem;
+    padding: .15rem .45rem;
+    border-radius: .3rem;
+    font-weight: 600;
+}
+.ds-stat .stat-trend.up { background: rgba(16,185,129,.1); color: #059669; }
+.ds-stat .stat-trend.down { background: rgba(239,68,68,.1); color: #dc2626; }
+.ds-stat .stat-trend.neutral { background: rgba(107,114,128,.1); color: #6b7280; }
+.ds-widget {
+    border: none;
+    border-radius: .85rem;
+    box-shadow: 0 3px 15px rgba(0,0,0,.05);
+    transition: box-shadow .25s ease;
+    overflow: hidden;
+}
+.ds-widget:hover { box-shadow: 0 6px 22px rgba(0,0,0,.1); }
+.ds-widget .card-header {
+    background: #fff;
+    border-bottom: 2px solid #eee;
+    padding: .75rem 1rem;
+}
+.ds-widget .card-header h5 { font-size: .92rem; font-weight: 600; margin: 0; }
+.ds-widget.accent-blue .card-header { border-bottom-color: #667eea; }
+.ds-widget.accent-gold .card-header { border-bottom-color: #f59e0b; }
+.ds-widget.accent-green .card-header { border-bottom-color: #10b981; }
+.ds-widget.accent-red .card-header { border-bottom-color: #ef4444; }
+.ds-widget.accent-cyan .card-header { border-bottom-color: #06b6d4; }
+.ds-widget.accent-purple .card-header { border-bottom-color: #8b5cf6; }
+.ds-widget .card-header .widget-toggle { opacity: .4; transition: opacity .2s; }
+.ds-widget .card-header:hover .widget-toggle { opacity: 1; }
+/* Leaderboard list item */
+.ds-leader-item {
+    transition: background .15s;
+    border-left: 3px solid transparent;
+}
+.ds-leader-item:hover { background: #f8f9ff; border-left-color: #667eea; }
+.ds-leader-rank {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: .78rem;
+}
+.ds-leader-rank.gold { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #fff; }
+.ds-leader-rank.silver { background: linear-gradient(135deg, #d1d5db, #9ca3af); color: #fff; }
+.ds-leader-rank.bronze { background: linear-gradient(135deg, #d97706, #b45309); color: #fff; }
+.ds-leader-rank.default { background: #e5e7eb; color: #6b7280; }
+.volunteer-shift-card {
+    border-left: 4px solid #667eea;
+    transition: transform .15s, box-shadow .15s;
+}
+.volunteer-shift-card:hover { transform: translateX(4px); box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+.pulse-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ef4444;
+    animation: pulseDot 1.5s infinite;
+}
+@keyframes pulseDot {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.5); }
+    50% { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+}
+@media (max-width: 768px) {
+    .dash-hero { padding: 1rem; text-align: center; }
+    .dash-hero .d-flex { flex-direction: column; gap: .5rem; }
+    .dash-hero .hero-controls { justify-content: center !important; }
+    .ds-stat .stat-number { font-size: 1.35rem; }
+    .ds-stat .stat-icon-box { width: 40px; height: 40px; font-size: 1.1rem; }
+}
+</style>
+
+<!-- Dashboard Hero Header -->
+<div class="dash-hero">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <h1 class="h4 mb-1 text-white fw-bold">
+                <?php
+                $hour = (int)date('H');
+                $greeting = $hour < 12 ? 'Καλημέρα' : ($hour < 18 ? 'Καλό απόγευμα' : 'Καλό βράδυ');
+                ?>
+                <?= $greeting ?>, <?= h(explode(' ', $user['name'])[0]) ?>! 
+                <span style="font-size:.85rem;opacity:.7;">
+                    <?php if (isAdmin()): ?>
+                        <i class="bi bi-shield-check me-1"></i>Διαχειριστής
+                    <?php else: ?>
+                        <i class="bi bi-heart me-1"></i>Εθελοντής
+                    <?php endif; ?>
+                </span>
+            </h1>
+            <div style="opacity:.8;font-size:.88rem">
+                <i class="bi bi-speedometer2 me-1"></i>Πίνακας Ελέγχου
+                <span class="mx-2">·</span>
+                <i class="bi bi-calendar3 me-1"></i><?= date('d/m/Y') ?>
+                <?php if (isAdmin() && $stats['pending_requests'] > 0): ?>
+                    <span class="ms-2 badge bg-danger" style="font-size:.72rem"><span class="pulse-dot me-1"></span><?= $stats['pending_requests'] ?> εκκρεμείς</span>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="hero-controls d-flex gap-2 flex-shrink-0">
+            <button class="btn btn-sm" id="customizeBtn" title="Προσαρμογή Dashboard">
+                <i class="bi bi-gear"></i><span class="d-none d-sm-inline"> Προσαρμογή</span>
+            </button>
+            <select class="form-select form-select-sm" onchange="location.href='?year='+this.value" style="width: auto;">
+                <?php for ($y = date('Y'); $y >= date('Y') - 5; $y--): ?>
+                    <option value="<?= $y ?>" <?= $year == $y ? 'selected' : '' ?>><?= $y ?></option>
+                <?php endfor; ?>
+            </select>
+        </div>
     </div>
 </div>
 
@@ -313,92 +497,84 @@ $liveExams = dbFetchAll("
     <?php endforeach; ?>
 <?php endif; ?>
 
-<!-- Stats Cards with Comparison -->
+<!-- Stats Cards -->
 <div class="row g-3 mb-4" id="statsCards">
     <?php if (isAdmin()): ?>
-        <div class="col-md-6 col-xl-3">
-            <div class="card stats-card primary h-100">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h6 class="text-muted mb-1">Αποστολές</h6>
-                            <h3 class="mb-0"><?= $stats['missions_total'] ?></h3>
-                            <?php 
-                            $comparison = $stats['missions_total'] - ($stats['total_hours_last_month'] > 0 ? 1 : 0);
-                            $trend = $comparison >= 0 ? 'up' : 'down';
-                            $trendClass = $comparison >= 0 ? 'success' : 'danger';
-                            ?>
-                            <small class="text-<?= $trendClass ?>">
-                                <i class="bi bi-arrow-<?= $trend ?>"></i> 
-                                <?= $stats['missions_open'] ?> ανοιχτές
-                            </small>
+        <div class="col-6 col-xl-3">
+            <div class="card ds-stat h-100">
+                <div class="card-body p-3">
+                    <div class="d-flex align-items-start gap-3">
+                        <div class="stat-icon-box" style="background:linear-gradient(135deg,#667eea,#764ba2)">
+                            <i class="bi bi-flag"></i>
                         </div>
-                        <div class="text-primary opacity-50">
-                            <i class="bi bi-flag fs-1"></i>
+                        <div class="flex-grow-1">
+                            <div class="stat-label">Αποστολές</div>
+                            <div class="stat-number"><?= $stats['missions_total'] ?></div>
+                            <span class="stat-trend up">
+                                <i class="bi bi-arrow-up-short"></i><?= $stats['missions_open'] ?> ανοιχτές
+                            </span>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-        <div class="col-md-6 col-xl-3">
-            <div class="card stats-card success h-100">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h6 class="text-muted mb-1">Ολοκληρωμένες</h6>
-                            <h3 class="mb-0"><?= $stats['missions_completed'] ?></h3>
-                            <small class="text-success">
-                                <i class="bi bi-check-circle"></i> 
-                                <?= $stats['completion_rate'] ?>% ποσοστό
-                            </small>
+        <div class="col-6 col-xl-3">
+            <div class="card ds-stat h-100">
+                <div class="card-body p-3">
+                    <div class="d-flex align-items-start gap-3">
+                        <div class="stat-icon-box" style="background:linear-gradient(135deg,#10b981,#059669)">
+                            <i class="bi bi-check-circle"></i>
                         </div>
-                        <div class="text-success opacity-50">
-                            <i class="bi bi-check-circle fs-1"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-6 col-xl-3">
-            <div class="card stats-card warning h-100">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h6 class="text-muted mb-1">Ενεργοί Εθελοντές</h6>
-                            <h3 class="mb-0"><?= $stats['active_volunteers_this_month'] ?></h3>
-                            <small class="text-muted">
-                                <?= $stats['volunteers_active'] ?> από <?= $stats['volunteers_total'] ?> συνολικά
-                            </small>
-                        </div>
-                        <div class="text-warning opacity-50">
-                            <i class="bi bi-people fs-1"></i>
+                        <div class="flex-grow-1">
+                            <div class="stat-label">Ολοκληρωμένες</div>
+                            <div class="stat-number"><?= $stats['missions_completed'] ?></div>
+                            <span class="stat-trend up">
+                                <i class="bi bi-percent"></i> <?= $stats['completion_rate'] ?>% ποσοστό
+                            </span>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-        <div class="col-md-6 col-xl-3">
-            <div class="card stats-card danger h-100">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h6 class="text-muted mb-1">Ώρες Μήνα</h6>
-                            <h3 class="mb-0"><?= number_format($stats['total_hours_this_month'], 0) ?></h3>
+        <div class="col-6 col-xl-3">
+            <div class="card ds-stat h-100">
+                <div class="card-body p-3">
+                    <div class="d-flex align-items-start gap-3">
+                        <div class="stat-icon-box" style="background:linear-gradient(135deg,#f59e0b,#d97706)">
+                            <i class="bi bi-people"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="stat-label">Ενεργοί Εθελοντές</div>
+                            <div class="stat-number"><?= $stats['active_volunteers_this_month'] ?></div>
+                            <span class="stat-trend neutral">
+                                <?= $stats['volunteers_active'] ?> / <?= $stats['volunteers_total'] ?> σύνολο
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="card ds-stat h-100">
+                <div class="card-body p-3">
+                    <div class="d-flex align-items-start gap-3">
+                        <div class="stat-icon-box" style="background:linear-gradient(135deg,#ef4444,#dc2626)">
+                            <i class="bi bi-clock-history"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="stat-label">Ώρες Μήνα</div>
+                            <div class="stat-number"><?= number_format($stats['total_hours_this_month'], 0) ?></div>
                             <?php 
                             $hoursDiff = $stats['total_hours_this_month'] - $stats['total_hours_last_month'];
                             $hoursPercent = $stats['total_hours_last_month'] > 0 
                                 ? round(($hoursDiff / $stats['total_hours_last_month']) * 100) 
                                 : 0;
-                            $hoursTrend = $hoursDiff >= 0 ? 'up' : 'down';
-                            $hoursTrendClass = $hoursDiff >= 0 ? 'success' : 'danger';
+                            $hoursTrendCls = $hoursDiff >= 0 ? 'up' : 'down';
                             ?>
-                            <small class="text-<?= $hoursTrendClass ?>">
-                                <i class="bi bi-arrow-<?= $hoursTrend ?>"></i> 
-                                <?= abs($hoursPercent) ?>% vs προηγ. μήνα
-                            </small>
-                        </div>
-                        <div class="text-danger opacity-50">
-                            <i class="bi bi-clock-history fs-1"></i>
+                            <span class="stat-trend <?= $hoursTrendCls ?>">
+                                <i class="bi bi-arrow-<?= $hoursDiff >= 0 ? 'up' : 'down' ?>-short"></i>
+                                <?= abs($hoursPercent) ?>% vs προηγ.
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -406,60 +582,60 @@ $liveExams = dbFetchAll("
         </div>
     <?php else: ?>
         <div class="col-6 col-md-6 col-lg-3">
-            <div class="card stats-card primary">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h6 class="text-muted mb-1">Οι Βάρδιες μου</h6>
-                            <h3 class="mb-0"><?= $stats['my_shifts'] ?></h3>
+            <div class="card ds-stat">
+                <div class="card-body p-3">
+                    <div class="d-flex align-items-start gap-3">
+                        <div class="stat-icon-box" style="background:linear-gradient(135deg,#667eea,#764ba2)">
+                            <i class="bi bi-calendar-check"></i>
                         </div>
-                        <div class="text-primary opacity-50">
-                            <i class="bi bi-calendar-check fs-1"></i>
+                        <div>
+                            <div class="stat-label">Βάρδιες</div>
+                            <div class="stat-number"><?= $stats['my_shifts'] ?></div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
         <div class="col-6 col-md-6 col-lg-3">
-            <div class="card stats-card warning">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h6 class="text-muted mb-1">Εκκρεμείς</h6>
-                            <h3 class="mb-0"><?= $stats['pending_requests'] ?></h3>
+            <div class="card ds-stat">
+                <div class="card-body p-3">
+                    <div class="d-flex align-items-start gap-3">
+                        <div class="stat-icon-box" style="background:linear-gradient(135deg,#f59e0b,#d97706)">
+                            <i class="bi bi-hourglass-split"></i>
                         </div>
-                        <div class="text-warning opacity-50">
-                            <i class="bi bi-hourglass-split fs-1"></i>
+                        <div>
+                            <div class="stat-label">Εκκρεμείς</div>
+                            <div class="stat-number"><?= $stats['pending_requests'] ?></div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
         <div class="col-6 col-md-6 col-lg-3">
-            <div class="card stats-card success">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h6 class="text-muted mb-1">Ώρες Εθελοντισμού</h6>
-                            <h3 class="mb-0"><?= number_format($stats['total_hours'], 1) ?></h3>
+            <div class="card ds-stat">
+                <div class="card-body p-3">
+                    <div class="d-flex align-items-start gap-3">
+                        <div class="stat-icon-box" style="background:linear-gradient(135deg,#10b981,#059669)">
+                            <i class="bi bi-clock-history"></i>
                         </div>
-                        <div class="text-success opacity-50">
-                            <i class="bi bi-clock-history fs-1"></i>
+                        <div>
+                            <div class="stat-label">Ώρες</div>
+                            <div class="stat-number"><?= number_format($stats['total_hours'], 1) ?></div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
         <div class="col-6 col-md-6 col-lg-3">
-            <div class="card stats-card danger">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <h6 class="text-muted mb-1">Πόντοι</h6>
-                            <h3 class="mb-0"><?= number_format($stats['total_points']) ?></h3>
+            <div class="card ds-stat">
+                <div class="card-body p-3">
+                    <div class="d-flex align-items-start gap-3">
+                        <div class="stat-icon-box" style="background:linear-gradient(135deg,#ef4444,#dc2626)">
+                            <i class="bi bi-star-fill"></i>
                         </div>
-                        <div class="text-danger opacity-50">
-                            <i class="bi bi-star fs-1"></i>
+                        <div>
+                            <div class="stat-label">Πόντοι</div>
+                            <div class="stat-number"><?= number_format($stats['total_points']) ?></div>
                         </div>
                     </div>
                 </div>
@@ -510,19 +686,15 @@ $liveExams = dbFetchAll("
 <?php endif; ?>
 
 <!-- Interactive Charts & Widgets Section -->
-<div class="mt-4 mb-3">
-    <h5 class="text-muted"><i class="bi bi-grip-vertical me-2"></i>Widgets - Σύρετε για Αναδιάταξη</h5>
-    <small class="text-muted">Κάντε κλικ και σύρετε τις κάρτες για να αλλάξετε τη σειρά τους</small>
-</div>
 <div id="draggableWidgets" class="widgets-container">
     <!-- Monthly Trends Chart -->
     <div class="widget-item mb-4" data-widget-id="monthly-trends">
-        <div class="card h-100 draggable-card">
+        <div class="card ds-widget accent-blue h-100 draggable-card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">
-                    <i class="bi bi-graph-up me-2"></i>Τάσεις Μηνός
+                <h5>
+                    <i class="bi bi-graph-up text-primary me-2"></i>Τάσεις Μηνός
                 </h5>
-                <button class="btn btn-sm btn-outline-secondary" onclick="toggleWidget(this)">
+                <button class="btn btn-sm btn-link widget-toggle" onclick="toggleWidget(this)">
                     <i class="bi bi-eye-slash"></i>
                 </button>
             </div>
@@ -534,33 +706,34 @@ $liveExams = dbFetchAll("
     
     <!-- Top Volunteers Widget -->
     <div class="widget-item mb-4" data-widget-id="top-volunteers">
-        <div class="card h-100 draggable-card">
+        <div class="card ds-widget accent-gold h-100 draggable-card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">
-                    <i class="bi bi-trophy me-2"></i>Κορυφαίοι Εθελοντές
+                <h5>
+                    <i class="bi bi-trophy-fill text-warning me-2"></i>Κορυφαίοι Εθελοντές
                 </h5>
-                <button class="btn btn-sm btn-outline-secondary" onclick="toggleWidget(this)">
+                <button class="btn btn-sm btn-link widget-toggle" onclick="toggleWidget(this)">
                     <i class="bi bi-eye-slash"></i>
                 </button>
             </div>
-            <div class="card-body">
+            <div class="card-body p-0">
                 <?php if (empty($topVolunteers)): ?>
-                    <p class="text-muted text-center">Δεν υπάρχουν δεδομένα.</p>
+                    <p class="text-muted text-center py-4">Δεν υπάρχουν δεδομένα.</p>
                 <?php else: ?>
                     <div class="list-group list-group-flush">
-                        <?php foreach ($topVolunteers as $idx => $vol): ?>
-                            <div class="list-group-item px-0 d-flex align-items-center">
-                                <span class="badge bg-primary me-3">#<?= $idx + 1 ?></span>
+                        <?php foreach ($topVolunteers as $idx => $vol):
+                            $rankClass = $idx === 0 ? 'gold' : ($idx === 1 ? 'silver' : ($idx === 2 ? 'bronze' : 'default'));
+                        ?>
+                            <div class="list-group-item ds-leader-item d-flex align-items-center px-3 py-2">
+                                <span class="ds-leader-rank <?= $rankClass ?> me-3"><?= $idx + 1 ?></span>
                                 <div class="flex-grow-1">
-                                    <strong><?= h($vol['name']) ?></strong>
-                                    <br>
+                                    <strong class="d-block" style="font-size:.9rem"><?= h($vol['name']) ?></strong>
                                     <small class="text-muted">
                                         <?= number_format($vol['total_hours'], 1) ?>ω · 
                                         <?= $vol['shifts_count'] ?> βάρδιες
                                     </small>
                                 </div>
-                                <span class="text-warning">
-                                    <i class="bi bi-star-fill"></i> <?= number_format($vol['total_points']) ?>
+                                <span class="badge bg-warning text-dark" style="font-size:.8rem">
+                                    <i class="bi bi-star-fill me-1"></i><?= number_format($vol['total_points']) ?>
                                 </span>
                             </div>
                         <?php endforeach; ?>
@@ -572,12 +745,12 @@ $liveExams = dbFetchAll("
     
     <!-- Completion Rate Chart -->
     <div class="widget-item mb-4" data-widget-id="completion-rate">
-        <div class="card h-100 draggable-card">
+        <div class="card ds-widget accent-green h-100 draggable-card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">
-                    <i class="bi bi-pie-chart me-2"></i>Ποσοστό Ολοκλήρωσης
+                <h5>
+                    <i class="bi bi-pie-chart-fill text-success me-2"></i>Ποσοστό Ολοκλήρωσης
                 </h5>
-                <button class="btn btn-sm btn-outline-secondary" onclick="toggleWidget(this)">
+                <button class="btn btn-sm btn-link widget-toggle" onclick="toggleWidget(this)">
                     <i class="bi bi-eye-slash"></i>
                 </button>
             </div>
@@ -589,12 +762,12 @@ $liveExams = dbFetchAll("
     
     <!-- Recent Activity Timeline -->
     <div class="widget-item mb-4" data-widget-id="recent-activity">
-        <div class="card h-100 draggable-card">
+        <div class="card ds-widget accent-purple h-100 draggable-card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">
-                    <i class="bi bi-activity me-2"></i>Πρόσφατη Δραστηριότητα
+                <h5>
+                    <i class="bi bi-activity text-purple me-2" style="color:#8b5cf6"></i>Πρόσφατη Δραστηριότητα
                 </h5>
-                <button class="btn btn-sm btn-outline-secondary" onclick="toggleWidget(this)">
+                <button class="btn btn-sm btn-link widget-toggle" onclick="toggleWidget(this)">
                     <i class="bi bi-eye-slash"></i>
                 </button>
             </div>
@@ -650,12 +823,12 @@ $liveExams = dbFetchAll("
     
     <!-- Recent Missions -->
     <div class="widget-item mb-4" data-widget-id="recent-missions">
-        <div class="card h-100 draggable-card">
+        <div class="card ds-widget accent-cyan h-100 draggable-card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-flag me-2"></i>Πρόσφατες Αποστολές</h5>
+                <h5><i class="bi bi-flag-fill me-2" style="color:#06b6d4"></i>Πρόσφατες Αποστολές</h5>
                 <div>
-                    <a href="missions.php" class="btn btn-sm btn-outline-light me-2">Όλες</a>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleWidget(this, event)">
+                    <a href="missions.php" class="btn btn-sm btn-outline-info me-1">Όλες</a>
+                    <button type="button" class="btn btn-sm btn-link widget-toggle" onclick="toggleWidget(this, event)">
                         <i class="bi bi-eye-slash"></i>
                     </button>
                 </div>
@@ -707,12 +880,12 @@ $liveExams = dbFetchAll("
     
     <!-- Pending Requests -->
     <div class="widget-item mb-4" data-widget-id="pending-requests">
-        <div class="card h-100 draggable-card">
+        <div class="card ds-widget accent-red h-100 draggable-card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-person-check me-2"></i>Εκκρεμείς Αιτήσεις</h5>
+                <h5><i class="bi bi-person-check-fill text-danger me-2"></i>Εκκρεμείς Αιτήσεις <?php if ($stats['pending_requests'] > 0): ?><span class="badge bg-danger ms-1"><?= $stats['pending_requests'] ?></span><?php endif; ?></h5>
                 <div>
-                    <a href="participations.php" class="btn btn-sm btn-outline-light me-2">Όλες</a>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleWidget(this, event)">
+                    <a href="participations.php" class="btn btn-sm btn-outline-danger me-1">Όλες</a>
+                    <button type="button" class="btn btn-sm btn-link widget-toggle" onclick="toggleWidget(this, event)">
                         <i class="bi bi-eye-slash"></i>
                     </button>
                 </div>
@@ -766,42 +939,30 @@ $liveExams = dbFetchAll("
 <style>
 .widgets-container {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
     gap: 1rem;
 }
-
 .widget-item {
     min-height: 200px;
 }
-
-.draggable-card {
-    transition: transform 0.2s, box-shadow 0.2s;
-}
-
 .draggable-card .card-header {
     cursor: move;
     cursor: grab;
     user-select: none;
 }
-
 .draggable-card .card-header:active {
     cursor: grabbing;
 }
-
-.draggable-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-}
-
 .sortable-ghost {
-    opacity: 0.4;
-    background: #f8f9fa;
+    opacity: 0.3;
+    background: #f0f4ff;
+    border: 2px dashed #667eea;
+    border-radius: .85rem;
 }
-
 .sortable-drag {
-    opacity: 0.8;
+    opacity: 0.85;
+    box-shadow: 0 12px 40px rgba(0,0,0,.15);
 }
-
 @media (max-width: 768px) {
     .widgets-container {
         grid-template-columns: 1fr;
@@ -1131,18 +1292,21 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
     <?php if (!isAdmin()): ?>
         <!-- My Upcoming Shifts -->
         <div class="col-lg-6">
-            <div class="card h-100">
+            <div class="card ds-widget accent-blue h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="bi bi-calendar-check me-2"></i>Οι Επόμενες Βάρδιες μου</h5>
+                    <h5><i class="bi bi-calendar-event text-primary me-2"></i>Επόμενες Βάρδιες</h5>
                     <a href="my-participations.php" class="btn btn-sm btn-outline-primary">Όλες</a>
                 </div>
                 <div class="card-body p-0">
                     <?php if (empty($myShifts)): ?>
-                        <p class="text-muted text-center py-4">Δεν έχετε προγραμματισμένες βάρδιες.</p>
+                        <div class="text-center py-5">
+                            <i class="bi bi-calendar-x text-muted" style="font-size:2.5rem;opacity:.3"></i>
+                            <p class="text-muted mt-2 mb-0">Δεν έχετε προγραμματισμένες βάρδιες.</p>
+                        </div>
                     <?php else: ?>
                         <div class="list-group list-group-flush">
                             <?php foreach ($myShifts as $shift): ?>
-                                <div class="list-group-item">
+                                <div class="list-group-item volunteer-shift-card">
                                     <div class="d-flex justify-content-between align-items-start">
                                         <div>
                                             <strong><?= h($shift['mission_title']) ?></strong>
@@ -1167,18 +1331,21 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
         
         <!-- Available Missions -->
         <div class="col-lg-6">
-            <div class="card h-100">
+            <div class="card ds-widget accent-green h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="bi bi-flag me-2"></i>Διαθέσιμες Αποστολές</h5>
-                    <a href="missions.php" class="btn btn-sm btn-outline-primary">Όλες</a>
+                    <h5><i class="bi bi-flag-fill text-success me-2"></i>Διαθέσιμες Αποστολές</h5>
+                    <a href="missions.php" class="btn btn-sm btn-outline-success">Όλες</a>
                 </div>
                 <div class="card-body p-0">
                     <?php if (empty($availableMissions)): ?>
-                        <p class="text-muted text-center py-4">Δεν υπάρχουν διαθέσιμες αποστολές.</p>
+                        <div class="text-center py-5">
+                            <i class="bi bi-flag text-muted" style="font-size:2.5rem;opacity:.3"></i>
+                            <p class="text-muted mt-2 mb-0">Δεν υπάρχουν διαθέσιμες αποστολές.</p>
+                        </div>
                     <?php else: ?>
                         <div class="list-group list-group-flush">
                             <?php foreach ($availableMissions as $mission): ?>
-                                <a href="mission-view.php?id=<?= $mission['id'] ?>" class="list-group-item list-group-item-action">
+                                <a href="mission-view.php?id=<?= $mission['id'] ?>" class="list-group-item list-group-item-action volunteer-shift-card" style="border-left-color:#10b981">
                                     <div class="d-flex justify-content-between align-items-start">
                                         <div>
                                             <strong><?= h($mission['title']) ?></strong>
