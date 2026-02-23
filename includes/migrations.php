@@ -1193,6 +1193,40 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 19,
+            'description' => 'Add available_from, available_until, max_attempts to training_exams',
+            'up' => function () {
+                $col1 = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'training_exams'
+                       AND COLUMN_NAME  = 'available_from'"
+                );
+                if (!$col1) {
+                    dbExecute("ALTER TABLE training_exams ADD COLUMN available_from DATETIME NULL AFTER is_active");
+                }
+                $col2 = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'training_exams'
+                       AND COLUMN_NAME  = 'available_until'"
+                );
+                if (!$col2) {
+                    dbExecute("ALTER TABLE training_exams ADD COLUMN available_until DATETIME NULL AFTER available_from");
+                }
+                $col3 = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'training_exams'
+                       AND COLUMN_NAME  = 'max_attempts'"
+                );
+                if (!$col3) {
+                    dbExecute("ALTER TABLE training_exams ADD COLUMN max_attempts INT NOT NULL DEFAULT 1 AFTER allow_retake");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

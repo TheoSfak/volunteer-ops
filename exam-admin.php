@@ -208,8 +208,7 @@ include __DIR__ . '/includes/header.php';
                                     <th>Τίτλος</th>
                                     <th>Κατηγορία</th>
                                     <th>Ερωτήσεις</th>
-                                    <th>Προσπάθειες</th>
-                                    <th>Όριο %</th>
+                                    <th>Προσπάθειες</th>                                    <th>Μέγ. Προσπάθειες</th>                                    <th>Όριο %</th>
                                     <th>Χρόνος</th>
                                     <th>Κατάσταση</th>
                                     <th>Ενέργειες</th>
@@ -229,20 +228,20 @@ include __DIR__ . '/includes/header.php';
                                             (Χρησιμ: <?= $exam['questions_per_attempt'] ?>)
                                         </td>
                                         <td><?= $exam['attempt_count'] ?></td>
+                                        <td>
+                                            <span class="badge bg-secondary"><?= $exam['max_attempts'] ?? 1 ?></span>
+                                        </td>
                                         <td><?= $exam['passing_percentage'] ?>%</td>
                                         <td><?= $exam['time_limit_minutes'] ? $exam['time_limit_minutes'] . '΄' : '<span class="text-muted">-</span>' ?></td>
                                         <td>
                                             <?php
                                             $examAvail = isExamAvailable($exam);
                                             if ($exam['is_active'] && $examAvail['available']) {
-                                                $remaining = '';
-                                                if (!empty($exam['available_until'])) {
-                                                    $secsLeft = strtotime($exam['available_until']) - time();
-                                                    if ($secsLeft > 0) {
-                                                        $remaining = ' (' . ceil($secsLeft / 60) . '΄ ακόμα)';
-                                                    }
+                                                $untilTs = !empty($exam['available_until']) ? strtotime($exam['available_until']) * 1000 : 0;
+                                                echo '<span class="badge bg-success fs-6"><i class="bi bi-broadcast"></i> LIVE</span>';
+                                                if ($untilTs > 0) {
+                                                    echo ' <span class="badge bg-warning text-dark" data-countdown="' . $untilTs . '">...</span>';
                                                 }
-                                                echo '<span class="badge bg-success"><i class="bi bi-broadcast"></i> LIVE' . h($remaining) . '</span>';
                                             } elseif ($exam['is_active'] && $examAvail['status'] === 'expired') {
                                                 echo '<span class="badge bg-secondary"><i class="bi bi-clock-history"></i> Έληξε</span>';
                                             } elseif ($exam['is_active']) {
@@ -366,5 +365,35 @@ include __DIR__ . '/includes/header.php';
         </div>
     <?php endif; ?>
 </div>
+
+<script>
+// Live countdown timers for LIVE exams
+function updateCountdowns() {
+    document.querySelectorAll('[data-countdown]').forEach(function(el) {
+        var until = parseInt(el.getAttribute('data-countdown'));
+        var now = Date.now();
+        var diff = Math.max(0, until - now);
+        if (diff <= 0) {
+            el.textContent = 'Έληξε';
+            el.className = 'badge bg-secondary';
+            return;
+        }
+        var totalSecs = Math.floor(diff / 1000);
+        var mins = Math.floor(totalSecs / 60);
+        var secs = totalSecs % 60;
+        el.textContent = mins + ':' + (secs < 10 ? '0' : '') + secs + ' απομένουν';
+        // Color coding
+        if (mins < 5) {
+            el.className = 'badge bg-danger text-white';
+        } else if (mins < 10) {
+            el.className = 'badge bg-warning text-dark';
+        } else {
+            el.className = 'badge bg-info text-dark';
+        }
+    });
+}
+updateCountdowns();
+setInterval(updateCountdowns, 1000);
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

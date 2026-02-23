@@ -60,12 +60,16 @@ function calculateAttemptScore($attemptId, $attemptType) {
  * Check if a user can take an exam (hasn't taken it yet)
  */
 function canUserTakeExam($examId, $userId) {
-    // Check if user has a COMPLETED attempt for this exam
-    $completedAttempt = dbFetchOne(
-        "SELECT id FROM exam_attempts WHERE exam_id = ? AND user_id = ? AND completed_at IS NOT NULL",
+    // Fetch exam to get max_attempts
+    $exam = dbFetchOne("SELECT max_attempts FROM training_exams WHERE id = ?", [$examId]);
+    $maxAttempts = (int) ($exam['max_attempts'] ?? 1);
+
+    // Count completed attempts
+    $completedCount = (int) dbFetchValue(
+        "SELECT COUNT(*) FROM exam_attempts WHERE exam_id = ? AND user_id = ? AND completed_at IS NOT NULL",
         [$examId, $userId]
     );
-    return $completedAttempt === null;
+    return $completedCount < $maxAttempts;
 }
 
 /**
