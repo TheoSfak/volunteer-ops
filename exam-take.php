@@ -63,7 +63,7 @@ if (isPost()) {
         
         if ($question['question_type'] === QUESTION_TYPE_MC || $question['question_type'] === QUESTION_TYPE_TF) {
             $userAnswer = post('question_' . $question['id'], '');
-            $isCorrect = ($userAnswer === $question['correct_option']) ? 1 : 0;
+            $isCorrect = (strtoupper(trim($userAnswer)) === strtoupper(trim($question['correct_option']))) ? 1 : 0;
         } elseif ($question['question_type'] === QUESTION_TYPE_OPEN) {
             $userAnswer = post('question_' . $question['id'], '');
             $isCorrect = null; // Requires manual grading
@@ -153,13 +153,12 @@ if (!isset($_SESSION['exam_attempt_' . $examId])) {
     $selectedQuestionIds = $attemptData['question_ids'];
 }
 
-// Fetch selected questions (shuffled order per user)
+// Fetch selected questions (fixed order - do NOT shuffle to avoid display/validation mismatch)
 $placeholders = str_repeat('?,', count($selectedQuestionIds) - 1) . '?';
 $questions = dbFetchAll("
     SELECT * FROM training_exam_questions 
     WHERE id IN ($placeholders)
 ", $selectedQuestionIds);
-shuffle($questions);
 
 $pageTitle = h($exam['title']);
 include __DIR__ . '/includes/header.php';
@@ -221,16 +220,15 @@ include __DIR__ . '/includes/header.php';
                                     ['key' => 'C', 'text' => $question['option_c']],
                                     ['key' => 'D', 'text' => $question['option_d']],
                                 ];
-                                // Don't shuffle - breaks answer validation
                                 ?>
-                                <?php foreach ($mcOptions as $oi => $opt): ?>
+                                <?php foreach ($mcOptions as $opt): ?>
                                     <div class="form-check mb-2">
                                         <input class="form-check-input" type="radio" 
                                                name="question_<?= $question['id'] ?>" 
                                                id="q<?= $question['id'] ?>_<?= strtolower($opt['key']) ?>" 
-                                               value="<?= $opt['key'] ?>" <?= $oi === 0 ? 'required' : '' ?>>
+                                               value="<?= $opt['key'] ?>" required>
                                         <label class="form-check-label" for="q<?= $question['id'] ?>_<?= strtolower($opt['key']) ?>">
-                                            <?= ($oi + 1) ?>. <?= h($opt['text']) ?>
+                                            <strong><?= $opt['key'] ?>.</strong> <?= h($opt['text']) ?>
                                         </label>
                                     </div>
                                 <?php endforeach; ?>
@@ -242,14 +240,13 @@ include __DIR__ . '/includes/header.php';
                                     ['key' => 'T', 'text' => 'Σωστό'],
                                     ['key' => 'F', 'text' => 'Λάθος'],
                                 ];
-                                // Don't shuffle - breaks answer validation
                                 ?>
-                                <?php foreach ($tfOptions as $tfi => $tfOpt): ?>
+                                <?php foreach ($tfOptions as $tfOpt): ?>
                                     <div class="form-check mb-2">
                                         <input class="form-check-input" type="radio" 
                                                name="question_<?= $question['id'] ?>" 
                                                id="q<?= $question['id'] ?>_<?= strtolower($tfOpt['key']) ?>" 
-                                               value="<?= $tfOpt['key'] ?>" <?= $tfi === 0 ? 'required' : '' ?>>
+                                               value="<?= $tfOpt['key'] ?>" required>
                                         <label class="form-check-label" for="q<?= $question['id'] ?>_<?= strtolower($tfOpt['key']) ?>">
                                             <?= $tfOpt['text'] ?>
                                         </label>
