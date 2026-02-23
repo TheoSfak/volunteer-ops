@@ -679,58 +679,60 @@ include __DIR__ . '/includes/header.php';
         
         <?php if ($debrief): ?>
         <!-- Mission Debrief -->
-        <div class="card mb-4 border-success">
-            <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Αναφορά Μετά την Αποστολή (Debrief)</h5>
-                <small>Υποβλήθηκε από: <?= h($debrief['submitter_name']) ?></small>
+        <div class="card mb-4" style="border:2px solid #198754;border-radius:10px;overflow:hidden">
+            <div class="card-header d-flex justify-content-between align-items-center py-2" style="background:linear-gradient(135deg,#d1f0e0 0%,#eafaf1 100%);border-bottom:2px solid #198754">
+                <h6 class="mb-0 fw-bold text-dark"><i class="bi bi-clipboard-check-fill me-2 text-success"></i>Αναφορά Μετά την Αποστολή (Debrief)</h6>
+                <span class="badge text-dark fw-normal" style="background:#b7e4c7;font-size:0.78rem"><i class="bi bi-person-fill me-1"></i><?= h($debrief['submitter_name']) ?></span>
             </div>
-            <div class="card-body">
-                <div class="row mb-3">
-                    <div class="col-md-6">
-                        <strong>Επίτευξη Στόχων:</strong><br>
-                        <?php if ($debrief['objectives_met'] === 'YES'): ?>
-                            <span class="badge bg-success"><i class="bi bi-check-circle-fill me-1"></i>Ναι, πλήρως</span>
-                        <?php elseif ($debrief['objectives_met'] === 'PARTIAL'): ?>
-                            <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle-fill me-1"></i>Μερικώς</span>
-                        <?php else: ?>
-                            <span class="badge bg-danger"><i class="bi bi-x-circle-fill me-1"></i>Όχι</span>
-                        <?php endif; ?>
+            <div class="card-body py-3 px-3">
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <div class="p-2 rounded-2 text-center" style="background:#f0fdf4;border:1px solid #bbf7d0">
+                            <div class="text-muted small mb-1">Επίτευξη Στόχων</div>
+                            <?php if ($debrief['objectives_met'] === 'YES'): ?>
+                                <span class="badge bg-success px-2 py-1"><i class="bi bi-check-circle-fill me-1"></i>Πλήρως</span>
+                            <?php elseif ($debrief['objectives_met'] === 'PARTIAL'): ?>
+                                <span class="badge bg-warning text-dark px-2 py-1"><i class="bi bi-exclamation-circle-fill me-1"></i>Μερικώς</span>
+                            <?php else: ?>
+                                <span class="badge bg-danger px-2 py-1"><i class="bi bi-x-circle-fill me-1"></i>Όχι</span>
+                            <?php endif; ?>
+                        </div>
                     </div>
-                    <div class="col-md-6">
-                        <strong>Συνολική Αξιολόγηση:</strong><br>
-                        <div class="text-warning fs-5">
-                            <?= str_repeat('★', $debrief['rating']) ?><?= str_repeat('☆', 5 - $debrief['rating']) ?>
-                            <span class="text-muted fs-6 ms-1">(<?= $debrief['rating'] ?>/5)</span>
+                    <div class="col-6">
+                        <div class="p-2 rounded-2 text-center" style="background:#f0fdf4;border:1px solid #bbf7d0">
+                            <div class="text-muted small mb-1">Αξιολόγηση</div>
+                            <span class="text-warning fw-bold" style="font-size:1rem;letter-spacing:1px"><?= str_repeat('★', $debrief['rating']) ?><span style="opacity:.3"><?= str_repeat('★', 5 - $debrief['rating']) ?></span></span>
+                            <span class="text-muted small ms-1"><?= $debrief['rating'] ?>/5</span>
                         </div>
                     </div>
                 </div>
-                
-                <div class="mb-3">
-                    <strong>Σύνοψη:</strong>
-                    <div class="p-3 bg-light rounded mt-1">
+
+                <div class="mb-2">
+                    <div class="text-muted small fw-semibold mb-1 text-uppercase" style="letter-spacing:.05em"><i class="bi bi-text-paragraph me-1"></i>Σύνοψη</div>
+                    <div class="p-2 rounded-2 text-dark" style="background:#f8fffe;border:1px solid #d1f0e0;font-size:.93rem">
                         <?= nl2br(h($debrief['summary'])) ?>
                     </div>
                 </div>
-                
+
                 <?php if ($debrief['incidents']): ?>
-                <div class="mb-3">
-                    <strong class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>Συμβάντα / Ατυχήματα:</strong>
-                    <div class="p-3 bg-light border-start border-danger border-4 mt-1">
+                <div class="mb-2">
+                    <div class="text-danger small fw-semibold mb-1 text-uppercase" style="letter-spacing:.05em"><i class="bi bi-exclamation-triangle-fill me-1"></i>Συμβάντα / Ατυχήματα</div>
+                    <div class="p-2 rounded-2 text-dark" style="background:#fff5f5;border-left:3px solid #dc3545;font-size:.93rem">
                         <?= nl2br(h($debrief['incidents'])) ?>
                     </div>
                 </div>
                 <?php endif; ?>
-                
+
                 <?php if ($debrief['equipment_issues']): ?>
-                <div class="mb-3">
-                    <strong class="text-warning text-dark"><i class="bi bi-tools me-1"></i>Προβλήματα Εξοπλισμού:</strong>
-                    <div class="p-3 bg-light border-start border-warning border-4 mt-1">
+                <div class="mb-2">
+                    <div class="small fw-semibold mb-1 text-uppercase" style="letter-spacing:.05em;color:#856404"><i class="bi bi-tools me-1"></i>Προβλήματα Εξοπλισμού</div>
+                    <div class="p-2 rounded-2 text-dark" style="background:#fffdf0;border-left:3px solid #ffc107;font-size:.93rem">
                         <?= nl2br(h($debrief['equipment_issues'])) ?>
                     </div>
                 </div>
                 <?php endif; ?>
-                
-                <div class="text-muted small text-end mt-3">
+
+                <div class="text-muted mt-2" style="font-size:.78rem;text-align:right">
                     <i class="bi bi-clock me-1"></i>Υποβλήθηκε: <?= formatDateTime($debrief['created_at']) ?>
                 </div>
             </div>
