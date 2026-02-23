@@ -18,6 +18,16 @@ function getRandomExamQuestions($examId, $count) {
 }
 
 /**
+ * Get random questions from the entire category pool (all exams in same category)
+ */
+function getRandomPoolQuestions($categoryId, $count) {
+    return dbFetchAll(
+        "SELECT * FROM training_exam_questions WHERE category_id = ? ORDER BY RAND() LIMIT ?",
+        [$categoryId, $count]
+    );
+}
+
+/**
  * Get random questions from a quiz
  */
 function getRandomQuizQuestions($quizId, $count = null) {

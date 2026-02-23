@@ -84,6 +84,18 @@ include __DIR__ . '/includes/header.php';
         </a>
     </div>
     
+    <!-- Pool Mode Banner -->
+    <?php if (!empty($exam['use_random_pool'])): ?>
+        <div class="alert alert-primary mb-4">
+            <i class="bi bi-shuffle me-2"></i>
+            <strong>Τυχαία επιλογή από pool είναι ενεργή.</strong>
+            Κατά την έναρξη του διαγωνίσματος, ο συστημζ θα επιλέξει αυτόματα
+            <strong><?= $exam['questions_per_attempt'] ?> τυχαίες ερωτήσεις</strong> από
+            <em>όλες τις ερωτήσεις της κατηγορίας "<?= h($exam['category_name']) ?>"</em>.
+            Μπορείτε να προσθέσετε ερωτήσεις εδώ ή από το <a href="questions-pool.php">σύνολο pool ερωτήσεων</a> — θα συμπεριληφθούν άμεσα.
+        </div>
+    <?php endif; ?>
+
     <!-- Add Question Button -->
     <div class="card mb-4">
         <div class="card-body text-center">

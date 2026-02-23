@@ -120,8 +120,12 @@ if (!$availability['available']) {
 
 // Initialize exam attempt - select random questions
 if (!isset($_SESSION['exam_attempt_' . $examId])) {
-    // Get random questions
-    $questions = getRandomExamQuestions($examId, $exam['questions_per_attempt']);
+    // Get random questions (from pool or exam-specific)
+    if (!empty($exam['use_random_pool'])) {
+        $questions = getRandomPoolQuestions($exam['category_id'], $exam['questions_per_attempt']);
+    } else {
+        $questions = getRandomExamQuestions($examId, $exam['questions_per_attempt']);
+    }
     
     if (count($questions) < $exam['questions_per_attempt']) {
         setFlash('error', 'Δεν υπάρχουν αρκετές ερωτήσεις για αυτό το διαγώνισμα.');
