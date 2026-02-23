@@ -688,7 +688,7 @@ include __DIR__ . '/includes/header.php';
                                                 </button>
                                             <?php endif; ?>
                                             <?php if ($canManage): ?>
-                                                <br><small class="text-muted"><?= h($p['email']) ?> | <?= h($p['phone']) ?></small>
+                                                <br><small class="text-muted"><?= h($p['email']) ?> | <?php if ($p['phone']): ?><a href="tel:<?= h($p['phone']) ?>" class="text-muted"><?= h($p['phone']) ?></a><?php else: ?>-<?php endif; ?></small>
                                             <?php endif; ?>
                                             <?php if ($p['notes']): ?>
                                                 <br><small><em><i class="bi bi-quote me-1"></i><?= h($p['notes']) ?></em></small>

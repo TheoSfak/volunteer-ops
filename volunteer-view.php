@@ -607,7 +607,7 @@ include __DIR__ . '/includes/header.php';
             <div style="opacity:.85">
                 <i class="bi bi-envelope me-1"></i><?= h($volunteer['email']) ?>
                 <?php if ($volunteer['phone']): ?>
-                    <span class="ms-3"><i class="bi bi-telephone me-1"></i><?= h($volunteer['phone']) ?></span>
+                    <span class="ms-3"><i class="bi bi-telephone me-1"></i><?php if ($volunteer['phone']): ?><a href="tel:<?= h($volunteer['phone']) ?>"><?= h($volunteer['phone']) ?></a><?php else: ?>-<?php endif; ?></span>
                 <?php endif; ?>
                 <?php if ($volunteer['department_name']): ?>
                     <span class="ms-3"><i class="bi bi-building me-1"></i><?= h($volunteer['department_name']) ?></span>

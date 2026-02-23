@@ -228,7 +228,7 @@ $greekMonths = [
                     <?php endif; ?>
                     <i class="bi bi-envelope me-1"></i><?= h($volunteer['email']) ?>
                     <?php if ($volunteer['phone']): ?>
-                        &nbsp;&bull;&nbsp;<i class="bi bi-telephone me-1"></i><?= h($volunteer['phone']) ?>
+                        &nbsp;&bull;&nbsp;<i class="bi bi-telephone me-1"></i><?php if ($volunteer['phone']): ?><a href="tel:<?= h($volunteer['phone']) ?>"><?= h($volunteer['phone']) ?></a><?php else: ?>-<?php endif; ?>
                     <?php endif; ?>
                 </div>
             </div>

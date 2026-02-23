@@ -363,7 +363,7 @@ include __DIR__ . '/includes/header.php';
             <div style="opacity:.85">
                 <i class="bi bi-envelope me-1"></i><?= h($user['email']) ?>
                 <?php if ($user['phone']): ?>
-                    <span class="ms-3"><i class="bi bi-telephone me-1"></i><?= h($user['phone']) ?></span>
+                    <span class="ms-3"><i class="bi bi-telephone me-1"></i><?php if ($user['phone']): ?><a href="tel:<?= h($user['phone']) ?>"><?= h($user['phone']) ?></a><?php else: ?>-<?php endif; ?></span>
                 <?php endif; ?>
             </div>
             <div class="mt-1">
