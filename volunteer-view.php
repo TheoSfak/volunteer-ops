@@ -256,9 +256,10 @@ if (isPost()) {
         } elseif (dbFetchOne("SELECT id FROM volunteer_certificates WHERE user_id = ? AND certificate_type_id = ?", [$id, $typeId])) {
             setFlash('error', 'Ο εθελοντής έχει ήδη πιστοποιητικό αυτού του τύπου. Επεξεργαστείτε το υπάρχον.');
         } else {
-            // Auto-calculate expiry if type has default validity and no expiry given
-            if (!$expiryDate && $certType['default_validity_months']) {
-                $expiryDate = date('Y-m-d', strtotime($issueDate . ' + ' . $certType['default_validity_months'] . ' months'));
+            // Auto-calculate expiry: use type's validity or default 36 months (3 years)
+            if (!$expiryDate) {
+                $months = $certType['default_validity_months'] ?: 36;
+                $expiryDate = date('Y-m-d', strtotime($issueDate . ' + ' . $months . ' months'));
             }
             $newCertId = dbInsert(
                 "INSERT INTO volunteer_certificates (user_id, certificate_type_id, issue_date, expiry_date, issuing_body, certificate_number, notes, created_by)
@@ -1289,7 +1290,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="col-md-6 mb-3">
                             <label class="form-label fw-semibold">Ημ. Λήξης</label>
                             <input type="date" name="expiry_date" class="form-control" id="addExpiryDate">
-                            <div class="form-text">Κενό = υπολογισμός από ισχύ τύπου ή αόριστη</div>
+                            <div class="form-text">Κενό = 3 χρόνια ή ισχύς τύπου</div>
                         </div>
                     </div>
                     <div class="mb-3">
@@ -1401,9 +1402,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!certType || !issueDate || !expiryDate) return;
         const selected = certType.options[certType.selectedIndex];
         const validity = selected ? selected.getAttribute('data-validity') : '';
-        if (validity && issueDate.value && !expiryDate.value) {
+        // Default 36 months (3 years) if type has no specific validity
+        const months = validity ? parseInt(validity) : 36;
+        if (issueDate.value && !expiryDate.value) {
             const d = new Date(issueDate.value);
-            d.setMonth(d.getMonth() + parseInt(validity));
+            d.setMonth(d.getMonth() + months);
             expiryDate.value = d.toISOString().split('T')[0];
         }
     }
