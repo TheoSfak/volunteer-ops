@@ -203,7 +203,7 @@ function csrfField() {
  * Verify CSRF token
  */
 /**
- * Verify CSRF token. On success, rotate the token so it cannot be reused.
+ * Verify CSRF token.
  */
 function verifyCsrf() {
     if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
@@ -211,8 +211,6 @@ function verifyCsrf() {
         // Do NOT use HTTP_REFERER — it is attacker-controlled and enables open redirect
         redirect('dashboard.php');
     }
-    // Rotate token after successful check to prevent replay
-    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
 /**
