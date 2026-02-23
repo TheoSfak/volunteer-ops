@@ -13,7 +13,7 @@ if (!$id) {
 
 $shift = dbFetchOne(
     "SELECT s.*, m.title as mission_title, m.status as mission_status, m.department_id,
-            m.description, m.location
+            m.description, m.location, m.end_datetime as mission_end_datetime
      FROM shifts s
      JOIN missions m ON s.mission_id = m.id
      WHERE s.id = ?",
@@ -66,7 +66,10 @@ if (isPost()) {
 
     switch ($action) {
         case 'apply':
-            if ($shift['mission_status'] !== 'OPEN') {
+            $missionExpired = in_array($shift['mission_status'], [STATUS_OPEN, STATUS_CLOSED]) && strtotime($shift['mission_end_datetime']) < time();
+            if ($missionExpired && !isAdmin()) {
+                setFlash('error', 'Η αποστολή είναι ακόμα ανοιχτή αλλά ο χρόνος διεξαγωγής έχει παρέλθει. Δεν μπορείτε να υποβάλετε αίτηση.');
+            } elseif ($shift['mission_status'] !== 'OPEN') {
                 setFlash('error', 'Η αποστολή δεν δέχεται αιτήσεις.');
             } elseif ($myParticipation) {
                 setFlash('error', 'Έχετε ήδη υποβάλει αίτηση.');
@@ -524,6 +527,7 @@ foreach ($participants as $p) {
 
 $isPast = strtotime($shift['end_time']) < time();
 $isActive = strtotime($shift['start_time']) <= time() && strtotime($shift['end_time']) >= time();
+$missionOverdue = in_array($shift['mission_status'], [STATUS_OPEN, STATUS_CLOSED]) && strtotime($shift['mission_end_datetime']) < time();
 
 // Get available volunteers for manual add (exclude only PENDING/APPROVED — rejected/canceled can be re-added)
 $availableVolunteers = [];
@@ -790,7 +794,7 @@ include __DIR__ . '/includes/header.php';
                                 <?php endif; ?>
                             </div>
                         <?php endif; ?>
-                    <?php elseif ($shift['mission_status'] === 'OPEN' && !$isPast): ?>
+                    <?php elseif ($shift['mission_status'] === 'OPEN' && !$isPast && !$missionOverdue): ?>
                         <?php if ($approvedCount >= $shift['max_volunteers']): ?>
                             <div class="alert alert-warning mb-0">
                                 <i class="bi bi-exclamation-circle me-1"></i>
@@ -809,6 +813,11 @@ include __DIR__ . '/includes/header.php';
                                 </button>
                             </form>
                         <?php endif; ?>
+                    <?php elseif ($missionOverdue && !isAdmin()): ?>
+                        <div class="alert alert-warning mb-0">
+                            <i class="bi bi-clock-history me-1"></i>
+                            Η αποστολή είναι ακόμα ανοιχτή αλλά <strong>ο χρόνος διεξαγωγής έχει παρέλθει</strong>. Δεν μπορείτε να υποβάλετε αίτηση.
+                        </div>
                     <?php else: ?>
                         <p class="text-muted mb-0">Δεν μπορείτε να υποβάλετε αίτηση αυτή τη στιγμή.</p>
                     <?php endif; ?>
