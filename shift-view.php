@@ -389,6 +389,102 @@ if (isPost()) {
             }
             break;
             
+        case 'mass_add_volunteers':
+            if ($canManage) {
+                $volunteerIds = post('volunteer_ids');
+                $notes = post('admin_notes');
+                
+                if (empty($volunteerIds) || !is_array($volunteerIds)) {
+                    setFlash('error', 'Δεν επιλέξατε κανέναν εθελοντή.');
+                    redirect('shift-view.php?id=' . $id);
+                }
+                
+                $addedCount = 0;
+                $skippedCount = 0;
+                
+                foreach ($volunteerIds as $volunteerId) {
+                    $volunteerId = (int) $volunteerId;
+                    if (!$volunteerId) continue;
+                    
+                    // Check if already in this shift (any status)
+                    $exists = dbFetchOne(
+                        "SELECT id, status FROM participation_requests WHERE shift_id = ? AND volunteer_id = ?",
+                        [$id, $volunteerId]
+                    );
+                    
+                    if ($exists && in_array($exists['status'], [PARTICIPATION_APPROVED, PARTICIPATION_PENDING])) {
+                        // Already active — skip
+                        $skippedCount++;
+                        continue;
+                    }
+                    
+                    if ($exists) {
+                        // Reactivate existing rejected/canceled record
+                        dbExecute(
+                            "UPDATE participation_requests 
+                             SET status = 'APPROVED', rejection_reason = NULL, admin_notes = ?, 
+                                 decided_by = ?, decided_at = NOW(), updated_at = NOW() 
+                             WHERE id = ?",
+                            [$notes, $user['id'], $exists['id']]
+                        );
+                    } else {
+                        // Insert new record
+                        dbInsert(
+                            "INSERT INTO participation_requests 
+                             (shift_id, volunteer_id, status, admin_notes, decided_by, decided_at, created_at, updated_at)
+                             VALUES (?, ?, 'APPROVED', ?, ?, NOW(), NOW(), NOW())",
+                            [$id, $volunteerId, $notes, $user['id']]
+                        );
+                    }
+                    
+                    $addedCount++;
+                    
+                    // Fetch volunteer info for notification
+                    $volunteerInfo = dbFetchOne("SELECT name, email FROM users WHERE id = ?", [$volunteerId]);
+                    
+                    // Send email notification
+                    if ($volunteerInfo && !empty($volunteerInfo['email']) && isNotificationEnabled('admin_added_volunteer')) {
+                        $gcalLink = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+                            . '&text=' . rawurlencode($shift['mission_title'])
+                            . '&dates=' . date('Ymd\THis', strtotime($shift['start_time'])) . '/' . date('Ymd\THis', strtotime($shift['end_time']))
+                            . '&details=' . rawurlencode('Βάρδια εθελοντισμού')
+                            . '&location=' . rawurlencode($shift['location'] ?: '');
+                        sendNotificationEmail(
+                            'admin_added_volunteer',
+                            $volunteerInfo['email'],
+                            [
+                                'user_name'     => $volunteerInfo['name'],
+                                'mission_title' => $shift['mission_title'],
+                                'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
+                                'shift_time'    => formatDateTime($shift['start_time'], 'H:i') . ' - ' . formatDateTime($shift['end_time'], 'H:i'),
+                                'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
+                                'admin_notes'   => $notes ?: 'Προστεθήκατε από τον διαχειριστή.',
+                                'gcal_link'     => $gcalLink,
+                            ]
+                        );
+                    }
+                    
+                    // In-app notification
+                    sendNotification(
+                        (int) $volunteerId,
+                        'Τοποθετήθηκατε σε βάρδια',
+                        'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time'])
+                    );
+                }
+                
+                if ($addedCount > 0) {
+                    logAudit('mass_add_volunteers', 'participation_requests', null, "Shift $id, Added $addedCount users");
+                    $msg = "Προστέθηκαν επιτυχώς $addedCount εθελοντές.";
+                    if ($skippedCount > 0) {
+                        $msg .= " Παραλείφθηκαν $skippedCount που ήταν ήδη στη βάρδια.";
+                    }
+                    setFlash('success', $msg);
+                } else {
+                    setFlash('warning', 'Δεν προστέθηκε κανένας εθελοντής (ήταν όλοι ήδη στη βάρδια).');
+                }
+            }
+            break;
+            
         case 'update_notes':
             if ($canManage) {
                 $newNotes = post('admin_notes');
@@ -745,7 +841,7 @@ include __DIR__ . '/includes/header.php';
         <?php if ($canManage): ?>
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-person-plus me-1"></i>Προσθήκη Εθελοντή</h5>
+                    <h5 class="mb-0"><i class="bi bi-person-plus me-1"></i>Προσθήκη Εθελοντών</h5>
                 </div>
                 <div class="card-body">
                     <?php if (empty($availableVolunteers)): ?>
@@ -753,9 +849,14 @@ include __DIR__ . '/includes/header.php';
                     <?php elseif ($approvedCount >= $shift['max_volunteers']): ?>
                         <p class="text-warning mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Η βάρδια είναι πλήρης.</p>
                     <?php else: ?>
-                        <button type="button" class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#addVolunteerModal">
-                            <i class="bi bi-person-plus me-1"></i>Προσθήκη Εθελοντή
-                        </button>
+                        <div class="d-grid gap-2">
+                            <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addVolunteerModal">
+                                <i class="bi bi-person-plus me-1"></i>Μεμονωμένη Προσθήκη
+                            </button>
+                            <button type="button" class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#massAddVolunteerModal">
+                                <i class="bi bi-people me-1"></i>Μαζική Προσθήκη
+                            </button>
+                        </div>
                     <?php endif; ?>
                 </div>
             </div>
@@ -811,6 +912,63 @@ include __DIR__ . '/includes/header.php';
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
                     <button type="submit" class="btn btn-success">Προσθήκη</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Mass Add Volunteers Modal -->
+<div class="modal fade" id="massAddVolunteerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="mass_add_volunteers">
+                
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-people me-1"></i>Μαζική Προσθήκη Εθελοντών</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <input type="text" class="form-control" id="massAddSearch" placeholder="Αναζήτηση με όνομα ή email...">
+                    </div>
+                    
+                    <div class="mb-3 d-flex justify-content-between align-items-center">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="selectAllVolunteers">
+                            <label class="form-check-label fw-bold" for="selectAllVolunteers">
+                                Επιλογή Όλων
+                            </label>
+                        </div>
+                        <span class="badge bg-primary" id="selectedCountBadge">0 επιλεγμένοι</span>
+                    </div>
+                    
+                    <div class="list-group mb-3" style="max-height: 300px; overflow-y: auto;" id="massAddList">
+                        <?php foreach ($availableVolunteers as $v): ?>
+                            <label class="list-group-item d-flex gap-2 align-items-center volunteer-item">
+                                <input class="form-check-input flex-shrink-0 volunteer-checkbox" type="checkbox" name="volunteer_ids[]" value="<?= $v['id'] ?>">
+                                <span>
+                                    <span class="volunteer-name fw-bold"><?= h($v['name']) ?></span>
+                                    <small class="text-muted volunteer-email d-block"><?= h($v['email']) ?> — <?= h(ROLE_LABELS[$v['role']] ?? $v['role']) ?></small>
+                                </span>
+                            </label>
+                        <?php endforeach; ?>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Σημειώσεις (κοινές για όλους)</label>
+                        <textarea class="form-control" name="admin_notes" rows="2" placeholder="Λόγος χειροκίνητης ανάθεσης..."></textarea>
+                    </div>
+                    <div class="alert alert-info mb-0">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Οι εθελοντές θα προστεθούν απευθείας ως <strong>ΕΓΚΕΚΡΙΜΕΝΟΙ</strong> και θα λάβουν ειδοποίηση.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-success" id="massAddSubmitBtn" disabled>Προσθήκη Επιλεγμένων</button>
                 </div>
             </form>
         </div>
@@ -1095,6 +1253,78 @@ $(document).ready(function() {
             searching: function() { return 'Αναζήτηση...'; }
         }
     });
+});
+
+// Mass Add Volunteers Logic
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('massAddSearch');
+    const selectAllCheckbox = document.getElementById('selectAllVolunteers');
+    const volunteerCheckboxes = document.querySelectorAll('.volunteer-checkbox');
+    const volunteerItems = document.querySelectorAll('.volunteer-item');
+    const selectedCountBadge = document.getElementById('selectedCountBadge');
+    const submitBtn = document.getElementById('massAddSubmitBtn');
+
+    if (!searchInput) return;
+
+    // Filter volunteers
+    searchInput.addEventListener('input', function() {
+        const term = this.value.toLowerCase();
+        volunteerItems.forEach(item => {
+            const name = item.querySelector('.volunteer-name').textContent.toLowerCase();
+            const email = item.querySelector('.volunteer-email').textContent.toLowerCase();
+            if (name.includes(term) || email.includes(term)) {
+                item.style.display = '';
+            } else {
+                item.style.display = 'none';
+            }
+        });
+        updateSelectAllState();
+    });
+
+    // Select All (only visible items)
+    selectAllCheckbox.addEventListener('change', function() {
+        const isChecked = this.checked;
+        volunteerItems.forEach(item => {
+            if (item.style.display !== 'none') {
+                const cb = item.querySelector('.volunteer-checkbox');
+                cb.checked = isChecked;
+            }
+        });
+        updateCount();
+    });
+
+    // Individual checkbox change
+    volunteerCheckboxes.forEach(cb => {
+        cb.addEventListener('change', function() {
+            updateCount();
+            updateSelectAllState();
+        });
+    });
+
+    function updateCount() {
+        const count = document.querySelectorAll('.volunteer-checkbox:checked').length;
+        selectedCountBadge.textContent = count + (count === 1 ? ' επιλεγμένος' : ' επιλεγμένοι');
+        submitBtn.disabled = count === 0;
+    }
+
+    function updateSelectAllState() {
+        const visibleItems = Array.from(volunteerItems).filter(item => item.style.display !== 'none');
+        const visibleChecked = visibleItems.filter(item => item.querySelector('.volunteer-checkbox').checked);
+        
+        if (visibleItems.length === 0) {
+            selectAllCheckbox.checked = false;
+            selectAllCheckbox.indeterminate = false;
+        } else if (visibleChecked.length === visibleItems.length) {
+            selectAllCheckbox.checked = true;
+            selectAllCheckbox.indeterminate = false;
+        } else if (visibleChecked.length > 0) {
+            selectAllCheckbox.checked = false;
+            selectAllCheckbox.indeterminate = true;
+        } else {
+            selectAllCheckbox.checked = false;
+            selectAllCheckbox.indeterminate = false;
+        }
+    }
 });
 </script>
 <?php endif; ?>
