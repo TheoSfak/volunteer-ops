@@ -237,10 +237,127 @@ if (isPost()) {
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h1 class="h3 mb-0">
-        <i class="bi bi-person me-2"></i>Το Προφίλ μου
-    </h1>
+<style>
+/* Profile Page Beautification */
+.profile-hero {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 1rem;
+    padding: 1.5rem;
+    color: #fff;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 8px 32px rgba(102,126,234,.25);
+    position: relative;
+    overflow: hidden;
+}
+.profile-hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -20%;
+    width: 300px;
+    height: 300px;
+    background: rgba(255,255,255,.06);
+    border-radius: 50%;
+}
+.profile-hero .hero-avatar {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 3px solid rgba(255,255,255,.4);
+    box-shadow: 0 4px 15px rgba(0,0,0,.2);
+}
+.profile-hero .hero-avatar-placeholder {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    background: rgba(255,255,255,.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    border: 3px solid rgba(255,255,255,.4);
+}
+.pp-stat-card {
+    border: none;
+    border-radius: .75rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,.06);
+    transition: transform .2s, box-shadow .2s;
+    overflow: hidden;
+}
+.pp-stat-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 6px 20px rgba(0,0,0,.1);
+}
+.pp-stat-card .stat-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: .6rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    color: #fff;
+    flex-shrink: 0;
+}
+.pp-stat-card .stat-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    line-height: 1;
+}
+.pp-card {
+    border: none;
+    border-radius: .75rem;
+    box-shadow: 0 2px 12px rgba(0,0,0,.05);
+    transition: box-shadow .2s;
+    overflow: hidden;
+}
+.pp-card:hover { box-shadow: 0 4px 18px rgba(0,0,0,.09); }
+.pp-card .card-header {
+    background: #fff;
+    border-bottom: 2px solid #eee;
+    padding: .75rem 1rem;
+}
+.pp-card .card-header h5 { font-size: .95rem; font-weight: 600; }
+.pp-card.accent-primary .card-header { border-bottom-color: #667eea; }
+.pp-card.accent-success .card-header { border-bottom-color: #10b981; }
+.pp-card.accent-warning .card-header { border-bottom-color: #f59e0b; }
+.pp-card.accent-danger .card-header { border-bottom-color: #ef4444; }
+@media (max-width: 768px) {
+    .profile-hero { padding: 1rem; text-align: center; }
+    .profile-hero .d-flex { flex-direction: column; gap: .75rem; }
+    .pp-stat-card .card-body { padding: .65rem !important; }
+    .pp-stat-card .stat-value { font-size: 1.15rem; }
+}
+</style>
+
+<!-- Profile Hero Header -->
+<div class="profile-hero">
+    <div class="d-flex align-items-center gap-3">
+        <?php
+        $myPhoto = $user['profile_photo'] ?? null;
+        $myPhotoExists = $myPhoto && file_exists(__DIR__ . '/uploads/avatars/' . $myPhoto);
+        ?>
+        <?php if ($myPhotoExists): ?>
+            <img src="<?= BASE_URL ?>/uploads/avatars/<?= h($myPhoto) ?>?t=<?= time() ?>" class="hero-avatar" alt="">
+        <?php else: ?>
+            <div class="hero-avatar-placeholder"><i class="bi bi-person-fill"></i></div>
+        <?php endif; ?>
+        <div class="flex-grow-1">
+            <h1 class="h4 mb-1 text-white fw-bold"><?= h($user['name']) ?></h1>
+            <div style="opacity:.85">
+                <i class="bi bi-envelope me-1"></i><?= h($user['email']) ?>
+                <?php if ($user['phone']): ?>
+                    <span class="ms-3"><i class="bi bi-telephone me-1"></i><?= h($user['phone']) ?></span>
+                <?php endif; ?>
+            </div>
+            <div class="mt-1">
+                <?= roleBadge($user['role']) ?>
+                <?= volunteerTypeBadge($user['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
+                <span class="badge bg-light text-dark ms-1" style="font-size:.72rem"><i class="bi bi-calendar3 me-1"></i>Μέλος από <?= formatDate($user['created_at']) ?></span>
+            </div>
+        </div>
+    </div>
 </div>
 
 <?php if (!empty($errors)): ?>
@@ -259,35 +376,47 @@ include __DIR__ . '/includes/header.php';
 
 <!-- Stats Cards -->
 <div class="row g-3 mb-4">
-    <div class="col-md-3">
-        <div class="card stats-card primary">
-            <div class="card-body text-center">
-                <h3 class="mb-0"><?= $stats['total_shifts'] ?></h3>
-                <small class="text-muted">Βάρδιες</small>
+    <div class="col-6 col-md-3">
+        <div class="card pp-stat-card">
+            <div class="card-body d-flex align-items-center gap-3 py-3 px-3">
+                <div class="stat-icon" style="background:linear-gradient(135deg,#667eea,#764ba2)"><i class="bi bi-calendar2-check"></i></div>
+                <div>
+                    <div class="stat-value text-dark"><?= $stats['total_shifts'] ?></div>
+                    <small class="text-muted">Βάρδιες</small>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card stats-card success">
-            <div class="card-body text-center">
-                <h3 class="mb-0"><?= number_format($stats['total_hours'], 1) ?></h3>
-                <small class="text-muted">Ώρες</small>
+    <div class="col-6 col-md-3">
+        <div class="card pp-stat-card">
+            <div class="card-body d-flex align-items-center gap-3 py-3 px-3">
+                <div class="stat-icon" style="background:linear-gradient(135deg,#06b6d4,#0891b2)"><i class="bi bi-clock-history"></i></div>
+                <div>
+                    <div class="stat-value text-dark"><?= number_format($stats['total_hours'], 1) ?></div>
+                    <small class="text-muted">Ώρες</small>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card stats-card warning">
-            <div class="card-body text-center">
-                <h3 class="mb-0"><?= number_format($user['total_points']) ?></h3>
-                <small class="text-muted">Πόντοι</small>
+    <div class="col-6 col-md-3">
+        <div class="card pp-stat-card">
+            <div class="card-body d-flex align-items-center gap-3 py-3 px-3">
+                <div class="stat-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><i class="bi bi-star-fill"></i></div>
+                <div>
+                    <div class="stat-value text-dark"><?= number_format($user['total_points']) ?></div>
+                    <small class="text-muted">Πόντοι</small>
+                </div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card stats-card danger">
-            <div class="card-body text-center">
-                <h3 class="mb-0"><?= $stats['achievements'] ?></h3>
-                <small class="text-muted">Επιτεύγματα</small>
+    <div class="col-6 col-md-3">
+        <div class="card pp-stat-card">
+            <div class="card-body d-flex align-items-center gap-3 py-3 px-3">
+                <div class="stat-icon" style="background:linear-gradient(135deg,#ef4444,#dc2626)"><i class="bi bi-trophy"></i></div>
+                <div>
+                    <div class="stat-value text-dark"><?= $stats['achievements'] ?></div>
+                    <small class="text-muted">Επιτεύγματα</small>
+                </div>
             </div>
         </div>
     </div>
@@ -295,9 +424,9 @@ include __DIR__ . '/includes/header.php';
 
 <!-- Exam Attempts History -->
 <?php if (!empty($examAttempts)): ?>
-<div class="card mb-4">
+<div class="card pp-card accent-warning mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0"><i class="bi bi-award me-1"></i>Ιστορικό Διαγωνισμάτων</h5>
+        <h5 class="mb-0"><i class="bi bi-award text-warning me-2"></i>Ιστορικό Διαγωνισμάτων</h5>
         <a href="training-exams.php" class="btn btn-sm btn-primary">
             <i class="bi bi-arrow-right"></i> Όλα τα Διαγωνίσματα
         </a>
@@ -386,9 +515,9 @@ $myRequiredMissing = dbFetchAll(
 );
 ?>
 <?php if (!empty($myCertificates) || !empty($myRequiredMissing)): ?>
-<div class="card mb-4">
+<div class="card pp-card accent-success mb-4">
     <div class="card-header">
-        <h5 class="mb-0"><i class="bi bi-award me-1"></i>Τα Πιστοποιητικά μου</h5>
+        <h5 class="mb-0"><i class="bi bi-award text-success me-2"></i>Τα Πιστοποιητικά μου</h5>
     </div>
     <div class="card-body">
         <?php if (!empty($myCertificates)): ?>
@@ -455,9 +584,9 @@ $myRequiredMissing = dbFetchAll(
 <div class="row">
     <div class="col-lg-8">
         <!-- Profile Form -->
-        <div class="card mb-4">
+        <div class="card pp-card accent-primary mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-person me-1"></i>Στοιχεία Προφίλ</h5>
+                <h5 class="mb-0"><i class="bi bi-person-vcard text-primary me-2"></i>Στοιχεία Προφίλ</h5>
             </div>
             <div class="card-body">
                 <form method="post">
@@ -583,9 +712,9 @@ $myRequiredMissing = dbFetchAll(
     
     <div class="col-lg-4">
         <!-- Profile Photo -->
-        <div class="card mb-4">
+        <div class="card pp-card accent-primary mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-camera me-1"></i>Φωτογραφία Προφίλ</h5>
+                <h5 class="mb-0"><i class="bi bi-camera text-primary me-2"></i>Φωτογραφία Προφίλ</h5>
             </div>
             <div class="card-body text-center">
                 <?php if (!empty($user['profile_photo']) && file_exists(__DIR__ . '/uploads/avatars/' . $user['profile_photo'])): ?>
@@ -625,9 +754,9 @@ $myRequiredMissing = dbFetchAll(
         </div>
 
         <!-- Change Password -->
-        <div class="card mb-4">
+        <div class="card pp-card accent-danger mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-lock me-1"></i>Αλλαγή Κωδικού</h5>
+                <h5 class="mb-0"><i class="bi bi-lock text-danger me-2"></i>Αλλαγή Κωδικού</h5>
             </div>
             <div class="card-body">
                 <form method="post">
@@ -654,9 +783,9 @@ $myRequiredMissing = dbFetchAll(
         </div>
         
         <!-- Role Badge -->
-        <div class="card">
-            <div class="card-body text-center">
-                <h6 class="text-muted mb-2">Ο ρόλος σας</h6>
+        <div class="card pp-card">
+            <div class="card-body text-center py-4">
+                <div class="mb-2" style="font-size:2.5rem;opacity:.7"><i class="bi bi-shield-check"></i></div>
                 <?= roleBadge($user['role']) ?>
                 <?= volunteerTypeBadge($user['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
                 <p class="text-muted mt-2 mb-0 small">
