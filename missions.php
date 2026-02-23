@@ -210,7 +210,25 @@ include __DIR__ . '/includes/header.php';
                                 </td>
                                 <td><span class="badge bg-secondary"><?= $mission['shift_count'] ?></span></td>
                                 <td><span class="badge bg-info"><?= $mission['volunteer_count'] ?></span></td>
-                                <td><?= statusBadge($mission['status']) ?></td>
+                                <td>
+                                    <?= statusBadge($mission['status']) ?>
+                                    <?php
+                                    // Show overdue badge for OPEN/CLOSED missions past their end date
+                                    if (in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED]) && strtotime($mission['end_datetime']) < time()):
+                                        $elapsed = time() - strtotime($mission['end_datetime']);
+                                        $days = floor($elapsed / 86400);
+                                        $hours = floor(($elapsed % 86400) / 3600);
+                                        $elapsedText = '';
+                                        if ($days > 0) $elapsedText .= $days . ' μέρ' . ($days == 1 ? 'α' : 'ες');
+                                        if ($hours > 0) $elapsedText .= ($days > 0 ? ' και ' : '') . $hours . ' ώρ' . ($hours == 1 ? 'α' : 'ες');
+                                        if (!$elapsedText) $elapsedText = 'Μόλις τώρα';
+                                    ?>
+                                        <br>
+                                        <span class="badge bg-danger mt-1" title="Έληξε πριν <?= h($elapsedText) ?>" data-bs-toggle="tooltip">
+                                            <i class="bi bi-clock-history me-1"></i>ΕΛΗΞΕ
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
                                 <td class="text-end">
                                     <a href="mission-view.php?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-primary" title="Προβολή">
                                         <i class="bi bi-eye"></i>

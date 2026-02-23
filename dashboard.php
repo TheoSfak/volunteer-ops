@@ -488,6 +488,16 @@ $liveExams = dbFetchAll("
                 <small>
                     <?= h($om['department_name'] ?? '-') ?> &middot; 
                     Λήξη: <?= formatDateTime($om['end_datetime']) ?>
+                    <?php
+                    $elapsed = time() - strtotime($om['end_datetime']);
+                    $days = floor($elapsed / 86400);
+                    $hours = floor(($elapsed % 86400) / 3600);
+                    $et = '';
+                    if ($days > 0) $et .= $days . ' μέρ' . ($days == 1 ? 'α' : 'ες');
+                    if ($hours > 0) $et .= ($days > 0 ? ' και ' : '') . $hours . ' ώρ' . ($hours == 1 ? 'α' : 'ες');
+                    if (!$et) $et = 'Μόλις τώρα';
+                    ?>
+                    &middot; <strong class="text-danger">πριν <?= h($et) ?></strong>
                 </small>
             </div>
             <div>
@@ -671,6 +681,19 @@ $liveExams = dbFetchAll("
                                         </td>
                                         <td class="text-end">
                                             <?= statusBadge($mission['status']) ?>
+                                            <?php if (in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED]) && strtotime($mission['end_datetime']) < time()):
+                                                $elapsed = time() - strtotime($mission['end_datetime']);
+                                                $days = floor($elapsed / 86400);
+                                                $hours = floor(($elapsed % 86400) / 3600);
+                                                $et = '';
+                                                if ($days > 0) $et .= $days . ' μέρ' . ($days == 1 ? 'α' : 'ες');
+                                                if ($hours > 0) $et .= ($days > 0 ? ' και ' : '') . $hours . ' ώρ' . ($hours == 1 ? 'α' : 'ες');
+                                                if (!$et) $et = 'Μόλις τώρα';
+                                            ?>
+                                                <br><span class="badge bg-danger" title="Έληξε πριν <?= h($et) ?>" data-bs-toggle="tooltip">
+                                                    <i class="bi bi-clock-history me-1"></i>ΕΛΗΞΕ
+                                                </span>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
