@@ -413,6 +413,21 @@ $stats = [
     ),
 ];
 
+// Mission attendance count for current year (distinct missions, not shifts)
+$currentYear = date('Y');
+$missionAttendance = (int) dbFetchValue(
+    "SELECT COUNT(DISTINCT m.id)
+     FROM participation_requests pr
+     JOIN shifts s ON pr.shift_id = s.id
+     JOIN missions m ON s.mission_id = m.id
+     WHERE pr.volunteer_id = ? AND pr.attended = 1
+     AND YEAR(m.start_datetime) = ?",
+    [$id, $currentYear]
+);
+$attendanceGoal = 10;
+$attendancePct = min(100, round(($missionAttendance / $attendanceGoal) * 100));
+$attendanceColor = $missionAttendance >= $attendanceGoal ? 'success' : ($missionAttendance >= 7 ? 'info' : ($missionAttendance >= 4 ? 'warning' : 'danger'));
+
 // Points history
 $pointsHistory = dbFetchAll(
     "SELECT vp.*, 
@@ -480,6 +495,37 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>        <a href="volunteers.php" class="btn btn-outline-secondary">
             <i class="bi bi-arrow-left me-1"></i>Πίσω
         </a>
+    </div>
+</div>
+
+<!-- Annual Mission Attendance Progress -->
+<div class="card mb-4 border-<?= $attendanceColor ?>">
+    <div class="card-body py-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>
+                <i class="bi bi-calendar-check me-1"></i>
+                <strong>Παρουσίες Αποστολών <?= $currentYear ?></strong>
+                <span class="text-muted ms-2">(στόχος: <?= $attendanceGoal ?> για παραμονή ενεργού μέλους)</span>
+            </div>
+            <div>
+                <span class="badge bg-<?= $attendanceColor ?> fs-6"><?= $missionAttendance ?> / <?= $attendanceGoal ?></span>
+                <?php if ($missionAttendance >= $attendanceGoal): ?>
+                    <i class="bi bi-check-circle-fill text-success ms-1" title="Πληροί την προϋπόθεση!"></i>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="progress" style="height: 22px;">
+            <div class="progress-bar bg-<?= $attendanceColor ?><?= $missionAttendance < $attendanceGoal ? ' progress-bar-striped progress-bar-animated' : '' ?>"
+                 role="progressbar" style="width: <?= $attendancePct ?>%"
+                 aria-valuenow="<?= $missionAttendance ?>" aria-valuemin="0" aria-valuemax="<?= $attendanceGoal ?>">
+                <?= $attendancePct ?>%
+            </div>
+        </div>
+        <?php if ($missionAttendance < $attendanceGoal): ?>
+            <small class="text-muted mt-1 d-block">Απομένουν <?= $attendanceGoal - $missionAttendance ?> παρουσίες για ολοκλήρωση του στόχου</small>
+        <?php else: ?>
+            <small class="text-success mt-1 d-block"><i class="bi bi-check-lg"></i> Ο εθελοντής πληροί την προϋπόθεση παραμονής ενεργού μέλους για το <?= $currentYear + 1 ?></small>
+        <?php endif; ?>
     </div>
 </div>
 
