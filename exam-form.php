@@ -24,9 +24,8 @@ if (isPost()) {
     $questionsPerAttempt = post('questions_per_attempt');
     $passingPercentage = post('passing_percentage');
     $timeLimit = post('time_limit_minutes');
+    $maxAttempts = max(1, (int) post('max_attempts', 1));
     $isActive = isset($_POST['is_active']) ? 1 : 0;
-    $availableFrom = post('available_from');
-    $availableUntil = post('available_until');
     
     $errors = [];
     if (empty($title)) $errors[] = 'Το πεδίο τίτλος είναι υποχρεωτικό.';
@@ -39,20 +38,18 @@ if (isPost()) {
             dbExecute("
                 UPDATE training_exams 
                 SET title = ?, description = ?, category_id = ?, questions_per_attempt = ?, 
-                    passing_percentage = ?, time_limit_minutes = ?, is_active = ?, 
-                    available_from = ?, available_until = ?, updated_at = NOW()
+                    passing_percentage = ?, time_limit_minutes = ?, max_attempts = ?, is_active = ?,
+                    updated_at = NOW()
                 WHERE id = ?
-            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $isActive, 
-                $availableFrom ?: null, $availableUntil ?: null, $id]);
+            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $maxAttempts, $isActive, $id]);
             logAudit('update', 'training_exams', $id);
             setFlash('success', 'Το διαγώνισμα ενημερώθηκε.');
         } else {
             $newId = dbInsert("
                 INSERT INTO training_exams (title, description, category_id, questions_per_attempt, 
-                    passing_percentage, time_limit_minutes, is_active, available_from, available_until, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $isActive, 
-                $availableFrom ?: null, $availableUntil ?: null, getCurrentUserId()]);
+                    passing_percentage, time_limit_minutes, max_attempts, is_active, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $maxAttempts, $isActive, getCurrentUserId()]);
             logAudit('create', 'training_exams', $newId);
             setFlash('success', 'Το διαγώνισμα δημιουργήθηκε.');
             redirect('exam-questions-admin.php?exam_id=' . $newId);
@@ -130,31 +127,17 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         
                         <div class="mb-3">
-                            <label class="form-label">Όριο Χρόνου (λεπτά)</label>
-                            <input type="number" name="time_limit_minutes" class="form-control" min="0" 
-                                   value="<?= h($exam['time_limit_minutes'] ?? '') ?>">
-                            <small class="text-muted">Αφήστε κενό για απεριόριστο χρόνο</small>
+                            <label class="form-label">Χρονικό Όριο (λεπτά) <small class="text-muted">— Διάρκεια countdown κατά την εκκίνηση</small></label>
+                            <input type="number" name="time_limit_minutes" class="form-control" min="1" 
+                                   value="<?= h($exam['time_limit_minutes'] ?? '') ?>" placeholder="π.χ. 30">
+                            <small class="text-muted">Απαιτείται για να ξεκινήσετε διαγώνισμα με Countdown. Αφήστε κενό για απεριόριστο.</small>
                         </div>
-                        
-                        <div class="alert alert-info">
-                            <strong><i class="bi bi-clock"></i> Χρονικός Προγραμματισμός:</strong>
-                            Ορίστε πότε το διαγώνισμα θα είναι διαθέσιμο (π.χ. για εξέταση σε συγκεκριμένη ώρα)
-                        </div>
-                        
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Διαθέσιμο από</label>
-                                <input type="datetime-local" name="available_from" class="form-control" 
-                                       value="<?= isset($exam['available_from']) ? date('Y-m-d\TH:i', strtotime($exam['available_from'])) : '' ?>">
-                                <small class="text-muted">Αφήστε κενό για άμεση διαθεσιμότητα</small>
-                            </div>
-                            
-                            <div class="col-md-6 mb-3">
-                                <label class="form-label">Διαθέσιμο έως</label>
-                                <input type="datetime-local" name="available_until" class="form-control" 
-                                       value="<?= isset($exam['available_until']) ? date('Y-m-d\TH:i', strtotime($exam['available_until'])) : '' ?>">
-                                <small class="text-muted">Αφήστε κενό για αόριστη διαθεσιμότητα</small>
-                            </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Μέγιστος Αριθμός Προσπαθειών *</label>
+                            <input type="number" name="max_attempts" class="form-control" min="1" max="10"
+                                   value="<?= h($exam['max_attempts'] ?? 1) ?>" required>
+                            <small class="text-muted">Πόσες φορές μπορεί να δώσει ο εθελοντής αυτό το διαγώνισμα (1 = μία μόνο φορά)</small>
                         </div>
                         
                         <div class="form-check mb-3">

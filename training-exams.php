@@ -36,16 +36,25 @@ $exams = dbFetchAll("
 
 // Get user attempts for these exams
 $attemptsByExam = [];
+$attemptsCountByExam = [];
 if (!empty($exams)) {
     $examIds = array_column($exams, 'id');
     $placeholders = str_repeat('?,', count($examIds) - 1) . '?';
     $attempts = dbFetchAll("
         SELECT * FROM exam_attempts 
         WHERE exam_id IN ($placeholders) AND user_id = ?
+        ORDER BY completed_at DESC
     ", array_merge($examIds, [$userId]));
     
     foreach ($attempts as $attempt) {
-        $attemptsByExam[$attempt['exam_id']] = $attempt;
+        // Keep the latest (first due to ORDER BY DESC)
+        if (!isset($attemptsByExam[$attempt['exam_id']])) {
+            $attemptsByExam[$attempt['exam_id']] = $attempt;
+        }
+        // Count all completed attempts
+        if ($attempt['completed_at']) {
+            $attemptsCountByExam[$attempt['exam_id']] = ($attemptsCountByExam[$attempt['exam_id']] ?? 0) + 1;
+        }
     }
 }
 
@@ -76,8 +85,7 @@ include __DIR__ . '/includes/header.php';
     <!-- Info Alert -->
     <div class="alert alert-warning">
         <i class="bi bi-exclamation-triangle me-2"></i>
-        <strong>Σημαντικό:</strong> Τα διαγωνίσματα είναι επίσημα τεστ που μπορείτε να κάνετε μόνο μία φορά. 
-        Τα αποτελέσματα θα καταγραφούν στο ιστορικό σας.
+        <strong>Σημαντικό:</strong> Τα διαγωνίσματα είναι επίσημα τεστ και τα αποτελέσματα καταγράφονται στο ιστορικό σας. Ο αριθμός των επιτρεπόμενων προσπαθειών ορίζεται από τον διαχειριστή.
     </div>
     
     <!-- Filters -->
@@ -120,22 +128,35 @@ include __DIR__ . '/includes/header.php';
             <?php foreach ($exams as $exam): ?>
                 <?php 
                 $userAttempt = $attemptsByExam[$exam['id']] ?? null;
-                $hasAttempt = $userAttempt !== null;
+                $attemptsUsed = $attemptsCountByExam[$exam['id']] ?? 0;
+                $maxAttempts = (int) ($exam['max_attempts'] ?? 1);
+                $attemptsRemaining = max(0, $maxAttempts - $attemptsUsed);
+                $hasAttempt = $userAttempt !== null && $userAttempt['completed_at'];
+                $allAttemptsUsed = $attemptsUsed >= $maxAttempts;
                 $availability = isExamAvailable($exam);
                 $isAvailable = $availability['available'];
                 ?>
                 <div class="col-md-6 mb-4">
-                    <div class="card h-100 shadow-sm <?= $hasAttempt ? 'border-success' : '' ?>">
+                    <div class="card h-100 shadow-sm <?= $allAttemptsUsed ? 'border-success' : '' ?>">
                         <div class="card-body">
                             <!-- Header -->
                             <div class="d-flex align-items-center justify-content-between mb-3">
                                 <span class="badge bg-warning">
                                     <?= h($exam['category_icon']) ?> <?= h($exam['category_name']) ?>
                                 </span>
-                                <div>
-                                    <?php if ($hasAttempt): ?>
+                                <div class="d-flex gap-1 align-items-center">
+                                    <?php if ($maxAttempts > 1): ?>
+                                        <span class="badge bg-light text-dark border">
+                                            <?= $attemptsUsed ?>/<?= $maxAttempts ?> προσπάθειες
+                                        </span>
+                                    <?php endif; ?>
+                                    <?php if ($hasAttempt && $allAttemptsUsed): ?>
                                         <span class="badge <?= $userAttempt['passed'] ? 'bg-success' : 'bg-danger' ?>">
                                             Ολοκληρωμένο
+                                        </span>
+                                    <?php elseif ($hasAttempt): ?>
+                                        <span class="badge bg-info">
+                                            Έγινε <?= $attemptsUsed ?>x
                                         </span>
                                     <?php else: ?>
                                         <?= examAvailabilityBadge($exam) ?>
@@ -175,9 +196,14 @@ include __DIR__ . '/includes/header.php';
                                     </div>
                                     <div><strong>Αποτέλεσμα:</strong> <?= $userAttempt['passed'] ? 'ΕΠΙΤΥΧΙΑ' : 'ΑΠΟΤΥΧΙΑ' ?></div>
                                 </div>
-                                <a href="exam-results.php?attempt_id=<?= $userAttempt['id'] ?>" class="btn btn-outline-primary w-100">
+                                <a href="exam-results.php?attempt_id=<?= $userAttempt['id'] ?>" class="btn btn-outline-primary w-100 mb-2">
                                     <i class="bi bi-eye"></i> Προβολή Ανασκόπησης
                                 </a>
+                                <?php if (!$allAttemptsUsed && $isAvailable): ?>
+                                    <a href="exam-take.php?id=<?= $exam['id'] ?>" class="btn btn-warning w-100 text-white">
+                                        <i class="bi bi-arrow-repeat"></i> Ξαναπροσπάθεια (<?= $attemptsRemaining ?> ακόμα)
+                                    </a>
+                                <?php endif; ?>
                             <?php else: ?>
                                 <?php if (!$isAvailable): ?>
                                     <div class="alert alert-<?= $availability['status'] === 'expired' ? 'danger' : 'info' ?> mb-3">
