@@ -357,6 +357,20 @@ CREATE TABLE IF NOT EXISTS `notification_settings` (
     FOREIGN KEY (`email_template_id`) REFERENCES `email_templates`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- USER NOTIFICATION PREFERENCES TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `user_notification_preferences` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT UNSIGNED NOT NULL,
+    `notification_code` VARCHAR(50) NOT NULL,
+    `email_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+    `in_app_enabled` TINYINT(1) NOT NULL DEFAULT 1,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_user_notif` (`user_id`, `notification_code`),
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- =============================================

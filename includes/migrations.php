@@ -1064,6 +1064,32 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 17,
+            'description' => 'Create user_notification_preferences table for per-user opt-out',
+            'up' => function () {
+                $tableExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'user_notification_preferences'"
+                );
+                if (!$tableExists) {
+                    dbExecute("
+                        CREATE TABLE user_notification_preferences (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            user_id INT UNSIGNED NOT NULL,
+                            notification_code VARCHAR(50) NOT NULL,
+                            email_enabled TINYINT(1) NOT NULL DEFAULT 1,
+                            in_app_enabled TINYINT(1) NOT NULL DEFAULT 1,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            UNIQUE KEY uq_user_notif (user_id, notification_code),
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    ");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

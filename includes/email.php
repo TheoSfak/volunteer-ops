@@ -7,6 +7,74 @@ if (!defined('VOLUNTEEROPS')) {
     die('Direct access not permitted');
 }
 
+// Notification codes that users CANNOT opt out of (always delivered)
+if (!defined('NON_CONFIGURABLE_NOTIFICATIONS')) {
+    define('NON_CONFIGURABLE_NOTIFICATIONS', ['welcome']);
+}
+
+/**
+ * Get all notification preferences for a user (cached per user per request).
+ * Returns array keyed by notification_code => ['email_enabled'=>int, 'in_app_enabled'=>int]
+ */
+function getUserNotificationPrefs(int $userId): array {
+    static $cache = [];
+    if (isset($cache[$userId])) {
+        return $cache[$userId];
+    }
+
+    $prefs = [];
+    try {
+        $rows = dbFetchAll(
+            "SELECT notification_code, email_enabled, in_app_enabled FROM user_notification_preferences WHERE user_id = ?",
+            [$userId]
+        );
+        foreach ($rows as $row) {
+            $prefs[$row['notification_code']] = [
+                'email_enabled'  => (int)$row['email_enabled'],
+                'in_app_enabled' => (int)$row['in_app_enabled'],
+            ];
+        }
+    } catch (Exception $e) {
+        // Table may not exist yet (pre-migration) — allow all
+    }
+
+    $cache[$userId] = $prefs;
+    return $prefs;
+}
+
+/**
+ * Check if a specific notification channel is enabled for a user.
+ * Default: true (opted-in) when no row exists.
+ * $channel = 'email' | 'in_app'
+ */
+function isUserNotifEnabled(int $userId, string $code, string $channel = 'email'): bool {
+    $prefs = getUserNotificationPrefs($userId);
+    if (!isset($prefs[$code])) {
+        return true; // no preference set = opted-in
+    }
+    $key = ($channel === 'email') ? 'email_enabled' : 'in_app_enabled';
+    return (bool)$prefs[$code][$key];
+}
+
+/**
+ * Save notification preferences for a user.
+ * $prefs = [ 'code' => ['email_enabled'=>0|1, 'in_app_enabled'=>0|1], ... ]
+ */
+function saveUserNotificationPrefs(int $userId, array $prefs): void {
+    foreach ($prefs as $code => $settings) {
+        $emailEnabled  = (int)($settings['email_enabled'] ?? 1);
+        $inAppEnabled  = (int)($settings['in_app_enabled'] ?? 1);
+        dbExecute(
+            "INSERT INTO user_notification_preferences (user_id, notification_code, email_enabled, in_app_enabled, updated_at)
+             VALUES (?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE email_enabled = VALUES(email_enabled), in_app_enabled = VALUES(in_app_enabled), updated_at = NOW()",
+            [$userId, $code, $emailEnabled, $inAppEnabled]
+        );
+    }
+    // Clear cache for this user
+    // (static var — we just call it fresh next time; for this request we reset manually)
+}
+
 /**
  * Get SMTP settings from database (cached per request)
  */
@@ -343,12 +411,21 @@ function sendTestEmail(string $to): array {
 
 /**
  * Send notification email using template
+ * Checks both global (admin) setting AND per-user preference.
  */
 function sendNotificationEmail(string $notificationCode, string $to, array $variables = []): array {
-    // Check if notification is enabled
+    // Check if notification is globally enabled by admin
     $setting = getNotificationSetting($notificationCode);
     if (!$setting || !$setting['email_enabled']) {
         return ['success' => false, 'message' => 'Η ειδοποίηση δεν είναι ενεργοποιημένη'];
+    }
+    
+    // Check per-user email preference (skip for non-configurable codes)
+    if (!in_array($notificationCode, NON_CONFIGURABLE_NOTIFICATIONS)) {
+        $recipientUser = dbFetchOne("SELECT id FROM users WHERE email = ? AND deleted_at IS NULL", [$to]);
+        if ($recipientUser && !isUserNotifEnabled((int)$recipientUser['id'], $notificationCode, 'email')) {
+            return ['success' => false, 'message' => 'Ο χρήστης έχει απενεργοποιήσει αυτή την ειδοποίηση'];
+        }
     }
     
     // Get template
@@ -384,9 +461,16 @@ function sendNotificationEmail(string $notificationCode, string $to, array $vari
 }
 
 /**
- * Simple notification wrapper - creates a notification record in database
+ * Simple notification wrapper - creates a notification record in database.
+ * Pass $notificationCode to check per-user in-app preference.
  */
-function sendNotification(int $userId, string $title, string $message, string $type = 'info'): void {
+function sendNotification(int $userId, string $title, string $message, string $type = 'info', string $notificationCode = ''): void {
+    // Check per-user in-app preference when a code is provided
+    if ($notificationCode !== '' && !in_array($notificationCode, NON_CONFIGURABLE_NOTIFICATIONS)) {
+        if (!isUserNotifEnabled($userId, $notificationCode, 'in_app')) {
+            return;
+        }
+    }
     dbInsert(
         "INSERT INTO notifications (user_id, type, title, message, created_at) VALUES (?, ?, ?, ?, NOW())",
         [$userId, $type, $title, $message]
@@ -394,10 +478,20 @@ function sendNotification(int $userId, string $title, string $message, string $t
 }
 
 /**
- * Bulk notification wrapper - creates multiple notification records in a single query
+ * Bulk notification wrapper - creates multiple notification records in a single query.
+ * Pass $notificationCode to respect per-user in-app preferences.
  */
-function sendBulkNotifications(array $userIds, string $title, string $message, string $type = 'info'): void {
+function sendBulkNotifications(array $userIds, string $title, string $message, string $type = 'info', string $notificationCode = ''): void {
     if (empty($userIds)) return;
+    
+    // Filter out users who opted out of this in-app notification
+    if ($notificationCode !== '' && !in_array($notificationCode, NON_CONFIGURABLE_NOTIFICATIONS)) {
+        $userIds = array_filter($userIds, function ($uid) use ($notificationCode) {
+            return isUserNotifEnabled((int)$uid, $notificationCode, 'in_app');
+        });
+        $userIds = array_values($userIds); // re-index
+        if (empty($userIds)) return;
+    }
     
     $values = [];
     $params = [];

@@ -886,6 +886,7 @@ $appDescription = getSetting('app_description', '');
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i>Το Προφίλ μου</a></li>
                         <li><a class="dropdown-item" href="my-participations.php"><i class="bi bi-list-check me-2"></i>Οι Αιτήσεις μου</a></li>
                         <li><a class="dropdown-item" href="my-points.php"><i class="bi bi-star me-2"></i>Οι Πόντοι μου</a></li>
+                        <li><a class="dropdown-item" href="notification-preferences.php"><i class="bi bi-bell me-2"></i>Ρυθμίσεις Ειδοποιήσεων</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <form action="logout.php" method="post" class="d-inline">
