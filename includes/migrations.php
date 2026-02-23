@@ -1090,6 +1090,109 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 18,
+            'description' => 'Certificate expiry tracking — types, volunteer certificates, email template, settings',
+            'up' => function () {
+                // 1. certificate_types table
+                $exists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'certificate_types'"
+                );
+                if (!$exists) {
+                    dbExecute("
+                        CREATE TABLE certificate_types (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            name VARCHAR(150) NOT NULL,
+                            description TEXT NULL,
+                            default_validity_months INT UNSIGNED NULL COMMENT 'NULL = no expiry',
+                            is_required TINYINT(1) NOT NULL DEFAULT 0,
+                            is_active TINYINT(1) NOT NULL DEFAULT 1,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    ");
+
+                    // Seed default certificate types
+                    dbExecute("INSERT INTO certificate_types (name, description, default_validity_months, is_required) VALUES
+                        ('Πρώτες Βοήθειες', 'Πιστοποίηση Πρώτων Βοηθειών (BLS)', 24, 1),
+                        ('BLS/AED', 'Βασική Υποστήριξη Ζωής & Αυτόματος Εξωτερικός Απινιδωτής', 24, 0),
+                        ('Δίπλωμα Οδήγησης', 'Άδεια οδήγησης αυτοκινήτου / μοτοσυκλέτας', NULL, 0),
+                        ('PHTLS', 'Prehospital Trauma Life Support', 48, 0)
+                    ");
+                }
+
+                // 2. volunteer_certificates table
+                $exists2 = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'volunteer_certificates'"
+                );
+                if (!$exists2) {
+                    dbExecute("
+                        CREATE TABLE volunteer_certificates (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            user_id INT UNSIGNED NOT NULL,
+                            certificate_type_id INT UNSIGNED NOT NULL,
+                            issue_date DATE NOT NULL,
+                            expiry_date DATE NULL COMMENT 'NULL = never expires',
+                            issuing_body VARCHAR(255) NULL,
+                            certificate_number VARCHAR(100) NULL,
+                            document_id INT UNSIGNED NULL,
+                            notes TEXT NULL,
+                            reminder_sent_30 TINYINT(1) NOT NULL DEFAULT 0,
+                            reminder_sent_7 TINYINT(1) NOT NULL DEFAULT 0,
+                            created_by INT UNSIGNED NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            UNIQUE KEY uq_user_cert (user_id, certificate_type_id),
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            FOREIGN KEY (certificate_type_id) REFERENCES certificate_types(id) ON DELETE RESTRICT,
+                            FOREIGN KEY (document_id) REFERENCES volunteer_documents(id) ON DELETE SET NULL,
+                            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    ");
+                }
+
+                // 3. Email template for certificate expiry reminder
+                $tmplExists = dbFetchOne("SELECT id FROM email_templates WHERE code = 'certificate_expiry_reminder'");
+                if (!$tmplExists) {
+                    dbInsert(
+                        "INSERT INTO email_templates (code, name, subject, body_html, is_active) VALUES (?, ?, ?, ?, 1)",
+                        [
+                            'certificate_expiry_reminder',
+                            'Υπενθύμιση Λήξης Πιστοποιητικού',
+                            'Υπενθύμιση: Το πιστοποιητικό σας «{{certificate_type}}» λήγει σε {{days_remaining}} ημέρες',
+                            '<p>Αγαπητέ/ή {{user_name}},</p>
+<p>Σας ενημερώνουμε ότι το πιστοποιητικό σας <strong>«{{certificate_type}}»</strong> λήγει στις <strong>{{expiry_date}}</strong> (σε {{days_remaining}} ημέρες).</p>
+<p>Παρακαλούμε φροντίστε για την ανανέωσή του εγκαίρως.</p>
+<p>Με εκτίμηση,<br>{{app_name}}</p>'
+                        ]
+                    );
+                }
+
+                // 4. Notification setting
+                $nsExists = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'certificate_expiry_reminder'");
+                if (!$nsExists) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES ('certificate_expiry_reminder', 'Υπενθύμιση Λήξης Πιστοποιητικού',
+                                 'Όταν πλησιάζει η λήξη ενός πιστοποιητικού του εθελοντή', 1,
+                                 (SELECT id FROM email_templates WHERE code = 'certificate_expiry_reminder'))"
+                    );
+                }
+
+                // 5. Default settings
+                $s1 = dbFetchOne("SELECT setting_key FROM settings WHERE setting_key = 'certificate_reminder_days_first'");
+                if (!$s1) {
+                    dbInsert("INSERT INTO settings (setting_key, setting_value) VALUES ('certificate_reminder_days_first', '30')");
+                }
+                $s2 = dbFetchOne("SELECT setting_key FROM settings WHERE setting_key = 'certificate_reminder_days_urgent'");
+                if (!$s2) {
+                    dbInsert("INSERT INTO settings (setting_key, setting_value) VALUES ('certificate_reminder_days_urgent', '7')");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

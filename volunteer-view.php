@@ -234,6 +234,95 @@ if (isPost()) {
         }
         redirect('volunteer-view.php?id=' . $id);
     }
+
+    // ════ CERTIFICATE ACTIONS ════════════════════════════════════════════════
+    if ($action === 'add_certificate') {
+        if (!isAdmin()) {
+            setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
+            redirect('volunteer-view.php?id=' . $id);
+        }
+        $typeId = (int) post('certificate_type_id');
+        $issueDate = post('issue_date');
+        $expiryDate = post('expiry_date') ?: null;
+        $issuingBody = trim(post('issuing_body'));
+        $certNumber = trim(post('certificate_number'));
+        $notes = trim(post('cert_notes'));
+
+        $certType = dbFetchOne("SELECT * FROM certificate_types WHERE id = ? AND is_active = 1", [$typeId]);
+        if (!$certType) {
+            setFlash('error', 'Μη έγκυρος τύπος πιστοποιητικού.');
+        } elseif (!$issueDate) {
+            setFlash('error', 'Η ημερομηνία έκδοσης είναι υποχρεωτική.');
+        } elseif (dbFetchOne("SELECT id FROM volunteer_certificates WHERE user_id = ? AND certificate_type_id = ?", [$id, $typeId])) {
+            setFlash('error', 'Ο εθελοντής έχει ήδη πιστοποιητικό αυτού του τύπου. Επεξεργαστείτε το υπάρχον.');
+        } else {
+            // Auto-calculate expiry if type has default validity and no expiry given
+            if (!$expiryDate && $certType['default_validity_months']) {
+                $expiryDate = date('Y-m-d', strtotime($issueDate . ' + ' . $certType['default_validity_months'] . ' months'));
+            }
+            $newCertId = dbInsert(
+                "INSERT INTO volunteer_certificates (user_id, certificate_type_id, issue_date, expiry_date, issuing_body, certificate_number, notes, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [$id, $typeId, $issueDate, $expiryDate, $issuingBody ?: null, $certNumber ?: null, $notes ?: null, getCurrentUserId()]
+            );
+            logAudit('add_certificate', 'volunteer_certificates', $newCertId);
+            setFlash('success', 'Το πιστοποιητικό προστέθηκε.');
+        }
+        redirect('volunteer-view.php?id=' . $id . '#certificates');
+    }
+
+    if ($action === 'edit_certificate') {
+        if (!isAdmin()) {
+            setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
+            redirect('volunteer-view.php?id=' . $id);
+        }
+        $certId = (int) post('cert_id');
+        $cert = dbFetchOne("SELECT * FROM volunteer_certificates WHERE id = ? AND user_id = ?", [$certId, $id]);
+        if (!$cert) {
+            setFlash('error', 'Το πιστοποιητικό δεν βρέθηκε.');
+        } else {
+            $issueDate = post('issue_date');
+            $expiryDate = post('expiry_date') ?: null;
+            $issuingBody = trim(post('issuing_body'));
+            $certNumber = trim(post('certificate_number'));
+            $notes = trim(post('cert_notes'));
+
+            if (!$issueDate) {
+                setFlash('error', 'Η ημερομηνία έκδοσης είναι υποχρεωτική.');
+            } else {
+                // Reset reminder flags if expiry date changed
+                $resetReminders = ($expiryDate !== $cert['expiry_date']);
+                $sql = "UPDATE volunteer_certificates SET issue_date = ?, expiry_date = ?, issuing_body = ?, certificate_number = ?, notes = ?, updated_at = NOW()";
+                $params = [$issueDate, $expiryDate, $issuingBody ?: null, $certNumber ?: null, $notes ?: null];
+                if ($resetReminders) {
+                    $sql .= ", reminder_sent_30 = 0, reminder_sent_7 = 0";
+                }
+                $sql .= " WHERE id = ?";
+                $params[] = $certId;
+                dbExecute($sql, $params);
+                logAudit('edit_certificate', 'volunteer_certificates', $certId);
+                setFlash('success', 'Το πιστοποιητικό ενημερώθηκε.');
+            }
+        }
+        redirect('volunteer-view.php?id=' . $id . '#certificates');
+    }
+
+    if ($action === 'delete_certificate') {
+        if (!isAdmin()) {
+            setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
+            redirect('volunteer-view.php?id=' . $id);
+        }
+        $certId = (int) post('cert_id');
+        $cert = dbFetchOne("SELECT vc.*, ct.name as type_name FROM volunteer_certificates vc JOIN certificate_types ct ON vc.certificate_type_id = ct.id WHERE vc.id = ? AND vc.user_id = ?", [$certId, $id]);
+        if (!$cert) {
+            setFlash('error', 'Το πιστοποιητικό δεν βρέθηκε.');
+        } else {
+            dbExecute("DELETE FROM volunteer_certificates WHERE id = ?", [$certId]);
+            logAudit('delete_certificate', 'volunteer_certificates', $certId);
+            setFlash('success', 'Το πιστοποιητικό <strong>' . h($cert['type_name']) . '</strong> διαγράφηκε.');
+        }
+        redirect('volunteer-view.php?id=' . $id . '#certificates');
+    }
 }
 
 // Get profile
@@ -264,6 +353,24 @@ $userSkillMap = [];
 foreach ($skills as $sk) {
     $userSkillMap[$sk['id']] = $sk['level'];
 }
+
+// Get certificates
+$certificates = dbFetchAll(
+    "SELECT vc.*, ct.name as type_name, ct.default_validity_months, ct.is_required,
+            u.name as created_by_name
+     FROM volunteer_certificates vc
+     JOIN certificate_types ct ON vc.certificate_type_id = ct.id
+     LEFT JOIN users u ON vc.created_by = u.id
+     WHERE vc.user_id = ?
+     ORDER BY ct.is_required DESC, ct.name",
+    [$id]
+);
+
+// Get active certificate types for the add form
+$certTypes = dbFetchAll("SELECT * FROM certificate_types WHERE is_active = 1 ORDER BY name");
+
+// Certificate types already assigned to this volunteer (for filtering the dropdown)
+$assignedCertTypeIds = array_column($certificates, 'certificate_type_id');
 
 // Get achievements
 $achievements = dbFetchAll(
@@ -607,6 +714,102 @@ include __DIR__ . '/includes/header.php';
                             </div>
                         <?php endif; ?>
                     </form>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <!-- Certificates -->
+        <div class="card mb-4" id="certificates">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-award me-1"></i>Πιστοποιητικά</h5>
+                <?php if (isAdmin()): ?>
+                <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#addCertModal">
+                    <i class="bi bi-plus-circle me-1"></i>Προσθήκη
+                </button>
+                <?php endif; ?>
+            </div>
+            <div class="card-body">
+                <?php if (empty($certificates)): ?>
+                    <p class="text-muted">Δεν υπάρχουν καταχωρημένα πιστοποιητικά.</p>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Τύπος</th>
+                                    <th>Ημ. Έκδοσης</th>
+                                    <th>Ημ. Λήξης</th>
+                                    <th>Κατάσταση</th>
+                                    <th>Φορέας</th>
+                                    <?php if (isAdmin()): ?><th class="text-end">Ενέργειες</th><?php endif; ?>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($certificates as $cert):
+                                    $certStatus = 'no_expiry';
+                                    $certBadge = '<span class="badge bg-secondary">Αόριστη</span>';
+                                    if ($cert['expiry_date']) {
+                                        $daysLeft = (int) ((strtotime($cert['expiry_date']) - time()) / 86400);
+                                        if ($daysLeft < 0) {
+                                            $certStatus = 'expired';
+                                            $certBadge = '<span class="badge bg-danger">Ληγμένο (' . abs($daysLeft) . ' ημ.)</span>';
+                                        } elseif ($daysLeft <= 30) {
+                                            $certStatus = 'expiring';
+                                            $certBadge = '<span class="badge bg-warning text-dark">Λήγει σε ' . $daysLeft . ' ημ.</span>';
+                                        } else {
+                                            $certStatus = 'active';
+                                            $certBadge = '<span class="badge bg-success">Ενεργό</span>';
+                                        }
+                                    }
+                                ?>
+                                <tr class="<?= $certStatus === 'expired' ? 'table-danger' : ($certStatus === 'expiring' ? 'table-warning' : '') ?>">
+                                    <td class="fw-semibold">
+                                        <?php if ($cert['is_required']): ?>
+                                            <i class="bi bi-exclamation-circle text-danger me-1" title="Υποχρεωτικό"></i>
+                                        <?php endif; ?>
+                                        <?= h($cert['type_name']) ?>
+                                    </td>
+                                    <td><?= formatDate($cert['issue_date']) ?></td>
+                                    <td><?= $cert['expiry_date'] ? formatDate($cert['expiry_date']) : '—' ?></td>
+                                    <td><?= $certBadge ?></td>
+                                    <td class="text-muted small"><?= h($cert['issuing_body'] ?? '—') ?></td>
+                                    <?php if (isAdmin()): ?>
+                                    <td class="text-end">
+                                        <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal"
+                                                data-bs-target="#editCertModal<?= $cert['id'] ?>" title="Επεξεργασία">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal"
+                                                data-bs-target="#deleteCertModal<?= $cert['id'] ?>" title="Διαγραφή">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </td>
+                                    <?php endif; ?>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+
+                <?php
+                // Show missing required certificates
+                $requiredTypes = dbFetchAll("SELECT * FROM certificate_types WHERE is_required = 1 AND is_active = 1 ORDER BY name");
+                $missingRequired = [];
+                foreach ($requiredTypes as $rt) {
+                    if (!in_array($rt['id'], $assignedCertTypeIds)) {
+                        $missingRequired[] = $rt;
+                    }
+                }
+                if (!empty($missingRequired)):
+                ?>
+                <div class="alert alert-warning mt-3 mb-0">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    <strong>Ελλείποντα υποχρεωτικά:</strong>
+                    <?php foreach ($missingRequired as $mr): ?>
+                        <span class="badge bg-danger ms-1"><?= h($mr['name']) ?></span>
+                    <?php endforeach; ?>
                 </div>
                 <?php endif; ?>
             </div>
@@ -1051,6 +1254,163 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<?php if (isAdmin()): ?>
+<!-- ════ ADD CERTIFICATE MODAL ═══════════════════════════════════════════════ -->
+<div class="modal fade" id="addCertModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="add_certificate">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Προσθήκη Πιστοποιητικού</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Τύπος Πιστοποιητικού <span class="text-danger">*</span></label>
+                        <select name="certificate_type_id" class="form-select" required id="addCertType">
+                            <option value="">— Επιλέξτε —</option>
+                            <?php foreach ($certTypes as $ct): ?>
+                                <?php if (!in_array($ct['id'], $assignedCertTypeIds)): ?>
+                                <option value="<?= $ct['id'] ?>" data-validity="<?= $ct['default_validity_months'] ?? '' ?>">
+                                    <?= h($ct['name']) ?><?= $ct['is_required'] ? ' (Υποχρεωτικό)' : '' ?>
+                                </option>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-semibold">Ημ. Έκδοσης <span class="text-danger">*</span></label>
+                            <input type="date" name="issue_date" class="form-control" required id="addIssueDate">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-semibold">Ημ. Λήξης</label>
+                            <input type="date" name="expiry_date" class="form-control" id="addExpiryDate">
+                            <div class="form-text">Κενό = υπολογισμός από ισχύ τύπου ή αόριστη</div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Φορέας Έκδοσης</label>
+                        <input type="text" name="issuing_body" class="form-control" placeholder="π.χ. Ερυθρός Σταυρός" maxlength="255">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Αριθμός Πιστοποιητικού</label>
+                        <input type="text" name="certificate_number" class="form-control" maxlength="100">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Σημειώσεις</label>
+                        <textarea name="cert_notes" class="form-control" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-plus-circle me-1"></i>Προσθήκη</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- ════ EDIT / DELETE CERTIFICATE MODALS ════════════════════════════════════ -->
+<?php foreach ($certificates as $cert): ?>
+<div class="modal fade" id="editCertModal<?= $cert['id'] ?>" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="edit_certificate">
+                <input type="hidden" name="cert_id" value="<?= $cert['id'] ?>">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Επεξεργασία: <?= h($cert['type_name']) ?></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-semibold">Ημ. Έκδοσης <span class="text-danger">*</span></label>
+                            <input type="date" name="issue_date" class="form-control" required
+                                   value="<?= h($cert['issue_date']) ?>">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label fw-semibold">Ημ. Λήξης</label>
+                            <input type="date" name="expiry_date" class="form-control"
+                                   value="<?= h($cert['expiry_date'] ?? '') ?>">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Φορέας Έκδοσης</label>
+                        <input type="text" name="issuing_body" class="form-control" maxlength="255"
+                               value="<?= h($cert['issuing_body'] ?? '') ?>">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Αριθμός Πιστοποιητικού</label>
+                        <input type="text" name="certificate_number" class="form-control" maxlength="100"
+                               value="<?= h($cert['certificate_number'] ?? '') ?>">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Σημειώσεις</label>
+                        <textarea name="cert_notes" class="form-control" rows="2"><?= h($cert['notes'] ?? '') ?></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-circle me-1"></i>Αποθήκευση</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="deleteCertModal<?= $cert['id'] ?>" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="delete_certificate">
+                <input type="hidden" name="cert_id" value="<?= $cert['id'] ?>">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Διαγραφή Πιστοποιητικού</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Πρόκειται να διαγράψετε το πιστοποιητικό <strong><?= h($cert['type_name']) ?></strong>
+                       του εθελοντή <strong><?= h($volunteer['name']) ?></strong>.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>Διαγραφή</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endforeach; ?>
+<?php endif; // isAdmin certificate modals ?>
+
+<script>
+// Auto-calculate expiry date when certificate type or issue date changes
+document.addEventListener('DOMContentLoaded', function() {
+    const certType = document.getElementById('addCertType');
+    const issueDate = document.getElementById('addIssueDate');
+    const expiryDate = document.getElementById('addExpiryDate');
+    
+    function autoCalcExpiry() {
+        if (!certType || !issueDate || !expiryDate) return;
+        const selected = certType.options[certType.selectedIndex];
+        const validity = selected ? selected.getAttribute('data-validity') : '';
+        if (validity && issueDate.value && !expiryDate.value) {
+            const d = new Date(issueDate.value);
+            d.setMonth(d.getMonth() + parseInt(validity));
+            expiryDate.value = d.toISOString().split('T')[0];
+        }
+    }
+    if (certType) certType.addEventListener('change', autoCalcExpiry);
+    if (issueDate) issueDate.addEventListener('change', autoCalcExpiry);
+});
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
 
