@@ -1227,6 +1227,22 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 20,
+            'description' => 'Add use_random_pool to training_exams',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'training_exams'
+                       AND COLUMN_NAME  = 'use_random_pool'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE training_exams ADD COLUMN use_random_pool TINYINT(1) NOT NULL DEFAULT 0 AFTER max_attempts");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

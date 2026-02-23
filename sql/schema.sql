@@ -804,6 +804,7 @@ CREATE TABLE IF NOT EXISTS `training_exams` (
     `is_active` TINYINT(1) DEFAULT 1,
     `allow_retake` TINYINT(1) DEFAULT 0,
     `max_attempts` INT DEFAULT 1,
+    `use_random_pool` TINYINT(1) DEFAULT 0,
     `available_from` DATETIME NULL,
     `available_until` DATETIME NULL,
     `created_by` INT UNSIGNED NOT NULL,

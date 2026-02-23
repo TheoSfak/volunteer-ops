@@ -25,6 +25,7 @@ if (isPost()) {
     $passingPercentage = post('passing_percentage');
     $timeLimit = post('time_limit_minutes');
     $maxAttempts = max(1, (int) post('max_attempts', 1));
+    $useRandomPool = isset($_POST['use_random_pool']) ? 1 : 0;
     $isActive = isset($_POST['is_active']) ? 1 : 0;
     
     $errors = [];
@@ -38,21 +39,26 @@ if (isPost()) {
             dbExecute("
                 UPDATE training_exams 
                 SET title = ?, description = ?, category_id = ?, questions_per_attempt = ?, 
-                    passing_percentage = ?, time_limit_minutes = ?, max_attempts = ?, is_active = ?,
+                    passing_percentage = ?, time_limit_minutes = ?, max_attempts = ?, use_random_pool = ?, is_active = ?,
                     updated_at = NOW()
                 WHERE id = ?
-            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $maxAttempts, $isActive, $id]);
+            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $maxAttempts, $useRandomPool, $isActive, $id]);
             logAudit('update', 'training_exams', $id);
             setFlash('success', 'Το διαγώνισμα ενημερώθηκε.');
         } else {
             $newId = dbInsert("
                 INSERT INTO training_exams (title, description, category_id, questions_per_attempt, 
-                    passing_percentage, time_limit_minutes, max_attempts, is_active, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $maxAttempts, $isActive, getCurrentUserId()]);
+                    passing_percentage, time_limit_minutes, max_attempts, use_random_pool, is_active, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $maxAttempts, $useRandomPool, $isActive, getCurrentUserId()]);
             logAudit('create', 'training_exams', $newId);
-            setFlash('success', 'Το διαγώνισμα δημιουργήθηκε.');
-            redirect('exam-questions-admin.php?exam_id=' . $newId);
+            if ($useRandomPool) {
+                setFlash('success', 'Το διαγώνισμα δημιουργήθηκε. Ο τυχαίος επιλογέας ερωτήσεων από pool είναι ενεργός — δεν χρειάζεται χειροκίνητη προσθήκη ερωτήσεων.');
+                redirect('exam-admin.php');
+            } else {
+                setFlash('success', 'Το διαγώνισμα δημιουργήθηκε.');
+                redirect('exam-questions-admin.php?exam_id=' . $newId);
+            }
         }
         redirect('exam-admin.php');
     } else {
@@ -140,6 +146,15 @@ include __DIR__ . '/includes/header.php';
                             <small class="text-muted">Πόσες φορές μπορεί να δώσει ο εθελοντής αυτό το διαγώνισμα (1 = μία μόνο φορά)</small>
                         </div>
                         
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" name="use_random_pool" id="use_random_pool" 
+                                   <?= ($exam['use_random_pool'] ?? 0) ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="use_random_pool">
+                                <strong>Τυχαία επιλογή από pool κατηγορίας</strong>
+                                <div class="text-muted small mt-1">Το σύστημα επιλέγει αυτόματα τυχαίες ερωτήσεις από <em>όλη</em> την κατηγορία κατά την έναρξη. Δεν χρειάζεται χειροκίνητη προσθήκη ερωτήσεων στο διαγώνισμα.</div>
+                            </label>
+                        </div>
+
                         <div class="form-check mb-3">
                             <input class="form-check-input" type="checkbox" name="is_active" id="is_active" 
                                    <?= ($exam['is_active'] ?? 1) ? 'checked' : '' ?>>
