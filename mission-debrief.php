@@ -24,7 +24,7 @@ if (!in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED])) {
 }
 
 $existingDebrief = dbFetchOne("SELECT * FROM mission_debriefs WHERE mission_id = ?", [$id]);
-$isEdit = $existingDebrief !== false;
+$isEdit = $existingDebrief !== null;
 
 $pageTitle = ($isEdit ? 'Επεξεργασία Αναφοράς: ' : 'Αναφορά Μετά την Αποστολή: ') . $mission['title'];
 
