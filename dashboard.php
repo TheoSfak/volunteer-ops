@@ -225,7 +225,7 @@ if (isAdmin()) {
                 (SELECT COUNT(*) FROM shifts WHERE mission_id = m.id) as shift_count
          FROM missions m
          LEFT JOIN departments d ON m.department_id = d.id
-         WHERE m.status = ? AND m.start_datetime >= NOW()
+         WHERE m.status = ? AND m.end_datetime >= NOW() AND m.deleted_at IS NULL
          ORDER BY m.start_datetime ASC
          LIMIT 5",
         [STATUS_OPEN]

@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.25.7');
+define('APP_VERSION', '3.25.8');
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
@@ -181,5 +181,6 @@ $GLOBALS['PARTICIPATION_COLORS'] = PARTICIPATION_COLORS;
 $GLOBALS['VOLUNTEER_TYPE_LABELS'] = VOLUNTEER_TYPE_LABELS;
 $GLOBALS['VOLUNTEER_TYPE_COLORS'] = VOLUNTEER_TYPE_COLORS;
 $GLOBALS['VOLUNTEER_TYPE_ICONS'] = VOLUNTEER_TYPE_ICONS;
+
 
 

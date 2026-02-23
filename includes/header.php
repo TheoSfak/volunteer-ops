@@ -641,6 +641,7 @@ $appDescription = getSetting('app_description', '');
                     <i class="bi bi-flag-fill text-success"></i> Ενεργές Αποστολές
                 </a>
             </li>
+            <?php if (isAdmin()): ?>
             <li class="nav-item">
                 <a class="nav-link <?= ($currentPage === 'missions' && get('status') === 'CLOSED') ? 'active' : '' ?>" href="missions.php?status=CLOSED">
                     <i class="bi bi-flag text-warning"></i> Κλειστές Αποστολές
@@ -651,6 +652,7 @@ $appDescription = getSetting('app_description', '');
                     <i class="bi bi-flag-fill text-primary"></i> Ολοκληρωμένες Αποστολές
                 </a>
             </li>
+            <?php endif; ?>
             
             <div class="sidebar-section">Διαχείριση</div>
             
