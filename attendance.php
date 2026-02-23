@@ -292,7 +292,7 @@ include __DIR__ . '/includes/header.php';
                                             <td>
                                                 <small>
                                                     <i class="bi bi-envelope me-1"></i><?= h($p['email']) ?><br>
-                                                    <i class="bi bi-phone me-1"></i><?= h($p['phone']) ?>
+                                                    <i class="bi bi-phone me-1"></i><?php if ($p['phone']): ?><a href="tel:<?= h($p['phone']) ?>"><?= h($p['phone']) ?></a><?php else: ?>-<?php endif; ?>
                                                 </small>
                                             </td>
                                             <td>
