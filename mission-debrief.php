@@ -18,12 +18,15 @@ if (!$mission) {
     redirect('missions.php');
 }
 
-if ($mission['status'] !== STATUS_CLOSED) {
-    setFlash('error', 'Μόνο κλειστές αποστολές μπορούν να ολοκληρωθούν με αναφορά.');
+if (!in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED])) {
+    setFlash('error', 'Μόνο κλειστές ή ολοκληρωμένες αποστολές μπορούν να έχουν αναφορά.');
     redirect('mission-view.php?id=' . $id);
 }
 
-$pageTitle = 'Αναφορά Μετά την Αποστολή: ' . $mission['title'];
+$existingDebrief = dbFetchOne("SELECT * FROM mission_debriefs WHERE mission_id = ?", [$id]);
+$isEdit = $existingDebrief !== false;
+
+$pageTitle = ($isEdit ? 'Επεξεργασία Αναφοράς: ' : 'Αναφορά Μετά την Αποστολή: ') . $mission['title'];
 
 if (isPost()) {
     verifyCsrf();
@@ -44,48 +47,57 @@ if (isPost()) {
             $pdo = db();
             $pdo->beginTransaction();
             
-            // Insert debrief
-            dbInsert(
-                "INSERT INTO mission_debriefs (mission_id, submitted_by, summary, objectives_met, incidents, equipment_issues, rating) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
-                [$id, getCurrentUserId(), $summary, $objectives_met, $incidents ?: null, $equipment_issues ?: null, $rating]
-            );
-            
-            // Update mission status
-            dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_COMPLETED, $id]);
-            
-            $pdo->commit();
-            
-            logAudit('complete_with_debrief', 'missions', $id);
-            
-            // Notify participants
-            $shifts = dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$id]);
-            $shiftIds = array_column($shifts, 'id');
-            if (!empty($shiftIds)) {
-                $ph = implode(',', array_fill(0, count($shiftIds), '?'));
-                $participants = dbFetchAll(
-                    "SELECT DISTINCT pr.volunteer_id, u.name, u.email
-                     FROM participation_requests pr
-                     JOIN users u ON pr.volunteer_id = u.id
-                     WHERE pr.shift_id IN ($ph) AND pr.status IN ('PENDING', 'APPROVED')",
-                    $shiftIds
+            if ($isEdit) {
+                // Update existing debrief
+                dbExecute(
+                    "UPDATE mission_debriefs 
+                     SET summary = ?, objectives_met = ?, incidents = ?, equipment_issues = ?, rating = ?, updated_at = NOW()
+                     WHERE mission_id = ?",
+                    [$summary, $objectives_met, $incidents ?: null, $equipment_issues ?: null, $rating, $id]
                 );
+                logAudit('edit_debrief', 'missions', $id);
+            } else {
+                // Insert new debrief
+                dbInsert(
+                    "INSERT INTO mission_debriefs (mission_id, submitted_by, summary, objectives_met, incidents, equipment_issues, rating) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [$id, getCurrentUserId(), $summary, $objectives_met, $incidents ?: null, $equipment_issues ?: null, $rating]
+                );
+                logAudit('complete_with_debrief', 'missions', $id);
+            }
+            
+            // Update mission status to COMPLETED if it's not already
+            if ($mission['status'] !== STATUS_COMPLETED) {
+                dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_COMPLETED, $id]);
                 
-                $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id;
-                $appName = getSetting('app_name', 'VolunteerOps');
-                
-                foreach ($participants as $p) {
-                    // In-app notification
-                    sendNotification(
-                        $p['volunteer_id'],
-                        'Ολοκλήρωση Αποστολής: ' . $mission['title'],
-                        'Η αποστολή ολοκληρώθηκε επιτυχώς. Μπορείτε να δείτε την αναφορά (debrief) στη σελίδα της αποστολής.'
+                // Notify participants only on first completion
+                $shifts = dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$id]);
+                $shiftIds = array_column($shifts, 'id');
+                if (!empty($shiftIds)) {
+                    $ph = implode(',', array_fill(0, count($shiftIds), '?'));
+                    $participants = dbFetchAll(
+                        "SELECT DISTINCT pr.volunteer_id, u.name, u.email
+                         FROM participation_requests pr
+                         JOIN users u ON pr.volunteer_id = u.id
+                         WHERE pr.shift_id IN ($ph) AND pr.status IN ('PENDING', 'APPROVED')",
+                        $shiftIds
                     );
                     
-                    // Email notification
-                    if (!empty($p['email'])) {
-                        $subject = '[' . $appName . '] Ολοκλήρωση Αποστολής: ' . $mission['title'];
-                        $body = '
+                    $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id;
+                    $appName = getSetting('app_name', 'VolunteerOps');
+                    
+                    foreach ($participants as $p) {
+                        // In-app notification
+                        sendNotification(
+                            $p['volunteer_id'],
+                            'Ολοκλήρωση Αποστολής: ' . $mission['title'],
+                            'Η αποστολή ολοκληρώθηκε επιτυχώς. Μπορείτε να δείτε την αναφορά (debrief) στη σελίδα της αποστολής.'
+                        );
+                        
+                        // Email notification
+                        if (!empty($p['email'])) {
+                            $subject = '[' . $appName . '] Ολοκλήρωση Αποστολής: ' . $mission['title'];
+                            $body = '
 <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
   <h2 style="color:#198754">Η Αποστολή Ολοκληρώθηκε</h2>
   <p>Γεια σου <strong>' . htmlspecialchars($p['name']) . '</strong>,</p>
@@ -96,12 +108,15 @@ if (isPost()) {
   </p>
   <p style="color:#6c757d;font-size:0.9em;margin-top:30px;">&mdash; ' . $appName . '</p>
 </div>';
-                        sendEmail($p['email'], $subject, $body);
+                            sendEmail($p['email'], $subject, $body);
+                        }
                     }
                 }
             }
             
-            setFlash('success', 'Η αναφορά υποβλήθηκε και η αποστολή ολοκληρώθηκε επιτυχώς.');
+            $pdo->commit();
+            
+            setFlash('success', $isEdit ? 'Η αναφορά ενημερώθηκε επιτυχώς.' : 'Η αναφορά υποβλήθηκε και η αποστολή ολοκληρώθηκε επιτυχώς.');
             redirect('mission-view.php?id=' . $id);
             
         } catch (Exception $e) {
