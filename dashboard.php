@@ -158,6 +158,20 @@ if (isAdmin()) {
     );
     
     // Pending participation requests
+    
+    // Overdue missions (past end date but still OPEN or CLOSED)
+    $overdueMissions = dbFetchAll(
+        "SELECT m.*, d.name as department_name
+         FROM missions m
+         LEFT JOIN departments d ON m.department_id = d.id
+         WHERE m.status IN ('" . STATUS_OPEN . "', '" . STATUS_CLOSED . "')
+           AND m.end_datetime < NOW()
+           AND m.deleted_at IS NULL
+           $departmentFilter
+         ORDER BY m.end_datetime ASC",
+        $params
+    );
+    
     $pendingRequests = dbFetchAll(
         "SELECT pr.*, u.name as volunteer_name, s.start_time, s.end_time, m.title as mission_title
          FROM participation_requests pr
@@ -455,6 +469,36 @@ $liveExams = dbFetchAll("
 </div>
 
 <?php if (isAdmin()): ?>
+
+<?php if (!empty($overdueMissions)): ?>
+<!-- Overdue Missions Alert -->
+<div class="alert alert-danger shadow-sm mb-4" style="border-left: 5px solid #dc3545 !important;">
+    <div class="d-flex align-items-center mb-2">
+        <i class="bi bi-exclamation-triangle-fill fs-4 text-danger me-2"></i>
+        <strong class="fs-5">Εκκρεμείς Αποστολές (<?= count($overdueMissions) ?>)</strong>
+    </div>
+    <p class="mb-2 text-danger">Οι παρακάτω αποστολές έχουν λήξει αλλά δεν έχουν ολοκληρωθεί. Παρακαλώ κλείστε/ολοκληρώστε τες.</p>
+    <div class="list-group">
+        <?php foreach ($overdueMissions as $om): ?>
+        <a href="mission-view.php?id=<?= $om['id'] ?>" class="list-group-item list-group-item-action list-group-item-danger d-flex justify-content-between align-items-center">
+            <div>
+                <i class="bi bi-flag-fill me-1"></i>
+                <strong><?= h($om['title']) ?></strong>
+                <br>
+                <small>
+                    <?= h($om['department_name'] ?? '-') ?> &middot; 
+                    Λήξη: <?= formatDateTime($om['end_datetime']) ?>
+                </small>
+            </div>
+            <div>
+                <?= statusBadge($om['status']) ?>
+            </div>
+        </a>
+        <?php endforeach; ?>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Interactive Charts & Widgets Section -->
 <div class="mt-4 mb-3">
     <h5 class="text-muted"><i class="bi bi-grip-vertical me-2"></i>Widgets - Σύρετε για Αναδιάταξη</h5>
