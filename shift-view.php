@@ -111,11 +111,7 @@ if (isPost()) {
                 
                 // Send notification
                 if ($prInfo && isNotificationEnabled('participation_approved')) {
-                    $gcalLink = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
-                        . '&text=' . rawurlencode($shift['mission_title'])
-                        . '&dates=' . date('Ymd\THis', strtotime($shift['start_time'])) . '/' . date('Ymd\THis', strtotime($shift['end_time']))
-                        . '&details=' . rawurlencode('Βάρδια εθελοντισμού')
-                        . '&location=' . rawurlencode($shift['location'] ?: '');
+                    $gcalLink = buildGcalLink($shift['mission_title'], $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
                     // Send email
                     sendNotificationEmail('participation_approved', $prInfo['email'], [
                         'user_name'     => $prInfo['name'],
@@ -206,11 +202,7 @@ if (isPost()) {
 
                     // Send email notification (reuse participation_approved template)
                     if (isNotificationEnabled('participation_approved')) {
-                        $gcalLink = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
-                            . '&text=' . rawurlencode($shift['mission_title'])
-                            . '&dates=' . date('Ymd\THis', strtotime($shift['start_time'])) . '/' . date('Ymd\THis', strtotime($shift['end_time']))
-                            . '&details=' . rawurlencode('Βάρδια εθελοντισμού')
-                            . '&location=' . rawurlencode($shift['location'] ?: '');
+                        $gcalLink = buildGcalLink($shift['mission_title'], $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
                         sendNotificationEmail('participation_approved', $pr['email'], [
                             'user_name'     => $pr['name'],
                             'mission_title' => $shift['mission_title'],
@@ -285,34 +277,36 @@ if (isPost()) {
                     [$id]
                 );
                 
-                // Send notifications to affected volunteers
-                if (isNotificationEnabled('mission_cancelled')) {
-                    foreach ($affectedParticipants as $participant) {
-                        dbInsert(
-                            "INSERT INTO notifications (user_id, type, title, message, data, created_at) 
-                             VALUES (?, 'shift_deleted', ?, ?, ?, NOW())",
-                            [
-                                $participant['volunteer_id'],
-                                'Ακύρωση Βάρδιας',
-                                'Η βάρδια στην αποστολή "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') διαγράφηκε. Η αίτησή σας ακυρώθηκε αυτόματα.',
-                                json_encode(['shift_id' => $id, 'mission_id' => $shift['mission_id']])
-                            ]
+                db()->beginTransaction();
+                try {
+                    // Send bulk notification to affected volunteers
+                    if (isNotificationEnabled('mission_cancelled') && !empty($affectedParticipants)) {
+                        $userIds = array_column($affectedParticipants, 'volunteer_id');
+                        sendBulkNotifications(
+                            $userIds,
+                            'Ακύρωση Βάρδιας',
+                            'Η βάρδια στην αποστολή "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') διαγράφηκε. Η αίτησή σας ακυρώθηκε αυτόματα.'
                         );
                     }
+                    
+                    // Delete participation requests first
+                    dbExecute("DELETE FROM participation_requests WHERE shift_id = ?", [$id]);
+                    
+                    // Delete the shift
+                    dbExecute("DELETE FROM shifts WHERE id = ?", [$id]);
+                    logAudit('delete', 'shifts', $id, 'Notified ' . count($affectedParticipants) . ' volunteers');
+                    
+                    db()->commit();
+                    
+                    $msg = 'Η βάρδια διαγράφηκε.';
+                    if (count($affectedParticipants) > 0) {
+                        $msg .= ' Ειδοποιήθηκαν ' . count($affectedParticipants) . ' εθελοντές.';
+                    }
+                    setFlash('success', $msg);
+                } catch (Exception $e) {
+                    db()->rollBack();
+                    setFlash('error', 'Σφάλμα κατά τη διαγραφή της βάρδιας.');
                 }
-                
-                // Delete participation requests first
-                dbExecute("DELETE FROM participation_requests WHERE shift_id = ?", [$id]);
-                
-                // Delete the shift
-                dbExecute("DELETE FROM shifts WHERE id = ?", [$id]);
-                logAudit('delete', 'shifts', $id, 'Notified ' . count($affectedParticipants) . ' volunteers');
-                
-                $msg = 'Η βάρδια διαγράφηκε.';
-                if (count($affectedParticipants) > 0) {
-                    $msg .= ' Ειδοποιήθηκαν ' . count($affectedParticipants) . ' εθελοντές.';
-                }
-                setFlash('success', $msg);
                 redirect('mission-view.php?id=' . $shift['mission_id']);
             }
             break;
@@ -444,11 +438,7 @@ if (isPost()) {
                     
                     // Send email notification
                     if ($volunteerInfo && !empty($volunteerInfo['email']) && isNotificationEnabled('admin_added_volunteer')) {
-                        $gcalLink = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
-                            . '&text=' . rawurlencode($shift['mission_title'])
-                            . '&dates=' . date('Ymd\THis', strtotime($shift['start_time'])) . '/' . date('Ymd\THis', strtotime($shift['end_time']))
-                            . '&details=' . rawurlencode('Βάρδια εθελοντισμού')
-                            . '&location=' . rawurlencode($shift['location'] ?: '');
+                        $gcalLink = buildGcalLink($shift['mission_title'], $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
                         sendNotificationEmail(
                             'admin_added_volunteer',
                             $volunteerInfo['email'],

@@ -440,7 +440,6 @@ function sendGpsPing(btn) {
             fetch('ping-location.php', { method: 'POST', body })
                 .then(r => r.json())
                 .then(d => {
-                    if (d.new_csrf) CSRF_TOKEN = d.new_csrf;
                     if (d.ok) {
                         showPingStatus(btn.dataset.prId, '✅ Θέση εστάλη (' + d.ts + ')', 'success');
                     } else {
@@ -481,7 +480,6 @@ function setStatus(btn, prId, status) {
     fetch('volunteer-status.php', { method: 'POST', body })
         .then(r => r.json())
         .then(d => {
-            if (d.new_csrf) CSRF_TOKEN = d.new_csrf;
             if (d.ok) {
                 // Update badge
                 const badge = document.getElementById('statusBadge-' + prId);

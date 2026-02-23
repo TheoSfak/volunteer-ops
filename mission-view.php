@@ -316,53 +316,62 @@ if (isPost()) {
                 $shiftIds = array_column($missionShifts, 'id');
                 $notifiedUsers = [];
 
-                if (!empty($shiftIds)) {
-                    // Get all affected participants (PENDING or APPROVED)
-                    $placeholders = implode(',', array_fill(0, count($shiftIds), '?'));
-                    $affectedParticipants = dbFetchAll(
-                        "SELECT DISTINCT pr.volunteer_id, u.name, u.email
-                         FROM participation_requests pr 
-                         JOIN users u ON pr.volunteer_id = u.id 
-                         WHERE pr.shift_id IN ($placeholders) AND pr.status IN ('PENDING', 'APPROVED')",
-                        $shiftIds
-                    );
-                    
-                    // Notify each affected volunteer once
-                    foreach ($affectedParticipants as $participant) {
-                        if (in_array($participant['volunteer_id'], $notifiedUsers)) continue;
-                        $notifiedUsers[] = $participant['volunteer_id'];
-                        // In-app
-                        sendNotification(
-                            $participant['volunteer_id'],
-                            'Διαγραφή Αποστολής: ' . $mission['title'],
-                            'Η αποστολή "' . $mission['title'] . '" διαγράφηκε. Όλες οι αιτήσεις σας ακυρώθηκαν αυτόματα.'
+                db()->beginTransaction();
+                try {
+                    if (!empty($shiftIds)) {
+                        // Get all affected participants (PENDING or APPROVED)
+                        $placeholders = implode(',', array_fill(0, count($shiftIds), '?'));
+                        $affectedParticipants = dbFetchAll(
+                            "SELECT DISTINCT pr.volunteer_id, u.name, u.email
+                             FROM participation_requests pr 
+                             JOIN users u ON pr.volunteer_id = u.id 
+                             WHERE pr.shift_id IN ($placeholders) AND pr.status IN ('PENDING', 'APPROVED')",
+                            $shiftIds
                         );
-                        // Email
-                        if (!empty($participant['email'])) {
-                            sendNotificationEmail('mission_canceled', $participant['email'], [
-                                'user_name'     => $participant['name'],
-                                'mission_title' => $mission['title'],
-                                'reason'        => 'Η αποστολή διαγράφηκε από διαχειριστή.',
-                            ]);
+                        
+                        // Bulk in-app notification
+                        $notifiedUsers = array_column($affectedParticipants, 'volunteer_id');
+                        if (!empty($notifiedUsers)) {
+                            sendBulkNotifications(
+                                $notifiedUsers,
+                                'Διαγραφή Αποστολής: ' . $mission['title'],
+                                'Η αποστολή "' . $mission['title'] . '" διαγράφηκε. Όλες οι αιτήσεις σας ακυρώθηκαν αυτόματα.'
+                            );
                         }
+                        
+                        // Email each affected volunteer
+                        foreach ($affectedParticipants as $participant) {
+                            if (!empty($participant['email'])) {
+                                sendNotificationEmail('mission_canceled', $participant['email'], [
+                                    'user_name'     => $participant['name'],
+                                    'mission_title' => $mission['title'],
+                                    'reason'        => 'Η αποστολή διαγράφηκε από διαχειριστή.',
+                                ]);
+                            }
+                        }
+                        
+                        // Delete participation requests
+                        dbExecute("DELETE FROM participation_requests WHERE shift_id IN ($placeholders)", $shiftIds);
+                        
+                        // Delete shifts
+                        dbExecute("DELETE FROM shifts WHERE mission_id = ?", [$id]);
                     }
                     
-                    // Delete participation requests
-                    dbExecute("DELETE FROM participation_requests WHERE shift_id IN ($placeholders)", $shiftIds);
+                    // Soft delete mission
+                    dbExecute("UPDATE missions SET deleted_at = NOW(), updated_at = NOW() WHERE id = ?", [$id]);
+                    logAudit('delete', 'missions', $id, 'Notified ' . count($notifiedUsers) . ' volunteers');
                     
-                    // Delete shifts
-                    dbExecute("DELETE FROM shifts WHERE mission_id = ?", [$id]);
+                    db()->commit();
+                    
+                    $msg = 'Η αποστολή διαγράφηκε.';
+                    if (!empty($notifiedUsers)) {
+                        $msg .= ' Ειδοποιήθηκαν ' . count($notifiedUsers) . ' εθελοντές.';
+                    }
+                    setFlash('success', $msg);
+                } catch (Exception $e) {
+                    db()->rollBack();
+                    setFlash('error', 'Σφάλμα κατά τη διαγραφή της αποστολής.');
                 }
-                
-                // Soft delete mission
-                dbExecute("UPDATE missions SET deleted_at = NOW(), updated_at = NOW() WHERE id = ?", [$id]);
-                logAudit('delete', 'missions', $id, 'Notified ' . count($notifiedUsers) . ' volunteers');
-                
-                $msg = 'Η αποστολή διαγράφηκε.';
-                if (!empty($notifiedUsers)) {
-                    $msg .= ' Ειδοποιήθηκαν ' . count($notifiedUsers) . ' εθελοντές.';
-                }
-                setFlash('success', $msg);
                 redirect('missions.php');
             }
             break;
@@ -446,11 +455,7 @@ if (isPost()) {
                             
                             // Send notification email
                             if ($volunteer && !empty($volunteer['email']) && isNotificationEnabled('admin_added_volunteer')) {
-                                $gcalLink = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
-                                    . '&text=' . rawurlencode($shift['mission_title'])
-                                    . '&dates=' . date('Ymd\THis', strtotime($shift['start_time'])) . '/' . date('Ymd\THis', strtotime($shift['end_time']))
-                                    . '&details=' . rawurlencode('Βάρδια εθελοντισμού')
-                                    . '&location=' . rawurlencode($shift['location'] ?: '');
+                                $gcalLink = buildGcalLink($shift['mission_title'], $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
                                 sendNotificationEmail(
                                     'admin_added_volunteer',
                                     $volunteer['email'],

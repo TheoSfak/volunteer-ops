@@ -20,7 +20,6 @@ if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_to
     echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
     exit;
 }
-$newCsrf = $_SESSION['csrf_token'];
 
 $userId  = getCurrentUserId();
 $shiftId = (int) post('shift_id');
@@ -57,4 +56,4 @@ try {
     exit;
 }
 
-echo json_encode(['ok' => true, 'ts' => date('H:i:s'), 'new_csrf' => $newCsrf]);
+echo json_encode(['ok' => true, 'ts' => date('H:i:s')]);
