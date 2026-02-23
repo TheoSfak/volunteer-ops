@@ -545,12 +545,20 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<?php if ($isOverdue && isAdmin()): ?>
+<?php if ($isOverdue && isAdmin()):
+    $elapsed = time() - strtotime($mission['end_datetime']);
+    $days = floor($elapsed / 86400);
+    $hours = floor(($elapsed % 86400) / 3600);
+    $elapsedText = '';
+    if ($days > 0) $elapsedText .= $days . ' μέρ' . ($days == 1 ? 'α' : 'ες');
+    if ($hours > 0) $elapsedText .= ($days > 0 ? ' και ' : '') . $hours . ' ώρ' . ($hours == 1 ? 'α' : 'ες');
+    if (!$elapsedText) $elapsedText = 'Μόλις τώρα';
+?>
 <div class="alert alert-danger d-flex align-items-center gap-2 mb-4 shadow-sm border-danger" style="border-left: 5px solid #dc3545 !important;">
     <i class="bi bi-exclamation-triangle-fill fs-4 text-danger"></i>
     <div>
         <strong>Η αποστολή έχει λήξει!</strong>
-        Η ημερομηνία λήξης (<?= formatDateTime($mission['end_datetime']) ?>) έχει παρέλθει.
+        Η ημερομηνία λήξης (<?= formatDateTime($mission['end_datetime']) ?>) έχει παρέλθει — <strong class="text-danger">πριν <?= h($elapsedText) ?></strong>.
         <?php if ($mission['status'] === STATUS_OPEN): ?>
             Παρακαλώ <strong>κλείστε</strong> την αποστολή και στη συνέχεια <strong>ολοκληρώστε</strong> την.
         <?php else: ?>
