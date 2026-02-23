@@ -48,9 +48,12 @@ if (isPost()) {
                      WHERE s.mission_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "'",
                     [$missionId]
                 );
-                foreach ($vols as $v) {
-                    sendNotification($v['volunteer_id'], '📢 ' . h($mission['title']), $broadcastMsg, 'info');
+                
+                $userIds = array_column($vols, 'volunteer_id');
+                if (!empty($userIds)) {
+                    sendBulkNotifications($userIds, '📢 ' . h($mission['title']), $broadcastMsg, 'info');
                 }
+                
                 logAudit('broadcast', 'missions', $missionId);
                 setFlash('success', 'Η ανακοίνωση εστάλη σε ' . count($vols) . ' εθελοντές.');
             }

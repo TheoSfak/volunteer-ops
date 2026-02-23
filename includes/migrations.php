@@ -1030,6 +1030,40 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 16,
+            'description' => 'Add mission_reminder email template',
+            'up' => function () {
+                $exists = dbFetchOne("SELECT id FROM email_templates WHERE code = 'mission_reminder'");
+                if (!$exists) {
+                    $bodyHtml = '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+  <h2 style="color:#fd7e14">Υπενθύμιση Αποστολής</h2>
+  <p>Γεια σου <strong>{{user_name}}</strong>,</p>
+  <p>Η παρακάτω αποστολή είναι ακόμα ανοιχτή και αναζητά εθελοντές:</p>
+  <h3 style="color:#198754">{{mission_title}}</h3>
+  <p>{{mission_description}}</p>
+  <p>
+    <a href="{{mission_url}}" style="background:#fd7e14;color:#fff;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block">Δείτε την Αποστολή</a>
+  </p>
+  <p style="color:#6c757d;font-size:0.9em">&mdash; {{app_name}}</p>
+</div>';
+                    dbInsert(
+                        "INSERT INTO email_templates (code, name, subject, body_html, description, available_variables) 
+                         VALUES ('mission_reminder', 'Υπενθύμιση Αποστολής', 'Υπενθύμιση Αποστολής: {{mission_title}}', ?, 'Όταν στέλνεται υπενθύμιση για ανοιχτή αποστολή', '{{app_name}}, {{user_name}}, {{mission_title}}, {{mission_description}}, {{mission_url}}')",
+                        [$bodyHtml]
+                    );
+                }
+                
+                $settingExists = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_reminder'");
+                if (!$settingExists) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id) 
+                         VALUES ('mission_reminder', 'Υπενθύμιση Αποστολής', 'Όταν στέλνεται υπενθύμιση για ανοιχτή αποστολή', 1, (SELECT id FROM email_templates WHERE code = 'mission_reminder'))"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

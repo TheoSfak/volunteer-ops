@@ -388,3 +388,23 @@ function sendNotification(int $userId, string $title, string $message, string $t
         [$userId, $type, $title, $message]
     );
 }
+
+/**
+ * Bulk notification wrapper - creates multiple notification records in a single query
+ */
+function sendBulkNotifications(array $userIds, string $title, string $message, string $type = 'info'): void {
+    if (empty($userIds)) return;
+    
+    $values = [];
+    $params = [];
+    foreach ($userIds as $userId) {
+        $values[] = "(?, ?, ?, ?, NOW())";
+        $params[] = $userId;
+        $params[] = $type;
+        $params[] = $title;
+        $params[] = $message;
+    }
+    
+    $sql = "INSERT INTO notifications (user_id, type, title, message, created_at) VALUES " . implode(', ', $values);
+    dbExecute($sql, $params);
+}

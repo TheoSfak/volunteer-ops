@@ -20,8 +20,6 @@ if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_to
     echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
     exit;
 }
-// Rotate token and return new one so JS stays in sync
-$_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 $newCsrf = $_SESSION['csrf_token'];
 
 $userId  = getCurrentUserId();

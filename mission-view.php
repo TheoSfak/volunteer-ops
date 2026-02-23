@@ -135,27 +135,25 @@ if (isPost()) {
                 $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id;
                 $appName = getSetting('app_name', 'VolunteerOps');
                 $sent = 0;
-                foreach ($allUsers as $v) {
-                    sendNotification(
-                        $v['id'],
+                
+                $userIds = array_column($allUsers, 'id');
+                if (!empty($userIds)) {
+                    sendBulkNotifications(
+                        $userIds,
                         'Υπενθύμιση Αποστολής: ' . $mission['title'],
                         'Η αποστολή είναι ακόμα ανοιχτή και αναζητά εθελοντές. Δείτε τις διαθέσιμες βάρδιες.'
                     );
+                }
+                
+                foreach ($allUsers as $v) {
                     if (!empty($v['email'])) {
-                        $subject = '[' . $appName . '] Υπενθύμιση Αποστολής: ' . $mission['title'];
-                        $body = '
-<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-  <h2 style="color:#fd7e14">Υπενθύμιση Αποστολής</h2>
-  <p>Γεια σου <strong>' . htmlspecialchars($v['name']) . '</strong>,</p>
-  <p>Η παρακάτω αποστολή είναι ακόμα ανοιχτή και αναζητά εθελοντές:</p>
-  <h3 style="color:#198754">' . htmlspecialchars($mission['title']) . '</h3>
-  ' . (!empty($mission['description']) ? '<p>' . nl2br(htmlspecialchars($mission['description'])) . '</p>' : '') . '
-  <p>
-    <a href="' . $missionUrl . '" style="background:#fd7e14;color:#fff;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block">Δείτε την Αποστολή</a>
-  </p>
-  <p style="color:#6c757d;font-size:0.9em">&mdash; ' . $appName . '</p>
-</div>';
-                        sendEmail($v['email'], $subject, $body);
+                        sendNotificationEmail('mission_reminder', $v['email'], [
+                            'user_name'           => $v['name'],
+                            'mission_title'       => $mission['title'],
+                            'mission_description' => $mission['description'] ?? '',
+                            'mission_url'         => $missionUrl,
+                            'app_name'            => $appName,
+                        ]);
                         $sent++;
                     }
                 }
@@ -187,29 +185,29 @@ if (isPost()) {
                     );
                     $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id;
                     $appName = getSetting('app_name', 'VolunteerOps');
-                    foreach ($volunteers as $v) {
-                        // In-app notification
-                        sendNotification(
-                            $v['id'],
+                    
+                    $userIds = array_column($volunteers, 'id');
+                    if (!empty($userIds)) {
+                        sendBulkNotifications(
+                            $userIds,
                             'Νέα Αποστολή: ' . $mission['title'],
                             'Μια νέα αποστολή δημοσιεύτηκε και αναζητά εθελοντές. Δείτε τις διαθέσιμες βάρδιες.'
                         );
+                    }
+                    
+                    foreach ($volunteers as $v) {
                         // Email
                         if (!empty($v['email'])) {
-                            $subject = '[' . $appName . '] Νέα Αποστολή: ' . $mission['title'];
-                            $body = '
-<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-  <h2 style="color:#0d6efd">Νέα Αποστολή Διαθέσιμη</h2>
-  <p>Γεια σου <strong>' . htmlspecialchars($v['name']) . '</strong>,</p>
-  <p>Μια νέα αποστολή δημοσιεύτηκε και αναζητά εθελοντές:</p>
-  <h3 style="color:#198754">' . htmlspecialchars($mission['title']) . '</h3>
-  ' . (!empty($mission['description']) ? '<p>' . nl2br(htmlspecialchars($mission['description'])) . '</p>' : '') . '
-  <p>
-    <a href="' . $missionUrl . '" style="background:#0d6efd;color:#fff;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block">Δείτε την Αποστολή</a>
-  </p>
-  <p style="color:#6c757d;font-size:0.9em">— ' . $appName . '</p>
-</div>';
-                            sendEmail($v['email'], $subject, $body);
+                            sendNotificationEmail('new_mission', $v['email'], [
+                                'user_name'           => $v['name'],
+                                'mission_title'       => $mission['title'],
+                                'mission_description' => $mission['description'] ?? '',
+                                'location'            => $mission['location'] ?? 'Θα ανακοινωθεί',
+                                'start_date'          => formatDate($mission['start_datetime']),
+                                'end_date'            => formatDate($mission['end_datetime']),
+                                'mission_url'         => $missionUrl,
+                                'app_name'            => $appName,
+                            ]);
                         }
                     }
                     $count = count($volunteers);
@@ -250,50 +248,63 @@ if (isPost()) {
         case 'cancel':
             if (isAdmin() && in_array($mission['status'], [STATUS_DRAFT, STATUS_OPEN])) {
                 $reason = post('cancellation_reason');
-                dbExecute(
-                    "UPDATE missions SET status = ?, cancellation_reason = ?, canceled_by = ?, canceled_at = NOW(), updated_at = NOW() WHERE id = ?",
-                    [STATUS_CANCELED, $reason, $user['id'], $id]
-                );
-                logAudit('cancel', 'missions', $id, null, ['reason' => $reason]);
-
-                // Notify all volunteers with PENDING or APPROVED participation in any shift
-                $cancelShifts = dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$id]);
-                $cancelShiftIds = array_column($cancelShifts, 'id');
-                $notifiedCancel = [];
-                if (!empty($cancelShiftIds)) {
-                    $ph = implode(',', array_fill(0, count($cancelShiftIds), '?'));
-                    $cancelParticipants = dbFetchAll(
-                        "SELECT DISTINCT pr.volunteer_id, u.name, u.email
-                         FROM participation_requests pr
-                         JOIN users u ON pr.volunteer_id = u.id
-                         WHERE pr.shift_id IN ($ph) AND pr.status IN ('PENDING','APPROVED')",
-                        $cancelShiftIds
+                
+                db()->beginTransaction();
+                try {
+                    dbExecute(
+                        "UPDATE missions SET status = ?, cancellation_reason = ?, canceled_by = ?, canceled_at = NOW(), updated_at = NOW() WHERE id = ?",
+                        [STATUS_CANCELED, $reason, $user['id'], $id]
                     );
-                    foreach ($cancelParticipants as $cp) {
-                        if (in_array($cp['volunteer_id'], $notifiedCancel)) continue;
-                        $notifiedCancel[] = $cp['volunteer_id'];
-                        // In-app
-                        sendNotification(
-                            $cp['volunteer_id'],
-                            'Ακύρωση Αποστολής: ' . $mission['title'],
-                            'Η αποστολή ακυρώθηκε' . ($reason ? '. Λόγος: ' . $reason : '') . '. Οι αιτήσεις σας ακυρώθηκαν αυτόματα.'
+                    logAudit('cancel', 'missions', $id, null, ['reason' => $reason]);
+
+                    // Notify all volunteers with PENDING or APPROVED participation in any shift
+                    $cancelShifts = dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$id]);
+                    $cancelShiftIds = array_column($cancelShifts, 'id');
+                    $notifiedCancel = [];
+                    if (!empty($cancelShiftIds)) {
+                        $ph = implode(',', array_fill(0, count($cancelShiftIds), '?'));
+                        $cancelParticipants = dbFetchAll(
+                            "SELECT DISTINCT pr.volunteer_id, u.name, u.email
+                             FROM participation_requests pr
+                             JOIN users u ON pr.volunteer_id = u.id
+                             WHERE pr.shift_id IN ($ph) AND pr.status IN ('PENDING','APPROVED')",
+                            $cancelShiftIds
                         );
-                        // Email
-                        if (!empty($cp['email'])) {
-                            sendNotificationEmail('mission_canceled', $cp['email'], [
-                                'user_name'     => $cp['name'],
-                                'mission_title' => $mission['title'],
-                                'reason'        => $reason ?: 'Δεν δόθηκε αιτιολογία.',
-                            ]);
+                        
+                        $userIds = array_column($cancelParticipants, 'volunteer_id');
+                        if (!empty($userIds)) {
+                            sendBulkNotifications(
+                                $userIds,
+                                'Ακύρωση Αποστολής: ' . $mission['title'],
+                                'Η αποστολή ακυρώθηκε' . ($reason ? '. Λόγος: ' . $reason : '') . '. Οι αιτήσεις σας ακυρώθηκαν αυτόματα.'
+                            );
+                        }
+                        
+                        foreach ($cancelParticipants as $cp) {
+                            if (in_array($cp['volunteer_id'], $notifiedCancel)) continue;
+                            $notifiedCancel[] = $cp['volunteer_id'];
+                            // Email
+                            if (!empty($cp['email'])) {
+                                sendNotificationEmail('mission_canceled', $cp['email'], [
+                                    'user_name'     => $cp['name'],
+                                    'mission_title' => $mission['title'],
+                                    'reason'        => $reason ?: 'Δεν δόθηκε αιτιολογία.',
+                                ]);
+                            }
                         }
                     }
+                    
+                    db()->commit();
+                    
+                    $msg = 'Η αποστολή ακυρώθηκε.';
+                    if (!empty($notifiedCancel)) {
+                        $msg .= ' Ειδοποιήθηκαν ' . count($notifiedCancel) . ' εθελοντές.';
+                    }
+                    setFlash('success', $msg);
+                } catch (Exception $e) {
+                    db()->rollBack();
+                    setFlash('error', 'Σφάλμα κατά την ακύρωση της αποστολής.');
                 }
-
-                $msg = 'Η αποστολή ακυρώθηκε.';
-                if (!empty($notifiedCancel)) {
-                    $msg .= ' Ειδοποιήθηκαν ' . count($notifiedCancel) . ' εθελοντές.';
-                }
-                setFlash('success', $msg);
                 redirect('missions.php');
             }
             break;
