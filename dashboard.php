@@ -230,6 +230,49 @@ if (isAdmin()) {
          LIMIT 5",
         [STATUS_OPEN]
     );
+
+    // Annual attendance progress
+    $currentYear = date('Y');
+    $missionAttendance = (int) dbFetchValue(
+        "SELECT COUNT(DISTINCT m.id)
+         FROM participation_requests pr
+         JOIN shifts s ON pr.shift_id = s.id
+         JOIN missions m ON s.mission_id = m.id
+         WHERE pr.volunteer_id = ? AND pr.attended = 1
+         AND YEAR(m.start_datetime) = ?",
+        [$user['id'], $currentYear]
+    );
+    $attendanceGoal = 10;
+    $attendancePct = min(100, round(($missionAttendance / $attendanceGoal) * 100));
+    $attendanceColor = $missionAttendance >= $attendanceGoal ? 'success' : ($missionAttendance >= 7 ? 'info' : ($missionAttendance >= 4 ? 'warning' : 'danger'));
+
+    // Leaderboard rank
+    $leaderboardRank = (int) dbFetchValue(
+        "SELECT COUNT(*) + 1 FROM users
+         WHERE total_points > ? AND role IN ('" . ROLE_VOLUNTEER . "','" . ROLE_SHIFT_LEADER . "') AND is_active = 1 AND deleted_at IS NULL",
+        [$user['total_points'] ?? 0]
+    );
+    $leaderboardTotal = (int) dbFetchValue(
+        "SELECT COUNT(*) FROM users
+         WHERE role IN ('" . ROLE_VOLUNTEER . "','" . ROLE_SHIFT_LEADER . "') AND is_active = 1 AND deleted_at IS NULL"
+    );
+
+    // Recent achievements & next to earn
+    $recentAchievements = dbFetchAll(
+        "SELECT a.*, ua.earned_at FROM achievements a
+         JOIN user_achievements ua ON a.id = ua.achievement_id
+         WHERE ua.user_id = ?
+         ORDER BY ua.earned_at DESC LIMIT 2",
+        [$user['id']]
+    );
+    $nextAchievement = dbFetchOne(
+        "SELECT * FROM achievements
+         WHERE is_active = 1
+           AND id NOT IN (SELECT achievement_id FROM user_achievements WHERE user_id = ?)
+           AND required_points > 0
+         ORDER BY required_points ASC LIMIT 1",
+        [$user['id']]
+    );
 }
 
 include __DIR__ . '/includes/header.php';
@@ -1290,6 +1333,122 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
 
 <div class="row g-4 mt-4">
     <?php if (!isAdmin()): ?>
+
+    <!-- Attendance Progress Bar -->
+    <div class="col-12">
+        <div class="card ds-widget" style="border-left: 4px solid var(--bs-<?= $attendanceColor ?>);">
+            <div class="card-body py-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                        <i class="bi bi-calendar-check text-<?= $attendanceColor ?> me-1"></i>
+                        <strong>Παρουσίες Αποστολών <?= $currentYear ?></strong>
+                        <span class="text-muted ms-2">(στόχος: <?= $attendanceGoal ?>)</span>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-<?= $attendanceColor ?> fs-6"><?= $missionAttendance ?> / <?= $attendanceGoal ?></span>
+                        <?php if ($missionAttendance >= $attendanceGoal): ?>
+                            <i class="bi bi-check-circle-fill text-success" title="Πληροίτε τον στόχο!"></i>
+                        <?php endif; ?>
+                        <a href="profile.php" class="btn btn-sm btn-outline-secondary">Προφίλ</a>
+                    </div>
+                </div>
+                <div class="progress" style="height: 20px;">
+                    <div class="progress-bar bg-<?= $attendanceColor ?><?= $missionAttendance < $attendanceGoal ? ' progress-bar-striped progress-bar-animated' : '' ?>"
+                         role="progressbar" style="width: <?= $attendancePct ?>%"
+                         aria-valuenow="<?= $missionAttendance ?>" aria-valuemin="0" aria-valuemax="<?= $attendanceGoal ?>">
+                        <?= $attendancePct ?>%
+                    </div>
+                </div>
+                <?php if ($missionAttendance < $attendanceGoal): ?>
+                    <small class="text-muted mt-1 d-block">Απομένουν <strong><?= $attendanceGoal - $missionAttendance ?></strong> παρουσίες για τον στόχο του <?= $currentYear ?></small>
+                <?php else: ?>
+                    <small class="text-success mt-1 d-block"><i class="bi bi-check-lg"></i> Πληροίτε την προϋπόθεση παραμονής ενεργού μέλους για το <?= $currentYear + 1 ?></small>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rank + Achievements + Quick Actions -->
+    <div class="col-md-4">
+        <div class="card ds-widget accent-purple h-100">
+            <div class="card-header">
+                <h5><i class="bi bi-trophy text-warning me-2"></i>Κατάταξη</h5>
+            </div>
+            <div class="card-body text-center py-4">
+                <div style="font-size:2.8rem; font-weight:800; color:#7c3aed; line-height:1;">#<?= $leaderboardRank ?></div>
+                <div class="text-muted mt-1">από <?= $leaderboardTotal ?> εθελοντές</div>
+                <div class="mt-3">
+                    <span class="badge bg-warning text-dark fs-6">
+                        <i class="bi bi-star-fill me-1"></i><?= number_format($user['total_points'] ?? 0) ?> πόντοι
+                    </span>
+                </div>
+                <a href="leaderboard.php" class="btn btn-sm btn-outline-secondary mt-3">Δες Κατάταξη</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card ds-widget accent-gold h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5><i class="bi bi-award text-warning me-2"></i>Επιτεύγματα</h5>
+                <a href="achievements.php" class="btn btn-sm btn-outline-warning">Όλα</a>
+            </div>
+            <div class="card-body">
+                <?php if (empty($recentAchievements)): ?>
+                    <p class="text-muted text-center py-2 mb-0">Δεν έχετε επιτεύγματα ακόμα.</p>
+                <?php else: ?>
+                    <?php foreach ($recentAchievements as $ach): ?>
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <span style="font-size:1.4rem;"><?= h($ach['icon']) ?></span>
+                        <div>
+                            <div class="fw-semibold small"><?= h($ach['name']) ?></div>
+                            <div class="text-muted" style="font-size:.75rem;"><?= formatDate($ach['earned_at']) ?></div>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+                <?php if ($nextAchievement): ?>
+                    <hr class="my-2">
+                    <div class="text-muted small mb-1">Επόμενο:</div>
+                    <div class="d-flex align-items-center gap-2">
+                        <span style="font-size:1.2rem; opacity:.45;"><?= h($nextAchievement['icon']) ?></span>
+                        <div>
+                            <div class="fw-semibold small text-muted"><?= h($nextAchievement['name']) ?></div>
+                            <div style="font-size:.75rem;" class="text-muted"><?= number_format($nextAchievement['required_points']) ?> πόντοι</div>
+                        </div>
+                        <?php $ptsNeeded = max(0, $nextAchievement['required_points'] - ($user['total_points'] ?? 0)); ?>
+                        <span class="badge bg-light text-dark ms-auto"><?= number_format($ptsNeeded) ?> ακόμα</span>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card ds-widget h-100">
+            <div class="card-header">
+                <h5><i class="bi bi-lightning-charge text-primary me-2"></i>Γρήγορες Ενέργειες</h5>
+            </div>
+            <div class="card-body d-flex flex-column gap-2 py-3">
+                <a href="missions.php" class="btn btn-outline-success w-100 text-start">
+                    <i class="bi bi-flag me-2"></i>Βρες Αποστολή
+                </a>
+                <a href="my-participations.php" class="btn btn-outline-primary w-100 text-start">
+                    <i class="bi bi-list-check me-2"></i>Ιστορικό Συμμετοχών
+                </a>
+                <a href="leaderboard.php" class="btn btn-outline-warning w-100 text-start">
+                    <i class="bi bi-trophy me-2"></i>Leaderboard
+                </a>
+                <a href="achievements.php" class="btn btn-outline-secondary w-100 text-start">
+                    <i class="bi bi-award me-2"></i>Τα Επιτεύγματά μου
+                </a>
+                <a href="profile.php" class="btn btn-outline-dark w-100 text-start">
+                    <i class="bi bi-person-circle me-2"></i>Το Προφίλ μου
+                </a>
+            </div>
+        </div>
+    </div>
+
         <!-- My Upcoming Shifts -->
         <div class="col-lg-6">
             <div class="card ds-widget accent-blue h-100">
