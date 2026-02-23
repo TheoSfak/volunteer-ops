@@ -245,6 +245,15 @@ if (isPost()) {
             }
             break;
             
+        case 'reopen_to_closed':
+            if (isAdmin() && $mission['status'] === STATUS_COMPLETED) {
+                dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_CLOSED, $id]);
+                logAudit('reopen_to_closed', 'missions', $id);
+                setFlash('success', 'Η αποστολή επέστρεψε σε «Κλειστή». Μπορείτε να αλλάξετε παρουσίες και εθελοντές.');
+                redirect('mission-view.php?id=' . $id);
+            }
+            break;
+            
         case 'cancel':
             if (isAdmin() && in_array($mission['status'], [STATUS_DRAFT, STATUS_OPEN])) {
                 $reason = post('cancellation_reason');
@@ -401,7 +410,7 @@ if (isPost()) {
             break;
             
         case 'manual_add_volunteer':
-            if (isAdmin()) {
+            if (isAdmin() && $mission['status'] !== STATUS_COMPLETED) {
                 $shiftIds = post('shift_ids', []); // Array of shift IDs
                 $volunteerId = post('volunteer_id');
                 $adminNotes = post('admin_notes');
@@ -499,6 +508,10 @@ if (isPost()) {
     }
 }
 
+// Detect overdue mission (past end date but not closed/completed/canceled)
+$isOverdue = in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED]) 
+    && strtotime($mission['end_datetime']) < time();
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -531,6 +544,31 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?php if ($isOverdue && isAdmin()): ?>
+<div class="alert alert-danger d-flex align-items-center gap-2 mb-4 shadow-sm border-danger" style="border-left: 5px solid #dc3545 !important;">
+    <i class="bi bi-exclamation-triangle-fill fs-4 text-danger"></i>
+    <div>
+        <strong>Η αποστολή έχει λήξει!</strong>
+        Η ημερομηνία λήξης (<?= formatDateTime($mission['end_datetime']) ?>) έχει παρέλθει.
+        <?php if ($mission['status'] === STATUS_OPEN): ?>
+            Παρακαλώ <strong>κλείστε</strong> την αποστολή και στη συνέχεια <strong>ολοκληρώστε</strong> την.
+        <?php else: ?>
+            Παρακαλώ <strong>ολοκληρώστε</strong> την αποστολή.
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($mission['status'] === STATUS_COMPLETED && isAdmin()): ?>
+<div class="alert alert-info d-flex align-items-center gap-2 mb-4">
+    <i class="bi bi-lock-fill fs-5"></i>
+    <div>
+        <strong>Η αποστολή είναι ολοκληρωμένη.</strong>
+        Δεν μπορείτε να προσθέσετε εθελοντές ή να αλλάξετε παρουσίες. Αλλάξτε την κατάσταση σε «Κλειστή» για αλλαγές.
+    </div>
+</div>
+<?php endif; ?>
 
 <div class="row">
     <div class="col-lg-8">
@@ -766,9 +804,11 @@ include __DIR__ . '/includes/header.php';
                     <h5 class="mb-0">Ενέργειες</h5>
                 </div>
                 <div class="card-body d-grid gap-2">
+                    <?php if ($mission['status'] !== STATUS_COMPLETED): ?>
                     <button type="button" class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#addVolunteerModal">
                         <i class="bi bi-person-plus me-1"></i>Προσθήκη Εθελοντή
                     </button>
+                    <?php endif; ?>
                     
                     <?php if ($mission['status'] === STATUS_DRAFT): ?>
                         <form method="post">
@@ -836,6 +876,16 @@ include __DIR__ . '/includes/header.php';
                                 </button>
                             </form>
                         <?php endif; ?>
+                    <?php endif; ?>
+                    
+                    <?php if ($mission['status'] === STATUS_COMPLETED): ?>
+                        <form method="post">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="reopen_to_closed">
+                            <button type="submit" class="btn btn-warning w-100">
+                                <i class="bi bi-unlock me-1"></i>Επαναφορά σε «Κλειστή»
+                            </button>
+                        </form>
                     <?php endif; ?>
                     
                     <?php if (in_array($mission['status'], [STATUS_DRAFT, STATUS_OPEN])): ?>
