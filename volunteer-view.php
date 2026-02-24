@@ -450,6 +450,26 @@ if (($volunteer['volunteer_type'] ?? '') === VTYPE_TRAINEE) {
     $tepColor = $tepHours >= $tepGoal ? 'success' : ($tepHours >= 25 ? 'info' : ($tepHours >= 10 ? 'warning' : 'danger'));
 }
 
+// Educational missions (only for RESCUER)
+$eduMissions = 0;
+$eduGoal = 2;
+$eduPct = 0;
+$eduColor = 'danger';
+if (($volunteer['volunteer_type'] ?? '') === VTYPE_RESCUER) {
+    $eduMissions = (int) dbFetchValue(
+        "SELECT COUNT(DISTINCT m.id)
+         FROM participation_requests pr
+         JOIN shifts s ON pr.shift_id = s.id
+         JOIN missions m ON s.mission_id = m.id
+         WHERE pr.volunteer_id = ? AND pr.attended = 1
+           AND YEAR(m.start_datetime) = ?
+           AND m.mission_type_id = 3",
+        [$id, $currentYear]
+    );
+    $eduPct = min(100, round(($eduMissions / $eduGoal) * 100));
+    $eduColor = $eduMissions >= $eduGoal ? 'success' : ($eduMissions >= 1 ? 'warning' : 'danger');
+}
+
 // Points history
 $pointsHistory = dbFetchAll(
     "SELECT vp.*, 
@@ -618,7 +638,7 @@ include __DIR__ . '/includes/header.php';
         <div class="flex-grow-1">
             <h1 class="h4 mb-1 text-white fw-bold">
                 <?= h($volunteer['name']) ?>
-                <?= volunteerTypeBadge($volunteer['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
+                <?= volunteerTypeBadge($volunteer['volunteer_type'] ?? VTYPE_RESCUER) ?>
                 <?php if (!empty($volunteer['position_name'])): ?>
                     <span class="badge bg-<?= h($volunteer['position_color'] ?? 'secondary') ?> ms-1" style="font-size:.7rem">
                         <?php if ($volunteer['position_icon']): ?><i class="<?= h($volunteer['position_icon']) ?> me-1"></i><?php endif; ?>
@@ -722,6 +742,39 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 <?php endif; // VTYPE_TRAINEE ?>
+
+<?php if (($volunteer['volunteer_type'] ?? '') === VTYPE_RESCUER): ?>
+<!-- Εκπαιδευτικές Αποστολές Progress Bar (only for rescuers) -->
+<div class="card vp-card mb-4" style="border-left: 4px solid var(--bs-<?= $eduColor ?>)">
+    <div class="card-body py-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>
+                <i class="bi bi-mortarboard text-<?= $eduColor ?> me-1"></i>
+                <strong>Εκπαιδευτικές Αποστολές <?= $currentYear ?></strong>
+                <span class="text-muted ms-2 d-none d-md-inline">(απαιτούνται: <?= $eduGoal ?>)</span>
+            </div>
+            <div>
+                <span class="badge bg-<?= $eduColor ?> fs-6"><?= $eduMissions ?> / <?= $eduGoal ?></span>
+                <?php if ($eduMissions >= $eduGoal): ?>
+                    <i class="bi bi-check-circle-fill text-success ms-1" title="Πληροί την προϋπόθεση!"></i>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="progress" style="height: 22px;">
+            <div class="progress-bar bg-<?= $eduColor ?><?= $eduMissions < $eduGoal ? ' progress-bar-striped progress-bar-animated' : '' ?>"
+                 role="progressbar" style="width: <?= $eduPct ?>%"
+                 aria-valuenow="<?= $eduMissions ?>" aria-valuemin="0" aria-valuemax="<?= $eduGoal ?>">
+                <?= $eduPct ?>%
+            </div>
+        </div>
+        <?php if ($eduMissions < $eduGoal): ?>
+            <small class="text-muted mt-1 d-block">Απομένουν <strong><?= $eduGoal - $eduMissions ?></strong> εκπαιδευτικές αποστολές από τις <?= $eduGoal ?> απαιτούμενες</small>
+        <?php else: ?>
+            <small class="text-success mt-1 d-block"><i class="bi bi-check-lg"></i> Ο εθελοντής πληροί την προϋπόθεση συμμετοχής σε <?= $eduGoal ?> εκπαιδευτικές αποστολές!</small>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; // VTYPE_RESCUER ?>
 
 <!-- Stats Cards -->
 <div class="row g-3 mb-4">

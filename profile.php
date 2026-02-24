@@ -60,6 +60,26 @@ $attendanceGoal = 10;
 $attendancePct = min(100, round(($missionAttendance / $attendanceGoal) * 100));
 $attendanceColor = $missionAttendance >= $attendanceGoal ? 'success' : ($missionAttendance >= 7 ? 'info' : ($missionAttendance >= 4 ? 'warning' : 'danger'));
 
+// Educational missions (only for RESCUER)
+$eduMissions = 0;
+$eduGoal = 2;
+$eduPct = 0;
+$eduColor = 'danger';
+if (($user['volunteer_type'] ?? '') === VTYPE_RESCUER) {
+    $eduMissions = (int) dbFetchValue(
+        "SELECT COUNT(DISTINCT m.id)
+         FROM participation_requests pr
+         JOIN shifts s ON pr.shift_id = s.id
+         JOIN missions m ON s.mission_id = m.id
+         WHERE pr.volunteer_id = ? AND pr.attended = 1
+           AND YEAR(m.start_datetime) = ?
+           AND m.mission_type_id = 3",
+        [$user['id'], $currentYear]
+    );
+    $eduPct = min(100, round(($eduMissions / $eduGoal) * 100));
+    $eduColor = $eduMissions >= $eduGoal ? 'success' : ($eduMissions >= 1 ? 'warning' : 'danger');
+}
+
 // Get exam attempts history
 $examAttempts = dbFetchAll("
     SELECT ea.id, ea.exam_id, ea.score, ea.passed, ea.time_taken_seconds, ea.completed_at,
@@ -368,7 +388,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="mt-1">
                 <?= roleBadge($user['role']) ?>
-                <?= volunteerTypeBadge($user['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
+                <?= volunteerTypeBadge($user['volunteer_type'] ?? VTYPE_RESCUER) ?>
                 <span class="badge bg-light text-dark ms-1" style="font-size:.72rem"><i class="bi bi-calendar3 me-1"></i>Μέλος από <?= formatDate($user['created_at']) ?></span>
             </div>
         </div>
@@ -419,6 +439,39 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?php if (($user['volunteer_type'] ?? '') === VTYPE_RESCUER): ?>
+<!-- Εκπαιδευτικές Αποστολές Progress Bar (only for rescuers) -->
+<div class="card pp-card mb-4" style="border-left: 4px solid var(--bs-<?= $eduColor ?>)">
+    <div class="card-body py-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>
+                <i class="bi bi-mortarboard text-<?= $eduColor ?> me-1"></i>
+                <strong>Εκπαιδευτικές Αποστολές <?= $currentYear ?></strong>
+                <span class="text-muted ms-2 d-none d-md-inline">(απαιτούνται: <?= $eduGoal ?>)</span>
+            </div>
+            <div>
+                <span class="badge bg-<?= $eduColor ?> fs-6"><?= $eduMissions ?> / <?= $eduGoal ?></span>
+                <?php if ($eduMissions >= $eduGoal): ?>
+                    <i class="bi bi-check-circle-fill text-success ms-1" title="Πληροίς την προϋπόθεση!"></i>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="progress" style="height: 22px;">
+            <div class="progress-bar bg-<?= $eduColor ?><?= $eduMissions < $eduGoal ? ' progress-bar-striped progress-bar-animated' : '' ?>"
+                 role="progressbar" style="width: <?= $eduPct ?>%"
+                 aria-valuenow="<?= $eduMissions ?>" aria-valuemin="0" aria-valuemax="<?= $eduGoal ?>">
+                <?= $eduPct ?>%
+            </div>
+        </div>
+        <?php if ($eduMissions < $eduGoal): ?>
+            <small class="text-muted mt-1 d-block">Απομένουν <strong><?= $eduGoal - $eduMissions ?></strong> εκπαιδευτικές αποστολές από τις <?= $eduGoal ?> απαιτούμενες</small>
+        <?php else: ?>
+            <small class="text-success mt-1 d-block"><i class="bi bi-check-lg"></i> Πληροίτε την προϋπόθεση συμμετοχής σε <?= $eduGoal ?> εκπαιδευτικές αποστολές!</small>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; // VTYPE_RESCUER ?>
 
 <!-- Stats Cards -->
 <div class="row g-3 mb-4">
@@ -833,7 +886,7 @@ $myRequiredMissing = dbFetchAll(
             <div class="card-body text-center py-4">
                 <div class="mb-2" style="font-size:2.5rem;opacity:.7"><i class="bi bi-shield-check"></i></div>
                 <?= roleBadge($user['role']) ?>
-                <?= volunteerTypeBadge($user['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
+                <?= volunteerTypeBadge($user['volunteer_type'] ?? VTYPE_RESCUER) ?>
                 <p class="text-muted mt-2 mb-0 small">
                     Μέλος από <?= formatDate($user['created_at']) ?>
                 </p>
