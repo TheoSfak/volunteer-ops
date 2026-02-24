@@ -6,7 +6,7 @@
 --        Errors on individual statements are logged but do not stop the migration.
 
 -- 1. Volunteer Type column on users table
-ALTER TABLE `users` ADD COLUMN `volunteer_type` ENUM('VOLUNTEER','TRAINEE_RESCUER','RESCUER') NOT NULL DEFAULT 'VOLUNTEER' AFTER `role`;
+ALTER TABLE `users` ADD COLUMN `volunteer_type` ENUM('TRAINEE_RESCUER','RESCUER') NOT NULL DEFAULT 'RESCUER' AFTER `role`;
 
 ALTER TABLE `users` ADD INDEX `idx_volunteer_type` (`volunteer_type`);
 

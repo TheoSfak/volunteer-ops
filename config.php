@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.26.18');
+define('APP_VERSION', '3.27.0');
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
@@ -98,8 +98,7 @@ define('QUESTION_TYPE_MC', 'MULTIPLE_CHOICE');
 define('QUESTION_TYPE_TF', 'TRUE_FALSE');
 define('QUESTION_TYPE_OPEN', 'OPEN_ENDED');
 
-// Volunteer types
-define('VTYPE_VOLUNTEER', 'VOLUNTEER');
+// Volunteer types (2 categories: full rescuer or trainee)
 define('VTYPE_TRAINEE', 'TRAINEE_RESCUER');
 define('VTYPE_RESCUER', 'RESCUER');
 
@@ -139,19 +138,16 @@ define('MISSION_TYPES', [
 ]);
 
 define('VOLUNTEER_TYPE_LABELS', [
-    VTYPE_VOLUNTEER => 'Εθελοντής',
     VTYPE_TRAINEE => 'Δόκιμος Διασώστης',
     VTYPE_RESCUER => 'Εθελοντής Διασώστης',
 ]);
 
 define('VOLUNTEER_TYPE_COLORS', [
-    VTYPE_VOLUNTEER => 'primary',
     VTYPE_TRAINEE => 'warning',
     VTYPE_RESCUER => 'success',
 ]);
 
 define('VOLUNTEER_TYPE_ICONS', [
-    VTYPE_VOLUNTEER => '',
     VTYPE_TRAINEE => '📚',
     VTYPE_RESCUER => '⛑️',
 ]);
