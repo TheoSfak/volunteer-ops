@@ -428,6 +428,28 @@ $attendanceGoal = 10;
 $attendancePct = min(100, round(($missionAttendance / $attendanceGoal) * 100));
 $attendanceColor = $missionAttendance >= $attendanceGoal ? 'success' : ($missionAttendance >= 7 ? 'info' : ($missionAttendance >= 4 ? 'warning' : 'danger'));
 
+// Τ.Ε.Π. hours (only relevant for TRAINEE_RESCUER)
+$tepHours = 0;
+$tepGoal = 40;
+$tepPct = 0;
+$tepColor = 'danger';
+if (($volunteer['volunteer_type'] ?? '') === VTYPE_TRAINEE) {
+    $tepHours = (float) dbFetchValue(
+        "SELECT COALESCE(SUM(
+            CASE WHEN pr.actual_hours IS NOT NULL THEN pr.actual_hours
+            ELSE TIMESTAMPDIFF(HOUR, s.start_time, s.end_time) END
+        ), 0)
+        FROM participation_requests pr
+        JOIN shifts s ON pr.shift_id = s.id
+        JOIN missions m ON s.mission_id = m.id
+        WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1
+          AND m.mission_type_id = ?",
+        [$id, PARTICIPATION_APPROVED, getTepMissionTypeId()]
+    );
+    $tepPct = min(100, round(($tepHours / $tepGoal) * 100));
+    $tepColor = $tepHours >= $tepGoal ? 'success' : ($tepHours >= 25 ? 'info' : ($tepHours >= 10 ? 'warning' : 'danger'));
+}
+
 // Points history
 $pointsHistory = dbFetchAll(
     "SELECT vp.*, 
@@ -666,6 +688,40 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?php if (($volunteer['volunteer_type'] ?? '') === VTYPE_TRAINEE): ?>
+<!-- Τ.Ε.Π. Hours Progress Bar (only for trainee rescuers) -->
+<div class="card vp-card mb-4" style="border-left: 4px solid var(--bs-<?= $tepColor ?>)">
+    <div class="card-body py-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>
+                <i class="bi bi-hospital text-<?= $tepColor ?> me-1"></i>
+                <strong>Ώρες Τ.Ε.Π.</strong>
+                <span class="text-muted ms-2 d-none d-md-inline">(στόχος: <?= $tepGoal ?> ώρες)</span>
+                <span class="badge bg-secondary ms-1">Τμήμα Επειγόντων</span>
+            </div>
+            <div>
+                <span class="badge bg-<?= $tepColor ?> fs-6"><?= number_format($tepHours, 1) ?> / <?= $tepGoal ?> ώρες</span>
+                <?php if ($tepHours >= $tepGoal): ?>
+                    <i class="bi bi-check-circle-fill text-success ms-1" title="Ολοκλήρωσε τον στόχο!"></i>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="progress" style="height: 22px;">
+            <div class="progress-bar bg-<?= $tepColor ?><?= $tepHours < $tepGoal ? ' progress-bar-striped progress-bar-animated' : '' ?>"
+                 role="progressbar" style="width: <?= $tepPct ?>%"
+                 aria-valuenow="<?= $tepHours ?>" aria-valuemin="0" aria-valuemax="<?= $tepGoal ?>">
+                <?= $tepPct ?>%
+            </div>
+        </div>
+        <?php if ($tepHours < $tepGoal): ?>
+            <small class="text-muted mt-1 d-block">Απομένουν <strong><?= number_format($tepGoal - $tepHours, 1) ?></strong> ώρες από τις <?= $tepGoal ?> απαιτούμενες σε αποστολές Τ.Ε.Π.</small>
+        <?php else: ?>
+            <small class="text-success mt-1 d-block"><i class="bi bi-check-lg"></i> Ο δόκιμος έχει ολοκληρώσει τον στόχο των <?= $tepGoal ?> ωρών Τ.Ε.Π.!</small>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; // VTYPE_TRAINEE ?>
 
 <!-- Stats Cards -->
 <div class="row g-3 mb-4">
