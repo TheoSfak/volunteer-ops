@@ -670,7 +670,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="text-primary mt-1" style="font-size:1.1rem"><i class="bi bi-tag-fill"></i></div>
                             <div>
                                 <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.05em;font-size:.72rem">Τύπος</div>
-                                <div class="fw-semibold text-dark" style="font-size:.9rem"><?= h($GLOBALS['MISSION_TYPES'][$mission['type']] ?? $mission['type']) ?></div>
+                                <div class="fw-semibold text-dark" style="font-size:.9rem"><?= h($mission['type_name'] ?? $mission['type'] ?? 'Άγνωστος') ?></div>
                             </div>
                         </div>
                     </div>
