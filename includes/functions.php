@@ -163,7 +163,7 @@ function roleBadge($role) {
  * Get volunteer type badge HTML (returns empty string for plain VOLUNTEER)
  */
 function volunteerTypeBadge($type) {
-    if (empty($type) || $type === VTYPE_VOLUNTEER) {
+    if (empty($type)) {
         return '';
     }
     $color = VOLUNTEER_TYPE_COLORS[$type] ?? 'secondary';
@@ -180,7 +180,7 @@ function isTraineeRescuer($user = null) {
     if ($user === null) {
         $user = getCurrentUser();
     }
-    return ($user['volunteer_type'] ?? VTYPE_VOLUNTEER) === VTYPE_TRAINEE;
+    return ($user['volunteer_type'] ?? VTYPE_RESCUER) === VTYPE_TRAINEE;
 }
 
 /**
@@ -190,7 +190,7 @@ function isRescuer($user = null) {
     if ($user === null) {
         $user = getCurrentUser();
     }
-    return ($user['volunteer_type'] ?? VTYPE_VOLUNTEER) === VTYPE_RESCUER;
+    return ($user['volunteer_type'] ?? VTYPE_RESCUER) === VTYPE_RESCUER;
 }
 
 /**

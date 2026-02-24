@@ -893,8 +893,8 @@ $appDescription = getSetting('app_description', '');
                             <i class="bi bi-person-circle me-1 flex-shrink-0"></i>
                         <?php endif; ?>
                         <span class="user-name-text"><?= h($currentUser['name'] ?? 'Χρήστης') ?></span>
-                        <span class="user-type-badge d-none d-md-inline"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_VOLUNTEER) ?></span>
-                        <span class="user-type-badge-mobile d-md-none"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_VOLUNTEER) ?></span>
+                        <span class="user-type-badge d-none d-md-inline"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_RESCUER) ?></span>
+                        <span class="user-type-badge-mobile d-md-none"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_RESCUER) ?></span>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i>Το Προφίλ μου</a></li>
