@@ -377,7 +377,11 @@ if (_isoStart && !document.getElementById('start_datetime').value) {
 }
 
 let _currentField = null;
-const _modal = new bootstrap.Modal(document.getElementById('datePickerModal'));
+let _modal = null;
+function getModal() {
+    if (!_modal) _modal = new bootstrap.Modal(document.getElementById('datePickerModal'));
+    return _modal;
+}
 
 function openDateModal(field) {
     _currentField = field;
@@ -388,7 +392,7 @@ function openDateModal(field) {
     document.getElementById('datePickerModalLabel').innerHTML =
         '<i class="bi bi-calendar3 me-2"></i>' +
         (field === 'start' ? 'Ημερομηνία Έναρξης' : 'Ημερομηνία Λήξης');
-    _modal.show();
+    getModal().show();
     // Focus the input after modal is shown
     document.getElementById('datePickerModal').addEventListener('shown.bs.modal', function focusIt() {
         document.getElementById('modalDateInput').focus();
@@ -402,14 +406,14 @@ document.getElementById('confirmDateBtn').addEventListener('click', function() {
     const dmy = isoToDmy(isoVal);
     document.getElementById(_currentField + '_datetime').value = dmy;
     document.getElementById(_currentField + '_datetime_display').value = dmy;
-    _modal.hide();
+    getModal().hide();
 });
 
 document.getElementById('clearDateBtn').addEventListener('click', function() {
     document.getElementById('modalDateInput').value = '';
     document.getElementById(_currentField + '_datetime').value = '';
     document.getElementById(_currentField + '_datetime_display').value = '';
-    _modal.hide();
+    getModal().hide();
 });
 
 // Also confirm on Enter inside the input
