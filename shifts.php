@@ -55,6 +55,13 @@ if (!isAdmin()) {
     $params[] = getCurrentUser()['id'];
 }
 
+// Τ.Ε.Π.: κρύψε βάρδιες Τ.Ε.Π. από απλούς εθελοντές
+if (!canSeeTep()) {
+    $where[] = '(m.mission_type_id != ? OR m.responsible_user_id = ?)';
+    $params[] = getTepMissionTypeId();
+    $params[] = getCurrentUser()['id'];
+}
+
 $whereClause = implode(' AND ', $where);
 
 // Count total

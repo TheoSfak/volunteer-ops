@@ -508,3 +508,32 @@ function getSettings() {
 }
 
 // Training module functions moved to includes/training-functions.php
+
+/**
+ * Return the mission_type id for Τ.Ε.Π. (cached per request).
+ */
+function getTepMissionTypeId(): int {
+    static $tepId = null;
+    if ($tepId === null) {
+        $tepId = (int) dbFetchValue("SELECT id FROM mission_types WHERE name = 'Τ.Ε.Π.' LIMIT 1");
+    }
+    return $tepId;
+}
+
+/**
+ * Return true if the given mission_type_id is the Τ.Ε.Π. type.
+ */
+function isTepMission(int $missionTypeId): bool {
+    return $missionTypeId === getTepMissionTypeId();
+}
+
+/**
+ * Return true if the current user can see Τ.Ε.Π. missions.
+ * Admins, trainees (TRAINEE_RESCUER), and the responsible person always can.
+ */
+function canSeeTep(?int $responsibleUserId = null): bool {
+    if (isAdmin()) return true;
+    if (isTraineeRescuer()) return true;
+    if ($responsibleUserId && $responsibleUserId === getCurrentUserId()) return true;
+    return false;
+}

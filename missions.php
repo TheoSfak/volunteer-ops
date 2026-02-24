@@ -51,6 +51,13 @@ if ($missionType) {
     $params[] = $missionType;
 }
 
+// Τ.Ε.Π. αποστολές: ορατές μόνο σε admins, δόκιμους και υπεύθυνο αποστολής
+if (!canSeeTep()) {
+    $where[] = '(m.mission_type_id != ? OR m.responsible_user_id = ?)';
+    $params[] = getTepMissionTypeId();
+    $params[] = $user['id'];
+}
+
 // Department admin can only see their department
 if ($user['role'] === ROLE_DEPARTMENT_ADMIN && $user['department_id']) {
     $where[] = 'm.department_id = ?';
@@ -84,8 +91,13 @@ $missions = dbFetchAll(
 // Get departments for filter
 $departments = dbFetchAll("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
 
-// Get mission types for filter
-$missionTypesFilter = dbFetchAll("SELECT id, name FROM mission_types WHERE is_active = 1 ORDER BY sort_order");
+// Get mission types for filter (TEP hidden from regular volunteers)
+$tepMissionTypeId = getTepMissionTypeId();
+if (canSeeTep()) {
+    $missionTypesFilter = dbFetchAll("SELECT id, name FROM mission_types WHERE is_active = 1 ORDER BY sort_order");
+} else {
+    $missionTypesFilter = dbFetchAll("SELECT id, name FROM mission_types WHERE is_active = 1 AND id != ? ORDER BY sort_order", [$tepMissionTypeId]);
+}
 
 include __DIR__ . '/includes/header.php';
 ?>

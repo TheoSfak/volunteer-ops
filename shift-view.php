@@ -28,6 +28,14 @@ if (!$shift) {
 $pageTitle = $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time']);
 $user = getCurrentUser();
 $missionCompleted = ($shift['mission_status'] === STATUS_COMPLETED);
+
+// Τ.Ε.Π.: αποκλεισμός βάρδιας Τ.Ε.Π. για μη-εξουσιοδοτημένους
+$missionTypeId = (int) dbFetchValue('SELECT mission_type_id FROM missions WHERE id = ?', [$shift['mission_id']]);
+$missionResponsible = (int) dbFetchValue('SELECT responsible_user_id FROM missions WHERE id = ?', [$shift['mission_id']]);
+if (isTepMission($missionTypeId) && !canSeeTep($missionResponsible)) {
+    setFlash('error', 'Δεν έχετε πρόσβαση σε βάρδιες αποστολών Τ.Ε.Π.');
+    redirect('missions.php');
+}
 $canManage = (isAdmin() || hasRole(ROLE_SHIFT_LEADER)) && !$missionCompleted;
 
 // Get participants
