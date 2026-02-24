@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `password` VARCHAR(255) NOT NULL,
     `phone` VARCHAR(20) NULL,
     `role` ENUM('SYSTEM_ADMIN', 'DEPARTMENT_ADMIN', 'SHIFT_LEADER', 'VOLUNTEER') DEFAULT 'VOLUNTEER',
-    `volunteer_type` ENUM('VOLUNTEER','TRAINEE_RESCUER','RESCUER') NOT NULL DEFAULT 'VOLUNTEER',
+    `volunteer_type` ENUM('TRAINEE_RESCUER','RESCUER') NOT NULL DEFAULT 'RESCUER',
     `cohort_year` YEAR NULL COMMENT 'Χρονιά σειράς δοκίμων διασωστών',
     `department_id` INT UNSIGNED NULL,
     `is_active` TINYINT(1) DEFAULT 1,

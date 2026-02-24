@@ -98,9 +98,9 @@ if (isPost()) {
     
     if (empty($errors)) {
         try {
-        $volunteerType = post('volunteer_type', VTYPE_VOLUNTEER);
-        if (!in_array($volunteerType, [VTYPE_VOLUNTEER, VTYPE_TRAINEE, VTYPE_RESCUER])) {
-            $volunteerType = VTYPE_VOLUNTEER;
+        $volunteerType = post('volunteer_type', VTYPE_RESCUER);
+        if (!in_array($volunteerType, [VTYPE_TRAINEE, VTYPE_RESCUER])) {
+            $volunteerType = VTYPE_RESCUER;
         }
         
         $cohortYear = post('cohort_year') ? post('cohort_year') : null;
@@ -210,7 +210,7 @@ $form = $volunteer ?: [
     'department_id' => $currentUser['department_id'],
     'warehouse_id' => $currentUser['warehouse_id'] ?? null,
     'is_active' => 1,
-    'volunteer_type' => VTYPE_VOLUNTEER,
+    'volunteer_type' => VTYPE_RESCUER,
     'cohort_year' => null,
     'position_id' => null,
     'id_card' => '',
@@ -291,7 +291,7 @@ include __DIR__ . '/includes/header.php';
                     <label class="form-label">Τύπος Εθελοντή</label>
                     <select class="form-select" name="volunteer_type">
                         <?php foreach (VOLUNTEER_TYPE_LABELS as $vt => $vtLabel): ?>
-                            <option value="<?= $vt ?>" <?= ($form['volunteer_type'] ?? VTYPE_VOLUNTEER) === $vt ? 'selected' : '' ?>>
+                            <option value="<?= $vt ?>" <?= ($form['volunteer_type'] ?? VTYPE_RESCUER) === $vt ? 'selected' : '' ?>>>
                                 <?= (VOLUNTEER_TYPE_ICONS[$vt] ?? '') . ' ' . $vtLabel ?>
                             </option>
                         <?php endforeach; ?>
