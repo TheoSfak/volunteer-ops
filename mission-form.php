@@ -376,15 +376,11 @@ if (_isoStart && !document.getElementById('start_datetime').value) {
     document.getElementById('start_datetime').value = '';
 }
 
-let _currentField = null;
-let _modal = null;
-function getModal() {
-    if (!_modal) _modal = new bootstrap.Modal(document.getElementById('datePickerModal'));
-    return _modal;
-}
+window._dpField = null;
+window._dpModal = null;
 
 function openDateModal(field) {
-    _currentField = field;
+    window._dpField = field;
     const hiddenId = field + '_datetime';
     const currentVal = document.getElementById(hiddenId).value; // d/m/Y H:i
     const isoVal = dmyToIso(currentVal);
@@ -392,7 +388,8 @@ function openDateModal(field) {
     document.getElementById('datePickerModalLabel').innerHTML =
         '<i class="bi bi-calendar3 me-2"></i>' +
         (field === 'start' ? 'Ημερομηνία Έναρξης' : 'Ημερομηνία Λήξης');
-    getModal().show();
+    if (!window._dpModal) window._dpModal = new bootstrap.Modal(document.getElementById('datePickerModal'));
+    window._dpModal.show();
     // Focus the input after modal is shown
     document.getElementById('datePickerModal').addEventListener('shown.bs.modal', function focusIt() {
         document.getElementById('modalDateInput').focus();
@@ -404,19 +401,18 @@ document.getElementById('confirmDateBtn').addEventListener('click', function() {
     const isoVal = document.getElementById('modalDateInput').value;
     if (!isoVal) { return; }
     const dmy = isoToDmy(isoVal);
-    document.getElementById(_currentField + '_datetime').value = dmy;
-    document.getElementById(_currentField + '_datetime_display').value = dmy;
-    getModal().hide();
+    document.getElementById(window._dpField + '_datetime').value = dmy;
+    document.getElementById(window._dpField + '_datetime_display').value = dmy;
+    window._dpModal.hide();
 });
 
 document.getElementById('clearDateBtn').addEventListener('click', function() {
     document.getElementById('modalDateInput').value = '';
-    document.getElementById(_currentField + '_datetime').value = '';
-    document.getElementById(_currentField + '_datetime_display').value = '';
-    getModal().hide();
+    document.getElementById(window._dpField + '_datetime').value = '';
+    document.getElementById(window._dpField + '_datetime_display').value = '';
+    window._dpModal.hide();
 });
 
-// Also confirm on Enter inside the input
 document.getElementById('modalDateInput').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { e.preventDefault(); document.getElementById('confirmDateBtn').click(); }
 });
