@@ -343,26 +343,51 @@ include __DIR__ . '/includes/header.php';
 
 <!-- Date/Time Picker Modal -->
 <div class="modal fade" id="datePickerModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered" style="max-width:340px">
-        <div class="modal-content">
-            <div class="modal-header py-2">
-                <h6 class="modal-title" id="datePickerModalLabel"><i class="bi bi-calendar3 me-2"></i>Επιλογή Ημερομηνίας &amp; Ώρας</h6>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    <div class="modal-dialog modal-dialog-centered" style="max-width:480px">
+        <div class="modal-content border-0 shadow-lg overflow-hidden">
+            <!-- Gradient header -->
+            <div class="modal-header border-0 text-white py-4 px-4"
+                 style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="rounded-circle d-flex align-items-center justify-content-center"
+                         style="width:42px;height:42px;background:rgba(255,255,255,0.2);">
+                        <i class="bi bi-calendar3 fs-5"></i>
+                    </div>
+                    <div>
+                        <h5 class="modal-title mb-0 fw-bold" id="datePickerModalLabel">Επιλογή Ημερομηνίας &amp; Ώρας</h5>
+                        <small class="opacity-75" id="datePickerModalSub">Κάντε κλικ για να επιλέξετε</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white ms-auto" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body text-center pb-2">
-                <input type="datetime-local" id="modalDateInput" class="form-control form-control-lg text-center border-0 fs-5"
-                       style="max-width:260px; margin:0 auto;">
-            </div>
-            <div class="modal-footer py-2 justify-content-between">
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="clearDateBtn">
-                    <i class="bi bi-x-circle me-1"></i>Καθαρισμός
-                </button>
-                <div class="d-flex gap-2">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Ακύρωση</button>
-                    <button type="button" class="btn btn-primary btn-sm" id="confirmDateBtn">
-                        <i class="bi bi-check-lg me-1"></i>Επιλογή
+            <!-- Body -->
+            <div class="modal-body px-4 py-4" style="background:#f8f7ff;">
+                <label class="form-label text-muted small fw-semibold text-uppercase letter-spacing-1 mb-2">
+                    <i class="bi bi-clock me-1"></i>Ημερομηνία &amp; Ώρα
+                </label>
+                <input type="datetime-local" id="modalDateInput"
+                       class="form-control form-control-lg text-center fw-semibold"
+                       style="font-size:1.4rem; border:2px solid #e0ddff; border-radius:12px;
+                              background:#fff; color:#4f46e5; padding:18px 16px;
+                              box-shadow:0 2px 8px rgba(79,70,229,0.08);
+                              transition: border-color .2s, box-shadow .2s;"
+                       onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 4px rgba(79,70,229,0.15)'"
+                       onblur="this.style.borderColor='#e0ddff';this.style.boxShadow='0 2px 8px rgba(79,70,229,0.08)'">
+                <div class="text-center mt-3">
+                    <button type="button" class="btn btn-sm btn-link text-danger text-decoration-none p-0" id="clearDateBtn">
+                        <i class="bi bi-x-circle me-1"></i>Καθαρισμός επιλογής
                     </button>
                 </div>
+            </div>
+            <!-- Footer -->
+            <div class="modal-footer border-0 px-4 pb-4 pt-0 gap-2" style="background:#f8f7ff;">
+                <button type="button" class="btn btn-outline-secondary flex-fill py-2 rounded-3" data-bs-dismiss="modal">
+                    Ακύρωση
+                </button>
+                <button type="button" class="btn flex-fill py-2 rounded-3 fw-semibold text-white" id="confirmDateBtn"
+                        style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); border:none;">
+                    <i class="bi bi-check-lg me-1"></i>Επιλογή
+                </button>
             </div>
         </div>
     </div>
@@ -385,9 +410,10 @@ function openDateModal(field) {
     const currentVal = document.getElementById(hiddenId).value; // d/m/Y H:i
     const isoVal = dmyToIso(currentVal);
     document.getElementById('modalDateInput').value = isoVal || '';
-    document.getElementById('datePickerModalLabel').innerHTML =
-        '<i class="bi bi-calendar3 me-2"></i>' +
-        (field === 'start' ? 'Ημερομηνία Έναρξης' : 'Ημερομηνία Λήξης');
+    document.getElementById('datePickerModalLabel').textContent =
+        field === 'start' ? 'Ημερομηνία Έναρξης' : 'Ημερομηνία Λήξης';
+    document.getElementById('datePickerModalSub').textContent =
+        field === 'start' ? 'Πότε ξεκινά η αποστολή;' : 'Πότε λήγει η αποστολή;';
     if (!window._dpModal) window._dpModal = new bootstrap.Modal(document.getElementById('datePickerModal'));
     window._dpModal.show();
     // Focus the input after modal is shown
