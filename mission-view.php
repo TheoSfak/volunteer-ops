@@ -201,10 +201,10 @@ if (isPost()) {
                         );
                     }
                     
+                    $sent = 0; $failed = 0; $lastError = '';
                     foreach ($volunteers as $v) {
-                        // Email
                         if (!empty($v['email'])) {
-                            sendNotificationEmail('new_mission', $v['email'], [
+                            $result = sendNotificationEmail('new_mission', $v['email'], [
                                 'user_name'           => $v['name'],
                                 'mission_title'       => $mission['title'],
                                 'mission_description' => $mission['description'] ?? '',
@@ -214,10 +214,20 @@ if (isPost()) {
                                 'mission_url'         => $missionUrl,
                                 'app_name'            => $appName,
                             ]);
+                            if ($result['success']) {
+                                $sent++;
+                            } else {
+                                $failed++;
+                                $lastError = $result['message'];
+                            }
                         }
                     }
-                    $count = count($volunteers);
-                    setFlash('success', 'Η αποστολή δημοσιεύτηκε και στάλθηκε ειδοποίηση σε ' . $count . ' χρήστες.');
+                    if ($failed > 0) {
+                        logAudit('email_send_error', 'missions', $id, 'Sent:' . $sent . ' Failed:' . $failed . ' Error:' . $lastError);
+                        setFlash('warning', 'Η αποστολή δημοσιεύτηκε. Emails: ' . $sent . ' εστάλησαν, ' . $failed . ' απέτυχαν (δείτε Audit Log για λεπτομέρειες).');
+                    } else {
+                        setFlash('success', 'Η αποστολή δημοσιεύτηκε και στάλθηκε email ειδοποίηση σε ' . $sent . ' χρήστες.');
+                    }
                 } else {
                     setFlash('success', 'Η αποστολή δημοσιεύτηκε.');
                 }
