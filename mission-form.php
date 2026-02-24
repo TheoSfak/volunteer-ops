@@ -117,9 +117,13 @@ if (isPost()) {
 // Format dates for form
 $startDate = '';
 $endDate = '';
+$startDateIso = '';
+$endDateIso = '';
 if ($mission) {
     $startDate = formatDateTime($mission['start_datetime'], 'd/m/Y H:i');
-    $endDate = formatDateTime($mission['end_datetime'], 'd/m/Y H:i');
+    $endDate   = formatDateTime($mission['end_datetime'],   'd/m/Y H:i');
+    $startDateIso = date('Y-m-d\TH:i', strtotime($mission['start_datetime']));
+    $endDateIso   = date('Y-m-d\TH:i', strtotime($mission['end_datetime']));
 }
 
 include __DIR__ . '/includes/header.php';
@@ -227,14 +231,32 @@ include __DIR__ . '/includes/header.php';
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label for="start_datetime" class="form-label">Έναρξη *</label>
-                            <input type="text" class="form-control datetimepicker" id="start_datetime" name="start_datetime" 
-                                   value="<?= h($startDate ?: post('start_datetime')) ?>" required>
+                            <label class="form-label">Έναρξη *</label>
+                            <div class="input-group">
+                                <input type="hidden" id="start_datetime" name="start_datetime"
+                                       value="<?= h($startDate ?: post('start_datetime')) ?>" required>
+                                <input type="text" id="start_datetime_display" class="form-control bg-white"
+                                       value="<?= h($startDate ?: post('start_datetime')) ?>"
+                                       placeholder="ηη/μμ/εεεε ωω:λλ" readonly
+                                       style="cursor:pointer;" onclick="openDateModal('start')" required>
+                                <button type="button" class="btn btn-outline-secondary" onclick="openDateModal('start')" tabindex="-1">
+                                    <i class="bi bi-calendar3"></i>
+                                </button>
+                            </div>
                         </div>
                         <div class="col-md-6 mb-3">
-                            <label for="end_datetime" class="form-label">Λήξη *</label>
-                            <input type="text" class="form-control datetimepicker" id="end_datetime" name="end_datetime" 
-                                   value="<?= h($endDate ?: post('end_datetime')) ?>" required>
+                            <label class="form-label">Λήξη *</label>
+                            <div class="input-group">
+                                <input type="hidden" id="end_datetime" name="end_datetime"
+                                       value="<?= h($endDate ?: post('end_datetime')) ?>" required>
+                                <input type="text" id="end_datetime_display" class="form-control bg-white"
+                                       value="<?= h($endDate ?: post('end_datetime')) ?>"
+                                       placeholder="ηη/μμ/εεεε ωω:λλ" readonly
+                                       style="cursor:pointer;" onclick="openDateModal('end')" required>
+                                <button type="button" class="btn btn-outline-secondary" onclick="openDateModal('end')" tabindex="-1">
+                                    <i class="bi bi-calendar3"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -318,6 +340,100 @@ include __DIR__ . '/includes/header.php';
 <!-- Summernote JS -->
 <script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/lang/summernote-el-GR.min.js"></script>
+
+<!-- Date/Time Picker Modal -->
+<div class="modal fade" id="datePickerModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:340px">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title" id="datePickerModalLabel"><i class="bi bi-calendar3 me-2"></i>Επιλογή Ημερομηνίας &amp; Ώρας</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center pb-2">
+                <input type="datetime-local" id="modalDateInput" class="form-control form-control-lg text-center border-0 fs-5"
+                       style="max-width:260px; margin:0 auto;">
+            </div>
+            <div class="modal-footer py-2 justify-content-between">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="clearDateBtn">
+                    <i class="bi bi-x-circle me-1"></i>Καθαρισμός
+                </button>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="confirmDateBtn">
+                        <i class="bi bi-check-lg me-1"></i>Επιλογή
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Pre-fill ISO values from PHP for edit mode
+const _isoStart = <?= json_encode($startDateIso) ?>;
+const _isoEnd   = <?= json_encode($endDateIso) ?>;
+if (_isoStart && !document.getElementById('start_datetime').value) {
+    document.getElementById('start_datetime').value = '';
+}
+
+let _currentField = null;
+const _modal = new bootstrap.Modal(document.getElementById('datePickerModal'));
+
+function openDateModal(field) {
+    _currentField = field;
+    const hiddenId = field + '_datetime';
+    const currentVal = document.getElementById(hiddenId).value; // d/m/Y H:i
+    const isoVal = dmyToIso(currentVal);
+    document.getElementById('modalDateInput').value = isoVal || '';
+    document.getElementById('datePickerModalLabel').innerHTML =
+        '<i class="bi bi-calendar3 me-2"></i>' +
+        (field === 'start' ? 'Ημερομηνία Έναρξης' : 'Ημερομηνία Λήξης');
+    _modal.show();
+    // Focus the input after modal is shown
+    document.getElementById('datePickerModal').addEventListener('shown.bs.modal', function focusIt() {
+        document.getElementById('modalDateInput').focus();
+        document.getElementById('datePickerModal').removeEventListener('shown.bs.modal', focusIt);
+    });
+}
+
+document.getElementById('confirmDateBtn').addEventListener('click', function() {
+    const isoVal = document.getElementById('modalDateInput').value;
+    if (!isoVal) { return; }
+    const dmy = isoToDmy(isoVal);
+    document.getElementById(_currentField + '_datetime').value = dmy;
+    document.getElementById(_currentField + '_datetime_display').value = dmy;
+    _modal.hide();
+});
+
+document.getElementById('clearDateBtn').addEventListener('click', function() {
+    document.getElementById('modalDateInput').value = '';
+    document.getElementById(_currentField + '_datetime').value = '';
+    document.getElementById(_currentField + '_datetime_display').value = '';
+    _modal.hide();
+});
+
+// Also confirm on Enter inside the input
+document.getElementById('modalDateInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); document.getElementById('confirmDateBtn').click(); }
+});
+
+// Helpers: convert between d/m/Y H:i and Y-m-dTH:i
+function dmyToIso(dmy) {
+    if (!dmy) return '';
+    // expected: dd/mm/yyyy hh:ii
+    const m = dmy.match(/^(\d{2})\/(\d{2})\/(\d{4})\s(\d{2}):(\d{2})/);
+    if (!m) return '';
+    return m[3] + '-' + m[2] + '-' + m[1] + 'T' + m[4] + ':' + m[5];
+}
+function isoToDmy(iso) {
+    if (!iso) return '';
+    // expected: yyyy-mm-ddThh:ii
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (!m) return '';
+    return m[3] + '/' + m[2] + '/' + m[1] + ' ' + m[4] + ':' + m[5];
+}
+</script>
+
 <script>
 $(document).ready(function() {
     $('.summernote-basic').summernote({
