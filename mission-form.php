@@ -367,6 +367,7 @@ include __DIR__ . '/includes/header.php';
                 </label>
                 <input type="datetime-local" id="modalDateInput"
                        class="form-control form-control-lg text-center fw-semibold"
+                       step="900"
                        style="font-size:1.4rem; border:2px solid #e0ddff; border-radius:12px;
                               background:#fff; color:#4f46e5; padding:18px 16px;
                               box-shadow:0 2px 8px rgba(79,70,229,0.08);
