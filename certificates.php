@@ -378,9 +378,20 @@ include __DIR__ . '/includes/header.php';
                         <td><?= $certBadge ?></td>
                         <td class="text-muted small"><?= h($cert['issuing_body'] ?? '—') ?></td>
                         <td class="text-end pe-3">
-                            <a href="volunteer-view.php?id=<?= $cert['user_id'] ?>#certificates" class="btn btn-sm btn-outline-primary">
+                            <a href="volunteer-view.php?id=<?= $cert['user_id'] ?>#certificates" class="btn btn-sm btn-outline-primary me-1" title="Προβολή">
                                 <i class="bi bi-eye"></i>
                             </a>
+                            <?php if ($cert['expiry_date']):
+                                $gcDate = date('Ymd', strtotime($cert['expiry_date']));
+                                $gcDateEnd = date('Ymd', strtotime($cert['expiry_date'] . ' +1 day'));
+                                $gcTitle = urlencode('Λήξη Πιστοποιητικού: ' . $cert['type_name'] . ' – ' . $cert['volunteer_name']);
+                                $gcDetails = urlencode('Εθελοντής: ' . $cert['volunteer_name'] . '\nΤύπος Πιστοποιητικού: ' . $cert['type_name']);
+                                $gcUrl = "https://calendar.google.com/calendar/render?action=TEMPLATE&text={$gcTitle}&dates={$gcDate}/{$gcDateEnd}&details={$gcDetails}";
+                            ?>
+                            <a href="<?= $gcUrl ?>" target="_blank" class="btn btn-sm btn-outline-success" title="Προσθήκη στο Google Calendar">
+                                <i class="bi bi-calendar-plus"></i>
+                            </a>
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>
