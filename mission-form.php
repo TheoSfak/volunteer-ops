@@ -362,18 +362,33 @@ include __DIR__ . '/includes/header.php';
             </div>
             <!-- Body -->
             <div class="modal-body px-4 py-4" style="background:#f8f7ff;">
-                <label class="form-label text-muted small fw-semibold text-uppercase mb-2">
-                    <i class="bi bi-clock me-1"></i>Ημερομηνία &amp; Ώρα
-                </label>
-                <input type="datetime-local" id="modalDateInput"
-                       class="form-control form-control-lg text-center fw-semibold"
-                       step="900"
-                       style="font-size:1.4rem; border:2px solid #e0ddff; border-radius:12px;
-                              background:#fff; color:#4f46e5; padding:18px 16px;
-                              box-shadow:0 2px 8px rgba(79,70,229,0.08);
-                              transition: border-color .2s, box-shadow .2s;"
-                       onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 4px rgba(79,70,229,0.15)'"
-                       onblur="this.style.borderColor='#e0ddff';this.style.boxShadow='0 2px 8px rgba(79,70,229,0.08)'">
+                <div class="row g-3">
+                    <div class="col-7">
+                        <label class="form-label text-muted small fw-semibold text-uppercase mb-2">
+                            <i class="bi bi-calendar3 me-1"></i>Ημερομηνία
+                        </label>
+                        <input type="date" id="modalDatePart"
+                               class="form-control form-control-lg text-center fw-semibold"
+                               style="font-size:1.1rem; border:2px solid #e0ddff; border-radius:12px;
+                                      background:#fff; color:#4f46e5; padding:14px 10px;
+                                      box-shadow:0 2px 8px rgba(79,70,229,0.08); transition:border-color .2s,box-shadow .2s;"
+                               onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 4px rgba(79,70,229,0.15)'"
+                               onblur="this.style.borderColor='#e0ddff';this.style.boxShadow='0 2px 8px rgba(79,70,229,0.08)'">
+                    </div>
+                    <div class="col-5">
+                        <label class="form-label text-muted small fw-semibold text-uppercase mb-2">
+                            <i class="bi bi-clock me-1"></i>Ώρα
+                        </label>
+                        <input type="time" id="modalTimePart"
+                               class="form-control form-control-lg text-center fw-semibold"
+                               step="900"
+                               style="font-size:1.1rem; border:2px solid #e0ddff; border-radius:12px;
+                                      background:#fff; color:#4f46e5; padding:14px 10px;
+                                      box-shadow:0 2px 8px rgba(79,70,229,0.08); transition:border-color .2s,box-shadow .2s;"
+                               onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 4px rgba(79,70,229,0.15)'"
+                               onblur="this.style.borderColor='#e0ddff';this.style.boxShadow='0 2px 8px rgba(79,70,229,0.08)'">
+                    </div>
+                </div>
 
                 <!-- Duration section — shown only for Έναρξη -->
                 <div id="durationSection" style="display:none;">
@@ -439,8 +454,9 @@ function openDateModal(field) {
     window._dpField = field;
     const hiddenId = field + '_datetime';
     const currentVal = document.getElementById(hiddenId).value;
-    const isoVal = dmyToIso(currentVal);
-    document.getElementById('modalDateInput').value = isoVal || '';
+    const isoVal = dmyToIso(currentVal); // yyyy-mm-ddTHH:ii
+    document.getElementById('modalDatePart').value = isoVal ? isoVal.slice(0,10) : '';
+    document.getElementById('modalTimePart').value = isoVal ? isoVal.slice(11,16) : '';
     document.getElementById('datePickerModalLabel').textContent =
         field === 'start' ? 'Ημερομηνία Έναρξης' : 'Ημερομηνία Λήξης';
     document.getElementById('datePickerModalSub').textContent =
@@ -457,7 +473,7 @@ function openDateModal(field) {
     if (!window._dpModal) window._dpModal = new bootstrap.Modal(document.getElementById('datePickerModal'));
     window._dpModal.show();
     document.getElementById('datePickerModal').addEventListener('shown.bs.modal', function focusIt() {
-        document.getElementById('modalDateInput').focus();
+        document.getElementById('modalDatePart').focus();
         document.getElementById('datePickerModal').removeEventListener('shown.bs.modal', focusIt);
     });
 }
@@ -492,8 +508,10 @@ document.getElementById('durationCustom').addEventListener('input', function() {
 });
 
 document.getElementById('confirmDateBtn').addEventListener('click', function() {
-    const isoVal = document.getElementById('modalDateInput').value;
-    if (!isoVal) { return; }
+    const datePart = document.getElementById('modalDatePart').value; // yyyy-mm-dd
+    const timePart = document.getElementById('modalTimePart').value; // HH:ii
+    if (!datePart || !timePart) { return; }
+    const isoVal = datePart + 'T' + timePart;
     const dmy = isoToDmy(isoVal);
     document.getElementById(window._dpField + '_datetime').value = dmy;
     document.getElementById(window._dpField + '_datetime_display').value = dmy;
@@ -514,13 +532,14 @@ document.getElementById('confirmDateBtn').addEventListener('click', function() {
 });
 
 document.getElementById('clearDateBtn').addEventListener('click', function() {
-    document.getElementById('modalDateInput').value = '';
+    document.getElementById('modalDatePart').value = '';
+    document.getElementById('modalTimePart').value = '';
     document.getElementById(window._dpField + '_datetime').value = '';
     document.getElementById(window._dpField + '_datetime_display').value = '';
     window._dpModal.hide();
 });
 
-document.getElementById('modalDateInput').addEventListener('keydown', function(e) {
+document.getElementById('modalTimePart').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { e.preventDefault(); document.getElementById('confirmDateBtn').click(); }
 });
 
