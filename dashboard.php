@@ -219,16 +219,23 @@ if (isAdmin()) {
         [$user['id'], PARTICIPATION_APPROVED]
     );
 
-    // Available missions to join
+    // Available missions to join (TEP hidden from non-trainees)
+    $availMissionsWhere = "m.status = ? AND m.end_datetime >= NOW() AND m.deleted_at IS NULL";
+    $availMissionsParams = [STATUS_OPEN];
+    if (!canSeeTep()) {
+        $availMissionsWhere .= " AND (m.mission_type_id != ? OR m.responsible_user_id = ?)";
+        $availMissionsParams[] = getTepMissionTypeId();
+        $availMissionsParams[] = $user['id'];
+    }
     $availableMissions = dbFetchAll(
         "SELECT m.*, d.name as department_name,
                 (SELECT COUNT(*) FROM shifts WHERE mission_id = m.id) as shift_count
          FROM missions m
          LEFT JOIN departments d ON m.department_id = d.id
-         WHERE m.status = ? AND m.end_datetime >= NOW() AND m.deleted_at IS NULL
+         WHERE {$availMissionsWhere}
          ORDER BY m.start_datetime ASC
          LIMIT 5",
-        [STATUS_OPEN]
+        $availMissionsParams
     );
 
     // Annual attendance progress
@@ -245,6 +252,28 @@ if (isAdmin()) {
     $attendanceGoal = 10;
     $attendancePct = min(100, round(($missionAttendance / $attendanceGoal) * 100));
     $attendanceColor = $missionAttendance >= $attendanceGoal ? 'success' : ($missionAttendance >= 7 ? 'info' : ($missionAttendance >= 4 ? 'warning' : 'danger'));
+
+    // Τ.Ε.Π. hours progress (only for trainees)
+    $tepHours = 0;
+    $tepGoal = 40;
+    $tepPct = 0;
+    $tepColor = 'danger';
+    if (isTraineeRescuer()) {
+        $tepHours = (float) dbFetchValue(
+            "SELECT COALESCE(SUM(
+                CASE WHEN pr.actual_hours IS NOT NULL THEN pr.actual_hours
+                ELSE TIMESTAMPDIFF(HOUR, s.start_time, s.end_time) END
+            ), 0)
+            FROM participation_requests pr
+            JOIN shifts s ON pr.shift_id = s.id
+            JOIN missions m ON s.mission_id = m.id
+            WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1
+              AND m.mission_type_id = ?",
+            [$user['id'], PARTICIPATION_APPROVED, getTepMissionTypeId()]
+        );
+        $tepPct = min(100, round(($tepHours / $tepGoal) * 100));
+        $tepColor = $tepHours >= $tepGoal ? 'success' : ($tepHours >= 25 ? 'info' : ($tepHours >= 10 ? 'warning' : 'danger'));
+    }
 
     // Leaderboard rank
     $leaderboardRank = (int) dbFetchValue(
@@ -1367,6 +1396,43 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
             </div>
         </div>
     </div>
+
+    <?php if (isTraineeRescuer()): ?>
+    <!-- Τ.Ε.Π. Hours Progress Bar (only for trainee rescuers) -->
+    <div class="col-12">
+        <div class="card ds-widget" style="border-left: 4px solid var(--bs-<?= $tepColor ?>);">
+            <div class="card-body py-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                        <i class="bi bi-hospital text-<?= $tepColor ?> me-1"></i>
+                        <strong>Ώρες Τ.Ε.Π.</strong>
+                        <span class="text-muted ms-2">(στόχος: <?= $tepGoal ?> ώρες)</span>
+                        <span class="badge bg-secondary ms-1">Τμήμα Επειγόντων</span>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-<?= $tepColor ?> fs-6"><?= number_format($tepHours, 1) ?> / <?= $tepGoal ?> ώρες</span>
+                        <?php if ($tepHours >= $tepGoal): ?>
+                            <i class="bi bi-check-circle-fill text-success" title="Ολοκλήρωσες τον στόχο!"></i>
+                        <?php endif; ?>
+                        <a href="my-participations.php" class="btn btn-sm btn-outline-secondary">Συμμετοχές</a>
+                    </div>
+                </div>
+                <div class="progress" style="height: 20px;">
+                    <div class="progress-bar bg-<?= $tepColor ?><?= $tepHours < $tepGoal ? ' progress-bar-striped progress-bar-animated' : '' ?>"
+                         role="progressbar" style="width: <?= $tepPct ?>%"
+                         aria-valuenow="<?= $tepHours ?>" aria-valuemin="0" aria-valuemax="<?= $tepGoal ?>">
+                        <?= $tepPct ?>%
+                    </div>
+                </div>
+                <?php if ($tepHours < $tepGoal): ?>
+                    <small class="text-muted mt-1 d-block">Απομένουν <strong><?= number_format($tepGoal - $tepHours, 1) ?></strong> ώρες από τις <?= $tepGoal ?> απαιτούμενες για αποστολές Τ.Ε.Π.</small>
+                <?php else: ?>
+                    <small class="text-success mt-1 d-block"><i class="bi bi-check-lg"></i> Έχετε ολοκληρώσει τον στόχο των <?= $tepGoal ?> ωρών Τ.Ε.Π.!</small>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+    <?php endif; // isTraineeRescuer ?>
 
     <!-- Rank + Achievements + Quick Actions -->
     <div class="col-md-4">

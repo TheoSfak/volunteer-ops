@@ -31,6 +31,12 @@ if (!$mission) {
 $pageTitle = $mission['title'];
 $user = getCurrentUser();
 
+// Τ.Ε.Π.: αποκλεισμός για μη-δόκιμους / μη-admins που δεν είναι υπεύθυνοι αποστολής
+if (isTepMission((int)($mission['mission_type_id'] ?? 0)) && !canSeeTep($mission['responsible_user_id'])) {
+    setFlash('error', 'Δεν έχετε πρόσβαση σε αποστολές Τ.Ε.Π.');
+    redirect('missions.php');
+}
+
 // Get shifts
 $shifts = dbFetchAll(
     "SELECT s.*,
