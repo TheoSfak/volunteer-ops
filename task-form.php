@@ -108,6 +108,22 @@ if (isPost()) {
                     }
                     sendNotification($assignedUser['id'], 'Αλλαγή Κατάστασης', "Η εργασία '{$title}' άλλαξε σε: {$statusLabels[$status]}");
                 }
+                
+                // Notify creator if not already assigned to the task
+                $assignedIds = array_column($assignedUsers, 'id');
+                if ($task['created_by'] && !in_array($task['created_by'], $assignedIds) && $task['created_by'] != $user['id']) {
+                    $creator = dbFetchOne("SELECT * FROM users WHERE id = ?", [$task['created_by']]);
+                    if ($creator && $creator['email']) {
+                        sendNotificationEmail('task_status_changed', $creator['email'], [
+                            'user_name' => $creator['name'],
+                            'task_title' => $title,
+                            'old_status' => $statusLabels[$task['status']] ?? $task['status'],
+                            'new_status' => $statusLabels[$status] ?? $status,
+                            'changed_by' => $user['name']
+                        ]);
+                    }
+                    sendNotification($creator['id'], 'Αλλαγή Κατάστασης', "Η εργασία '{$title}' άλλαξε σε: {$statusLabels[$status]}");
+                }
             }
             
             // Update assignments
@@ -172,6 +188,21 @@ if (isPost()) {
                     }
                     sendNotification($userId, 'Νέα Εργασία', "Σας ανατέθηκε η εργασία: {$title}");
                 }
+            }
+            
+            // Notify creator (confirmation) if not already assigned
+            if (!in_array($user['id'], $assignedTo) && isNotificationEnabled('task_assigned')) {
+                if ($user['email']) {
+                    sendNotificationEmail('task_assigned', $user['email'], [
+                        'user_name' => $user['name'],
+                        'task_title' => $title,
+                        'task_description' => $description ?: 'Χωρίς περιγραφή',
+                        'task_priority' => $priorityLabels[$priority] ?? $priority,
+                        'task_deadline' => $deadline ? formatDateTime($deadline) : 'Χωρίς προθεσμία',
+                        'assigned_by' => $user['name']
+                    ]);
+                }
+                sendNotification($user['id'], 'Εργασία Δημιουργήθηκε', "Δημιουργήσατε νέα εργασία: {$title}");
             }
             
             logAudit('create_task', 'tasks', $taskId);

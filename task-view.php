@@ -94,6 +94,22 @@ if (isPost()) {
                         }
                         sendNotification($assignedUser['id'], 'Υποεργασία Ολοκληρώθηκε', "Ολοκληρώθηκε η υποεργασία '{$subtask['title']}' στην εργασία '{$task['title']}'");
                     }
+                    
+                    // Notify creator if not already notified
+                    $notifiedIds = array_column($assignedUsers, 'id');
+                    if ($task['responsible_user_id']) $notifiedIds[] = $task['responsible_user_id'];
+                    if ($task['created_by'] && !in_array($task['created_by'], $notifiedIds) && $task['created_by'] != $user['id']) {
+                        $creator = dbFetchOne("SELECT * FROM users WHERE id = ?", [$task['created_by']]);
+                        if ($creator && $creator['email']) {
+                            sendNotificationEmail('task_subtask_completed', $creator['email'], [
+                                'user_name' => $creator['name'],
+                                'task_title' => $task['title'],
+                                'subtask_title' => $subtask['title'],
+                                'completed_by' => $user['name']
+                            ]);
+                        }
+                        sendNotification($creator['id'], 'Υποεργασία Ολοκληρώθηκε', "Ολοκληρώθηκε η υποεργασία '{$subtask['title']}' στην εργασία '{$task['title']}'");
+                    }
                 }
                 
                 setFlash('success', 'Η υποεργασία ενημερώθηκε.');
@@ -143,6 +159,22 @@ if (isPost()) {
                             ]);
                             sendNotification($responsible['id'], 'Νέο Σχόλιο', "Νέο σχόλιο στην εργασία: {$task['title']}");
                         }
+                    }
+                    
+                    // Notify creator if not already notified
+                    $notifiedCommentIds = array_column($assignedUsers, 'id');
+                    if ($task['responsible_user_id']) $notifiedCommentIds[] = $task['responsible_user_id'];
+                    if ($task['created_by'] && !in_array($task['created_by'], $notifiedCommentIds) && $task['created_by'] != $user['id']) {
+                        $creator = dbFetchOne("SELECT * FROM users WHERE id = ?", [$task['created_by']]);
+                        if ($creator && $creator['email']) {
+                            sendNotificationEmail('task_comment', $creator['email'], [
+                                'user_name' => $creator['name'],
+                                'task_title' => $task['title'],
+                                'comment' => $comment,
+                                'commented_by' => $user['name']
+                            ]);
+                        }
+                        sendNotification($creator['id'], 'Νέο Σχόλιο', "Νέο σχόλιο στην εργασία: {$task['title']}");
                     }
                 }
                 
