@@ -362,7 +362,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <!-- Body -->
             <div class="modal-body px-4 py-4" style="background:#f8f7ff;">
-                <label class="form-label text-muted small fw-semibold text-uppercase letter-spacing-1 mb-2">
+                <label class="form-label text-muted small fw-semibold text-uppercase mb-2">
                     <i class="bi bi-clock me-1"></i>Ημερομηνία &amp; Ώρα
                 </label>
                 <input type="datetime-local" id="modalDateInput"
@@ -373,6 +373,36 @@ include __DIR__ . '/includes/header.php';
                               transition: border-color .2s, box-shadow .2s;"
                        onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 4px rgba(79,70,229,0.15)'"
                        onblur="this.style.borderColor='#e0ddff';this.style.boxShadow='0 2px 8px rgba(79,70,229,0.08)'">
+
+                <!-- Duration section — shown only for Έναρξη -->
+                <div id="durationSection" style="display:none;">
+                    <hr class="my-3" style="border-color:#e0ddff;">
+                    <label class="form-label text-muted small fw-semibold text-uppercase mb-2">
+                        <i class="bi bi-hourglass-split me-1"></i>Διάρκεια αποστολής
+                        <span class="text-muted fw-normal text-lowercase">(προαιρετικά — συμπληρώνει αυτόματα τη Λήξη)</span>
+                    </label>
+                    <!-- Quick-select pills -->
+                    <div class="d-flex flex-wrap gap-2 mb-3" id="durationPills">
+                        <?php foreach ([1,2,3,4,6,8,12,24] as $h): ?>
+                        <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3 dp-pill"
+                                data-hours="<?= $h ?>">
+                            <?= $h ?>ώρ
+                        </button>
+                        <?php endforeach; ?>
+                    </div>
+                    <!-- Custom hours input -->
+                    <div class="input-group input-group-sm" style="max-width:180px;">
+                        <span class="input-group-text bg-white" style="border:2px solid #e0ddff; border-right:0; border-radius:10px 0 0 10px;">
+                            <i class="bi bi-pencil text-muted"></i>
+                        </span>
+                        <input type="number" id="durationCustom" min="0.5" max="72" step="0.5"
+                               class="form-control text-center fw-semibold"
+                               style="border:2px solid #e0ddff; border-left:0; border-radius:0 10px 10px 0; color:#4f46e5;"
+                               placeholder="π.χ. 4.5">
+                        <span class="input-group-text bg-white ms-1 border-0 text-muted small">ώρες</span>
+                    </div>
+                </div>
+
                 <div class="text-center mt-3">
                     <button type="button" class="btn btn-sm btn-link text-danger text-decoration-none p-0" id="clearDateBtn">
                         <i class="bi bi-x-circle me-1"></i>Καθαρισμός επιλογής
@@ -407,21 +437,58 @@ window._dpModal = null;
 function openDateModal(field) {
     window._dpField = field;
     const hiddenId = field + '_datetime';
-    const currentVal = document.getElementById(hiddenId).value; // d/m/Y H:i
+    const currentVal = document.getElementById(hiddenId).value;
     const isoVal = dmyToIso(currentVal);
     document.getElementById('modalDateInput').value = isoVal || '';
     document.getElementById('datePickerModalLabel').textContent =
         field === 'start' ? 'Ημερομηνία Έναρξης' : 'Ημερομηνία Λήξης';
     document.getElementById('datePickerModalSub').textContent =
         field === 'start' ? 'Πότε ξεκινά η αποστολή;' : 'Πότε λήγει η αποστολή;';
+    // Show/hide duration section
+    const durSection = document.getElementById('durationSection');
+    durSection.style.display = field === 'start' ? '' : 'none';
+    // Reset duration selection
+    document.getElementById('durationCustom').value = '';
+    document.querySelectorAll('.dp-pill').forEach(function(b) {
+        b.classList.remove('btn-primary', 'text-white');
+        b.classList.add('btn-outline-secondary');
+    });
     if (!window._dpModal) window._dpModal = new bootstrap.Modal(document.getElementById('datePickerModal'));
     window._dpModal.show();
-    // Focus the input after modal is shown
     document.getElementById('datePickerModal').addEventListener('shown.bs.modal', function focusIt() {
         document.getElementById('modalDateInput').focus();
         document.getElementById('datePickerModal').removeEventListener('shown.bs.modal', focusIt);
     });
 }
+
+// Duration pill click
+document.getElementById('durationPills').addEventListener('click', function(e) {
+    const btn = e.target.closest('.dp-pill');
+    if (!btn) return;
+    document.querySelectorAll('.dp-pill').forEach(function(b) {
+        b.classList.remove('btn-primary', 'text-white');
+        b.classList.add('btn-outline-secondary');
+    });
+    btn.classList.remove('btn-outline-secondary');
+    btn.classList.add('btn-primary', 'text-white');
+    document.getElementById('durationCustom').value = btn.dataset.hours;
+});
+
+// Custom input clears pill selection
+document.getElementById('durationCustom').addEventListener('input', function() {
+    document.querySelectorAll('.dp-pill').forEach(function(b) {
+        b.classList.remove('btn-primary', 'text-white');
+        b.classList.add('btn-outline-secondary');
+    });
+    // Re-highlight matching pill if value matches
+    const v = parseFloat(this.value);
+    document.querySelectorAll('.dp-pill').forEach(function(b) {
+        if (parseFloat(b.dataset.hours) === v) {
+            b.classList.remove('btn-outline-secondary');
+            b.classList.add('btn-primary', 'text-white');
+        }
+    });
+});
 
 document.getElementById('confirmDateBtn').addEventListener('click', function() {
     const isoVal = document.getElementById('modalDateInput').value;
@@ -429,6 +496,19 @@ document.getElementById('confirmDateBtn').addEventListener('click', function() {
     const dmy = isoToDmy(isoVal);
     document.getElementById(window._dpField + '_datetime').value = dmy;
     document.getElementById(window._dpField + '_datetime_display').value = dmy;
+    // Auto-fill end datetime if duration is set and we're setting start
+    if (window._dpField === 'start') {
+        const hours = parseFloat(document.getElementById('durationCustom').value);
+        if (hours > 0) {
+            const startMs = new Date(isoVal).getTime();
+            const endDate = new Date(startMs + hours * 3600 * 1000);
+            const pad = n => String(n).padStart(2, '0');
+            const endIso = endDate.getFullYear() + '-' + pad(endDate.getMonth()+1) + '-' + pad(endDate.getDate()) + 'T' + pad(endDate.getHours()) + ':' + pad(endDate.getMinutes());
+            const endDmy = isoToDmy(endIso);
+            document.getElementById('end_datetime').value = endDmy;
+            document.getElementById('end_datetime_display').value = endDmy;
+        }
+    }
     window._dpModal.hide();
 });
 
