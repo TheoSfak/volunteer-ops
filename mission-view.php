@@ -942,9 +942,6 @@ include __DIR__ . '/includes/header.php';
                                 <i class="bi bi-envelope-arrow-up me-1"></i>Επαναποστολή Email
                             </button>
                         </form>
-                        <a href="attendance.php?mission_id=<?= $mission['id'] ?>" class="btn btn-info w-100">
-                            <i class="bi bi-clipboard-check me-1"></i>Διαχείριση Παρουσιών
-                        </a>
                     <?php endif; ?>
                     
                     <?php if ($mission['status'] === STATUS_CLOSED): ?>
