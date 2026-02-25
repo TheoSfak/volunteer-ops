@@ -108,9 +108,13 @@ include __DIR__ . '/includes/header.php';
     </h1>
     <?php if (isAdmin()): ?>
         <div class="d-flex gap-2">
-            <a href="exports/export-missions.php?status=<?= h($status) ?>&department_id=<?= h($department) ?>" 
+            <a href="exports/export-missions.php?status=<?= h($status) ?>&department_id=<?= h($department) ?>&search=<?= h($search) ?>&mission_type=<?= h($missionType) ?>" 
                class="btn btn-outline-success">
                 <i class="bi bi-download me-1"></i>Εξαγωγή CSV
+            </a>
+            <a href="exports/export-missions.php" 
+               class="btn btn-outline-secondary" title="Εξαγωγή όλων των αποστολών">
+                <i class="bi bi-download me-1"></i>Εξαγωγή Όλων
             </a>
             <a href="mission-form.php" class="btn btn-primary">
                 <i class="bi bi-plus-lg me-1"></i>Νέα Αποστολή

@@ -13,31 +13,37 @@ if (!defined('VOLUNTEEROPS')) {
  * Export missions to CSV
  */
 function exportMissionsToCsv($filters = []) {
-    $where = ['1=1'];
+    $where = ['m.deleted_at IS NULL'];
     $params = [];
     
     if (!empty($filters['status'])) {
-        $where[] = 'status = ?';
+        $where[] = 'm.status = ?';
         $params[] = $filters['status'];
     }
     
     if (!empty($filters['department_id'])) {
-        $where[] = 'department_id = ?';
+        $where[] = 'm.department_id = ?';
         $params[] = $filters['department_id'];
     }
     
-    if (!empty($filters['type'])) {
-        $where[] = 'type = ?';
-        $params[] = $filters['type'];
+    if (!empty($filters['mission_type'])) {
+        $where[] = 'm.mission_type_id = ?';
+        $params[] = (int) $filters['mission_type'];
+    }
+    
+    if (!empty($filters['search'])) {
+        $where[] = '(m.title LIKE ? OR m.description LIKE ? OR m.location LIKE ?)';
+        $term = '%' . $filters['search'] . '%';
+        $params = array_merge($params, [$term, $term, $term]);
     }
     
     if (!empty($filters['start_date'])) {
-        $where[] = 'start_datetime >= ?';
+        $where[] = 'm.start_datetime >= ?';
         $params[] = $filters['start_date'] . ' 00:00:00';
     }
     
     if (!empty($filters['end_date'])) {
-        $where[] = 'end_datetime <= ?';
+        $where[] = 'm.end_datetime <= ?';
         $params[] = $filters['end_date'] . ' 23:59:59';
     }
     
@@ -45,15 +51,21 @@ function exportMissionsToCsv($filters = []) {
                 m.id,
                 m.title,
                 m.description,
-                m.type,
+                mt.name AS type_name,
                 d.name AS department,
                 m.location,
                 m.start_datetime,
                 m.end_datetime,
                 m.status,
-                m.created_at
+                u.name AS responsible_name,
+                m.created_at,
+                (SELECT COUNT(*) FROM shifts WHERE mission_id = m.id) AS shift_count,
+                (SELECT COUNT(*) FROM shifts s JOIN participation_requests pr ON pr.shift_id = s.id
+                 WHERE s.mission_id = m.id AND pr.status = 'APPROVED') AS volunteer_count
             FROM missions m
             LEFT JOIN departments d ON m.department_id = d.id
+            LEFT JOIN mission_types mt ON m.mission_type_id = mt.id
+            LEFT JOIN users u ON m.responsible_user_id = u.id
             WHERE " . implode(' AND ', $where) . "
             ORDER BY m.start_datetime DESC";
     
@@ -85,6 +97,9 @@ function exportMissionsToCsv($filters = []) {
         'Έναρξη',
         'Λήξη',
         'Κατάσταση',
+        'Υπεύθυνος',
+        'Βάρδιες',
+        'Εγκεκριμένοι Εθελοντές',
         'Δημιουργήθηκε'
     ]);
     
@@ -94,12 +109,15 @@ function exportMissionsToCsv($filters = []) {
             $mission['id'],
             $mission['title'],
             $mission['description'],
-            $mission['type'],
+            $mission['type_name'] ?? '',
             $mission['department'],
             $mission['location'],
             formatDateTime($mission['start_datetime']),
             formatDateTime($mission['end_datetime']),
             $GLOBALS['STATUS_LABELS'][$mission['status']] ?? $mission['status'],
+            $mission['responsible_name'] ?? '',
+            $mission['shift_count'],
+            $mission['volunteer_count'],
             formatDateTime($mission['created_at'])
         ]);
     }
