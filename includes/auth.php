@@ -12,8 +12,25 @@ if (!defined('VOLUNTEEROPS')) {
  */
 function initSession() {
     if (session_status() === PHP_SESSION_NONE) {
+        $isSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+        session_set_cookie_params([
+            'lifetime' => SESSION_LIFETIME,
+            'path'     => '/',
+            'secure'   => $isSecure,
+            'httponly'  => true,
+            'samesite' => 'Lax',
+        ]);
         session_name(SESSION_NAME);
         session_start();
+
+        // Enforce session timeout
+        if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > SESSION_LIFETIME) {
+            logout();
+            session_start();
+            setFlash('warning', 'Η συνεδρία σας έληξε. Παρακαλώ συνδεθείτε ξανά.');
+            redirect('login.php');
+        }
+        $_SESSION['last_activity'] = time();
     }
 }
 
@@ -106,26 +123,23 @@ function hasRole($role) {
 }
 
 /**
- * Login user — with brute-force protection (5 attempts / 15 minutes per IP)
+ * Login user — with DB-backed brute-force protection (5 attempts / 15 minutes per IP)
  * and session fixation prevention.
  */
 function login($email, $password) {
     $ip  = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-    $key = 'login_attempts_' . md5($ip);
 
-    // --- Rate limiting ---
-    $attempts = $_SESSION[$key] ?? ['count' => 0, 'since' => time()];
+    // --- DB-backed rate limiting (survives session reset) ---
+    $recentFails = (int) dbFetchValue(
+        "SELECT COUNT(*) FROM audit_logs 
+         WHERE action = 'login_failed' AND ip_address = ? AND created_at > DATE_SUB(NOW(), INTERVAL 15 MINUTE)",
+        [$ip]
+    );
 
-    // Reset window if older than 15 minutes
-    if ((time() - $attempts['since']) > 900) {
-        $attempts = ['count' => 0, 'since' => time()];
-    }
-
-    if ($attempts['count'] >= 5) {
-        $wait = max(0, (int)ceil((900 - (time() - $attempts['since'])) / 60));
+    if ($recentFails >= 5) {
         return [
             'success' => false,
-            'message' => "Πολλές αποτυχημένες συνδέσεις. Παρακαλώ περιμένετε $wait λεπτά και δοκιμάστε ξανά.",
+            'message' => "Πολλές αποτυχημένες συνδέσεις. Παρακαλώ περιμένετε 15 λεπτά και δοκιμάστε ξανά.",
         ];
     }
 
@@ -133,8 +147,8 @@ function login($email, $password) {
     $user = dbFetchOne("SELECT * FROM users WHERE email = ?", [$email]);
 
     if (!$user || !password_verify($password, $user['password'])) {
-        $attempts['count']++;
-        $_SESSION[$key] = $attempts;
+        // Log failed attempt to DB with IP
+        logAudit('login_failed', 'users', 0, null, ['ip' => $ip, 'email' => $email]);
         return ['success' => false, 'message' => 'Λάθος email ή κωδικός.'];
     }
 
@@ -156,8 +170,7 @@ function login($email, $password) {
         return ['success' => false, 'message' => 'Ο λογαριασμός σας είναι απενεργοποιημένος.'];
     }
 
-    // --- Success: clear rate-limit, regenerate session, set data ---
-    unset($_SESSION[$key]);
+    // --- Success: regenerate session, set data ---
 
     // Prevent session fixation: bind the session to the new authenticated user
     session_regenerate_id(true);

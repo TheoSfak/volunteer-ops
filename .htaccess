@@ -1,0 +1,34 @@
+# VolunteerOps - Root Security Rules
+
+# Block access to sensitive file types
+<FilesMatch "\.(sql|log|md|sh|bak|env|ini)$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+# Block direct access to config.local.php
+<Files "config.local.php">
+    Order Deny,Allow
+    Deny from all
+</Files>
+
+# Block access to install.php after deployment
+# Uncomment the following lines after installation is complete:
+# <Files "install.php">
+#     Order Deny,Allow
+#     Deny from all
+# </Files>
+
+# Block hidden files (.git, .github, etc.)
+<FilesMatch "^\.">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+# Disable directory listing
+Options -Indexes
+
+# Prevent MIME sniffing
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+</IfModule>

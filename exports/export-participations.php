@@ -9,4 +9,10 @@ $filters = [
     'volunteer_id' => get('volunteer_id')
 ];
 
+// Department admins can only export their own department
+$currentUser = getCurrentUser();
+if ($currentUser['role'] === ROLE_DEPARTMENT_ADMIN) {
+    $filters['department_id'] = $currentUser['department_id'];
+}
+
 exportParticipationsToCsv($filters);

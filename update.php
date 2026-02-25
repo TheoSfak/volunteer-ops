@@ -13,6 +13,11 @@ requireRole([ROLE_SYSTEM_ADMIN]);
 // ============================================================
 define('GITHUB_REPO', 'TheoSfak/volunteer-ops'); // GitHub repository
 define('GITHUB_API_URL', 'https://api.github.com/repos/' . GITHUB_REPO);
+
+// SSL CA bundle: prefer XAMPP's bundled CA cert, fall back to system default
+$sslCaFile = 'C:/xampp/apache/bin/curl-ca-bundle.crt';
+define('SSL_VERIFY', file_exists($sslCaFile));
+define('SSL_CA_FILE', $sslCaFile);
 define('BACKUP_DIR', __DIR__ . '/backups');
 define('UPDATE_LOG_FILE', __DIR__ . '/update.log');
 
@@ -48,8 +53,9 @@ function getLatestRelease() {
             'timeout' => 30
         ],
         'ssl' => [
-            'verify_peer' => false,
-            'verify_peer_name' => false
+            'verify_peer' => SSL_VERIFY,
+            'verify_peer_name' => SSL_VERIFY,
+            'cafile' => SSL_CA_FILE
         ]
     ]);
     
@@ -260,8 +266,9 @@ function downloadUpdate($zipUrl, $version) {
             'follow_location' => true
         ],
         'ssl' => [
-            'verify_peer' => false,
-            'verify_peer_name' => false
+            'verify_peer' => SSL_VERIFY,
+            'verify_peer_name' => SSL_VERIFY,
+            'cafile' => SSL_CA_FILE
         ]
     ]);
     

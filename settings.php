@@ -69,8 +69,8 @@ if (isPost()) {
         // Handle logo upload
         if (!empty($_FILES['app_logo']['name'])) {
             $file = $_FILES['app_logo'];
-            $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/svg+xml', 'image/webp'];
-            $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'];
+            $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+            $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
             $maxSize = 2 * 1024 * 1024; // 2MB
 
             // Detect MIME from actual file content, not browser-supplied header
@@ -79,7 +79,7 @@ if (isPost()) {
             $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
 
             if (!in_array($detectedMime, $allowedTypes) || !in_array($ext, $allowedExtensions)) {
-                setFlash('error', 'Μη αποδεκτός τύπος αρχείου. Επιτρέπονται: JPG, PNG, GIF, SVG, WebP.');
+                setFlash('error', 'Μη αποδεκτός τύπος αρχείου. Επιτρέπονται: JPG, PNG, GIF, WebP.');
                 redirect('settings.php?tab=general');
             }
             

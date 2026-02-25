@@ -1503,7 +1503,7 @@ document.querySelectorAll('.apply-btn').forEach(function(btn) {
                                 <?= h($msg['user_name']) ?>
                                 <?= $msg['user_id'] == $user['id'] ? '(Εσείς)' : '' ?>
                             </div>
-                            <div style="word-wrap: break-word;"><?= $msg['message'] ?></div>
+                            <div style="word-wrap: break-word;"><?= nl2br(h($msg['message'])) ?></div>
                             <div class="text-<?= $msg['user_id'] == $user['id'] ? 'white-50' : 'muted' ?> mt-1" style="font-size: 0.75rem;">
                                 <?= formatDateTime($msg['created_at']) ?>
                             </div>

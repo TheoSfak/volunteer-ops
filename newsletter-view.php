@@ -247,7 +247,7 @@ include __DIR__ . '/includes/header.php';
                 <small class="text-muted">Τα {tags} εμφανίζονται ως έχουν στην προεπισκόπηση</small>
             </div>
             <div class="card-body p-0">
-                <iframe id="previewFrame" style="width:100%;height:450px;border:0;" srcdoc=""></iframe>
+                <iframe id="previewFrame" style="width:100%;height:450px;border:0;" srcdoc="" sandbox="allow-same-origin"></iframe>
             </div>
         </div>
 

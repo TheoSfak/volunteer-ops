@@ -199,6 +199,7 @@ if ($tab === 'exams') {
 
 // Build query for questions
 if ($tab === 'exams') {
+    $params = [];
     $sql = "
         SELECT teq.*, 
                tc.name as category_name,
@@ -220,13 +221,15 @@ if ($tab === 'exams') {
     }
     
     if (!empty($searchFilter)) {
-        $sql .= " AND teq.question_text LIKE '%" . dbEscape($searchFilter) . "%'";
+        $sql .= " AND teq.question_text LIKE ?";
+        $params[] = '%' . dbEscape($searchFilter) . '%';
     }
     
     $sql .= " ORDER BY teq.id DESC";
-    $questions = dbFetchAll($sql);
+    $questions = dbFetchAll($sql, $params);
     
 } else {
+    $params2 = [];
     $sql = "
         SELECT tqq.*, 
                tc.name as category_name,
@@ -248,11 +251,12 @@ if ($tab === 'exams') {
     }
     
     if (!empty($searchFilter)) {
-        $sql .= " AND tqq.question_text LIKE '%" . dbEscape($searchFilter) . "%'";
+        $sql .= " AND tqq.question_text LIKE ?";
+        $params2[] = '%' . dbEscape($searchFilter) . '%';
     }
     
     $sql .= " ORDER BY tqq.id DESC";
-    $questions = dbFetchAll($sql);
+    $questions = dbFetchAll($sql, $params2);
 }
 
 include __DIR__ . '/includes/header.php';
@@ -874,11 +878,12 @@ function viewQuestion(id) {
                 if (q[optionKey]) {
                     const li = document.createElement('li');
                     li.className = 'list-group-item';
+                    function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
                     if (q.correct_option === letter) {
                         li.classList.add('list-group-item-success');
-                        li.innerHTML = '<strong>' + letter + ':</strong> ' + q[optionKey] + ' <span class="badge bg-success float-end">Σωστή</span>';
+                        li.innerHTML = '<strong>' + escHtml(letter) + ':</strong> ' + escHtml(q[optionKey]) + ' <span class="badge bg-success float-end">Σωστή</span>';
                     } else {
-                        li.innerHTML = '<strong>' + letter + ':</strong> ' + q[optionKey];
+                        li.innerHTML = '<strong>' + escHtml(letter) + ':</strong> ' + escHtml(q[optionKey]);
                     }
                     optionsList.appendChild(li);
                 }
