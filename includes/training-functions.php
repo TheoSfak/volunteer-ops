@@ -93,6 +93,22 @@ function getUserExamAttempt($examId, $userId) {
 }
 
 /**
+ * Normalize a True/False correct_option value to 'T' or 'F'.
+ * Handles all possible stored formats: 'T', 'F', 't', 'f', 'true', 'false', 'TRUE', 'FALSE'
+ */
+function normalizeTfOption($value) {
+    $v = strtolower(trim($value));
+    if (in_array($v, ['t', 'true', '1'], true)) {
+        return 'T';
+    }
+    if (in_array($v, ['f', 'false', '0'], true)) {
+        return 'F';
+    }
+    // Fallback: take first character and uppercase
+    return strtoupper(substr($v, 0, 1));
+}
+
+/**
  * Get question type badge HTML
  */
 function questionTypeBadge($type) {
@@ -122,8 +138,13 @@ function gradeAnswer($question, $userAnswer) {
         return null;
     }
     
-    // For multiple choice and true/false
-    return $userAnswer === $question['correct_option'];
+    if ($question['question_type'] === QUESTION_TYPE_TF) {
+        // Normalize both values to handle all stored formats (T, true, t, etc.)
+        return normalizeTfOption($userAnswer) === normalizeTfOption($question['correct_option']);
+    }
+    
+    // For multiple choice - straightforward uppercase comparison
+    return strtoupper(trim($userAnswer)) === strtoupper(trim($question['correct_option']));
 }
 
 /**

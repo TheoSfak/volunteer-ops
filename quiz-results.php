@@ -157,21 +157,26 @@ include __DIR__ . '/includes/header.php';
                         
                         <?php elseif ($answer['question_type'] === QUESTION_TYPE_TF): ?>
                             <!-- True/False Review -->
-                            <div class="mb-2 p-2 rounded <?= $answer['user_answer'] === 'T' && !$answer['is_correct'] ? 'bg-danger bg-opacity-10' : '' ?> <?= $answer['correct_option'] === 'T' ? 'bg-success bg-opacity-10' : '' ?>">
+                            <?php
+                            // Normalize TF values for display (handles 'true'/'false'/'T'/'F'/'t'/'f')
+                            $tfUserAnswer = normalizeTfOption($answer['user_answer'] ?? '');
+                            $tfCorrectOption = normalizeTfOption($answer['correct_option'] ?? '');
+                            ?>
+                            <div class="mb-2 p-2 rounded <?= $tfUserAnswer === 'T' && !$answer['is_correct'] ? 'bg-danger bg-opacity-10' : '' ?> <?= $tfCorrectOption === 'T' ? 'bg-success bg-opacity-10' : '' ?>">
                                 <strong>Σωστό</strong>
-                                <?php if ($answer['user_answer'] === 'T'): ?>
+                                <?php if ($tfUserAnswer === 'T'): ?>
                                     <span class="badge bg-secondary ms-2">Η απάντησή σας</span>
                                 <?php endif; ?>
-                                <?php if ($answer['correct_option'] === 'T'): ?>
+                                <?php if ($tfCorrectOption === 'T'): ?>
                                     <span class="badge bg-success ms-2">✓ Σωστή Απάντηση</span>
                                 <?php endif; ?>
                             </div>
-                            <div class="mb-2 p-2 rounded <?= $answer['user_answer'] === 'F' && !$answer['is_correct'] ? 'bg-danger bg-opacity-10' : '' ?> <?= $answer['correct_option'] === 'F' ? 'bg-success bg-opacity-10' : '' ?>">
+                            <div class="mb-2 p-2 rounded <?= $tfUserAnswer === 'F' && !$answer['is_correct'] ? 'bg-danger bg-opacity-10' : '' ?> <?= $tfCorrectOption === 'F' ? 'bg-success bg-opacity-10' : '' ?>">
                                 <strong>Λάθος</strong>
-                                <?php if ($answer['user_answer'] === 'F'): ?>
+                                <?php if ($tfUserAnswer === 'F'): ?>
                                     <span class="badge bg-secondary ms-2">Η απάντησή σας</span>
                                 <?php endif; ?>
-                                <?php if ($answer['correct_option'] === 'F'): ?>
+                                <?php if ($tfCorrectOption === 'F'): ?>
                                     <span class="badge bg-success ms-2">✓ Σωστή Απάντηση</span>
                                 <?php endif; ?>
                             </div>

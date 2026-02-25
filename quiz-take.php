@@ -55,9 +55,13 @@ if (isPost()) {
         $userAnswer = null;
         $isCorrect = 0;
         
-        if ($question['question_type'] === QUESTION_TYPE_MC || $question['question_type'] === QUESTION_TYPE_TF) {
+        if ($question['question_type'] === QUESTION_TYPE_MC) {
             $userAnswer = post('question_' . $question['id'], '');
             $isCorrect = (strtoupper(trim($userAnswer)) === strtoupper(trim($question['correct_option']))) ? 1 : 0;
+        } elseif ($question['question_type'] === QUESTION_TYPE_TF) {
+            $userAnswer = post('question_' . $question['id'], '');
+            // Normalize TF values to handle all stored formats (T, true, t, false, f, etc.)
+            $isCorrect = (normalizeTfOption($userAnswer) === normalizeTfOption($question['correct_option'])) ? 1 : 0;
         } elseif ($question['question_type'] === QUESTION_TYPE_OPEN) {
             $userAnswer = post('question_' . $question['id'], '');
             $isCorrect = null; // Requires manual grading

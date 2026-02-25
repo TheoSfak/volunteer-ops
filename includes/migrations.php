@@ -1455,6 +1455,68 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 26,
+            'description' => 'Robust TF correct_option fix – also match single-char t/f from CHAR(1) truncation',
+            'up' => function () {
+                // Fix all TF questions to normalized T/F values
+                // Covers: 't', 'true', 'T', 'TRUE', 'Σωστό' → 'T'
+                dbExecute("
+                    UPDATE training_quiz_questions 
+                    SET correct_option = 'T' 
+                    WHERE question_type = 'TRUE_FALSE' 
+                      AND correct_option != 'T'
+                      AND LOWER(TRIM(correct_option)) IN ('t', 'true', '1', 'σωστό')
+                ");
+                // Covers: 'f', 'false', 'F', 'FALSE', 'Λάθος' → 'F'
+                dbExecute("
+                    UPDATE training_quiz_questions 
+                    SET correct_option = 'F' 
+                    WHERE question_type = 'TRUE_FALSE' 
+                      AND correct_option != 'F'
+                      AND LOWER(TRIM(correct_option)) IN ('f', 'false', '0', 'λάθος')
+                ");
+                // Also fix exam questions with same issue
+                dbExecute("
+                    UPDATE training_exam_questions 
+                    SET correct_option = 'T' 
+                    WHERE question_type = 'TRUE_FALSE' 
+                      AND correct_option != 'T'
+                      AND LOWER(TRIM(correct_option)) IN ('t', 'true', '1', 'σωστό')
+                ");
+                dbExecute("
+                    UPDATE training_exam_questions 
+                    SET correct_option = 'F' 
+                    WHERE question_type = 'TRUE_FALSE' 
+                      AND correct_option != 'F'
+                      AND LOWER(TRIM(correct_option)) IN ('f', 'false', '0', 'λάθος')
+                ");
+
+                // Widen correct_option from CHAR(1) to VARCHAR(10) if it's still CHAR(1)
+                // This prevents future truncation issues
+                $col = dbFetchOne(
+                    "SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH 
+                     FROM INFORMATION_SCHEMA.COLUMNS 
+                     WHERE TABLE_SCHEMA = DATABASE() 
+                       AND TABLE_NAME = 'training_quiz_questions' 
+                       AND COLUMN_NAME = 'correct_option'"
+                );
+                if ($col && strtolower($col['DATA_TYPE']) === 'char' && (int)$col['CHARACTER_MAXIMUM_LENGTH'] === 1) {
+                    dbExecute("ALTER TABLE training_quiz_questions MODIFY COLUMN `correct_option` VARCHAR(10) NULL");
+                }
+                $col2 = dbFetchOne(
+                    "SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH 
+                     FROM INFORMATION_SCHEMA.COLUMNS 
+                     WHERE TABLE_SCHEMA = DATABASE() 
+                       AND TABLE_NAME = 'training_exam_questions' 
+                       AND COLUMN_NAME = 'correct_option'"
+                );
+                if ($col2 && strtolower($col2['DATA_TYPE']) === 'char' && (int)$col2['CHARACTER_MAXIMUM_LENGTH'] === 1) {
+                    dbExecute("ALTER TABLE training_exam_questions MODIFY COLUMN `correct_option` VARCHAR(10) NULL");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

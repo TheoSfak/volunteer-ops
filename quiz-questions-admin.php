@@ -165,7 +165,7 @@ include __DIR__ . '/includes/header.php';
                                     <?php elseif ($q['question_type'] === QUESTION_TYPE_TF): ?>
                                         <p class="mb-0 text-success fw-bold">
                                             <i class="bi bi-check-circle"></i> 
-                                            Σωστή απάντηση: <?= $q['correct_option'] === 'T' ? 'Σωστό' : 'Λάθος' ?>
+                                            Σωστή απάντηση: <?= normalizeTfOption($q['correct_option']) === 'T' ? 'Σωστό' : 'Λάθος' ?>
                                         </p>
                                     <?php endif; ?>
                                     
