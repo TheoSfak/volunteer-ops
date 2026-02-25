@@ -184,13 +184,46 @@ if (isPost()) {
                     logAudit('auto_create_shift', 'shifts', $id, 'Αυτόματη δημιουργία βαρδίας κατά τη δημοσίευση');
                 }
 
-                // Notify all active users if checkbox was checked (default: yes)
+                // Notify volunteers based on targeting selection
                 if (isset($_POST['notify_volunteers'])) {
+                    $notifyTarget = post('notify_target', 'all');
+                    $whereFilter  = "is_active = 1 AND deleted_at IS NULL";
+                    $filterParams = [];
+
+                    if ($notifyTarget === 'roles' && !empty($_POST['notify_roles'])) {
+                        $allowedRoles = [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_SHIFT_LEADER, ROLE_VOLUNTEER];
+                        $roles = array_values(array_filter((array)$_POST['notify_roles'], fn($r) => in_array($r, $allowedRoles)));
+                        if (!empty($roles)) {
+                            $placeholders  = implode(',', array_fill(0, count($roles), '?'));
+                            $whereFilter  .= " AND role IN ($placeholders)";
+                            $filterParams  = $roles;
+                        }
+                    } elseif ($notifyTarget === 'vtypes' && !empty($_POST['notify_vtypes'])) {
+                        $allowedVtypes = [VTYPE_VOLUNTEER, VTYPE_TRAINEE, VTYPE_RESCUER];
+                        $vtypes = array_values(array_filter((array)$_POST['notify_vtypes'], fn($v) => in_array($v, $allowedVtypes)));
+                        if (!empty($vtypes)) {
+                            $placeholders  = implode(',', array_fill(0, count($vtypes), '?'));
+                            $whereFilter  .= " AND volunteer_type IN ($placeholders)";
+                            $filterParams  = $vtypes;
+                        }
+                    }
+
                     $volunteers = dbFetchAll(
-                        "SELECT id, name, email FROM users WHERE is_active = 1 AND deleted_at IS NULL"
+                        "SELECT id, name, email FROM users WHERE $whereFilter",
+                        $filterParams
                     );
                     $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id;
                     $appName = getSetting('app_name', 'VolunteerOps');
+
+                    // Human-readable label for flash message
+                    $targetLabel = 'όλους τους χρήστες';
+                    if ($notifyTarget === 'roles' && !empty($roles ?? [])) {
+                        $roleLabels = array_map(fn($r) => ROLE_LABELS[$r] ?? $r, $roles);
+                        $targetLabel = implode(', ', $roleLabels);
+                    } elseif ($notifyTarget === 'vtypes' && !empty($vtypes ?? [])) {
+                        $vtypeLabels = array_map(fn($v) => VOLUNTEER_TYPE_LABELS[$v] ?? $v, $vtypes);
+                        $targetLabel = implode(', ', $vtypeLabels);
+                    }
                     
                     $userIds = array_column($volunteers, 'id');
                     if (!empty($userIds)) {
@@ -224,9 +257,9 @@ if (isPost()) {
                     }
                     if ($failed > 0) {
                         logAudit('email_send_error', 'missions', $id, 'Sent:' . $sent . ' Failed:' . $failed . ' Error:' . $lastError);
-                        setFlash('warning', 'Η αποστολή δημοσιεύτηκε. Emails: ' . $sent . ' εστάλησαν, ' . $failed . ' απέτυχαν (δείτε Audit Log για λεπτομέρειες).');
+                        setFlash('warning', 'Η αποστολή δημοσιεύτηκε. Emails: ' . $sent . ' εστάλησαν σε (' . $targetLabel . '), ' . $failed . ' απέτυχαν (δείτε Audit Log).');
                     } else {
-                        setFlash('success', 'Η αποστολή δημοσιεύτηκε και στάλθηκε email ειδοποίηση σε ' . $sent . ' χρήστες.');
+                        setFlash('success', 'Η αποστολή δημοσιεύτηκε και στάλθηκε email σε ' . $sent . ' χρήστες (' . $targetLabel . ').');
                     }
                 } else {
                     setFlash('success', 'Η αποστολή δημοσιεύτηκε.');
@@ -912,19 +945,101 @@ include __DIR__ . '/includes/header.php';
                     <?php endif; ?>
                     
                     <?php if ($mission['status'] === STATUS_DRAFT): ?>
-                        <form method="post">
+                        <form method="post" id="publishForm">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="publish">
+
+                            <!-- Notify toggle -->
                             <div class="form-check mb-2">
-                                <input class="form-check-input" type="checkbox" name="notify_volunteers" id="notifyVolunteers" value="1" checked>
-                                <label class="form-check-label small" for="notifyVolunteers">
-                                    <i class="bi bi-envelope me-1"></i>Αποστολή email σε όλους τους χρήστες
+                                <input class="form-check-input" type="checkbox" name="notify_volunteers"
+                                       id="notifyVolunteers" value="1" checked
+                                       onchange="toggleNotifyPanel(this.checked)">
+                                <label class="form-check-label small fw-semibold" for="notifyVolunteers">
+                                    <i class="bi bi-envelope me-1"></i>Αποστολή ειδοποίησης Email
                                 </label>
                             </div>
+
+                            <!-- Targeting panel (visible when checked) -->
+                            <div id="notifyPanel" class="border rounded p-2 mb-3 bg-light small">
+                                <div class="mb-2 text-muted fw-semibold">Παραλήπτες:</div>
+
+                                <!-- All -->
+                                <div class="form-check mb-1">
+                                    <input class="form-check-input" type="radio" name="notify_target"
+                                           id="targetAll" value="all" checked
+                                           onchange="toggleTargetGroups()">
+                                    <label class="form-check-label" for="targetAll">
+                                        <i class="bi bi-people me-1 text-primary"></i>Όλοι οι ενεργοί χρήστες
+                                    </label>
+                                </div>
+
+                                <!-- By Role -->
+                                <div class="form-check mb-1">
+                                    <input class="form-check-input" type="radio" name="notify_target"
+                                           id="targetRoles" value="roles"
+                                           onchange="toggleTargetGroups()">
+                                    <label class="form-check-label" for="targetRoles">
+                                        <i class="bi bi-shield-check me-1 text-success"></i>Ανά Ρόλο
+                                    </label>
+                                </div>
+                                <div id="rolesGroup" class="ps-3 mb-2 d-none">
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="checkbox" name="notify_roles[]" value="SHIFT_LEADER" id="roleShiftLeader">
+                                        <label class="form-check-label" for="roleShiftLeader">Αρχηγοί Βάρδιας</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="checkbox" name="notify_roles[]" value="VOLUNTEER" id="roleVolunteer">
+                                        <label class="form-check-label" for="roleVolunteer">Εθελοντές</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="checkbox" name="notify_roles[]" value="DEPARTMENT_ADMIN" id="roleDeptAdmin">
+                                        <label class="form-check-label" for="roleDeptAdmin">Διαχ. Τμήματος</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="checkbox" name="notify_roles[]" value="SYSTEM_ADMIN" id="roleSysAdmin">
+                                        <label class="form-check-label" for="roleSysAdmin">Διαχ. Συστήματος</label>
+                                    </div>
+                                </div>
+
+                                <!-- By Volunteer Type -->
+                                <div class="form-check mb-1">
+                                    <input class="form-check-input" type="radio" name="notify_target"
+                                           id="targetVtypes" value="vtypes"
+                                           onchange="toggleTargetGroups()">
+                                    <label class="form-check-label" for="targetVtypes">
+                                        <i class="bi bi-person-badge me-1 text-warning"></i>Ανά Τύπο Εθελοντή
+                                    </label>
+                                </div>
+                                <div id="vtypesGroup" class="ps-3 d-none">
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="checkbox" name="notify_vtypes[]" value="TRAINEE_RESCUER" id="vtypeTrainee">
+                                        <label class="form-check-label" for="vtypeTrainee">Δόκιμοι Διασώστες</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="checkbox" name="notify_vtypes[]" value="RESCUER" id="vtypeRescuer">
+                                        <label class="form-check-label" for="vtypeRescuer">Εθελοντές Διασώστες</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="checkbox" name="notify_vtypes[]" value="VOLUNTEER" id="vtypeVolunteer">
+                                        <label class="form-check-label" for="vtypeVolunteer">Εθελοντές</label>
+                                    </div>
+                                </div>
+                            </div>
+
                             <button type="submit" class="btn btn-success w-100">
                                 <i class="bi bi-send me-1"></i>Δημοσίευση
                             </button>
                         </form>
+                        <script>
+                        function toggleNotifyPanel(checked) {
+                            document.getElementById('notifyPanel').style.display = checked ? '' : 'none';
+                        }
+                        function toggleTargetGroups() {
+                            var target = document.querySelector('input[name="notify_target"]:checked').value;
+                            document.getElementById('rolesGroup').classList.toggle('d-none', target !== 'roles');
+                            document.getElementById('vtypesGroup').classList.toggle('d-none', target !== 'vtypes');
+                        }
+                        </script>
                     <?php endif; ?>
                     
                     <?php if ($mission['status'] === STATUS_OPEN): ?>
