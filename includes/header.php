@@ -254,6 +254,7 @@ $appDescription = getSetting('app_description', '');
         .stats-card.success::before { background: linear-gradient(180deg, #10b981 0%, #059669 100%); }
         .stats-card.warning::before { background: linear-gradient(180deg, #f59e0b 0%, #d97706 100%); }
         .stats-card.danger::before { background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%); }
+        .stats-card.info::before { background: linear-gradient(180deg, #06b6d4 0%, #0891b2 100%); }
         
         .stats-card .stats-icon {
             width: 60px;
@@ -270,6 +271,7 @@ $appDescription = getSetting('app_description', '');
         .stats-card.success .stats-icon { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
         .stats-card.warning .stats-icon { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
         .stats-card.danger .stats-icon { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+        .stats-card.info .stats-icon { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); }
         
         /* Modern Buttons */
         .btn {
@@ -636,6 +638,13 @@ $appDescription = getSetting('app_description', '');
             
             <div class="sidebar-section">Αποστολές</div>
             
+            <?php if (isAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= ($currentPage === 'missions' && get('status') === 'DRAFT') ? 'active' : '' ?>" href="missions.php?status=DRAFT">
+                    <i class="bi bi-file-earmark-text text-secondary"></i> Πρόχειρες Αποστολές
+                </a>
+            </li>
+            <?php endif; ?>
             <li class="nav-item">
                 <a class="nav-link <?= ($currentPage === 'missions' && get('status', 'OPEN') === 'OPEN') ? 'active' : '' ?>" href="missions.php?status=OPEN">
                     <i class="bi bi-flag-fill text-success"></i> Ενεργές Αποστολές
