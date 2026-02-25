@@ -1393,6 +1393,68 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 25,
+            'description' => 'Fix quiz system tables – add missing columns to training_quizzes, quiz_attempts, user_answers, training_quiz_questions',
+            'up' => function () {
+                $checkCol = function ($table, $column) {
+                    return (bool) dbFetchOne(
+                        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+                        [$table, $column]
+                    );
+                };
+
+                // training_quizzes: add questions_per_attempt, passing_percentage
+                if (!$checkCol('training_quizzes', 'questions_per_attempt')) {
+                    dbExecute("ALTER TABLE training_quizzes ADD COLUMN `questions_per_attempt` INT DEFAULT 10 AFTER `time_limit_minutes`");
+                }
+                if (!$checkCol('training_quizzes', 'passing_percentage')) {
+                    dbExecute("ALTER TABLE training_quizzes ADD COLUMN `passing_percentage` INT DEFAULT 70 AFTER `questions_per_attempt`");
+                }
+
+                // quiz_attempts: add selected_questions_json, total_questions, passing_percentage, passed, started_at
+                if (!$checkCol('quiz_attempts', 'selected_questions_json')) {
+                    dbExecute("ALTER TABLE quiz_attempts ADD COLUMN `selected_questions_json` JSON NULL AFTER `user_id`");
+                }
+                if (!$checkCol('quiz_attempts', 'total_questions')) {
+                    dbExecute("ALTER TABLE quiz_attempts ADD COLUMN `total_questions` INT DEFAULT 0 AFTER `score`");
+                }
+                if (!$checkCol('quiz_attempts', 'passing_percentage')) {
+                    dbExecute("ALTER TABLE quiz_attempts ADD COLUMN `passing_percentage` INT DEFAULT 70 AFTER `total_questions`");
+                }
+                if (!$checkCol('quiz_attempts', 'passed')) {
+                    dbExecute("ALTER TABLE quiz_attempts ADD COLUMN `passed` TINYINT(1) DEFAULT 0 AFTER `passing_percentage`");
+                }
+                if (!$checkCol('quiz_attempts', 'started_at')) {
+                    dbExecute("ALTER TABLE quiz_attempts ADD COLUMN `started_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER `passed`");
+                }
+
+                // user_answers: add selected_option, answer_text
+                if (!$checkCol('user_answers', 'selected_option')) {
+                    dbExecute("ALTER TABLE user_answers ADD COLUMN `selected_option` VARCHAR(10) NULL AFTER `question_id`");
+                }
+                if (!$checkCol('user_answers', 'answer_text')) {
+                    dbExecute("ALTER TABLE user_answers ADD COLUMN `answer_text` TEXT NULL AFTER `selected_option`");
+                }
+
+                // training_quiz_questions: add category_id, display_order, updated_at
+                if (!$checkCol('training_quiz_questions', 'category_id')) {
+                    dbExecute("ALTER TABLE training_quiz_questions ADD COLUMN `category_id` INT NULL AFTER `quiz_id`");
+                }
+                if (!$checkCol('training_quiz_questions', 'display_order')) {
+                    dbExecute("ALTER TABLE training_quiz_questions ADD COLUMN `display_order` INT DEFAULT 0 AFTER `explanation`");
+                }
+                if (!$checkCol('training_quiz_questions', 'updated_at')) {
+                    dbExecute("ALTER TABLE training_quiz_questions ADD COLUMN `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `created_at`");
+                }
+
+                // Fix existing TF questions with wrong correct_option values
+                dbExecute("UPDATE training_quiz_questions SET correct_option = 'T' WHERE question_type = 'TRUE_FALSE' AND LOWER(correct_option) IN ('true', 'σωστό')");
+                dbExecute("UPDATE training_quiz_questions SET correct_option = 'F' WHERE question_type = 'TRUE_FALSE' AND LOWER(correct_option) IN ('false', 'λάθος')");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
