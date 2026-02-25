@@ -1243,6 +1243,62 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 21,
+            'description' => 'Add composite indexes for performance optimization',
+            'up' => function () {
+                // Helper: create index only if it doesn't already exist
+                $addIndex = function (string $table, string $indexName, string $columns) {
+                    $exists = dbFetchOne(
+                        "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+                         WHERE TABLE_SCHEMA = DATABASE()
+                           AND TABLE_NAME   = ?
+                           AND INDEX_NAME   = ?",
+                        [$table, $indexName]
+                    );
+                    if (!$exists) {
+                        dbExecute("CREATE INDEX {$indexName} ON {$table}({$columns})");
+                    }
+                };
+
+                // participation_requests
+                $addIndex('participation_requests', 'idx_pr_shift_status',  'shift_id, status');
+                $addIndex('participation_requests', 'idx_pr_vol_status',    'volunteer_id, status');
+
+                // missions
+                $addIndex('missions', 'idx_missions_status_dept',  'status, department_id');
+                $addIndex('missions', 'idx_missions_status_start', 'status, start_datetime');
+
+                // shifts
+                $addIndex('shifts', 'idx_shifts_mission_time', 'mission_id, start_time');
+
+                // users
+                $addIndex('users', 'idx_users_role_active', 'role, is_active');
+                $addIndex('users', 'idx_users_dept_role',   'department_id, role');
+
+                // notifications
+                $addIndex('notifications', 'idx_notifications_user_created', 'user_id, created_at');
+
+                // volunteer_points
+                $addIndex('volunteer_points', 'idx_points_user_date',   'user_id, created_at');
+                $addIndex('volunteer_points', 'idx_points_user_reason', 'user_id, reason');
+
+                // audit_logs
+                $addIndex('audit_logs', 'idx_audit_user_created',    'user_id, created_at');
+                $addIndex('audit_logs', 'idx_audit_table_rec_date',  'table_name, record_id, created_at');
+
+                // tasks
+                $addIndex('tasks', 'idx_tasks_priority_status',  'priority, status');
+                $addIndex('tasks', 'idx_tasks_status_deadline',  'status, deadline');
+
+                // inventory_bookings
+                $addIndex('inventory_bookings', 'idx_inv_book_user_status', 'user_id, status');
+
+                // inventory_items
+                $addIndex('inventory_items', 'idx_inv_items_dept_active_status', 'department_id, is_active, status');
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
