@@ -17,6 +17,7 @@ require_once __DIR__ . '/includes/email.php';
 require_once __DIR__ . '/includes/newsletter-functions.php';
 require_once __DIR__ . '/includes/training-functions.php';
 require_once __DIR__ . '/includes/migrations.php';
+require_once __DIR__ . '/includes/achievements-functions.php';
 // inventory-functions.php is loaded on-demand by inventory pages and branches.php only
 
 // Start session

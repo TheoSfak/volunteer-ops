@@ -1350,6 +1350,49 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 24,
+            'description' => 'Add notified column to user_achievements for badge popup system',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'user_achievements'
+                       AND COLUMN_NAME  = 'notified'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE user_achievements ADD COLUMN notified TINYINT(1) NOT NULL DEFAULT 1 AFTER earned_at");
+                    // Mark existing achievements as already notified (don't popup for old ones)
+                    dbExecute("UPDATE user_achievements SET notified = 1");
+                }
+
+                // Add new achievement codes if missing
+                $newAchievements = [
+                    ['shifts_100',    '100 Βάρδιες',           'Ολοκλήρωσε 100 βάρδιες',                       'shifts',    '🏅', 0,    100],
+                    ['first_mission', 'Πρώτη Αποστολή',        'Ολοκλήρωσε την πρώτη σου αποστολή',            'milestone', '🚀', 0,    1  ],
+                    ['missions_3',    '3 Αποστολές',           'Ολοκλήρωσε 3 αποστολές',                       'missions',  '📋', 0,    3  ],
+                    ['missions_10',   '10 Αποστολές',          'Ολοκλήρωσε 10 αποστολές',                      'missions',  '🌟', 0,    10 ],
+                    ['missions_25',   '25 Αποστολές',          'Ολοκλήρωσε 25 αποστολές',                      'missions',  '💫', 0,    25 ],
+                    ['missions_50',   '50 Αποστολές',          'Ολοκλήρωσε 50 αποστολές',                      'missions',  '🏆', 0,    50 ],
+                    ['hours_500',     '500 Ώρες',              'Συμπλήρωσε 500 ώρες εθελοντισμού',             'hours',     '⚡', 0,    500],
+                    ['hours_1000',    '1000 Ώρες',             'Συμπλήρωσε 1000 ώρες εθελοντισμού',            'hours',     '💎', 0,    1000],
+                    ['points_2000',   '2000 Πόντοι',           'Συγκέντρωσε 2000 πόντους',                     'points',    '🎖️', 2000, 0  ],
+                    ['points_5000',   '5000 Πόντοι',           'Συγκέντρωσε 5000 πόντους',                     'points',    '👑', 5000, 0  ],
+                    ['early_bird',    'Πτηνό της Αυγής',       'Ολοκλήρωσε 5 βάρδιες πριν τις 8:00',          'special',   '🌅', 0,    5  ],
+                    ['dedicated',     'Αφοσιωμένος',           'Συμμετοχή σε 5+ διαφορετικούς μήνες',          'special',   '🗓️', 0,   5  ],
+                    ['loyal_member',  'Πιστό Μέλος',           'Μέλος της ομάδας για 1+ χρόνο',                'special',   '💙', 0,    365],
+                    ['rescuer_elite', 'Ελίτ Διασώστης',        '250+ ώρες και 50+ αποστολές',                  'special',   '⭐', 0,    0  ],
+                ];
+                foreach ($newAchievements as $a) {
+                    dbExecute(
+                        "INSERT IGNORE INTO achievements (code, name, description, category, icon, required_points, threshold)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        $a
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
