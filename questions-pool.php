@@ -43,7 +43,13 @@ if (isPost()) {
         $optionB = post('option_b');
         $optionC = post('option_c');
         $optionD = post('option_d');
-        $correctOption = post('correct_option');
+        // Read correct_option from the right field based on question type
+        if ($questionType === 'TRUE_FALSE') {
+            $correctOption = post('correct_option_tf');
+            $optionA = $optionB = $optionC = $optionD = null;
+        } else {
+            $correctOption = post('correct_option');
+        }
         $explanation = post('explanation');
         
         if ($type === 'exam') {
@@ -75,7 +81,13 @@ if (isPost()) {
         $optionB = post('option_b');
         $optionC = post('option_c');
         $optionD = post('option_d');
-        $correctOption = post('correct_option');
+        // Read correct_option from the right field based on question type
+        if ($questionType === 'TRUE_FALSE') {
+            $correctOption = post('correct_option_tf');
+            $optionA = $optionB = $optionC = $optionD = null;
+        } else {
+            $correctOption = post('correct_option');
+        }
         $explanation = post('explanation');
         
         if ($type === 'exam') {
@@ -541,9 +553,13 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     
                     <div id="tfOptionsAdd" style="display:none;">
+                        <div class="alert alert-info mb-3">
+                            <i class="bi bi-info-circle"></i> <strong>Σωστό/Λάθος:</strong> Ο εθελοντής θα επιλέξει αν η πρόταση είναι σωστή ή λανθασμένη.
+                        </div>
                         <div class="mb-3">
-                            <label class="form-label">Σωστή Απάντηση</label>
-                            <select name="correct_option_tf" class="form-select">
+                            <label class="form-label">Σωστή Απάντηση *</label>
+                            <select name="correct_option_tf" class="form-select" required>
+                                <option value="">-- Επιλέξτε --</option>
                                 <option value="T">Σωστό</option>
                                 <option value="F">Λάθος</option>
                             </select>
@@ -673,13 +689,9 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     
                     <div id="tfOptionsEdit" style="display:none;">
-                        <input type="hidden" name="option_a" value="">
-                        <input type="hidden" name="option_b" value="">
-                        <input type="hidden" name="option_c" value="">
-                        <input type="hidden" name="option_d" value="">
                         <div class="mb-3">
                             <label class="form-label">Σωστή Απάντηση</label>
-                            <select name="correct_option" id="editCorrectOptionTF" class="form-select">
+                            <select name="correct_option_tf" id="editCorrectOptionTF" class="form-select">
                                 <option value="T">Σωστό</option>
                                 <option value="F">Λάθος</option>
                             </select>
@@ -934,7 +946,9 @@ function editQuestion(id) {
         } else {
             document.getElementById('mcOptionsEdit').style.display = 'none';
             document.getElementById('tfOptionsEdit').style.display = 'block';
-            document.getElementById('editCorrectOptionTF').value = q.correct_option;
+            // Normalize TF value for the select
+            var tfVal = (q.correct_option || 'T').toUpperCase().charAt(0);
+            document.getElementById('editCorrectOptionTF').value = (tfVal === 'F') ? 'F' : 'T';
         }
         
         document.getElementById('editExplanation').value = q.explanation || '';

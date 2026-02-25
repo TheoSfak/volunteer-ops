@@ -1517,6 +1517,87 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        // ── v27: Fix corrupted TF questions saved with MC correct_option (A/B/C/D) ──
+        [
+            'version' => 27,
+            'description' => 'Fix TF questions that have MC-style correct_option (A/B/C/D) from questions-pool bug',
+            'up' => function () {
+                // TF questions should only have T or F as correct_option
+                // If they have A/B/C/D, it's from the questions-pool.php bug
+                // Since we can't know the intended answer, default to 'T' and log it
+                
+                // Fix quiz questions
+                $corruptQuiz = dbFetchAll("
+                    SELECT id, quiz_id, question_text, correct_option 
+                    FROM training_quiz_questions 
+                    WHERE question_type = 'TRUE_FALSE' 
+                      AND correct_option IN ('A', 'B', 'C', 'D')
+                ");
+                if (!empty($corruptQuiz)) {
+                    dbExecute("
+                        UPDATE training_quiz_questions 
+                        SET correct_option = 'T' 
+                        WHERE question_type = 'TRUE_FALSE' 
+                          AND correct_option IN ('A', 'B', 'C', 'D')
+                    ");
+                    // Create admin notification about corrupted questions
+                    $count = count($corruptQuiz);
+                    $qIds = array_column($corruptQuiz, 'id');
+                    $adminUsers = dbFetchAll("SELECT id FROM users WHERE role IN ('SYSTEM_ADMIN', 'DEPARTMENT_ADMIN')");
+                    foreach ($adminUsers as $admin) {
+                        try {
+                            dbInsert(
+                                "INSERT INTO notifications (user_id, type, title, message, data, created_at)
+                                 VALUES (?, 'system', ?, ?, ?, NOW())",
+                                [
+                                    $admin['id'],
+                                    'Διόρθωση ερωτήσεων Σωστό/Λάθος',
+                                    $count . ' ερωτήσεις Σωστό/Λάθος κουίζ είχαν λάθος σωστή απάντηση (A/B/C/D αντί T/F). Διορθώθηκαν σε "Σωστό" (T). Ελέγξτε τις ερωτήσεις ID: ' . implode(', ', $qIds),
+                                    json_encode(['question_ids' => $qIds])
+                                ]
+                            );
+                        } catch (Exception $e) {
+                            // Notifications table may differ
+                        }
+                    }
+                    error_log("[migrations] v27: Fixed $count corrupt quiz TF questions (IDs: " . implode(', ', $qIds) . ") - set to T");
+                }
+                
+                // Fix exam questions
+                $corruptExam = dbFetchAll("
+                    SELECT id, exam_id, question_text, correct_option 
+                    FROM training_exam_questions 
+                    WHERE question_type = 'TRUE_FALSE' 
+                      AND correct_option IN ('A', 'B', 'C', 'D')
+                ");
+                if (!empty($corruptExam)) {
+                    dbExecute("
+                        UPDATE training_exam_questions 
+                        SET correct_option = 'T' 
+                        WHERE question_type = 'TRUE_FALSE' 
+                          AND correct_option IN ('A', 'B', 'C', 'D')
+                    ");
+                    $count2 = count($corruptExam);
+                    $eIds = array_column($corruptExam, 'id');
+                    error_log("[migrations] v27: Fixed $count2 corrupt exam TF questions (IDs: " . implode(', ', $eIds) . ") - set to T");
+                }
+                
+                // Also fix any TF questions with empty/null correct_option
+                dbExecute("
+                    UPDATE training_quiz_questions 
+                    SET correct_option = 'T' 
+                    WHERE question_type = 'TRUE_FALSE' 
+                      AND (correct_option IS NULL OR correct_option = '')
+                ");
+                dbExecute("
+                    UPDATE training_exam_questions 
+                    SET correct_option = 'T' 
+                    WHERE question_type = 'TRUE_FALSE' 
+                      AND (correct_option IS NULL OR correct_option = '')
+                ");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
