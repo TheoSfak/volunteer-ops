@@ -1299,6 +1299,31 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 22,
+            'description' => 'Add email_verification_token and approval_status to users',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'users'
+                       AND COLUMN_NAME  = 'email_verification_token'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN email_verification_token VARCHAR(100) NULL AFTER email_verified_at");
+                }
+                $col2 = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'users'
+                       AND COLUMN_NAME  = 'approval_status'"
+                );
+                if (!$col2) {
+                    dbExecute("ALTER TABLE users ADD COLUMN approval_status ENUM('PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'APPROVED' AFTER email_verification_token");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
