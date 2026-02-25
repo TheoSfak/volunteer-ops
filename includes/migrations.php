@@ -1324,6 +1324,32 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 23,
+            'description' => 'Create password_reset_tokens table',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'password_reset_tokens'"
+                );
+                if (!$table) {
+                    dbExecute("
+                        CREATE TABLE password_reset_tokens (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            user_id INT UNSIGNED NOT NULL,
+                            token VARCHAR(100) NOT NULL UNIQUE,
+                            expires_at DATETIME NOT NULL,
+                            used_at TIMESTAMP NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            INDEX idx_prt_token (token),
+                            INDEX idx_prt_user (user_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    ");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
