@@ -35,7 +35,14 @@ if (isPost()) {
         $optionB = post('option_b');
         $optionC = post('option_c');
         $optionD = post('option_d');
-        $correctOption = post('correct_option');
+        
+        // Read correct_option from the right field based on question type
+        if ($type === QUESTION_TYPE_TF) {
+            $correctOption = post('correct_option_tf', post('correct_option'));
+            $optionA = $optionB = $optionC = $optionD = null;
+        } else {
+            $correctOption = post('correct_option');
+        }
         
         $newId = dbInsert("
             INSERT INTO training_exam_questions 
