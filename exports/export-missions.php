@@ -5,11 +5,12 @@ requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
 
 // Get filters from query string
 $filters = [
-    'status' => get('status'),
+    'status'        => get('status'),
     'department_id' => get('department_id'),
-    'type' => get('type'),
-    'start_date' => get('start_date'),
-    'end_date' => get('end_date')
+    'mission_type'  => get('mission_type'),
+    'search'        => get('search'),
+    'start_date'    => get('start_date'),
+    'end_date'      => get('end_date')
 ];
 
 exportMissionsToCsv($filters);
