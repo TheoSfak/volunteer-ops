@@ -874,7 +874,8 @@ include __DIR__ . '/includes/header.php';
                 <?php if (empty($shifts)): ?>
                     <p class="text-muted text-center py-4">Δεν υπάρχουν βάρδιες.</p>
                 <?php else: ?>
-                    <div class="table-responsive">
+                    <!-- Desktop/Tablet table view (hidden on portrait phones) -->
+                    <div class="table-responsive d-none d-sm-block">
                         <table class="table table-hover mb-0">
                             <thead class="table-light">
                                 <tr>
@@ -941,6 +942,72 @@ include __DIR__ . '/includes/header.php';
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
+                    </div>
+                    
+                    <!-- Mobile card view (visible only on portrait phones <576px) -->
+                    <div class="d-sm-none mobile-cards-container p-2">
+                        <?php foreach ($shifts as $shift): ?>
+                            <?php
+                            $isFull = $shift['approved_count'] >= $shift['max_volunteers'];
+                            $isPast = strtotime($shift['end_time']) < time();
+                            ?>
+                            <div class="card mobile-card <?= $isPast ? 'border-secondary' : '' ?>">
+                                <div class="card-body <?= $isPast ? 'text-muted' : '' ?>">
+                                    <div class="mobile-card-header">
+                                        <div>
+                                            <strong><?= formatDateTime($shift['start_time'], 'd/m/Y') ?></strong>
+                                            <br><small><?= formatDateTime($shift['start_time'], 'H:i') ?> - <?= formatDateTime($shift['end_time'], 'H:i') ?></small>
+                                        </div>
+                                        <div>
+                                            <?php if ($isPast): ?>
+                                                <span class="badge bg-secondary">Ολοκληρώθηκε</span>
+                                            <?php elseif ($isFull): ?>
+                                                <span class="badge bg-danger">Πλήρης</span>
+                                            <?php else: ?>
+                                                <span class="badge bg-success">Διαθέσιμη</span>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="mobile-card-row">
+                                        <div class="mobile-card-label">Θέσεις</div>
+                                        <span class="badge bg-success"><?= $shift['approved_count'] ?></span>
+                                        <span class="text-muted">/</span>
+                                        <span class="badge bg-secondary"><?= $shift['max_volunteers'] ?></span>
+                                        <?php if ($shift['pending_count'] > 0): ?>
+                                            <span class="badge bg-warning ms-1"><?= $shift['pending_count'] ?> εκκρεμείς</span>
+                                        <?php endif; ?>
+                                    </div>
+                                    
+                                    <div class="mobile-card-actions">
+                                        <?php if (!isAdmin()): ?>
+                                            <?php if (isset($userParticipations[$shift['id']])): ?>
+                                                <span class="d-flex justify-content-center w-100">
+                                                    <?= statusBadge($userParticipations[$shift['id']], 'participation') ?>
+                                                </span>
+                                            <?php elseif (!$isPast && !$isFull && $mission['status'] === STATUS_OPEN && !$isOverdue): ?>
+                                                <button type="button" class="btn btn-sm btn-primary apply-btn w-100" 
+                                                        data-shift-id="<?= $shift['id'] ?>"
+                                                        data-shift-date="<?= formatDateTime($shift['start_time'], 'd/m/Y H:i') ?>">
+                                                    <i class="bi bi-hand-index me-1"></i>Αίτηση
+                                                </button>
+                                            <?php elseif ($isOverdue && $mission['status'] === STATUS_OPEN): ?>
+                                                <span class="badge bg-secondary" title="Ο χρόνος διεξαγωγής έχει παρέλθει">
+                                                    <i class="bi bi-clock-history me-1"></i>Έληξε
+                                                </span>
+                                            <?php endif; ?>
+                                        <?php else: ?>
+                                            <a href="shift-view.php?id=<?= $shift['id'] ?>" class="btn btn-sm btn-outline-primary">
+                                                <i class="bi bi-eye me-1"></i>Προβολή
+                                            </a>
+                                            <a href="shift-form.php?id=<?= $shift['id'] ?>" class="btn btn-sm btn-outline-secondary">
+                                                <i class="bi bi-pencil me-1"></i>Επεξεργασία
+                                            </a>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
                     </div>
                 <?php endif; ?>
             </div>

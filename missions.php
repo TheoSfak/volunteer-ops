@@ -179,7 +179,8 @@ include __DIR__ . '/includes/header.php';
         <?php if (empty($missions)): ?>
             <p class="text-muted text-center py-5">Δεν βρέθηκαν αποστολές.</p>
         <?php else: ?>
-            <div class="table-responsive">
+            <!-- Desktop/Tablet table view (hidden on portrait phones) -->
+            <div class="table-responsive d-none d-sm-block">
                 <table class="table table-hover align-middle mb-0">
                     <thead class="table-light">
                         <tr>
@@ -259,6 +260,86 @@ include __DIR__ . '/includes/header.php';
                         <?php endforeach; ?>
                     </tbody>
                 </table>
+            </div>
+            
+            <!-- Mobile card view (visible only on portrait phones <576px) -->
+            <div class="d-sm-none mobile-cards-container p-2">
+                <?php foreach ($missions as $mission): ?>
+                    <div class="card mobile-card">
+                        <div class="card-body">
+                            <div class="mobile-card-header">
+                                <div>
+                                    <a href="mission-view.php?id=<?= $mission['id'] ?>" class="text-decoration-none">
+                                        <strong><?= h($mission['title']) ?></strong>
+                                    </a>
+                                    <?php if ($mission['is_urgent']): ?>
+                                        <span class="badge bg-danger ms-1">Επείγον</span>
+                                    <?php endif; ?>
+                                </div>
+                                <div>
+                                    <?= statusBadge($mission['status']) ?>
+                                    <?php
+                                    if (in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED]) && strtotime($mission['end_datetime']) < time()):
+                                        $elapsed = time() - strtotime($mission['end_datetime']);
+                                        $days = floor($elapsed / 86400);
+                                        $hours = floor(($elapsed % 86400) / 3600);
+                                        $elapsedText = '';
+                                        if ($days > 0) $elapsedText .= $days . ' μέρ' . ($days == 1 ? 'α' : 'ες');
+                                        if ($hours > 0) $elapsedText .= ($days > 0 ? ' και ' : '') . $hours . ' ώρ' . ($hours == 1 ? 'α' : 'ες');
+                                        if (!$elapsedText) $elapsedText = 'Μόλις τώρα';
+                                    ?>
+                                        <span class="badge bg-danger" title="Έληξε πριν <?= h($elapsedText) ?>">
+                                            <i class="bi bi-clock-history me-1"></i>ΕΛΗΞΕ
+                                        </span>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            
+                            <div class="mobile-card-meta">
+                                <?php if (!empty($mission['type_name'])): ?>
+                                    <span class="badge bg-<?= h($mission['type_color'] ?? 'secondary') ?>">
+                                        <i class="bi <?= h($mission['type_icon'] ?? 'bi-flag') ?>"></i>
+                                        <?= h($mission['type_name']) ?>
+                                    </span>
+                                <?php endif; ?>
+                                <?php if (!empty($mission['department_name'])): ?>
+                                    <span class="badge bg-light text-dark border"><?= h($mission['department_name']) ?></span>
+                                <?php endif; ?>
+                            </div>
+                            
+                            <div class="mobile-card-row">
+                                <small class="text-muted">
+                                    <i class="bi bi-geo-alt me-1"></i><?= h($mission['location']) ?>
+                                </small>
+                            </div>
+                            <div class="mobile-card-row">
+                                <small>
+                                    <i class="bi bi-calendar me-1 text-muted"></i><?= formatDate($mission['start_datetime']) ?>
+                                    <span class="text-muted ms-1"><?= formatDateTime($mission['start_datetime'], 'H:i') ?></span>
+                                </small>
+                            </div>
+                            <div class="mobile-card-row">
+                                <small>
+                                    <span class="badge bg-secondary"><?= $mission['shift_count'] ?></span>
+                                    <span class="text-muted ms-1">βάρδιες</span>
+                                    <span class="badge bg-info ms-2"><?= $mission['volunteer_count'] ?></span>
+                                    <span class="text-muted ms-1">εθελοντές</span>
+                                </small>
+                            </div>
+                            
+                            <div class="mobile-card-actions">
+                                <a href="mission-view.php?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-eye me-1"></i>Προβολή
+                                </a>
+                                <?php if (isAdmin()): ?>
+                                    <a href="mission-form.php?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-secondary">
+                                        <i class="bi bi-pencil me-1"></i>Επεξεργασία
+                                    </a>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
             </div>
         <?php endif; ?>
     </div>
