@@ -269,6 +269,12 @@ if (isPost()) {
                         logAudit('mark_attended', 'participation_requests', $prId, "Points: $points");
                     }
                     db()->commit();
+
+                    // Check and award any newly earned achievements for the volunteer
+                    if ($pr) {
+                        checkAndAwardAchievements((int)$pr['volunteer_id']);
+                    }
+
                     setFlash('success', 'Η παρουσία καταγράφηκε και δόθηκαν πόντοι.');
                 } catch (Exception $e) {
                     db()->rollBack();
@@ -686,7 +692,7 @@ include __DIR__ . '/includes/header.php';
                                 <?php foreach ($participants as $p): ?>
                                     <tr>
                                         <td>
-                                            <strong><?= h($p['name']) ?></strong><?= volunteerTypeBadge($p['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
+                                            <strong><?= h($p['name']) ?></strong><?= volunteerTypeBadge($p['volunteer_type'] ?? VTYPE_RESCUER) ?>
                                             <?php if ($canManage): ?>
                                                 <button type="button" class="btn btn-sm btn-link p-0 ms-1 edit-notes-btn" 
                                                         data-id="<?= $p['id'] ?>"
