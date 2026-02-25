@@ -93,6 +93,11 @@ if (isAdmin()) {
     );
 }
 
+// Positions for publish targeting panel
+$publishPositions = dbFetchAll(
+    "SELECT id, name FROM volunteer_positions WHERE is_active = 1 ORDER BY name"
+);
+
 // Get debrief if it exists (even if status is not completed yet, e.g. reopened)
 $debrief = dbFetchOne(
     "SELECT md.*, COALESCE(u.name, 'Άγνωστος') as submitter_name 
@@ -206,6 +211,13 @@ if (isPost()) {
                             $whereFilter  .= " AND volunteer_type IN ($placeholders)";
                             $filterParams  = $vtypes;
                         }
+                    } elseif ($notifyTarget === 'positions' && !empty($_POST['notify_positions'])) {
+                        $positions = array_values(array_filter(array_map('intval', (array)$_POST['notify_positions']), fn($p) => $p > 0));
+                        if (!empty($positions)) {
+                            $placeholders  = implode(',', array_fill(0, count($positions), '?'));
+                            $whereFilter  .= " AND position_id IN ($placeholders)";
+                            $filterParams  = $positions;
+                        }
                     }
 
                     $volunteers = dbFetchAll(
@@ -223,6 +235,11 @@ if (isPost()) {
                     } elseif ($notifyTarget === 'vtypes' && !empty($vtypes ?? [])) {
                         $vtypeLabels = array_map(fn($v) => VOLUNTEER_TYPE_LABELS[$v] ?? $v, $vtypes);
                         $targetLabel = implode(', ', $vtypeLabels);
+                    } elseif ($notifyTarget === 'positions' && !empty($positions ?? [])) {
+                        $posRows = dbFetchAll(
+                            'SELECT name FROM volunteer_positions WHERE id IN (' . implode(',', $positions) . ')'
+                        );
+                        $targetLabel = implode(', ', array_column($posRows, 'name'));
                     }
                     
                     $userIds = array_column($volunteers, 'id');
@@ -1024,6 +1041,31 @@ include __DIR__ . '/includes/header.php';
                                         <label class="form-check-label" for="vtypeVolunteer">Εθελοντές</label>
                                     </div>
                                 </div>
+
+                                <?php if (!empty($publishPositions)): ?>
+                                <!-- By Position -->
+                                <div class="form-check mb-1">
+                                    <input class="form-check-input" type="radio" name="notify_target"
+                                           id="targetPositions" value="positions"
+                                           onchange="toggleTargetGroups()">
+                                    <label class="form-check-label" for="targetPositions">
+                                        <i class="bi bi-briefcase me-1 text-danger"></i>Ανά Θέση
+                                    </label>
+                                </div>
+                                <div id="positionsGroup" class="ps-3 d-none">
+                                    <?php foreach ($publishPositions as $pos): ?>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="checkbox"
+                                               name="notify_positions[]" value="<?= (int)$pos['id'] ?>"
+                                               id="pos<?= (int)$pos['id'] ?>">
+                                        <label class="form-check-label" for="pos<?= (int)$pos['id'] ?>">
+                                            <?= h($pos['name']) ?>
+                                        </label>
+                                    </div>
+                                    <?php endforeach; ?>
+                                </div>
+                                <?php endif; ?>
+
                             </div>
 
                             <button type="submit" class="btn btn-success w-100">
@@ -1038,6 +1080,8 @@ include __DIR__ . '/includes/header.php';
                             var target = document.querySelector('input[name="notify_target"]:checked').value;
                             document.getElementById('rolesGroup').classList.toggle('d-none', target !== 'roles');
                             document.getElementById('vtypesGroup').classList.toggle('d-none', target !== 'vtypes');
+                            var pg = document.getElementById('positionsGroup');
+                            if (pg) pg.classList.toggle('d-none', target !== 'positions');
                         }
                         </script>
                     <?php endif; ?>
