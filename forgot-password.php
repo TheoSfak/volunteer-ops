@@ -83,7 +83,7 @@ $appLogo = getSetting('app_logo', '');
         body {
             background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
             min-height: 100vh;
-            display: flex; align-items: center; justify-content: center;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
         }
         .card-auth {
             background: white; border-radius: 1rem;
@@ -98,6 +98,7 @@ $appLogo = getSetting('app_logo', '');
     </style>
 </head>
 <body>
+<div class="py-4 w-100 d-flex justify-content-center">
 <div class="card-auth">
     <div class="card-header-auth">
         <?php if (!empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLogo)): ?>

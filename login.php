@@ -47,6 +47,7 @@ $appLogo = getSetting('app_logo', '');
             background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
             min-height: 100vh;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
         }
@@ -79,6 +80,7 @@ $appLogo = getSetting('app_logo', '');
     </style>
 </head>
 <body>
+    <div class="py-4 w-100 d-flex justify-content-center">
     <div class="login-card">
         <div class="login-header">
             <?php if (!empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLogo)): ?>
@@ -131,7 +133,8 @@ $appLogo = getSetting('app_logo', '');
             </div>
         </div>
     </div>
-    
+    </div><!-- /.py-4 wrapper -->
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
     <footer class="text-center mt-4 pb-3" style="color:rgba(255,255,255,0.7);font-size:0.82rem">
