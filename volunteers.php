@@ -70,12 +70,14 @@ $pagination = paginate($total, $page, $perPage);
 // Get volunteers (optimized with JOINs)
 $volunteers = dbFetchAll(
     "SELECT u.*, d.name as department_name, wh.name as warehouse_name,
+            vp.name as position_name,
             COALESCE(pr_stats.shifts_count, 0) as shifts_count,
             COALESCE(pr_stats.total_hours, 0) as total_hours
      FROM users u
      $skillJoin
      LEFT JOIN departments d ON u.department_id = d.id
      LEFT JOIN departments wh ON u.warehouse_id = wh.id
+     LEFT JOIN volunteer_positions vp ON u.position_id = vp.id
      LEFT JOIN (
          SELECT volunteer_id, 
                 COUNT(*) as shifts_count,
@@ -314,7 +316,7 @@ include __DIR__ . '/includes/header.php';
                         <td>
                             <a href="volunteer-view.php?id=<?= $v['id'] ?>" class="text-decoration-none fw-semibold">
                                 <?= h($v['name']) ?>
-                            </a><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
+                            </a><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_VOLUNTEER) ?><?= positionBadge($v['position_name'] ?? '') ?>
                             <br><small class="text-muted"><?= h($v['email']) ?><?= $v['phone'] ? ' · ' . h($v['phone']) : '' ?></small>
                         </td>
                         <td><?= roleBadge($v['role']) ?></td>

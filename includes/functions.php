@@ -173,6 +173,11 @@ function volunteerTypeBadge($type) {
     return ' <span class="badge bg-' . $color . '">' . $icon . ' ' . h($label) . '</span>';
 }
 
+function positionBadge($name) {
+    if (empty($name)) return '';
+    return ' <span class="badge" style="background-color:#6f42c1" title="Θέση στην ομάδα"><i class="bi bi-award-fill"></i> ' . h($name) . '</span>';
+}
+
 /**
  * Check if user is a trainee rescuer
  */
