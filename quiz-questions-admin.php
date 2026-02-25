@@ -28,8 +28,14 @@ if (isPost()) {
     if ($action === 'add_question') {
         $questionText = post('question_text');
         $questionType = post('question_type');
-        $correctOption = post('correct_option');
         $explanation = post('explanation');
+        
+        // Get correct_option from the right field based on question type
+        if ($questionType === QUESTION_TYPE_TF) {
+            $correctOption = post('correct_option_tf');
+        } else {
+            $correctOption = post('correct_option');
+        }
         
         $errors = [];
         if (empty($questionText)) $errors[] = 'Το πεδίο ερώτηση είναι υποχρεωτικό.';
@@ -48,7 +54,7 @@ if (isPost()) {
                 $errors[] = 'Επιλέξτε τη σωστή απάντηση (A, B, C ή D).';
             }
         } elseif ($questionType === QUESTION_TYPE_TF) {
-            if (!in_array($correctOption, ['true', 'false'])) {
+            if (!in_array($correctOption, ['T', 'F'])) {
                 $errors[] = 'Επιλέξτε τη σωστή απάντηση (Σωστό ή Λάθος).';
             }
         }
@@ -159,7 +165,7 @@ include __DIR__ . '/includes/header.php';
                                     <?php elseif ($q['question_type'] === QUESTION_TYPE_TF): ?>
                                         <p class="mb-0 text-success fw-bold">
                                             <i class="bi bi-check-circle"></i> 
-                                            Σωστή απάντηση: <?= $q['correct_option'] === 'true' ? 'Σωστό' : 'Λάθος' ?>
+                                            Σωστή απάντηση: <?= $q['correct_option'] === 'T' ? 'Σωστό' : 'Λάθος' ?>
                                         </p>
                                     <?php endif; ?>
                                     
@@ -253,10 +259,10 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Σωστή Απάντηση *</label>
-                            <select name="correct_option" class="form-select">
+                            <select name="correct_option_tf" id="correctOptionTf" class="form-select">
                                 <option value="">-- Επιλέξτε --</option>
-                                <option value="true">Σωστό</option>
-                                <option value="false">Λάθος</option>
+                                <option value="T">Σωστό</option>
+                                <option value="F">Λάθος</option>
                             </select>
                         </div>
                     </div>
@@ -314,8 +320,12 @@ include __DIR__ . '/includes/header.php';
 // Show/hide question type specific fields
 document.getElementById('questionType').addEventListener('change', function() {
     const type = this.value;
-    document.getElementById('mcOptions').style.display = type === '<?= QUESTION_TYPE_MC ?>' ? 'block' : 'none';
-    document.getElementById('tfOptions').style.display = type === '<?= QUESTION_TYPE_TF ?>' ? 'block' : 'none';
+    const isMC = type === '<?= QUESTION_TYPE_MC ?>';
+    const isTF = type === '<?= QUESTION_TYPE_TF ?>';
+    document.getElementById('mcOptions').style.display = isMC ? 'block' : 'none';
+    document.getElementById('tfOptions').style.display = isTF ? 'block' : 'none';
+    // Sync correct_option for TF: copy TF value into a hidden input
+    // MC select keeps name="correct_option", TF has name="correct_option_tf"
 });
 
 // Trigger on page load
