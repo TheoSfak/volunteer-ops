@@ -47,6 +47,8 @@ foreach ($sampleData as $key => $value) {
     $html = str_replace('{{' . $key . '}}', $value, $html);
 }
 
-// Output raw HTML
+// Output sandboxed HTML preview
 header('Content-Type: text/html; charset=utf-8');
+header('Content-Security-Policy: default-src \'none\'; style-src \'unsafe-inline\'; img-src * data:;');
+header('X-Frame-Options: SAMEORIGIN');
 echo $html;

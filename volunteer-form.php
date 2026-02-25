@@ -18,6 +18,12 @@ if ($id) {
         setFlash('error', 'Ο εθελοντής δεν βρέθηκε.');
         redirect('volunteers.php');
     }
+    // Department admins can only edit users in their own department
+    if ($currentUser['role'] === ROLE_DEPARTMENT_ADMIN && 
+        $volunteer['department_id'] != $currentUser['department_id']) {
+        setFlash('error', 'Δεν έχετε δικαίωμα επεξεργασίας αυτού του εθελοντή.');
+        redirect('volunteers.php');
+    }
     $pageTitle = 'Επεξεργασία: ' . $volunteer['name'];
 }
 

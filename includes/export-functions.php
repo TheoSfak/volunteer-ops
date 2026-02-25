@@ -284,6 +284,11 @@ function exportParticipationsToCsv($filters = []) {
         $params[] = $filters['volunteer_id'];
     }
     
+    if (!empty($filters['department_id'])) {
+        $where[] = 'm.department_id = ?';
+        $params[] = $filters['department_id'];
+    }
+    
     $sql = "SELECT 
                 pr.id,
                 u.name AS volunteer_name,
@@ -356,7 +361,13 @@ function exportParticipationsToCsv($filters = []) {
 /**
  * Export statistics to CSV
  */
-function exportStatisticsToCsv($period = 'monthly') {
+function exportStatisticsToCsv($period = 'monthly', $deptId = null) {
+    $deptWhere = '';
+    $deptParams = [];
+    if ($deptId) {
+        $deptWhere = ' AND m.department_id = ?';
+        $deptParams = [$deptId];
+    }
     if ($period === 'monthly') {
         $sql = "SELECT 
                     DATE_FORMAT(m.start_datetime, '%Y-%m') AS period,
@@ -369,7 +380,7 @@ function exportStatisticsToCsv($period = 'monthly') {
                 FROM missions m
                 LEFT JOIN shifts s ON m.id = s.mission_id
                 LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = '" . PARTICIPATION_APPROVED . "'
-                WHERE m.start_datetime >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+                WHERE m.start_datetime >= DATE_SUB(NOW(), INTERVAL 12 MONTH)" . $deptWhere . "
                 GROUP BY DATE_FORMAT(m.start_datetime, '%Y-%m')
                 ORDER BY period DESC";
     } else {
@@ -384,11 +395,12 @@ function exportStatisticsToCsv($period = 'monthly') {
                 FROM missions m
                 LEFT JOIN shifts s ON m.id = s.mission_id
                 LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = '" . PARTICIPATION_APPROVED . "'
+                WHERE 1=1" . $deptWhere . "
                 GROUP BY YEAR(m.start_datetime)
                 ORDER BY period DESC";
     }
     
-    $stats = dbFetchAll($sql);
+    $stats = dbFetchAll($sql, $deptParams);
     
     // Clean output buffer
     if (ob_get_level()) {
