@@ -1,13 +1,12 @@
 <?php
 /**
- * VolunteerOps - Registration Page
+ * VolunteerOps - Registration disabled.
+ * New users are added exclusively by an administrator.
  */
-
 require_once __DIR__ . '/bootstrap.php';
 
-if (isLoggedIn()) {
-    redirect('dashboard.php');
-}
+setFlash('error', 'Η εγγραφή χρηστών γίνεται μόνο από τον Διαχειριστή. Απευθυνθείτε στον διαχειριστή του συστήματος.');
+redirect('login.php');
 
 $errors = [];
 $departments = dbFetchAll("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");

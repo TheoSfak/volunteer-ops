@@ -124,11 +124,11 @@ $appLogo = getSetting('app_logo', '');
                 </button>
             </form>
             
-            <hr class="my-4">
-            
-            <p class="text-center text-muted mb-0">
-                Δεν έχετε λογαριασμό; <a href="register.php">Εγγραφείτε</a>
-            </p>
+            <div class="text-center mt-3">
+                <a href="forgot-password.php" class="text-muted small">
+                    <i class="bi bi-key me-1"></i>Ξεχάσατε τον κωδικό σας;
+                </a>
+            </div>
         </div>
     </div>
     
