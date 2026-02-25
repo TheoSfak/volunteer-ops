@@ -204,7 +204,7 @@ if (isPost()) {
                             $filterParams  = $roles;
                         }
                     } elseif ($notifyTarget === 'vtypes' && !empty($_POST['notify_vtypes'])) {
-                        $allowedVtypes = [VTYPE_VOLUNTEER, VTYPE_TRAINEE, VTYPE_RESCUER];
+                        $allowedVtypes = [VTYPE_TRAINEE, VTYPE_RESCUER];
                         $vtypes = array_values(array_filter((array)$_POST['notify_vtypes'], fn($v) => in_array($v, $allowedVtypes)));
                         if (!empty($vtypes)) {
                             $placeholders  = implode(',', array_fill(0, count($vtypes), '?'));
@@ -1035,10 +1035,6 @@ include __DIR__ . '/includes/header.php';
                                     <div class="form-check form-check-sm">
                                         <input class="form-check-input" type="checkbox" name="notify_vtypes[]" value="RESCUER" id="vtypeRescuer">
                                         <label class="form-check-label" for="vtypeRescuer">Εθελοντές Διασώστες</label>
-                                    </div>
-                                    <div class="form-check form-check-sm">
-                                        <input class="form-check-input" type="checkbox" name="notify_vtypes[]" value="VOLUNTEER" id="vtypeVolunteer">
-                                        <label class="form-check-label" for="vtypeVolunteer">Εθελοντές</label>
                                     </div>
                                 </div>
 
