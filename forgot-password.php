@@ -149,6 +149,7 @@ $appLogo = getSetting('app_logo', '');
         <?php endif; ?>
     </div>
 </div>
+</div><!-- /.py-4 wrapper -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
 <footer class="text-center mt-4 pb-3" style="color:rgba(255,255,255,0.7);font-size:0.82rem">
