@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS `users` (
     `total_points` INT DEFAULT 0,
     `monthly_points` INT DEFAULT 0,
     `email_verified_at` TIMESTAMP NULL,
+    `email_verification_token` VARCHAR(100) NULL,
+    `approval_status` ENUM('PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'APPROVED',
     `remember_token` VARCHAR(100) NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

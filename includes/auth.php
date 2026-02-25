@@ -138,6 +138,20 @@ function login($email, $password) {
         return ['success' => false, 'message' => 'Λάθος email ή κωδικός.'];
     }
 
+    // Check email verification (skip for admins created by system)
+    if (empty($user['email_verified_at']) && ($user['approval_status'] ?? 'APPROVED') !== 'APPROVED') {
+        return ['success' => false, 'message' => 'Παρακαλώ επιβεβαιώστε πρώτα την ηλεκτρονική σας διεύθυνση. Ελέγξτε τα εισερχόμενά σας.'];
+    }
+
+    // Check approval status
+    $approvalStatus = $user['approval_status'] ?? 'APPROVED';
+    if ($approvalStatus === 'PENDING') {
+        return ['success' => false, 'message' => 'Η εγγραφή σας είναι σε αναμονή έγκρισης από τον διαχειριστή. Θα ειδοποιηθείτε μόλις εγκριθεί.'];
+    }
+    if ($approvalStatus === 'REJECTED') {
+        return ['success' => false, 'message' => 'Η αίτηση εγγραφής σας έχει απορριφθεί. Επικοινωνήστε με τον διαχειριστή για περισσότερες πληροφορίες.'];
+    }
+
     if (!$user['is_active']) {
         return ['success' => false, 'message' => 'Ο λογαριασμός σας είναι απενεργοποιημένος.'];
     }
@@ -198,18 +212,20 @@ function registerUser($data) {
     
     // Hash password
     $hashedPassword = password_hash($data['password'], PASSWORD_DEFAULT);
+    $verificationToken = bin2hex(random_bytes(32));
     
-    // Insert user
+    // Insert user — inactive until email verified and admin approved
     $userId = dbInsert(
-        "INSERT INTO users (name, email, password, phone, role, department_id, is_active, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, ?, ?, 1, NOW(), NOW())",
+        "INSERT INTO users (name, email, password, phone, role, department_id, is_active, approval_status, email_verification_token, created_at, updated_at) 
+         VALUES (?, ?, ?, ?, ?, ?, 0, 'PENDING', ?, NOW(), NOW())",
         [
             $data['name'],
             $data['email'],
             $hashedPassword,
             $data['phone'] ?? null,
-            ROLE_VOLUNTEER, // New users are always volunteers
-            $data['department_id'] ?? null
+            ROLE_VOLUNTEER,
+            $data['department_id'] ?? null,
+            $verificationToken
         ]
     );
     
@@ -221,6 +237,34 @@ function registerUser($data) {
         );
         
         logAudit('register', 'users', $userId);
+        
+        // Build verification URL
+        $appName = getSetting('app_name', 'VolunteerOps');
+        $proto   = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $host    = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        $path    = dirname($_SERVER['SCRIPT_NAME'] ?? '/volunteerops');
+        $baseUrl = getSetting('app_url', $proto . '://' . $host . rtrim($path, '/'));
+        $verifyUrl = rtrim($baseUrl, '/') . '/verify-email.php?token=' . $verificationToken;
+        
+        // Send verification email
+        $subject = 'Επιβεβαίωση Email - ' . $appName;
+        $body = '
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+  <h2 style="color:#2c3e50">Καλωσήρθατε στο ' . htmlspecialchars($appName) . '!</h2>
+  <p>Γεια σας <strong>' . htmlspecialchars($data['name']) . '</strong>,</p>
+  <p>Ευχαριστούμε για την εγγραφή σας. Παρακαλώ επιβεβαιώστε την ηλεκτρονική σας διεύθυνση κάνοντας κλικ στον παρακάτω σύνδεσμο:</p>
+  <p style="text-align:center;margin:2rem 0">
+    <a href="' . $verifyUrl . '" style="background:#27ae60;color:white;padding:14px 32px;text-decoration:none;border-radius:6px;display:inline-block;font-size:16px">
+      ✉ Επιβεβαίωση Email
+    </a>
+  </p>
+  <p>Ή αντιγράψτε αυτό το link στον browser σας:<br><small style="color:#666">' . $verifyUrl . '</small></p>
+  <hr style="border:1px solid #eee;margin:1.5rem 0">
+  <p style="color:#888;font-size:13px">Αν δεν ζητήσατε εγγραφή στο ' . htmlspecialchars($appName) . ', αγνοήστε αυτό το email.</p>
+</div>';
+        
+        sendEmail($data['email'], $subject, $body);
+        
         return ['success' => true, 'user_id' => $userId];
     }
     

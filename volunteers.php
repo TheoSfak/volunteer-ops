@@ -173,9 +173,80 @@ if (isPost()) {
                 setFlash('error', 'Ο χρήστης δεν βρέθηκε.');
             }
             break;
+
+        case 'approve_registration':
+            if (!isSystemAdmin()) {
+                setFlash('error', 'Δεν έχετε δικαίωμα σε αυτή την ενέργεια.');
+                break;
+            }
+            $targetUser = dbFetchOne("SELECT * FROM users WHERE id = ? AND deleted_at IS NULL", [$userId]);
+            if ($targetUser && $targetUser['approval_status'] === 'PENDING') {
+                dbExecute(
+                    "UPDATE users SET approval_status = 'APPROVED', is_active = 1, updated_at = NOW() WHERE id = ?",
+                    [$userId]
+                );
+                // Notify user (in-app)
+                sendNotification($userId, 'Η εγγραφή σας εγκρίθηκε!', 'Καλωσήρθατε! Ο λογαριασμός σας εγκρίθηκε. Μπορείτε τώρα να συνδεθείτε.', 'success');
+                // Email notification
+                $appName = getSetting('app_name', 'VolunteerOps');
+                $proto   = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+                $host    = $_SERVER['HTTP_HOST'] ?? 'localhost';
+                $path    = dirname($_SERVER['SCRIPT_NAME'] ?? '/volunteerops');
+                $baseUrl = getSetting('app_url', $proto . '://' . $host . rtrim($path, '/'));
+                $loginUrl = rtrim($baseUrl, '/') . '/login.php';
+                $body = '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+  <h2 style="color:#27ae60">✅ Η εγγραφή σας εγκρίθηκε!</h2>
+  <p>Γεια σας <strong>' . htmlspecialchars($targetUser['name']) . '</strong>,</p>
+  <p>Ο λογαριασμός σας στο <strong>' . htmlspecialchars($appName) . '</strong> εγκρίθηκε από τον διαχειριστή.</p>
+  <p style="text-align:center;margin:2rem 0">
+    <a href="' . $loginUrl . '" style="background:#27ae60;color:white;padding:14px 32px;text-decoration:none;border-radius:6px;display:inline-block">
+      Σύνδεση τώρα
+    </a>
+  </p>
+</div>';
+                sendEmail($targetUser['email'], 'Η εγγραφή σας εγκρίθηκε — ' . $appName, $body);
+                logAudit('approve_registration', 'users', $userId);
+                setFlash('success', 'Η εγγραφή του ' . h($targetUser['name']) . ' εγκρίθηκε και ειδοποιήθηκε.');
+            }
+            break;
+
+        case 'reject_registration':
+            if (!isSystemAdmin()) {
+                setFlash('error', 'Δεν έχετε δικαίωμα σε αυτή την ενέργεια.');
+                break;
+            }
+            $targetUser = dbFetchOne("SELECT * FROM users WHERE id = ? AND deleted_at IS NULL", [$userId]);
+            if ($targetUser && $targetUser['approval_status'] === 'PENDING') {
+                dbExecute(
+                    "UPDATE users SET approval_status = 'REJECTED', is_active = 0, updated_at = NOW() WHERE id = ?",
+                    [$userId]
+                );
+                $appName = getSetting('app_name', 'VolunteerOps');
+                $body = '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
+  <h2 style="color:#e74c3c">Αίτηση εγγραφής</h2>
+  <p>Γεια σας <strong>' . htmlspecialchars($targetUser['name']) . '</strong>,</p>
+  <p>Λυπούμαστε, η αίτηση εγγραφής σας στο <strong>' . htmlspecialchars($appName) . '</strong> δεν εγκρίθηκε. Για περισσότερες πληροφορίες επικοινωνήστε με τον διαχειριστή.</p>
+</div>';
+                sendEmail($targetUser['email'], 'Αίτηση εγγραφής — ' . $appName, $body);
+                logAudit('reject_registration', 'users', $userId);
+                setFlash('warning', 'Η εγγραφή του ' . h($targetUser['name']) . ' απορρίφθηκε.');
+            }
+            break;
     }
     
     redirect('volunteers.php?' . http_build_query($_GET));
+}
+
+// Pending approval users (for system admin only)
+$pendingUsers = [];
+if (isSystemAdmin()) {
+    $pendingUsers = dbFetchAll(
+        "SELECT u.*, d.name as department_name
+         FROM users u
+         LEFT JOIN departments d ON u.department_id = d.id
+         WHERE u.approval_status = 'PENDING' AND u.email_verified_at IS NOT NULL AND u.deleted_at IS NULL
+         ORDER BY u.created_at ASC"
+    );
 }
 
 include __DIR__ . '/includes/header.php';
@@ -198,6 +269,64 @@ include __DIR__ . '/includes/header.php';
         </a>
     </div>
 </div>
+
+<?php if (!empty($pendingUsers)): ?>
+<!-- Pending Registration Approvals -->
+<div class="card border-warning mb-4">
+    <div class="card-header bg-warning text-dark d-flex align-items-center gap-2">
+        <i class="bi bi-hourglass-split"></i>
+        <strong>Αναμονή Έγκρισης Εγγραφής</strong>
+        <span class="badge bg-dark ms-1"><?= count($pendingUsers) ?></span>
+        <small class="ms-auto">Οι παρακάτω χρήστες επιβεβαίωσαν το email τους και αναμένουν έγκριση</small>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Όνομα / Email</th>
+                    <th>Τηλέφωνο</th>
+                    <th>Τμήμα</th>
+                    <th>Εγγραφή</th>
+                    <th class="text-end">Ενέργειες</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($pendingUsers as $pu): ?>
+                <tr>
+                    <td>
+                        <strong><?= h($pu['name']) ?></strong><br>
+                        <small class="text-muted"><?= h($pu['email']) ?></small>
+                    </td>
+                    <td><?= $pu['phone'] ? h($pu['phone']) : '<span class="text-muted">-</span>' ?></td>
+                    <td><?= $pu['department_name'] ? h($pu['department_name']) : '<span class="text-muted">-</span>' ?></td>
+                    <td><small class="text-muted"><?= formatDateTime($pu['created_at']) ?></small></td>
+                    <td class="text-end">
+                        <form method="post" class="d-inline">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="user_id" value="<?= $pu['id'] ?>">
+                            <input type="hidden" name="action" value="approve_registration">
+                            <button type="submit" class="btn btn-sm btn-success"
+                                    onclick="return confirm('Έγκριση εγγραφής για <?= h(addslashes($pu['name'])) ?>;')">
+                                <i class="bi bi-check-lg"></i> Έγκριση
+                            </button>
+                        </form>
+                        <form method="post" class="d-inline ms-1">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="user_id" value="<?= $pu['id'] ?>">
+                            <input type="hidden" name="action" value="reject_registration">
+                            <button type="submit" class="btn btn-sm btn-outline-danger"
+                                    onclick="return confirm('Απόρριψη εγγραφής για <?= h(addslashes($pu['name'])) ?>;')">
+                                <i class="bi bi-x-lg"></i> Απόρριψη
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- Filters -->
 <div class="card mb-4">
@@ -316,7 +445,7 @@ include __DIR__ . '/includes/header.php';
                         <td>
                             <a href="volunteer-view.php?id=<?= $v['id'] ?>" class="text-decoration-none fw-semibold">
                                 <?= h($v['name']) ?>
-                            </a><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_VOLUNTEER) ?><?= positionBadge($v['position_name'] ?? '') ?>
+                            </a><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_RESCUER) ?><?= positionBadge($v['position_name'] ?? '') ?>
                             <br><small class="text-muted"><?= h($v['email']) ?><?= $v['phone'] ? ' · ' . h($v['phone']) : '' ?></small>
                         </td>
                         <td><?= roleBadge($v['role']) ?></td>
