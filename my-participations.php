@@ -203,7 +203,8 @@ include __DIR__ . '/includes/header.php';
         <h5 class="mb-0"><i class="bi bi-hourglass-split me-1"></i>Εκκρεμείς Αιτήσεις (<?= count($pending) ?>)</h5>
     </div>
     <div class="card-body p-0">
-        <div class="table-responsive">
+        <!-- Desktop/Tablet table view -->
+        <div class="table-responsive d-none d-sm-block">
             <table class="table table-hover mb-0">
                 <thead>
                     <tr>
@@ -244,6 +245,46 @@ include __DIR__ . '/includes/header.php';
                 </tbody>
             </table>
         </div>
+        <!-- Mobile card view -->
+        <div class="d-sm-none mobile-cards-container p-2">
+            <?php foreach ($pending as $p): ?>
+                <div class="card mobile-card border-warning">
+                    <div class="card-body">
+                        <div class="mobile-card-header">
+                            <strong><?= h($p['mission_title']) ?></strong>
+                            <span class="badge bg-warning text-dark">Εκκρεμεί</span>
+                        </div>
+                        <?php if ($p['notes']): ?>
+                            <div class="mobile-card-row">
+                                <small class="text-muted"><i class="bi bi-quote me-1"></i><?= h($p['notes']) ?></small>
+                            </div>
+                        <?php endif; ?>
+                        <div class="mobile-card-row">
+                            <div class="mobile-card-label">Βάρδια</div>
+                            <small><i class="bi bi-calendar me-1"></i><?= formatDateTime($p['start_time'], 'd/m/Y') ?> &nbsp;<?= formatDateTime($p['start_time'], 'H:i') ?> - <?= formatDateTime($p['end_time'], 'H:i') ?></small>
+                        </div>
+                        <div class="mobile-card-row">
+                            <div class="mobile-card-label">Τοποθεσία</div>
+                            <small><i class="bi bi-geo-alt me-1"></i><?= h($p['location']) ?></small>
+                        </div>
+                        <div class="mobile-card-row">
+                            <div class="mobile-card-label">Ημ/νία Αίτησης</div>
+                            <small><?= formatDateTime($p['created_at'], 'd/m/Y H:i') ?></small>
+                        </div>
+                        <div class="mobile-card-actions">
+                            <form method="post" class="w-100" onsubmit="return confirm('Ακύρωση της αίτησης;')">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="cancel">
+                                <input type="hidden" name="participation_id" value="<?= $p['id'] ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-danger w-100">
+                                    <i class="bi bi-x-lg me-1"></i>Ακύρωση Αίτησης
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
     </div>
 </div>
 <?php endif; ?>
@@ -255,7 +296,8 @@ include __DIR__ . '/includes/header.php';
         <h5 class="mb-0"><i class="bi bi-check-circle me-1"></i>Εγκεκριμένες Συμμετοχές (<?= count($approved) ?>)</h5>
     </div>
     <div class="card-body p-0">
-        <div class="table-responsive">
+        <!-- Desktop/Tablet table view -->
+        <div class="table-responsive d-none d-sm-block">
             <table class="table table-hover mb-0">
                 <thead>
                     <tr>
@@ -303,6 +345,48 @@ include __DIR__ . '/includes/header.php';
                 </tbody>
             </table>
         </div>
+        <!-- Mobile card view -->
+        <div class="d-sm-none mobile-cards-container p-2">
+            <?php foreach ($approved as $p): ?>
+                <?php $isPast = strtotime($p['end_time']) < time(); ?>
+                <div class="card mobile-card border-success <?= $isPast ? 'opacity-75' : '' ?>">
+                    <div class="card-body">
+                        <div class="mobile-card-header">
+                            <strong><?= h($p['mission_title']) ?></strong>
+                            <div>
+                                <?php if ($p['attended']): ?>
+                                    <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Παρευρέθηκα</span>
+                                <?php elseif ($isPast): ?>
+                                    <span class="badge bg-secondary">Ολοκληρώθηκε</span>
+                                <?php else: ?>
+                                    <span class="badge bg-info">Αναμένεται</span>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        <?php if ($p['notes']): ?>
+                            <div class="mobile-card-row">
+                                <small class="text-muted"><i class="bi bi-quote me-1"></i><?= h($p['notes']) ?></small>
+                            </div>
+                        <?php endif; ?>
+                        <div class="mobile-card-row">
+                            <div class="mobile-card-label">Βάρδια</div>
+                            <small><i class="bi bi-calendar me-1"></i><?= formatDateTime($p['start_time'], 'd/m/Y') ?> &nbsp;<?= formatDateTime($p['start_time'], 'H:i') ?> - <?= formatDateTime($p['end_time'], 'H:i') ?></small>
+                        </div>
+                        <div class="mobile-card-row">
+                            <div class="mobile-card-label">Τοποθεσία</div>
+                            <small><i class="bi bi-geo-alt me-1"></i><?= h($p['location']) ?></small>
+                        </div>
+                        <div class="mobile-card-row">
+                            <div class="mobile-card-label">Εγκρίθηκε</div>
+                            <small><?= formatDateTime($p['decided_at'], 'd/m/Y H:i') ?>
+                            <?php if ($p['decided_by_name']): ?>
+                                <span class="text-muted">από <?= h($p['decided_by_name']) ?></span>
+                            <?php endif; ?></small>
+                        </div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
     </div>
 </div>
 <?php endif; ?>
@@ -314,7 +398,8 @@ include __DIR__ . '/includes/header.php';
         <h5 class="mb-0"><i class="bi bi-x-circle me-1"></i>Απορριφθείσες Αιτήσεις (<?= count($rejected) ?>)</h5>
     </div>
     <div class="card-body p-0">
-        <div class="table-responsive">
+        <!-- Desktop/Tablet table view -->
+        <div class="table-responsive d-none d-sm-block">
             <table class="table table-hover mb-0">
                 <thead>
                     <tr>
@@ -357,6 +442,43 @@ include __DIR__ . '/includes/header.php';
                 </tbody>
             </table>
         </div>
+        <!-- Mobile card view -->
+        <div class="d-sm-none mobile-cards-container p-2">
+            <?php foreach ($rejected as $p): ?>
+                <div class="card mobile-card border-danger">
+                    <div class="card-body">
+                        <div class="mobile-card-header">
+                            <strong><?= h($p['mission_title']) ?></strong>
+                            <span class="badge bg-danger">Απορρίφθηκε</span>
+                        </div>
+                        <?php if ($p['notes']): ?>
+                            <div class="mobile-card-row">
+                                <small class="text-muted"><i class="bi bi-quote me-1"></i>Η αίτησή μου: <?= h($p['notes']) ?></small>
+                            </div>
+                        <?php endif; ?>
+                        <div class="mobile-card-row">
+                            <div class="mobile-card-label">Βάρδια</div>
+                            <small><i class="bi bi-calendar me-1"></i><?= formatDateTime($p['start_time'], 'd/m/Y') ?> &nbsp;<?= formatDateTime($p['start_time'], 'H:i') ?> - <?= formatDateTime($p['end_time'], 'H:i') ?></small>
+                        </div>
+                        <div class="mobile-card-row">
+                            <div class="mobile-card-label">Λόγος Απόρριψης</div>
+                            <?php if ($p['rejection_reason']): ?>
+                                <small class="text-danger"><i class="bi bi-info-circle me-1"></i><?= h($p['rejection_reason']) ?></small>
+                            <?php else: ?>
+                                <small class="text-muted">Δεν δόθηκε αιτιολογία</small>
+                            <?php endif; ?>
+                        </div>
+                        <div class="mobile-card-row">
+                            <div class="mobile-card-label">Ημ/νία Απόρριψης</div>
+                            <small><?= formatDateTime($p['decided_at'], 'd/m/Y H:i') ?>
+                            <?php if ($p['decided_by_name']): ?>
+                                <span class="text-muted">από <?= h($p['decided_by_name']) ?></span>
+                            <?php endif; ?></small>
+                        </div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
     </div>
 </div>
 <?php endif; ?>
@@ -368,7 +490,8 @@ include __DIR__ . '/includes/header.php';
         <h5 class="mb-0"><i class="bi bi-dash-circle me-1"></i>Ακυρωμένες Αιτήσεις (<?= count($canceled) ?>)</h5>
     </div>
     <div class="card-body p-0">
-        <div class="table-responsive">
+        <!-- Desktop/Tablet table view -->
+        <div class="table-responsive d-none d-sm-block">
             <table class="table table-hover mb-0">
                 <thead>
                     <tr>
@@ -398,6 +521,33 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </tbody>
             </table>
+        </div>
+        <!-- Mobile card view -->
+        <div class="d-sm-none mobile-cards-container p-2">
+            <?php foreach ($canceled as $p): ?>
+                <div class="card mobile-card border-secondary">
+                    <div class="card-body">
+                        <div class="mobile-card-header">
+                            <strong><?= h($p['mission_title']) ?></strong>
+                            <div>
+                                <?php if ($p['status'] === 'CANCELED_BY_USER'): ?>
+                                    <span class="badge bg-secondary">Από εσάς</span>
+                                <?php else: ?>
+                                    <span class="badge bg-dark">Από διαχειριστή</span>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        <div class="mobile-card-row">
+                            <div class="mobile-card-label">Βάρδια</div>
+                            <small><i class="bi bi-calendar me-1"></i><?= formatDateTime($p['start_time'], 'd/m/Y') ?> &nbsp;<?= formatDateTime($p['start_time'], 'H:i') ?> - <?= formatDateTime($p['end_time'], 'H:i') ?></small>
+                        </div>
+                        <div class="mobile-card-row">
+                            <div class="mobile-card-label">Ημ/νία Ακύρωσης</div>
+                            <small><?= formatDateTime($p['updated_at'], 'd/m/Y H:i') ?></small>
+                        </div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
         </div>
     </div>
 </div>

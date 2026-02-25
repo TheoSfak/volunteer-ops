@@ -604,6 +604,56 @@ $appDescription = getSetting('app_description', '');
                 padding: 1rem;
             }
         }
+        
+        /* Mobile card view for tables - only on portrait phones (<576px) */
+        @media (max-width: 575.98px) {
+            .mobile-cards-container .mobile-card {
+                border-radius: 0.5rem;
+                margin-bottom: 0.75rem;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            }
+            .mobile-cards-container .mobile-card .card-body {
+                padding: 0.75rem;
+            }
+            .mobile-cards-container .mobile-card-label {
+                font-size: 0.7rem;
+                color: #6c757d;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 0.1rem;
+            }
+            .mobile-cards-container .mobile-card-row {
+                margin-bottom: 0.4rem;
+            }
+            .mobile-cards-container .mobile-card-actions {
+                display: flex;
+                gap: 0.5rem;
+                margin-top: 0.5rem;
+                padding-top: 0.5rem;
+                border-top: 1px solid rgba(0,0,0,0.08);
+            }
+            .mobile-cards-container .mobile-card-actions .btn {
+                flex: 1;
+            }
+            .mobile-cards-container .mobile-card-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                margin-bottom: 0.4rem;
+            }
+            .mobile-cards-container .mobile-card-header .card-title {
+                font-size: 0.95rem;
+                margin-bottom: 0;
+                flex: 1;
+                margin-right: 0.5rem;
+            }
+            .mobile-cards-container .mobile-card-meta {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.35rem;
+                margin-bottom: 0.3rem;
+            }
+        }
     </style>
 </head>
 <body>

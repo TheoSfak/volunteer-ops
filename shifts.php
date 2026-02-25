@@ -148,7 +148,8 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-info-circle me-2"></i>Δεν βρέθηκαν βάρδιες.
     </div>
 <?php else: ?>
-    <div class="table-responsive">
+    <!-- Desktop/Tablet table view (hidden on portrait phones) -->
+    <div class="table-responsive d-none d-sm-block">
         <table class="table table-hover align-middle">
             <thead>
                 <tr>
@@ -219,6 +220,80 @@ include __DIR__ . '/includes/header.php';
                 <?php endforeach; ?>
             </tbody>
         </table>
+    </div>
+    
+    <!-- Mobile card view (visible only on portrait phones <576px) -->
+    <div class="d-sm-none mobile-cards-container p-2">
+        <?php foreach ($shifts as $shift): ?>
+            <?php
+            $now = time();
+            $start = strtotime($shift['start_time']);
+            $end = strtotime($shift['end_time']);
+            $isPast = $end < $now;
+            $isActive = $start <= $now && $end >= $now;
+            $isUpcoming = $start > $now;
+            ?>
+            <div class="card mobile-card <?= $isPast ? 'border-secondary' : '' ?>">
+                <div class="card-body <?= $isPast ? 'text-muted' : '' ?>">
+                    <div class="mobile-card-header">
+                        <div class="card-title">
+                            <strong><?= h(($shift['title'] ?? '') ?: 'Βάρδια #' . $shift['id']) ?></strong>
+                        </div>
+                        <div>
+                            <?php if ($isActive): ?>
+                                <span class="badge bg-success"><i class="bi bi-play-fill me-1"></i>Σε εξέλιξη</span>
+                            <?php elseif ($isUpcoming): ?>
+                                <span class="badge bg-primary"><i class="bi bi-clock me-1"></i>Επερχόμενη</span>
+                            <?php else: ?>
+                                <span class="badge bg-secondary"><i class="bi bi-check me-1"></i>Ολοκληρώθηκε</span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    
+                    <?php if (!empty($shift['description'])): ?>
+                        <div class="mobile-card-row">
+                            <small class="text-muted"><?= h(mb_substr($shift['description'], 0, 80)) ?>...</small>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <div class="mobile-card-row">
+                        <div class="mobile-card-label">Αποστολή</div>
+                        <a href="mission-view.php?id=<?= $shift['mission_id'] ?>">
+                            <?= h($shift['mission_title']) ?>
+                        </a>
+                        <?= statusBadge($shift['mission_status']) ?>
+                    </div>
+                    
+                    <div class="mobile-card-row">
+                        <div class="mobile-card-label">Χρόνος</div>
+                        <small>
+                            <i class="bi bi-calendar me-1"></i><?= formatDate($shift['start_time']) ?>
+                            &nbsp;<?= date('H:i', $start) ?> - <?= date('H:i', $end) ?>
+                            <span class="text-muted">(<?= round(($end - $start) / 3600, 1) ?> ώρες)</span>
+                        </small>
+                    </div>
+                    
+                    <div class="mobile-card-row">
+                        <div class="mobile-card-label">Εθελοντές</div>
+                        <span class="badge bg-success"><?= $shift['approved_count'] ?>/<?= $shift['max_volunteers'] ?></span>
+                        <?php if ($shift['pending_count'] > 0): ?>
+                            <span class="badge bg-warning ms-1"><?= $shift['pending_count'] ?> εκκρεμεί</span>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <div class="mobile-card-actions">
+                        <a href="shift-view.php?id=<?= $shift['id'] ?>" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-eye me-1"></i>Προβολή
+                        </a>
+                        <?php if (isAdmin()): ?>
+                            <a href="shift-form.php?id=<?= $shift['id'] ?>" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-pencil me-1"></i>Επεξεργασία
+                            </a>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        <?php endforeach; ?>
     </div>
     
     <?= paginationLinks($pagination) ?>
