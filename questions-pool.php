@@ -319,10 +319,10 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 
                 <div class="col-md-3">
-                    <label class="form-label">Κατάσταση</label>
+                    <label class="form-label">Ανάθεση</label>
                     <select name="status" class="form-select" onchange="this.form.submit()">
                         <option value="all" <?= $statusFilter === 'all' ? 'selected' : '' ?>>Όλες</option>
-                        <option value="orphan" <?= $statusFilter === 'orphan' ? 'selected' : '' ?>>Μη Ανατεθειμένες (Orphans)</option>
+                        <option value="orphan" <?= $statusFilter === 'orphan' ? 'selected' : '' ?>>Μη Ανατεθειμένες</option>
                         <option value="assigned" <?= $statusFilter === 'assigned' ? 'selected' : '' ?>>Ανατεθειμένες</option>
                     </select>
                 </div>
@@ -408,7 +408,7 @@ include __DIR__ . '/includes/header.php';
                                 <th>Ερώτηση</th>
                                 <th>Τύπος</th>
                                 <th>Κατηγορία</th>
-                                <th>Κατάσταση</th>
+                                <th>Ανάθεση σε Exam/Quiz</th>
                                 <th style="width: 200px;">Ενέργειες</th>
                             </tr>
                         </thead>
@@ -435,9 +435,9 @@ include __DIR__ . '/includes/header.php';
                                     <td><span class="badge bg-warning"><?= h($q['category_name']) ?></span></td>
                                     <td>
                                         <?php if (empty($q['assigned_to'])): ?>
-                                            <span class="badge bg-danger"><i class="bi bi-exclamation-triangle"></i> Orphan</span>
+                                            <span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>Μη Ανατεθειμένη</span>
                                         <?php else: ?>
-                                            <span class="badge bg-success"><i class="bi bi-check-circle"></i> <?= h($q['assigned_to']) ?></span>
+                                            <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i><?= h($q['assigned_to']) ?></span>
                                         <?php endif; ?>
                                     </td>
                                     <td>
