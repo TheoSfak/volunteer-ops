@@ -218,12 +218,12 @@ if ($tab === 'exams') {
                te.title as assigned_to
         FROM training_exam_questions teq
         LEFT JOIN training_exams te ON teq.exam_id = te.id
-        LEFT JOIN training_categories tc ON te.category_id = tc.id
+        LEFT JOIN training_categories tc ON teq.category_id = tc.id
         WHERE 1=1
     ";
     
     if ($categoryFilter !== 'all') {
-        $sql .= " AND te.category_id = " . (int)$categoryFilter;
+        $sql .= " AND teq.category_id = " . (int)$categoryFilter;
     }
     
     if ($statusFilter === 'orphan') {
@@ -248,12 +248,12 @@ if ($tab === 'exams') {
                tq.title as assigned_to
         FROM training_quiz_questions tqq
         LEFT JOIN training_quizzes tq ON tqq.quiz_id = tq.id
-        LEFT JOIN training_categories tc ON tq.category_id = tc.id
+        LEFT JOIN training_categories tc ON tqq.category_id = tc.id
         WHERE 1=1
     ";
     
     if ($categoryFilter !== 'all') {
-        $sql .= " AND tq.category_id = " . (int)$categoryFilter;
+        $sql .= " AND tqq.category_id = " . (int)$categoryFilter;
     }
     
     if ($statusFilter === 'orphan') {
