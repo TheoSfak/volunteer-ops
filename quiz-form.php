@@ -23,6 +23,7 @@ if (isPost()) {
     $questionsPerAttempt = post('questions_per_attempt', 10);
     $passingPercentage = post('passing_percentage', 70);
     $timeLimit = post('time_limit_minutes');
+    $useRandomPool = isset($_POST['use_random_pool']) ? 1 : 0;
     $isActive = isset($_POST['is_active']) ? 1 : 0;
     
     $errors = [];
@@ -35,18 +36,23 @@ if (isPost()) {
         if ($isEdit) {
             dbExecute("
                 UPDATE training_quizzes 
-                SET title = ?, description = ?, category_id = ?, questions_per_attempt = ?, passing_percentage = ?, time_limit_minutes = ?, is_active = ?, updated_at = NOW()
+                SET title = ?, description = ?, category_id = ?, questions_per_attempt = ?, passing_percentage = ?, time_limit_minutes = ?, use_random_pool = ?, is_active = ?, updated_at = NOW()
                 WHERE id = ?
-            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $isActive, $id]);
+            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $useRandomPool, $isActive, $id]);
             logAudit('update', 'training_quizzes', $id);
             setFlash('success', 'Το κουίζ ενημερώθηκε.');
         } else {
             $newId = dbInsert("
-                INSERT INTO training_quizzes (title, description, category_id, questions_per_attempt, passing_percentage, time_limit_minutes, is_active, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $isActive, getCurrentUserId()]);
+                INSERT INTO training_quizzes (title, description, category_id, questions_per_attempt, passing_percentage, time_limit_minutes, use_random_pool, is_active, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ", [$title, $description, $categoryId, $questionsPerAttempt, $passingPercentage, $timeLimit, $useRandomPool, $isActive, getCurrentUserId()]);
             logAudit('create', 'training_quizzes', $newId);
-            setFlash('success', 'Το κουίζ δημιουργήθηκε.');
+            if ($useRandomPool) {
+                setFlash('success', 'Το κουίζ δημιουργήθηκε. Ο τυχαίος επιλογέας ερωτήσεων από pool είναι ενεργός — δεν χρειάζεται χειροκίνητη προσθήκη ερωτήσεων.');
+                redirect('exam-admin.php?tab=quizzes');
+            } else {
+                setFlash('success', 'Το κουίζ δημιουργήθηκε.');
+            }
             redirect('quiz-questions-admin.php?quiz_id=' . $newId);
         }
         redirect('exam-admin.php?tab=quizzes');
@@ -128,6 +134,15 @@ include __DIR__ . '/includes/header.php';
                             <small class="text-muted">Αφήστε κενό για απεριόριστο χρόνο</small>
                         </div>
                         
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" name="use_random_pool" id="use_random_pool" 
+                                   <?= ($quiz['use_random_pool'] ?? 0) ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="use_random_pool">
+                                <strong>Τυχαία επιλογή από pool κατηγορίας</strong>
+                                <div class="text-muted small mt-1">Το σύστημα επιλέγει αυτόματα τυχαίες ερωτήσεις από <em>όλη</em> την κατηγορία κατά την έναρξη. Δεν χρειάζεται χειροκίνητη προσθήκη ερωτήσεων στο κουίζ.</div>
+                            </label>
+                        </div>
+
                         <div class="form-check mb-3">
                             <input class="form-check-input" type="checkbox" name="is_active" id="is_active" 
                                    <?= ($quiz['is_active'] ?? 1) ? 'checked' : '' ?>>
