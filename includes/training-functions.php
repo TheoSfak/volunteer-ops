@@ -28,6 +28,16 @@ function getRandomPoolQuestions($categoryId, $count) {
 }
 
 /**
+ * Get random questions from the entire category pool (quiz variant)
+ */
+function getRandomQuizPoolQuestions($categoryId, $count) {
+    return dbFetchAll(
+        "SELECT * FROM training_quiz_questions WHERE category_id = ? ORDER BY RAND() LIMIT ?",
+        [$categoryId, $count]
+    );
+}
+
+/**
  * Get random questions from a quiz
  */
 function getRandomQuizQuestions($quizId, $count = null) {

@@ -129,6 +129,17 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
     
+    <?php if (!empty($quiz['use_random_pool'])): ?>
+        <div class="alert alert-primary mb-4">
+            <i class="bi bi-shuffle me-2"></i>
+            <strong>Τυχαία επιλογή από pool είναι ενεργή.</strong>
+            Κατά την έναρξη του κουίζ, το σύστημα θα επιλέξει αυτόματα
+            <strong><?= $quiz['questions_per_attempt'] ?> τυχαίες ερωτήσεις</strong> από
+            <em>όλες τις ερωτήσεις της κατηγορίας "<?= h($quiz['category_name']) ?>"</em>.
+            Δεν χρειάζεται χειροκίνητη προσθήκη ερωτήσεων.
+        </div>
+    <?php endif; ?>
+
     <?php if ($questionCount === 0): ?>
         <div class="alert alert-info">
             <i class="bi bi-info-circle"></i> Δεν υπάρχουν ερωτήσεις ακόμα. Προσθέστε την πρώτη ερώτηση!

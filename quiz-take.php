@@ -105,17 +105,24 @@ dbExecute("DELETE FROM quiz_attempts WHERE quiz_id = ? AND user_id = ? AND compl
 
 // Initialize quiz attempt - select random questions
 if (!isset($_SESSION['quiz_attempt_' . $quizId])) {
-    // Get random questions from the pool
-    $allQuestions = dbFetchAll("SELECT id FROM training_quiz_questions WHERE quiz_id = ?", [$quizId]);
-    
-    if (count($allQuestions) < $quiz['questions_per_attempt']) {
-        setFlash('error', 'Δεν υπάρχουν αρκετές ερωτήσεις για αυτό το κουίζ.');
+    // Get questions: from category pool OR quiz-specific
+    if (!empty($quiz['use_random_pool'])) {
+        $poolQuestions = getRandomQuizPoolQuestions($quiz['category_id'], $quiz['questions_per_attempt']);
+        $selectedQuestionIds = array_column($poolQuestions, 'id');
+    } else {
+        $allQuestions = dbFetchAll("SELECT id FROM training_quiz_questions WHERE quiz_id = ?", [$quizId]);
+        if (count($allQuestions) < $quiz['questions_per_attempt']) {
+            setFlash('error', 'Δεν υπάρχουν αρκετές ερωτήσεις για αυτό το κουίζ.');
+            redirect('training-quizzes.php');
+        }
+        shuffle($allQuestions);
+        $selectedQuestionIds = array_slice(array_column($allQuestions, 'id'), 0, $quiz['questions_per_attempt']);
+    }
+
+    if (empty($selectedQuestionIds)) {
+        setFlash('error', 'Δεν υπάρχουν αρκετές ερωτήσεις στο pool για αυτό το κουίζ.');
         redirect('training-quizzes.php');
     }
-    
-    // Randomly select questions
-    shuffle($allQuestions);
-    $selectedQuestionIds = array_slice(array_column($allQuestions, 'id'), 0, $quiz['questions_per_attempt']);
     
     // Create attempt record
     $attemptId = dbInsert("

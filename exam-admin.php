@@ -336,6 +336,9 @@ include __DIR__ . '/includes/header.php';
                                             <a href="quiz-questions-admin.php?quiz_id=<?= $quiz['id'] ?>" class="fw-bold">
                                                 <?= h($quiz['title']) ?>
                                             </a>
+                                            <?php if (!empty($quiz['use_random_pool'])): ?>
+                                                <span class="badge bg-primary ms-1" title="Τυχαία επιλογή από pool"><i class="bi bi-shuffle"></i> Pool</span>
+                                            <?php endif; ?>
                                         </td>
                                         <td><span class="badge bg-info"><?= h($quiz['category_name']) ?></span></td>
                                         <td><span class="badge bg-primary"><?= $quiz['question_count'] ?></span></td>
