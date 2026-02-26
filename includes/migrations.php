@@ -1598,6 +1598,32 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 28,
+            'description' => 'Add category_id/display_order/updated_at to training_exam_questions; make exam_id and quiz_id nullable for pool support',
+            'up' => function () {
+                $checkCol = function ($table, $col) {
+                    return (bool) dbFetchOne(
+                        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?",
+                        [$table, $col]
+                    );
+                };
+                if (!$checkCol('training_exam_questions', 'category_id')) {
+                    dbExecute("ALTER TABLE training_exam_questions ADD COLUMN category_id INT UNSIGNED NULL AFTER exam_id");
+                }
+                if (!$checkCol('training_exam_questions', 'display_order')) {
+                    dbExecute("ALTER TABLE training_exam_questions ADD COLUMN display_order INT DEFAULT 0");
+                }
+                if (!$checkCol('training_exam_questions', 'updated_at')) {
+                    dbExecute("ALTER TABLE training_exam_questions ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+                }
+                // Make exam_id nullable (pool questions have no exam_id)
+                dbExecute("ALTER TABLE training_exam_questions MODIFY exam_id INT NULL");
+                // Make quiz_id nullable (pool questions have no quiz_id)
+                dbExecute("ALTER TABLE training_quiz_questions MODIFY quiz_id INT NULL");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
