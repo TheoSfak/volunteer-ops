@@ -248,6 +248,50 @@ if (isPost()) {
         logAudit('update_settings', 'notification_settings', null, 'Ρυθμίσεις ειδοποιήσεων');
         setFlash('success', 'Οι ρυθμίσεις ειδοποιήσεων αποθηκεύτηκαν.');
         redirect('settings.php?tab=notifications');
+
+    } elseif ($action === 'reset_data') {
+        $confirmation = post('confirmation', '');
+        if ($confirmation !== 'DELETE') {
+            setFlash('error', 'Πρέπει να πληκτρολογήσετε DELETE για επιβεβαίωση.');
+            redirect('settings.php?tab=reset');
+        }
+
+        try {
+            db()->beginTransaction();
+
+            // Mission activity
+            dbExecute("DELETE FROM mission_chat_messages");
+            dbExecute("DELETE FROM mission_debriefs");
+            dbExecute("DELETE FROM participation_requests");
+            dbExecute("DELETE FROM shifts");
+            dbExecute("UPDATE missions SET deleted_at = NOW() WHERE deleted_at IS NULL");
+            dbExecute("DELETE FROM missions");
+
+            // Points & badges
+            dbExecute("DELETE FROM volunteer_points");
+            dbExecute("DELETE FROM user_achievements");
+            dbExecute("UPDATE users SET total_points = 0, monthly_points = 0");
+
+            // Exam / quiz history (keep definitions & questions pool)
+            dbExecute("DELETE FROM user_answers");
+            dbExecute("DELETE FROM exam_attempts");
+            dbExecute("DELETE FROM quiz_attempts");
+            dbExecute("DELETE FROM training_user_progress");
+
+            // Notifications & audit trail
+            dbExecute("DELETE FROM notifications");
+            dbExecute("DELETE FROM audit_logs");
+
+            db()->commit();
+
+            logAudit('reset_data', 'system', null, 'Επαναφορά δεδομένων — πλήρης καθαρισμός');
+            setFlash('success', 'Η επαναφορά δεδομένων ολοκληρώθηκε επιτυχώς. Το σύστημα είναι έτοιμο.');
+            redirect('settings.php?tab=reset');
+        } catch (Exception $e) {
+            db()->rollBack();
+            setFlash('error', 'Σφάλμα κατά την επαναφορά: ' . h($e->getMessage()));
+            redirect('settings.php?tab=reset');
+        }
     }
 }
 
@@ -310,6 +354,11 @@ include __DIR__ . '/includes/header.php';
     <li class="nav-item">
         <a class="nav-link" href="update.php">
             <i class="bi bi-cloud-download me-1"></i>Ενημερώσεις
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $activeTab === 'reset' ? 'active' : '' ?> text-danger fw-semibold" href="settings.php?tab=reset">
+            <i class="bi bi-trash3 me-1"></i>Επαναφορά
         </a>
     </li>
 </ul>
@@ -969,6 +1018,81 @@ $invStats = [
         </div>
     </div>
 </div>
+<?php endif; ?>
+
+<?php if ($activeTab === 'reset'): ?>
+<div class="row justify-content-center">
+    <div class="col-lg-7">
+        <div class="card border-danger">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-2"></i>Επαναφορά Δεδομένων Συστήματος</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-warning">
+                    <strong><i class="bi bi-exclamation-triangle me-1"></i>Προσοχή — Μη αναστρέψιμη ενέργεια!</strong>
+                    <p class="mb-0 mt-1">Αυτή η ενέργεια θα διαγράψει μόνιμα τα παρακάτω δεδομένα. Οι χρήστες, τα εκπαιδευτικά αρχεία και η τράπεζα ερωτήσεων <strong>δεν</strong> επηρεάζονται.</p>
+                </div>
+
+                <h6 class="text-danger mt-3 mb-2"><i class="bi bi-trash3 me-1"></i>Τι θα διαγραφεί:</h6>
+                <div class="row">
+                    <div class="col-md-6">
+                        <ul class="list-group list-group-flush mb-3">
+                            <li class="list-group-item py-1"><i class="bi bi-x-circle-fill text-danger me-2"></i>Όλες οι αποστολές &amp; βάρδιες</li>
+                            <li class="list-group-item py-1"><i class="bi bi-x-circle-fill text-danger me-2"></i>Αιτήσεις συμμετοχής &amp; παρουσίες</li>
+                            <li class="list-group-item py-1"><i class="bi bi-x-circle-fill text-danger me-2"></i>Σχόλια αποστολών &amp; απολογισμοί</li>
+                            <li class="list-group-item py-1"><i class="bi bi-x-circle-fill text-danger me-2"></i>Πόντοι &amp; ιστορικό πόντων</li>
+                            <li class="list-group-item py-1"><i class="bi bi-x-circle-fill text-danger me-2"></i>Badges εθελοντών</li>
+                            <li class="list-group-item py-1"><i class="bi bi-x-circle-fill text-danger me-2"></i>Σύνολο πόντων (→ 0)</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <ul class="list-group list-group-flush mb-3">
+                            <li class="list-group-item py-1"><i class="bi bi-x-circle-fill text-danger me-2"></i>Ιστορικό quiz &amp; εξετάσεων</li>
+                            <li class="list-group-item py-1"><i class="bi bi-x-circle-fill text-danger me-2"></i>Απαντήσεις χρηστών</li>
+                            <li class="list-group-item py-1"><i class="bi bi-x-circle-fill text-danger me-2"></i>Πρόοδος εκπαιδευτικού υλικού</li>
+                            <li class="list-group-item py-1"><i class="bi bi-x-circle-fill text-danger me-2"></i>Ειδοποιήσεις</li>
+                            <li class="list-group-item py-1"><i class="bi bi-x-circle-fill text-danger me-2"></i>Αρχείο ενεργειών (audit log)</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <h6 class="text-success mt-2 mb-2"><i class="bi bi-shield-check me-1"></i>Τι διατηρείται:</h6>
+                <ul class="list-group list-group-flush mb-4">
+                    <li class="list-group-item py-1 text-success"><i class="bi bi-check-circle-fill me-2"></i>Όλοι οι χρήστες &amp; λογαριασμοί</li>
+                    <li class="list-group-item py-1 text-success"><i class="bi bi-check-circle-fill me-2"></i>Εκπαιδευτικά αρχεία &amp; κατηγορίες</li>
+                    <li class="list-group-item py-1 text-success"><i class="bi bi-check-circle-fill me-2"></i>Τράπεζα ερωτήσεων &amp; ορισμοί quiz/εξετάσεων</li>
+                    <li class="list-group-item py-1 text-success"><i class="bi bi-check-circle-fill me-2"></i>Τμήματα, παραρτήματα, δεξιότητες</li>
+                    <li class="list-group-item py-1 text-success"><i class="bi bi-check-circle-fill me-2"></i>Πιστοποιητικά χρηστών</li>
+                    <li class="list-group-item py-1 text-success"><i class="bi bi-check-circle-fill me-2"></i>Ορισμοί Badges &amp; ρυθμίσεις συστήματος</li>
+                </ul>
+
+                <form method="post" id="resetForm" onsubmit="return confirmReset()">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="reset_data">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold text-danger">Για επιβεβαίωση, πληκτρολογήστε <code>DELETE</code>:</label>
+                        <input type="text" class="form-control border-danger" name="confirmation"
+                               id="resetConfirmInput" autocomplete="off"
+                               placeholder="Πληκτρολογήστε DELETE">
+                    </div>
+                    <button type="submit" class="btn btn-danger" id="resetBtn" disabled>
+                        <i class="bi bi-trash3-fill me-1"></i>Εκτέλεση Επαναφοράς
+                    </button>
+                    <a href="settings.php?tab=general" class="btn btn-secondary ms-2">Ακύρωση</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('resetConfirmInput').addEventListener('input', function() {
+    document.getElementById('resetBtn').disabled = (this.value !== 'DELETE');
+});
+function confirmReset() {
+    return confirm('ΤΕΛΕΥΤΑΙΑ ΕΠΙΒΕΒΑΙΩΣΗ: Είστε απολύτως σίγουροι; Αυτή η ενέργεια είναι ΜΗ ΑΝΑΣΤΡΕΨΙΜΗ.');
+}
+</script>
 <?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
