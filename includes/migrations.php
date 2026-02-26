@@ -1617,10 +1617,26 @@ function runSchemaMigrations(): void {
                 if (!$checkCol('training_exam_questions', 'updated_at')) {
                     dbExecute("ALTER TABLE training_exam_questions ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
                 }
-                // Make exam_id nullable (pool questions have no exam_id)
+                // Make exam_id nullable for pool questions (drop FK, modify, re-add)
+                $fk1 = dbFetchOne("SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='training_exam_questions' AND COLUMN_NAME='exam_id' AND REFERENCED_TABLE_NAME IS NOT NULL LIMIT 1");
+                if ($fk1) {
+                    dbExecute("ALTER TABLE training_exam_questions DROP FOREIGN KEY `{$fk1['CONSTRAINT_NAME']}`");
+                }
                 dbExecute("ALTER TABLE training_exam_questions MODIFY exam_id INT NULL");
-                // Make quiz_id nullable (pool questions have no quiz_id)
+                if ($fk1) {
+                    dbExecute("ALTER TABLE training_exam_questions ADD CONSTRAINT `{$fk1['CONSTRAINT_NAME']}` FOREIGN KEY (exam_id) REFERENCES training_exams(id) ON DELETE SET NULL");
+                }
+                // Make quiz_id nullable for pool questions
+                $fk2 = dbFetchOne("SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='training_quiz_questions' AND COLUMN_NAME='quiz_id' AND REFERENCED_TABLE_NAME IS NOT NULL LIMIT 1");
+                if ($fk2) {
+                    dbExecute("ALTER TABLE training_quiz_questions DROP FOREIGN KEY `{$fk2['CONSTRAINT_NAME']}`");
+                }
                 dbExecute("ALTER TABLE training_quiz_questions MODIFY quiz_id INT NULL");
+                if ($fk2) {
+                    dbExecute("ALTER TABLE training_quiz_questions ADD CONSTRAINT `{$fk2['CONSTRAINT_NAME']}` FOREIGN KEY (quiz_id) REFERENCES training_quizzes(id) ON DELETE SET NULL");
+                }
             },
         ],
 
