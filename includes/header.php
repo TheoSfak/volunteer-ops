@@ -14,6 +14,20 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
 $appName = getSetting('app_name', 'VolunteerOps');
 $appLogo = getSetting('app_logo', '');
 $appDescription = getSetting('app_description', '');
+
+// Unread notifications count + latest 5 for bell dropdown
+$unreadNotifCount = 0;
+$latestNotifications = [];
+if (isLoggedIn()) {
+    $uid = getCurrentUserId();
+    $unreadNotifCount = (int) dbFetchValue(
+        "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL", [$uid]
+    );
+    $latestNotifications = dbFetchAll(
+        "SELECT id, type, title, message, created_at, read_at
+         FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 5", [$uid]
+    );
+}
 ?>
 <!DOCTYPE html>
 <html lang="el">
@@ -678,6 +692,14 @@ $appDescription = getSetting('app_description', '');
                     <i class="bi bi-speedometer2"></i> Πίνακας Ελέγχου
                 </a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'notifications' ? 'active' : '' ?>" href="notifications.php">
+                    <i class="bi bi-bell"></i> Ειδοποιήσεις
+                    <?php if ($unreadNotifCount > 0): ?>
+                        <span class="badge bg-danger ms-1"><?= $unreadNotifCount > 99 ? '99+' : $unreadNotifCount ?></span>
+                    <?php endif; ?>
+                </a>
+            </li>
             <?php if (isAdmin() || hasRole(ROLE_SHIFT_LEADER)): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'ops-dashboard' ? 'active' : '' ?>" href="ops-dashboard.php">
@@ -949,6 +971,62 @@ $appDescription = getSetting('app_description', '');
             </button>
             
             <div class="d-flex align-items-center ms-auto">
+                <!-- Notification Bell -->
+                <div class="dropdown me-3">
+                    <a class="btn btn-link text-dark position-relative p-1" href="notifications.php" id="notifBell"
+                       data-bs-toggle="dropdown" aria-expanded="false" title="Ειδοποιήσεις">
+                        <i class="bi bi-bell fs-5"></i>
+                        <?php if ($unreadNotifCount > 0): ?>
+                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger notif-badge" style="font-size:0.65rem;">
+                                <?= $unreadNotifCount > 99 ? '99+' : $unreadNotifCount ?>
+                            </span>
+                        <?php endif; ?>
+                    </a>
+                    <div class="dropdown-menu dropdown-menu-end shadow-lg" style="width:360px; max-height:420px; overflow-y:auto; right:0; left:auto;">
+                        <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
+                            <h6 class="mb-0"><i class="bi bi-bell me-1"></i>Ειδοποιήσεις</h6>
+                            <?php if ($unreadNotifCount > 0): ?>
+                                <a href="notifications.php?action=mark_all_read" class="text-decoration-none small">Ανάγνωση όλων</a>
+                            <?php endif; ?>
+                        </div>
+                        <?php if (empty($latestNotifications)): ?>
+                            <div class="text-center text-muted py-4">
+                                <i class="bi bi-bell-slash fs-3 d-block mb-2"></i>
+                                Δεν υπάρχουν ειδοποιήσεις
+                            </div>
+                        <?php else: ?>
+                            <?php foreach ($latestNotifications as $notif): ?>
+                                <a href="notifications.php?mark=<?= $notif['id'] ?>" class="dropdown-item py-2 px-3 border-bottom <?= empty($notif['read_at']) ? 'bg-light' : '' ?>" style="white-space:normal;">
+                                    <div class="d-flex align-items-start">
+                                        <div class="me-2 mt-1">
+                                            <?php
+                                            $iconClass = match($notif['type'] ?? 'info') {
+                                                'success' => 'bi-check-circle-fill text-success',
+                                                'warning' => 'bi-exclamation-triangle-fill text-warning',
+                                                'danger', 'error' => 'bi-x-circle-fill text-danger',
+                                                default => 'bi-info-circle-fill text-primary',
+                                            };
+                                            ?>
+                                            <i class="bi <?= $iconClass ?>"></i>
+                                        </div>
+                                        <div class="flex-grow-1">
+                                            <div class="fw-semibold small"><?= h($notif['title']) ?></div>
+                                            <div class="text-muted small text-truncate" style="max-width:280px;"><?= h($notif['message']) ?></div>
+                                            <div class="text-muted" style="font-size:0.7rem;"><?= formatDateTime($notif['created_at']) ?></div>
+                                        </div>
+                                        <?php if (empty($notif['read_at'])): ?>
+                                            <span class="ms-1 mt-1"><i class="bi bi-circle-fill text-primary" style="font-size:0.5rem;"></i></span>
+                                        <?php endif; ?>
+                                    </div>
+                                </a>
+                            <?php endforeach; ?>
+                            <div class="text-center py-2">
+                                <a href="notifications.php" class="text-decoration-none small">Προβολή όλων</a>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                
                 <div class="dropdown">
                     <button class="btn btn-link text-dark dropdown-toggle text-decoration-none" type="button" id="userDropdown" data-bs-toggle="dropdown" aria-expanded="false">
                         <?php if (!empty($currentUser['profile_photo']) && file_exists(__DIR__ . '/../uploads/avatars/' . $currentUser['profile_photo'])): ?>
