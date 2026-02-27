@@ -1831,6 +1831,96 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 31,
+            'description' => 'Add citizens and citizen_certificates tables',
+            'up' => function () {
+                $tableExists = function ($table) {
+                    return (bool) dbFetchOne(
+                        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+                        [$table]
+                    );
+                };
+
+                if (!$tableExists('citizens')) {
+                    dbExecute("CREATE TABLE citizens (
+                        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        first_name_gr VARCHAR(100) NOT NULL COMMENT 'Όνομα (Ελληνικά)',
+                        last_name_gr VARCHAR(100) NOT NULL COMMENT 'Επίθετο (Ελληνικά)',
+                        first_name_lat VARCHAR(100) NULL COMMENT 'Όνομα (Λατινικά)',
+                        last_name_lat VARCHAR(100) NULL COMMENT 'Επίθετο (Λατινικά)',
+                        birth_date DATE NULL COMMENT 'Ημερομηνία γέννησης',
+                        email VARCHAR(255) NULL,
+                        phone VARCHAR(30) NULL,
+                        contact_done TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Επικοινωνία',
+                        payment_done TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Πληρωμή',
+                        completed TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Έχει ολοκληρώσει',
+                        notes TEXT NULL,
+                        created_by INT UNSIGNED NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        INDEX idx_citizens_name_gr (last_name_gr, first_name_gr),
+                        INDEX idx_citizens_email (email)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                }
+
+                if (!$tableExists('citizen_certificates')) {
+                    dbExecute("CREATE TABLE citizen_certificates (
+                        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        first_name VARCHAR(100) NOT NULL COMMENT 'Όνομα',
+                        last_name VARCHAR(100) NOT NULL COMMENT 'Επίθετο',
+                        father_name VARCHAR(100) NULL COMMENT 'Όνομα Πατρός',
+                        birth_date DATE NULL COMMENT 'Ημερομηνία γέννησης',
+                        issue_date DATE NULL COMMENT 'Ημ. Έκδοσης',
+                        expiry_date DATE NULL COMMENT 'Ημ. Λήξης',
+                        notes TEXT NULL,
+                        created_by INT UNSIGNED NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        INDEX idx_cc_name (last_name, first_name),
+                        INDEX idx_cc_expiry (expiry_date)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                }
+            },
+        ],
+
+        [
+            'version'     => 32,
+            'description' => 'Add citizen_certificate_types table and certificate_type_id column',
+            'up' => function () {
+                $tableExists = function ($table) {
+                    return (bool) dbFetchOne(
+                        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+                        [$table]
+                    );
+                };
+                $checkCol = function ($table, $column) {
+                    return (bool) dbFetchOne(
+                        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+                        [$table, $column]
+                    );
+                };
+
+                if (!$tableExists('citizen_certificate_types')) {
+                    dbExecute("CREATE TABLE citizen_certificate_types (
+                        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(150) NOT NULL,
+                        description TEXT NULL,
+                        is_active TINYINT(1) NOT NULL DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                }
+
+                if (!$checkCol('citizen_certificates', 'certificate_type_id')) {
+                    dbExecute("ALTER TABLE citizen_certificates ADD COLUMN certificate_type_id INT UNSIGNED NULL AFTER id, ADD INDEX idx_cc_type (certificate_type_id)");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
