@@ -48,6 +48,11 @@ $defaults = [
     'inventory_default_warehouse' => '',
     'inventory_require_location' => '0',
     'inventory_require_notes' => '0',
+    'citizen_cert_notify_enabled' => '0',
+    'citizen_cert_notify_3months' => '1',
+    'citizen_cert_notify_1month' => '1',
+    'citizen_cert_notify_1week' => '1',
+    'citizen_cert_notify_expired' => '1',
 ];
 
 foreach ($defaults as $key => $value) {
@@ -226,6 +231,33 @@ if (isPost()) {
         setFlash('success', 'Οι ρυθμίσεις αποθέματος αποθηκεύτηκαν.');
         redirect('settings.php?tab=inventory');
         
+    } elseif ($action === 'save_citizens') {
+        // Save citizen certificate notification settings
+        $citizenFields = [
+            'citizen_cert_notify_enabled',
+            'citizen_cert_notify_3months',
+            'citizen_cert_notify_1month',
+            'citizen_cert_notify_1week',
+            'citizen_cert_notify_expired',
+        ];
+        
+        foreach ($citizenFields as $field) {
+            $value = isset($_POST[$field]) ? '1' : '0';
+            
+            $exists = dbFetchValue("SELECT COUNT(*) FROM settings WHERE setting_key = ?", [$field]);
+            if ($exists) {
+                dbExecute("UPDATE settings SET setting_value = ?, updated_at = NOW() WHERE setting_key = ?", [$value, $field]);
+            } else {
+                dbInsert("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$field, $value]);
+            }
+            $settings[$field] = $value;
+        }
+        
+        clearSettingsCache();
+        logAudit('update_settings', 'settings', null, 'Ρυθμίσεις Πολιτών');
+        setFlash('success', 'Οι ρυθμίσεις πολιτών αποθηκεύτηκαν.');
+        redirect('settings.php?tab=citizens');
+        
     } elseif ($action === 'save_notifications') {
         // Save notification settings
         foreach ($_POST['notifications'] ?? [] as $code => $enabled) {
@@ -267,6 +299,7 @@ if (isPost()) {
             'shift_reminders'     => ['file' => 'cron_shift_reminders.php',     'label' => 'Υπενθυμίσεις Βαρδιών'],
             'incomplete_missions' => ['file' => 'cron_incomplete_missions.php', 'label' => 'Ελλιπείς Αποστολές'],
             'certificate_expiry'  => ['file' => 'cron_certificate_expiry.php',  'label' => 'Λήξη Πιστοποιητικών'],
+            'citizen_cert_expiry' => ['file' => 'cron_citizen_cert_expiry.php', 'label' => 'Λήξη Πιστ/κών Πολιτών'],
             'shelf_expiry'        => ['file' => 'cron_shelf_expiry.php',        'label' => 'Λήξη Υλικών Ραφιού'],
         ];
         
@@ -413,6 +446,11 @@ include __DIR__ . '/includes/header.php';
     <li class="nav-item">
         <a class="nav-link <?= $activeTab === 'inventory' ? 'active' : '' ?>" href="settings.php?tab=inventory">
             <i class="bi bi-box-seam me-1"></i>Απόθεμα
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $activeTab === 'citizens' ? 'active' : '' ?>" href="settings.php?tab=citizens">
+            <i class="bi bi-person-vcard me-1"></i>Πολίτες
         </a>
     </li>
     <li class="nav-item">
@@ -1096,6 +1134,7 @@ $cronJobs = [
     'shift_reminders'     => ['label' => 'Υπενθυμίσεις Βαρδιών',    'icon' => 'bi-alarm',              'desc' => 'Ειδοποιεί τους εγκεκριμένους εθελοντές για βάρδιες εντός ' . h($settings['shift_reminder_hours'] ?? '24') . ' ωρών.', 'color' => 'info'],
     'incomplete_missions' => ['label' => 'Ελλιπείς Αποστολές',      'icon' => 'bi-people',             'desc' => 'Ειδοποιεί εθελοντές για αποστολές που χρειάζονται ακόμα εθελοντές (εντός ' . h($settings['resend_mission_hours_before'] ?? '48') . ' ωρών).', 'color' => 'warning'],
     'certificate_expiry'  => ['label' => 'Λήξη Πιστοποιητικών',     'icon' => 'bi-award',              'desc' => 'Στέλνει υπενθυμίσεις 30 & 7 ημερών πριν τη λήξη πιστοποιητικών.', 'color' => 'success'],
+    'citizen_cert_expiry' => ['label' => 'Λήξη Πιστ/κών Πολιτών',   'icon' => 'bi-person-vcard',       'desc' => 'Στέλνει ειδοποιήσεις λήξης πιστοποιητικών πολιτών (3μ, 1μ, 1εβδ, ληγμένα).', 'color' => 'secondary'],
     'shelf_expiry'        => ['label' => 'Λήξη Υλικών Ραφιού',      'icon' => 'bi-box-seam',           'desc' => 'Ελέγχει για ληγμένα ή υπό λήξη υλικά ραφιού (εντός ' . h($settings['shelf_expiry_reminder_days'] ?? '30') . ' ημερών).', 'color' => 'danger'],
 ];
 $lastManualRun = getSetting('cron_last_manual_run', '');
@@ -1226,6 +1265,151 @@ unset($_SESSION['cron_results'], $_SESSION['cron_elapsed']);
 
                 <h6 class="mt-3">Ειδοποιήσεις Email</h6>
                 <p class="small text-muted mb-2">Μπορείτε να ενεργοποιήσετε/απενεργοποιήσετε τα email από την καρτέλα <a href="settings.php?tab=notifications">Ειδοποιήσεις</a>.</p>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- Citizens Settings Tab -->
+<?php if ($activeTab === 'citizens'): ?>
+<?php
+$citizenStats = [
+    'total_citizens' => (int)dbFetchValue("SELECT COUNT(*) FROM citizens"),
+    'total_certs' => (int)dbFetchValue("SELECT COUNT(*) FROM citizen_certificates"),
+    'expired_certs' => (int)dbFetchValue("SELECT COUNT(*) FROM citizen_certificates WHERE expiry_date IS NOT NULL AND expiry_date < CURDATE()"),
+    'expiring_3m' => (int)dbFetchValue("SELECT COUNT(*) FROM citizen_certificates WHERE expiry_date IS NOT NULL AND expiry_date >= CURDATE() AND expiry_date <= DATE_ADD(CURDATE(), INTERVAL 3 MONTH)"),
+];
+?>
+<div class="row">
+    <div class="col-lg-7">
+        <form method="post">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="save_citizens">
+            
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-bell me-1"></i>Ειδοποιήσεις Λήξης Πιστοποιητικών Πολιτών</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch mb-4">
+                        <input class="form-check-input" type="checkbox" name="citizen_cert_notify_enabled" id="citizenNotifyEnabled"
+                               <?= ($settings['citizen_cert_notify_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label fw-bold" for="citizenNotifyEnabled">
+                            Ενεργοποίηση αυτόματων ειδοποιήσεων λήξης
+                        </label>
+                        <small class="text-muted d-block">Αν είναι ενεργό, το σύστημα θα στέλνει email ειδοποιήσεις πριν τη λήξη πιστοποιητικών πολιτών.</small>
+                    </div>
+                    
+                    <hr>
+                    <h6 class="text-muted mb-3"><i class="bi bi-clock-history me-1"></i>Χρόνοι Ειδοποίησης</h6>
+                    <p class="small text-muted mb-3">Επιλέξτε πότε θα στέλνεται email ειδοποίηση:</p>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="citizen_cert_notify_3months" id="citizenNotify3m"
+                               <?= ($settings['citizen_cert_notify_3months'] ?? '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="citizenNotify3m">
+                            <span class="badge bg-info text-dark me-1">3 μήνες</span> πριν τη λήξη
+                        </label>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="citizen_cert_notify_1month" id="citizenNotify1m"
+                               <?= ($settings['citizen_cert_notify_1month'] ?? '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="citizenNotify1m">
+                            <span class="badge bg-warning text-dark me-1">1 μήνα</span> πριν τη λήξη
+                        </label>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="citizen_cert_notify_1week" id="citizenNotify1w"
+                               <?= ($settings['citizen_cert_notify_1week'] ?? '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="citizenNotify1w">
+                            <span class="badge bg-warning text-dark me-1">1 εβδομάδα</span> πριν τη λήξη
+                        </label>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="citizen_cert_notify_expired" id="citizenNotifyExpired"
+                               <?= ($settings['citizen_cert_notify_expired'] ?? '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="citizenNotifyExpired">
+                            <span class="badge bg-danger me-1">Κατά τη λήξη</span> (ημέρα λήξης)
+                        </label>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg me-1"></i>Αποθήκευση
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+    
+    <div class="col-lg-5">
+        <!-- Stats -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-bar-chart me-1"></i>Στατιστικά Πολιτών</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tr>
+                        <td>Σύνολο Πολιτών</td>
+                        <td class="text-end"><strong><?= $citizenStats['total_citizens'] ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Σύνολο Πιστοποιητικών</td>
+                        <td class="text-end"><strong><?= $citizenStats['total_certs'] ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Ληγμένα Πιστοποιητικά</td>
+                        <td class="text-end"><strong class="text-danger"><?= $citizenStats['expired_certs'] ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Λήγουν σε 3 μήνες</td>
+                        <td class="text-end"><strong class="text-warning"><?= $citizenStats['expiring_3m'] ?></strong></td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Quick Links -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-link-45deg me-1"></i>Γρήγορη Διαχείριση</h5>
+            </div>
+            <div class="card-body d-grid gap-2">
+                <a href="citizens.php" class="btn btn-outline-primary">
+                    <i class="bi bi-person-vcard me-1"></i>Λίστα Πολιτών
+                </a>
+                <a href="citizen-certificates.php" class="btn btn-outline-primary">
+                    <i class="bi bi-file-earmark-medical me-1"></i>Πιστοποιητικά Πολιτών
+                </a>
+                <a href="citizen-certificate-types.php" class="btn btn-outline-primary">
+                    <i class="bi bi-tags me-1"></i>Τύποι Πιστοποιητικών
+                </a>
+            </div>
+        </div>
+        
+        <!-- Color Legend -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-palette me-1"></i>Υπόμνημα Χρωμάτων</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <span class="badge bg-info text-dark me-2" style="width: 80px;">Μπλε</span>
+                    <small>Λήγει σε 6 μήνες ή λιγότερο</small>
+                </div>
+                <div class="d-flex align-items-center mb-2">
+                    <span class="badge bg-warning text-dark me-2" style="width: 80px;">Κίτρινο</span>
+                    <small>Λήγει σε 3 μήνες ή λιγότερο</small>
+                </div>
+                <div class="d-flex align-items-center">
+                    <span class="badge bg-danger me-2" style="width: 80px;">Κόκκινο</span>
+                    <small>Ληγμένο πιστοποιητικό</small>
+                </div>
             </div>
         </div>
     </div>

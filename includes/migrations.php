@@ -1921,6 +1921,112 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 33,
+            'description' => 'Add email + reminder columns to citizen_certificates, email templates & notification settings for citizen cert expiry',
+            'up' => function () {
+                $checkCol = function ($table, $column) {
+                    return (bool) dbFetchOne(
+                        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+                        [$table, $column]
+                    );
+                };
+
+                // Add email column
+                if (!$checkCol('citizen_certificates', 'email')) {
+                    dbExecute("ALTER TABLE citizen_certificates ADD COLUMN email VARCHAR(255) NULL AFTER expiry_date");
+                }
+
+                // Add reminder tracking columns
+                $reminderCols = ['reminder_sent_3m', 'reminder_sent_1m', 'reminder_sent_1w', 'reminder_sent_expired'];
+                foreach ($reminderCols as $col) {
+                    if (!$checkCol('citizen_certificates', $col)) {
+                        dbExecute("ALTER TABLE citizen_certificates ADD COLUMN {$col} TINYINT(1) NOT NULL DEFAULT 0");
+                    }
+                }
+
+                // Insert email templates for citizen cert expiry
+                $templates = [
+                    [
+                        'code' => 'citizen_cert_expiry_3months',
+                        'name' => 'Λήξη Πιστοποιητικού Πολίτη (3 μήνες)',
+                        'subject' => 'Υπενθύμιση: Το πιστοποιητικό σας λήγει σε 3 μήνες',
+                        'body_html' => '<p>Αγαπητέ/ή {{citizen_name}},</p><p>Σας ενημερώνουμε ότι το πιστοποιητικό σας <strong>{{certificate_type}}</strong> λήγει σε <strong>{{days_remaining}} ημέρες</strong> (στις {{expiry_date}}).</p><p>Παρακαλούμε φροντίστε για την ανανέωσή του εγκαίρως.</p><p>Με εκτίμηση,<br>{{app_name}}</p>',
+                        'description' => 'Αποστέλλεται 3 μήνες πριν τη λήξη πιστοποιητικού πολίτη',
+                    ],
+                    [
+                        'code' => 'citizen_cert_expiry_1month',
+                        'name' => 'Λήξη Πιστοποιητικού Πολίτη (1 μήνα)',
+                        'subject' => 'Υπενθύμιση: Το πιστοποιητικό σας λήγει σε 1 μήνα',
+                        'body_html' => '<p>Αγαπητέ/ή {{citizen_name}},</p><p>Σας ενημερώνουμε ότι το πιστοποιητικό σας <strong>{{certificate_type}}</strong> λήγει σε <strong>{{days_remaining}} ημέρες</strong> (στις {{expiry_date}}).</p><p>Παρακαλούμε φροντίστε για την άμεση ανανέωσή του.</p><p>Με εκτίμηση,<br>{{app_name}}</p>',
+                        'description' => 'Αποστέλλεται 1 μήνα πριν τη λήξη πιστοποιητικού πολίτη',
+                    ],
+                    [
+                        'code' => 'citizen_cert_expiry_1week',
+                        'name' => 'Λήξη Πιστοποιητικού Πολίτη (1 εβδομάδα)',
+                        'subject' => '⚠ Επείγον: Το πιστοποιητικό σας λήγει σε 1 εβδομάδα',
+                        'body_html' => '<p>Αγαπητέ/ή {{citizen_name}},</p><p><strong>Επείγουσα ειδοποίηση:</strong> Το πιστοποιητικό σας <strong>{{certificate_type}}</strong> λήγει σε μόλις <strong>{{days_remaining}} ημέρες</strong> (στις {{expiry_date}}).</p><p>Παρακαλούμε φροντίστε άμεσα για την ανανέωσή του.</p><p>Με εκτίμηση,<br>{{app_name}}</p>',
+                        'description' => 'Αποστέλλεται 1 εβδομάδα πριν τη λήξη πιστοποιητικού πολίτη',
+                    ],
+                    [
+                        'code' => 'citizen_cert_expiry_expired',
+                        'name' => 'Λήξη Πιστοποιητικού Πολίτη (Ληγμένο)',
+                        'subject' => '🔴 Το πιστοποιητικό σας έχει λήξει',
+                        'body_html' => '<p>Αγαπητέ/ή {{citizen_name}},</p><p>Σας ενημερώνουμε ότι το πιστοποιητικό σας <strong>{{certificate_type}}</strong> <strong>έχει λήξει</strong> (ημ. λήξης: {{expiry_date}}).</p><p>Παρακαλούμε φροντίστε άμεσα για την ανανέωσή του.</p><p>Με εκτίμηση,<br>{{app_name}}</p>',
+                        'description' => 'Αποστέλλεται όταν ένα πιστοποιητικό πολίτη λήξει',
+                    ],
+                ];
+
+                foreach ($templates as $tpl) {
+                    $exists = dbFetchValue("SELECT COUNT(*) FROM email_templates WHERE code = ?", [$tpl['code']]);
+                    if (!$exists) {
+                        dbInsert(
+                            "INSERT INTO email_templates (code, name, subject, body_html, description, is_active, created_at, updated_at)
+                             VALUES (?, ?, ?, ?, ?, 1, NOW(), NOW())",
+                            [$tpl['code'], $tpl['name'], $tpl['subject'], $tpl['body_html'], $tpl['description']]
+                        );
+                    }
+                }
+
+                // Insert notification settings for each template, linking via email_template_id
+                $notifCodes = [
+                    ['code' => 'citizen_cert_expiry_3months', 'name' => 'Λήξη Πιστοποιητικού Πολίτη (3 μήνες)', 'description' => 'Email 3 μήνες πριν τη λήξη πιστοποιητικού πολίτη'],
+                    ['code' => 'citizen_cert_expiry_1month',  'name' => 'Λήξη Πιστοποιητικού Πολίτη (1 μήνα)',  'description' => 'Email 1 μήνα πριν τη λήξη πιστοποιητικού πολίτη'],
+                    ['code' => 'citizen_cert_expiry_1week',   'name' => 'Λήξη Πιστοποιητικού Πολίτη (1 εβδομάδα)', 'description' => 'Email 1 εβδομάδα πριν τη λήξη πιστοποιητικού πολίτη'],
+                    ['code' => 'citizen_cert_expiry_expired', 'name' => 'Λήξη Πιστοποιητικού Πολίτη (Ληγμένο)', 'description' => 'Email κατά τη λήξη πιστοποιητικού πολίτη'],
+                ];
+
+                foreach ($notifCodes as $ns) {
+                    $exists = dbFetchValue("SELECT COUNT(*) FROM notification_settings WHERE code = ?", [$ns['code']]);
+                    if (!$exists) {
+                        // Link to the email template we just inserted
+                        $templateId = dbFetchValue("SELECT id FROM email_templates WHERE code = ?", [$ns['code']]);
+                        dbInsert(
+                            "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id, created_at, updated_at)
+                             VALUES (?, ?, ?, 1, ?, NOW(), NOW())",
+                            [$ns['code'], $ns['name'], $ns['description'], $templateId]
+                        );
+                    }
+                }
+
+                // Insert default settings
+                $defaultSettings = [
+                    'citizen_cert_notify_enabled'  => '0',
+                    'citizen_cert_notify_3months'  => '1',
+                    'citizen_cert_notify_1month'   => '1',
+                    'citizen_cert_notify_1week'    => '1',
+                    'citizen_cert_notify_expired'  => '1',
+                ];
+                foreach ($defaultSettings as $key => $val) {
+                    $exists = dbFetchValue("SELECT COUNT(*) FROM settings WHERE setting_key = ?", [$key]);
+                    if (!$exists) {
+                        dbInsert("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$key, $val]);
+                    }
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
