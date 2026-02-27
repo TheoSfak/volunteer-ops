@@ -383,6 +383,9 @@ function sendSmtpEmail(string $to, string $subject, string $htmlBody, array $smt
         $message .= "Subject: =?UTF-8?B?" . base64_encode($subject) . "?=\r\n";
         $message .= "Message-ID: $messageId\r\n";
         $message .= "MIME-Version: 1.0\r\n";
+        $message .= "List-Unsubscribe: <mailto:{$smtp['from_email']}?subject=unsubscribe>\r\n";
+        $message .= "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n";
+        $message .= "Precedence: bulk\r\n";
         $message .= "Content-Type: multipart/alternative; boundary=\"$boundary\"\r\n";
         $message .= "X-Mailer: VolunteerOps/" . APP_VERSION . "\r\n";
         $message .= "\r\n";
