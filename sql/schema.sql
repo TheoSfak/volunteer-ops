@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS `departments` (
     `name` VARCHAR(100) NOT NULL,
     `description` TEXT NULL,
     `is_active` TINYINT(1) DEFAULT 1,
+    `has_inventory` TINYINT(1) DEFAULT 0,
+    `inventory_settings` JSON NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -27,10 +29,13 @@ CREATE TABLE IF NOT EXISTS `users` (
     `email` VARCHAR(255) NOT NULL UNIQUE,
     `password` VARCHAR(255) NOT NULL,
     `phone` VARCHAR(20) NULL,
+    `profile_photo` VARCHAR(255) NULL DEFAULT NULL,
     `role` ENUM('SYSTEM_ADMIN', 'DEPARTMENT_ADMIN', 'SHIFT_LEADER', 'VOLUNTEER') DEFAULT 'VOLUNTEER',
     `volunteer_type` ENUM('TRAINEE_RESCUER','RESCUER') NOT NULL DEFAULT 'RESCUER',
+    `position_id` INT UNSIGNED NULL,
     `cohort_year` YEAR NULL COMMENT 'Χρονιά σειράς δοκίμων διασωστών',
     `department_id` INT UNSIGNED NULL,
+    `warehouse_id` INT UNSIGNED NULL,
     `is_active` TINYINT(1) DEFAULT 1,
     `total_points` INT DEFAULT 0,
     `monthly_points` INT DEFAULT 0,
@@ -40,6 +45,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `remember_token` VARCHAR(100) NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `newsletter_unsubscribed` TINYINT(1) NOT NULL DEFAULT 0,
     `deleted_at` TIMESTAMP NULL DEFAULT NULL,
     `deleted_by` INT UNSIGNED NULL DEFAULT NULL,
     FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL
@@ -135,6 +141,7 @@ CREATE TABLE IF NOT EXISTS `missions` (
     `coverage_percentage` INT DEFAULT 0,
     `status` ENUM('DRAFT', 'OPEN', 'CLOSED', 'COMPLETED', 'CANCELED') DEFAULT 'DRAFT',
     `created_by` INT UNSIGNED NULL,
+    `responsible_user_id` INT UNSIGNED NULL,
     `cancellation_reason` TEXT NULL,
     `canceled_by` INT UNSIGNED NULL,
     `canceled_at` TIMESTAMP NULL,
@@ -144,6 +151,7 @@ CREATE TABLE IF NOT EXISTS `missions` (
     FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`mission_type_id`) REFERENCES `mission_types`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`responsible_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`canceled_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     INDEX `idx_missions_status` (`status`),
     INDEX `idx_missions_start` (`start_datetime`)
@@ -373,6 +381,63 @@ CREATE TABLE IF NOT EXISTS `user_notification_preferences` (
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY `uq_user_notif` (`user_id`, `notification_code`),
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- VOLUNTEER DOCUMENTS TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `volunteer_documents` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT UNSIGNED NOT NULL,
+    `label` VARCHAR(255) NOT NULL,
+    `original_name` VARCHAR(255) NOT NULL,
+    `stored_name` VARCHAR(255) NOT NULL,
+    `mime_type` VARCHAR(100) NOT NULL,
+    `file_size` INT NOT NULL DEFAULT 0,
+    `uploaded_by` INT UNSIGNED NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY `idx_vd_user_id` (`user_id`),
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`uploaded_by`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- VOLUNTEER POSITIONS TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `volunteer_positions` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(100) NOT NULL,
+    `color` VARCHAR(20) DEFAULT 'secondary',
+    `icon` VARCHAR(50) NULL,
+    `description` TEXT NULL,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `sort_order` INT DEFAULT 0,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- SKILL CATEGORIES TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `skill_categories` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(100) NOT NULL UNIQUE,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- PASSWORD RESET TOKENS TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `password_reset_tokens` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT UNSIGNED NOT NULL,
+    `token` VARCHAR(100) NOT NULL UNIQUE,
+    `expires_at` DATETIME NOT NULL,
+    `used_at` TIMESTAMP NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    INDEX `idx_prt_token` (`token`),
+    INDEX `idx_prt_user` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
@@ -721,7 +786,74 @@ INSERT INTO `email_templates` (`code`, `name`, `subject`, `body_html`, `descript
     </div>
 </div>',
 'Αποστέλλεται όταν πλησιάζει η λήξη ενός πιστοποιητικού εθελοντή',
-'{{app_name}}, {{user_name}}, {{certificate_type}}, {{expiry_date}}, {{days_remaining}}');
+'{{app_name}}, {{user_name}}, {{certificate_type}}, {{expiry_date}}, {{days_remaining}}'),
+
+('task_assigned', 'Ανάθεση Εργασίας', 'Νέα Εργασία: {{task_title}}',
+'<p>Γεια σας {{user_name}},</p>
+<p>Σας ανατέθηκε μια νέα εργασία από τον/την <strong>{{assigned_by}}</strong>.</p>
+<h3>Λεπτομέρειες Εργασίας</h3>
+<ul>
+<li><strong>Τίτλος:</strong> {{task_title}}</li>
+<li><strong>Περιγραφή:</strong> {{task_description}}</li>
+<li><strong>Προτεραιότητα:</strong> {{task_priority}}</li>
+<li><strong>Προθεσμία:</strong> {{task_deadline}}</li>
+</ul>
+<p>Μπορείτε να δείτε τις λεπτομέρειες της εργασίας συνδεόμενοι στο σύστημα.</p>',
+'Αποστέλλεται όταν ανατίθεται εργασία σε εθελοντή',
+'user_name, task_title, task_description, task_priority, task_deadline, assigned_by'),
+
+('task_comment', 'Σχόλιο σε Εργασία', 'Νέο Σχόλιο στην Εργασία: {{task_title}}',
+'<p>Γεια σας {{user_name}},</p>
+<p>Ο/Η <strong>{{commented_by}}</strong> πρόσθεσε ένα νέο σχόλιο στην εργασία "<strong>{{task_title}}</strong>".</p>
+<blockquote style="border-left: 3px solid #007bff; padding-left: 15px; margin: 20px 0; color: #555;">
+{{comment}}
+</blockquote>
+<p>Συνδεθείτε στο σύστημα για να δείτε την εργασία και να απαντήσετε.</p>',
+'Αποστέλλεται όταν προστίθεται σχόλιο σε εργασία',
+'user_name, task_title, comment, commented_by'),
+
+('task_deadline_reminder', 'Υπενθύμιση Προθεσμίας', 'Υπενθύμιση: Η εργασία {{task_title}} λήγει σύντομα',
+'<p>Γεια σας {{user_name}},</p>
+<p>Σας υπενθυμίζουμε ότι η εργασία "<strong>{{task_title}}</strong>" λήγει σε λιγότερο από 24 ώρες.</p>
+<ul>
+<li><strong>Προθεσμία:</strong> {{task_deadline}}</li>
+<li><strong>Κατάσταση:</strong> {{task_status}}</li>
+<li><strong>Πρόοδος:</strong> {{task_progress}}%</li>
+</ul>
+<p>Παρακαλούμε συνδεθείτε στο σύστημα για να ολοκληρώσετε την εργασία έγκαιρα.</p>',
+'Αποστέλλεται 24 ώρες πριν τη λήξη προθεσμίας εργασίας',
+'user_name, task_title, task_deadline, task_status, task_progress'),
+
+('task_status_changed', 'Αλλαγή Κατάστασης Εργασίας', 'Αλλαγή Κατάστασης: {{task_title}}',
+'<p>Γεια σας {{user_name}},</p>
+<p>Ο/Η <strong>{{changed_by}}</strong> άλλαξε την κατάσταση της εργασίας "<strong>{{task_title}}</strong>".</p>
+<p style="font-size: 16px; margin: 20px 0;">
+<span style="background: #f8d7da; padding: 5px 10px; border-radius: 3px; text-decoration: line-through;">{{old_status}}</span>
+<span style="margin: 0 10px;">→</span>
+<span style="background: #d4edda; padding: 5px 10px; border-radius: 3px;">{{new_status}}</span>
+</p>
+<p>Συνδεθείτε στο σύστημα για να δείτε τις λεπτομέρειες.</p>',
+'Αποστέλλεται όταν αλλάζει η κατάσταση εργασίας',
+'user_name, task_title, old_status, new_status, changed_by'),
+
+('task_subtask_completed', 'Ολοκλήρωση Υποεργασίας', 'Ολοκληρώθηκε Υποεργασία στην: {{task_title}}',
+'<p>Γεια σας {{user_name}},</p>
+<p>Ο/Η <strong>{{completed_by}}</strong> ολοκλήρωσε την υποεργασία "<strong>{{subtask_title}}</strong>" στην εργασία "<strong>{{task_title}}</strong>".</p>
+<p style="background: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0;">
+✓ Η υποεργασία έχει σημανθεί ως ολοκληρωμένη
+</p>
+<p>Συνδεθείτε στο σύστημα για να δείτε την πρόοδο της εργασίας.</p>',
+'Αποστέλλεται όταν ολοκληρώνεται υποεργασία',
+'user_name, task_title, subtask_title, completed_by'),
+
+('mission_needs_volunteers', 'Αποστολή Χρειάζεται Εθελοντές', 'Η αποστολή {{mission_title}} χρειάζεται εθελοντές!',
+'<p>Γεια σας {{user_name}},</p>
+<p>Η αποστολή "<strong>{{mission_title}}</strong>" πλησιάζει και χρειάζεται ακόμα εθελοντές.</p>
+<p>{{mission_description}}</p>
+<p><a href="{{mission_url}}" style="background:#fd7e14;color:#fff;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block">Δείτε την Αποστολή</a></p>
+<p style="color:#6c757d;font-size:0.9em">&mdash; {{app_name}}</p>',
+'Αποστέλλεται όταν μια αποστολή πλησιάζει και δεν έχει αρκετούς εθελοντές',
+'{{app_name}}, {{user_name}}, {{mission_title}}, {{mission_description}}, {{mission_url}}');
 
 -- Default notification settings
 INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabled`, `email_template_id`) VALUES
@@ -734,7 +866,13 @@ INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabl
 ('points_earned', 'Κέρδος Πόντων', 'Όταν ο εθελοντής κερδίζει πόντους', 0, (SELECT id FROM email_templates WHERE code = 'points_earned')),
 ('welcome', 'Καλωσόρισμα', 'Μετά την εγγραφή νέου χρήστη', 1, (SELECT id FROM email_templates WHERE code = 'welcome')),
 ('admin_added_volunteer', 'Προσθήκη από Διαχειριστή', 'Όταν ο διαχειριστής προσθέτει εθελοντή απευθείας σε βάρδια', 1, (SELECT id FROM email_templates WHERE code = 'admin_added_volunteer')),
-('certificate_expiry_reminder', 'Υπενθύμιση Λήξης Πιστοποιητικού', 'Όταν πλησιάζει η λήξη ενός πιστοποιητικού του εθελοντή', 1, (SELECT id FROM email_templates WHERE code = 'certificate_expiry_reminder'));
+('certificate_expiry_reminder', 'Υπενθύμιση Λήξης Πιστοποιητικού', 'Όταν πλησιάζει η λήξη ενός πιστοποιητικού του εθελοντή', 1, (SELECT id FROM email_templates WHERE code = 'certificate_expiry_reminder')),
+('task_assigned', 'Ανάθεση Εργασίας', 'Όταν ανατίθεται μια εργασία σε εθελοντή', 1, (SELECT id FROM email_templates WHERE code = 'task_assigned')),
+('task_comment', 'Σχόλιο σε Εργασία', 'Όταν προστίθεται σχόλιο σε εργασία', 1, (SELECT id FROM email_templates WHERE code = 'task_comment')),
+('task_deadline_reminder', 'Υπενθύμιση Προθεσμίας', 'Όταν πλησιάζει η προθεσμία εργασίας (24h πριν)', 1, (SELECT id FROM email_templates WHERE code = 'task_deadline_reminder')),
+('task_status_changed', 'Αλλαγή Κατάστασης Εργασίας', 'Όταν αλλάζει η κατάσταση μιας εργασίας', 1, (SELECT id FROM email_templates WHERE code = 'task_status_changed')),
+('task_subtask_completed', 'Ολοκλήρωση Υποεργασίας', 'Όταν ολοκληρώνεται μια υποεργασία', 1, (SELECT id FROM email_templates WHERE code = 'task_subtask_completed')),
+('mission_needs_volunteers', 'Αποστολή Χρειάζεται Εθελοντές', 'Όταν μια αποστολή πλησιάζει και δεν έχει αρκετούς εθελοντές', 1, (SELECT id FROM email_templates WHERE code = 'mission_needs_volunteers'));
 
 -- Default certificate types
 INSERT INTO `certificate_types` (`name`, `description`, `default_validity_months`, `is_required`) VALUES
@@ -746,8 +884,35 @@ INSERT INTO `certificate_types` (`name`, `description`, `default_validity_months
 -- Default certificate settings
 INSERT INTO `settings` (`setting_key`, `setting_value`) VALUES
 ('certificate_reminder_days_first', '30'),
-('certificate_reminder_days_urgent', '7')
+('certificate_reminder_days_urgent', '7'),
+('shelf_expiry_reminder_days', '30')
 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
+
+-- Default volunteer positions
+INSERT INTO `volunteer_positions` (`id`, `name`, `color`, `icon`, `sort_order`) VALUES
+(1, 'Υπεύθυνος Τμήματος',   'primary', 'bi-person-lines-fill', 1),
+(2, 'Υπεύθυνος Γραμματείας','info',    'bi-envelope-paper',    2),
+(3, 'Εκπαιδευτής',          'success', 'bi-mortarboard',       3),
+(4, 'Ταμίας',               'warning', 'bi-cash-coin',         4);
+
+-- Default inventory categories
+INSERT INTO `inventory_categories` (`name`, `icon`, `color`, `sort_order`) VALUES
+('Φαρμακεία', '💊', '#dc3545', 1),
+('Ιατρικός Εξοπλισμός', '🏥', '#28a745', 2),
+('Επικοινωνία', '📢', '#17a2b8', 3),
+('Σκηνές & Εξοπλισμός', '⛺', '#ffc107', 4),
+('Εκπαίδευση', '📚', '#6c757d', 5),
+('Ασύρματοι', '📻', '#007bff', 6),
+('Οχήματα', '🚑', '#e83e8c', 7),
+('Γενικά', '📦', '#6c757d', 8)
+ON DUPLICATE KEY UPDATE `sort_order` = VALUES(`sort_order`);
+
+-- Default inventory locations
+INSERT INTO `inventory_locations` (`name`, `location_type`, `notes`) VALUES
+('Κεντρική Αποθήκη', 'warehouse', 'Κύρια αποθήκη υλικών'),
+('Αποθήκη Οχημάτων', 'vehicle', 'Αποθήκη εντός οχημάτων'),
+('Γραφείο', 'room', 'Γραφείο διοίκησης')
+ON DUPLICATE KEY UPDATE `notes` = VALUES(`notes`);
 
 -- =============================================
 -- TRAINING MODULE TABLES
@@ -976,12 +1141,15 @@ CREATE TABLE IF NOT EXISTS `tasks` (
     `description` TEXT,
     `priority` ENUM('LOW', 'MEDIUM', 'HIGH', 'URGENT') DEFAULT 'MEDIUM',
     `status` ENUM('TODO', 'IN_PROGRESS', 'COMPLETED', 'CANCELED') DEFAULT 'TODO',
+    `progress` INT DEFAULT 0,
     `deadline` DATETIME,
     `created_by` INT UNSIGNED NOT NULL,
+    `responsible_user_id` INT UNSIGNED NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `completed_at` DATETIME,
-    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT,
+    FOREIGN KEY (`responsible_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `subtasks` (
@@ -1079,6 +1247,277 @@ CREATE TABLE IF NOT EXISTS `volunteer_pings` (
     FOREIGN KEY (`shift_id`) REFERENCES `shifts`(`id`) ON DELETE CASCADE,
     INDEX `idx_pings_shift_time` (`shift_id`, `created_at`),
     INDEX `idx_pings_user_shift` (`user_id`, `shift_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- INVENTORY SYSTEM TABLES
+-- =============================================
+
+-- INVENTORY CATEGORIES
+CREATE TABLE IF NOT EXISTS `inventory_categories` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(255) NOT NULL,
+    `description` TEXT NULL,
+    `icon` VARCHAR(10) DEFAULT '📦',
+    `color` VARCHAR(7) DEFAULT '#6c757d',
+    `sort_order` INT DEFAULT 0,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `unique_name` (`name`),
+    INDEX `idx_active` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- INVENTORY LOCATIONS
+CREATE TABLE IF NOT EXISTS `inventory_locations` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(255) NOT NULL,
+    `department_id` INT UNSIGNED NULL,
+    `location_type` ENUM('warehouse','vehicle','room','other') DEFAULT 'warehouse',
+    `address` TEXT NULL,
+    `capacity` INT NULL,
+    `current_items_count` INT DEFAULT 0,
+    `notes` TEXT NULL,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
+    INDEX `idx_department` (`department_id`),
+    INDEX `idx_type` (`location_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- INVENTORY ITEMS
+CREATE TABLE IF NOT EXISTS `inventory_items` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `barcode` VARCHAR(50) NOT NULL,
+    `name` VARCHAR(255) NOT NULL,
+    `description` TEXT NULL,
+    `category_id` INT UNSIGNED NULL,
+    `department_id` INT UNSIGNED NULL,
+    `location_id` INT UNSIGNED NULL,
+    `location_notes` TEXT NULL,
+    `status` ENUM('available','booked','maintenance','damaged') DEFAULT 'available',
+    `condition_notes` TEXT NULL,
+    `booked_by_user_id` INT UNSIGNED NULL,
+    `booked_by_name` VARCHAR(255) NULL,
+    `booking_date` DATETIME NULL,
+    `expected_return_date` DATETIME NULL,
+    `quantity` INT DEFAULT 1,
+    `image_url` VARCHAR(500) NULL,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`category_id`) REFERENCES `inventory_categories`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`location_id`) REFERENCES `inventory_locations`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`booked_by_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    UNIQUE KEY `unique_barcode` (`barcode`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_department` (`department_id`),
+    INDEX `idx_category` (`category_id`),
+    INDEX `idx_location` (`location_id`),
+    INDEX `idx_active` (`is_active`),
+    INDEX `idx_dept_status` (`department_id`, `status`),
+    FULLTEXT INDEX `idx_search` (`name`, `description`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- INVENTORY BOOKINGS
+CREATE TABLE IF NOT EXISTS `inventory_bookings` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `item_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `volunteer_name` VARCHAR(255) NULL,
+    `volunteer_phone` VARCHAR(20) NULL,
+    `volunteer_email` VARCHAR(255) NULL,
+    `mission_location` VARCHAR(500) NULL,
+    `booking_type` ENUM('single','bulk') DEFAULT 'single',
+    `expected_return_date` DATE NULL,
+    `notes` TEXT NULL,
+    `status` ENUM('active','overdue','returned','lost') DEFAULT 'active',
+    `return_date` DATETIME NULL,
+    `returned_by_user_id` INT UNSIGNED NULL,
+    `return_notes` TEXT NULL,
+    `actual_hours` DECIMAL(8,2) NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`item_id`) REFERENCES `inventory_items`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`returned_by_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_status` (`status`),
+    INDEX `idx_item` (`item_id`),
+    INDEX `idx_user` (`user_id`),
+    INDEX `idx_dates` (`created_at`, `return_date`),
+    INDEX `idx_status_dates` (`status`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- INVENTORY NOTES
+CREATE TABLE IF NOT EXISTS `inventory_notes` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `item_id` INT UNSIGNED NOT NULL,
+    `item_name` VARCHAR(255) NULL,
+    `note_type` ENUM('booking','return','maintenance','damage','general') DEFAULT 'general',
+    `content` TEXT NOT NULL,
+    `priority` ENUM('low','medium','high','urgent') DEFAULT 'medium',
+    `status` ENUM('pending','acknowledged','in_progress','resolved','archived') DEFAULT 'pending',
+    `status_history` JSON NULL,
+    `related_booking_id` INT UNSIGNED NULL,
+    `assigned_to_user_id` INT UNSIGNED NULL,
+    `created_by_user_id` INT UNSIGNED NULL,
+    `created_by_name` VARCHAR(255) NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `resolved_at` DATETIME NULL,
+    `resolved_by_user_id` INT UNSIGNED NULL,
+    `resolution_notes` TEXT NULL,
+    FOREIGN KEY (`item_id`) REFERENCES `inventory_items`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`related_booking_id`) REFERENCES `inventory_bookings`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`created_by_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`assigned_to_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`resolved_by_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_status` (`status`),
+    INDEX `idx_priority` (`priority`),
+    INDEX `idx_item` (`item_id`),
+    INDEX `idx_type` (`note_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- INVENTORY FIXED ASSETS
+CREATE TABLE IF NOT EXISTS `inventory_fixed_assets` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(255) NOT NULL,
+    `barcode` VARCHAR(50) NULL,
+    `description` TEXT NULL,
+    `location` VARCHAR(255) NULL,
+    `department_id` INT UNSIGNED NULL,
+    `status` ENUM('available','checked_out','retired') DEFAULT 'available',
+    `checked_out_to_user_id` INT UNSIGNED NULL,
+    `checked_out_to_name` VARCHAR(255) NULL,
+    `checked_out_phone` VARCHAR(20) NULL,
+    `checked_out_at` DATETIME NULL,
+    `checkout_notes` TEXT NULL,
+    `purchase_date` DATE NULL,
+    `purchase_cost` DECIMAL(10,2) NULL,
+    `serial_number` VARCHAR(100) NULL,
+    `condition_notes` TEXT NULL,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `unique_barcode` (`barcode`),
+    FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`checked_out_to_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_status` (`status`),
+    INDEX `idx_department` (`department_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- INVENTORY DEPARTMENT ACCESS
+CREATE TABLE IF NOT EXISTS `inventory_department_access` (
+    `user_id` INT UNSIGNED NOT NULL,
+    `department_id` INT UNSIGNED NOT NULL,
+    `access_level` ENUM('viewer','manager','admin') DEFAULT 'viewer',
+    `can_book` TINYINT(1) DEFAULT 1,
+    `can_manage_items` TINYINT(1) DEFAULT 0,
+    `can_approve_bookings` TINYINT(1) DEFAULT 0,
+    `granted_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `granted_by_user_id` INT UNSIGNED NULL,
+    PRIMARY KEY (`user_id`, `department_id`),
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`granted_by_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_access_level` (`access_level`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- INVENTORY SHELF ITEMS (consumable items with expiry)
+CREATE TABLE IF NOT EXISTS `inventory_shelf_items` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(255) NOT NULL,
+    `quantity` INT NOT NULL DEFAULT 1,
+    `shelf` VARCHAR(100) NULL,
+    `expiry_date` DATE NULL,
+    `notes` TEXT NULL,
+    `department_id` INT UNSIGNED NULL,
+    `sort_order` INT DEFAULT 0,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_expiry` (`expiry_date`),
+    INDEX `idx_shelf` (`shelf`),
+    INDEX `idx_department` (`department_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- INVENTORY KITS
+CREATE TABLE IF NOT EXISTS `inventory_kits` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `barcode` VARCHAR(50) NOT NULL UNIQUE,
+    `name` VARCHAR(255) NOT NULL,
+    `description` TEXT NULL,
+    `department_id` INT UNSIGNED NULL,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- INVENTORY KIT ITEMS (pivot)
+CREATE TABLE IF NOT EXISTS `inventory_kit_items` (
+    `kit_id` INT UNSIGNED NOT NULL,
+    `item_id` INT UNSIGNED NOT NULL,
+    PRIMARY KEY (`kit_id`, `item_id`),
+    FOREIGN KEY (`kit_id`) REFERENCES `inventory_kits`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`item_id`) REFERENCES `inventory_items`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- NEWSLETTER SYSTEM TABLES
+-- =============================================
+
+-- NEWSLETTERS
+CREATE TABLE IF NOT EXISTS `newsletters` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `title` VARCHAR(255) NOT NULL,
+    `subject` VARCHAR(255) NOT NULL,
+    `body_html` MEDIUMTEXT NOT NULL,
+    `status` ENUM('draft','sending','sent','failed') NOT NULL DEFAULT 'draft',
+    `filter_roles` JSON NULL COMMENT 'Array of roles to send to, NULL = all',
+    `filter_dept_id` INT UNSIGNED NULL COMMENT 'Limit to one department, NULL = all',
+    `total_recipients` INT UNSIGNED NOT NULL DEFAULT 0,
+    `sent_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    `failed_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    `created_by` INT UNSIGNED NOT NULL,
+    `sent_at` TIMESTAMP NULL DEFAULT NULL,
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_newsletters_status` (`status`),
+    INDEX `idx_newsletters_created_by` (`created_by`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- NEWSLETTER SENDS
+CREATE TABLE IF NOT EXISTS `newsletter_sends` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `newsletter_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NULL,
+    `email` VARCHAR(255) NOT NULL,
+    `name` VARCHAR(255) NOT NULL DEFAULT '',
+    `status` ENUM('pending','sent','failed') NOT NULL DEFAULT 'pending',
+    `error_msg` TEXT NULL,
+    `sent_at` TIMESTAMP NULL DEFAULT NULL,
+    INDEX `idx_ns_newsletter_id` (`newsletter_id`),
+    INDEX `idx_ns_user_id` (`user_id`),
+    INDEX `idx_ns_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- NEWSLETTER UNSUBSCRIBES
+CREATE TABLE IF NOT EXISTS `newsletter_unsubscribes` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT UNSIGNED NULL,
+    `email` VARCHAR(255) NOT NULL,
+    `token` VARCHAR(64) NOT NULL,
+    `newsletter_id` INT UNSIGNED NULL COMMENT 'Campaign that triggered unsubscribe',
+    `unsubscribed_at` TIMESTAMP NULL DEFAULT NULL,
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_nu_token` (`token`),
+    INDEX `idx_nu_email` (`email`),
+    INDEX `idx_nu_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

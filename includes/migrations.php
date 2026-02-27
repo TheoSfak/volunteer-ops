@@ -1654,6 +1654,179 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        [
+            'version'     => 30,
+            'description' => 'Schema consolidation — add missing tables, columns, and seed data for v3.39',
+            'up' => function () {
+                $checkCol = function ($table, $column) {
+                    return (bool) dbFetchOne(
+                        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+                        [$table, $column]
+                    );
+                };
+                $tableExists = function ($table) {
+                    return (bool) dbFetchOne(
+                        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+                        [$table]
+                    );
+                };
+
+                // ── Missing columns on users ──
+                if (!$checkCol('users', 'profile_photo')) {
+                    dbExecute("ALTER TABLE users ADD COLUMN profile_photo VARCHAR(255) NULL DEFAULT NULL AFTER phone");
+                }
+                if (!$checkCol('users', 'position_id')) {
+                    dbExecute("ALTER TABLE users ADD COLUMN position_id INT UNSIGNED NULL AFTER volunteer_type");
+                }
+                if (!$checkCol('users', 'warehouse_id')) {
+                    dbExecute("ALTER TABLE users ADD COLUMN warehouse_id INT UNSIGNED NULL AFTER department_id");
+                }
+                if (!$checkCol('users', 'newsletter_unsubscribed')) {
+                    dbExecute("ALTER TABLE users ADD COLUMN newsletter_unsubscribed TINYINT(1) NOT NULL DEFAULT 0 AFTER deleted_by");
+                }
+
+                // ── Missing columns on departments ──
+                if (!$checkCol('departments', 'has_inventory')) {
+                    dbExecute("ALTER TABLE departments ADD COLUMN has_inventory TINYINT(1) DEFAULT 0 AFTER is_active");
+                }
+                if (!$checkCol('departments', 'inventory_settings')) {
+                    dbExecute("ALTER TABLE departments ADD COLUMN inventory_settings JSON NULL AFTER has_inventory");
+                }
+
+                // ── Missing column on missions ──
+                if (!$checkCol('missions', 'responsible_user_id')) {
+                    dbExecute("ALTER TABLE missions ADD COLUMN responsible_user_id INT UNSIGNED NULL AFTER created_by");
+                }
+
+                // ── Missing columns on tasks ──
+                if (!$checkCol('tasks', 'progress')) {
+                    dbExecute("ALTER TABLE tasks ADD COLUMN progress INT DEFAULT 0 AFTER status");
+                }
+                if (!$checkCol('tasks', 'responsible_user_id')) {
+                    dbExecute("ALTER TABLE tasks ADD COLUMN responsible_user_id INT UNSIGNED NULL AFTER created_by");
+                }
+
+                // ── volunteer_documents table ──
+                if (!$tableExists('volunteer_documents')) {
+                    dbExecute("CREATE TABLE volunteer_documents (
+                        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        user_id INT UNSIGNED NOT NULL,
+                        label VARCHAR(255) NOT NULL,
+                        original_name VARCHAR(255) NOT NULL,
+                        stored_name VARCHAR(255) NOT NULL,
+                        mime_type VARCHAR(100) NOT NULL,
+                        file_size INT NOT NULL DEFAULT 0,
+                        uploaded_by INT UNSIGNED NOT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        KEY idx_vd_user_id (user_id),
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                        FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE CASCADE
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                }
+
+                // ── volunteer_positions table ──
+                if (!$tableExists('volunteer_positions')) {
+                    dbExecute("CREATE TABLE volunteer_positions (
+                        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(100) NOT NULL,
+                        color VARCHAR(20) DEFAULT 'secondary',
+                        icon VARCHAR(50) NULL,
+                        description TEXT NULL,
+                        is_active TINYINT(1) DEFAULT 1,
+                        sort_order INT DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                    dbExecute("INSERT IGNORE INTO volunteer_positions (id, name, color, icon, sort_order) VALUES
+                        (1, 'Υπεύθυνος Τμήματος', 'primary', 'bi-person-lines-fill', 1),
+                        (2, 'Υπεύθυνος Γραμματείας', 'info', 'bi-envelope-paper', 2),
+                        (3, 'Εκπαιδευτής', 'success', 'bi-mortarboard', 3),
+                        (4, 'Ταμίας', 'warning', 'bi-cash-coin', 4)");
+                }
+
+                // ── inventory_shelf_items table ──
+                if (!$tableExists('inventory_shelf_items')) {
+                    dbExecute("CREATE TABLE inventory_shelf_items (
+                        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        quantity INT NOT NULL DEFAULT 1,
+                        shelf VARCHAR(100) NULL,
+                        expiry_date DATE NULL,
+                        notes TEXT NULL,
+                        department_id INT UNSIGNED NULL,
+                        sort_order INT DEFAULT 0,
+                        created_by INT UNSIGNED NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
+                        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+                        INDEX idx_expiry (expiry_date),
+                        INDEX idx_shelf (shelf),
+                        INDEX idx_department (department_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                }
+
+                // ── shelf_expiry_reminder_days setting ──
+                $s = dbFetchOne("SELECT setting_key FROM settings WHERE setting_key = 'shelf_expiry_reminder_days'");
+                if (!$s) {
+                    dbInsert("INSERT INTO settings (setting_key, setting_value) VALUES ('shelf_expiry_reminder_days', '30')");
+                }
+
+                // ── Missing email templates (task-related + mission_needs_volunteers) ──
+                $taskTemplates = [
+                    ['task_assigned', 'Ανάθεση Εργασίας', 'Νέα Εργασία: {{task_title}}',
+                     '<p>Γεια σας {{user_name}},</p><p>Σας ανατέθηκε μια νέα εργασία.</p><ul><li><strong>Τίτλος:</strong> {{task_title}}</li><li><strong>Προτεραιότητα:</strong> {{task_priority}}</li><li><strong>Προθεσμία:</strong> {{task_deadline}}</li></ul>',
+                     'Αποστέλλεται όταν ανατίθεται εργασία', 'user_name, task_title, task_description, task_priority, task_deadline, assigned_by'],
+                    ['task_comment', 'Σχόλιο σε Εργασία', 'Νέο Σχόλιο: {{task_title}}',
+                     '<p>Γεια σας {{user_name}},</p><p>Νέο σχόλιο στην εργασία "<strong>{{task_title}}</strong>".</p><blockquote>{{comment}}</blockquote>',
+                     'Αποστέλλεται όταν προστίθεται σχόλιο', 'user_name, task_title, comment, commented_by'],
+                    ['task_deadline_reminder', 'Υπενθύμιση Προθεσμίας', 'Υπενθύμιση: {{task_title}} λήγει σύντομα',
+                     '<p>Γεια σας {{user_name}},</p><p>Η εργασία "<strong>{{task_title}}</strong>" λήγει σε λιγότερο από 24 ώρες.</p><ul><li><strong>Προθεσμία:</strong> {{task_deadline}}</li><li><strong>Κατάσταση:</strong> {{task_status}}</li></ul>',
+                     'Αποστέλλεται 24h πριν τη λήξη', 'user_name, task_title, task_deadline, task_status, task_progress'],
+                    ['task_status_changed', 'Αλλαγή Κατάστασης Εργασίας', 'Αλλαγή: {{task_title}}',
+                     '<p>Γεια σας {{user_name}},</p><p>Η κατάσταση της εργασίας "<strong>{{task_title}}</strong>" άλλαξε: {{old_status}} → {{new_status}}</p>',
+                     'Αποστέλλεται όταν αλλάζει η κατάσταση', 'user_name, task_title, old_status, new_status, changed_by'],
+                    ['task_subtask_completed', 'Ολοκλήρωση Υποεργασίας', 'Ολοκληρώθηκε: {{subtask_title}}',
+                     '<p>Γεια σας {{user_name}},</p><p>Η υποεργασία "<strong>{{subtask_title}}</strong>" ολοκληρώθηκε στην εργασία "<strong>{{task_title}}</strong>".</p>',
+                     'Αποστέλλεται όταν ολοκληρώνεται υποεργασία', 'user_name, task_title, subtask_title, completed_by'],
+                    ['mission_needs_volunteers', 'Αποστολή Χρειάζεται Εθελοντές', 'Η αποστολή {{mission_title}} χρειάζεται εθελοντές!',
+                     '<p>Γεια σας {{user_name}},</p><p>Η αποστολή "<strong>{{mission_title}}</strong>" πλησιάζει και χρειάζεται ακόμα εθελοντές.</p>',
+                     'Αποστέλλεται για αποστολές χωρίς αρκετούς εθελοντές', '{{app_name}}, {{user_name}}, {{mission_title}}, {{mission_description}}, {{mission_url}}'],
+                ];
+                foreach ($taskTemplates as $t) {
+                    $exists = dbFetchOne("SELECT id FROM email_templates WHERE code = ?", [$t[0]]);
+                    if (!$exists) {
+                        dbInsert(
+                            "INSERT INTO email_templates (code, name, subject, body_html, description, available_variables) VALUES (?, ?, ?, ?, ?, ?)",
+                            $t
+                        );
+                    }
+                }
+
+                // ── Missing notification_settings entries ──
+                $notifCodes = [
+                    ['task_assigned', 'Ανάθεση Εργασίας', 'Όταν ανατίθεται εργασία σε εθελοντή', 1],
+                    ['task_comment', 'Σχόλιο σε Εργασία', 'Όταν προστίθεται σχόλιο σε εργασία', 1],
+                    ['task_deadline_reminder', 'Υπενθύμιση Προθεσμίας', 'Όταν πλησιάζει η προθεσμία εργασίας', 1],
+                    ['task_status_changed', 'Αλλαγή Κατάστασης Εργασίας', 'Όταν αλλάζει η κατάσταση εργασίας', 1],
+                    ['task_subtask_completed', 'Ολοκλήρωση Υποεργασίας', 'Όταν ολοκληρώνεται υποεργασία', 1],
+                    ['mission_needs_volunteers', 'Αποστολή Χρειάζεται Εθελοντές', 'Όταν αποστολή πλησιάζει χωρίς αρκετούς εθελοντές', 1],
+                ];
+                foreach ($notifCodes as $n) {
+                    $exists = dbFetchOne("SELECT id FROM notification_settings WHERE code = ?", [$n[0]]);
+                    if (!$exists) {
+                        $tmplId = dbFetchValue("SELECT id FROM email_templates WHERE code = ?", [$n[0]]);
+                        dbInsert(
+                            "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id) VALUES (?, ?, ?, ?, ?)",
+                            [$n[0], $n[1], $n[2], $n[3], $tmplId]
+                        );
+                    }
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

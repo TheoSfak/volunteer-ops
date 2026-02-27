@@ -1,4 +1,7 @@
 <?php
+require_once __DIR__ . '/bootstrap.php';
+requireRole([ROLE_SYSTEM_ADMIN]);
+
 // Quick fix for install.php column names
 $file = __DIR__ . '/install.php';
 $content = file_get_contents($file);

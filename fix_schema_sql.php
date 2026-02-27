@@ -4,6 +4,9 @@
  * Run this once, then re-upload schema.sql to server
  */
 
+require_once __DIR__ . '/bootstrap.php';
+requireRole([ROLE_SYSTEM_ADMIN]);
+
 $schemaFile = __DIR__ . '/sql/schema.sql';
 $sql = file_get_contents($schemaFile);
 
