@@ -927,6 +927,11 @@ $appDescription = getSetting('app_description', '');
                 </a>
             </li>
             <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'email-logs' ? 'active' : '' ?>" href="email-logs.php">
+                    <i class="bi bi-envelope-check"></i> Email Logs
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'settings' ? 'active' : '' ?>" href="settings.php">
                     <i class="bi bi-gear"></i> Ρυθμίσεις
                 </a>

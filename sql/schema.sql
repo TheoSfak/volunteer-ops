@@ -1045,6 +1045,27 @@ CREATE INDEX IF NOT EXISTS `idx_task_assignments_user` ON `task_assignments`(`us
 CREATE INDEX IF NOT EXISTS `idx_task_comments_task` ON `task_comments`(`task_id`);
 
 -- =============================================
+-- EMAIL LOGS TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `email_logs` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `recipient_email` VARCHAR(255) NOT NULL,
+    `subject` VARCHAR(500) NOT NULL,
+    `notification_code` VARCHAR(100) NULL,
+    `status` ENUM('SUCCESS','FAILED') NOT NULL DEFAULT 'FAILED',
+    `error_message` TEXT NULL,
+    `smtp_log` TEXT NULL,
+    `smtp_host` VARCHAR(255) NULL,
+    `from_email` VARCHAR(255) NULL,
+    `sent_by` INT UNSIGNED NULL,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_email_logs_recipient` (`recipient_email`),
+    INDEX `idx_email_logs_status` (`status`),
+    INDEX `idx_email_logs_created` (`created_at`),
+    INDEX `idx_email_logs_notification` (`notification_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- VOLUNTEER GPS PINGS
 -- =============================================
 CREATE TABLE IF NOT EXISTS `volunteer_pings` (

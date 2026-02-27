@@ -151,13 +151,46 @@ function replaceTemplateVariables(string $text, array $variables): string {
 }
 
 /**
- * Send email using SMTP
+ * Log email send attempt to database
  */
-function sendEmail(string $to, string $subject, string $htmlBody, ?string $fromName = null): array {
+function logEmail(string $to, string $subject, array $result, ?string $notificationCode = null): void {
+    try {
+        $smtp = getSmtpSettings();
+        $userId = null;
+        if (function_exists('getCurrentUserId')) {
+            try { $userId = getCurrentUserId(); } catch (Exception $e) {}
+        }
+        dbInsert(
+            "INSERT INTO email_logs (recipient_email, subject, notification_code, status, error_message, smtp_log, smtp_host, from_email, sent_by, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+            [
+                $to,
+                mb_substr($subject, 0, 500),
+                $notificationCode,
+                $result['success'] ? 'SUCCESS' : 'FAILED',
+                $result['success'] ? null : ($result['message'] ?? 'Unknown error'),
+                isset($result['log']) ? implode("\n", $result['log']) : null,
+                $smtp['host'] ?? null,
+                $smtp['from_email'] ?? null,
+                $userId
+            ]
+        );
+    } catch (Exception $e) {
+        // Silently fail — logging should never break email sending
+    }
+}
+
+/**
+ * Send email using SMTP
+ * @param string|null $notificationCode  Optional code for log tracking
+ */
+function sendEmail(string $to, string $subject, string $htmlBody, ?string $fromName = null, ?string $notificationCode = null): array {
     $smtp = getSmtpSettings();
     
     if (empty($smtp['host']) || empty($smtp['from_email'])) {
-        return ['success' => false, 'message' => 'Οι ρυθμίσεις SMTP δεν έχουν οριστεί'];
+        $result = ['success' => false, 'message' => 'Οι ρυθμίσεις SMTP δεν έχουν οριστεί'];
+        logEmail($to, $subject, $result, $notificationCode);
+        return $result;
     }
     
     $fromName = $fromName ?? $smtp['from_name'];
@@ -174,16 +207,20 @@ function sendEmail(string $to, string $subject, string $htmlBody, ?string $fromN
     
     // If SMTP host is configured, use socket connection
     if (!empty($smtp['host'])) {
-        return sendSmtpEmail($to, $subject, $htmlBody, $smtp);
+        $result = sendSmtpEmail($to, $subject, $htmlBody, $smtp);
+        logEmail($to, $subject, $result, $notificationCode);
+        return $result;
     }
     
     // Fallback to PHP mail() - usually won't work without proper server config
     $success = @mail($to, $subject, $htmlBody, implode("\r\n", $headers));
     
-    return [
+    $result = [
         'success' => $success,
         'message' => $success ? 'Το email στάλθηκε' : 'Αποτυχία αποστολής'
     ];
+    logEmail($to, $subject, $result, $notificationCode);
+    return $result;
 }
 
 /**
@@ -480,7 +517,7 @@ function sendNotificationEmail(string $notificationCode, string $to, array $vari
     $subject = replaceTemplateVariables($template['subject'], $variables);
     $body = replaceTemplateVariables($template['body_html'], $variables);
     
-    return sendEmail($to, $subject, $body);
+    return sendEmail($to, $subject, $body, null, $notificationCode);
 }
 
 /**
