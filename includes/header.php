@@ -932,6 +932,26 @@ if (isLoggedIn()) {
                 </a>
             </li>
             
+            <?php if (isAdmin()): ?>
+            <div class="sidebar-section">Πολίτες</div>
+            
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'citizens' ? 'active' : '' ?>" href="citizens.php">
+                    <i class="bi bi-person-vcard"></i> Λίστα πολιτών
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'citizen-certificates' ? 'active' : '' ?>" href="citizen-certificates.php">
+                    <i class="bi bi-file-earmark-medical"></i> Πιστοποιητικά Πολιτών
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'citizen-certificate-types' ? 'active' : '' ?>" href="citizen-certificate-types.php">
+                    <i class="bi bi-tags"></i> Τύποι Πιστοποιητικών
+                </a>
+            </li>
+            <?php endif; ?>
+
             <?php if (isSystemAdmin()): ?>
             <div class="sidebar-section">Επικοινωνία</div>
             

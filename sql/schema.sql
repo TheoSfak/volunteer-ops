@@ -1534,4 +1534,60 @@ CREATE TABLE IF NOT EXISTS `newsletter_unsubscribes` (
     INDEX `idx_nu_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- CITIZENS TABLE (Πολίτες)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `citizens` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `first_name_gr` VARCHAR(100) NOT NULL COMMENT 'Όνομα (Ελληνικά)',
+    `last_name_gr` VARCHAR(100) NOT NULL COMMENT 'Επίθετο (Ελληνικά)',
+    `first_name_lat` VARCHAR(100) NULL COMMENT 'Όνομα (Λατινικά)',
+    `last_name_lat` VARCHAR(100) NULL COMMENT 'Επίθετο (Λατινικά)',
+    `birth_date` DATE NULL COMMENT 'Ημερομηνία γέννησης',
+    `email` VARCHAR(255) NULL,
+    `phone` VARCHAR(30) NULL,
+    `contact_done` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Επικοινωνία',
+    `payment_done` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Πληρωμή',
+    `completed` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Έχει ολοκληρώσει',
+    `notes` TEXT NULL,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_citizens_name_gr` (`last_name_gr`, `first_name_gr`),
+    INDEX `idx_citizens_email` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- CITIZEN CERTIFICATE TYPES TABLE (Τύποι Πιστοποιητικών)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `citizen_certificate_types` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(150) NOT NULL,
+    `description` TEXT NULL,
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- CITIZEN CERTIFICATES TABLE (Πιστοποιητικά Πολιτών)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `citizen_certificates` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `certificate_type_id` INT UNSIGNED NULL,
+    `first_name` VARCHAR(100) NOT NULL COMMENT 'Όνομα',
+    `last_name` VARCHAR(100) NOT NULL COMMENT 'Επίθετο',
+    `father_name` VARCHAR(100) NULL COMMENT 'Όνομα Πατρός',
+    `birth_date` DATE NULL COMMENT 'Ημερομηνία γέννησης',
+    `issue_date` DATE NULL COMMENT 'Ημ. Έκδοσης',
+    `expiry_date` DATE NULL COMMENT 'Ημ. Λήξης',
+    `notes` TEXT NULL,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_cc_type` (`certificate_type_id`),
+    INDEX `idx_cc_name` (`last_name`, `first_name`),
+    INDEX `idx_cc_expiry` (`expiry_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
