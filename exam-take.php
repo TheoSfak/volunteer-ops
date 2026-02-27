@@ -276,6 +276,21 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<script>
+// Warn user before leaving page (refresh, back, click link)
+let examSubmitting = false;
+document.getElementById('examForm').addEventListener('submit', function() {
+    examSubmitting = true;
+});
+window.addEventListener('beforeunload', function(e) {
+    if (!examSubmitting) {
+        e.preventDefault();
+        e.returnValue = 'Έχετε διαγώνισμα σε εξέλιξη. Αν φύγετε, θα χαθεί η πρόοδός σας και ό,τι έχετε απαντήσει μέχρι τώρα.';
+        return e.returnValue;
+    }
+});
+</script>
+
 <?php if ($exam['time_limit_minutes']): ?>
 <script>
 // Timer countdown
@@ -292,6 +307,7 @@ const timer = setInterval(() => {
     if (timeLeft <= 0) {
         clearInterval(timer);
         alert('Ο χρόνος έληξε! Το διαγώνισμα θα υποβληθεί αυτόματα.');
+        examSubmitting = true;
         form.submit();
     } else if (timeLeft <= 60) {
         timerDisplay.classList.add('text-danger');

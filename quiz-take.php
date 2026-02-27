@@ -272,7 +272,7 @@ include __DIR__ . '/includes/header.php';
                         <button type="submit" class="btn btn-success btn-lg">
                             <i class="bi bi-check-circle"></i> Υποβολή Κουίζ
                         </button>
-                        <a href="training-quizzes.php" class="btn btn-outline-secondary btn-lg ms-2">
+                        <a href="training-quizzes.php" class="btn btn-outline-secondary btn-lg ms-2" onclick="quizSubmitting=true;">
                             <i class="bi bi-x-circle"></i> Ακύρωση
                         </a>
                     </div>
@@ -281,6 +281,21 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<script>
+// Warn user before leaving page (refresh, back, click link)
+let quizSubmitting = false;
+document.getElementById('quizForm').addEventListener('submit', function() {
+    quizSubmitting = true;
+});
+window.addEventListener('beforeunload', function(e) {
+    if (!quizSubmitting) {
+        e.preventDefault();
+        e.returnValue = 'Έχετε κουίζ σε εξέλιξη. Αν φύγετε, θα χαθεί η πρόοδός σας και ό,τι έχετε απαντήσει μέχρι τώρα.';
+        return e.returnValue;
+    }
+});
+</script>
 
 <?php if ($quiz['time_limit_minutes']): ?>
 <script>
@@ -298,6 +313,7 @@ const timer = setInterval(() => {
     if (timeLeft <= 0) {
         clearInterval(timer);
         alert('Ο χρόνος έληξε! Το κουίζ θα υποβληθεί αυτόματα.');
+        quizSubmitting = true;
         form.submit();
     } else if (timeLeft <= 60) {
         timerDisplay.classList.add('text-danger');
