@@ -38,12 +38,12 @@ if ($table) {
 }
 
 if ($startDate) {
-    $where[] = "DATE(al.created_at) >= ?";
+    $where[] = "al.created_at >= ?";
     $params[] = $startDate;
 }
 
 if ($endDate) {
-    $where[] = "DATE(al.created_at) <= ?";
+    $where[] = "al.created_at < ? + INTERVAL 1 DAY";
     $params[] = $endDate;
 }
 

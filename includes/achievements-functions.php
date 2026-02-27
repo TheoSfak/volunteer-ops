@@ -32,54 +32,31 @@ function checkAndAwardAchievements(int $userId): array
         if (!$user) return [];
         $totalPoints = (int)($user['total_points'] ?? 0);
 
-        // Completed shifts (attended & approved)
-        $completedShifts = (int)dbFetchValue(
-            "SELECT COUNT(*) FROM participation_requests
-             WHERE volunteer_id = ? AND status = 'APPROVED' AND attended = 1",
-            [$userId]
-        );
-
-        // Completed distinct missions
-        $completedMissions = (int)dbFetchValue(
-            "SELECT COUNT(DISTINCT s.mission_id)
+        // Combined stats query — replaces 8 separate queries with 1
+        $stats = dbFetchOne(
+            "SELECT 
+                COUNT(*) as completed_shifts,
+                COUNT(DISTINCT s.mission_id) as completed_missions,
+                COALESCE(SUM(CASE WHEN pr.actual_hours > 0 THEN pr.actual_hours
+                              ELSE TIMESTAMPDIFF(MINUTE, s.start_time, s.end_time) / 60.0 END), 0) as total_hours,
+                SUM(DAYOFWEEK(s.start_time) IN (1, 7)) as weekend_shifts,
+                SUM(HOUR(s.start_time) >= 22 OR HOUR(s.start_time) < 6) as night_shifts,
+                SUM(HOUR(s.start_time) < 8) as morning_shifts,
+                COUNT(DISTINCT DATE_FORMAT(s.start_time, '%Y-%m')) as distinct_months
              FROM participation_requests pr
              JOIN shifts s ON pr.shift_id = s.id
              WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1",
             [$userId]
         );
+        $completedShifts = (int)($stats['completed_shifts'] ?? 0);
+        $completedMissions = (int)($stats['completed_missions'] ?? 0);
+        $totalHours = (float)($stats['total_hours'] ?? 0);
+        $weekendShifts = (int)($stats['weekend_shifts'] ?? 0);
+        $nightShifts = (int)($stats['night_shifts'] ?? 0);
+        $morningShifts = (int)($stats['morning_shifts'] ?? 0);
+        $distinctMonths = (int)($stats['distinct_months'] ?? 0);
 
-        // Total hours (uses actual_hours if set, else calculates from shift times)
-        $totalHours = (float)dbFetchValue(
-            "SELECT COALESCE(SUM(
-                CASE WHEN pr.actual_hours > 0 THEN pr.actual_hours
-                     ELSE TIMESTAMPDIFF(MINUTE, s.start_time, s.end_time) / 60.0
-                END
-             ), 0)
-             FROM participation_requests pr
-             JOIN shifts s ON pr.shift_id = s.id
-             WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1",
-            [$userId]
-        );
-
-        // Weekend shifts (Sunday=1, Saturday=7)
-        $weekendShifts = (int)dbFetchValue(
-            "SELECT COUNT(*) FROM participation_requests pr
-             JOIN shifts s ON pr.shift_id = s.id
-             WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1
-               AND DAYOFWEEK(s.start_time) IN (1, 7)",
-            [$userId]
-        );
-
-        // Night shifts (22:00–06:00)
-        $nightShifts = (int)dbFetchValue(
-            "SELECT COUNT(*) FROM participation_requests pr
-             JOIN shifts s ON pr.shift_id = s.id
-             WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1
-               AND (HOUR(s.start_time) >= 22 OR HOUR(s.start_time) < 6)",
-            [$userId]
-        );
-
-        // Medical missions (title keywords)
+        // Medical missions (needs missions join, kept separate)
         $medicalMissions = (int)dbFetchValue(
             "SELECT COUNT(DISTINCT m.id) FROM participation_requests pr
              JOIN shifts s ON pr.shift_id = s.id
@@ -92,25 +69,7 @@ function checkAndAwardAchievements(int $userId): array
             [$userId]
         );
 
-        // Morning shifts (start before 08:00)
-        $morningShifts = (int)dbFetchValue(
-            "SELECT COUNT(*) FROM participation_requests pr
-             JOIN shifts s ON pr.shift_id = s.id
-             WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1
-               AND HOUR(s.start_time) < 8",
-            [$userId]
-        );
-
-        // Distinct participation months
-        $distinctMonths = (int)dbFetchValue(
-            "SELECT COUNT(DISTINCT DATE_FORMAT(s.start_time, '%Y-%m'))
-             FROM participation_requests pr
-             JOIN shifts s ON pr.shift_id = s.id
-             WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1",
-            [$userId]
-        );
-
-        // Account age in days
+        // Account age in days (already fetched user above)
         $daysSinceRegistration = (int)dbFetchValue(
             "SELECT DATEDIFF(NOW(), created_at) FROM users WHERE id = ?",
             [$userId]

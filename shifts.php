@@ -44,7 +44,8 @@ if ($status) {
 }
 
 if ($date) {
-    $where[] = 'DATE(s.start_time) = ?';
+    $where[] = 's.start_time >= ? AND s.start_time < ? + INTERVAL 1 DAY';
+    $params[] = $date;
     $params[] = $date;
 }
 

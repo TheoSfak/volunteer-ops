@@ -41,7 +41,7 @@ $fp = http_build_query(array_filter([
 function tabUrl($tab) { global $fp; return "reports.php?tab=$tab" . ($fp ? "&$fp" : ""); }
 
 // --- COMMON WHERE CLAUSES ---
-$mWhere = "m.deleted_at IS NULL AND DATE(m.start_datetime) BETWEEN ? AND ?";
+$mWhere = "m.deleted_at IS NULL AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 DAY";
 $mParams = [$startDate, $endDate];
 if ($departmentId) { $mWhere .= " AND m.department_id = ?"; $mParams[] = $departmentId; }
 
@@ -210,7 +210,7 @@ case 'volunteers':
     $kpi['total']    = dbFetchValue("SELECT COUNT(*) FROM users u WHERE $uWhere AND u.role != 'SYSTEM_ADMIN'", $uParams);
     $kpi['active']   = dbFetchValue("SELECT COUNT(*) FROM users u WHERE $uWhere AND u.is_active=1 AND u.role != 'SYSTEM_ADMIN'", $uParams);
     $kpi['inactive'] = dbFetchValue("SELECT COUNT(*) FROM users u WHERE $uWhere AND u.is_active=0 AND u.role != 'SYSTEM_ADMIN'", $uParams);
-    $kpi['new_period'] = dbFetchValue("SELECT COUNT(*) FROM users u WHERE $uWhere AND u.role != 'SYSTEM_ADMIN' AND DATE(u.created_at) BETWEEN ? AND ?",
+    $kpi['new_period'] = dbFetchValue("SELECT COUNT(*) FROM users u WHERE $uWhere AND u.role != 'SYSTEM_ADMIN' AND u.created_at >= ? AND u.created_at < ? + INTERVAL 1 DAY",
         array_merge($uParams, [$startDate, $endDate]));
 
     // By volunteer type
@@ -407,11 +407,11 @@ case 'inventory':
 
 // ===== TAB 8: SYSTEM =====
 case 'system':
-    $kpi['audit_total']   = safeFetchValue("SELECT COUNT(*) FROM audit_log WHERE DATE(created_at) BETWEEN ? AND ?", [$startDate, $endDate]);
-    $kpi['emails_sent']   = safeFetchValue("SELECT COALESCE(SUM(sent_count),0) FROM newsletters WHERE DATE(sent_at) BETWEEN ? AND ?", [$startDate, $endDate]);
-    $kpi['emails_failed'] = safeFetchValue("SELECT COALESCE(SUM(failed_count),0) FROM newsletters WHERE DATE(sent_at) BETWEEN ? AND ?", [$startDate, $endDate]);
-    $kpi['notif_total']   = safeFetchValue("SELECT COUNT(*) FROM notifications WHERE DATE(created_at) BETWEEN ? AND ?", [$startDate, $endDate]);
-    $kpi['notif_read']    = safeFetchValue("SELECT COUNT(*) FROM notifications WHERE read_at IS NOT NULL AND DATE(created_at) BETWEEN ? AND ?", [$startDate, $endDate]);
+    $kpi['audit_total']   = safeFetchValue("SELECT COUNT(*) FROM audit_log WHERE created_at >= ? AND created_at < ? + INTERVAL 1 DAY", [$startDate, $endDate]);
+    $kpi['emails_sent']   = safeFetchValue("SELECT COALESCE(SUM(sent_count),0) FROM newsletters WHERE sent_at >= ? AND sent_at < ? + INTERVAL 1 DAY", [$startDate, $endDate]);
+    $kpi['emails_failed'] = safeFetchValue("SELECT COALESCE(SUM(failed_count),0) FROM newsletters WHERE sent_at >= ? AND sent_at < ? + INTERVAL 1 DAY", [$startDate, $endDate]);
+    $kpi['notif_total']   = safeFetchValue("SELECT COUNT(*) FROM notifications WHERE created_at >= ? AND created_at < ? + INTERVAL 1 DAY", [$startDate, $endDate]);
+    $kpi['notif_read']    = safeFetchValue("SELECT COUNT(*) FROM notifications WHERE read_at IS NOT NULL AND created_at >= ? AND created_at < ? + INTERVAL 1 DAY", [$startDate, $endDate]);
 
     // Audit per month
     $chartData['auditMonthly'] = safeFetchAll(

@@ -1278,15 +1278,16 @@ include __DIR__ . '/includes/header.php';
 <!-- Delete Mission Modal -->
 <?php
 $allMissionParticipants = [];
-foreach ($shifts as $s) {
-    $shiftParticipants = dbFetchAll(
+$shiftIds = array_column($shifts, 'id');
+if (!empty($shiftIds)) {
+    $placeholders = implode(',', array_fill(0, count($shiftIds), '?'));
+    $allMissionParticipants = dbFetchAll(
         "SELECT DISTINCT u.name, pr.status 
          FROM participation_requests pr 
          JOIN users u ON pr.volunteer_id = u.id 
-         WHERE pr.shift_id = ? AND pr.status IN ('PENDING', 'APPROVED')",
-        [$s['id']]
+         WHERE pr.shift_id IN ($placeholders) AND pr.status IN ('PENDING', 'APPROVED')",
+        $shiftIds
     );
-    $allMissionParticipants = array_merge($allMissionParticipants, $shiftParticipants);
 }
 ?>
 <div class="modal fade" id="deleteMissionModal" tabindex="-1" aria-hidden="true">
