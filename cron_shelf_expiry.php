@@ -18,7 +18,7 @@ try {
     dbFetchValue("SELECT 1 FROM inventory_shelf_items LIMIT 1");
 } catch (\PDOException $e) {
     echo "Shelf items table does not exist yet. Skipping.\n";
-    exit(0);
+    return;
 }
 
 // Get threshold from settings (default: 30 days before expiry)
@@ -46,7 +46,7 @@ $expiringItems = dbFetchAll(
 // If nothing to report, exit
 if (empty($expiredItems) && empty($expiringItems)) {
     echo "No expired or expiring shelf items found. Done.\n";
-    exit(0);
+    return;
 }
 
 // =============================================

@@ -17,7 +17,7 @@ if (!defined('VOLUNTEEROPS')) {
 $resendEnabled = getSetting('resend_mission_enabled', '1') === '1';
 if (!$resendEnabled) {
     echo "Resend mission feature is disabled in settings.\n";
-    exit;
+    return;
 }
 
 // Get hours before from settings (default 48)

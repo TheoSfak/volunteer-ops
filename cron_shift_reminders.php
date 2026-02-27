@@ -31,7 +31,7 @@ try {
     );
 } catch (Exception $e) {
     echo "Error fetching shifts: " . $e->getMessage() . "\n";
-    exit(1);
+    return;
 }
 
 $sentCount = 0;
