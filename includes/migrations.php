@@ -1222,7 +1222,7 @@ function runSchemaMigrations(): void {
                        AND COLUMN_NAME  = 'max_attempts'"
                 );
                 if (!$col3) {
-                    dbExecute("ALTER TABLE training_exams ADD COLUMN max_attempts INT NOT NULL DEFAULT 1 AFTER allow_retake");
+                    dbExecute("ALTER TABLE training_exams ADD COLUMN max_attempts INT NOT NULL DEFAULT 1 AFTER available_until");
                 }
             },
         ],
