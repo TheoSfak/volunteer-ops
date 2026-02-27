@@ -1036,17 +1036,7 @@ function runSchemaMigrations(): void {
             'up' => function () {
                 $exists = dbFetchOne("SELECT id FROM email_templates WHERE code = 'mission_reminder'");
                 if (!$exists) {
-                    $bodyHtml = '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-  <h2 style="color:#fd7e14">Υπενθύμιση Αποστολής</h2>
-  <p>Γεια σου <strong>{{user_name}}</strong>,</p>
-  <p>Η παρακάτω αποστολή είναι ακόμα ανοιχτή και αναζητά εθελοντές:</p>
-  <h3 style="color:#198754">{{mission_title}}</h3>
-  <p>{{mission_description}}</p>
-  <p>
-    <a href="{{mission_url}}" style="background:#fd7e14;color:#fff;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block">Δείτε την Αποστολή</a>
-  </p>
-  <p style="color:#6c757d;font-size:0.9em">&mdash; {{app_name}}</p>
-</div>';
+                    $bodyHtml = '<div style="background:#eef2f7;padding:28px 0 40px;font-family:Helvetica Neue,Arial,sans-serif;"><div style="max-width:600px;margin:0 auto;"><div style="background:#fd7e14;padding:30px 40px 26px;border-radius:12px 12px 0 0;text-align:center;">{{logo_html}}<p style="color:rgba(255,255,255,0.7);font-size:11px;letter-spacing:2px;text-transform:uppercase;margin:0 0 8px;">{{app_name}}</p><div style="font-size:36px;line-height:1;margin:0 0 8px;">&#128226;</div><h1 style="color:#fff;margin:0;font-size:23px;font-weight:700;line-height:1.3;">Υπενθύμιση Αποστολής</h1></div><div style="background:#fff;padding:36px 40px 40px;border-radius:0 0 12px 12px;box-shadow:0 4px 20px rgba(0,0,0,0.07);"><h2 style="color:#1f2937;font-size:18px;font-weight:700;margin:0 0 14px;">Γεια σας {{user_name}},</h2><p style="color:#4b5563;line-height:1.65;font-size:15px;margin:0 0 14px;">Η παρακάτω αποστολή είναι ακόμα <strong>ανοιχτή</strong> και αναζητά εθελοντές:</p><div style="background:#f9fafb;border-left:4px solid #fd7e14;padding:2px 20px;border-radius:0 8px 8px 0;margin:20px 0;"><div style="padding:7px 0;font-size:14px;border-bottom:1px solid #f3f4f6;"><span style="color:#9ca3af;display:inline-block;min-width:140px;">Αποστολή:</span><span style="color:#111827;font-weight:600;">{{mission_title}}</span></div><div style="padding:7px 0;font-size:14px;"><span style="color:#9ca3af;display:inline-block;min-width:140px;">Περιγραφή:</span><span style="color:#111827;font-weight:600;">{{mission_description}}</span></div></div><p style="color:#4b5563;line-height:1.65;font-size:15px;margin:0 0 14px;">Μη χάσετε την ευκαιρία να συμμετέχετε και να κάνετε τη διαφορά!</p><div style="text-align:center;margin:28px 0 4px;"><a href="{{mission_url}}" style="background:#fd7e14;color:#ffffff;text-decoration:none;padding:13px 38px;border-radius:8px;font-size:15px;font-weight:700;display:inline-block;letter-spacing:0.3px;">Δείτε την Αποστολή</a></div></div><div style="text-align:center;padding:18px 0 0;color:#9ca3af;font-size:12px;line-height:1.9;"><p style="margin:0;"><strong style="color:#6b7280;">{{app_name}}</strong> &bull; Σύστημα Διαχείρισης Εθελοντών</p><p style="margin:0;">Αυτό το μήνυμα στάλθηκε αυτόματα από το σύστημα.</p></div></div></div>';
                     dbInsert(
                         "INSERT INTO email_templates (code, name, subject, body_html, description, available_variables) 
                          VALUES ('mission_reminder', 'Υπενθύμιση Αποστολής', 'Υπενθύμιση Αποστολής: {{mission_title}}', ?, 'Όταν στέλνεται υπενθύμιση για ανοιχτή αποστολή', '{{app_name}}, {{user_name}}, {{mission_title}}, {{mission_description}}, {{mission_url}}')",
@@ -1775,27 +1765,55 @@ function runSchemaMigrations(): void {
                 }
 
                 // ── Missing email templates (task-related + mission_needs_volunteers) ──
+                // Helper: wrap content in styled email layout
+                $wrap30 = function($headerBg, $icon, $title, $body) {
+                    return '<div style="background:#eef2f7;padding:28px 0 40px;font-family:Helvetica Neue,Arial,sans-serif;"><div style="max-width:600px;margin:0 auto;"><div style="background:'.$headerBg.';padding:30px 40px 26px;border-radius:12px 12px 0 0;text-align:center;">{{logo_html}}<p style="color:rgba(255,255,255,0.7);font-size:11px;letter-spacing:2px;text-transform:uppercase;margin:0 0 8px;">{{app_name}}</p><div style="font-size:36px;line-height:1;margin:0 0 8px;">'.$icon.'</div><h1 style="color:#fff;margin:0;font-size:23px;font-weight:700;line-height:1.3;">'.$title.'</h1></div><div style="background:#fff;padding:36px 40px 40px;border-radius:0 0 12px 12px;box-shadow:0 4px 20px rgba(0,0,0,0.07);">'.$body.'</div><div style="text-align:center;padding:18px 0 0;color:#9ca3af;font-size:12px;line-height:1.9;"><p style="margin:0;"><strong style="color:#6b7280;">{{app_name}}</strong> &bull; Σύστημα Διαχείρισης Εθελοντών</p><p style="margin:0;">Αυτό το μήνυμα στάλθηκε αυτόματα από το σύστημα.</p></div></div></div>';
+                };
+                $info30 = function($borderColor, $rows) {
+                    $html = '<div style="background:#f9fafb;border-left:4px solid '.$borderColor.';padding:2px 20px;border-radius:0 8px 8px 0;margin:20px 0;">';
+                    $last = count($rows) - 1;
+                    foreach ($rows as $i => $row) {
+                        $border = $i < $last ? 'border-bottom:1px solid #f3f4f6;' : '';
+                        $html .= '<div style="padding:7px 0;font-size:14px;'.$border.'"><span style="color:#9ca3af;display:inline-block;min-width:140px;">'.$row[0].':</span><span style="color:#111827;font-weight:600;">'.$row[1].'</span></div>';
+                    }
+                    $html .= '</div>';
+                    return $html;
+                };
+                $btn30 = function($bg, $text, $url = '{{login_url}}') {
+                    return '<div style="text-align:center;margin:28px 0 4px;"><a href="'.$url.'" style="background:'.$bg.';color:#ffffff;text-decoration:none;padding:13px 38px;border-radius:8px;font-size:15px;font-weight:700;display:inline-block;letter-spacing:0.3px;">'.$text.'</a></div>';
+                };
+                $greet30 = '<h2 style="color:#1f2937;font-size:18px;font-weight:700;margin:0 0 14px;">Γεια σας {{user_name}},</h2>';
+                $p30 = function($text) { return '<p style="color:#4b5563;line-height:1.65;font-size:15px;margin:0 0 14px;">'.$text.'</p>'; };
+                $alert30 = function($bg, $border, $color, $text) { return '<div style="background:'.$bg.';border:1px solid '.$border.';border-radius:8px;padding:14px 20px;margin:20px 0;"><p style="color:'.$color.';font-size:14px;font-weight:600;margin:0;">'.$text.'</p></div>'; };
+
                 $taskTemplates = [
                     ['task_assigned', 'Ανάθεση Εργασίας', 'Νέα Εργασία: {{task_title}}',
-                     '<p>Γεια σας {{user_name}},</p><p>Σας ανατέθηκε μια νέα εργασία.</p><ul><li><strong>Τίτλος:</strong> {{task_title}}</li><li><strong>Προτεραιότητα:</strong> {{task_priority}}</li><li><strong>Προθεσμία:</strong> {{task_deadline}}</li></ul>',
+                     $wrap30('#4f46e5', '&#128203;', 'Νέα Ανάθεση Εργασίας',
+                        $greet30.$p30('Σας ανατέθηκε μια νέα εργασία από τον/την <strong>{{assigned_by}}</strong>. Παρακαλούμε ελέγξτε τις λεπτομέρειες παρακάτω.').$info30('#4f46e5', [['Εργασία','{{task_title}}'],['Περιγραφή','{{task_description}}'],['Προτεραιότητα','{{task_priority}}'],['Προθεσμία','{{task_deadline}}']]).$p30('Μπορείτε να δείτε τις λεπτομέρειες της εργασίας συνδεόμενοι στο σύστημα.').$btn30('#4f46e5','Δείτε την Εργασία')),
                      'Αποστέλλεται όταν ανατίθεται εργασία', 'user_name, task_title, task_description, task_priority, task_deadline, assigned_by'],
                     ['task_comment', 'Σχόλιο σε Εργασία', 'Νέο Σχόλιο: {{task_title}}',
-                     '<p>Γεια σας {{user_name}},</p><p>Νέο σχόλιο στην εργασία "<strong>{{task_title}}</strong>".</p><blockquote>{{comment}}</blockquote>',
+                     $wrap30('#3b82f6', '&#128172;', 'Νέο Σχόλιο στην Εργασία',
+                        $greet30.$p30('Ο/Η <strong>{{commented_by}}</strong> πρόσθεσε ένα νέο σχόλιο στην εργασία "<strong>{{task_title}}</strong>".').'<div style="background:#f0f4ff;border-left:4px solid #3b82f6;padding:16px 20px;border-radius:0 8px 8px 0;margin:20px 0;"><p style="color:#1e40af;font-size:14px;line-height:1.65;margin:0;font-style:italic;">{{comment}}</p></div>'.$p30('Συνδεθείτε στο σύστημα για να δείτε την εργασία και να απαντήσετε.').$btn30('#3b82f6','Δείτε την Εργασία')),
                      'Αποστέλλεται όταν προστίθεται σχόλιο', 'user_name, task_title, comment, commented_by'],
                     ['task_deadline_reminder', 'Υπενθύμιση Προθεσμίας', 'Υπενθύμιση: {{task_title}} λήγει σύντομα',
-                     '<p>Γεια σας {{user_name}},</p><p>Η εργασία "<strong>{{task_title}}</strong>" λήγει σε λιγότερο από 24 ώρες.</p><ul><li><strong>Προθεσμία:</strong> {{task_deadline}}</li><li><strong>Κατάσταση:</strong> {{task_status}}</li></ul>',
+                     $wrap30('#f97316', '&#9200;', 'Υπενθύμιση Προθεσμίας Εργασίας',
+                        $greet30.$p30('Σας υπενθυμίζουμε ότι η εργασία "<strong>{{task_title}}</strong>" λήγει σε <strong>λιγότερο από 24 ώρες</strong>.').$info30('#f97316', [['Εργασία','{{task_title}}'],['Προθεσμία','{{task_deadline}}'],['Κατάσταση','{{task_status}}'],['Πρόοδος','{{task_progress}}%']]).$alert30('#fff7ed','#fed7aa','#c2410c','⏰ Η προθεσμία πλησιάζει — παρακαλούμε ολοκληρώστε την εργασία εγκαίρως.').$btn30('#f97316','Δείτε την Εργασία')),
                      'Αποστέλλεται 24h πριν τη λήξη', 'user_name, task_title, task_deadline, task_status, task_progress'],
                     ['task_status_changed', 'Αλλαγή Κατάστασης Εργασίας', 'Αλλαγή: {{task_title}}',
-                     '<p>Γεια σας {{user_name}},</p><p>Η κατάσταση της εργασίας "<strong>{{task_title}}</strong>" άλλαξε: {{old_status}} → {{new_status}}</p>',
+                     $wrap30('#8b5cf6', '&#128260;', 'Αλλαγή Κατάστασης Εργασίας',
+                        $greet30.$p30('Ο/Η <strong>{{changed_by}}</strong> άλλαξε την κατάσταση της εργασίας "<strong>{{task_title}}</strong>".').'<div style="text-align:center;margin:24px 0;padding:20px;background:#f9fafb;border-radius:8px;"><span style="background:#fef2f2;color:#991b1b;padding:6px 14px;border-radius:6px;font-size:14px;font-weight:600;text-decoration:line-through;">{{old_status}}</span><span style="display:inline-block;margin:0 16px;color:#9ca3af;font-size:20px;">→</span><span style="background:#dcfce7;color:#166534;padding:6px 14px;border-radius:6px;font-size:14px;font-weight:600;">{{new_status}}</span></div>'.$p30('Συνδεθείτε στο σύστημα για να δείτε τις λεπτομέρειες.').$btn30('#8b5cf6','Δείτε την Εργασία')),
                      'Αποστέλλεται όταν αλλάζει η κατάσταση', 'user_name, task_title, old_status, new_status, changed_by'],
                     ['task_subtask_completed', 'Ολοκλήρωση Υποεργασίας', 'Ολοκληρώθηκε: {{subtask_title}}',
-                     '<p>Γεια σας {{user_name}},</p><p>Η υποεργασία "<strong>{{subtask_title}}</strong>" ολοκληρώθηκε στην εργασία "<strong>{{task_title}}</strong>".</p>',
+                     $wrap30('#22c55e', '&#9989;', 'Ολοκλήρωση Υποεργασίας',
+                        $greet30.$p30('Ο/Η <strong>{{completed_by}}</strong> ολοκλήρωσε μια υποεργασία στην εργασία "<strong>{{task_title}}</strong>".').$info30('#22c55e', [['Υποεργασία','{{subtask_title}}'],['Εργασία','{{task_title}}']]).$alert30('#f0fdf4','#bbf7d0','#166534','✅ Η υποεργασία έχει σημανθεί ως ολοκληρωμένη.').$p30('Συνδεθείτε στο σύστημα για να δείτε την πρόοδο της εργασίας.').$btn30('#22c55e','Δείτε την Εργασία')),
                      'Αποστέλλεται όταν ολοκληρώνεται υποεργασία', 'user_name, task_title, subtask_title, completed_by'],
                     ['mission_needs_volunteers', 'Αποστολή Χρειάζεται Εθελοντές', 'Η αποστολή {{mission_title}} χρειάζεται εθελοντές!',
-                     '<p>Γεια σας {{user_name}},</p><p>Η αποστολή "<strong>{{mission_title}}</strong>" πλησιάζει και χρειάζεται ακόμα εθελοντές.</p>',
+                     $wrap30('#dc2626', '&#128680;', 'Χρειάζονται Εθελοντές!',
+                        $greet30.$p30('Η αποστολή "<strong>{{mission_title}}</strong>" χρειάζεται <strong>επειγόντως</strong> περισσότερους εθελοντές!').$info30('#dc2626', [['Αποστολή','{{mission_title}}'],['Ημερομηνία','{{mission_date}}'],['Θέσεις Ανοιχτές','{{available_spots}}'],['Συνολικές Θέσεις','{{total_spots}}']]).$alert30('#fef2f2','#fecaca','#dc2626','🚨 Η βοήθειά σας χρειάζεται! Κάθε εθελοντής κάνει τη διαφορά.').$p30('Αν ενδιαφέρεστε να συμμετέχετε, παρακαλούμε συνδεθείτε στο σύστημα και κάντε αίτηση συμμετοχής.').$btn30('#dc2626','Δηλώστε Συμμετοχή')),
                      'Αποστέλλεται για αποστολές χωρίς αρκετούς εθελοντές', '{{app_name}}, {{user_name}}, {{mission_title}}, {{mission_description}}, {{mission_url}}'],
-                    ['shelf_expiry_reminder', 'Ειδοποίηση Λήξης Υλικών Ραφιού', 'Ειδοποίηση: Υλικά ραφιού λήγουν ή έχουν λήξει',
-                     '<p>Γεια σας {{user_name}},</p><p>Υπάρχουν υλικά ραφιού που χρειάζονται την προσοχή σας:</p><ul><li><strong>Ληγμένα:</strong> {{expired_count}}</li><li><strong>Λήγουν σύντομα (εντός {{threshold_days}} ημερών):</strong> {{expiring_count}}</li></ul><pre>{{details}}</pre>',
+                    ['shelf_expiry_reminder', 'Υπενθύμιση Λήξης Ραφιών Αποθήκης', 'Υπενθύμιση: Είδη Αποθήκης Λήγουν ή Έχουν Λήξει',
+                     $wrap30('#d97706', '&#128230;', 'Υπενθύμιση Λήξης Ραφιών Αποθήκης',
+                        $greet30.$p30('Υπάρχουν είδη αποθήκης που πλησιάζουν ή έχουν ξεπεράσει την ημερομηνία λήξης τους.').$info30('#d97706', [['Ληγμένα Είδη','{{expired_count}}'],['Κοντά σε Λήξη (εντός {{threshold_days}} ημερών)','{{expiring_count}}']]).'<div style="background:#f9fafb;border-radius:8px;padding:16px 20px;margin:20px 0;"><p style="color:#6b7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">Λεπτομέρειες:</p><pre style="background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:12px 16px;font-size:13px;color:#374151;margin:0;white-space:pre-wrap;word-break:break-word;">{{details}}</pre></div>'.$p30('Συνδεθείτε στο σύστημα για να ελέγξετε τα είδη.').$btn30('#d97706','Διαχείριση Αποθήκης')),
                      'Αποστέλλεται όταν υπάρχουν ληγμένα ή υπό λήξη υλικά ραφιού', 'user_name, expired_count, expiring_count, details, threshold_days'],
                 ];
                 foreach ($taskTemplates as $t) {
@@ -2039,6 +2057,72 @@ function runSchemaMigrations(): void {
                         dbInsert("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$key, $val]);
                     }
                 }
+            },
+        ],
+
+        [
+            'version'     => 34,
+            'description' => 'Re-style all plain email templates to match styled format',
+            'up' => function () {
+                // Helper functions for styled email layout
+                $wrap = function($headerBg, $icon, $title, $body) {
+                    return '<div style="background:#eef2f7;padding:28px 0 40px;font-family:Helvetica Neue,Arial,sans-serif;"><div style="max-width:600px;margin:0 auto;"><div style="background:'.$headerBg.';padding:30px 40px 26px;border-radius:12px 12px 0 0;text-align:center;">{{logo_html}}<p style="color:rgba(255,255,255,0.7);font-size:11px;letter-spacing:2px;text-transform:uppercase;margin:0 0 8px;">{{app_name}}</p><div style="font-size:36px;line-height:1;margin:0 0 8px;">'.$icon.'</div><h1 style="color:#fff;margin:0;font-size:23px;font-weight:700;line-height:1.3;">'.$title.'</h1></div><div style="background:#fff;padding:36px 40px 40px;border-radius:0 0 12px 12px;box-shadow:0 4px 20px rgba(0,0,0,0.07);">'.$body.'</div><div style="text-align:center;padding:18px 0 0;color:#9ca3af;font-size:12px;line-height:1.9;"><p style="margin:0;"><strong style="color:#6b7280;">{{app_name}}</strong> &bull; Σύστημα Διαχείρισης Εθελοντών</p><p style="margin:0;">Αυτό το μήνυμα στάλθηκε αυτόματα από το σύστημα.</p></div></div></div>';
+                };
+                $info = function($borderColor, $rows) {
+                    $html = '<div style="background:#f9fafb;border-left:4px solid '.$borderColor.';padding:2px 20px;border-radius:0 8px 8px 0;margin:20px 0;">';
+                    $last = count($rows) - 1;
+                    foreach ($rows as $i => $row) {
+                        $border = $i < $last ? 'border-bottom:1px solid #f3f4f6;' : '';
+                        $html .= '<div style="padding:7px 0;font-size:14px;'.$border.'"><span style="color:#9ca3af;display:inline-block;min-width:140px;">'.$row[0].':</span><span style="color:#111827;font-weight:600;">'.$row[1].'</span></div>';
+                    }
+                    $html .= '</div>';
+                    return $html;
+                };
+                $btn = function($bg, $text, $url = '{{login_url}}') {
+                    return '<div style="text-align:center;margin:28px 0 4px;"><a href="'.$url.'" style="background:'.$bg.';color:#ffffff;text-decoration:none;padding:13px 38px;border-radius:8px;font-size:15px;font-weight:700;display:inline-block;letter-spacing:0.3px;">'.$text.'</a></div>';
+                };
+                $greet = '<h2 style="color:#1f2937;font-size:18px;font-weight:700;margin:0 0 14px;">Γεια σας {{user_name}},</h2>';
+                $p = function($text) { return '<p style="color:#4b5563;line-height:1.65;font-size:15px;margin:0 0 14px;">'.$text.'</p>'; };
+                $alert = function($bg, $border, $color, $text) { return '<div style="background:'.$bg.';border:1px solid '.$border.';border-radius:8px;padding:14px 20px;margin:20px 0;"><p style="color:'.$color.';font-size:14px;font-weight:600;margin:0;">'.$text.'</p></div>'; };
+
+                $updates = [
+                    'task_assigned' => $wrap('#4f46e5', '&#128203;', 'Νέα Ανάθεση Εργασίας',
+                        $greet.$p('Σας ανατέθηκε μια νέα εργασία από τον/την <strong>{{assigned_by}}</strong>. Παρακαλούμε ελέγξτε τις λεπτομέρειες παρακάτω.').$info('#4f46e5', [['Εργασία','{{task_title}}'],['Περιγραφή','{{task_description}}'],['Προτεραιότητα','{{task_priority}}'],['Προθεσμία','{{task_deadline}}']]).$p('Μπορείτε να δείτε τις λεπτομέρειες της εργασίας συνδεόμενοι στο σύστημα.').$btn('#4f46e5','Δείτε την Εργασία')),
+
+                    'task_comment' => $wrap('#3b82f6', '&#128172;', 'Νέο Σχόλιο στην Εργασία',
+                        $greet.$p('Ο/Η <strong>{{commented_by}}</strong> πρόσθεσε ένα νέο σχόλιο στην εργασία "<strong>{{task_title}}</strong>".').'<div style="background:#f0f4ff;border-left:4px solid #3b82f6;padding:16px 20px;border-radius:0 8px 8px 0;margin:20px 0;"><p style="color:#1e40af;font-size:14px;line-height:1.65;margin:0;font-style:italic;">{{comment}}</p></div>'.$p('Συνδεθείτε στο σύστημα για να δείτε την εργασία και να απαντήσετε.').$btn('#3b82f6','Δείτε την Εργασία')),
+
+                    'task_deadline_reminder' => $wrap('#f97316', '&#9200;', 'Υπενθύμιση Προθεσμίας Εργασίας',
+                        $greet.$p('Σας υπενθυμίζουμε ότι η εργασία "<strong>{{task_title}}</strong>" λήγει σε <strong>λιγότερο από 24 ώρες</strong>.').$info('#f97316', [['Εργασία','{{task_title}}'],['Προθεσμία','{{task_deadline}}'],['Κατάσταση','{{task_status}}'],['Πρόοδος','{{task_progress}}%']]).$alert('#fff7ed','#fed7aa','#c2410c','⏰ Η προθεσμία πλησιάζει — παρακαλούμε ολοκληρώστε την εργασία εγκαίρως.').$btn('#f97316','Δείτε την Εργασία')),
+
+                    'task_status_changed' => $wrap('#8b5cf6', '&#128260;', 'Αλλαγή Κατάστασης Εργασίας',
+                        $greet.$p('Ο/Η <strong>{{changed_by}}</strong> άλλαξε την κατάσταση της εργασίας "<strong>{{task_title}}</strong>".').'<div style="text-align:center;margin:24px 0;padding:20px;background:#f9fafb;border-radius:8px;"><span style="background:#fef2f2;color:#991b1b;padding:6px 14px;border-radius:6px;font-size:14px;font-weight:600;text-decoration:line-through;">{{old_status}}</span><span style="display:inline-block;margin:0 16px;color:#9ca3af;font-size:20px;">→</span><span style="background:#dcfce7;color:#166534;padding:6px 14px;border-radius:6px;font-size:14px;font-weight:600;">{{new_status}}</span></div>'.$p('Συνδεθείτε στο σύστημα για να δείτε τις λεπτομέρειες.').$btn('#8b5cf6','Δείτε την Εργασία')),
+
+                    'task_subtask_completed' => $wrap('#22c55e', '&#9989;', 'Ολοκλήρωση Υποεργασίας',
+                        $greet.$p('Ο/Η <strong>{{completed_by}}</strong> ολοκλήρωσε μια υποεργασία στην εργασία "<strong>{{task_title}}</strong>".').$info('#22c55e', [['Υποεργασία','{{subtask_title}}'],['Εργασία','{{task_title}}']]).$alert('#f0fdf4','#bbf7d0','#166534','✅ Η υποεργασία έχει σημανθεί ως ολοκληρωμένη.').$p('Συνδεθείτε στο σύστημα για να δείτε την πρόοδο της εργασίας.').$btn('#22c55e','Δείτε την Εργασία')),
+
+                    'mission_needs_volunteers' => $wrap('#dc2626', '&#128680;', 'Χρειάζονται Εθελοντές!',
+                        $greet.$p('Η αποστολή "<strong>{{mission_title}}</strong>" χρειάζεται <strong>επειγόντως</strong> περισσότερους εθελοντές!').$info('#dc2626', [['Αποστολή','{{mission_title}}'],['Ημερομηνία','{{mission_date}}'],['Θέσεις Ανοιχτές','{{available_spots}}'],['Συνολικές Θέσεις','{{total_spots}}']]).$alert('#fef2f2','#fecaca','#dc2626','🚨 Η βοήθειά σας χρειάζεται! Κάθε εθελοντής κάνει τη διαφορά.').$p('Αν ενδιαφέρεστε να συμμετέχετε, παρακαλούμε συνδεθείτε στο σύστημα και κάντε αίτηση συμμετοχής.').$btn('#dc2626','Δηλώστε Συμμετοχή')),
+
+                    'mission_reminder' => $wrap('#fd7e14', '&#128226;', 'Υπενθύμιση Αποστολής',
+                        $greet.$p('Η παρακάτω αποστολή είναι ακόμα <strong>ανοιχτή</strong> και αναζητά εθελοντές:').$info('#fd7e14', [['Αποστολή','{{mission_title}}'],['Περιγραφή','{{mission_description}}']]).$p('Μη χάσετε την ευκαιρία να συμμετέχετε και να κάνετε τη διαφορά!').$btn('#fd7e14','Δείτε την Αποστολή','{{mission_url}}')),
+
+                    'shelf_expiry_reminder' => $wrap('#d97706', '&#128230;', 'Υπενθύμιση Λήξης Ραφιών Αποθήκης',
+                        $greet.$p('Υπάρχουν είδη αποθήκης που πλησιάζουν ή έχουν ξεπεράσει την ημερομηνία λήξης τους.').$info('#d97706', [['Ληγμένα Είδη','{{expired_count}}'],['Κοντά σε Λήξη (εντός {{threshold_days}} ημερών)','{{expiring_count}}']]).'<div style="background:#f9fafb;border-radius:8px;padding:16px 20px;margin:20px 0;"><p style="color:#6b7280;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">Λεπτομέρειες:</p><pre style="background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:12px 16px;font-size:13px;color:#374151;margin:0;white-space:pre-wrap;word-break:break-word;">{{details}}</pre></div>'.$p('Συνδεθείτε στο σύστημα για να ελέγξετε τα είδη.').$btn('#d97706','Διαχείριση Αποθήκης')),
+                ];
+
+                foreach ($updates as $code => $html) {
+                    $exists = dbFetchOne("SELECT id FROM email_templates WHERE code = ?", [$code]);
+                    if ($exists) {
+                        dbExecute("UPDATE email_templates SET body_html = ?, updated_at = NOW() WHERE code = ?", [$html, $code]);
+                    }
+                }
+
+                // Fix shelf_expiry_reminder name/subject (broken encoding in earlier migration)
+                dbExecute("UPDATE email_templates SET name = ?, subject = ?, updated_at = NOW() WHERE code = 'shelf_expiry_reminder'", [
+                    'Υπενθύμιση Λήξης Ραφιών Αποθήκης',
+                    'Υπενθύμιση: Είδη Αποθήκης Λήγουν ή Έχουν Λήξει'
+                ]);
             },
         ],
 
