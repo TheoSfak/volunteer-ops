@@ -74,15 +74,16 @@ $pagination = paginate($total, $page, $perPage);
 $missions = dbFetchAll(
     "SELECT m.*, d.name as department_name, u.name as creator_name,
             mt.name as type_name, mt.color as type_color, mt.icon as type_icon,
-            (SELECT COUNT(*) FROM shifts WHERE mission_id = m.id) as shift_count,
-            (SELECT COUNT(*) FROM shifts s 
-             JOIN participation_requests pr ON pr.shift_id = s.id 
-             WHERE s.mission_id = m.id AND pr.status = '" . PARTICIPATION_APPROVED . "') as volunteer_count
+            COUNT(DISTINCT sh.id) as shift_count,
+            COUNT(DISTINCT CASE WHEN pr.status = '" . PARTICIPATION_APPROVED . "' THEN pr.id END) as volunteer_count
      FROM missions m
      LEFT JOIN departments d ON m.department_id = d.id
      LEFT JOIN users u ON m.created_by = u.id
      LEFT JOIN mission_types mt ON m.mission_type_id = mt.id
+     LEFT JOIN shifts sh ON sh.mission_id = m.id
+     LEFT JOIN participation_requests pr ON pr.shift_id = sh.id
      WHERE $whereClause
+     GROUP BY m.id
      ORDER BY m.start_datetime DESC
      LIMIT {$pagination['per_page']} OFFSET {$pagination['offset']}",
     $params

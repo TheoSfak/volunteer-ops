@@ -13,7 +13,8 @@ if (!$id) {
 
 $shift = dbFetchOne(
     "SELECT s.*, m.title as mission_title, m.status as mission_status, m.department_id,
-            m.description, m.location, m.end_datetime as mission_end_datetime
+            m.description, m.location, m.end_datetime as mission_end_datetime,
+            m.mission_type_id, m.responsible_user_id
      FROM shifts s
      JOIN missions m ON s.mission_id = m.id
      WHERE s.id = ?",
@@ -30,8 +31,8 @@ $user = getCurrentUser();
 $missionCompleted = ($shift['mission_status'] === STATUS_COMPLETED);
 
 // Τ.Ε.Π.: αποκλεισμός βάρδιας Τ.Ε.Π. για μη-εξουσιοδοτημένους
-$missionTypeId = (int) dbFetchValue('SELECT mission_type_id FROM missions WHERE id = ?', [$shift['mission_id']]);
-$missionResponsible = (int) dbFetchValue('SELECT responsible_user_id FROM missions WHERE id = ?', [$shift['mission_id']]);
+$missionTypeId = (int) $shift['mission_type_id'];
+$missionResponsible = (int) $shift['responsible_user_id'];
 if (isTepMission($missionTypeId) && !canSeeTep($missionResponsible)) {
     setFlash('error', 'Δεν έχετε πρόσβαση σε βάρδιες αποστολών Τ.Ε.Π.');
     redirect('missions.php');

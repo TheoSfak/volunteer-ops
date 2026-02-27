@@ -44,11 +44,14 @@ if ($period === 'all') {
     
     $leaderboard = dbFetchAll(
         "SELECT u.id, u.name, u.total_points, u.department_id, d.name as department_name,
-                (SELECT COUNT(*) FROM user_achievements ua WHERE ua.user_id = u.id) as achievements_count,
-                (SELECT COUNT(*) FROM participation_requests pr WHERE pr.volunteer_id = u.id AND pr.attended = 1) as shifts_count
+                COUNT(DISTINCT ua.achievement_id) as achievements_count,
+                COUNT(DISTINCT CASE WHEN pr.attended = 1 THEN pr.id END) as shifts_count
          FROM users u
          LEFT JOIN departments d ON u.department_id = d.id
+         LEFT JOIN user_achievements ua ON ua.user_id = u.id
+         LEFT JOIN participation_requests pr ON pr.volunteer_id = u.id AND pr.attended = 1
          WHERE $whereClause
+         GROUP BY u.id
          ORDER BY u.total_points DESC, u.name ASC
          LIMIT {$pagination['offset']}, {$pagination['per_page']}",
         $params
@@ -73,11 +76,12 @@ if ($period === 'all') {
     $leaderboard = dbFetchAll(
         "SELECT u.id, u.name, u.department_id, d.name as department_name,
                 COALESCE(SUM(vp.points), 0) as total_points,
-                (SELECT COUNT(*) FROM user_achievements ua WHERE ua.user_id = u.id) as achievements_count,
+                COUNT(DISTINCT ua.achievement_id) as achievements_count,
                 COUNT(DISTINCT CASE WHEN vp.pointable_type = 'App\\\\Models\\\\Shift' THEN vp.pointable_id END) as shifts_count
          FROM users u
          LEFT JOIN departments d ON u.department_id = d.id
          LEFT JOIN volunteer_points vp ON u.id = vp.user_id $periodFilter
+         LEFT JOIN user_achievements ua ON ua.user_id = u.id
          WHERE $whereClause
          GROUP BY u.id
          HAVING total_points > 0

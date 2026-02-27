@@ -63,24 +63,32 @@ if ($tab === 'missing') {
     // Missing required certificates
     $requiredTypes = dbFetchAll("SELECT * FROM certificate_types WHERE is_required = 1 AND is_active = 1 ORDER BY name");
     $missingData = [];
-    foreach ($requiredTypes as $rt) {
-        $where = "u.is_active = 1 AND u.id NOT IN (SELECT user_id FROM volunteer_certificates WHERE certificate_type_id = ?)";
-        $params = [$rt['id']];
+    if (!empty($requiredTypes)) {
+        $rtIds = array_column($requiredTypes, 'id');
+        $placeholders = implode(',', array_fill(0, count($rtIds), '?'));
+        $searchWhere = '';
+        $searchParams = [];
         if ($filterSearch) {
-            $where .= " AND (u.name LIKE ? OR u.email LIKE ?)";
-            $params[] = "%{$filterSearch}%";
-            $params[] = "%{$filterSearch}%";
+            $searchWhere = " AND (u.name LIKE ? OR u.email LIKE ?)";
+            $searchParams = ["%{$filterSearch}%", "%{$filterSearch}%"];
         }
-        $volunteers = dbFetchAll(
-            "SELECT u.id, u.name, u.email, d.name as department_name
-             FROM users u
+        $allMissing = dbFetchAll(
+            "SELECT ct.id as type_id, u.id, u.name, u.email, d.name as department_name
+             FROM certificate_types ct
+             CROSS JOIN users u
              LEFT JOIN departments d ON u.department_id = d.id
-             WHERE {$where}
-             ORDER BY u.name",
-            $params
+             LEFT JOIN volunteer_certificates vc ON vc.user_id = u.id AND vc.certificate_type_id = ct.id
+             WHERE ct.id IN ($placeholders) AND u.is_active = 1 AND vc.id IS NULL $searchWhere
+             ORDER BY ct.name, u.name",
+            array_merge($rtIds, $searchParams)
         );
-        if (!empty($volunteers)) {
-            $missingData[] = ['type' => $rt, 'volunteers' => $volunteers];
+        $rtMap = array_column($requiredTypes, null, 'id');
+        $grouped = [];
+        foreach ($allMissing as $row) {
+            $grouped[$row['type_id']][] = $row;
+        }
+        foreach ($grouped as $typeId => $volunteers) {
+            $missingData[] = ['type' => $rtMap[$typeId], 'volunteers' => $volunteers];
         }
     }
 } else {
@@ -209,14 +217,12 @@ include __DIR__ . '/includes/header.php';
         <a class="nav-link <?= $tab === 'missing' ? 'active' : '' ?>" href="certificates.php?tab=missing">
             <i class="bi bi-exclamation-triangle me-1"></i>Ελλείποντα Υποχρεωτικά
             <?php
-            $missingCount = 0;
-            $reqTypes = dbFetchAll("SELECT id FROM certificate_types WHERE is_required = 1 AND is_active = 1");
-            foreach ($reqTypes as $rt) {
-                $missingCount += dbFetchValue(
-                    "SELECT COUNT(*) FROM users u WHERE u.is_active = 1 AND u.id NOT IN (SELECT user_id FROM volunteer_certificates WHERE certificate_type_id = ?)",
-                    [$rt['id']]
-                );
-            }
+            $missingCount = (int)dbFetchValue(
+                "SELECT COUNT(*) FROM certificate_types ct
+                 CROSS JOIN users u
+                 LEFT JOIN volunteer_certificates vc ON vc.user_id = u.id AND vc.certificate_type_id = ct.id
+                 WHERE ct.is_required = 1 AND ct.is_active = 1 AND u.is_active = 1 AND vc.id IS NULL"
+            );
             if ($missingCount > 0):
             ?>
                 <span class="badge bg-danger"><?= $missingCount ?></span>

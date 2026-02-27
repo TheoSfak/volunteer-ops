@@ -55,35 +55,35 @@ if (isAdmin()) {
             "SELECT COALESCE(SUM(pr.actual_hours), 0) FROM participation_requests pr
              JOIN shifts s ON pr.shift_id = s.id
              JOIN missions m ON s.mission_id = m.id
-             WHERE pr.attended = 1 AND DATE_FORMAT(s.start_time, '%Y-%m') = ? $departmentFilter",
-            array_merge([$currentMonth], $params)
+             WHERE pr.attended = 1 AND s.start_time >= ? AND s.start_time < ? + INTERVAL 1 MONTH $departmentFilter",
+            array_merge([$currentMonth . '-01', $currentMonth . '-01'], $params)
         ),
         'total_hours_last_month' => dbFetchValue(
             "SELECT COALESCE(SUM(pr.actual_hours), 0) FROM participation_requests pr
              JOIN shifts s ON pr.shift_id = s.id
              JOIN missions m ON s.mission_id = m.id
-             WHERE pr.attended = 1 AND DATE_FORMAT(s.start_time, '%Y-%m') = ? $departmentFilter",
-            array_merge([$previousMonth], $params)
+             WHERE pr.attended = 1 AND s.start_time >= ? AND s.start_time < ? + INTERVAL 1 MONTH $departmentFilter",
+            array_merge([$previousMonth . '-01', $previousMonth . '-01'], $params)
         ),
         'active_volunteers_this_month' => dbFetchValue(
             "SELECT COUNT(DISTINCT pr.volunteer_id) FROM participation_requests pr
              JOIN shifts s ON pr.shift_id = s.id
              JOIN missions m ON s.mission_id = m.id
-             WHERE pr.attended = 1 AND DATE_FORMAT(s.start_time, '%Y-%m') = ? $departmentFilter",
-            array_merge([$currentMonth], $params)
+             WHERE pr.attended = 1 AND s.start_time >= ? AND s.start_time < ? + INTERVAL 1 MONTH $departmentFilter",
+            array_merge([$currentMonth . '-01', $currentMonth . '-01'], $params)
         ),
     ];
     
     // Calculate completion rate
     $completedThisMonth = dbFetchValue(
         "SELECT COUNT(*) FROM missions m 
-         WHERE status = '" . STATUS_COMPLETED . "' AND DATE_FORMAT(start_datetime, '%Y-%m') = ? $departmentFilter",
-        array_merge([$currentMonth], $params)
+         WHERE status = '" . STATUS_COMPLETED . "' AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 MONTH $departmentFilter",
+        array_merge([$currentMonth . '-01', $currentMonth . '-01'], $params)
     );
     $totalThisMonth = dbFetchValue(
         "SELECT COUNT(*) FROM missions m 
-         WHERE DATE_FORMAT(start_datetime, '%Y-%m') = ? AND status != '" . STATUS_DRAFT . "' $departmentFilter",
-        array_merge([$currentMonth], $params)
+         WHERE m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 MONTH AND status != '" . STATUS_DRAFT . "' $departmentFilter",
+        array_merge([$currentMonth . '-01', $currentMonth . '-01'], $params)
     );
     $stats['completion_rate'] = $totalThisMonth > 0 ? round(($completedThisMonth / $totalThisMonth) * 100) : 0;
     
@@ -132,26 +132,29 @@ if (isAdmin()) {
                 COALESCE(SUM(pr.actual_hours), 0) as total_hours
          FROM users u
          LEFT JOIN participation_requests pr ON u.id = pr.volunteer_id 
-             AND pr.attended = 1 
-             AND DATE_FORMAT((SELECT start_time FROM shifts WHERE id = pr.shift_id), '%Y-%m') = ?
+             AND pr.attended = 1
+         LEFT JOIN shifts s ON s.id = pr.shift_id
+             AND s.start_time >= ? AND s.start_time < ? + INTERVAL 1 MONTH
          WHERE u.role = ? AND u.is_active = 1
          GROUP BY u.id
          ORDER BY u.total_points DESC
          LIMIT 5",
-        [$currentMonth, ROLE_VOLUNTEER]
+        [$currentMonth . '-01', $currentMonth . '-01', ROLE_VOLUNTEER]
     );
     
     // Recent missions
     $recentMissions = dbFetchAll(
         "SELECT m.*, d.name as department_name,
-                (SELECT COUNT(*) FROM shifts WHERE mission_id = m.id) as shift_count
+                COUNT(sh.id) as shift_count
          FROM missions m
          LEFT JOIN departments d ON m.department_id = d.id
+         LEFT JOIN shifts sh ON sh.mission_id = m.id
          WHERE m.deleted_at IS NULL 
-           AND LOWER(m.title) NOT LIKE '%test%'
-           AND LOWER(m.title) NOT LIKE '%δοκιμ%'
-           AND LOWER(m.title) NOT LIKE '%δοκή%'
+           AND m.title NOT LIKE '%test%'
+           AND m.title NOT LIKE '%δοκιμ%'
+           AND m.title NOT LIKE '%δοκή%'
            $departmentFilter
+         GROUP BY m.id
          ORDER BY m.created_at DESC
          LIMIT 5",
         $params
@@ -229,10 +232,12 @@ if (isAdmin()) {
     }
     $availableMissions = dbFetchAll(
         "SELECT m.*, d.name as department_name,
-                (SELECT COUNT(*) FROM shifts WHERE mission_id = m.id) as shift_count
+                COUNT(sh.id) as shift_count
          FROM missions m
          LEFT JOIN departments d ON m.department_id = d.id
+         LEFT JOIN shifts sh ON sh.mission_id = m.id
          WHERE {$availMissionsWhere}
+         GROUP BY m.id
          ORDER BY m.start_datetime ASC
          LIMIT 5",
         $availMissionsParams
