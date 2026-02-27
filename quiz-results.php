@@ -34,6 +34,11 @@ if ($attempt['user_id'] != $user['id'] && !isAdmin()) {
 
 $isAdminViewing = isAdmin() && ($attempt['user_id'] != $user['id']);
 
+// Clear session data for this quiz so retake gets fresh questions
+if (isset($_SESSION['quiz_attempt_' . $attempt['quiz_id']])) {
+    unset($_SESSION['quiz_attempt_' . $attempt['quiz_id']]);
+}
+
 // Fetch user answers with questions
 $answers = dbFetchAll("
     SELECT ua.*, tqq.*,
