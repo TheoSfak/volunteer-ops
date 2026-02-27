@@ -249,6 +249,65 @@ if (isPost()) {
         setFlash('success', 'Οι ρυθμίσεις ειδοποιήσεων αποθηκεύτηκαν.');
         redirect('settings.php?tab=notifications');
 
+    } elseif ($action === 'run_cron') {
+        $cronJob = post('cron_job', 'all');
+        
+        // Capture output from cron scripts
+        ob_start();
+        $startTime = microtime(true);
+        $results = [];
+        
+        $cronJobs = [
+            'task_reminders'      => ['file' => 'cron_task_reminders.php',      'label' => 'Υπενθυμίσεις Εργασιών'],
+            'shift_reminders'     => ['file' => 'cron_shift_reminders.php',     'label' => 'Υπενθυμίσεις Βαρδιών'],
+            'incomplete_missions' => ['file' => 'cron_incomplete_missions.php', 'label' => 'Ελλιπείς Αποστολές'],
+            'certificate_expiry'  => ['file' => 'cron_certificate_expiry.php',  'label' => 'Λήξη Πιστοποιητικών'],
+            'shelf_expiry'        => ['file' => 'cron_shelf_expiry.php',        'label' => 'Λήξη Υλικών Ραφιού'],
+        ];
+        
+        $jobsToRun = ($cronJob === 'all') ? array_keys($cronJobs) : [$cronJob];
+        
+        foreach ($jobsToRun as $jobKey) {
+            if (!isset($cronJobs[$jobKey])) continue;
+            $job = $cronJobs[$jobKey];
+            $file = __DIR__ . '/' . $job['file'];
+            if (!file_exists($file)) {
+                $results[$jobKey] = ['label' => $job['label'], 'status' => 'error', 'output' => 'Αρχείο δεν βρέθηκε: ' . $job['file']];
+                continue;
+            }
+            ob_start();
+            try {
+                include $file;
+                $output = ob_get_clean();
+                $results[$jobKey] = ['label' => $job['label'], 'status' => 'success', 'output' => $output];
+            } catch (Exception $e) {
+                $output = ob_get_clean();
+                $results[$jobKey] = ['label' => $job['label'], 'status' => 'error', 'output' => $output . ' Error: ' . $e->getMessage()];
+            }
+        }
+        
+        $elapsed = round(microtime(true) - $startTime, 2);
+        ob_end_clean();
+        
+        // Save last run timestamp
+        $lastRunKey = 'cron_last_manual_run';
+        $exists = dbFetchValue("SELECT COUNT(*) FROM settings WHERE setting_key = ?", [$lastRunKey]);
+        $lastRunValue = date('Y-m-d H:i:s');
+        if ($exists) {
+            dbExecute("UPDATE settings SET setting_value = ?, updated_at = NOW() WHERE setting_key = ?", [$lastRunValue, $lastRunKey]);
+        } else {
+            dbInsert("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$lastRunKey, $lastRunValue]);
+        }
+        
+        // Store results in session for display
+        $_SESSION['cron_results'] = $results;
+        $_SESSION['cron_elapsed'] = $elapsed;
+        
+        $jobLabel = ($cronJob === 'all') ? 'Όλες οι εργασίες' : ($cronJobs[$cronJob]['label'] ?? $cronJob);
+        logAudit('run_cron', 'system', null, 'Χειροκίνητη εκτέλεση: ' . $jobLabel);
+        setFlash('success', "Η εκτέλεση ολοκληρώθηκε σε {$elapsed}s.");
+        redirect('settings.php?tab=cron');
+        
     } elseif ($action === 'reset_data') {
         $confirmation = post('confirmation', '');
         if ($confirmation !== 'DELETE') {
@@ -349,6 +408,11 @@ include __DIR__ . '/includes/header.php';
     <li class="nav-item">
         <a class="nav-link <?= $activeTab === 'inventory' ? 'active' : '' ?>" href="settings.php?tab=inventory">
             <i class="bi bi-box-seam me-1"></i>Απόθεμα
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $activeTab === 'cron' ? 'active' : '' ?>" href="settings.php?tab=cron">
+            <i class="bi bi-clock-history me-1"></i>Cron Jobs
         </a>
     </li>
     <li class="nav-item">
@@ -1014,6 +1078,149 @@ $invStats = [
                         <?php endforeach; ?>
                     </div>
                 <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($activeTab === 'cron'): ?>
+<?php
+$cronJobs = [
+    'task_reminders'      => ['label' => 'Υπενθυμίσεις Εργασιών',   'icon' => 'bi-list-task',          'desc' => 'Ειδοποιεί τους εθελοντές για εργασίες με προθεσμία εντός 24 ωρών.', 'color' => 'primary'],
+    'shift_reminders'     => ['label' => 'Υπενθυμίσεις Βαρδιών',    'icon' => 'bi-alarm',              'desc' => 'Ειδοποιεί τους εγκεκριμένους εθελοντές για βάρδιες εντός ' . h($settings['shift_reminder_hours'] ?? '24') . ' ωρών.', 'color' => 'info'],
+    'incomplete_missions' => ['label' => 'Ελλιπείς Αποστολές',      'icon' => 'bi-people',             'desc' => 'Ειδοποιεί εθελοντές για αποστολές που χρειάζονται ακόμα εθελοντές (εντός ' . h($settings['resend_mission_hours_before'] ?? '48') . ' ωρών).', 'color' => 'warning'],
+    'certificate_expiry'  => ['label' => 'Λήξη Πιστοποιητικών',     'icon' => 'bi-award',              'desc' => 'Στέλνει υπενθυμίσεις 30 & 7 ημερών πριν τη λήξη πιστοποιητικών.', 'color' => 'success'],
+    'shelf_expiry'        => ['label' => 'Λήξη Υλικών Ραφιού',      'icon' => 'bi-box-seam',           'desc' => 'Ελέγχει για ληγμένα ή υπό λήξη υλικά ραφιού (εντός ' . h($settings['shelf_expiry_reminder_days'] ?? '30') . ' ημερών).', 'color' => 'danger'],
+];
+$lastManualRun = getSetting('cron_last_manual_run', '');
+$cronResults = $_SESSION['cron_results'] ?? null;
+$cronElapsed = $_SESSION['cron_elapsed'] ?? null;
+unset($_SESSION['cron_results'], $_SESSION['cron_elapsed']);
+?>
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Χειροκίνητη Εκτέλεση Cron Jobs</h5>
+                <form method="post" class="d-inline">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="run_cron">
+                    <input type="hidden" name="cron_job" value="all">
+                    <button type="submit" class="btn btn-primary" onclick="return confirm('Εκτέλεση όλων των cron jobs;')">
+                        <i class="bi bi-play-fill me-1"></i>Εκτέλεση Όλων
+                    </button>
+                </form>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Οι παρακάτω εργασίες εκτελούνται αυτόματα καθημερινά μέσω του <code>cron_daily.php</code>.
+                    Μπορείτε να τις εκτελέσετε χειροκίνητα ανά πάσα στιγμή.
+                </p>
+
+                <?php if ($lastManualRun): ?>
+                <div class="alert alert-light py-2 mb-3">
+                    <i class="bi bi-clock me-1"></i>
+                    <strong>Τελευταία χειροκίνητη εκτέλεση:</strong> <?= h(formatDateTime($lastManualRun)) ?>
+                    <?php if ($cronElapsed): ?>
+                        <span class="text-muted">(<?= h($cronElapsed) ?>s)</span>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+
+                <?php if ($cronResults): ?>
+                <div class="mb-4">
+                    <h6><i class="bi bi-terminal me-1"></i>Αποτελέσματα Τελευταίας Εκτέλεσης:</h6>
+                    <?php foreach ($cronResults as $key => $result): ?>
+                    <div class="card mb-2 border-<?= $result['status'] === 'success' ? 'success' : 'danger' ?>">
+                        <div class="card-header py-2 bg-<?= $result['status'] === 'success' ? 'success' : 'danger' ?> bg-opacity-10">
+                            <i class="bi <?= $result['status'] === 'success' ? 'bi-check-circle text-success' : 'bi-x-circle text-danger' ?> me-1"></i>
+                            <strong><?= h($result['label']) ?></strong>
+                        </div>
+                        <div class="card-body py-2">
+                            <pre class="mb-0" style="font-size: 12px; white-space: pre-wrap;"><?= h(trim($result['output'])) ?></pre>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Εργασία</th>
+                                <th>Περιγραφή</th>
+                                <th class="text-end" style="width: 140px;">Ενέργεια</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($cronJobs as $key => $job): ?>
+                            <tr>
+                                <td>
+                                    <span class="badge bg-<?= $job['color'] ?> me-2"><i class="bi <?= $job['icon'] ?>"></i></span>
+                                    <strong><?= h($job['label']) ?></strong>
+                                </td>
+                                <td class="text-muted small"><?= $job['desc'] ?></td>
+                                <td class="text-end">
+                                    <form method="post" class="d-inline">
+                                        <?= csrfField() ?>
+                                        <input type="hidden" name="action" value="run_cron">
+                                        <input type="hidden" name="cron_job" value="<?= h($key) ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-<?= $job['color'] ?>">
+                                            <i class="bi bi-play-fill me-1"></i>Εκτέλεση
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Πληροφορίες</h5>
+            </div>
+            <div class="card-body">
+                <h6>Αυτόματη εκτέλεση</h6>
+                <p class="small text-muted">
+                    Για καθημερινή αυτόματη εκτέλεση, ρυθμίστε στο Windows Task Scheduler:
+                </p>
+                <div class="bg-dark text-light p-2 rounded mb-3" style="font-size: 12px;">
+                    <code class="text-light">php C:\xampp\htdocs\volunteerops\cron_daily.php</code>
+                </div>
+
+                <h6>Σχετικές ρυθμίσεις</h6>
+                <ul class="list-unstyled small">
+                    <li class="mb-1">
+                        <i class="bi bi-gear me-1"></i>
+                        <strong>Ώρες υπενθύμισης βάρδιας:</strong> <?= h($settings['shift_reminder_hours'] ?? '24') ?>h
+                        <a href="settings.php?tab=general" class="ms-1"><i class="bi bi-pencil-square"></i></a>
+                    </li>
+                    <li class="mb-1">
+                        <i class="bi bi-gear me-1"></i>
+                        <strong>Ώρες πριν αποστολές:</strong> <?= h($settings['resend_mission_hours_before'] ?? '48') ?>h
+                        <a href="settings.php?tab=general" class="ms-1"><i class="bi bi-pencil-square"></i></a>
+                    </li>
+                    <li class="mb-1">
+                        <i class="bi bi-gear me-1"></i>
+                        <strong>Λήξη ραφιού (ημέρες):</strong> <?= h($settings['shelf_expiry_reminder_days'] ?? '30') ?>
+                    </li>
+                    <li class="mb-1">
+                        <i class="bi bi-gear me-1"></i>
+                        <strong>Αποστολές ενεργές:</strong>
+                        <?= ($settings['resend_mission_enabled'] ?? '1') === '1' ? '<span class="text-success">Ναι</span>' : '<span class="text-danger">Όχι</span>' ?>
+                    </li>
+                </ul>
+
+                <h6 class="mt-3">Ειδοποιήσεις Email</h6>
+                <p class="small text-muted mb-2">Μπορείτε να ενεργοποιήσετε/απενεργοποιήσετε τα email από την καρτέλα <a href="settings.php?tab=notifications">Ειδοποιήσεις</a>.</p>
             </div>
         </div>
     </div>
