@@ -482,27 +482,43 @@ function runMigrations() {
             }
             $cleanSql = implode("\n", $cleanLines);
             
-            // Handle DELIMITER blocks (for triggers/procedures)
-            // Split into regular statements and DELIMITER blocks
+            // Quote-aware SQL statement splitter
+            // Splits on semicolons only when NOT inside quoted strings
             $allStatements = [];
-            if (preg_match('/DELIMITER\s/', $cleanSql)) {
-                // Process DELIMITER blocks
-                $parts = preg_split('/(DELIMITER\s+\S+)/', $cleanSql, -1, PREG_SPLIT_DELIM_CAPTURE);
-                $currentDelimiter = ';';
-                foreach ($parts as $part) {
-                    $part = trim($part);
-                    if (empty($part)) continue;
-                    if (preg_match('/^DELIMITER\s+(\S+)$/', $part, $m)) {
-                        $currentDelimiter = $m[1];
-                        continue;
+            $current = '';
+            $inSingleQuote = false;
+            $len = strlen($cleanSql);
+            for ($ci = 0; $ci < $len; $ci++) {
+                $ch = $cleanSql[$ci];
+                if ($ch === "'" && !$inSingleQuote) {
+                    $inSingleQuote = true;
+                    $current .= $ch;
+                } elseif ($ch === "'" && $inSingleQuote) {
+                    // Check for escaped quote ''
+                    if ($ci + 1 < $len && $cleanSql[$ci + 1] === "'") {
+                        $current .= "''";
+                        $ci++;
+                    } else {
+                        $inSingleQuote = false;
+                        $current .= $ch;
                     }
-                    $stmts = array_filter(array_map('trim', explode($currentDelimiter, $part)));
-                    foreach ($stmts as $s) {
-                        if (!empty($s)) $allStatements[] = $s;
+                } elseif ($ch === '\\' && $inSingleQuote && $ci + 1 < $len) {
+                    // Backslash escape inside string
+                    $current .= $ch . $cleanSql[$ci + 1];
+                    $ci++;
+                } elseif ($ch === ';' && !$inSingleQuote) {
+                    $stmt = trim($current);
+                    if (!empty($stmt)) {
+                        $allStatements[] = $stmt;
                     }
+                    $current = '';
+                } else {
+                    $current .= $ch;
                 }
-            } else {
-                $allStatements = array_filter(array_map('trim', explode(';', $cleanSql)));
+            }
+            $stmt = trim($current);
+            if (!empty($stmt)) {
+                $allStatements[] = $stmt;
             }
             $stmtErrors = 0;
             
