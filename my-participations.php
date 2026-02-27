@@ -603,7 +603,24 @@ function sendGpsPing(btn) {
                 });
         },
         (err) => {
-            showPingStatus(btn.dataset.prId, '❌ Δεν επιτράπηκε πρόσβαση GPS', 'danger');
+            let msg = '❌ ';
+            switch (err.code) {
+                case err.PERMISSION_DENIED:
+                    msg += 'Η πρόσβαση GPS απορρίφθηκε. Ελέγξτε τις ρυθμίσεις τοποθεσίας του browser σας.';
+                    // Show help tooltip
+                    showPingStatus(btn.dataset.prId, msg + '<br><small class="text-muted">Κλικ στο εικονίδιο 🔒 στη γραμμή διεύθυνσης → Τοποθεσία → Επιτρέπεται</small>', 'danger');
+                    break;
+                case err.POSITION_UNAVAILABLE:
+                    msg += 'Η θέση δεν είναι διαθέσιμη. Ενεργοποιήστε το GPS.';
+                    showPingStatus(btn.dataset.prId, msg, 'warning');
+                    break;
+                case err.TIMEOUT:
+                    msg += 'Λήξη χρόνου εντοπισμού. Δοκιμάστε ξανά.';
+                    showPingStatus(btn.dataset.prId, msg, 'warning');
+                    break;
+                default:
+                    showPingStatus(btn.dataset.prId, '❌ Άγνωστο σφάλμα GPS', 'danger');
+            }
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-send-fill me-1"></i>Αποστολή Θέσης';
         },
