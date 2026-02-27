@@ -5,6 +5,25 @@ requireRole([ROLE_SYSTEM_ADMIN]);
 $pageTitle = 'Email Logs & Αναφορές';
 $currentPage = 'email-logs';
 
+// ─── Auto-create table if it doesn't exist (first visit after deploy) ───────
+db()->exec("CREATE TABLE IF NOT EXISTS `email_logs` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `recipient_email` VARCHAR(255) NOT NULL,
+    `subject` VARCHAR(500) NOT NULL,
+    `notification_code` VARCHAR(100) NULL,
+    `status` ENUM('SUCCESS','FAILED') NOT NULL DEFAULT 'FAILED',
+    `error_message` TEXT NULL,
+    `smtp_log` TEXT NULL,
+    `smtp_host` VARCHAR(255) NULL,
+    `from_email` VARCHAR(255) NULL,
+    `sent_by` INT UNSIGNED NULL,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_email_logs_recipient` (`recipient_email`),
+    INDEX `idx_email_logs_status` (`status`),
+    INDEX `idx_email_logs_created` (`created_at`),
+    INDEX `idx_email_logs_notification` (`notification_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
 // ─── Filters ────────────────────────────────────────────────────────────────
 $filterStatus = get('status', '');
 $filterEmail  = get('email', '');
