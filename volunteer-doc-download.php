@@ -37,8 +37,9 @@ if (!file_exists($filePath)) {
 logAudit('download_document', 'volunteer_documents', $docId, $doc['label']);
 
 // Serve the file
+$safeName = preg_replace('/[^\w\s\-.]/', '', $doc['original_name']);
 header('Content-Type: ' . $doc['mime_type']);
-header('Content-Disposition: inline; filename="' . addslashes($doc['original_name']) . '"');
+header('Content-Disposition: inline; filename="' . $safeName . '"');
 header('Content-Length: ' . filesize($filePath));
 header('Cache-Control: private, max-age=3600');
 readfile($filePath);

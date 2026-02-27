@@ -55,30 +55,39 @@ if ($request['status'] !== PARTICIPATION_PENDING) {
 
 try {
     if ($action === 'approve') {
-        // Check if shift is full
-        $currentCount = dbFetchValue(
-            "SELECT COUNT(*) FROM participation_requests 
-             WHERE shift_id = ? AND status = ?",
-            [$request['shift_id'], PARTICIPATION_APPROVED]
-        );
-        
-        $maxVolunteers = dbFetchValue(
-            "SELECT max_volunteers FROM shifts WHERE id = ?",
-            [$request['shift_id']]
-        );
-        
-        if ($currentCount >= $maxVolunteers) {
-            setFlash('error', 'Η βάρδια είναι πλήρης.');
-            redirect('dashboard.php');
+        // Use transaction with row lock to prevent race condition (over-approval)
+        db()->beginTransaction();
+        try {
+            // Lock approved rows for this shift to get accurate count
+            $currentCount = dbFetchValue(
+                "SELECT COUNT(*) FROM participation_requests 
+                 WHERE shift_id = ? AND status = ? FOR UPDATE",
+                [$request['shift_id'], PARTICIPATION_APPROVED]
+            );
+            
+            $maxVolunteers = dbFetchValue(
+                "SELECT max_volunteers FROM shifts WHERE id = ?",
+                [$request['shift_id']]
+            );
+            
+            if ($currentCount >= $maxVolunteers) {
+                db()->rollBack();
+                setFlash('error', 'Η βάρδια είναι πλήρης.');
+                redirect('dashboard.php');
+            }
+            
+            // Approve the request
+            dbExecute(
+                "UPDATE participation_requests 
+                 SET status = ?, decided_by = ?, decided_at = NOW() 
+                 WHERE id = ?",
+                [PARTICIPATION_APPROVED, getCurrentUserId(), $id]
+            );
+            db()->commit();
+        } catch (Exception $txEx) {
+            db()->rollBack();
+            throw $txEx;
         }
-        
-        // Approve the request
-        dbExecute(
-            "UPDATE participation_requests 
-             SET status = ?, decided_by = ?, decided_at = NOW() 
-             WHERE id = ?",
-            [PARTICIPATION_APPROVED, getCurrentUserId(), $id]
-        );
         
         // Send notification
         if (isNotificationEnabled('participation_approved')) {

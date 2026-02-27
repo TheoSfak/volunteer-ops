@@ -285,6 +285,26 @@ function registerUser($data) {
 }
 
 /**
+ * Validate password strength
+ * Returns error message string or null if valid
+ */
+function validatePasswordStrength(string $password): ?string {
+    if (strlen($password) < 8) {
+        return 'Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες.';
+    }
+    if (!preg_match('/[A-Z]/', $password)) {
+        return 'Ο κωδικός πρέπει να περιέχει τουλάχιστον ένα κεφαλαίο γράμμα.';
+    }
+    if (!preg_match('/[a-z]/', $password)) {
+        return 'Ο κωδικός πρέπει να περιέχει τουλάχιστον ένα πεζό γράμμα.';
+    }
+    if (!preg_match('/[0-9]/', $password)) {
+        return 'Ο κωδικός πρέπει να περιέχει τουλάχιστον ένα ψηφίο.';
+    }
+    return null;
+}
+
+/**
  * Update user password
  */
 function updatePassword($userId, $currentPassword, $newPassword) {
@@ -292,6 +312,12 @@ function updatePassword($userId, $currentPassword, $newPassword) {
     
     if (!$user || !password_verify($currentPassword, $user['password'])) {
         return ['success' => false, 'message' => 'Ο τρέχων κωδικός είναι λάθος.'];
+    }
+    
+    // Enforce password strength
+    $pwError = validatePasswordStrength($newPassword);
+    if ($pwError) {
+        return ['success' => false, 'message' => $pwError];
     }
     
     $hashed = password_hash($newPassword, PASSWORD_DEFAULT);

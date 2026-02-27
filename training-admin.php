@@ -57,7 +57,12 @@ if (isPost()) {
                 redirect('training-admin.php');
             }
             
-            if (!in_array($file['type'], TRAINING_ALLOWED_TYPES)) {
+            // Validate MIME type server-side (don't trust browser-supplied type)
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $detectedMime = $finfo->file($file['tmp_name']);
+            $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+            
+            if (!in_array($detectedMime, TRAINING_ALLOWED_TYPES) || !in_array($ext, ['pdf'])) {
                 setFlash('error', 'Μόνο PDF αρχεία επιτρέπονται.');
                 redirect('training-admin.php');
             }
@@ -67,9 +72,8 @@ if (isPost()) {
                 mkdir(TRAINING_UPLOAD_PATH, 0755, true);
             }
             
-            // Generate unique filename
-            $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
-            $newFilename = 'material_' . time() . '_' . uniqid() . '.' . strtolower($ext);
+            // Generate unique filename with validated extension
+            $newFilename = 'material_' . time() . '_' . uniqid() . '.' . $ext;
             
             if (move_uploaded_file($file['tmp_name'], TRAINING_UPLOAD_PATH . $newFilename)) {
                 // Save to database

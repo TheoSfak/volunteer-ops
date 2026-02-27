@@ -16,8 +16,9 @@ if (!$material) {
     redirect('training.php');
 }
 
-// Build file path
-$filePath = TRAINING_UPLOAD_PATH . $material['file_path'];
+// Build file path — strip any directory traversal from DB value
+$safeFile = basename($material['file_path']);
+$filePath = TRAINING_UPLOAD_PATH . $safeFile;
 
 if (!file_exists($filePath)) {
     setFlash('error', 'Το αρχείο δεν βρέθηκε στον διακομιστή.');
