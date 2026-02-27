@@ -4,8 +4,8 @@
  * This script sends reminders for approved shifts happening within configured hours
  */
 
-// CLI only - prevent web access
-if (php_sapi_name() !== 'cli') {
+// CLI or manual admin trigger only
+if (php_sapi_name() !== 'cli' && !defined('CRON_MANUAL_RUN')) {
     die('This script can only be run from command line.');
 }
 

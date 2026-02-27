@@ -257,6 +257,11 @@ if (isPost()) {
         $startTime = microtime(true);
         $results = [];
         
+        // Allow cron scripts to run from web context
+        if (!defined('CRON_MANUAL_RUN')) {
+            define('CRON_MANUAL_RUN', true);
+        }
+        
         $cronJobs = [
             'task_reminders'      => ['file' => 'cron_task_reminders.php',      'label' => 'Υπενθυμίσεις Εργασιών'],
             'shift_reminders'     => ['file' => 'cron_shift_reminders.php',     'label' => 'Υπενθυμίσεις Βαρδιών'],
