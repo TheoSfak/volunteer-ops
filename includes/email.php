@@ -330,17 +330,40 @@ function sendSmtpEmail(string $to, string $subject, string $htmlBody, array $smt
             throw new Exception("DATA απέτυχε: $response");
         }
         
-        // Build message
+        // Build message with proper headers for Yahoo/Gmail/Outlook compatibility
         $boundary = md5(uniqid(time()));
+        $domain = explode('@', $smtp['from_email'])[1] ?? 'localhost';
+        $messageId = '<' . bin2hex(random_bytes(16)) . '@' . $domain . '>';
+        
+        // Strip HTML for plain text alternative
+        $plainText = strip_tags(str_replace(['<br>', '<br/>', '<br />', '</p>', '</div>', '</li>'], "\n", $htmlBody));
+        $plainText = html_entity_decode($plainText, ENT_QUOTES, 'UTF-8');
+        $plainText = preg_replace('/\n{3,}/', "\n\n", trim($plainText));
+        
         $message = "Date: " . date('r') . "\r\n";
-        $message .= "From: {$smtp['from_name']} <{$smtp['from_email']}>\r\n";
+        $message .= "From: =?UTF-8?B?" . base64_encode($smtp['from_name']) . "?= <{$smtp['from_email']}>\r\n";
         $message .= "To: $to\r\n";
         $message .= "Subject: =?UTF-8?B?" . base64_encode($subject) . "?=\r\n";
+        $message .= "Message-ID: $messageId\r\n";
         $message .= "MIME-Version: 1.0\r\n";
+        $message .= "Content-Type: multipart/alternative; boundary=\"$boundary\"\r\n";
+        $message .= "X-Mailer: VolunteerOps/" . APP_VERSION . "\r\n";
+        $message .= "\r\n";
+        // Plain text part
+        $message .= "--$boundary\r\n";
+        $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
+        $message .= "Content-Transfer-Encoding: base64\r\n";
+        $message .= "\r\n";
+        $message .= chunk_split(base64_encode($plainText));
+        $message .= "\r\n";
+        // HTML part
+        $message .= "--$boundary\r\n";
         $message .= "Content-Type: text/html; charset=UTF-8\r\n";
         $message .= "Content-Transfer-Encoding: base64\r\n";
         $message .= "\r\n";
         $message .= chunk_split(base64_encode($htmlBody));
+        $message .= "\r\n";
+        $message .= "--$boundary--\r\n";
         $message .= "\r\n.\r\n";
         
         fwrite($socket, $message);
