@@ -853,7 +853,20 @@ INSERT INTO `email_templates` (`code`, `name`, `subject`, `body_html`, `descript
 <p><a href="{{mission_url}}" style="background:#fd7e14;color:#fff;padding:10px 20px;text-decoration:none;border-radius:5px;display:inline-block">Δείτε την Αποστολή</a></p>
 <p style="color:#6c757d;font-size:0.9em">&mdash; {{app_name}}</p>',
 'Αποστέλλεται όταν μια αποστολή πλησιάζει και δεν έχει αρκετούς εθελοντές',
-'{{app_name}}, {{user_name}}, {{mission_title}}, {{mission_description}}, {{mission_url}}');
+'{{app_name}}, {{user_name}}, {{mission_title}}, {{mission_description}}, {{mission_url}}'),
+
+('shelf_expiry_reminder', 'Ειδοποίηση Λήξης Υλικών Ραφιού', 'Ειδοποίηση: Υλικά ραφιού λήγουν ή έχουν λήξει',
+'<p>Γεια σας {{user_name}},</p>
+<p>Υπάρχουν υλικά ραφιού που χρειάζονται την προσοχή σας:</p>
+<ul>
+<li><strong>Ληγμένα υλικά:</strong> {{expired_count}}</li>
+<li><strong>Λήγουν σύντομα (εντός {{threshold_days}} ημερών):</strong> {{expiring_count}}</li>
+</ul>
+<h4>Λεπτομέρειες:</h4>
+<pre>{{details}}</pre>
+<p>Συνδεθείτε στο σύστημα για να ελέγξετε τα υλικά.</p>',
+'Αποστέλλεται όταν υπάρχουν ληγμένα ή υπό λήξη υλικά ραφιού',
+'user_name, expired_count, expiring_count, details, threshold_days');
 
 -- Default notification settings
 INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabled`, `email_template_id`) VALUES
@@ -872,7 +885,8 @@ INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabl
 ('task_deadline_reminder', 'Υπενθύμιση Προθεσμίας', 'Όταν πλησιάζει η προθεσμία εργασίας (24h πριν)', 1, (SELECT id FROM email_templates WHERE code = 'task_deadline_reminder')),
 ('task_status_changed', 'Αλλαγή Κατάστασης Εργασίας', 'Όταν αλλάζει η κατάσταση μιας εργασίας', 1, (SELECT id FROM email_templates WHERE code = 'task_status_changed')),
 ('task_subtask_completed', 'Ολοκλήρωση Υποεργασίας', 'Όταν ολοκληρώνεται μια υποεργασία', 1, (SELECT id FROM email_templates WHERE code = 'task_subtask_completed')),
-('mission_needs_volunteers', 'Αποστολή Χρειάζεται Εθελοντές', 'Όταν μια αποστολή πλησιάζει και δεν έχει αρκετούς εθελοντές', 1, (SELECT id FROM email_templates WHERE code = 'mission_needs_volunteers'));
+('mission_needs_volunteers', 'Αποστολή Χρειάζεται Εθελοντές', 'Όταν μια αποστολή πλησιάζει και δεν έχει αρκετούς εθελοντές', 1, (SELECT id FROM email_templates WHERE code = 'mission_needs_volunteers')),
+('shelf_expiry_reminder', 'Ειδοποίηση Λήξης Υλικών Ραφιού', 'Όταν υπάρχουν ληγμένα ή υπό λήξη υλικά ραφιού', 1, (SELECT id FROM email_templates WHERE code = 'shelf_expiry_reminder'));
 
 -- Default certificate types
 INSERT INTO `certificate_types` (`name`, `description`, `default_validity_months`, `is_required`) VALUES

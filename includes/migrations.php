@@ -1794,6 +1794,9 @@ function runSchemaMigrations(): void {
                     ['mission_needs_volunteers', 'Αποστολή Χρειάζεται Εθελοντές', 'Η αποστολή {{mission_title}} χρειάζεται εθελοντές!',
                      '<p>Γεια σας {{user_name}},</p><p>Η αποστολή "<strong>{{mission_title}}</strong>" πλησιάζει και χρειάζεται ακόμα εθελοντές.</p>',
                      'Αποστέλλεται για αποστολές χωρίς αρκετούς εθελοντές', '{{app_name}}, {{user_name}}, {{mission_title}}, {{mission_description}}, {{mission_url}}'],
+                    ['shelf_expiry_reminder', 'Ειδοποίηση Λήξης Υλικών Ραφιού', 'Ειδοποίηση: Υλικά ραφιού λήγουν ή έχουν λήξει',
+                     '<p>Γεια σας {{user_name}},</p><p>Υπάρχουν υλικά ραφιού που χρειάζονται την προσοχή σας:</p><ul><li><strong>Ληγμένα:</strong> {{expired_count}}</li><li><strong>Λήγουν σύντομα (εντός {{threshold_days}} ημερών):</strong> {{expiring_count}}</li></ul><pre>{{details}}</pre>',
+                     'Αποστέλλεται όταν υπάρχουν ληγμένα ή υπό λήξη υλικά ραφιού', 'user_name, expired_count, expiring_count, details, threshold_days'],
                 ];
                 foreach ($taskTemplates as $t) {
                     $exists = dbFetchOne("SELECT id FROM email_templates WHERE code = ?", [$t[0]]);
@@ -1813,6 +1816,7 @@ function runSchemaMigrations(): void {
                     ['task_status_changed', 'Αλλαγή Κατάστασης Εργασίας', 'Όταν αλλάζει η κατάσταση εργασίας', 1],
                     ['task_subtask_completed', 'Ολοκλήρωση Υποεργασίας', 'Όταν ολοκληρώνεται υποεργασία', 1],
                     ['mission_needs_volunteers', 'Αποστολή Χρειάζεται Εθελοντές', 'Όταν αποστολή πλησιάζει χωρίς αρκετούς εθελοντές', 1],
+                    ['shelf_expiry_reminder', 'Ειδοποίηση Λήξης Υλικών Ραφιού', 'Όταν υπάρχουν ληγμένα ή υπό λήξη υλικά ραφιού', 1],
                 ];
                 foreach ($notifCodes as $n) {
                     $exists = dbFetchOne("SELECT id FROM notification_settings WHERE code = ?", [$n[0]]);
