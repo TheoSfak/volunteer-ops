@@ -25,7 +25,8 @@ if (isPost()) {
     if (empty($email)) $errors[] = 'Το email είναι υποχρεωτικό.';
     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = 'Το email δεν είναι έγκυρο.';
     if (empty($password)) $errors[] = 'Ο κωδικός είναι υποχρεωτικός.';
-    if (strlen($password) < 6) $errors[] = 'Ο κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες.';
+    $pwError = validatePasswordStrength($password);
+    if ($pwError) $errors[] = $pwError;
     if ($password !== $password_confirm) $errors[] = 'Οι κωδικοί δεν ταιριάζουν.';
     
     if (empty($errors)) {

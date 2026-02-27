@@ -65,6 +65,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $dbUser = trim($_POST['db_user'] ?? '');
                 $dbPass = $_POST['db_pass'] ?? '';
                 
+                // Validate database name against injection
+                if (!preg_match('/^[a-zA-Z0-9_]+$/', $dbName)) {
+                    throw new Exception('Το όνομα βάσης δεδομένων περιέχει μη έγκυρους χαρακτήρες.');
+                }
+                
                 logDebug("Παράμετροι: Host={$dbHost}, Port={$dbPort}, DB={$dbName}, User={$dbUser}");
                 
                 // Test connection

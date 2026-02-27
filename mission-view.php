@@ -236,8 +236,10 @@ if (isPost()) {
                         $vtypeLabels = array_map(fn($v) => VOLUNTEER_TYPE_LABELS[$v] ?? $v, $vtypes);
                         $targetLabel = implode(', ', $vtypeLabels);
                     } elseif ($notifyTarget === 'positions' && !empty($positions ?? [])) {
+                        $posPh = implode(',', array_fill(0, count($positions), '?'));
                         $posRows = dbFetchAll(
-                            'SELECT name FROM volunteer_positions WHERE id IN (' . implode(',', $positions) . ')'
+                            "SELECT name FROM volunteer_positions WHERE id IN ($posPh)",
+                            $positions
                         );
                         $targetLabel = implode(', ', array_column($posRows, 'name'));
                     }
