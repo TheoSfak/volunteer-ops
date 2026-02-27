@@ -5,6 +5,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+requireRole([ROLE_SYSTEM_ADMIN]);
 
 // Check if already migrated
 $columns = dbFetchAll("SHOW COLUMNS FROM users LIKE 'cohort_year'");

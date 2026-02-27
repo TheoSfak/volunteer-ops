@@ -4,6 +4,9 @@
  * This script helps enable the PHP zip extension needed for updates
  */
 
+require_once __DIR__ . '/bootstrap.php';
+requireRole([ROLE_SYSTEM_ADMIN]);
+
 echo "<!DOCTYPE html>
 <html lang='el'>
 <head>

@@ -5,6 +5,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+requireRole([ROLE_SYSTEM_ADMIN]);
 
 try {
     // Delete existing task-related templates

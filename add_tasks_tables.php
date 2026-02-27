@@ -5,6 +5,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+requireRole([ROLE_SYSTEM_ADMIN]);
 
 echo "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Add Tasks Tables</title>";
 echo "<style>body{font-family:Arial;margin:40px;} .success{color:green;} .error{color:red;}</style></head><body>";
