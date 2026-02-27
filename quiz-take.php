@@ -71,6 +71,9 @@ if (isPost()) {
             $score++;
         }
         
+        // Delete any old answer for this attempt+question (safety net for retakes)
+        dbExecute("DELETE FROM user_answers WHERE attempt_id = ? AND attempt_type = 'QUIZ' AND question_id = ?", [$attemptId, $question['id']]);
+        
         // Save answer
         dbInsert("
             INSERT INTO user_answers (attempt_id, attempt_type, question_id, selected_option, answer_text, is_correct)
@@ -102,6 +105,16 @@ if (isPost()) {
 
 // Clean up any incomplete attempts (only when NOT submitting - to allow viewing the quiz)
 dbExecute("DELETE FROM quiz_attempts WHERE quiz_id = ? AND user_id = ? AND completed_at IS NULL", [$quizId, $userId]);
+
+// Validate existing session - if attempt was already completed, clear session to start fresh
+if (isset($_SESSION['quiz_attempt_' . $quizId])) {
+    $existingAttemptId = $_SESSION['quiz_attempt_' . $quizId]['attempt_id'];
+    $existingAttempt = dbFetchOne("SELECT id FROM quiz_attempts WHERE id = ? AND completed_at IS NULL", [$existingAttemptId]);
+    if (!$existingAttempt) {
+        // Previous attempt was completed or deleted — force new question selection
+        unset($_SESSION['quiz_attempt_' . $quizId]);
+    }
+}
 
 // Initialize quiz attempt - select random questions
 if (!isset($_SESSION['quiz_attempt_' . $quizId])) {
