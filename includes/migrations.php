@@ -1947,33 +1947,48 @@ function runSchemaMigrations(): void {
                 }
 
                 // Insert email templates for citizen cert expiry
+                // Helper: wrap content in styled email layout
+                $wrap = function($headerBg, $icon, $title, $body) {
+                    return '<div style="background:#eef2f7;padding:28px 0 40px;font-family:Helvetica Neue,Arial,sans-serif;"><div style="max-width:600px;margin:0 auto;"><div style="background:'.$headerBg.';padding:30px 40px 26px;border-radius:12px 12px 0 0;text-align:center;">{{logo_html}}<p style="color:rgba(255,255,255,0.7);font-size:11px;letter-spacing:2px;text-transform:uppercase;margin:0 0 8px;">{{app_name}}</p><div style="font-size:36px;line-height:1;margin:0 0 8px;">'.$icon.'</div><h1 style="color:#fff;margin:0;font-size:23px;font-weight:700;line-height:1.3;">'.$title.'</h1></div><div style="background:#fff;padding:36px 40px 40px;border-radius:0 0 12px 12px;box-shadow:0 4px 20px rgba(0,0,0,0.07);">'.$body.'</div><div style="text-align:center;padding:18px 0 0;color:#9ca3af;font-size:12px;line-height:1.9;"><p style="margin:0;"><strong style="color:#6b7280;">{{app_name}}</strong> &bull; Σύστημα Διαχείρισης Εθελοντών</p><p style="margin:0;">Αυτό το μήνυμα στάλθηκε αυτόματα από το σύστημα.</p></div></div></div>';
+                };
+                $certBlock = function($borderColor) {
+                    return '<div style="background:#f9fafb;border-left:4px solid '.$borderColor.';padding:2px 20px;border-radius:0 8px 8px 0;margin:20px 0;"><div style="padding:7px 0;font-size:14px;border-bottom:1px solid #f3f4f6;"><span style="color:#9ca3af;display:inline-block;min-width:140px;">Πιστοποιητικό:</span><span style="color:#111827;font-weight:600;">{{certificate_type}}</span></div><div style="padding:7px 0;font-size:14px;border-bottom:1px solid #f3f4f6;"><span style="color:#9ca3af;display:inline-block;min-width:140px;">Ημ. Λήξης:</span><span style="color:#111827;font-weight:600;">{{expiry_date}}</span></div><div style="padding:7px 0;font-size:14px;"><span style="color:#9ca3af;display:inline-block;min-width:140px;">Υπόλοιπες Ημέρες:</span><span style="color:#111827;font-weight:600;">{{days_remaining}} ημέρες</span></div></div>';
+                };
+                $btn = function($bg, $text) {
+                    return '<div style="text-align:center;margin:28px 0 4px;"><a href="{{login_url}}" style="background:'.$bg.';color:#ffffff;text-decoration:none;padding:13px 38px;border-radius:8px;font-size:15px;font-weight:700;display:inline-block;letter-spacing:0.3px;">'.$text.'</a></div>';
+                };
+
                 $templates = [
                     [
                         'code' => 'citizen_cert_expiry_3months',
                         'name' => 'Λήξη Πιστοποιητικού Πολίτη (3 μήνες)',
                         'subject' => 'Υπενθύμιση: Το πιστοποιητικό σας λήγει σε 3 μήνες',
-                        'body_html' => '<p>Αγαπητέ/ή {{citizen_name}},</p><p>Σας ενημερώνουμε ότι το πιστοποιητικό σας <strong>{{certificate_type}}</strong> λήγει σε <strong>{{days_remaining}} ημέρες</strong> (στις {{expiry_date}}).</p><p>Παρακαλούμε φροντίστε για την ανανέωσή του εγκαίρως.</p><p>Με εκτίμηση,<br>{{app_name}}</p>',
+                        'body_html' => $wrap('#0ea5e9', '&#128203;', 'Υπενθύμιση Λήξης Πιστοποιητικού',
+                            '<h2 style="color:#1f2937;font-size:18px;font-weight:700;margin:0 0 14px;">Αγαπητέ/ή {{citizen_name}},</h2><p style="color:#4b5563;line-height:1.65;font-size:15px;margin:0 0 14px;">Σας ενημερώνουμε ότι το πιστοποιητικό σας πλησιάζει στην ημερομηνία λήξης του. Παρακαλούμε ξεκινήστε τη διαδικασία ανανέωσής του εγκαίρως.</p>'.$certBlock('#0ea5e9').'<p style="color:#4b5563;line-height:1.65;font-size:15px;margin:0 0 14px;">Διαθέτετε ακόμη αρκετό χρόνο για να ολοκληρώσετε τη διαδικασία ανανέωσης.</p>'.$btn('#0ea5e9','Σύνδεση στο Σύστημα')),
                         'description' => 'Αποστέλλεται 3 μήνες πριν τη λήξη πιστοποιητικού πολίτη',
                     ],
                     [
                         'code' => 'citizen_cert_expiry_1month',
                         'name' => 'Λήξη Πιστοποιητικού Πολίτη (1 μήνα)',
                         'subject' => 'Υπενθύμιση: Το πιστοποιητικό σας λήγει σε 1 μήνα',
-                        'body_html' => '<p>Αγαπητέ/ή {{citizen_name}},</p><p>Σας ενημερώνουμε ότι το πιστοποιητικό σας <strong>{{certificate_type}}</strong> λήγει σε <strong>{{days_remaining}} ημέρες</strong> (στις {{expiry_date}}).</p><p>Παρακαλούμε φροντίστε για την άμεση ανανέωσή του.</p><p>Με εκτίμηση,<br>{{app_name}}</p>',
+                        'body_html' => $wrap('#eab308', '&#9888;', 'Το Πιστοποιητικό σας Λήγει Σύντομα',
+                            '<h2 style="color:#1f2937;font-size:18px;font-weight:700;margin:0 0 14px;">Αγαπητέ/ή {{citizen_name}},</h2><p style="color:#4b5563;line-height:1.65;font-size:15px;margin:0 0 14px;">Το πιστοποιητικό σας λήγει <strong>σε λιγότερο από 1 μήνα</strong>. Παρακαλούμε φροντίστε άμεσα για την ανανέωσή του.</p>'.$certBlock('#eab308').'<p style="color:#4b5563;line-height:1.65;font-size:15px;margin:0 0 14px;">Μην αφήσετε το πιστοποιητικό σας να λήξει — ξεκινήστε τη διαδικασία ανανέωσης σήμερα.</p>'.$btn('#eab308','Σύνδεση στο Σύστημα')),
                         'description' => 'Αποστέλλεται 1 μήνα πριν τη λήξη πιστοποιητικού πολίτη',
                     ],
                     [
                         'code' => 'citizen_cert_expiry_1week',
                         'name' => 'Λήξη Πιστοποιητικού Πολίτη (1 εβδομάδα)',
                         'subject' => '⚠ Επείγον: Το πιστοποιητικό σας λήγει σε 1 εβδομάδα',
-                        'body_html' => '<p>Αγαπητέ/ή {{citizen_name}},</p><p><strong>Επείγουσα ειδοποίηση:</strong> Το πιστοποιητικό σας <strong>{{certificate_type}}</strong> λήγει σε μόλις <strong>{{days_remaining}} ημέρες</strong> (στις {{expiry_date}}).</p><p>Παρακαλούμε φροντίστε άμεσα για την ανανέωσή του.</p><p>Με εκτίμηση,<br>{{app_name}}</p>',
+                        'body_html' => $wrap('#f97316', '&#9888;', 'Επείγουσα Υπενθύμιση — Λήξη Πιστοποιητικού',
+                            '<h2 style="color:#1f2937;font-size:18px;font-weight:700;margin:0 0 14px;">Αγαπητέ/ή {{citizen_name}},</h2><p style="color:#4b5563;line-height:1.65;font-size:15px;margin:0 0 14px;"><strong style="color:#dc2626;">Επείγουσα ειδοποίηση:</strong> Το πιστοποιητικό σας λήγει <strong>σε μόλις λίγες ημέρες</strong>. Απαιτείται άμεση ενέργεια.</p>'.$certBlock('#f97316').'<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px 20px;margin:20px 0;"><p style="color:#dc2626;font-size:14px;font-weight:600;margin:0;">⚠ Αν δεν ανανεωθεί εγκαίρως, το πιστοποιητικό σας θα λήξει και δεν θα είναι έγκυρο.</p></div>'.$btn('#f97316','Σύνδεση στο Σύστημα')),
                         'description' => 'Αποστέλλεται 1 εβδομάδα πριν τη λήξη πιστοποιητικού πολίτη',
                     ],
                     [
                         'code' => 'citizen_cert_expiry_expired',
                         'name' => 'Λήξη Πιστοποιητικού Πολίτη (Ληγμένο)',
                         'subject' => '🔴 Το πιστοποιητικό σας έχει λήξει',
-                        'body_html' => '<p>Αγαπητέ/ή {{citizen_name}},</p><p>Σας ενημερώνουμε ότι το πιστοποιητικό σας <strong>{{certificate_type}}</strong> <strong>έχει λήξει</strong> (ημ. λήξης: {{expiry_date}}).</p><p>Παρακαλούμε φροντίστε άμεσα για την ανανέωσή του.</p><p>Με εκτίμηση,<br>{{app_name}}</p>',
+                        'body_html' => $wrap('#dc2626', '&#10060;', 'Το Πιστοποιητικό σας Έληξε',
+                            '<h2 style="color:#1f2937;font-size:18px;font-weight:700;margin:0 0 14px;">Αγαπητέ/ή {{citizen_name}},</h2><p style="color:#4b5563;line-height:1.65;font-size:15px;margin:0 0 14px;">Σας ενημερώνουμε ότι το πιστοποιητικό σας <strong style="color:#dc2626;">έχει λήξει</strong>. Παρακαλούμε φροντίστε για την <strong>άμεση ανανέωσή</strong> του.</p><div style="background:#f9fafb;border-left:4px solid #dc2626;padding:2px 20px;border-radius:0 8px 8px 0;margin:20px 0;"><div style="padding:7px 0;font-size:14px;border-bottom:1px solid #f3f4f6;"><span style="color:#9ca3af;display:inline-block;min-width:140px;">Πιστοποιητικό:</span><span style="color:#111827;font-weight:600;">{{certificate_type}}</span></div><div style="padding:7px 0;font-size:14px;border-bottom:1px solid #f3f4f6;"><span style="color:#9ca3af;display:inline-block;min-width:140px;">Ημ. Λήξης:</span><span style="color:#dc2626;font-weight:600;">{{expiry_date}}</span></div><div style="padding:7px 0;font-size:14px;"><span style="color:#9ca3af;display:inline-block;min-width:140px;">Κατάσταση:</span><span style="background:#dc2626;color:#fff;padding:2px 10px;border-radius:4px;font-size:13px;font-weight:600;">ΛΗΓΜΕΝΟ</span></div></div><div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px 20px;margin:20px 0;"><p style="color:#dc2626;font-size:14px;font-weight:600;margin:0;">🔴 Το πιστοποιητικό δεν είναι πλέον σε ισχύ. Επικοινωνήστε μαζί μας ή ξεκινήστε τη διαδικασία ανανέωσης.</p></div>'.$btn('#dc2626','Σύνδεση στο Σύστημα')),
                         'description' => 'Αποστέλλεται όταν ένα πιστοποιητικό πολίτη λήξει',
                     ],
                 ];
