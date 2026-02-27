@@ -25,6 +25,7 @@ if (isPost()) {
             $birthDate = post('birth_date') ?: null;
             $issueDate = post('issue_date') ?: null;
             $expiryDate = post('expiry_date') ?: null;
+            $email = trim(post('email')) ?: null;
             $notes = trim(post('notes')) ?: null;
 
             if (empty($firstName) || empty($lastName)) {
@@ -32,12 +33,12 @@ if (isPost()) {
                 redirect('citizen-certificates.php');
             }
 
-            $data = [$certificateTypeId, $firstName, $lastName, $fatherName, $birthDate, $issueDate, $expiryDate, $notes];
+            $data = [$certificateTypeId, $firstName, $lastName, $fatherName, $birthDate, $issueDate, $expiryDate, $email, $notes];
 
             if ($action === 'update' && $id > 0) {
                 dbExecute(
                     "UPDATE citizen_certificates SET certificate_type_id=?, first_name=?, last_name=?, father_name=?,
-                     birth_date=?, issue_date=?, expiry_date=?, notes=?, updated_at=NOW() WHERE id=?",
+                     birth_date=?, issue_date=?, expiry_date=?, email=?, notes=?, updated_at=NOW() WHERE id=?",
                     array_merge($data, [$id])
                 );
                 logAudit('update', 'citizen_certificates', $id);
@@ -46,8 +47,8 @@ if (isPost()) {
                 $data[] = getCurrentUserId();
                 $newId = dbInsert(
                     "INSERT INTO citizen_certificates (certificate_type_id, first_name, last_name, father_name,
-                     birth_date, issue_date, expiry_date, notes, created_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     birth_date, issue_date, expiry_date, email, notes, created_by)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     $data
                 );
                 logAudit('create', 'citizen_certificates', $newId);
@@ -166,6 +167,7 @@ include __DIR__ . '/includes/header.php';
                         <th>Επίθετο</th>
                         <th>Όνομα Πατρός</th>
                         <th>Ημ. Γέννησης</th>
+                        <th>Email</th>
                         <th>Ημ. Έκδοσης</th>
                         <th>Ημ. Λήξης</th>
                         <th class="text-center">Ενέργειες</th>
@@ -173,28 +175,48 @@ include __DIR__ . '/includes/header.php';
                 </thead>
                 <tbody>
                     <?php if (empty($certs)): ?>
-                    <tr><td colspan="9" class="text-center text-muted py-4">Δεν βρέθηκαν πιστοποιητικά.</td></tr>
+                    <tr><td colspan="10" class="text-center text-muted py-4">Δεν βρέθηκαν πιστοποιητικά.</td></tr>
                     <?php else: ?>
                     <?php foreach ($certs as $i => $c): ?>
                     <?php
+                        $rowClass = '';
+                        $expiryBadge = '';
+                        if ($c['expiry_date']) {
+                            $today = new DateTime();
+                            $expiry = new DateTime($c['expiry_date']);
+                            $diff = $today->diff($expiry);
+                            $daysLeft = $expiry > $today ? (int) $diff->days : -(int) $diff->days;
+
+                            if ($daysLeft < 0) {
+                                $rowClass = 'table-danger';
+                                $expiryBadge = '<span class="badge bg-danger ms-1">Ληγμένο</span>';
+                            } elseif ($daysLeft <= 90) {
+                                $rowClass = 'table-warning';
+                                $expiryBadge = '<span class="badge bg-warning text-dark ms-1">' . $daysLeft . ' ημέρες</span>';
+                            } elseif ($daysLeft <= 180) {
+                                $rowClass = 'table-info';
+                                $expiryBadge = '<span class="badge bg-info text-dark ms-1">' . $daysLeft . ' ημέρες</span>';
+                            }
+                        }
                         $isExpired = $c['expiry_date'] && $c['expiry_date'] < date('Y-m-d');
                     ?>
-                    <tr class="<?= $isExpired ? 'table-warning' : '' ?>">
+                    <tr class="<?= $rowClass ?>">
                         <td><?= $pagination['offset'] + $i + 1 ?></td>
                         <td><?= h($c['type_name'] ?? '-') ?></td>
                         <td><?= h($c['first_name']) ?></td>
                         <td><?= h($c['last_name']) ?></td>
                         <td><?= h($c['father_name'] ?? '-') ?></td>
                         <td><?= $c['birth_date'] ? formatDate($c['birth_date']) : '-' ?></td>
+                        <td><?= h($c['email'] ?? '-') ?></td>
                         <td><?= $c['issue_date'] ? formatDate($c['issue_date']) : '-' ?></td>
                         <td>
                             <?php if ($c['expiry_date']): ?>
                                 <?php if ($isExpired): ?>
                                     <span class="text-danger fw-bold"><?= formatDate($c['expiry_date']) ?></span>
-                                    <span class="badge bg-danger ms-1">Ληγμένο</span>
                                 <?php else: ?>
                                     <?= formatDate($c['expiry_date']) ?>
                                 <?php endif; ?>
+                                <?= $expiryBadge ?>
                             <?php else: ?>
                                 -
                             <?php endif; ?>
@@ -286,6 +308,10 @@ include __DIR__ . '/includes/header.php';
                             <input type="date" name="birth_date" id="birth_date" class="form-control">
                         </div>
                         <div class="col-md-4">
+                            <label class="form-label">Email</label>
+                            <input type="email" name="email" id="cert_email" class="form-control">
+                        </div>
+                        <div class="col-md-4">
                             <label class="form-label">Ημ. Έκδοσης</label>
                             <input type="date" name="issue_date" id="issue_date" class="form-control">
                         </div>
@@ -324,6 +350,7 @@ function editCert(c) {
     document.getElementById('last_name').value = c.last_name || '';
     document.getElementById('father_name').value = c.father_name || '';
     document.getElementById('birth_date').value = c.birth_date || '';
+    document.getElementById('cert_email').value = c.email || '';
     document.getElementById('issue_date').value = c.issue_date || '';
     document.getElementById('expiry_date').value = c.expiry_date || '';
     document.getElementById('cert_notes').value = c.notes || '';

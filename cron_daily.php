@@ -44,6 +44,11 @@ echo "[5/5] Processing Shelf Item Expiry Reminders...\n";
 include __DIR__ . '/cron_shelf_expiry.php';
 echo "\n";
 
+// 6. Citizen Certificate Expiry Reminders
+echo "[6/6] Processing Citizen Certificate Expiry Reminders...\n";
+include __DIR__ . '/cron_citizen_cert_expiry.php';
+echo "\n";
+
 echo "==============================================\n";
 echo "All reminders completed successfully!\n";
 echo "Finished at: " . date('Y-m-d H:i:s') . "\n";
