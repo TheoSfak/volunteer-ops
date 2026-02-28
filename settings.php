@@ -67,6 +67,352 @@ $notificationSettings = dbFetchAll("SELECT * FROM notification_settings ORDER BY
 
 $testEmailResult = null;
 
+/**
+ * Run all health checks and return structured results
+ */
+function runHealthChecks() {
+    $results = ['checks' => [], 'score' => 0, 'total' => 0, 'passed' => 0];
+    
+    // ── 1. SYSTEM ENVIRONMENT ──
+    $env = [];
+    
+    // PHP version
+    $phpVer = PHP_VERSION;
+    $env[] = ['label' => 'PHP Version', 'value' => $phpVer, 
+              'status' => version_compare($phpVer, '8.0.0', '>=') ? 'ok' : 'error',
+              'detail' => version_compare($phpVer, '8.0.0', '>=') ? '' : 'Απαιτείται PHP ≥ 8.0'];
+    
+    // PHP Extensions
+    $requiredExt = ['pdo_mysql', 'mbstring', 'json', 'fileinfo', 'openssl'];
+    $optionalExt = ['gd', 'zip', 'curl'];
+    $missingReq = array_filter($requiredExt, fn($e) => !extension_loaded($e));
+    $missingOpt = array_filter($optionalExt, fn($e) => !extension_loaded($e));
+    $extCount = count($requiredExt) - count($missingReq);
+    $env[] = ['label' => 'PHP Extensions (απαιτούμενα)', 'value' => "$extCount/" . count($requiredExt),
+              'status' => empty($missingReq) ? 'ok' : 'error',
+              'detail' => empty($missingReq) ? 'Όλα εγκατεστημένα' : 'Λείπουν: ' . implode(', ', $missingReq)];
+    if (!empty($missingOpt)) {
+        $env[] = ['label' => 'PHP Extensions (προαιρετικά)', 'value' => (count($optionalExt) - count($missingOpt)) . '/' . count($optionalExt),
+                  'status' => 'warning', 'detail' => 'Λείπουν: ' . implode(', ', $missingOpt)];
+    }
+    
+    // MySQL version
+    try {
+        $mysqlVer = dbFetchValue("SELECT VERSION()");
+        $env[] = ['label' => 'MySQL Version', 'value' => $mysqlVer, 'status' => 'ok', 'detail' => ''];
+    } catch (Exception $e) {
+        $env[] = ['label' => 'MySQL Version', 'value' => 'N/A', 'status' => 'error', 'detail' => $e->getMessage()];
+    }
+    
+    // Timezone sync
+    $phpTz = date_default_timezone_get();
+    try {
+        $mysqlTz = dbFetchValue("SELECT @@session.time_zone");
+        $phpOffset = (new DateTime('now', new DateTimeZone($phpTz)))->format('P');
+        $tzMatch = ($mysqlTz === $phpOffset || $mysqlTz === $phpTz);
+        $env[] = ['label' => 'Timezone Sync', 'value' => "PHP: $phpTz | MySQL: $mysqlTz",
+                  'status' => $tzMatch ? 'ok' : 'warning',
+                  'detail' => $tzMatch ? 'Συγχρονισμένα' : 'Ασυμφωνία timezone'];
+    } catch (Exception $e) {
+        $env[] = ['label' => 'Timezone', 'value' => $phpTz, 'status' => 'warning', 'detail' => 'Δεν ήταν δυνατός ο έλεγχος MySQL timezone'];
+    }
+    
+    // Debug mode
+    $debugOn = defined('DEBUG_MODE') && DEBUG_MODE;
+    $env[] = ['label' => 'Debug Mode', 'value' => $debugOn ? 'ΕΝΕΡΓΟ' : 'Ανενεργό',
+              'status' => $debugOn ? 'warning' : 'ok',
+              'detail' => $debugOn ? 'Απενεργοποιήστε το σε production' : ''];
+    
+    // PHP settings
+    $env[] = ['label' => 'Memory Limit', 'value' => ini_get('memory_limit'), 'status' => 'ok', 'detail' => ''];
+    $env[] = ['label' => 'Upload Max Size', 'value' => ini_get('upload_max_filesize'), 'status' => 'ok', 'detail' => ''];
+    $env[] = ['label' => 'Post Max Size', 'value' => ini_get('post_max_size'), 'status' => 'ok', 'detail' => ''];
+    $env[] = ['label' => 'Max Execution Time', 'value' => ini_get('max_execution_time') . 's', 'status' => 'ok', 'detail' => ''];
+    
+    // App version
+    $env[] = ['label' => 'App Version', 'value' => APP_VERSION, 'status' => 'ok', 'detail' => ''];
+    
+    $results['checks']['environment'] = $env;
+    
+    // ── 2. FILE SYSTEM ──
+    $fs = [];
+    $dirs = [
+        'uploads' => __DIR__ . '/uploads',
+        'uploads/logos' => __DIR__ . '/uploads/logos',
+        'uploads/documents' => __DIR__ . '/uploads/documents',
+        'uploads/training' => __DIR__ . '/uploads/training',
+        'uploads/photos' => __DIR__ . '/uploads/photos',
+        'uploads/profile_photos' => __DIR__ . '/uploads/profile_photos',
+        'exports' => __DIR__ . '/exports',
+    ];
+    $missingDirs = 0;
+    foreach ($dirs as $name => $path) {
+        $exists = is_dir($path);
+        $writable = $exists && is_writable($path);
+        if (!$exists) {
+            $fs[] = ['label' => $name . '/', 'value' => 'Δεν υπάρχει', 'status' => 'error', 'detail' => 'Χρειάζεται δημιουργία'];
+            $missingDirs++;
+        } elseif (!$writable) {
+            $fs[] = ['label' => $name . '/', 'value' => 'Μη εγγράψιμο', 'status' => 'warning', 'detail' => 'Ελέγξτε τα δικαιώματα'];
+        } else {
+            $fs[] = ['label' => $name . '/', 'value' => 'OK', 'status' => 'ok', 'detail' => 'Εγγράψιμο'];
+        }
+    }
+    
+    // Disk space
+    $freeSpace = @disk_free_space(__DIR__);
+    if ($freeSpace !== false) {
+        $freeGB = round($freeSpace / (1024*1024*1024), 1);
+        $fs[] = ['label' => 'Ελεύθερος χώρος δίσκου', 'value' => $freeGB . ' GB',
+                 'status' => $freeGB > 1 ? 'ok' : ($freeGB > 0.2 ? 'warning' : 'error'),
+                 'detail' => $freeGB < 1 ? 'Χαμηλός ελεύθερος χώρος' : ''];
+    }
+    
+    $results['checks']['filesystem'] = $fs;
+    $results['missing_dirs'] = $missingDirs;
+    
+    // ── 3. DATABASE STRUCTURE ──
+    $dbStruct = [];
+    
+    $expectedTables = [
+        'achievements', 'audit_logs', 'certificate_types', 'citizen_certificate_types',
+        'citizen_certificates', 'citizens', 'departments', 'documents', 'email_logs',
+        'email_templates', 'exam_attempts', 'inventory_bookings', 'inventory_categories',
+        'inventory_department_access', 'inventory_fixed_assets', 'inventory_items',
+        'inventory_kit_items', 'inventory_kits', 'inventory_locations', 'inventory_notes',
+        'inventory_shelf_items', 'mission_chat_messages', 'mission_debriefs', 'mission_types',
+        'missions', 'newsletter_sends', 'newsletter_unsubscribes', 'newsletters',
+        'notification_settings', 'notifications', 'participation_requests', 'password_reset_tokens',
+        'quiz_attempts', 'settings', 'shifts', 'skill_categories', 'skills', 'subtasks',
+        'task_assignments', 'task_comments', 'tasks', 'training_categories', 'training_exam_questions',
+        'training_exams', 'training_materials', 'training_quiz_questions', 'training_quizzes',
+        'training_user_progress', 'user_achievements', 'user_answers', 'user_notification_preferences',
+        'user_skills', 'users', 'volunteer_certificates', 'volunteer_documents', 'volunteer_pings',
+        'volunteer_points', 'volunteer_positions',
+    ];
+    
+    try {
+        $actualTables = db()->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
+        $missing = array_diff($expectedTables, $actualTables);
+        $extra = array_diff($actualTables, $expectedTables);
+        
+        $dbStruct[] = ['label' => 'Πίνακες βάσης', 'value' => count($actualTables) . '/' . count($expectedTables) . ' αναμενόμενοι',
+                       'status' => empty($missing) ? 'ok' : 'error',
+                       'detail' => empty($missing) ? 'Όλοι οι πίνακες υπάρχουν' : 'Λείπουν: ' . implode(', ', $missing)];
+        if (!empty($extra)) {
+            $dbStruct[] = ['label' => 'Επιπλέον πίνακες', 'value' => count($extra),
+                           'status' => 'warning', 'detail' => implode(', ', $extra)];
+        }
+    } catch (Exception $e) {
+        $dbStruct[] = ['label' => 'Πίνακες βάσης', 'value' => 'Σφάλμα', 'status' => 'error', 'detail' => $e->getMessage()];
+    }
+    
+    // Migration version
+    try {
+        $dbVersion = (int) dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'db_schema_version'");
+        $latestVersion = defined('LATEST_MIGRATION_VERSION') ? LATEST_MIGRATION_VERSION : '?';
+        $dbStruct[] = ['label' => 'Schema Version', 'value' => "$dbVersion / $latestVersion",
+                       'status' => ($dbVersion >= $latestVersion) ? 'ok' : 'warning',
+                       'detail' => ($dbVersion >= $latestVersion) ? 'Ενημερωμένο' : 'Εκκρεμούν migrations'];
+    } catch (Exception $e) {
+        $dbStruct[] = ['label' => 'Schema Version', 'value' => 'N/A', 'status' => 'warning', 'detail' => 'Δεν βρέθηκε'];
+    }
+    
+    // Table sizes
+    try {
+        $dbName = DB_NAME;
+        $tableSizes = dbFetchAll("
+            SELECT TABLE_NAME, TABLE_ROWS, 
+                   ROUND((DATA_LENGTH + INDEX_LENGTH) / 1024 / 1024, 2) AS size_mb,
+                   ROUND(DATA_LENGTH / 1024 / 1024, 2) AS data_mb,
+                   ROUND(INDEX_LENGTH / 1024 / 1024, 2) AS index_mb
+            FROM INFORMATION_SCHEMA.TABLES 
+            WHERE TABLE_SCHEMA = ? 
+            ORDER BY (DATA_LENGTH + INDEX_LENGTH) DESC
+        ", [$dbName]);
+        
+        $totalSize = 0;
+        $totalRows = 0;
+        $topTables = [];
+        foreach ($tableSizes as $i => $ts) {
+            $totalSize += (float)$ts['size_mb'];
+            $totalRows += (int)$ts['TABLE_ROWS'];
+            if ($i < 5) {
+                $topTables[] = $ts['TABLE_NAME'] . ' (' . number_format($ts['TABLE_ROWS']) . ' rows, ' . $ts['size_mb'] . ' MB)';
+            }
+        }
+        
+        $dbStruct[] = ['label' => 'Μέγεθος βάσης', 'value' => round($totalSize, 2) . ' MB',
+                       'status' => 'ok', 'detail' => number_format($totalRows) . ' συνολικές εγγραφές'];
+        $dbStruct[] = ['label' => 'Top 5 πίνακες', 'value' => '',
+                       'status' => 'ok', 'detail' => implode(' | ', $topTables)];
+        
+        $results['table_sizes'] = $tableSizes;
+    } catch (Exception $e) {
+        $dbStruct[] = ['label' => 'Μέγεθος βάσης', 'value' => 'N/A', 'status' => 'warning', 'detail' => $e->getMessage()];
+    }
+    
+    $results['checks']['database'] = $dbStruct;
+    
+    // ── 4. DATA INTEGRITY ──
+    $integrity = [];
+    
+    try {
+        // Orphan participation_requests
+        $orphanPR = (int) dbFetchValue("SELECT COUNT(*) FROM participation_requests pr LEFT JOIN shifts s ON pr.shift_id = s.id WHERE s.id IS NULL");
+        $integrity[] = ['label' => 'Ορφανές συμμετοχές (shift deleted)', 'value' => $orphanPR,
+                        'status' => $orphanPR === 0 ? 'ok' : 'warning', 'detail' => $orphanPR > 0 ? 'Χρειάζεται καθαρισμός' : ''];
+        
+        // Orphan shifts
+        $orphanShifts = (int) dbFetchValue("SELECT COUNT(*) FROM shifts sh LEFT JOIN missions m ON sh.mission_id = m.id WHERE m.id IS NULL");
+        $integrity[] = ['label' => 'Ορφανές βάρδιες (mission deleted)', 'value' => $orphanShifts,
+                        'status' => $orphanShifts === 0 ? 'ok' : 'warning', 'detail' => $orphanShifts > 0 ? 'Χρειάζεται καθαρισμός' : ''];
+        
+        // Orphan volunteer_points
+        $orphanPoints = (int) dbFetchValue("SELECT COUNT(*) FROM volunteer_points vp LEFT JOIN users u ON vp.user_id = u.id WHERE u.id IS NULL");
+        $integrity[] = ['label' => 'Ορφανοί πόντοι (user deleted)', 'value' => $orphanPoints,
+                        'status' => $orphanPoints === 0 ? 'ok' : 'warning', 'detail' => $orphanPoints > 0 ? 'Χρειάζεται καθαρισμός' : ''];
+        
+        // Orphan notifications
+        $orphanNotif = (int) dbFetchValue("SELECT COUNT(*) FROM notifications n LEFT JOIN users u ON n.user_id = u.id WHERE u.id IS NULL");
+        $integrity[] = ['label' => 'Ορφανές ειδοποιήσεις', 'value' => $orphanNotif,
+                        'status' => $orphanNotif === 0 ? 'ok' : 'warning', 'detail' => $orphanNotif > 0 ? 'Χρειάζεται καθαρισμός' : ''];
+        
+        // Users active but soft-deleted
+        $ghostUsers = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE is_active = 1 AND deleted_at IS NOT NULL");
+        $integrity[] = ['label' => 'Ασυνέπεια (active + deleted)', 'value' => $ghostUsers,
+                        'status' => $ghostUsers === 0 ? 'ok' : 'warning', 'detail' => $ghostUsers > 0 ? 'Χρήστες active αλλά deleted' : ''];
+        
+        // Duplicate emails
+        $dupEmails = (int) dbFetchValue("SELECT COUNT(*) FROM (SELECT email, COUNT(*) c FROM users WHERE deleted_at IS NULL GROUP BY email HAVING c > 1) t");
+        $integrity[] = ['label' => 'Διπλότυπα emails', 'value' => $dupEmails,
+                        'status' => $dupEmails === 0 ? 'ok' : 'error', 'detail' => $dupEmails > 0 ? 'Υπάρχουν διπλότυπα emails' : ''];
+        
+        // Approved decisions without decided_by
+        $noDecider = (int) dbFetchValue("SELECT COUNT(*) FROM participation_requests WHERE status IN ('APPROVED','REJECTED') AND decided_by IS NULL");
+        $integrity[] = ['label' => 'Αποφάσεις χωρίς decided_by', 'value' => $noDecider,
+                        'status' => $noDecider === 0 ? 'ok' : 'warning', 'detail' => $noDecider > 0 ? 'Ιστορικά δεδομένα χωρίς αποφασίζοντα' : ''];
+        
+        $totalOrphans = $orphanPR + $orphanShifts + $orphanPoints + $orphanNotif;
+        $results['total_orphans'] = $totalOrphans;
+        
+    } catch (Exception $e) {
+        $integrity[] = ['label' => 'Έλεγχος ακεραιότητας', 'value' => 'Σφάλμα', 'status' => 'error', 'detail' => $e->getMessage()];
+    }
+    
+    $results['checks']['integrity'] = $integrity;
+    
+    // ── 5. PERFORMANCE ──
+    $perf = [];
+    
+    try {
+        // Audit logs size
+        $auditCount = (int) dbFetchValue("SELECT COUNT(*) FROM audit_logs");
+        $perf[] = ['label' => 'Εγγραφές audit_logs', 'value' => number_format($auditCount),
+                   'status' => $auditCount < 50000 ? 'ok' : ($auditCount < 100000 ? 'warning' : 'error'),
+                   'detail' => $auditCount >= 50000 ? 'Σκεφτείτε καθαρισμό παλαιών εγγραφών' : ''];
+        
+        // Email logs size
+        $emailLogCount = (int) dbFetchValue("SELECT COUNT(*) FROM email_logs");
+        $perf[] = ['label' => 'Εγγραφές email_logs', 'value' => number_format($emailLogCount),
+                   'status' => $emailLogCount < 50000 ? 'ok' : ($emailLogCount < 100000 ? 'warning' : 'error'),
+                   'detail' => $emailLogCount >= 50000 ? 'Σκεφτείτε καθαρισμό παλαιών εγγραφών' : ''];
+        
+        // Notifications unread ratio
+        $totalNotif = (int) dbFetchValue("SELECT COUNT(*) FROM notifications");
+        $unreadNotif = (int) dbFetchValue("SELECT COUNT(*) FROM notifications WHERE read_at IS NULL");
+        $perf[] = ['label' => 'Ειδοποιήσεις (αδιάβαστες/σύνολο)', 'value' => number_format($unreadNotif) . '/' . number_format($totalNotif),
+                   'status' => ($totalNotif === 0 || ($unreadNotif / max($totalNotif, 1)) < 0.8) ? 'ok' : 'warning',
+                   'detail' => ''];
+        
+    } catch (Exception $e) {
+        $perf[] = ['label' => 'Στατιστικά απόδοσης', 'value' => 'Σφάλμα', 'status' => 'error', 'detail' => $e->getMessage()];
+    }
+    
+    $results['checks']['performance'] = $perf;
+    
+    // ── 6. CONFIG & SECURITY ──
+    $security = [];
+    
+    // Admin email
+    $adminEmail = getSetting('admin_email', '');
+    $security[] = ['label' => 'Admin email', 'value' => !empty($adminEmail) ? $adminEmail : 'Μη ρυθμισμένο',
+                   'status' => !empty($adminEmail) ? 'ok' : 'warning', 'detail' => empty($adminEmail) ? 'Ρυθμίστε στις Γενικές ρυθμίσεις' : ''];
+    
+    // SMTP
+    $smtpHost = getSetting('smtp_host', '');
+    $security[] = ['label' => 'SMTP Email', 'value' => !empty($smtpHost) ? $smtpHost : 'Μη ρυθμισμένο',
+                   'status' => !empty($smtpHost) ? 'ok' : 'warning', 'detail' => empty($smtpHost) ? 'Τα email δεν αποστέλλονται' : ''];
+    
+    // System admins exist
+    $adminCount = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE role = 'SYSTEM_ADMIN' AND is_active = 1 AND deleted_at IS NULL");
+    $security[] = ['label' => 'System Admins', 'value' => $adminCount,
+                   'status' => $adminCount >= 1 ? 'ok' : 'error', 'detail' => $adminCount === 0 ? 'Δεν υπάρχει ενεργός admin!' : ''];
+    
+    // Maintenance mode
+    $maintMode = getSetting('maintenance_mode', '0');
+    $security[] = ['label' => 'Λειτουργία συντήρησης', 'value' => $maintMode === '1' ? 'ΕΝΕΡΓΗ' : 'Ανενεργή',
+                   'status' => $maintMode === '1' ? 'warning' : 'ok', 'detail' => $maintMode === '1' ? 'Μόνο admins έχουν πρόσβαση' : ''];
+    
+    // Email templates
+    try {
+        $totalTemplates = (int) dbFetchValue("SELECT COUNT(*) FROM email_templates");
+        $emptyTemplates = (int) dbFetchValue("SELECT COUNT(*) FROM email_templates WHERE body_html IS NULL OR body_html = ''");
+        $security[] = ['label' => 'Email templates', 'value' => $totalTemplates . ' templates',
+                       'status' => $emptyTemplates === 0 ? 'ok' : 'warning',
+                       'detail' => $emptyTemplates > 0 ? "$emptyTemplates κενά templates" : 'Όλα ρυθμισμένα'];
+    } catch (Exception $e) { /* skip */ }
+    
+    // Session lifetime
+    $security[] = ['label' => 'Session Lifetime', 'value' => (defined('SESSION_LIFETIME') ? (SESSION_LIFETIME / 60) . ' λεπτά' : 'Default'),
+                   'status' => 'ok', 'detail' => ''];
+    
+    $results['checks']['security'] = $security;
+    
+    // ── 7. HEALTH STATS ──
+    $stats = [];
+    try {
+        $totalUsers = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL");
+        $activeUsers = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE is_active = 1 AND deleted_at IS NULL");
+        $deletedUsers = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE deleted_at IS NOT NULL");
+        $stats[] = ['label' => 'Χρήστες (ενεργοί / σύνολο / διαγραμμένοι)', 'value' => "$activeUsers / $totalUsers / $deletedUsers", 'status' => 'ok', 'detail' => ''];
+        
+        $missionsByStatus = dbFetchAll("SELECT status, COUNT(*) as cnt FROM missions WHERE deleted_at IS NULL GROUP BY status");
+        $missionStr = implode(', ', array_map(fn($m) => $m['status'] . ': ' . $m['cnt'], $missionsByStatus));
+        $stats[] = ['label' => 'Αποστολές κατά κατάσταση', 'value' => $missionStr ?: 'Δεν υπάρχουν', 'status' => 'ok', 'detail' => ''];
+        
+        // Last audit entry
+        $lastAudit = dbFetchValue("SELECT MAX(created_at) FROM audit_logs");
+        $stats[] = ['label' => 'Τελευταία ενέργεια (audit)', 'value' => $lastAudit ? formatDateTime($lastAudit) : 'Κενό', 'status' => 'ok', 'detail' => ''];
+        
+        // Last cron run
+        $lastCron = getSetting('cron_last_manual_run', '');
+        $stats[] = ['label' => 'Τελευταίο cron run', 'value' => $lastCron ? formatDateTime($lastCron) : 'Ποτέ', 
+                    'status' => !empty($lastCron) ? 'ok' : 'warning', 'detail' => empty($lastCron) ? 'Δεν έχει τρέξει ποτέ' : ''];
+        
+    } catch (Exception $e) {
+        $stats[] = ['label' => 'Στατιστικά', 'value' => 'Σφάλμα', 'status' => 'error', 'detail' => $e->getMessage()];
+    }
+    
+    $results['checks']['stats'] = $stats;
+    
+    // ── CALCULATE SCORE ──
+    $total = 0;
+    $passed = 0;
+    foreach ($results['checks'] as $category => $checks) {
+        foreach ($checks as $check) {
+            $total++;
+            if ($check['status'] === 'ok') $passed++;
+            elseif ($check['status'] === 'warning') $passed += 0.5;
+        }
+    }
+    $results['total'] = $total;
+    $results['passed'] = $passed;
+    $results['score'] = $total > 0 ? round(($passed / $total) * 100) : 0;
+    
+    return $results;
+}
+
 if (isPost()) {
     verifyCsrf();
     $action = post('action', 'save_general');
@@ -347,6 +693,92 @@ if (isPost()) {
         setFlash('success', "Η εκτέλεση ολοκληρώθηκε σε {$elapsed}s.");
         redirect('settings.php?tab=cron');
         
+    } elseif ($action === 'run_health_check') {
+        // Run health checks — results stored in session
+        $_SESSION['health_results'] = runHealthChecks();
+        $_SESSION['health_ran'] = true;
+        logAudit('health_check', 'system', null, 'Εκτέλεση ελέγχου υγείας');
+        redirect('settings.php?tab=health');
+
+    } elseif ($action === 'health_fix_dirs') {
+        $dirs = [
+            __DIR__ . '/uploads',
+            __DIR__ . '/uploads/logos',
+            __DIR__ . '/uploads/documents',
+            __DIR__ . '/uploads/training',
+            __DIR__ . '/uploads/photos',
+            __DIR__ . '/uploads/profile_photos',
+            __DIR__ . '/exports',
+        ];
+        $created = 0;
+        foreach ($dirs as $dir) {
+            if (!is_dir($dir)) {
+                @mkdir($dir, 0755, true);
+                $created++;
+            }
+        }
+        logAudit('health_fix', 'system', null, "Δημιουργία $created φακέλων");
+        setFlash('success', "Δημιουργήθηκαν $created φάκελοι επιτυχώς.");
+        redirect('settings.php?tab=health');
+
+    } elseif ($action === 'health_fix_orphans') {
+        $fixed = 0;
+        // Orphan participation_requests (shift deleted)
+        $fixed += dbExecute("DELETE pr FROM participation_requests pr LEFT JOIN shifts s ON pr.shift_id = s.id WHERE s.id IS NULL");
+        // Orphan shifts (mission deleted)
+        $fixed += dbExecute("DELETE sh FROM shifts sh LEFT JOIN missions m ON sh.mission_id = m.id WHERE m.id IS NULL");
+        // Orphan volunteer_points (user deleted)
+        $fixed += dbExecute("DELETE vp FROM volunteer_points vp LEFT JOIN users u ON vp.user_id = u.id WHERE u.id IS NULL");
+        // Orphan notifications (user deleted)
+        $fixed += dbExecute("DELETE n FROM notifications n LEFT JOIN users u ON n.user_id = u.id WHERE u.id IS NULL");
+        // Orphan user_achievements (user deleted)
+        $fixed += dbExecute("DELETE ua FROM user_achievements ua LEFT JOIN users u ON ua.user_id = u.id WHERE u.id IS NULL");
+        logAudit('health_fix', 'system', null, "Καθαρισμός $fixed ορφανών εγγραφών");
+        setFlash('success', "Καθαρίστηκαν $fixed ορφανές εγγραφές.");
+        redirect('settings.php?tab=health');
+
+    } elseif ($action === 'health_optimize') {
+        $tables = db()->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
+        $optimized = 0;
+        foreach ($tables as $table) {
+            try {
+                db()->exec("OPTIMIZE TABLE `$table`");
+                $optimized++;
+            } catch (Exception $e) { /* skip */ }
+        }
+        logAudit('health_optimize', 'system', null, "OPTIMIZE TABLE σε $optimized πίνακες");
+        setFlash('success', "Βελτιστοποιήθηκαν $optimized πίνακες επιτυχώς.");
+        redirect('settings.php?tab=health');
+
+    } elseif ($action === 'health_analyze') {
+        $tables = db()->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
+        $analyzed = 0;
+        foreach ($tables as $table) {
+            try {
+                db()->exec("ANALYZE TABLE `$table`");
+                $analyzed++;
+            } catch (Exception $e) { /* skip */ }
+        }
+        logAudit('health_analyze', 'system', null, "ANALYZE TABLE σε $analyzed πίνακες");
+        setFlash('success', "Ανάλυση στατιστικών σε $analyzed πίνακες ολοκληρώθηκε.");
+        redirect('settings.php?tab=health');
+
+    } elseif ($action === 'health_cleanup_logs') {
+        $months = (int) post('cleanup_months', 6);
+        if ($months < 1) $months = 1;
+        $deleted = dbExecute("DELETE FROM audit_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? MONTH)", [$months]);
+        logAudit('health_cleanup', 'audit_logs', null, "Διαγραφή $deleted εγγραφών παλαιότερων $months μηνών");
+        setFlash('success', "Διαγράφηκαν $deleted εγγραφές audit log παλαιότερες $months μηνών.");
+        redirect('settings.php?tab=health');
+
+    } elseif ($action === 'health_cleanup_email_logs') {
+        $months = (int) post('cleanup_months', 6);
+        if ($months < 1) $months = 1;
+        $deleted = dbExecute("DELETE FROM email_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? MONTH)", [$months]);
+        logAudit('health_cleanup', 'email_logs', null, "Διαγραφή $deleted email logs παλαιότερων $months μηνών");
+        setFlash('success', "Διαγράφηκαν $deleted εγγραφές email log παλαιότερες $months μηνών.");
+        redirect('settings.php?tab=health');
+
     } elseif ($action === 'reset_data') {
         $confirmation = post('confirmation', '');
         if ($confirmation !== 'DELETE') {
@@ -457,6 +889,11 @@ include __DIR__ . '/includes/header.php';
     <li class="nav-item">
         <a class="nav-link <?= $activeTab === 'cron' ? 'active' : '' ?>" href="settings.php?tab=cron">
             <i class="bi bi-clock-history me-1"></i>Cron Jobs
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $activeTab === 'health' ? 'active' : '' ?>" href="settings.php?tab=health">
+            <i class="bi bi-heart-pulse me-1"></i>Υγεία Εφαρμογής
         </a>
     </li>
     <li class="nav-item">
@@ -1423,6 +1860,377 @@ $citizenStats = [
         </div>
     </div>
 </div>
+<?php endif; ?>
+
+<?php if ($activeTab === 'health'): ?>
+<?php
+$healthResults = $_SESSION['health_results'] ?? null;
+$healthRan = $_SESSION['health_ran'] ?? false;
+unset($_SESSION['health_results'], $_SESSION['health_ran']);
+?>
+
+<!-- Action Buttons -->
+<div class="d-flex gap-2 mb-4 flex-wrap">
+    <form method="post" class="d-inline">
+        <?= csrfField() ?>
+        <input type="hidden" name="action" value="run_health_check">
+        <button type="submit" class="btn btn-primary btn-lg">
+            <i class="bi bi-heart-pulse me-2"></i>Εκτέλεση Ελέγχου Υγείας
+        </button>
+    </form>
+    <form method="post" class="d-inline" onsubmit="return confirm('Εκτέλεση OPTIMIZE TABLE σε όλους τους πίνακες;')">
+        <?= csrfField() ?>
+        <input type="hidden" name="action" value="health_optimize">
+        <button type="submit" class="btn btn-outline-success">
+            <i class="bi bi-rocket-takeoff me-1"></i>Optimize Tables
+        </button>
+    </form>
+    <form method="post" class="d-inline">
+        <?= csrfField() ?>
+        <input type="hidden" name="action" value="health_analyze">
+        <button type="submit" class="btn btn-outline-info">
+            <i class="bi bi-bar-chart me-1"></i>Analyze Tables
+        </button>
+    </form>
+</div>
+
+<?php if ($healthRan && $healthResults): ?>
+<!-- Overall Score -->
+<div class="card mb-4 <?= $healthResults['score'] >= 90 ? 'border-success' : ($healthResults['score'] >= 70 ? 'border-warning' : 'border-danger') ?>">
+    <div class="card-body text-center py-4">
+        <h4 class="mb-3">Συνολική Βαθμολογία Υγείας</h4>
+        <div class="d-flex justify-content-center align-items-center gap-3">
+            <?php
+            $scoreColor = $healthResults['score'] >= 90 ? 'success' : ($healthResults['score'] >= 70 ? 'warning' : 'danger');
+            $scoreIcon = $healthResults['score'] >= 90 ? 'bi-check-circle-fill' : ($healthResults['score'] >= 70 ? 'bi-exclamation-triangle-fill' : 'bi-x-circle-fill');
+            ?>
+            <i class="bi <?= $scoreIcon ?> text-<?= $scoreColor ?>" style="font-size: 3rem;"></i>
+            <div>
+                <span class="display-3 fw-bold text-<?= $scoreColor ?>"><?= $healthResults['score'] ?>%</span>
+                <div class="text-muted"><?= $healthResults['passed'] ?> / <?= $healthResults['total'] ?> έλεγχοι</div>
+            </div>
+        </div>
+        <div class="progress mt-3 mx-auto" style="max-width: 500px; height: 12px;">
+            <div class="progress-bar bg-<?= $scoreColor ?>" style="width: <?= $healthResults['score'] ?>%"></div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-6">
+        <!-- 1. System Environment -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-cpu me-1"></i>Περιβάλλον Συστήματος</h5>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <tbody>
+                    <?php foreach ($healthResults['checks']['environment'] ?? [] as $check): ?>
+                        <tr>
+                            <td class="ps-3" style="width:40%"><?= h($check['label']) ?></td>
+                            <td>
+                                <?php if ($check['status'] === 'ok'): ?>
+                                    <span class="badge bg-success"><i class="bi bi-check-lg"></i></span>
+                                <?php elseif ($check['status'] === 'warning'): ?>
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i></span>
+                                <?php else: ?>
+                                    <span class="badge bg-danger"><i class="bi bi-x-lg"></i></span>
+                                <?php endif; ?>
+                                <strong><?= h($check['value']) ?></strong>
+                                <?php if (!empty($check['detail'])): ?>
+                                    <small class="text-muted d-block"><?= h($check['detail']) ?></small>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 3. Database Structure -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-database me-1"></i>Βάση Δεδομένων - Δομή</h5>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <tbody>
+                    <?php foreach ($healthResults['checks']['database'] ?? [] as $check): ?>
+                        <tr>
+                            <td class="ps-3" style="width:40%"><?= h($check['label']) ?></td>
+                            <td>
+                                <?php if ($check['status'] === 'ok'): ?>
+                                    <span class="badge bg-success"><i class="bi bi-check-lg"></i></span>
+                                <?php elseif ($check['status'] === 'warning'): ?>
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i></span>
+                                <?php else: ?>
+                                    <span class="badge bg-danger"><i class="bi bi-x-lg"></i></span>
+                                <?php endif; ?>
+                                <strong><?= h($check['value']) ?></strong>
+                                <?php if (!empty($check['detail'])): ?>
+                                    <small class="text-muted d-block"><?= h($check['detail']) ?></small>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 5. Performance -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-speedometer2 me-1"></i>Απόδοση</h5>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <tbody>
+                    <?php foreach ($healthResults['checks']['performance'] ?? [] as $check): ?>
+                        <tr>
+                            <td class="ps-3" style="width:40%"><?= h($check['label']) ?></td>
+                            <td>
+                                <?php if ($check['status'] === 'ok'): ?>
+                                    <span class="badge bg-success"><i class="bi bi-check-lg"></i></span>
+                                <?php elseif ($check['status'] === 'warning'): ?>
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i></span>
+                                <?php else: ?>
+                                    <span class="badge bg-danger"><i class="bi bi-x-lg"></i></span>
+                                <?php endif; ?>
+                                <strong><?= h($check['value']) ?></strong>
+                                <?php if (!empty($check['detail'])): ?>
+                                    <small class="text-muted d-block"><?= h($check['detail']) ?></small>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer">
+                <div class="d-flex gap-2 flex-wrap">
+                    <form method="post" class="d-inline">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="health_cleanup_logs">
+                        <input type="hidden" name="cleanup_months" value="6">
+                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή audit logs παλαιότερων 6 μηνών;')">
+                            <i class="bi bi-trash me-1"></i>Καθαρισμός Audit Log (&gt; 6μ)
+                        </button>
+                    </form>
+                    <form method="post" class="d-inline">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="health_cleanup_email_logs">
+                        <input type="hidden" name="cleanup_months" value="6">
+                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή email logs παλαιότερων 6 μηνών;')">
+                            <i class="bi bi-trash me-1"></i>Καθαρισμός Email Log (&gt; 6μ)
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <!-- 2. File System -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-folder me-1"></i>Σύστημα Αρχείων</h5>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <tbody>
+                    <?php foreach ($healthResults['checks']['filesystem'] ?? [] as $check): ?>
+                        <tr>
+                            <td class="ps-3" style="width:40%"><code><?= h($check['label']) ?></code></td>
+                            <td>
+                                <?php if ($check['status'] === 'ok'): ?>
+                                    <span class="badge bg-success"><i class="bi bi-check-lg"></i></span>
+                                <?php elseif ($check['status'] === 'warning'): ?>
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i></span>
+                                <?php else: ?>
+                                    <span class="badge bg-danger"><i class="bi bi-x-lg"></i></span>
+                                <?php endif; ?>
+                                <strong><?= h($check['value']) ?></strong>
+                                <?php if (!empty($check['detail'])): ?>
+                                    <small class="text-muted d-block"><?= h($check['detail']) ?></small>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php if (($healthResults['missing_dirs'] ?? 0) > 0): ?>
+            <div class="card-footer">
+                <form method="post" class="d-inline">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="health_fix_dirs">
+                    <button type="submit" class="btn btn-sm btn-warning">
+                        <i class="bi bi-folder-plus me-1"></i>Δημιουργία Φακέλων (<?= $healthResults['missing_dirs'] ?>)
+                    </button>
+                </form>
+            </div>
+            <?php endif; ?>
+        </div>
+
+        <!-- 4. Data Integrity -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-link-45deg me-1"></i>Ακεραιότητα Δεδομένων</h5>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <tbody>
+                    <?php foreach ($healthResults['checks']['integrity'] ?? [] as $check): ?>
+                        <tr>
+                            <td class="ps-3" style="width:50%"><?= h($check['label']) ?></td>
+                            <td>
+                                <?php if ($check['status'] === 'ok'): ?>
+                                    <span class="badge bg-success"><i class="bi bi-check-lg"></i></span>
+                                <?php elseif ($check['status'] === 'warning'): ?>
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i></span>
+                                <?php else: ?>
+                                    <span class="badge bg-danger"><i class="bi bi-x-lg"></i></span>
+                                <?php endif; ?>
+                                <strong><?= h($check['value']) ?></strong>
+                                <?php if (!empty($check['detail'])): ?>
+                                    <small class="text-muted d-block"><?= h($check['detail']) ?></small>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php if (($healthResults['total_orphans'] ?? 0) > 0): ?>
+            <div class="card-footer">
+                <form method="post" class="d-inline" onsubmit="return confirm('Θα διαγραφούν <?= $healthResults['total_orphans'] ?> ορφανές εγγραφές. Συνέχεια;')">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="health_fix_orphans">
+                    <button type="submit" class="btn btn-sm btn-warning">
+                        <i class="bi bi-trash me-1"></i>Καθαρισμός Ορφανών (<?= $healthResults['total_orphans'] ?>)
+                    </button>
+                </form>
+            </div>
+            <?php endif; ?>
+        </div>
+
+        <!-- 6. Config & Security -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-shield-lock me-1"></i>Ρυθμίσεις &amp; Ασφάλεια</h5>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <tbody>
+                    <?php foreach ($healthResults['checks']['security'] ?? [] as $check): ?>
+                        <tr>
+                            <td class="ps-3" style="width:40%"><?= h($check['label']) ?></td>
+                            <td>
+                                <?php if ($check['status'] === 'ok'): ?>
+                                    <span class="badge bg-success"><i class="bi bi-check-lg"></i></span>
+                                <?php elseif ($check['status'] === 'warning'): ?>
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i></span>
+                                <?php else: ?>
+                                    <span class="badge bg-danger"><i class="bi bi-x-lg"></i></span>
+                                <?php endif; ?>
+                                <strong><?= h($check['value']) ?></strong>
+                                <?php if (!empty($check['detail'])): ?>
+                                    <small class="text-muted d-block"><?= h($check['detail']) ?></small>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 7. Health Stats -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-graph-up me-1"></i>Στατιστικά Υγείας</h5>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <tbody>
+                    <?php foreach ($healthResults['checks']['stats'] ?? [] as $check): ?>
+                        <tr>
+                            <td class="ps-3" style="width:50%"><?= h($check['label']) ?></td>
+                            <td>
+                                <?php if ($check['status'] === 'ok'): ?>
+                                    <span class="badge bg-success"><i class="bi bi-check-lg"></i></span>
+                                <?php elseif ($check['status'] === 'warning'): ?>
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle"></i></span>
+                                <?php else: ?>
+                                    <span class="badge bg-danger"><i class="bi bi-x-lg"></i></span>
+                                <?php endif; ?>
+                                <strong><?= h($check['value']) ?></strong>
+                                <?php if (!empty($check['detail'])): ?>
+                                    <small class="text-muted d-block"><?= h($check['detail']) ?></small>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Table Sizes Detail -->
+<?php if (!empty($healthResults['table_sizes'])): ?>
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-table me-1"></i>Μεγέθη Πινάκων</h5>
+        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#tableSizesCollapse">
+            <i class="bi bi-chevron-down me-1"></i>Εμφάνιση/Απόκρυψη
+        </button>
+    </div>
+    <div class="collapse" id="tableSizesCollapse">
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="ps-3">Πίνακας</th>
+                        <th class="text-end">Εγγραφές</th>
+                        <th class="text-end">Data (MB)</th>
+                        <th class="text-end">Index (MB)</th>
+                        <th class="text-end">Σύνολο (MB)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($healthResults['table_sizes'] as $ts): ?>
+                    <tr>
+                        <td class="ps-3"><code><?= h($ts['TABLE_NAME']) ?></code></td>
+                        <td class="text-end"><?= number_format($ts['TABLE_ROWS']) ?></td>
+                        <td class="text-end"><?= $ts['data_mb'] ?></td>
+                        <td class="text-end"><?= $ts['index_mb'] ?></td>
+                        <td class="text-end"><strong><?= $ts['size_mb'] ?></strong></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php else: ?>
+<!-- No results yet -->
+<div class="text-center py-5">
+    <i class="bi bi-heart-pulse text-muted" style="font-size: 4rem;"></i>
+    <h4 class="text-muted mt-3">Έλεγχος Υγείας Εφαρμογής</h4>
+    <p class="text-muted">Πατήστε <strong>«Εκτέλεση Ελέγχου Υγείας»</strong> για πλήρη διαγνωστικό έλεγχο του συστήματος.</p>
+    <p class="text-muted small">
+        Ελέγχονται: Περιβάλλον PHP/MySQL, σύστημα αρχείων, δομή βάσης, ακεραιότητα δεδομένων,<br>
+        απόδοση, ρυθμίσεις ασφαλείας και στατιστικά λειτουργίας.
+    </p>
+</div>
+<?php endif; ?>
 <?php endif; ?>
 
 <?php if ($activeTab === 'reset'): ?>
