@@ -5,8 +5,16 @@
  */
 require_once __DIR__ . '/bootstrap.php';
 
-setFlash('error', 'Η εγγραφή χρηστών γίνεται μόνο από τον Διαχειριστή. Απευθυνθείτε στον διαχειριστή του συστήματος.');
-redirect('login.php');
+// Check if registration is enabled via settings
+if (!getSetting('registration_enabled', '1')) {
+    setFlash('error', 'Η εγγραφή χρηστών γίνεται μόνο από τον Διαχειριστή. Απευθυνθείτε στον διαχειριστή του συστήματος.');
+    redirect('login.php');
+}
+
+// Already logged in?
+if (isLoggedIn()) {
+    redirect('dashboard.php');
+}
 
 $errors = [];
 $departments = dbFetchAll("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
@@ -39,7 +47,11 @@ if (isPost()) {
         ]);
         
         if ($result['success']) {
-            setFlash('success', 'Η εγγραφή ολοκληρώθηκε! Σας έχουμε αποστείλει email επιβεβαίωσης. Ελέγξτε τα εισερχόμενά σας και ακολουθήστε τον σύνδεσμο για να επιβεβαιώσετε τη διεύθυνσή σας.');
+            if (getSetting('require_approval', '0')) {
+                setFlash('success', 'Η εγγραφή ολοκληρώθηκε! Ο λογαριασμός σας είναι σε αναμονή έγκρισης από τον διαχειριστή. Θα ειδοποιηθείτε μέσω email μόλις εγκριθεί.');
+            } else {
+                setFlash('success', 'Η εγγραφή ολοκληρώθηκε! Σας έχουμε αποστείλει email επιβεβαίωσης. Ελέγξτε τα εισερχόμενά σας και ακολουθήστε τον σύνδεσμο για να επιβεβαιώσετε τη διεύθυνσή σας.');
+            }
             redirect('login.php');
         } else {
             $errors[] = $result['message'];

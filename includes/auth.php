@@ -227,10 +227,15 @@ function registerUser($data) {
     $hashedPassword = password_hash($data['password'], PASSWORD_DEFAULT);
     $verificationToken = bin2hex(random_bytes(32));
     
-    // Insert user — inactive until email verified and admin approved
+    // Determine approval status based on system setting
+    $requireApproval = getSetting('require_approval', '0');
+    $approvalStatus = $requireApproval ? 'PENDING' : 'APPROVED';
+    $isActive = $requireApproval ? 0 : 1;
+    
+    // Insert user
     $userId = dbInsert(
         "INSERT INTO users (name, email, password, phone, role, department_id, is_active, approval_status, email_verification_token, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, ?, ?, 0, 'PENDING', ?, NOW(), NOW())",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
         [
             $data['name'],
             $data['email'],
@@ -238,6 +243,8 @@ function registerUser($data) {
             $data['phone'] ?? null,
             ROLE_VOLUNTEER,
             $data['department_id'] ?? null,
+            $isActive,
+            $approvalStatus,
             $verificationToken
         ]
     );
