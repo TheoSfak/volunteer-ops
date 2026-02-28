@@ -22,7 +22,18 @@ if (isPost()) {
     } else {
         $result = login($email, $password);
         if ($result['success']) {
-            redirect('dashboard.php');
+            // Maintenance mode: block non-admin logins
+            if (getSetting('maintenance_mode', '0')) {
+                $loggedUser = getCurrentUser();
+                if ($loggedUser && !in_array($loggedUser['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN])) {
+                    logout();
+                    $error = 'Το σύστημα βρίσκεται σε συντήρηση. Παρακαλώ δοκιμάστε αργότερα.';
+                } else {
+                    redirect('dashboard.php');
+                }
+            } else {
+                redirect('dashboard.php');
+            }
         } else {
             $error = $result['message'];
         }
@@ -92,6 +103,11 @@ $appLogo = getSetting('app_logo', '');
             <p class="mb-0 opacity-75"><?= h($appDescription) ?></p>
         </div>
         <div class="login-body">
+            <?php if (getSetting('maintenance_mode', '0')): ?>
+                <div class="alert alert-warning">
+                    <i class="bi bi-tools me-1"></i>Το σύστημα βρίσκεται σε λειτουργία συντήρησης. Μόνο διαχειριστές μπορούν να συνδεθούν.
+                </div>
+            <?php endif; ?>
             <?php if (!empty($flash['error'])): ?>
                 <div class="alert alert-danger"><?= h($flash['error']) ?></div>
             <?php endif; ?>
@@ -131,6 +147,13 @@ $appLogo = getSetting('app_logo', '');
                     <i class="bi bi-key me-1"></i>Ξεχάσατε τον κωδικό σας;
                 </a>
             </div>
+            
+            <?php if (getSetting('registration_enabled', '1') && getSetting('show_register_button', '0')): ?>
+            <hr class="my-3">
+            <p class="text-center text-muted mb-0">
+                Δεν έχετε λογαριασμό; <a href="register.php">Εγγραφείτε</a>
+            </p>
+            <?php endif; ?>
         </div>
     </div>
     </div><!-- /.py-4 wrapper -->
