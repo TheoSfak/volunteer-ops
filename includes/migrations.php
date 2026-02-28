@@ -26,6 +26,28 @@ function runSchemaMigrations(): void {
         return;
     }
 
+    // ── Quick return if already up-to-date ───────────────────────────────────
+    // IMPORTANT: Update this number whenever you add a new migration!
+    // This prevents PHP from building ~180KB of closures on every page load.
+    $LATEST_MIGRATION_VERSION = 35;
+    if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
+        return;
+    }
+
+    // ── Cooldown after migration failure ─────────────────────────────────────
+    // If a migration failed recently, don't retry for 5 minutes to avoid
+    // hammering the server on every request when a migration is stuck.
+    try {
+        $lastFailure = dbFetchValue(
+            "SELECT setting_value FROM settings WHERE setting_key = 'migration_last_failure'"
+        );
+        if ($lastFailure && (time() - (int)$lastFailure) < 300) {
+            return; // Wait 5 minutes before retrying
+        }
+    } catch (Exception $e) {
+        // Ignore — settings table might not have this key yet
+    }
+
     // ── Migration definitions ────────────────────────────────────────────────
     // Each entry: [version (int), description (str), callable]
     // The callable receives no arguments. Throw an exception on failure.
@@ -2232,11 +2254,20 @@ function runSchemaMigrations(): void {
             ($migration['up'])();
             $highest = max($highest, $migration['version']);
         } catch (Exception $e) {
-            // Log but don't crash the app — migration will retry next request
+            // Log but don't crash the app — migration will retry after cooldown
             error_log(
                 "[migrations] Failed migration v{$migration['version']} " .
                 "({$migration['description']}): " . $e->getMessage()
             );
+            // Record failure time to enable cooldown (5 min before retry)
+            try {
+                dbExecute(
+                    "INSERT INTO settings (setting_key, setting_value, updated_at)
+                     VALUES ('migration_last_failure', ?, NOW())
+                     ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()",
+                    [(string)time()]
+                );
+            } catch (Exception $ignore) {}
             break; // stop at the first failure so order is preserved
         }
     }
