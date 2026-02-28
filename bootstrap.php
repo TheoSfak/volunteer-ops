@@ -34,7 +34,8 @@ try {
     require_once __DIR__ . '/includes/migrations.php';
 }
 unset($__schemaVer);
-
+// Prevent PHP's default Session Garbage Collection from causing intermittent 5-7s pauses on shared hosting
+ini_set('session.gc_probability', 0);
 // Start session
 initSession();
 
