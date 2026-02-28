@@ -22,8 +22,8 @@ echo "DB: " . DB_NAME . " @ " . DB_HOST . "\n\n";
 // Schema version
 try {
     $ver = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'db_schema_version'");
-    echo "DB schema version: " . ($ver ?? 'NOT SET') . " (expected: 35)\n";
-    if ((int)$ver < 35) {
+    echo "DB schema version: " . ($ver ?? 'NOT SET') . " (expected: 36)\n";
+    if ((int)$ver < 36) {
         echo "⚠ MIGRATIONS PENDING — schema is behind. This causes heavy processing on every request.\n";
     } else {
         echo "✓ Schema is up-to-date.\n";
