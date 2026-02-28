@@ -18,12 +18,15 @@ class Database {
                 DB_HOST, DB_PORT, DB_NAME, DB_CHARSET
             );
             
+            // Sync MySQL session timezone with PHP timezone
+            $phpTzOffset = (new DateTime('now', new DateTimeZone(date_default_timezone_get())))->format('P');
+            
             $this->pdo = new PDO($dsn, DB_USER, DB_PASS, [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
                 PDO::ATTR_EMULATE_PREPARES => false,
                 PDO::ATTR_TIMEOUT => 5, // Prevent intermittent 60s hangs on Hostinger connection pools
-                PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci"
+                PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci, time_zone = '" . $phpTzOffset . "'"
             ]);
         } catch (PDOException $e) {
             if (DEBUG_MODE) {
