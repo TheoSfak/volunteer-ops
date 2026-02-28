@@ -274,18 +274,23 @@ function logAudit($action, $tableName = null, $recordId = null, $oldData = null,
         $notes = $oldData;
     }
     
-    dbInsert(
-        "INSERT INTO audit_logs (user_id, action, table_name, record_id, notes, ip_address, created_at) 
-         VALUES (?, ?, ?, ?, ?, ?, NOW())",
-        [
-            $userId,
-            $action,
-            $tableName,
-            $recordId,
-            $notes,
-            $_SERVER['REMOTE_ADDR'] ?? null
-        ]
-    );
+    try {
+        dbInsert(
+            "INSERT INTO audit_logs (user_id, action, table_name, record_id, notes, ip_address, created_at) 
+             VALUES (?, ?, ?, ?, ?, ?, NOW())",
+            [
+                $userId,
+                $action,
+                $tableName,
+                $recordId,
+                $notes,
+                $_SERVER['REMOTE_ADDR'] ?? null
+            ]
+        );
+    } catch (Exception $e) {
+        // Don't crash the app if audit_logs table is missing or broken
+        error_log("[logAudit] Failed: " . $e->getMessage());
+    }
 }
 
 /**

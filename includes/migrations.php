@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 35;
+    $LATEST_MIGRATION_VERSION = 36;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -2236,6 +2236,34 @@ function runSchemaMigrations(): void {
                     if ($exists) {
                         dbExecute("UPDATE email_templates SET body_html = ?, name = ?, subject = ?, updated_at = NOW() WHERE code = ?", [$data[2], $data[0], $data[1], $code]);
                     }
+                }
+            },
+        ],
+
+        [
+            'version'     => 36,
+            'description' => 'Ensure audit_logs table exists',
+            'up' => function () {
+                $tableExists = (bool) dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_logs'"
+                );
+                if (!$tableExists) {
+                    dbExecute("CREATE TABLE audit_logs (
+                        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        user_id INT UNSIGNED NULL,
+                        action VARCHAR(50) NOT NULL,
+                        table_name VARCHAR(100) NULL,
+                        record_id INT UNSIGNED NULL,
+                        notes TEXT NULL,
+                        ip_address VARCHAR(45) NULL,
+                        user_agent TEXT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_audit_user (user_id),
+                        INDEX idx_audit_table (table_name, record_id),
+                        INDEX idx_audit_action (action),
+                        INDEX idx_audit_created (created_at)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
                 }
             },
         ],

@@ -6,7 +6,6 @@
 
 define('VOLUNTEEROPS', true);
 require __DIR__ . '/config.php';
-if (file_exists(__DIR__ . '/config.local.php')) require __DIR__ . '/config.local.php';
 require __DIR__ . '/includes/db.php';
 
 header('Content-Type: text/plain; charset=utf-8');
@@ -36,7 +35,7 @@ try {
 echo "\n--- Critical Tables ---\n";
 $tables = [
     'users', 'missions', 'shifts', 'participation_requests',
-    'settings', 'email_templates', 'notification_settings', 'audit_log',
+    'settings', 'email_templates', 'notification_settings', 'audit_logs',
     'citizens', 'citizen_certificates', 'citizen_certificate_types',
     'volunteer_points', 'notifications',
 ];
