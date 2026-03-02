@@ -100,7 +100,11 @@ include __DIR__ . '/includes/header.php';
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0">
-        <i class="bi bi-list-task me-2"></i>Εργασίες
+        <?php if (isAdmin()): ?>
+            <i class="bi bi-list-task me-2"></i>Εργασίες
+        <?php else: ?>
+            <i class="bi bi-person-check me-2"></i>Οι Εργασίες μου
+        <?php endif; ?>
     </h1>
     <?php if (isAdmin()): ?>
         <a href="task-form.php" class="btn btn-primary">
@@ -110,6 +114,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <!-- Filters -->
+<?php if (isAdmin()): ?>
 <div class="card mb-4">
     <div class="card-body">
         <form method="get" class="row g-3">
@@ -124,7 +129,6 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </select>
             </div>
-            <?php if (isAdmin()): ?>
             <div class="col-md-3">
                 <label class="form-label">Ανατεθειμένες σε μένα</label>
                 <select class="form-select" name="assigned_to_me">
@@ -132,7 +136,6 @@ include __DIR__ . '/includes/header.php';
                     <option value="1" <?= $assignedToMe ? 'selected' : '' ?>>Μόνο οι δικές μου</option>
                 </select>
             </div>
-            <?php endif; ?>
             <div class="col-md-3 d-flex align-items-end">
                 <button type="submit" class="btn btn-outline-primary w-100">
                     <i class="bi bi-funnel me-1"></i>Φίλτρο
@@ -144,6 +147,7 @@ include __DIR__ . '/includes/header.php';
         </form>
     </div>
 </div>
+<?php endif; ?>
 
 <!-- Stats Cards -->
 <?php if (isAdmin()): ?>
@@ -277,9 +281,15 @@ include __DIR__ . '/includes/header.php';
                         </div>
                     </div>
                     <div class="card-footer bg-transparent">
-                        <small class="text-muted">
-                            Δημιουργήθηκε από <?= h($task['creator_name']) ?>
-                        </small>
+                        <?php if (isAdmin()): ?>
+                            <small class="text-muted">
+                                Δημιουργήθηκε από <?= h($task['creator_name']) ?>
+                            </small>
+                        <?php else: ?>
+                            <small class="text-muted">
+                                <i class="bi bi-clock me-1"></i><?= formatDate($task['created_at']) ?>
+                            </small>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
