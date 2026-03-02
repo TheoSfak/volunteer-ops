@@ -1556,4 +1556,30 @@ CREATE TABLE IF NOT EXISTS `citizen_certificates` (
     INDEX `idx_cc_expiry` (`expiry_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- COMPLAINTS TABLE (Παράπονα Εθελοντών)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `complaints` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT UNSIGNED NOT NULL COMMENT 'Ο εθελοντής που υπέβαλε',
+    `mission_id` INT UNSIGNED NULL COMMENT 'Σχετική αποστολή (προαιρετικό)',
+    `category` ENUM('MISSION','EQUIPMENT','BEHAVIOR','ADMIN','OTHER') NOT NULL DEFAULT 'OTHER' COMMENT 'Κατηγορία παραπόνου',
+    `priority` ENUM('LOW','MEDIUM','HIGH') NOT NULL DEFAULT 'MEDIUM' COMMENT 'Προτεραιότητα',
+    `subject` VARCHAR(255) NOT NULL COMMENT 'Θέμα',
+    `body` TEXT NOT NULL COMMENT 'Κείμενο παραπόνου',
+    `status` ENUM('NEW','IN_REVIEW','RESOLVED','REJECTED') NOT NULL DEFAULT 'NEW' COMMENT 'Κατάσταση',
+    `admin_response` TEXT NULL COMMENT 'Απάντηση διαχειριστή',
+    `responded_by` INT UNSIGNED NULL COMMENT 'Ποιος απάντησε',
+    `responded_at` DATETIME NULL COMMENT 'Πότε απάντησε',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`responded_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_complaint_user` (`user_id`),
+    INDEX `idx_complaint_status` (`status`),
+    INDEX `idx_complaint_category` (`category`),
+    INDEX `idx_complaint_mission` (`mission_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

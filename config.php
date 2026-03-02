@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.50.2');
+define('APP_VERSION', '3.51.0');
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
@@ -177,6 +177,58 @@ $GLOBALS['PARTICIPATION_COLORS'] = PARTICIPATION_COLORS;
 $GLOBALS['VOLUNTEER_TYPE_LABELS'] = VOLUNTEER_TYPE_LABELS;
 $GLOBALS['VOLUNTEER_TYPE_COLORS'] = VOLUNTEER_TYPE_COLORS;
 $GLOBALS['VOLUNTEER_TYPE_ICONS'] = VOLUNTEER_TYPE_ICONS;
+
+// Complaint statuses
+define('COMPLAINT_NEW', 'NEW');
+define('COMPLAINT_IN_REVIEW', 'IN_REVIEW');
+define('COMPLAINT_RESOLVED', 'RESOLVED');
+define('COMPLAINT_REJECTED', 'REJECTED');
+
+// Complaint categories
+define('COMPLAINT_CAT_MISSION', 'MISSION');
+define('COMPLAINT_CAT_EQUIPMENT', 'EQUIPMENT');
+define('COMPLAINT_CAT_BEHAVIOR', 'BEHAVIOR');
+define('COMPLAINT_CAT_ADMIN', 'ADMIN');
+define('COMPLAINT_CAT_OTHER', 'OTHER');
+
+// Complaint priority
+define('COMPLAINT_PRIORITY_LOW', 'LOW');
+define('COMPLAINT_PRIORITY_MEDIUM', 'MEDIUM');
+define('COMPLAINT_PRIORITY_HIGH', 'HIGH');
+
+define('COMPLAINT_STATUS_LABELS', [
+    COMPLAINT_NEW => 'Νέο',
+    COMPLAINT_IN_REVIEW => 'Σε Εξέταση',
+    COMPLAINT_RESOLVED => 'Επιλύθηκε',
+    COMPLAINT_REJECTED => 'Απορρίφθηκε',
+]);
+
+define('COMPLAINT_STATUS_COLORS', [
+    COMPLAINT_NEW => 'primary',
+    COMPLAINT_IN_REVIEW => 'warning',
+    COMPLAINT_RESOLVED => 'success',
+    COMPLAINT_REJECTED => 'danger',
+]);
+
+define('COMPLAINT_CATEGORY_LABELS', [
+    COMPLAINT_CAT_MISSION => 'Αποστολή / Βάρδια',
+    COMPLAINT_CAT_EQUIPMENT => 'Εξοπλισμός',
+    COMPLAINT_CAT_BEHAVIOR => 'Συμπεριφορά',
+    COMPLAINT_CAT_ADMIN => 'Διοίκηση',
+    COMPLAINT_CAT_OTHER => 'Άλλο',
+]);
+
+define('COMPLAINT_PRIORITY_LABELS', [
+    COMPLAINT_PRIORITY_LOW => 'Χαμηλή',
+    COMPLAINT_PRIORITY_MEDIUM => 'Μεσαία',
+    COMPLAINT_PRIORITY_HIGH => 'Υψηλή',
+]);
+
+define('COMPLAINT_PRIORITY_COLORS', [
+    COMPLAINT_PRIORITY_LOW => 'secondary',
+    COMPLAINT_PRIORITY_MEDIUM => 'warning',
+    COMPLAINT_PRIORITY_HIGH => 'danger',
+]);
 
 
 
