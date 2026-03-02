@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VolunteerOps — Εγχειρίδιο Εθελοντή</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root {
+            --vo-primary: #2563eb;
+            --vo-dark: #1e293b;
+            --vo-light: #f8fafc;
+            --vo-accent: #0ea5e9;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #334155;
+            line-height: 1.7;
+            background: #fff;
+        }
+        /* Cover Page */
+        .cover-page {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0ea5e9 0%, var(--vo-dark) 100%);
+            color: #fff;
+            text-align: center;
+            page-break-after: always;
+        }
+        .cover-page h1 { font-size: 3rem; font-weight: 800; margin-bottom: .5rem; }
+        .cover-page .subtitle { font-size: 1.5rem; opacity: .85; margin-bottom: 2rem; }
+        .cover-page .version { opacity: .6; font-size: .95rem; }
+        .cover-page .logo-icon { font-size: 5rem; margin-bottom: 1.5rem; opacity: .9; }
+
+        /* TOC */
+        .toc { page-break-after: always; }
+        .toc h2 { color: var(--vo-primary); border-bottom: 3px solid var(--vo-primary); padding-bottom: .5rem; }
+        .toc-list { list-style: none; padding: 0; }
+        .toc-list li { padding: .4rem 0; border-bottom: 1px dotted #cbd5e1; }
+        .toc-list li a { text-decoration: none; color: var(--vo-dark); font-weight: 500; }
+        .toc-list li a:hover { color: var(--vo-primary); }
+        .toc-list .toc-num { display: inline-block; width: 2.5rem; color: var(--vo-primary); font-weight: 700; }
+
+        /* Sections */
+        .manual-section { page-break-before: always; margin-top: 2rem; }
+        .manual-section:first-of-type { page-break-before: avoid; }
+        .manual-section h2 {
+            color: var(--vo-accent);
+            font-weight: 700;
+            font-size: 1.75rem;
+            border-left: 5px solid var(--vo-accent);
+            padding-left: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .manual-section h3 {
+            color: var(--vo-dark);
+            font-weight: 600;
+            font-size: 1.25rem;
+            margin-top: 1.5rem;
+            margin-bottom: .75rem;
+        }
+        .manual-section h4 {
+            font-weight: 600;
+            font-size: 1.1rem;
+            color: #475569;
+            margin-top: 1.25rem;
+        }
+
+        /* Info boxes */
+        .info-box {
+            background: #eff6ff;
+            border-left: 4px solid var(--vo-primary);
+            padding: 1rem 1.25rem;
+            margin: 1rem 0;
+            border-radius: 0 .5rem .5rem 0;
+        }
+        .info-box.warning {
+            background: #fefce8;
+            border-left-color: #eab308;
+        }
+        .info-box.danger {
+            background: #fef2f2;
+            border-left-color: #ef4444;
+        }
+        .info-box.success {
+            background: #f0fdf4;
+            border-left-color: #22c55e;
+        }
+        .info-box strong { display: block; margin-bottom: .25rem; }
+
+        /* Steps */
+        .steps { counter-reset: step-counter; list-style: none; padding-left: 0; }
+        .steps li {
+            counter-increment: step-counter;
+            padding: .5rem 0 .5rem 3rem;
+            position: relative;
+            margin-bottom: .25rem;
+        }
+        .steps li::before {
+            content: counter(step-counter);
+            position: absolute;
+            left: 0;
+            top: .4rem;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 50%;
+            background: var(--vo-accent);
+            color: #fff;
+            text-align: center;
+            line-height: 2rem;
+            font-weight: 700;
+            font-size: .9rem;
+        }
+
+        /* Key shortcut badges */
+        kbd {
+            background: var(--vo-dark);
+            color: #fff;
+            padding: .15rem .5rem;
+            border-radius: .25rem;
+            font-size: .85rem;
+        }
+
+        /* Tables */
+        .table-manual { font-size: .9rem; }
+        .table-manual th { background: var(--vo-light); color: var(--vo-dark); font-weight: 600; }
+
+        /* Print styles */
+        @media print {
+            body { font-size: 11pt; color: #000; }
+            .cover-page { min-height: auto; padding: 4cm 2cm; }
+            .no-print { display: none !important; }
+            a { color: #000 !important; text-decoration: none !important; }
+            .info-box { break-inside: avoid; }
+            .manual-section { page-break-before: always; }
+            .manual-section:first-of-type { page-break-before: avoid; }
+        }
+
+        /* Floating print button */
+        .print-btn {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Print / Save as PDF Button -->
+<div class="print-btn no-print">
+    <button onclick="window.print()" class="btn btn-info btn-lg shadow-lg text-white">
+        <i class="bi bi-printer me-2"></i>Εκτύπωση / Αποθήκευση PDF
+    </button>
+</div>
+
+<!-- ═══════════════════════════════════════ COVER PAGE ═══════════════════════════════════════ -->
+<div class="cover-page">
+    <div class="logo-icon"><i class="bi bi-person-heart"></i></div>
+    <h1>VolunteerOps</h1>
+    <div class="subtitle">Εγχειρίδιο Εθελοντή</div>
+    <p style="max-width:600px;opacity:.8">
+        Πλήρης οδηγός χρήσης της πλατφόρμας εθελοντικών αποστολών.<br>
+        Μάθετε πώς να βρίσκετε αποστολές, να αιτείστε συμμετοχή, να παρακολουθείτε τους πόντους σας και πολλά ακόμα!
+    </p>
+    <div class="version">Έκδοση 3.50.0 — Μάρτιος 2026</div>
+</div>
+
+<!-- ═══════════════════════════════════════ TABLE OF CONTENTS ═══════════════════════════════════════ -->
+<div class="container py-5 toc">
+    <h2><i class="bi bi-list-ol me-2"></i>Πίνακας Περιεχομένων</h2>
+    <ol class="toc-list">
+        <li><a href="#s1"><span class="toc-num">1.</span> Ξεκινώντας — Σύνδεση &amp; Εγγραφή</a></li>
+        <li><a href="#s2"><span class="toc-num">2.</span> Πίνακας Ελέγχου</a></li>
+        <li><a href="#s3"><span class="toc-num">3.</span> Το Προφίλ μου</a></li>
+        <li><a href="#s4"><span class="toc-num">4.</span> Αποστολές &amp; Βάρδιες</a></li>
+        <li><a href="#s5"><span class="toc-num">5.</span> Αίτηση Συμμετοχής</a></li>
+        <li><a href="#s6"><span class="toc-num">6.</span> Οι Συμμετοχές μου</a></li>
+        <li><a href="#s7"><span class="toc-num">7.</span> Οι Πόντοι μου</a></li>
+        <li><a href="#s8"><span class="toc-num">8.</span> Εργασίες</a></li>
+        <li><a href="#s9"><span class="toc-num">9.</span> Εκπαίδευση</a></li>
+        <li><a href="#s10"><span class="toc-num">10.</span> Διαγωνίσματα &amp; Κουίζ</a></li>
+        <li><a href="#s11"><span class="toc-num">11.</span> Απόθεμα &amp; Εξοπλισμός</a></li>
+        <li><a href="#s12"><span class="toc-num">12.</span> Πιστοποιητικά</a></li>
+        <li><a href="#s13"><span class="toc-num">13.</span> Κατάταξη &amp; Επιτεύγματα</a></li>
+        <li><a href="#s14"><span class="toc-num">14.</span> Ειδοποιήσεις</a></li>
+        <li><a href="#s15"><span class="toc-num">15.</span> Συχνές Ερωτήσεις</a></li>
+    </ol>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 1 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s1">
+    <h2>1. Ξεκινώντας — Σύνδεση &amp; Εγγραφή</h2>
+
+    <h3>1.1 Εγγραφή νέου εθελοντή</h3>
+    <p>Αν δεν έχετε λογαριασμό, μπορείτε να εγγραφείτε ακολουθώντας αυτά τα βήματα:</p>
+    <ol class="steps">
+        <li>Ανοίξτε τη σελίδα σύνδεσης και πατήστε <strong>Εγγραφή</strong></li>
+        <li>Συμπληρώστε:
+            <ul>
+                <li><strong>Ονοματεπώνυμο:</strong> Το πλήρες όνομά σας</li>
+                <li><strong>Email:</strong> Μια έγκυρη διεύθυνση email</li>
+                <li><strong>Κωδικός:</strong> Τουλάχιστον 6 χαρακτήρες</li>
+                <li><strong>Τηλέφωνο:</strong> Αριθμός επικοινωνίας</li>
+            </ul>
+        </li>
+        <li>Πατήστε <strong>Εγγραφή</strong></li>
+        <li>Ελέγξτε το email σας για τον σύνδεσμο επιβεβαίωσης (αν απαιτείται)</li>
+    </ol>
+
+    <div class="info-box">
+        <strong><i class="bi bi-info-circle me-1"></i> Σημείωση</strong>
+        Η εγγραφή μπορεί να μην είναι διαθέσιμη αν ο οργανισμός έχει απενεργοποιήσει τη λειτουργία αυτο-εγγραφής. Σε αυτή την περίπτωση, ο λογαριασμός σας δημιουργείται από τον διαχειριστή.
+    </div>
+
+    <h3>1.2 Σύνδεση</h3>
+    <ol class="steps">
+        <li>Ανοίξτε τη σελίδα σύνδεσης</li>
+        <li>Εισάγετε το <strong>Email</strong> και τον <strong>Κωδικό</strong> σας</li>
+        <li>Πατήστε <strong>Σύνδεση</strong></li>
+    </ol>
+
+    <h3>1.3 Ξέχασα τον κωδικό μου</h3>
+    <ol class="steps">
+        <li>Στη σελίδα σύνδεσης, πατήστε <strong>Ξέχασα τον κωδικό</strong></li>
+        <li>Εισάγετε το email του λογαριασμού σας</li>
+        <li>Θα λάβετε email με σύνδεσμο επαναφοράς κωδικού</li>
+        <li>Ακολουθήστε τον σύνδεσμο και ορίστε νέο κωδικό</li>
+    </ol>
+
+    <h3>1.4 Πλοήγηση στην εφαρμογή</h3>
+    <p>Μετά τη σύνδεση, η εφαρμογή αποτελείται από:</p>
+    <ul>
+        <li><strong>Πλαϊνή μπάρα (αριστερά):</strong> Μενού πλοήγησης με όλες τις ενότητες</li>
+        <li><strong>Πάνω μπάρα (δεξιά):</strong> Ειδοποιήσεις, Προφίλ, Αποσύνδεση</li>
+        <li><strong>Κεντρικό περιεχόμενο:</strong> Η σελίδα που βρίσκεστε</li>
+    </ul>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 2 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s2">
+    <h2>2. Πίνακας Ελέγχου</h2>
+
+    <h3>2.1 Προσωπικά στατιστικά</h3>
+    <p>Ο Πίνακας Ελέγχου είναι η πρώτη σελίδα μετά τη σύνδεση. Εμφανίζει τα προσωπικά σας στατιστικά:</p>
+    <ul>
+        <li><strong>Βάρδιες:</strong> Πόσες βάρδιες έχετε ολοκληρώσει</li>
+        <li><strong>Ώρες:</strong> Συνολικές ώρες εθελοντισμού</li>
+        <li><strong>Πόντοι:</strong> Τρέχον σύνολο πόντων</li>
+        <li><strong>Επιτεύγματα:</strong> Πόσα έχετε κερδίσει</li>
+    </ul>
+
+    <h3>2.2 Επερχόμενες βάρδιες</h3>
+    <p>Στο κάτω μέρος εμφανίζονται οι εγκεκριμένες βάρδιες σας που πρόκειται να πραγματοποιηθούν, με ημερομηνία, ώρα και τοποθεσία.</p>
+
+    <h3>2.3 Πρόσφατη δραστηριότητα</h3>
+    <p>Δείτε τις τελευταίες σας ενέργειες: αιτήσεις, εγκρίσεις, πόντοι που κερδίσατε.</p>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 3 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s3">
+    <h2>3. Το Προφίλ μου</h2>
+
+    <p>Μεταβείτε στο προφίλ σας κάνοντας κλικ στο avatar σας πάνω δεξιά → <strong>Το Προφίλ μου</strong>.</p>
+
+    <h3>3.1 Προσωπικά στοιχεία</h3>
+    <p>Στο προφίλ σας μπορείτε να ενημερώσετε:</p>
+    <ul>
+        <li><strong>Ονοματεπώνυμο</strong></li>
+        <li><strong>Τηλέφωνο</strong></li>
+        <li><strong>Βιογραφικό σημείωμα</strong></li>
+        <li><strong>Διεύθυνση</strong></li>
+        <li><strong>Επαφή έκτακτης ανάγκης</strong></li>
+        <li><strong>Διαθεσιμότητα:</strong> Σημειώστε πότε είστε διαθέσιμοι</li>
+    </ul>
+
+    <h3>3.2 Φωτογραφία προφίλ</h3>
+    <ol class="steps">
+        <li>Στο δεξί μέρος του προφίλ, πατήστε <strong>Αλλαγή φωτογραφίας</strong></li>
+        <li>Επιλέξτε αρχείο (JPG, PNG, GIF ή WebP, μέγεθος έως 5MB)</li>
+        <li>Η φωτογραφία περικόπτεται αυτόματα σε 250×250 pixels</li>
+        <li>Πατήστε <strong>Ανέβασμα</strong> για αποθήκευση</li>
+    </ol>
+
+    <h3>3.3 Δεξιότητες</h3>
+    <p>Προσθέστε τις δεξιότητές σας (π.χ. Πρώτες Βοήθειες, Οδήγηση, Αγγλικά) για να βοηθήσετε τους διαχειριστές να σας αναθέσουν κατάλληλες αποστολές.</p>
+
+    <h3>3.4 Αλλαγή κωδικού</h3>
+    <ol class="steps">
+        <li>Στο προφίλ, βρείτε την κάρτα <strong>Αλλαγή Κωδικού</strong></li>
+        <li>Εισάγετε τον τρέχοντα κωδικό σας</li>
+        <li>Εισάγετε τον νέο κωδικό (τουλάχιστον 6 χαρακτήρες)</li>
+        <li>Επιβεβαιώστε τον νέο κωδικό</li>
+        <li>Πατήστε <strong>Αλλαγή Κωδικού</strong></li>
+    </ol>
+
+    <h3>3.5 Πρόοδος αποστολών</h3>
+    <p>Στο πάνω μέρος του προφίλ εμφανίζεται η πρόοδός σας στον ετήσιο στόχο αποστολών (10 αποστολές/έτος) ως μπάρα ποσοστού.</p>
+
+    <div class="info-box success">
+        <strong><i class="bi bi-check-circle me-1"></i> Συμβουλή</strong>
+        Κρατήστε το προφίλ σας ενημερωμένο! Οι διαχειριστές χρησιμοποιούν τις δεξιότητες και τη διαθεσιμότητά σας για τον σχεδιασμό αποστολών.
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 4 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s4">
+    <h2>4. Αποστολές &amp; Βάρδιες</h2>
+
+    <h3>4.1 Εύρεση αποστολών</h3>
+    <p>Μεταβείτε στο <strong>Ενεργές Αποστολές</strong> από το μενού. Εδώ εμφανίζονται όλες οι αποστολές με κατάσταση «Ανοιχτή» που δέχονται εθελοντές.</p>
+
+    <h3>4.2 Φιλτράρισμα</h3>
+    <p>Χρησιμοποιήστε τα φίλτρα για να βρείτε αποστολές:</p>
+    <ul>
+        <li><strong>Τμήμα:</strong> Εμφάνιση αποστολών συγκεκριμένου τμήματος</li>
+        <li><strong>Τύπος:</strong> Εκπαιδευτική, Επιχειρησιακή κ.λπ.</li>
+        <li><strong>Αναζήτηση:</strong> Πληκτρολογήστε λέξεις-κλειδιά στον τίτλο</li>
+    </ul>
+
+    <h3>4.3 Προβολή αποστολής</h3>
+    <p>Κάντε κλικ σε μια αποστολή για να δείτε:</p>
+    <ul>
+        <li><strong>Περιγραφή:</strong> Τι αφορά η αποστολή</li>
+        <li><strong>Ημ/νίες:</strong> Πότε αρχίζει και τελειώνει</li>
+        <li><strong>Τοποθεσία:</strong> Πού θα πραγματοποιηθεί</li>
+        <li><strong>Βάρδιες:</strong> Λίστα διαθέσιμων βαρδιών με ώρες και θέσεις</li>
+    </ul>
+
+    <h3>4.4 Κατανόηση κατάστασης αποστολής</h3>
+    <table class="table table-bordered table-manual">
+        <thead>
+            <tr><th>Κατάσταση</th><th>Τι σημαίνει για εσάς</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><span class="badge bg-success">Ανοιχτή</span></td><td>Μπορείτε να αιτηθείτε συμμετοχή</td></tr>
+            <tr><td><span class="badge bg-warning text-dark">Κλειστή</span></td><td>Δεν δέχεται νέες αιτήσεις</td></tr>
+            <tr><td><span class="badge bg-primary">Ολοκληρωμένη</span></td><td>Έχει ολοκληρωθεί</td></tr>
+            <tr><td><span class="badge bg-danger">Ακυρωμένη</span></td><td>Έχει ακυρωθεί — θα λάβετε ειδοποίηση αν είχατε εγκεκριμένη συμμετοχή</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 5 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s5">
+    <h2>5. Αίτηση Συμμετοχής</h2>
+
+    <h3>5.1 Πώς αιτούμαι συμμετοχή</h3>
+    <ol class="steps">
+        <li>Ανοίξτε μια <strong>Ανοιχτή</strong> αποστολή</li>
+        <li>Δείτε τις διαθέσιμες <strong>Βάρδιες</strong> — ελέγξτε ώρες και κενές θέσεις</li>
+        <li>Πατήστε <strong>Αίτηση Συμμετοχής</strong> στη βάρδια που θέλετε</li>
+        <li>(Προαιρετικά) Προσθέστε <strong>σημειώσεις</strong> στην αίτησή σας</li>
+        <li>Πατήστε <strong>Υποβολή</strong></li>
+    </ol>
+
+    <h3>5.2 Μετά την υποβολή</h3>
+    <p>Η αίτησή σας μπαίνει σε κατάσταση <strong>Εκκρεμεί</strong>. Ένας διαχειριστής θα τη δει και θα αποφασίσει:</p>
+    <table class="table table-bordered table-manual">
+        <thead>
+            <tr><th>Κατάσταση</th><th>Τι σημαίνει</th><th>Τι κάνετε</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><span class="badge bg-warning text-dark">Εκκρεμεί</span></td>
+                <td>Αναμένει απόφαση</td>
+                <td>Περιμένετε — μπορείτε να ακυρώσετε αν αλλάξετε γνώμη</td>
+            </tr>
+            <tr>
+                <td><span class="badge bg-success">Εγκεκριμένη</span></td>
+                <td>Η αίτηση εγκρίθηκε!</td>
+                <td>Παρουσιαστείτε στη βάρδια σύμφωνα με τις οδηγίες</td>
+            </tr>
+            <tr>
+                <td><span class="badge bg-danger">Απορρίφθηκε</span></td>
+                <td>Η αίτηση δεν εγκρίθηκε</td>
+                <td>Ελέγξτε τον λόγο απόρριψης — μπορείτε να αιτηθείτε σε άλλη βάρδια</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="info-box">
+        <strong><i class="bi bi-info-circle me-1"></i> Ειδοποίηση</strong>
+        Θα λάβετε email <em>και</em> ειδοποίηση στην εφαρμογή κάθε φορά που αλλάζει η κατάσταση της αίτησής σας.
+    </div>
+
+    <h3>5.3 Ακύρωση αίτησης</h3>
+    <p>Μπορείτε να <strong>ακυρώσετε</strong> μια αίτηση μόνο όταν βρίσκεται σε κατάσταση «Εκκρεμεί»:</p>
+    <ol class="steps">
+        <li>Μεταβείτε σε <strong>Οι Συμμετοχές μου</strong></li>
+        <li>Βρείτε την αίτηση</li>
+        <li>Πατήστε <strong>Ακύρωση</strong></li>
+    </ol>
+
+    <div class="info-box warning">
+        <strong><i class="bi bi-exclamation-triangle me-1"></i> Προσοχή</strong>
+        Αν η αίτησή σας είναι ήδη εγκεκριμένη, δεν μπορείτε να την ακυρώσετε μόνοι σας. Επικοινωνήστε με τον διαχειριστή.
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 6 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s6">
+    <h2>6. Οι Συμμετοχές μου</h2>
+
+    <h3>6.1 Λίστα συμμετοχών</h3>
+    <p>Στη σελίδα <strong>Οι Συμμετοχές μου</strong> (από το μενού ή το dropdown πάνω δεξιά) βλέπετε <em>όλες</em> τις αιτήσεις σας:</p>
+    <ul>
+        <li>Τίτλος αποστολής και βάρδιας</li>
+        <li>Ημ/νία και ώρα βάρδιας</li>
+        <li>Τρέχουσα κατάσταση (Εκκρεμεί / Εγκεκριμένη / Απορρίφθηκε / Ακυρωμένη)</li>
+        <li>Λόγος απόρριψης (αν υπάρχει)</li>
+    </ul>
+
+    <h3>6.2 Φιλτράρισμα</h3>
+    <p>Χρησιμοποιήστε τα φίλτρα κατάστασης για να δείτε μόνο τις εγκεκριμένες, εκκρεμείς κ.λπ.</p>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 7 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s7">
+    <h2>7. Οι Πόντοι μου</h2>
+
+    <h3>7.1 Πώς κερδίζω πόντους</h3>
+    <p>Κερδίζετε πόντους κάθε φορά που <strong>παρουσιάζεστε</strong> σε μια βάρδια. Οι πόντοι υπολογίζονται αυτόματα μετά την καταγραφή παρουσίας από τον διαχειριστή.</p>
+
+    <h3>7.2 Υπολογισμός πόντων</h3>
+    <table class="table table-bordered table-manual">
+        <thead>
+            <tr><th>Κριτήριο</th><th>Πόντοι</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Βασικοί πόντοι</td><td><strong>10 πόντοι</strong> ανά ώρα</td></tr>
+            <tr><td>Σαββατοκύριακο</td><td>×1.5 (50% bonus)</td></tr>
+            <tr><td>Νυχτερινή βάρδια</td><td>×1.5 (50% bonus)</td></tr>
+            <tr><td>Ιατρική / Διασωστική</td><td>×2.0 (100% bonus)</td></tr>
+        </tbody>
+    </table>
+
+    <div class="info-box success">
+        <strong><i class="bi bi-check-circle me-1"></i> Παράδειγμα</strong>
+        Εθελοντεύσατε 3 ώρες ένα Σάββατο βράδυ:<br>
+        3 ώρες × 10 πόντοι × 1.5 (Σ/Κ) × 1.5 (νύχτα) = <strong>67.5 → 68 πόντοι</strong>
+    </div>
+
+    <h3>7.3 Ιστορικό πόντων</h3>
+    <p>Στη σελίδα <strong>Οι Πόντοι μου</strong> δείτε:</p>
+    <ul>
+        <li>Συνολικούς πόντους</li>
+        <li>Αναλυτικό ιστορικό: ποιά βάρδια, πόσοι πόντοι, ημ/νία</li>
+    </ul>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 8 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s8">
+    <h2>8. Εργασίες</h2>
+
+    <h3>8.1 Προβολή εργασιών</h3>
+    <p>Στη σελίδα <strong>Εργασίες</strong> βλέπετε τις εργασίες που σας έχουν ανατεθεί. Κάθε εργασία έχει:</p>
+    <ul>
+        <li><strong>Τίτλος</strong> και <strong>Περιγραφή</strong></li>
+        <li><strong>Προτεραιότητα:</strong> Χαμηλή / Κανονική / Υψηλή / Επείγουσα</li>
+        <li><strong>Προθεσμία:</strong> Ημ/νία λήξης</li>
+        <li><strong>Κατάσταση:</strong> Νέα / Σε εξέλιξη / Ολοκληρωμένη</li>
+    </ul>
+
+    <h3>8.2 Ενημέρωση κατάστασης</h3>
+    <ol class="steps">
+        <li>Ανοίξτε την εργασία</li>
+        <li>Αλλάξτε την κατάσταση (π.χ. «Σε εξέλιξη» ή «Ολοκληρωμένη»)</li>
+        <li>Προσθέστε σχόλιο αν χρειάζεται</li>
+        <li>Πατήστε <strong>Αποθήκευση</strong></li>
+    </ol>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 9 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s9">
+    <h2>9. Εκπαίδευση</h2>
+
+    <h3>9.1 Μαθήματα</h3>
+    <p>Στη σελίδα <strong>Μαθήματα</strong> βρείτε τα διαθέσιμα εκπαιδευτικά μαθήματα. Κάθε μάθημα έχει:</p>
+    <ul>
+        <li>Τίτλο και περιγραφή</li>
+        <li>Κατηγορία (π.χ. Πρώτες Βοήθειες, Ασφάλεια)</li>
+        <li>Διάρκεια</li>
+    </ul>
+
+    <h3>9.2 Εκπαιδευτικό υλικό</h3>
+    <p>Στη σελίδα <strong>Εκπαιδευτικό Υλικό</strong> μπορείτε να κατεβάσετε αρχεία:</p>
+    <ul>
+        <li>PDF εγχειρίδια</li>
+        <li>Παρουσιάσεις</li>
+        <li>Βίντεο (σύνδεσμοι)</li>
+    </ul>
+    <p>Χρησιμοποιήστε τα φίλτρα κατηγορίας για να βρείτε γρήγορα αυτό που ψάχνετε.</p>
+
+    <div class="info-box">
+        <strong><i class="bi bi-info-circle me-1"></i> Συμβουλή</strong>
+        Μελετήστε το εκπαιδευτικό υλικό πριν δώσετε διαγώνισμα — σας βοηθά να πετύχετε υψηλότερο βαθμό!
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 10 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s10">
+    <h2>10. Διαγωνίσματα &amp; Κουίζ</h2>
+
+    <h3>10.1 Κουίζ (Εξάσκηση)</h3>
+    <p>Τα <strong>Κουίζ</strong> είναι ελαφριές ασκήσεις χωρίς χρονικό περιορισμό. Ιδανικά για εξάσκηση πριν τα διαγωνίσματα.</p>
+    <ol class="steps">
+        <li>Μεταβείτε στα <strong>Κουίζ</strong></li>
+        <li>Επιλέξτε ένα κουίζ</li>
+        <li>Απαντήστε τις ερωτήσεις</li>
+        <li>Δείτε τα αποτελέσματά σας αμέσως</li>
+    </ol>
+
+    <h3>10.2 Διαγωνίσματα (Εξετάσεις)</h3>
+    <p>Τα <strong>Διαγωνίσματα</strong> είναι επίσημες εξετάσεις με χρονικό όριο και ελάχιστο βαθμό επιτυχίας.</p>
+    <ol class="steps">
+        <li>Μεταβείτε στα <strong>Διαγωνίσματα</strong></li>
+        <li>Δείτε τα διαθέσιμα — κάθε ένα δείχνει: Κατηγορία, Ερωτήσεις, Ποσοστό επιτυχίας, Χρονικό όριο</li>
+        <li>Πατήστε <strong>Έναρξη</strong></li>
+        <li>Απαντήστε σε όλες τις ερωτήσεις πριν τελειώσει ο χρόνος</li>
+        <li>Πατήστε <strong>Υποβολή</strong></li>
+        <li>Δείτε τα αποτελέσματά σας: βαθμός, σωστές/λάθος, αν περάσατε</li>
+    </ol>
+
+    <div class="info-box warning">
+        <strong><i class="bi bi-exclamation-triangle me-1"></i> Προσοχή</strong>
+        Μόλις ξεκινήσετε ένα διαγώνισμα, ο χρόνος τρέχει! Αν κλείσετε τη σελίδα, ο χρόνος συνεχίζει να μετρά.
+    </div>
+
+    <h3>10.3 Ιστορικό εξετάσεων</h3>
+    <p>Στο <strong>Προφίλ</strong> σας και στη σελίδα Αποτελέσματα, βλέπετε όλες τις προσπάθειές σας: βαθμός, αν περάσατε, ημερομηνία.</p>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 11 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s11">
+    <h2>11. Απόθεμα &amp; Εξοπλισμός</h2>
+
+    <div class="info-box danger">
+        <strong><i class="bi bi-exclamation-octagon me-1"></i> Πρόσβαση</strong>
+        Αν είστε <strong>Δόκιμος Διασώστης</strong> (Trainee Rescuer), <u>δεν</u> έχετε πρόσβαση σε αυτή την ενότητα. Η πρόσβαση ενεργοποιείται μετά την αναβάθμισή σας.
+    </div>
+
+    <h3>11.1 Υλικά</h3>
+    <p>Στη σελίδα <strong>Υλικά</strong> δείτε τον διαθέσιμο εξοπλισμό. Κάθε υλικό δείχνει:</p>
+    <ul>
+        <li>Όνομα και κατηγορία</li>
+        <li>Διαθεσιμότητα (διαθέσιμο / χρεωμένο)</li>
+        <li>Τοποθεσία αποθήκευσης</li>
+    </ul>
+
+    <h3>11.2 Σετ εξοπλισμού</h3>
+    <p>Τα σετ εξοπλισμού ομαδοποιούν πολλά υλικά (π.χ. Σετ Πρώτων Βοηθειών). Μπορείτε να δείτε τι περιέχει κάθε σετ.</p>
+
+    <h3>11.3 Χρέωση / Επιστροφή</h3>
+    <p>Η <strong>χρέωση</strong> (δανεισμός) και <strong>επιστροφή</strong> εξοπλισμού γίνεται από τον διαχειριστή ή τον αρχηγό βάρδιας. Εσείς μπορείτε να δείτε ποιον εξοπλισμό έχετε χρεωμένο.</p>
+
+    <h3>11.4 Υλικά ραφιού</h3>
+    <p>Δείτε τα υλικά ανά ράφι αποθήκευσης, μαζί με ημερομηνίες λήξης.</p>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 12 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s12">
+    <h2>12. Πιστοποιητικά</h2>
+
+    <h3>12.1 Τα πιστοποιητικά μου</h3>
+    <p>Στο <strong>Προφίλ</strong> σας, στην ενότητα «Τα Πιστοποιητικά μου», βλέπετε όλα τα πιστοποιητικά που σας έχουν εκδοθεί:</p>
+    <ul>
+        <li><strong>Τύπος:</strong> Πιστοποίηση Πρώτων Βοηθειών, Κολύμβηση κ.λπ.</li>
+        <li><strong>Ημ/νία έκδοσης</strong></li>
+        <li><strong>Ημ/νία λήξης</strong></li>
+        <li><strong>Κατάσταση:</strong>
+            <ul>
+                <li><span class="badge bg-success">Ενεργό</span> — σε ισχύ</li>
+                <li><span class="badge bg-warning text-dark">Λήγει σύντομα</span> — θα λήξει σύντομα</li>
+                <li><span class="badge bg-danger">Ληγμένο</span> — χρειάζεται ανανέωση</li>
+            </ul>
+        </li>
+    </ul>
+
+    <div class="info-box">
+        <strong><i class="bi bi-info-circle me-1"></i> Αυτόματη ειδοποίηση</strong>
+        Θα λάβετε email ειδοποίηση πριν τη λήξη πιστοποιητικού, ώστε να προλάβετε την ανανέωση.
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 13 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s13">
+    <h2>13. Κατάταξη &amp; Επιτεύγματα</h2>
+
+    <h3>13.1 Κατάταξη (Leaderboard)</h3>
+    <p>Η σελίδα <strong>Κατάταξη</strong> εμφανίζει τη βαθμολογία όλων των εθελοντών. Δείτε πού βρίσκεστε!</p>
+    <p>Φίλτρα:</p>
+    <ul>
+        <li><strong>Περίοδος:</strong> Αυτόν τον μήνα, Φέτος, Όλων των εποχών</li>
+        <li><strong>Τμήμα:</strong> Σύγκριση μόνο με εθελοντές του τμήματός σας</li>
+    </ul>
+
+    <h3>13.2 Επιτεύγματα (Achievements)</h3>
+    <p>Τα <strong>Επιτεύγματα</strong> είναι βραβεία που κερδίζετε αυτόματα βάσει της δραστηριότητάς σας. Παραδείγματα:</p>
+    <table class="table table-bordered table-manual">
+        <thead>
+            <tr><th>Επίτευγμα</th><th>Πώς το κερδίζετε</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><i class="bi bi-star-fill text-warning me-1"></i> Πρώτη Βάρδια</td><td>Ολοκληρώστε την πρώτη σας βάρδια</td></tr>
+            <tr><td><i class="bi bi-fire text-danger me-1"></i> 10 Αποστολές</td><td>Συμμετέχετε σε 10 αποστολές</td></tr>
+            <tr><td><i class="bi bi-clock-history text-primary me-1"></i> 100 Ώρες</td><td>Συμπληρώστε 100 ώρες εθελοντισμού</td></tr>
+            <tr><td><i class="bi bi-trophy-fill text-success me-1"></i> Κορυφαίος</td><td>Φτάστε στην 1η θέση της κατάταξης</td></tr>
+        </tbody>
+    </table>
+    <p>Στη σελίδα <strong>Επιτεύγματα</strong> δείτε ποια έχετε κερδίσει (χρωματισμένα) και ποια σας λείπουν (αχνά). Η μπάρα ποσοστού δείχνει τη συνολική πρόοδό σας.</p>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 14 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s14">
+    <h2>14. Ειδοποιήσεις</h2>
+
+    <h3>14.1 Τύποι ειδοποιήσεων</h3>
+    <p>Το σύστημα σάς ειδοποιεί για:</p>
+    <ul>
+        <li>Έγκριση ή απόρριψη αίτησης συμμετοχής</li>
+        <li>Ακύρωση αποστολής</li>
+        <li>Υπενθύμιση βάρδιας (πριν την έναρξη)</li>
+        <li>Νέα εργασία</li>
+        <li>Προσθήκη σας σε βάρδια από admin</li>
+        <li>Λήξη πιστοποιητικού</li>
+    </ul>
+
+    <h3>14.2 Πού βλέπω τις ειδοποιήσεις</h3>
+    <ul>
+        <li><strong>Εικονίδιο καμπάνας</strong> <i class="bi bi-bell"></i> πάνω δεξιά — αριθμός αδιάβαστων</li>
+        <li>Σελίδα <strong>Ειδοποιήσεις</strong> — πλήρης λίστα</li>
+        <li><strong>Email</strong> — λαμβάνετε και email (εφόσον είναι ενεργοποιημένο)</li>
+    </ul>
+
+    <h3>14.3 Ρυθμίσεις ειδοποιήσεων</h3>
+    <p>Μεταβείτε σε <strong>Ρυθμίσεις Ειδοποιήσεων</strong> (από το dropdown πάνω δεξιά) για να ελέγξετε ποιες ειδοποιήσεις θέλετε να λαμβάνετε μέσω email.</p>
+</div>
+
+<!-- ═══════════════════════════════════════ SECTION 15 ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="s15">
+    <h2>15. Συχνές Ερωτήσεις</h2>
+
+    <h4><i class="bi bi-question-circle text-primary me-2"></i>Πώς αλλάζω τα στοιχεία μου;</h4>
+    <p>Μεταβείτε στο <strong>Το Προφίλ μου</strong> → Ενημερώστε τα πεδία → <strong>Αποθήκευση</strong>.</p>
+
+    <h4><i class="bi bi-question-circle text-primary me-2"></i>Πώς αλλάζω τον κωδικό μου;</h4>
+    <p>Στο Προφίλ, χρησιμοποιήστε την κάρτα «Αλλαγή Κωδικού» (βλ. Ενότητα 3.4).</p>
+
+    <h4><i class="bi bi-question-circle text-primary me-2"></i>Μπορώ να ακυρώσω μια εγκεκριμένη συμμετοχή;</h4>
+    <p>Όχι απευθείας. Επικοινωνήστε με τον αρμόδιο διαχειριστή ή αρχηγό βάρδιας.</p>
+
+    <h4><i class="bi bi-question-circle text-primary me-2"></i>Γιατί δεν βλέπω το Απόθεμα;</h4>
+    <p>Αν είστε Δόκιμος Διασώστης (Trainee Rescuer), δεν έχετε πρόσβαση. Ζητήστε αναβάθμιση από τον διαχειριστή.</p>
+
+    <h4><i class="bi bi-question-circle text-primary me-2"></i>Πώς κερδίζω πόντους;</h4>
+    <p>Παρουσιαστείτε στις βάρδιές σας. Μετά την καταγραφή παρουσίας, οι πόντοι υπολογίζονται αυτόματα (βλ. Ενότητα 7).</p>
+
+    <h4><i class="bi bi-question-circle text-primary me-2"></i>Πώς ανεβαίνω στην κατάταξη;</h4>
+    <p>Συμμετέχετε σε αποστολές, ιδίως Σ/Κ, νυχτερινές και διασωστικές — δίνουν περισσότερους πόντους!</p>
+
+    <h4><i class="bi bi-question-circle text-primary me-2"></i>Δεν λαμβάνω emails. Τι κάνω;</h4>
+    <p>Ελέγξτε τον φάκελο spam/junk. Αν δεν βρείτε τίποτα, ενημερώστε τον διαχειριστή — μπορεί να υπάρχει πρόβλημα στις ρυθμίσεις SMTP.</p>
+
+    <h4><i class="bi bi-question-circle text-primary me-2"></i>Πώς μπορώ να δω τα πιστοποιητικά μου;</h4>
+    <p>Στο <strong>Το Προφίλ μου</strong>, στην ενότητα «Τα Πιστοποιητικά μου» (βλ. Ενότητα 12).</p>
+
+    <h4><i class="bi bi-question-circle text-primary me-2"></i>Τι κάνω αν ξεχάσω τον κωδικό;</h4>
+    <p>Στη σελίδα σύνδεσης, πατήστε «Ξέχασα τον κωδικό» και ακολουθήστε τις οδηγίες (βλ. Ενότητα 1.3).</p>
+</div>
+
+<!-- ═══════════════════════════════════════ QUICK REFERENCE ═══════════════════════════════════════ -->
+<div class="container py-4 manual-section" id="quickref">
+    <h2>Γρήγορος Οδηγός Αναφοράς</h2>
+
+    <table class="table table-bordered table-manual">
+        <thead>
+            <tr><th style="width:40%">Θέλω να...</th><th>Πού πηγαίνω</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Δω τις επερχόμενες βάρδιές μου</td><td>Πίνακας Ελέγχου</td></tr>
+            <tr><td>Αιτηθώ σε μια αποστολή</td><td>Ενεργές Αποστολές → κλικ σε αποστολή → Αίτηση</td></tr>
+            <tr><td>Δω τις αιτήσεις μου</td><td>Οι Συμμετοχές μου</td></tr>
+            <tr><td>Δω τους πόντους μου</td><td>Οι Πόντοι μου</td></tr>
+            <tr><td>Αλλάξω τα στοιχεία μου</td><td>Πάνω δεξιά → Το Προφίλ μου</td></tr>
+            <tr><td>Αλλάξω τον κωδικό μου</td><td>Προφίλ → Αλλαγή Κωδικού</td></tr>
+            <tr><td>Δω τα πιστοποιητικά μου</td><td>Προφίλ → Τα Πιστοποιητικά μου</td></tr>
+            <tr><td>Μελετήσω εκπαιδευτικό υλικό</td><td>Εκπαιδευτικό Υλικό</td></tr>
+            <tr><td>Δώσω διαγώνισμα</td><td>Διαγωνίσματα</td></tr>
+            <tr><td>Εξασκηθώ με κουίζ</td><td>Κουίζ</td></tr>
+            <tr><td>Δω την κατάταξη</td><td>Κατάταξη</td></tr>
+            <tr><td>Δω τα επιτεύγματά μου</td><td>Επιτεύγματα</td></tr>
+            <tr><td>Ρυθμίσω τις ειδοποιήσεις μου</td><td>Ρυθμίσεις Ειδοποιήσεων</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- Footer -->
+<div class="container py-4 text-center text-muted border-top mt-5">
+    <p><small>VolunteerOps v3.50.0 — Εγχειρίδιο Εθελοντή — Μάρτιος 2026</small></p>
+    <p><small>Αυτό το έγγραφο μπορεί να εκτυπωθεί ή να αποθηκευτεί ως PDF μέσω <kbd>Ctrl</kbd>+<kbd>P</kbd> → «Αποθήκευση ως PDF»</small></p>
+</div>
+
+</body>
+</html>

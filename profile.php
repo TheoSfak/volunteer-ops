@@ -892,6 +892,26 @@ $myRequiredMissing = dbFetchAll(
                 </p>
             </div>
         </div>
+
+        <!-- User Manual -->
+        <div class="card pp-card">
+            <div class="card-body text-center py-4">
+                <div class="mb-2" style="font-size:2.5rem;opacity:.7"><i class="bi bi-book"></i></div>
+                <h6 class="fw-bold mb-3">Εγχειρίδιο Χρήσης</h6>
+                <?php if (isAdmin()): ?>
+                    <a href="docs/manual-admin.html" target="_blank" class="btn btn-outline-primary w-100">
+                        <i class="bi bi-book me-1"></i>Εγχειρίδιο Διαχειριστή
+                    </a>
+                <?php else: ?>
+                    <a href="docs/manual-user.html" target="_blank" class="btn btn-outline-primary w-100">
+                        <i class="bi bi-book me-1"></i>Εγχειρίδιο Εθελοντή
+                    </a>
+                <?php endif; ?>
+                <p class="text-muted mt-2 mb-0 small">
+                    <i class="bi bi-printer me-1"></i>Εκτυπώστε ή αποθηκεύστε ως PDF
+                </p>
+            </div>
+        </div>
     </div>
 </div>
 
