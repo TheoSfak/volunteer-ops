@@ -66,13 +66,26 @@ if (isPost() && isAdmin()) {
             
             logAudit('respond_complaint', 'complaints', $id);
             
-            // Notify the volunteer
+            // Notify the volunteer (in-app + email)
             sendNotification(
                 $complaint['user_id'],
                 'Απάντηση στο Παράπονο #' . $id,
                 'Υπάρχει απάντηση στο παράπονό σας: ' . $complaint['subject'],
                 'complaint_response'
             );
+            if (isNotificationEnabled('complaint_response')) {
+                $complaintUrl = rtrim(BASE_URL, '/') . '/complaint-view.php?id=' . $id;
+                $statusLabel = COMPLAINT_STATUS_LABELS[$newStatus] ?? $newStatus;
+                $responderName = getCurrentUser()['name'] ?? 'Διαχειριστής';
+                sendNotificationEmail('complaint_response', $complaint['user_email'], [
+                    'user_name'          => $complaint['user_name'],
+                    'complaint_subject'  => $complaint['subject'],
+                    'complaint_status'   => $statusLabel,
+                    'responder_name'     => $responderName,
+                    'admin_response'     => $response,
+                    'complaint_url'      => $complaintUrl,
+                ]);
+            }
             
             setFlash('success', 'Η απάντηση αποθηκεύτηκε.');
             redirect('complaint-view.php?id=' . $id);

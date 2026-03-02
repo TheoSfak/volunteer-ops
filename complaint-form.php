@@ -54,8 +54,10 @@ if (isPost()) {
         
         logAudit('create_complaint', 'complaints', $id);
         
-        // Notify admins via in-app notification
-        $admins = dbFetchAll("SELECT id FROM users WHERE role IN (?, ?)", [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+        // Notify admins (in-app + email)
+        $admins = dbFetchAll("SELECT id, name, email FROM users WHERE role IN (?, ?)", [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+        $missionTitle = $missionId ? (dbFetchValue("SELECT title FROM missions WHERE id = ?", [(int)$missionId]) ?: '—') : '—';
+        $complaintUrl = rtrim(BASE_URL, '/') . '/complaint-view.php?id=' . $id;
         foreach ($admins as $admin) {
             sendNotification(
                 $admin['id'],
@@ -63,6 +65,18 @@ if (isPost()) {
                 'Ο/Η ' . $currentUser['name'] . ' υπέβαλε παράπονο: ' . $subject,
                 'complaint'
             );
+            if (isNotificationEnabled('complaint_submitted')) {
+                sendNotificationEmail('complaint_submitted', $admin['email'], [
+                    'admin_name'          => $admin['name'],
+                    'volunteer_name'      => $currentUser['name'],
+                    'complaint_subject'   => $subject,
+                    'complaint_category'  => COMPLAINT_CATEGORY_LABELS[$category] ?? $category,
+                    'complaint_priority'  => COMPLAINT_PRIORITY_LABELS[$priority] ?? $priority,
+                    'complaint_body'      => $body,
+                    'mission_title'       => $missionTitle,
+                    'complaint_url'       => $complaintUrl,
+                ]);
+            }
         }
         
         setFlash('success', 'Το παράπονό σας υποβλήθηκε επιτυχώς. Θα εξεταστεί από τη διοίκηση.');
