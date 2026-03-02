@@ -867,6 +867,11 @@ if (isLoggedIn()) {
                     <i class="bi bi-graph-up"></i> Αναφορές
                 </a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'complaints' ? 'active' : '' ?>" href="complaints.php">
+                    <i class="bi bi-chat-left-dots"></i> Παράπονα
+                </a>
+            </li>
             <?php endif; ?>
             
             <?php if (!isTraineeRescuer()): ?>
@@ -1063,6 +1068,8 @@ if (isLoggedIn()) {
                         <li><a class="dropdown-item" href="my-participations.php"><i class="bi bi-list-check me-2"></i>Οι Αιτήσεις μου</a></li>
                         <li><a class="dropdown-item" href="my-points.php"><i class="bi bi-star me-2"></i>Οι Πόντοι μου</a></li>
                         <li><a class="dropdown-item" href="notification-preferences.php"><i class="bi bi-bell me-2"></i>Ρυθμίσεις Ειδοποιήσεων</a></li>
+                        <li><a class="dropdown-item" href="complaint-form.php"><i class="bi bi-exclamation-triangle me-2"></i>Αναφορά Παραπόνου</a></li>
+                        <li><a class="dropdown-item" href="my-complaints.php"><i class="bi bi-chat-left-dots me-2"></i>Τα Παράπονά μου</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <form action="logout.php" method="post" class="d-inline">
