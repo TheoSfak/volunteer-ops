@@ -2,7 +2,7 @@
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 
-$pageTitle = 'Διαχείριση Εργασιών';
+$pageTitle = isAdmin() ? 'Διαχείριση Εργασιών' : 'Οι Εργασίες μου';
 $user = getCurrentUser();
 
 // Filters
@@ -124,6 +124,7 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </select>
             </div>
+            <?php if (isAdmin()): ?>
             <div class="col-md-3">
                 <label class="form-label">Ανατεθειμένες σε μένα</label>
                 <select class="form-select" name="assigned_to_me">
@@ -131,6 +132,7 @@ include __DIR__ . '/includes/header.php';
                     <option value="1" <?= $assignedToMe ? 'selected' : '' ?>>Μόνο οι δικές μου</option>
                 </select>
             </div>
+            <?php endif; ?>
             <div class="col-md-3 d-flex align-items-end">
                 <button type="submit" class="btn btn-outline-primary w-100">
                     <i class="bi bi-funnel me-1"></i>Φίλτρο
@@ -144,6 +146,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <!-- Stats Cards -->
+<?php if (isAdmin()): ?>
 <div class="row mb-4">
     <?php
     $stats = [
@@ -177,13 +180,19 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+<?php endif; ?>
 
 <!-- Tasks List -->
 <?php if (empty($tasks)): ?>
     <div class="card">
         <div class="card-body text-center py-5">
             <i class="bi bi-inbox" style="font-size: 3rem; color: #ccc;"></i>
-            <p class="text-muted mt-3">Δεν βρέθηκαν εργασίες.</p>
+            <?php if (isAdmin()): ?>
+                <p class="text-muted mt-3">Δεν βρέθηκαν εργασίες.</p>
+            <?php else: ?>
+                <p class="text-muted mt-3 mb-1">Δεν σας έχει ανατεθεί κάποια εργασία.</p>
+                <p class="text-muted small">Όταν κάποιος διαχειριστής σας αναθέσει εργασία, θα εμφανιστεί εδώ.</p>
+            <?php endif; ?>
         </div>
     </div>
 <?php else: ?>
