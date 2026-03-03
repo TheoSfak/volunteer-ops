@@ -137,29 +137,19 @@ foreach ($shifts as $s) {
     $isPast      = strtotime($s['end_time']) < $now;
     $isCanceled  = in_array($s['mission_status'], ['CANCELED']);
 
-    // Determine fill rate colour
+    // Determine fill rate colour (always used for both bg and border)
     if ($isCanceled) {
-        $color = '#6c757d'; // grey
+        $color = '#6c757d'; // grey — canceled
     } elseif ($isPast) {
-        $color = '#495057'; // dark grey for past
+        $color = '#495057'; // dark grey — past
     } else {
         $fillPct = $max > 0 ? ($approved / $max) * 100 : 0;
         if ($fillPct >= 80) {
-            $color = '#146c43'; // dark green
+            $color = '#146c43'; // dark green — full
         } elseif ($fillPct >= 50) {
-            $color = '#cc6c0a'; // dark orange
+            $color = '#cc6c0a'; // dark orange — medium
         } else {
-            $color = '#b02a37'; // dark red
-        }
-    }
-
-    // Border accent: use mission type colour if set
-    $borderColor = null;
-    if (!empty($s['type_color'])) {
-        // type_color can be a Bootstrap name like "primary" or a hex "#3d8bcd"
-        $tc = $s['type_color'];
-        if (strpos($tc, '#') === 0) {
-            $borderColor = $tc;
+            $color = '#b02a37'; // dark red — low
         }
     }
 
@@ -177,7 +167,7 @@ foreach ($shifts as $s) {
         'end'             => $s['end_time'],
         'url'             => 'shift-view.php?id=' . $s['id'],
         'backgroundColor' => $color,
-        'borderColor'     => $borderColor ?? $color,
+        'borderColor'     => $color,
         'textColor'       => '#ffffff',
         'extendedProps'   => [
             'shift_id'       => $s['id'],
@@ -192,6 +182,8 @@ foreach ($shifts as $s) {
             'notes'          => $s['notes'],
             'is_urgent'      => (bool) $s['is_urgent'],
             'is_past'        => $isPast,
+            'fill_pct'       => $max > 0 ? round(($approved / $max) * 100) : 0,
+            'color'          => $color,
         ],
     ];
 
