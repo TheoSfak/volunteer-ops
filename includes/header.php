@@ -710,6 +710,11 @@ if (isLoggedIn()) {
             
             <div class="sidebar-section">Αποστολές</div>
             
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'shift-calendar' ? 'active' : '' ?>" href="shift-calendar.php">
+                    <i class="bi bi-calendar3"></i> Ημερολόγιο Βάρδιων
+                </a>
+            </li>
             <?php if (isAdmin()): ?>
             <li class="nav-item">
                 <a class="nav-link <?= ($currentPage === 'missions' && get('status') === 'DRAFT') ? 'active' : '' ?>" href="missions.php?status=DRAFT">
