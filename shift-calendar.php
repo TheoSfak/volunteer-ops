@@ -380,6 +380,19 @@ include __DIR__ . '/includes/header.php';
 document.addEventListener('DOMContentLoaded', function () {
 
     /* ── Helpers ─────────────────────────────────────────────────────────── */
+    function shiftColor(ep) {
+        // Determine colour clientside so it's API-version independent
+        const status = (ep.mission_status || '').toUpperCase();
+        if (status === 'CANCELED') return '#6c757d';
+        if (ep.is_past)            return '#495057';
+        // Compute fill pct from raw counts when ep.fill_pct is missing
+        const pct = (ep.fill_pct !== undefined && ep.fill_pct !== null)
+            ? ep.fill_pct
+            : (ep.max_volunteers > 0 ? Math.round((ep.approved_count / ep.max_volunteers) * 100) : 0);
+        if (pct >= 80) return '#146c43';
+        if (pct >= 50) return '#cc6c0a';
+        return '#b02a37';
+    }
     function filterParams(info) {
         const p = new URLSearchParams({ mine: document.getElementById('filterMine').checked ? '1' : '0' });
         if (info) { p.set('start', info.startStr); p.set('end', info.endStr); }
@@ -415,8 +428,12 @@ document.addEventListener('DOMContentLoaded', function () {
         /* Custom event HTML — fill bar + volunteer count (background applied directly here) */
         eventContent: function (arg) {
             const ep  = arg.event.extendedProps;
-            const pct = Math.min(ep.fill_pct || 0, 100);
-            const bg  = ep.color || arg.event.backgroundColor || '#6c757d';
+            const pct = Math.min(
+                (ep.fill_pct !== undefined && ep.fill_pct !== null)
+                    ? ep.fill_pct
+                    : (ep.max_volunteers > 0 ? Math.round((ep.approved_count / ep.max_volunteers) * 100) : 0),
+                100);
+            const bg  = shiftColor(ep);
             const countStr = ep.max_volunteers > 0
                 ? ep.approved_count + '/' + ep.max_volunteers
                 : String(ep.approved_count);
@@ -455,9 +472,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
         /* Styled popover on mount */
         eventDidMount: function (info) {
-            const ep  = info.event.extendedProps;
-            const pct = Math.min(ep.fill_pct || 0, 100);
-            const barColor = ep.color || '#6c757d';
+            const ep       = info.event.extendedProps;
+            const pct      = Math.min(
+                (ep.fill_pct !== undefined && ep.fill_pct !== null)
+                    ? ep.fill_pct
+                    : (ep.max_volunteers > 0 ? Math.round((ep.approved_count / ep.max_volunteers) * 100) : 0),
+                100);
+            const barColor = shiftColor(ep);
 
             const countStr = ep.max_volunteers > 0
                 ? ep.approved_count + '/' + ep.max_volunteers + ' εθελοντές'
