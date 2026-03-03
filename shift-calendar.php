@@ -69,9 +69,12 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
 
-            <div class="col-auto d-flex align-items-end">
+            <div class="col-auto d-flex align-items-end gap-2">
                 <button id="btnRefresh" class="btn btn-sm btn-outline-primary mt-3">
                     <i class="bi bi-arrow-clockwise me-1"></i>Ανανέωση
+                </button>
+                <button id="btnExportIcs" class="btn btn-sm btn-outline-success mt-3" title="Εξαγωγή βαρδιών ως .ics (Google Calendar, Apple Calendar, Outlook)">
+                    <i class="bi bi-calendar-plus me-1"></i>Εξαγωγή .ics
                 </button>
             </div>
 
@@ -186,8 +189,23 @@ document.addEventListener('DOMContentLoaded', function () {
                 ? `<br><span class="badge bg-info text-dark">Η συμμετοχή μου: ${myStatusLabel(ep.my_status)}</span>`
                 : '';
 
+            // Google Calendar direct link for this single event
+            const gcalStart = info.event.start
+                ? info.event.start.toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'')
+                : '';
+            const gcalEnd = info.event.end
+                ? info.event.end.toISOString().replace(/[-:]/g,'').replace(/\.\d{3}/,'')
+                : gcalStart;
+            const gcalUrl = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+                + '&text='    + encodeURIComponent(ep.mission_title + ' — Βάρδια #' + ep.shift_id)
+                + '&dates='  + gcalStart + '/' + gcalEnd
+                + '&details=' + encodeURIComponent('Βάρδια εθελοντισμού - ' + ep.mission_title)
+                + '&location=' + encodeURIComponent(ep.location || '');
+            const gcalBtn = `<br><a href="${gcalUrl}" target="_blank" class="btn btn-sm btn-outline-danger mt-1 py-0 px-1" style="font-size:0.72rem;">`
+                + `<img src="https://ssl.gstatic.com/calendar/images/dynamiclogo_2020q4/calendar_16_2x.png" height="12" class="me-1" alt="">Προσθήκη στο Google Calendar</a>`;
+
             const tipContent = `<strong>${ep.mission_title}</strong>${typeStr}`
-                + `<br>${fillStr}${pendStr}${locStr}${myBadge}`;
+                + `<br>${fillStr}${pendStr}${locStr}${myBadge}${gcalBtn}`;
 
             const el = info.el;
             el.setAttribute('data-bs-toggle', 'popover');
@@ -220,6 +238,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
     document.getElementById('btnRefresh').addEventListener('click', function () {
         calendar.refetchEvents();
+    });
+
+    /* ── ICS export ─────────────────────────────────────────────────────────── */
+    document.getElementById('btnExportIcs').addEventListener('click', function () {
+        const params = new URLSearchParams({ mine: document.getElementById('filterMine').checked ? '1' : '0' });
+        const dept = document.getElementById('filterDept');
+        if (dept && dept.value) params.set('department_id', dept.value);
+        const type = document.getElementById('filterType');
+        if (type && type.value) params.set('mission_type_id', type.value);
+        window.location.href = 'api-shifts-calendar-ics.php?' + params.toString();
     });
 
     /* ── Helper: my_status Greek label ─────────────────────────────────────── */
