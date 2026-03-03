@@ -201,6 +201,7 @@ include __DIR__ . '/includes/header.php';
 .fc .fc-event {
     border-radius: 6px !important;
     border: none !important;
+    background: transparent !important;
     cursor: pointer;
     transition: transform 0.12s, box-shadow 0.12s;
     box-shadow: 0 1px 4px rgba(0,0,0,0.18);
@@ -211,10 +212,14 @@ include __DIR__ . '/includes/header.php';
     box-shadow: 0 4px 12px rgba(0,0,0,0.28) !important;
     z-index: 10;
 }
-.fc .fc-event-main { padding: 2px 5px !important; }
+.fc .fc-event-main { padding: 0 !important; overflow: hidden; border-radius: 6px; }
 
 /* Custom event inner */
-.cal-event-inner { display: flex; flex-direction: column; gap: 1px; min-height: 26px; }
+.cal-event-inner {
+    display: flex; flex-direction: column; gap: 1px;
+    min-height: 26px; border-radius: 5px;
+    padding: 3px 5px; overflow: hidden;
+}
 .cal-event-inner .ev-title {
     font-size: 0.72rem; font-weight: 600; color: #fff;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3;
@@ -407,18 +412,18 @@ document.addEventListener('DOMContentLoaded', function () {
         },
         buttonText: { today:'Σήμερα', month:'Μήνας', week:'Εβδομάδα', day:'Ημέρα', list:'Λίστα' },
 
-        /* Custom event HTML — fill bar + volunteer count */
+        /* Custom event HTML — fill bar + volunteer count (background applied directly here) */
         eventContent: function (arg) {
             const ep  = arg.event.extendedProps;
             const pct = Math.min(ep.fill_pct || 0, 100);
+            const bg  = ep.color || arg.event.backgroundColor || '#6c757d';
             const countStr = ep.max_volunteers > 0
                 ? ep.approved_count + '/' + ep.max_volunteers
                 : String(ep.approved_count);
             const urgentIcon = ep.is_urgent ? '<span style="color:#ffe066;margin-right:2px;">⚡</span>' : '';
-            // Strip the 🔴 prefix already in title (we use ⚡ instead)
             const cleanTitle = arg.event.title.replace(/^🔴 /, '');
             return { html:
-                '<div class="cal-event-inner">' +
+                '<div class="cal-event-inner" style="background:' + bg + ';">' +
                   '<div class="ev-title">' + urgentIcon + cleanTitle + '</div>' +
                   '<div class="ev-meta">' +
                     '<span class="ev-count"><i class="bi bi-people-fill" style="font-size:0.6rem;margin-right:2px;"></i>' + countStr + '</span>' +
@@ -435,10 +440,17 @@ document.addEventListener('DOMContentLoaded', function () {
                 .catch(e => { console.error('Calendar fetch error', e); fail(e); });
         },
 
-        /* Click → navigate to shift */
+        /* Click → toggle popover (navigation is inside the popover) */
         eventClick: function (info) {
             info.jsEvent.preventDefault();
-            if (info.event.url) window.location.href = info.event.url;
+            // Close every other open popover
+            document.querySelectorAll('.fc-event').forEach(function (el) {
+                const p = bootstrap.Popover.getInstance(el);
+                if (p && el !== info.el) p.hide();
+            });
+            // Toggle this event's popover
+            const instance = bootstrap.Popover.getInstance(info.el);
+            if (instance) instance.toggle();
         },
 
         /* Styled popover on mount */
@@ -470,6 +482,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 + '&details='  + encodeURIComponent('Βάρδια εθελοντισμού - ' + ep.mission_title)
                 + '&location=' + encodeURIComponent(ep.location || '');
 
+            const viewLink = info.event.url
+                ? '<a href="' + info.event.url + '" class="btn btn-sm btn-outline-primary w-100 mt-2" style="font-size:0.78rem;"><i class="bi bi-eye me-1"></i>Προβολή Βάρδιας</a>'
+                : '';
+
             const body =
                 '<div class="cal-pop-row"><i class="bi bi-people"></i>' + countStr + pendStr + '</div>' +
                 '<div class="cal-pop-fill-bar"><div class="fill-inner" style="width:' + pct + '%;background:' + barColor + ';"></div></div>' +
@@ -477,13 +493,14 @@ document.addEventListener('DOMContentLoaded', function () {
                 '<a href="' + gcalUrl + '" target="_blank" class="cal-pop-gcal">' +
                   '<svg width="14" height="14" viewBox="0 0 24 24" fill="#1a73e8"><path d="M19 4h-1V2h-2v2H8V2H6v2H5C3.9 4 3 4.9 3 6v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11zM7 11h5v5H7z"/></svg>' +
                   'Προσθήκη στο Google Calendar' +
-                '</a>';
+                '</a>' +
+                viewLink;
 
             new bootstrap.Popover(info.el, {
                 title      : (ep.is_urgent ? '⚡ ' : '') + ep.mission_title,
                 content    : body,
                 html       : true,
-                trigger    : 'hover focus',
+                trigger    : 'manual',
                 placement  : 'top',
                 container  : 'body',
                 sanitize   : false,
@@ -502,6 +519,16 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     calendar.render();
+
+    /* ── Close popover when clicking outside calendar ────────────────────── */
+    document.addEventListener('click', function (e) {
+        if (!e.target.closest('.fc-event') && !e.target.closest('.popover')) {
+            document.querySelectorAll('.fc-event').forEach(function (el) {
+                const p = bootstrap.Popover.getInstance(el);
+                if (p) p.hide();
+            });
+        }
+    });
 
     /* ── Filter change listeners ─────────────────────────────────────────── */
     ['filterDept','filterType','filterMine'].forEach(function (id) {
