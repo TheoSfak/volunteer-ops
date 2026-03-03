@@ -189,6 +189,8 @@ function runHealthChecks() {
         'training_user_progress', 'user_achievements', 'user_answers', 'user_notification_preferences',
         'user_skills', 'users', 'volunteer_certificates', 'volunteer_documents', 'volunteer_pings',
         'volunteer_points', 'volunteer_positions',
+        // additional tables
+        'complaints', 'migrations', 'volunteer_profiles',
     ];
     
     try {
