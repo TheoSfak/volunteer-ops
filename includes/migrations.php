@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 37;
+    $LATEST_MIGRATION_VERSION = 38;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -2376,6 +2376,110 @@ function runSchemaMigrations(): void {
                 // ── audit_logs ──────────────────────────────────────────────
                 // Combined filter for audit viewer: action + table_name + created_at
                 $addIndex('audit_logs', 'idx_audit_action_table_date', 'action, table_name, created_at');
+            },
+        ],
+
+        [
+            'version'     => 38,
+            'description' => 'Create complaints table + add missing priority/created_at/user indexes',
+            'up' => function () {
+                // ── 1. Create complaints table if missing ──────────────────────────
+                $tableExists = (bool) dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'complaints'"
+                );
+                if (!$tableExists) {
+                    dbExecute(
+                        "CREATE TABLE `complaints` (
+                            `id`             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            `user_id`        INT UNSIGNED NOT NULL,
+                            `mission_id`     INT UNSIGNED NULL,
+                            `category`       ENUM('MISSION','EQUIPMENT','BEHAVIOR','ADMIN','OTHER') NOT NULL DEFAULT 'OTHER',
+                            `priority`       ENUM('LOW','MEDIUM','HIGH') NOT NULL DEFAULT 'MEDIUM',
+                            `subject`        VARCHAR(255) NOT NULL,
+                            `body`           TEXT NOT NULL,
+                            `status`         ENUM('NEW','IN_REVIEW','RESOLVED','REJECTED') NOT NULL DEFAULT 'NEW',
+                            `admin_response` TEXT NULL,
+                            `responded_by`   INT UNSIGNED NULL,
+                            `responded_at`   DATETIME NULL,
+                            `created_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            `updated_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            FOREIGN KEY (`user_id`)       REFERENCES `users`(`id`)    ON DELETE CASCADE,
+                            FOREIGN KEY (`mission_id`)    REFERENCES `missions`(`id`) ON DELETE SET NULL,
+                            FOREIGN KEY (`responded_by`)  REFERENCES `users`(`id`)   ON DELETE SET NULL,
+                            INDEX `idx_complaint_user`         (`user_id`),
+                            INDEX `idx_complaint_status`       (`status`),
+                            INDEX `idx_complaint_category`     (`category`),
+                            INDEX `idx_complaint_mission`      (`mission_id`),
+                            INDEX `idx_complaint_priority`     (`priority`),
+                            INDEX `idx_complaint_created`      (`created_at`),
+                            INDEX `idx_complaint_user_created` (`user_id`, `created_at`)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                } else {
+                    // Table exists (e.g. via migrate_complaints.php) — add new indexes only
+                    $addIdx = function (string $idxName, string $cols) {
+                        $exists = dbFetchOne(
+                            "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+                             WHERE TABLE_SCHEMA = DATABASE()
+                               AND TABLE_NAME   = 'complaints'
+                               AND INDEX_NAME   = ?",
+                            [$idxName]
+                        );
+                        if (!$exists) {
+                            dbExecute("ALTER TABLE `complaints` ADD INDEX `{$idxName}` ({$cols})");
+                        }
+                    };
+                    $addIdx('idx_complaint_priority',     'priority');
+                    $addIdx('idx_complaint_created',      'created_at');
+                    $addIdx('idx_complaint_user_created', 'user_id, created_at');
+                }
+
+                // ── 2. Email templates (safe: ON DUPLICATE KEY touches nothing) ────
+                $tplHtml = [
+                    'complaint_submitted' => '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#dc2626;color:white;padding:20px;text-align:center;"><h1>&#9888; Νέο Παράπονο Εθελοντή</h1></div><div style="padding:30px;background:#fff;"><h2>Γεια σας {{admin_name}},</h2><p>Ο/Η εθελοντής <strong>{{volunteer_name}}</strong> υπέβαλε νέο παράπονο.</p><ul><li><strong>Θέμα:</strong> {{complaint_subject}}</li><li><strong>Κατηγορία:</strong> {{complaint_category}}</li><li><strong>Προτεραιότητα:</strong> {{complaint_priority}}</li><li><strong>Αποστολή:</strong> {{mission_title}}</li></ul><p>{{complaint_body}}</p><p style="text-align:center;"><a href="{{complaint_url}}" style="background:#dc2626;color:white;padding:12px 28px;text-decoration:none;border-radius:5px;">Δείτε το Παράπονο</a></p></div><div style="padding:12px;background:#f8f9fa;text-align:center;font-size:12px;color:#666;">{{app_name}}</div></div>',
+                    'complaint_response'  => '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#16a34a;color:white;padding:20px;text-align:center;"><h1>&#128172; Απάντηση στο Παράπονό σας</h1></div><div style="padding:30px;background:#fff;"><h2>Γεια σας {{user_name}},</h2><p>Λάβαμε το παράπονό σας και σας αποστέλλουμε την απάντησή μας.</p><ul><li><strong>Θέμα:</strong> {{complaint_subject}}</li><li><strong>Νέα Κατάσταση:</strong> {{complaint_status}}</li><li><strong>Απάντηση από:</strong> {{responder_name}}</li></ul><blockquote style="background:#f0fdf4;border-left:4px solid #16a34a;padding:12px 16px;">{{admin_response}}</blockquote><p style="text-align:center;"><a href="{{complaint_url}}" style="background:#16a34a;color:white;padding:12px 28px;text-decoration:none;border-radius:5px;">Δείτε το Παράπονο</a></p></div><div style="padding:12px;background:#f8f9fa;text-align:center;font-size:12px;color:#666;">{{app_name}}</div></div>',
+                ];
+                $tplMeta = [
+                    'complaint_submitted' => [
+                        'name'    => 'Νέο Παράπονο (Admin)',
+                        'subject' => 'Νέο παράπονο εθελοντή - {{complaint_subject}}',
+                        'desc'    => 'Αποστέλλεται στους διαχειριστές όταν υποβάλλεται νέο παράπονο εθελοντή',
+                        'vars'    => '{{app_name}}, {{admin_name}}, {{volunteer_name}}, {{complaint_subject}}, {{complaint_category}}, {{complaint_priority}}, {{complaint_body}}, {{mission_title}}, {{complaint_url}}',
+                    ],
+                    'complaint_response'  => [
+                        'name'    => 'Απάντηση Παραπόνου',
+                        'subject' => 'Απάντηση στο παράπονό σας: {{complaint_subject}}',
+                        'desc'    => 'Αποστέλλεται στον εθελοντή όταν ο διαχειριστής απαντήσει στο παράπονό του',
+                        'vars'    => '{{app_name}}, {{user_name}}, {{complaint_subject}}, {{complaint_status}}, {{responder_name}}, {{admin_response}}, {{complaint_url}}',
+                    ],
+                ];
+                foreach ($tplMeta as $code => $meta) {
+                    dbExecute(
+                        "INSERT INTO email_templates
+                            (code, name, subject, body_html, description, available_variables)
+                         VALUES (?, ?, ?, ?, ?, ?)
+                         ON DUPLICATE KEY UPDATE updated_at = updated_at",
+                        [$code, $meta['name'], $meta['subject'], $tplHtml[$code], $meta['desc'], $meta['vars']]
+                    );
+                }
+
+                // ── 3. Notification settings rows ─────────────────────────────────
+                $notifCodes = [
+                    'complaint_submitted' => 'Νέο Παράπονο (Admin)',
+                    'complaint_response'  => 'Απάντηση Παραπόνου',
+                ];
+                foreach ($notifCodes as $code => $name) {
+                    $tplId = dbFetchValue(
+                        "SELECT id FROM email_templates WHERE code = ?", [$code]
+                    );
+                    dbExecute(
+                        "INSERT INTO notification_settings (code, name, email_enabled, email_template_id)
+                         VALUES (?, ?, 1, ?)
+                         ON DUPLICATE KEY UPDATE updated_at = updated_at",
+                        [$code, $name, $tplId]
+                    );
+                }
             },
         ],
 
