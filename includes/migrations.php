@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 36;
+    $LATEST_MIGRATION_VERSION = 37;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -2265,6 +2265,117 @@ function runSchemaMigrations(): void {
                         INDEX idx_audit_created (created_at)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
                 }
+            },
+        ],
+
+        [
+            'version'     => 36,
+            'description' => 'Ensure audit_logs table exists',
+            'up' => function () {
+                $tableExists = (bool) dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'audit_logs'"
+                );
+                if (!$tableExists) {
+                    dbExecute("CREATE TABLE audit_logs (
+                        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        user_id INT UNSIGNED NULL,
+                        action VARCHAR(50) NOT NULL,
+                        table_name VARCHAR(100) NULL,
+                        record_id INT UNSIGNED NULL,
+                        notes TEXT NULL,
+                        ip_address VARCHAR(45) NULL,
+                        user_agent TEXT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        INDEX idx_audit_user (user_id),
+                        INDEX idx_audit_table (table_name, record_id),
+                        INDEX idx_audit_action (action),
+                        INDEX idx_audit_created (created_at)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                }
+            },
+        ],
+
+        [
+            'version'     => 37,
+            'description' => 'Add missing performance indexes: deleted_at, total_points, attended, expiry, achievements',
+            'up' => function () {
+                // Helper: add index only if not already present (safe to run multiple times)
+                $addIndex = function (string $table, string $indexName, string $columns) {
+                    // First check the table exists (guards against optional tables)
+                    $tblExists = dbFetchOne(
+                        "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+                        [$table]
+                    );
+                    if (!$tblExists) return;
+                    $exists = dbFetchOne(
+                        "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+                         WHERE TABLE_SCHEMA = DATABASE()
+                           AND TABLE_NAME   = ?
+                           AND INDEX_NAME   = ?",
+                        [$table, $indexName]
+                    );
+                    if (!$exists) {
+                        dbExecute("ALTER TABLE `{$table}` ADD INDEX `{$indexName}` ({$columns})");
+                    }
+                };
+
+                // ── missions ────────────────────────────────────────────────
+                // deleted_at: every query has `deleted_at IS NULL` — no index before
+                $addIndex('missions', 'idx_missions_deleted_at', 'deleted_at');
+                // Covering composite: status + deleted_at + start_datetime
+                // covers: WHERE status=? AND deleted_at IS NULL ORDER BY start_datetime
+                $addIndex('missions', 'idx_missions_status_del_start', 'status, deleted_at, start_datetime');
+                // Urgent missions filter: WHERE is_urgent=1 AND status='OPEN'
+                $addIndex('missions', 'idx_missions_urgent', 'is_urgent, status');
+
+                // ── users ───────────────────────────────────────────────────
+                // deleted_at: every user listing has `deleted_at IS NULL`
+                $addIndex('users', 'idx_users_deleted_at', 'deleted_at');
+                // leaderboard ORDER BY total_points DESC
+                $addIndex('users', 'idx_users_total_points', 'total_points');
+                // Covering composite for volunteer listings (role + is_active + deleted_at)
+                $addIndex('users', 'idx_users_role_active_del', 'role, is_active, deleted_at');
+                // Admin pending-approval queue: WHERE approval_status='PENDING'
+                $addIndex('users', 'idx_users_approval_status', 'approval_status');
+                // Newsletter recipient query: WHERE newsletter_unsubscribed=0 AND is_active=1 AND deleted_at IS NULL
+                $addIndex('users', 'idx_users_newsletter', 'newsletter_unsubscribed, is_active, deleted_at');
+
+                // ── participation_requests ───────────────────────────────────
+                // attended flag: presence in all attendance reports / points calculation
+                $addIndex('participation_requests', 'idx_pr_attended', 'attended, shift_id');
+                // points_awarded + attended: "which attended rows haven't got points yet"
+                $addIndex('participation_requests', 'idx_pr_points_attended', 'points_awarded, attended');
+                // Per-volunteer attendance history
+                $addIndex('participation_requests', 'idx_pr_vol_attended', 'volunteer_id, attended');
+
+                // ── shifts ──────────────────────────────────────────────────
+                // end_time: past-shift queries (WHERE end_time < NOW()), cron, dashboard
+                $addIndex('shifts', 'idx_shifts_end_time', 'end_time');
+                // Covering range composite for calendar API date-range scan
+                $addIndex('shifts', 'idx_shifts_time_mission', 'start_time, end_time, mission_id');
+
+                // ── volunteer_certificates ───────────────────────────────────
+                // Cron expiry: WHERE expiry_date BETWEEN ? AND ? AND reminder_sent_30 = 0
+                $addIndex('volunteer_certificates', 'idx_vc_expiry', 'expiry_date');
+                $addIndex('volunteer_certificates', 'idx_vc_expiry_reminder', 'expiry_date, reminder_sent_30, reminder_sent_7');
+
+                // ── user_achievements ───────────────────────────────────────
+                // Achievement notification cron: WHERE notified = 0
+                $addIndex('user_achievements', 'idx_ua_notified', 'notified, earned_at');
+
+                // ── volunteer_points ────────────────────────────────────────
+                // Covering index for leaderboard SUM: user_id, points, created_at
+                $addIndex('volunteer_points', 'idx_vp_user_points', 'user_id, points, created_at');
+
+                // ── notifications ───────────────────────────────────────────
+                // Extend to 3-column: user_id + read_at + created_at (unread count + date sort)
+                $addIndex('notifications', 'idx_notif_user_read_created', 'user_id, read_at, created_at');
+
+                // ── audit_logs ──────────────────────────────────────────────
+                // Combined filter for audit viewer: action + table_name + created_at
+                $addIndex('audit_logs', 'idx_audit_action_table_date', 'action, table_name, created_at');
             },
         ],
 

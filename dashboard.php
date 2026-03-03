@@ -8,7 +8,10 @@ requireLogin();
 
 $pageTitle = 'Πίνακας Ελέγχου';
 $user = getCurrentUser();
-$year = get('year', date('Y'));
+$year = (int) get('year', date('Y'));
+// Range strings allow MySQL to use the idx_missions_start index (YEAR() prevents index use)
+$yearStart = $year . '-01-01';
+$yearEnd   = ($year + 1) . '-01-01';
 $currentMonth = date('Y-m');
 $previousMonth = date('Y-m', strtotime('-1 month'));
 
@@ -25,16 +28,16 @@ if (isAdmin()) {
     
     $stats = [
         'missions_total' => dbFetchValue(
-            "SELECT COUNT(*) FROM missions m WHERE YEAR(start_datetime) = ? $departmentFilter",
-            array_merge([$year], $params)
+            "SELECT COUNT(*) FROM missions m WHERE start_datetime >= ? AND start_datetime < ? $departmentFilter",
+            array_merge([$yearStart, $yearEnd], $params)
         ),
         'missions_open' => dbFetchValue(
-            "SELECT COUNT(*) FROM missions m WHERE status = '" . STATUS_OPEN . "' AND YEAR(start_datetime) = ? $departmentFilter",
-            array_merge([$year], $params)
+            "SELECT COUNT(*) FROM missions m WHERE status = '" . STATUS_OPEN . "' AND start_datetime >= ? AND start_datetime < ? $departmentFilter",
+            array_merge([$yearStart, $yearEnd], $params)
         ),
         'missions_completed' => dbFetchValue(
-            "SELECT COUNT(*) FROM missions m WHERE status = '" . STATUS_COMPLETED . "' AND YEAR(start_datetime) = ? $departmentFilter",
-            array_merge([$year], $params)
+            "SELECT COUNT(*) FROM missions m WHERE status = '" . STATUS_COMPLETED . "' AND start_datetime >= ? AND start_datetime < ? $departmentFilter",
+            array_merge([$yearStart, $yearEnd], $params)
         ),
         'volunteers_total' => dbFetchValue(
             "SELECT COUNT(*) FROM users WHERE role = ? AND deleted_at IS NULL",
