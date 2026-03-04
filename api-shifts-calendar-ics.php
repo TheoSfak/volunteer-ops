@@ -36,9 +36,12 @@ $where  = ['m.deleted_at IS NULL', 's.end_time > ?', 's.start_time < ?'];
 $params = [$now, $rangeEnd];
 
 if (!isAdmin()) {
-    $where[]  = "(m.status IN ('OPEN', 'CLOSED', 'COMPLETED')
+    $where[]  = "(m.status IN (?,?,?)
                    OR EXISTS (SELECT 1 FROM participation_requests pr2
                               WHERE pr2.shift_id = s.id AND pr2.volunteer_id = ?))";
+    $params[] = STATUS_OPEN;
+    $params[] = STATUS_CLOSED;
+    $params[] = STATUS_COMPLETED;
     $params[] = $userId;
 }
 

@@ -83,13 +83,13 @@ $volunteers = dbFetchAll(
                 COUNT(*) as shifts_count,
                 COALESCE(SUM(actual_hours), 0) as total_hours
          FROM participation_requests 
-         WHERE status = '" . PARTICIPATION_APPROVED . "' OR attended = 1
+         WHERE status = ? OR attended = 1
          GROUP BY volunteer_id
      ) pr_stats ON u.id = pr_stats.volunteer_id
      WHERE $whereClause
      ORDER BY u.cohort_year DESC, u.name ASC
      LIMIT {$pagination['offset']}, {$pagination['per_page']}",
-    $params
+    array_merge([PARTICIPATION_APPROVED], $params)
 );
 
 // Get departments for filter
@@ -180,10 +180,10 @@ if (isPost()) {
                 break;
             }
             $targetUser = dbFetchOne("SELECT * FROM users WHERE id = ? AND deleted_at IS NULL", [$userId]);
-            if ($targetUser && $targetUser['approval_status'] === 'PENDING') {
+            if ($targetUser && $targetUser['approval_status'] === APPROVAL_PENDING) {
                 dbExecute(
-                    "UPDATE users SET approval_status = 'APPROVED', is_active = 1, updated_at = NOW() WHERE id = ?",
-                    [$userId]
+                    "UPDATE users SET approval_status = ?, is_active = 1, updated_at = NOW() WHERE id = ?",
+                    [APPROVAL_APPROVED, $userId]
                 );
                 // Notify user (in-app)
                 sendNotification($userId, 'Η εγγραφή σας εγκρίθηκε!', 'Καλωσήρθατε! Ο λογαριασμός σας εγκρίθηκε. Μπορείτε τώρα να συνδεθείτε.', 'success');
@@ -216,10 +216,10 @@ if (isPost()) {
                 break;
             }
             $targetUser = dbFetchOne("SELECT * FROM users WHERE id = ? AND deleted_at IS NULL", [$userId]);
-            if ($targetUser && $targetUser['approval_status'] === 'PENDING') {
+            if ($targetUser && $targetUser['approval_status'] === APPROVAL_PENDING) {
                 dbExecute(
-                    "UPDATE users SET approval_status = 'REJECTED', is_active = 0, updated_at = NOW() WHERE id = ?",
-                    [$userId]
+                    "UPDATE users SET approval_status = ?, is_active = 0, updated_at = NOW() WHERE id = ?",
+                    [APPROVAL_REJECTED, $userId]
                 );
                 $appName = getSetting('app_name', 'VolunteerOps');
                 $body = '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px">
@@ -244,8 +244,9 @@ if (isSystemAdmin()) {
         "SELECT u.*, d.name as department_name
          FROM users u
          LEFT JOIN departments d ON u.department_id = d.id
-         WHERE u.approval_status = 'PENDING' AND u.email_verified_at IS NOT NULL AND u.deleted_at IS NULL
-         ORDER BY u.created_at ASC"
+         WHERE u.approval_status = ? AND u.email_verified_at IS NOT NULL AND u.deleted_at IS NULL
+         ORDER BY u.created_at ASC",
+        [APPROVAL_PENDING]
     );
 }
 

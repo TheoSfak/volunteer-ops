@@ -32,12 +32,12 @@ if (isAdmin()) {
             array_merge([$yearStart, $yearEnd], $params)
         ),
         'missions_open' => dbFetchValue(
-            "SELECT COUNT(*) FROM missions m WHERE status = '" . STATUS_OPEN . "' AND start_datetime >= ? AND start_datetime < ? $departmentFilter",
-            array_merge([$yearStart, $yearEnd], $params)
+            "SELECT COUNT(*) FROM missions m WHERE status = ? AND start_datetime >= ? AND start_datetime < ? $departmentFilter",
+            array_merge([STATUS_OPEN, $yearStart, $yearEnd], $params)
         ),
         'missions_completed' => dbFetchValue(
-            "SELECT COUNT(*) FROM missions m WHERE status = '" . STATUS_COMPLETED . "' AND start_datetime >= ? AND start_datetime < ? $departmentFilter",
-            array_merge([$yearStart, $yearEnd], $params)
+            "SELECT COUNT(*) FROM missions m WHERE status = ? AND start_datetime >= ? AND start_datetime < ? $departmentFilter",
+            array_merge([STATUS_COMPLETED, $yearStart, $yearEnd], $params)
         ),
         'volunteers_total' => dbFetchValue(
             "SELECT COUNT(*) FROM users WHERE role = ? AND deleted_at IS NULL",
@@ -51,8 +51,8 @@ if (isAdmin()) {
             "SELECT COUNT(*) FROM participation_requests pr 
              JOIN shifts s ON pr.shift_id = s.id 
              JOIN missions m ON s.mission_id = m.id 
-             WHERE pr.status = '" . PARTICIPATION_PENDING . "' $departmentFilter",
-            $params
+             WHERE pr.status = ? $departmentFilter",
+            array_merge([PARTICIPATION_PENDING], $params)
         ),
         'total_hours_this_month' => dbFetchValue(
             "SELECT COALESCE(SUM(pr.actual_hours), 0) FROM participation_requests pr
@@ -80,13 +80,13 @@ if (isAdmin()) {
     // Calculate completion rate
     $completedThisMonth = dbFetchValue(
         "SELECT COUNT(*) FROM missions m 
-         WHERE status = '" . STATUS_COMPLETED . "' AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 MONTH $departmentFilter",
-        array_merge([$currentMonth . '-01', $currentMonth . '-01'], $params)
+         WHERE status = ? AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 MONTH $departmentFilter",
+        array_merge([STATUS_COMPLETED, $currentMonth . '-01', $currentMonth . '-01'], $params)
     );
     $totalThisMonth = dbFetchValue(
         "SELECT COUNT(*) FROM missions m 
-         WHERE m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 MONTH AND status != '" . STATUS_DRAFT . "' $departmentFilter",
-        array_merge([$currentMonth . '-01', $currentMonth . '-01'], $params)
+         WHERE m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 MONTH AND status != ? $departmentFilter",
+        array_merge([$currentMonth . '-01', $currentMonth . '-01', STATUS_DRAFT], $params)
     );
     $stats['completion_rate'] = $totalThisMonth > 0 ? round(($completedThisMonth / $totalThisMonth) * 100) : 0;
     
@@ -170,12 +170,12 @@ if (isAdmin()) {
         "SELECT m.*, d.name as department_name
          FROM missions m
          LEFT JOIN departments d ON m.department_id = d.id
-         WHERE m.status IN ('" . STATUS_OPEN . "', '" . STATUS_CLOSED . "')
+         WHERE m.status IN (?,?)
            AND m.end_datetime < NOW()
            AND m.deleted_at IS NULL
            $departmentFilter
          ORDER BY m.end_datetime ASC",
-        $params
+        array_merge([STATUS_OPEN, STATUS_CLOSED], $params)
     );
     
     $pendingRequests = dbFetchAll(
@@ -184,10 +184,10 @@ if (isAdmin()) {
          JOIN users u ON pr.volunteer_id = u.id
          JOIN shifts s ON pr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
-         WHERE pr.status = '" . PARTICIPATION_PENDING . "' $departmentFilter
+         WHERE pr.status = ? $departmentFilter
          ORDER BY pr.created_at DESC
          LIMIT 10",
-        $params
+        array_merge([PARTICIPATION_PENDING], $params)
     );
 } else {
     // Volunteer statistics
