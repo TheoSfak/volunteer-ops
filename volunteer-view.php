@@ -463,8 +463,8 @@ if (($volunteer['volunteer_type'] ?? '') === VTYPE_RESCUER) {
          JOIN missions m ON s.mission_id = m.id
          WHERE pr.volunteer_id = ? AND pr.attended = 1
            AND YEAR(m.start_datetime) = ?
-           AND m.mission_type_id = 3",
-        [$id, $currentYear]
+           AND m.mission_type_id = ?",
+        [$id, $currentYear, getEduMissionTypeId()]
     );
     $eduPct = min(100, round(($eduMissions / $eduGoal) * 100));
     $eduColor = $eduMissions >= $eduGoal ? 'success' : ($eduMissions >= 1 ? 'warning' : 'danger');

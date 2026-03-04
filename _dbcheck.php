@@ -4,9 +4,9 @@
  * Checks schema version, table existence, and migration status.
  */
 
-define('VOLUNTEEROPS', true);
-require __DIR__ . '/config.php';
-require __DIR__ . '/includes/db.php';
+require_once __DIR__ . '/bootstrap.php';
+requireLogin();
+requireRole([ROLE_SYSTEM_ADMIN]);
 
 header('Content-Type: text/plain; charset=utf-8');
 
