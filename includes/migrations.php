@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 38;
+    $LATEST_MIGRATION_VERSION = 39;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -2470,6 +2470,94 @@ function runSchemaMigrations(): void {
                     'complaint_response'  => 'Απάντηση Παραπόνου',
                 ];
                 foreach ($notifCodes as $code => $name) {
+                    $tplId = dbFetchValue(
+                        "SELECT id FROM email_templates WHERE code = ?", [$code]
+                    );
+                    dbExecute(
+                        "INSERT INTO notification_settings (code, name, email_enabled, email_template_id)
+                         VALUES (?, ?, 1, ?)
+                         ON DUPLICATE KEY UPDATE updated_at = updated_at",
+                        [$code, $name, $tplId]
+                    );
+                }
+            },
+        ],
+
+        [
+            'version'     => 39,
+            'description' => 'Shift swap requests: table, email templates, notification settings',
+            'up' => function () {
+                // ── 1. Create shift_swap_requests table ──────────────────────────────
+                dbExecute(
+                    "CREATE TABLE IF NOT EXISTS shift_swap_requests (
+                        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        participation_id  INT UNSIGNED NOT NULL,
+                        from_volunteer_id INT UNSIGNED NOT NULL,
+                        to_volunteer_id   INT UNSIGNED NOT NULL,
+                        shift_id          INT UNSIGNED NOT NULL,
+                        message           TEXT NULL,
+                        status ENUM('PENDING_RESPONSE','ACCEPTED','DECLINED','APPROVED','REJECTED','CANCELED')
+                               NOT NULL DEFAULT 'PENDING_RESPONSE',
+                        to_volunteer_responded_at DATETIME NULL,
+                        decided_by INT UNSIGNED NULL,
+                        decided_at DATETIME NULL,
+                        admin_notes TEXT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        INDEX idx_ssr_shift        (shift_id),
+                        INDEX idx_ssr_from_vol     (from_volunteer_id),
+                        INDEX idx_ssr_to_vol       (to_volunteer_id),
+                        INDEX idx_ssr_status       (status),
+                        FOREIGN KEY (participation_id)  REFERENCES participation_requests(id) ON DELETE CASCADE,
+                        FOREIGN KEY (from_volunteer_id) REFERENCES users(id) ON DELETE CASCADE,
+                        FOREIGN KEY (to_volunteer_id)   REFERENCES users(id) ON DELETE CASCADE,
+                        FOREIGN KEY (shift_id)          REFERENCES shifts(id) ON DELETE CASCADE,
+                        FOREIGN KEY (decided_by)        REFERENCES users(id) ON DELETE SET NULL
+                    )"
+                );
+
+                // ── 2. Email templates ────────────────────────────────────────────────
+                $templates = [
+                    'shift_swap_requested' => [
+                        'name'    => '\u0391\u03af\u03c4\u03b7\u03bc\u03b1 \u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2 \u0392\u03ac\u03c1\u03b4\u03b9\u03b1\u03c2',
+                        'subject' => '\u0391\u03af\u03c4\u03b7\u03bc\u03b1 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2 \u03b3\u03b9\u03b1 \u03b1\u03c0\u03bf\u03c3\u03c4\u03bf\u03bb\u03ae {{mission_title}}',
+                        'desc'    => '\u0391\u03c0\u03bf\u03c3\u03c4\u03ad\u03bb\u03bb\u03b5\u03c4\u03b1\u03b9 \u03c3\u03c4\u03bf\u03bd \u03b5\u03b8\u03b5\u03bb\u03bf\u03bd\u03c4\u03ae \u03c0\u03bf\u03c5 \u03b6\u03b7\u03c4\u03ae\u03b8\u03b7\u03ba\u03b5 \u03bd\u03b1 \u03ba\u03b1\u03bb\u03cd\u03c8\u03b5\u03b9 \u03c4\u03b7 \u03b2\u03ac\u03c1\u03b4\u03b9\u03b1',
+                        'vars'    => '{{user_name}}, {{requester_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{message}}',
+                        'html'    => '<div style="font-family:Arial,sans-serif"><div style="background:#8e44ad;color:#fff;padding:16px 20px"><h2 style="margin:0">&#128257; \u0391\u03af\u03c4\u03b7\u03bc\u03b1 \u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2</h2></div><div style="padding:20px"><p>\u0393\u03b5\u03b9\u03b1, <strong>{{user_name}}</strong>!</p><p>\u039f/\u0397 <strong>{{requester_name}}</strong> \u03c3\u03b1\u03c2 \u03b6\u03b7\u03c4\u03ac \u03bd\u03b1 \u03c4\u03bf\u03bd/\u03c4\u03b7\u03bd \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03b1\u03c3\u03c4\u03ae\u03c3\u03b5\u03c4\u03b5 \u03c3\u03c4\u03b7 \u03b2\u03ac\u03c1\u03b4\u03b9\u03b1:</p><ul><li><strong>\u0391\u03c0\u03bf\u03c3\u03c4\u03bf\u03bb\u03ae:</strong> {{mission_title}}</li><li><strong>\u0397\u03bc/\u03bd\u03af\u03b1:</strong> {{shift_date}}</li><li><strong>\u038f\u03c1\u03b1:</strong> {{shift_time}}</li></ul><p>\u03a3\u03c5\u03bd\u03b4\u03b5\u03b8\u03b5\u03af\u03c4\u03b5 \u03b3\u03b9\u03b1 \u03bd\u03b1 \u03b1\u03c0\u03bf\u03b4\u03b5\u03c7\u03c4\u03b5\u03af\u03c4\u03b5 \u03ae \u03bd\u03b1 \u03b1\u03c1\u03bd\u03b7\u03b8\u03b5\u03af\u03c4\u03b5 \u03c4\u03bf \u03b1\u03af\u03c4\u03b7\u03bc\u03b1.</p></div></div>',
+                    ],
+                    'shift_swap_accepted' => [
+                        'name'    => '\u0391\u03c0\u03bf\u03b4\u03bf\u03c7\u03ae \u0391\u03b9\u03c4\u03ae\u03bc\u03b1\u03c4\u03bf\u03c2 \u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2',
+                        'subject' => '\u039f/\u0397 {{replacement_name}} \u03b1\u03c0\u03bf\u03b4\u03ad\u03c7\u03c4\u03b7\u03ba\u03b5 \u03c4\u03bf \u03b1\u03af\u03c4\u03b7\u03bc\u03b1 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2',
+                        'desc'    => '\u0391\u03c0\u03bf\u03c3\u03c4\u03ad\u03bb\u03bb\u03b5\u03c4\u03b1\u03b9 \u03c3\u03c4\u03bf\u03bd \u03b1\u03b9\u03c4\u03bf\u03cd\u03bd\u03c4\u03b1 \u03cc\u03c4\u03b1\u03bd \u03bf \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03b1\u03c3\u03c4\u03ac\u03c4\u03b7\u03c2 \u03b1\u03c0\u03bf\u03b4\u03b5\u03c7\u03c4\u03b5\u03af',
+                        'vars'    => '{{user_name}}, {{replacement_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}',
+                        'html'    => '<div style="font-family:Arial,sans-serif"><div style="background:#27ae60;color:#fff;padding:16px 20px"><h2 style="margin:0">&#10003; \u0391\u03c0\u03bf\u03b4\u03bf\u03c7\u03ae \u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2</h2></div><div style="padding:20px"><p>\u0393\u03b5\u03b9\u03b1, <strong>{{user_name}}</strong>!</p><p>\u039f/\u0397 <strong>{{replacement_name}}</strong> \u03b1\u03c0\u03bf\u03b4\u03ad\u03c7\u03c4\u03b7\u03ba\u03b5 \u03c4\u03bf \u03b1\u03af\u03c4\u03b7\u03bc\u03ac \u03c3\u03b1\u03c2 \u03b3\u03b9\u03b1 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7:</p><ul><li><strong>\u0391\u03c0\u03bf\u03c3\u03c4\u03bf\u03bb\u03ae:</strong> {{mission_title}}</li><li><strong>\u0397\u03bc/\u03bd\u03af\u03b1:</strong> {{shift_date}}</li><li><strong>\u038f\u03c1\u03b1:</strong> {{shift_time}}</li></ul><p>\u0391\u03bd\u03b1\u03bc\u03ad\u03bd\u03b5\u03c4\u03b1\u03b9 \u03b7 \u03c4\u03b5\u03bb\u03b9\u03ba\u03ae \u03ad\u03b3\u03ba\u03c1\u03b9\u03c3\u03b7 \u03b1\u03c0\u03cc \u03c4\u03bf\u03bd \u03b4\u03b9\u03b1\u03c7\u03b5\u03b9\u03c1\u03b9\u03c3\u03c4\u03ae.</p></div></div>',
+                    ],
+                    'shift_swap_approved' => [
+                        'name'    => '\u0388\u03b3\u03ba\u03c1\u03b9\u03c3\u03b7 \u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2 \u0392\u03ac\u03c1\u03b4\u03b9\u03b1\u03c2',
+                        'subject' => '\u0397 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7 \u03b3\u03b9\u03b1 {{mission_title}} \u03b5\u03b3\u03ba\u03c1\u03af\u03b8\u03b7\u03ba\u03b5',
+                        'desc'    => '\u0391\u03c0\u03bf\u03c3\u03c4\u03ad\u03bb\u03bb\u03b5\u03c4\u03b1\u03b9 \u03ba\u03b1\u03b9 \u03c3\u03c4\u03bf\u03c5\u03c2 \u03b4\u03cd\u03bf \u03b5\u03b8\u03b5\u03bb\u03bf\u03bd\u03c4\u03ad\u03c2 \u03cc\u03c4\u03b1\u03bd \u03bf admin \u03b5\u03b3\u03ba\u03c1\u03af\u03bd\u03b5\u03b9',
+                        'vars'    => '{{user_name}}, {{replacement_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}',
+                        'html'    => '<div style="font-family:Arial,sans-serif"><div style="background:#2980b9;color:#fff;padding:16px 20px"><h2 style="margin:0">&#9989; \u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7 \u0395\u03b3\u03ba\u03c1\u03af\u03b8\u03b7\u03ba\u03b5</h2></div><div style="padding:20px"><p>\u0393\u03b5\u03b9\u03b1, <strong>{{user_name}}</strong>!</p><p>\u0397 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7 \u03b3\u03b9\u03b1 \u03c4\u03b7 \u03b2\u03ac\u03c1\u03b4\u03b9\u03b1 \u03b5\u03b3\u03ba\u03c1\u03af\u03b8\u03b7\u03ba\u03b5 \u03b1\u03c0\u03cc \u03c4\u03bf\u03bd \u03b4\u03b9\u03b1\u03c7\u03b5\u03b9\u03c1\u03b9\u03c3\u03c4\u03ae:</p><ul><li><strong>\u0391\u03c0\u03bf\u03c3\u03c4\u03bf\u03bb\u03ae:</strong> {{mission_title}}</li><li><strong>\u0397\u03bc/\u03bd\u03af\u03b1:</strong> {{shift_date}}</li><li><strong>\u038f\u03c1\u03b1:</strong> {{shift_time}}</li></ul></div></div>',
+                    ],
+                ];
+
+                foreach ($templates as $code => $meta) {
+                    dbExecute(
+                        "INSERT INTO email_templates
+                            (code, name, subject, body_html, description, available_variables)
+                         VALUES (?, ?, ?, ?, ?, ?)
+                         ON DUPLICATE KEY UPDATE updated_at = updated_at",
+                        [$code, $meta['name'], $meta['subject'], $meta['html'], $meta['desc'], $meta['vars']]
+                    );
+                }
+
+                // ── 3. Notification settings rows ─────────────────────────────────
+                $notifSettings = [
+                    'shift_swap_requested' => '\u0391\u03af\u03c4\u03b7\u03bc\u03b1 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2 \u03b2\u03ac\u03c1\u03b4\u03b9\u03b1\u03c2 (\u03c0\u03c1\u03bf\u03c2 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03b1\u03c3\u03c4\u03ac\u03c4\u03b7)',
+                    'shift_swap_accepted'  => '\u0391\u03c0\u03bf\u03b4\u03bf\u03c7\u03ae \u03b1\u03b9\u03c4\u03ae\u03bc\u03b1\u03c4\u03bf\u03c2 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2 (\u03c0\u03c1\u03bf\u03c2 \u03b1\u03b9\u03c4\u03bf\u03cd\u03bd\u03c4\u03b1)',
+                    'shift_swap_approved'  => '\u0388\u03b3\u03ba\u03c1\u03b9\u03c3\u03b7 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2 (\u03ba\u03b1\u03b9 \u03c3\u03c4\u03bf\u03c5\u03c2 \u03b4\u03cd\u03bf)',
+                ];
+                foreach ($notifSettings as $code => $name) {
                     $tplId = dbFetchValue(
                         "SELECT id FROM email_templates WHERE code = ?", [$code]
                     );
