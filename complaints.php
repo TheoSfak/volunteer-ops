@@ -69,11 +69,12 @@ $complaints = dbFetchAll(
 $stats = dbFetchOne(
     "SELECT 
         COUNT(*) as total,
-        SUM(status = 'NEW') as new_count,
-        SUM(status = 'IN_REVIEW') as in_review_count,
-        SUM(status = 'RESOLVED') as resolved_count,
-        SUM(status = 'REJECTED') as rejected_count
-     FROM complaints"
+        SUM(status = ?) as new_count,
+        SUM(status = ?) as in_review_count,
+        SUM(status = ?) as resolved_count,
+        SUM(status = ?) as rejected_count
+     FROM complaints",
+    [COMPLAINT_NEW, COMPLAINT_IN_REVIEW, COMPLAINT_RESOLVED, COMPLAINT_REJECTED]
 );
 
 include __DIR__ . '/includes/header.php';

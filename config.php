@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.52.8');
+define('APP_VERSION', '3.52.9');
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
@@ -92,6 +92,11 @@ define('PARTICIPATION_APPROVED', 'APPROVED');
 define('PARTICIPATION_REJECTED', 'REJECTED');
 define('PARTICIPATION_CANCELED_BY_USER', 'CANCELED_BY_USER');
 define('PARTICIPATION_CANCELED_BY_ADMIN', 'CANCELED_BY_ADMIN');
+
+// User registration approval statuses (users.approval_status)
+define('APPROVAL_PENDING',  'PENDING');
+define('APPROVAL_APPROVED', 'APPROVED');
+define('APPROVAL_REJECTED', 'REJECTED');
 
 // Training question types
 define('QUESTION_TYPE_MC', 'MULTIPLE_CHOICE');

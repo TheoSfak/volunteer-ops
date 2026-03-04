@@ -40,12 +40,12 @@ if (isTepMission((int)($mission['mission_type_id'] ?? 0)) && !canSeeTep($mission
 // Get shifts
 $shifts = dbFetchAll(
     "SELECT s.*,
-            (SELECT COUNT(*) FROM participation_requests WHERE shift_id = s.id AND status = '" . PARTICIPATION_APPROVED . "') as approved_count,
-            (SELECT COUNT(*) FROM participation_requests WHERE shift_id = s.id AND status = '" . PARTICIPATION_PENDING . "') as pending_count
+            (SELECT COUNT(*) FROM participation_requests WHERE shift_id = s.id AND status = ?) as approved_count,
+            (SELECT COUNT(*) FROM participation_requests WHERE shift_id = s.id AND status = ?) as pending_count
      FROM shifts s
      WHERE s.mission_id = ?
      ORDER BY s.start_time ASC",
-    [$id]
+    [PARTICIPATION_APPROVED, PARTICIPATION_PENDING, $id]
 );
 
 // Check if current user has applied to any shift
@@ -344,8 +344,8 @@ if (isPost()) {
                             "SELECT DISTINCT pr.volunteer_id, u.name, u.email
                              FROM participation_requests pr
                              JOIN users u ON pr.volunteer_id = u.id
-                             WHERE pr.shift_id IN ($ph) AND pr.status IN ('PENDING','APPROVED')",
-                            $cancelShiftIds
+                             WHERE pr.shift_id IN ($ph) AND pr.status IN (?,?)",
+                            array_merge($cancelShiftIds, [PARTICIPATION_PENDING, PARTICIPATION_APPROVED])
                         );
                         
                         $userIds = array_column($cancelParticipants, 'volunteer_id');
@@ -402,8 +402,8 @@ if (isPost()) {
                             "SELECT DISTINCT pr.volunteer_id, u.name, u.email
                              FROM participation_requests pr 
                              JOIN users u ON pr.volunteer_id = u.id 
-                             WHERE pr.shift_id IN ($placeholders) AND pr.status IN ('PENDING', 'APPROVED')",
-                            $shiftIds
+                             WHERE pr.shift_id IN ($placeholders) AND pr.status IN (?,?)",
+                            array_merge($shiftIds, [PARTICIPATION_PENDING, PARTICIPATION_APPROVED])
                         );
                         
                         // Bulk in-app notification
@@ -1287,8 +1287,8 @@ if (!empty($shiftIds)) {
         "SELECT DISTINCT u.name, pr.status 
          FROM participation_requests pr 
          JOIN users u ON pr.volunteer_id = u.id 
-         WHERE pr.shift_id IN ($placeholders) AND pr.status IN ('PENDING', 'APPROVED')",
-        $shiftIds
+         WHERE pr.shift_id IN ($placeholders) AND pr.status IN (?,?)",
+        array_merge($shiftIds, [PARTICIPATION_PENDING, PARTICIPATION_APPROVED])
     );
 }
 ?>

@@ -51,9 +51,12 @@ $params[] = date('Y-m-d H:i:s', strtotime($rangeStart));
 
 // Non-admins: only open/closed/completed missions they can see
 if (!isAdmin()) {
-    $where[]  = "(m.status IN ('OPEN', 'CLOSED', 'COMPLETED')
+    $where[]  = "(m.status IN (?,?,?)
                    OR EXISTS (SELECT 1 FROM participation_requests pr2
                               WHERE pr2.shift_id = s.id AND pr2.volunteer_id = ?))";
+    $params[] = STATUS_OPEN;
+    $params[] = STATUS_CLOSED;
+    $params[] = STATUS_COMPLETED;
     $params[] = $userId;
 }
 

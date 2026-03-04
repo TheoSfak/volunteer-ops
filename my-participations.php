@@ -37,14 +37,14 @@ if (isPost()) {
         
         // Verify ownership and status
         $pr = dbFetchOne(
-            "SELECT * FROM participation_requests WHERE id = ? AND volunteer_id = ? AND status = '" . PARTICIPATION_PENDING . "'",
-            [$prId, $user['id']]
+            "SELECT * FROM participation_requests WHERE id = ? AND volunteer_id = ? AND status = ?",
+            [$prId, $user['id'], PARTICIPATION_PENDING]
         );
         
         if ($pr) {
             dbExecute(
-                "UPDATE participation_requests SET status = 'CANCELED_BY_USER', updated_at = NOW() WHERE id = ?",
-                [$prId]
+                "UPDATE participation_requests SET status = ?, updated_at = NOW() WHERE id = ?",
+                [PARTICIPATION_CANCELED_BY_USER, $prId]
             );
             logAudit('cancel_participation', 'participation_requests', $prId);
             setFlash('success', 'Η αίτηση ακυρώθηκε.');
@@ -56,10 +56,10 @@ if (isPost()) {
 }
 
 // Group by status
-$pending  = array_filter($participations, fn($p) => $p['status'] === 'PENDING');
-$approved = array_filter($participations, fn($p) => $p['status'] === 'APPROVED');
-$rejected = array_filter($participations, fn($p) => $p['status'] === 'REJECTED');
-$canceled = array_filter($participations, fn($p) => in_array($p['status'], ['CANCELED_BY_USER', 'CANCELED_BY_ADMIN']));
+$pending  = array_filter($participations, fn($p) => $p['status'] === PARTICIPATION_PENDING);
+$approved = array_filter($participations, fn($p) => $p['status'] === PARTICIPATION_APPROVED);
+$rejected = array_filter($participations, fn($p) => $p['status'] === PARTICIPATION_REJECTED);
+$canceled = array_filter($participations, fn($p) => in_array($p['status'], [PARTICIPATION_CANCELED_BY_USER, PARTICIPATION_CANCELED_BY_ADMIN]));
 
 // Active NOW: approved shifts currently in progress
 $now = time();
@@ -510,7 +510,7 @@ include __DIR__ . '/includes/header.php';
                                 <small><?= formatDateTime($p['start_time'], 'H:i') ?> - <?= formatDateTime($p['end_time'], 'H:i') ?></small>
                             </td>
                             <td>
-                                <?php if ($p['status'] === 'CANCELED_BY_USER'): ?>
+                                <?php if ($p['status'] === PARTICIPATION_CANCELED_BY_USER): ?>
                                     <span class="badge bg-secondary">Ακυρώθηκε από εσάς</span>
                                 <?php else: ?>
                                     <span class="badge bg-dark">Ακυρώθηκε από διαχειριστή</span>
@@ -530,7 +530,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="mobile-card-header">
                             <strong><?= h($p['mission_title']) ?></strong>
                             <div>
-                                <?php if ($p['status'] === 'CANCELED_BY_USER'): ?>
+                                <?php if ($p['status'] === PARTICIPATION_CANCELED_BY_USER): ?>
                                     <span class="badge bg-secondary">Από εσάς</span>
                                 <?php else: ?>
                                     <span class="badge bg-dark">Από διαχειριστή</span>

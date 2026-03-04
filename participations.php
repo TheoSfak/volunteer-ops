@@ -109,7 +109,7 @@ if (isPost() && ($isAdmin || $isShiftLeader)) {
             $newStatus = $bulkAction === 'approve' ? PARTICIPATION_APPROVED : PARTICIPATION_REJECTED;
             
             foreach ($selectedIds as $participationId) {
-                $participation = dbFetchOne("SELECT * FROM participation_requests WHERE id = ? AND status = '" . PARTICIPATION_PENDING . "'", [(int)$participationId]);
+                $participation = dbFetchOne("SELECT * FROM participation_requests WHERE id = ? AND status = ?", [(int)$participationId, PARTICIPATION_PENDING]);
                 
                 if ($participation) {
                     dbExecute(
@@ -152,7 +152,7 @@ if (isPost() && ($isAdmin || $isShiftLeader)) {
         $participation = dbFetchOne("SELECT * FROM participation_requests WHERE id = ?", [$participationId]);
         
         if ($participation) {
-            $newStatus = $action === 'approve' ? 'APPROVED' : 'REJECTED';
+            $newStatus = $action === 'approve' ? PARTICIPATION_APPROVED : PARTICIPATION_REJECTED;
             $rejectionReason = $action === 'reject' ? post('rejection_reason', '') : null;
             
             dbExecute(
