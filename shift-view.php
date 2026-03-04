@@ -78,7 +78,7 @@ if (isPost()) {
             $missionExpired = in_array($shift['mission_status'], [STATUS_OPEN, STATUS_CLOSED]) && strtotime($shift['mission_end_datetime']) < time();
             if ($missionExpired && !isAdmin()) {
                 setFlash('error', 'Η αποστολή είναι ακόμα ανοιχτή αλλά ο χρόνος διεξαγωγής έχει παρέλθει. Δεν μπορείτε να υποβάλετε αίτηση.');
-            } elseif ($shift['mission_status'] !== 'OPEN') {
+            } elseif ($shift['mission_status'] !== STATUS_OPEN) {
                 setFlash('error', 'Η αποστολή δεν δέχεται αιτήσεις.');
             } elseif ($myParticipation) {
                 setFlash('error', 'Έχετε ήδη υποβάλει αίτηση.');
@@ -86,8 +86,8 @@ if (isPost()) {
                 dbInsert(
                     "INSERT INTO participation_requests 
                      (shift_id, volunteer_id, status, notes, created_at, updated_at)
-                     VALUES (?, ?, 'PENDING', ?, NOW(), NOW())",
-                    [$id, $user['id'], post('notes')]
+                     VALUES (?, ?, ?, ?, NOW(), NOW())",
+                    [$id, $user['id'], PARTICIPATION_PENDING, post('notes')]
                 );
                 logAudit('apply', 'participation_requests', null, "Shift $id");
                 setFlash('success', 'Η αίτησή σας υποβλήθηκε.');
@@ -95,7 +95,7 @@ if (isPost()) {
             break;
             
         case 'cancel':
-            if ($myParticipation && $myParticipation['status'] === 'PENDING') {
+            if ($myParticipation && $myParticipation['status'] === PARTICIPATION_PENDING) {
                 dbExecute(
                     "UPDATE participation_requests SET status = '" . PARTICIPATION_CANCELED_BY_USER . "', updated_at = NOW() WHERE id = ?",
                     [$myParticipation['id']]
@@ -117,8 +117,8 @@ if (isPost()) {
                 );
                 
                 dbExecute(
-                    "UPDATE participation_requests SET status = '" . PARTICIPATION_APPROVED . "', decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
-                    [$user['id'], $prId]
+                    "UPDATE participation_requests SET status = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
+                    [PARTICIPATION_APPROVED, $user['id'], $prId]
                 );
                 
                 // Send notification
@@ -208,8 +208,8 @@ if (isPost()) {
                     setFlash('error', 'Δεν βρέθηκε η αίτηση.');
                 } else {
                     dbExecute(
-                        "UPDATE participation_requests SET status = '" . PARTICIPATION_APPROVED . "', rejection_reason = NULL, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
-                        [$user['id'], $prId]
+                        "UPDATE participation_requests SET status = ?, rejection_reason = NULL, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
+                        [PARTICIPATION_APPROVED, $user['id'], $prId]
                     );
 
                     // Send email notification (reuse participation_approved template)
@@ -291,8 +291,8 @@ if (isPost()) {
                     "SELECT pr.*, u.name, u.email 
                      FROM participation_requests pr 
                      JOIN users u ON pr.volunteer_id = u.id 
-                     WHERE pr.shift_id = ? AND pr.status IN ('PENDING', 'APPROVED')",
-                    [$id]
+                     WHERE pr.shift_id = ? AND pr.status IN (?, ?)",
+                    [$id, PARTICIPATION_PENDING, PARTICIPATION_APPROVED]
                 );
                 
                 db()->beginTransaction();
@@ -348,18 +348,18 @@ if (isPost()) {
                         // Reactivate existing rejected/canceled record
                         dbExecute(
                             "UPDATE participation_requests 
-                             SET status = 'APPROVED', rejection_reason = NULL, admin_notes = ?, 
+                             SET status = ?, rejection_reason = NULL, admin_notes = ?, 
                                  decided_by = ?, decided_at = NOW(), updated_at = NOW() 
                              WHERE id = ?",
-                            [$notes, $user['id'], $exists['id']]
+                            [PARTICIPATION_APPROVED, $notes, $user['id'], $exists['id']]
                         );
                     } else {
                         // Insert new record
                         dbInsert(
                             "INSERT INTO participation_requests 
                              (shift_id, volunteer_id, status, admin_notes, decided_by, decided_at, created_at, updated_at)
-                             VALUES (?, ?, 'APPROVED', ?, ?, NOW(), NOW(), NOW())",
-                            [$id, $volunteerId, $notes, $user['id']]
+                             VALUES (?, ?, ?, ?, ?, NOW(), NOW(), NOW())",
+                            [$id, $volunteerId, PARTICIPATION_APPROVED, $notes, $user['id']]
                         );
                     }
                     
@@ -434,18 +434,18 @@ if (isPost()) {
                         // Reactivate existing rejected/canceled record
                         dbExecute(
                             "UPDATE participation_requests 
-                             SET status = 'APPROVED', rejection_reason = NULL, admin_notes = ?, 
+                             SET status = ?, rejection_reason = NULL, admin_notes = ?, 
                                  decided_by = ?, decided_at = NOW(), updated_at = NOW() 
                              WHERE id = ?",
-                            [$notes, $user['id'], $exists['id']]
+                            [PARTICIPATION_APPROVED, $notes, $user['id'], $exists['id']]
                         );
                     } else {
                         // Insert new record
                         dbInsert(
                             "INSERT INTO participation_requests 
                              (shift_id, volunteer_id, status, admin_notes, decided_by, decided_at, created_at, updated_at)
-                             VALUES (?, ?, 'APPROVED', ?, ?, NOW(), NOW(), NOW())",
-                            [$id, $volunteerId, $notes, $user['id']]
+                             VALUES (?, ?, ?, ?, ?, NOW(), NOW(), NOW())",
+                            [$id, $volunteerId, PARTICIPATION_APPROVED, $notes, $user['id']]
                         );
                     }
                     
@@ -536,8 +536,8 @@ function calculatePoints($shift, $hours) {
 $approvedCount = 0;
 $pendingCount = 0;
 foreach ($participants as $p) {
-    if ($p['status'] === 'APPROVED') $approvedCount++;
-    if ($p['status'] === 'PENDING') $pendingCount++;
+    if ($p['status'] === PARTICIPATION_APPROVED) $approvedCount++;
+    if ($p['status'] === PARTICIPATION_PENDING) $pendingCount++;
 }
 
 $isPast = strtotime($shift['end_time']) < time();
@@ -718,7 +718,7 @@ include __DIR__ . '/includes/header.php';
                                         <td><?= formatDate($p['created_at']) ?></td>
                                         <?php if ($canManage): ?>
                                             <td>
-                                                <?php if ($p['status'] === 'PENDING'): ?>
+                                                <?php if ($p['status'] === PARTICIPATION_PENDING): ?>
                                                     <form method="post" class="d-inline">
                                                         <?= csrfField() ?>
                                                         <input type="hidden" name="action" value="approve">
@@ -734,7 +734,7 @@ include __DIR__ . '/includes/header.php';
                                                             title="Απόρριψη">
                                                         <i class="bi bi-x-lg"></i>
                                                     </button>
-                                                <?php elseif ($p['status'] === 'APPROVED' && !$p['attended']): ?>
+                                                <?php elseif ($p['status'] === PARTICIPATION_APPROVED && !$p['attended']): ?>
                                                     <?php if ($isPast): ?>
                                                     <button type="button" class="btn btn-sm btn-primary attend-btn"
                                                             data-id="<?= $p['id'] ?>"
@@ -786,7 +786,7 @@ include __DIR__ . '/includes/header.php';
                     <?php if ($myParticipation): ?>
                         <p>Κατάσταση: <?= statusBadge($myParticipation['status']) ?></p>
                         
-                        <?php if ($myParticipation['status'] === 'PENDING'): ?>
+                        <?php if ($myParticipation['status'] === PARTICIPATION_PENDING): ?>
                             <form method="post">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="cancel">
@@ -795,12 +795,12 @@ include __DIR__ . '/includes/header.php';
                                     <i class="bi bi-x-circle me-1"></i>Ακύρωση Αίτησης
                                 </button>
                             </form>
-                        <?php elseif ($myParticipation['status'] === 'APPROVED'): ?>
+                        <?php elseif ($myParticipation['status'] === PARTICIPATION_APPROVED): ?>
                             <div class="alert alert-success mb-0">
                                 <i class="bi bi-check-circle me-1"></i>
                                 Η συμμετοχή σας έχει εγκριθεί!
                             </div>
-                        <?php elseif ($myParticipation['status'] === 'REJECTED'): ?>
+                        <?php elseif ($myParticipation['status'] === PARTICIPATION_REJECTED): ?>
                             <div class="alert alert-danger mb-0">
                                 <i class="bi bi-x-circle me-1"></i>
                                 Η αίτηση απορρίφθηκε.
@@ -809,7 +809,7 @@ include __DIR__ . '/includes/header.php';
                                 <?php endif; ?>
                             </div>
                         <?php endif; ?>
-                    <?php elseif ($shift['mission_status'] === 'OPEN' && !$isPast && !$missionOverdue): ?>
+                    <?php elseif ($shift['mission_status'] === STATUS_OPEN && !$isPast && !$missionOverdue): ?>
                         <?php if ($approvedCount >= $shift['max_volunteers']): ?>
                             <div class="alert alert-warning mb-0">
                                 <i class="bi bi-exclamation-circle me-1"></i>
@@ -1108,7 +1108,7 @@ include __DIR__ . '/includes/header.php';
 <!-- Delete Shift Confirmation Modal -->
 <?php 
 $activeParticipants = array_filter($participants, function($p) {
-    return in_array($p['status'], ['PENDING', 'APPROVED']);
+    return in_array($p['status'], [PARTICIPATION_PENDING, PARTICIPATION_APPROVED]);
 });
 ?>
 <div class="modal fade" id="deleteShiftModal" tabindex="-1" aria-hidden="true">
@@ -1138,7 +1138,7 @@ $activeParticipants = array_filter($participants, function($p) {
                                     <span>
                                         <i class="bi bi-person me-1"></i><?= h($p['name']) ?>
                                     </span>
-                                    <?php if ($p['status'] === 'APPROVED'): ?>
+                                    <?php if ($p['status'] === PARTICIPATION_APPROVED): ?>
                                         <span class="badge bg-success">Εγκεκριμένη</span>
                                     <?php else: ?>
                                         <span class="badge bg-warning">Εκκρεμεί</span>

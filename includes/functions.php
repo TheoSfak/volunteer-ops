@@ -531,6 +531,17 @@ function getTepMissionTypeId(): int {
 }
 
 /**
+ * Return the mission_type id for Εκπαιδευτική missions (cached per request).
+ */
+function getEduMissionTypeId(): int {
+    static $eduId = null;
+    if ($eduId === null) {
+        $eduId = (int) dbFetchValue("SELECT id FROM mission_types WHERE name = 'Εκπαιδευτική' LIMIT 1");
+    }
+    return $eduId;
+}
+
+/**
  * Return true if the given mission_type_id is the Τ.Ε.Π. type.
  */
 function isTepMission(int $missionTypeId): bool {
