@@ -861,6 +861,70 @@ INSERT INTO `notification_settings` (`code`, `name`, `description`, `email_enabl
 ('complaint_submitted', 'Νέο Παράπονο (Admin)', 'Ειδοποίηση διαχειριστή όταν υποβάλλεται νέο παράπονο', 1, (SELECT id FROM email_templates WHERE code = 'complaint_submitted')),
 ('complaint_response', 'Απάντηση Παραπόνου', 'Ειδοποίηση εθελοντή όταν ο admin απαντήσει στο παράπονό του', 1, (SELECT id FROM email_templates WHERE code = 'complaint_response'));
 
+INSERT IGNORE INTO `email_templates` (`code`, `name`, `subject`, `body_html`, `description`, `available_variables`) VALUES
+('shift_swap_requested', 'Αίτημα Αντικατάστασης (προς αντικαταστάτη)', 'Ο {{requester_name}} σε προτείνει ως αντικαταστάτη - {{mission_title}}',
+'<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #8e44ad; color: white; padding: 20px; text-align: center;">
+        <h1>🔄 Αίτημα Αντικατάστασης</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Ο/Η <strong>{{requester_name}}</strong> δεν μπορεί να παραστεί στη βάρδια και σας προτείνει ως αντικαταστάτη.</p>
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+            <p><strong>Βάρδια:</strong> {{shift_date}} ({{shift_time}})</p>
+            <p><strong>Τοποθεσία:</strong> {{location}}</p>
+        </div>
+        {{#message}}<div style="background: #ede7f6; padding: 15px; border-radius: 8px; margin: 10px 0; border-left: 4px solid #8e44ad;"><strong>Μήνυμα:</strong> {{message}}</div>{{/message}}
+        <p>Μπορείτε να αποδεχτείτε ή να αρνηθείτε από <a href="{{action_url}}">εδώ</a>.</p>
+    </div>
+    <div style="padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;">{{app_name}}</div>
+</div>',
+'Αποστέλλεται στον εθελοντή που προτείνεται ως αντικαταστάτης',
+'{{app_name}}, {{user_name}}, {{requester_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{location}}, {{message}}, {{action_url}}'),
+
+('shift_swap_accepted', 'Αποδοχή Αντικατάστασης (προς αιτούντα)', 'Ο {{replacement_name}} αποδέχτηκε την αντικατάσταση - {{mission_title}}',
+'<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #27ae60; color: white; padding: 20px; text-align: center;">
+        <h1>✅ Αποδοχή Αντικατάστασης</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>Ο/Η <strong>{{replacement_name}}</strong> αποδέχτηκε να σας αντικαταστήσει στη βάρδια.</p>
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+            <p><strong>Βάρδια:</strong> {{shift_date}} ({{shift_time}})</p>
+        </div>
+        <p>Το αίτημα αναμένει τελική έγκριση από τον διαχειριστή.</p>
+    </div>
+    <div style="padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;">{{app_name}}</div>
+</div>',
+'Αποστέλλεται στον αιτούντα όταν ο αντικαταστάτης αποδεχτεί',
+'{{app_name}}, {{user_name}}, {{replacement_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}'),
+
+('shift_swap_approved', 'Έγκριση Αντικατάστασης (και στους δύο)', 'Η αντικατάσταση εγκρίθηκε - {{mission_title}}',
+'<div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    <div style="background: #2980b9; color: white; padding: 20px; text-align: center;">
+        <h1>✅ Αντικατάσταση Εγκρίθηκε</h1>
+    </div>
+    <div style="padding: 30px; background: #fff;">
+        <h2>Γεια σας {{user_name}},</h2>
+        <p>{{swap_message}}</p>
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p><strong>Αποστολή:</strong> {{mission_title}}</p>
+            <p><strong>Βάρδια:</strong> {{shift_date}} ({{shift_time}})</p>
+        </div>
+    </div>
+    <div style="padding: 15px; background: #f8f9fa; text-align: center; font-size: 12px; color: #666;">{{app_name}}</div>
+</div>',
+'Αποστέλλεται και στους δύο εθελοντές όταν ο admin εγκρίνει την αντικατάσταση',
+'{{app_name}}, {{user_name}}, {{swap_message}}, {{mission_title}}, {{shift_date}}, {{shift_time}}');
+
+INSERT IGNORE INTO `notification_settings` (`code`, `name`, `description`, `email_enabled`, `email_template_id`) VALUES
+('shift_swap_requested', 'Αίτημα Αντικατάστασης', 'Όταν ένας εθελοντής ζητά αντικατάσταση από άλλον', 1, (SELECT id FROM email_templates WHERE code = 'shift_swap_requested')),
+('shift_swap_accepted', 'Αποδοχή Αντικατάστασης', 'Όταν ο αντικαταστάτης αποδεχτεί το αίτημα', 1, (SELECT id FROM email_templates WHERE code = 'shift_swap_accepted')),
+('shift_swap_approved', 'Έγκριση Αντικατάστασης', 'Όταν ο admin εγκρίνει την αντικατάσταση βάρδιας', 1, (SELECT id FROM email_templates WHERE code = 'shift_swap_approved'));
+
 -- Default certificate types
 INSERT INTO `certificate_types` (`name`, `description`, `default_validity_months`, `is_required`) VALUES
 ('Πρώτες Βοήθειες', 'Πιστοποίηση Πρώτων Βοηθειών (BLS)', 36, 1),

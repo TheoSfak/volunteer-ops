@@ -53,6 +53,84 @@ if (isPost()) {
         }
         redirect('my-participations.php');
     }
+
+    if ($action === 'respond_swap') {
+        $swapId  = (int) post('swap_id');
+        $response = post('response'); // 'accept' or 'decline'
+
+        $swap = dbFetchOne(
+            "SELECT ssr.*, s.start_time, s.end_time, m.title as mission_title
+             FROM shift_swap_requests ssr
+             JOIN shifts s ON ssr.shift_id = s.id
+             JOIN missions m ON s.mission_id = m.id
+             WHERE ssr.id = ? AND ssr.to_volunteer_id = ? AND ssr.status = ?",
+            [$swapId, $user['id'], SWAP_PENDING_RESPONSE]
+        );
+
+        if ($swap) {
+            if ($response === 'accept') {
+                dbExecute(
+                    "UPDATE shift_swap_requests SET status = ?, to_volunteer_responded_at = NOW(), updated_at = NOW() WHERE id = ?",
+                    [SWAP_ACCEPTED, $swapId]
+                );
+                logAudit('swap_accepted', 'shift_swap_requests', $swapId);
+
+                // Notify requester (email + in-app)
+                $requester = dbFetchOne("SELECT name, email FROM users WHERE id = ?", [$swap['from_volunteer_id']]);
+                if ($requester) {
+                    if (!empty($requester['email']) && isNotificationEnabled('shift_swap_accepted')) {
+                        sendNotificationEmail('shift_swap_accepted', $requester['email'], [
+                            'user_name'        => $requester['name'],
+                            'replacement_name' => $user['name'],
+                            'mission_title'    => $swap['mission_title'],
+                            'shift_date'       => formatDateTime($swap['start_time'], 'd/m/Y'),
+                            'shift_time'       => formatDateTime($swap['start_time'], 'H:i') . ' - ' . formatDateTime($swap['end_time'], 'H:i'),
+                        ]);
+                    }
+                    sendNotification(
+                        $swap['from_volunteer_id'],
+                        'Αποδοχή Αντικατάστασης',
+                        'Ο/Η ' . $user['name'] . ' αποδέχτηκε το αίτημα αντικατάστασης για: ' . $swap['mission_title'] . '. Αναμένεται έγκριση διαχειριστή.'
+                    );
+                }
+                setFlash('success', 'Αποδεχτήκατε το αίτημα. Αναμένεται η τελική έγκριση από τον διαχειριστή.');
+            } else {
+                dbExecute(
+                    "UPDATE shift_swap_requests SET status = ?, to_volunteer_responded_at = NOW(), updated_at = NOW() WHERE id = ?",
+                    [SWAP_DECLINED, $swapId]
+                );
+                logAudit('swap_declined', 'shift_swap_requests', $swapId);
+
+                // Notify requester in-app
+                sendNotification(
+                    $swap['from_volunteer_id'],
+                    'Άρνηση Αντικατάστασης',
+                    'Ο/Η ' . $user['name'] . ' αρνήθηκε το αίτημα αντικατάστασης για: ' . $swap['mission_title'] . '. Μπορείτε να ζητήσετε άλλον εθελοντή.'
+                );
+                setFlash('warning', 'Αρνηθήκατε το αίτημα αντικατάστασης.');
+            }
+        } else {
+            setFlash('error', 'Δεν βρέθηκε το αίτημα αντικατάστασης.');
+        }
+        redirect('my-participations.php');
+    }
+
+    if ($action === 'cancel_swap') {
+        $swapId = (int) post('swap_id');
+        $swap = dbFetchOne(
+            "SELECT id FROM shift_swap_requests WHERE id = ? AND from_volunteer_id = ? AND status IN (?,?)",
+            [$swapId, $user['id'], SWAP_PENDING_RESPONSE, SWAP_ACCEPTED]
+        );
+        if ($swap) {
+            dbExecute(
+                "UPDATE shift_swap_requests SET status = ?, updated_at = NOW() WHERE id = ?",
+                [SWAP_CANCELED, $swapId]
+            );
+            logAudit('swap_canceled', 'shift_swap_requests', $swapId);
+            setFlash('success', 'Το αίτημα αντικατάστασης ακυρώθηκε.');
+        }
+        redirect('my-participations.php');
+    }
 }
 
 // Group by status
@@ -66,6 +144,32 @@ $now = time();
 $activeNow = array_filter($approved, fn($p) =>
     strtotime($p['start_time']) <= $now && strtotime($p['end_time']) > $now
 );
+
+// Incoming swap requests (someone asked ME to cover)
+$incomingSwaps = dbFetchAll(
+    "SELECT ssr.*, s.start_time, s.end_time, m.title as mission_title, m.location,
+            fu.name as requester_name
+     FROM shift_swap_requests ssr
+     JOIN shifts s ON ssr.shift_id = s.id
+     JOIN missions m ON s.mission_id = m.id
+     JOIN users fu ON ssr.from_volunteer_id = fu.id
+     WHERE ssr.to_volunteer_id = ? AND ssr.status = ?
+     ORDER BY ssr.created_at DESC",
+    [$user['id'], SWAP_PENDING_RESPONSE]
+);
+
+// Outgoing swaps keyed by participation_id, for status badges on approved rows
+$outgoingSwaps = [];
+$outgoingRaw = dbFetchAll(
+    "SELECT ssr.*, u.name as to_volunteer_name
+     FROM shift_swap_requests ssr
+     JOIN users u ON ssr.to_volunteer_id = u.id
+     WHERE ssr.from_volunteer_id = ? AND ssr.status IN (?,?,?)",
+    [$user['id'], SWAP_PENDING_RESPONSE, SWAP_ACCEPTED, SWAP_APPROVED]
+);
+foreach ($outgoingRaw as $sr) {
+    $outgoingSwaps[$sr['participation_id']] = $sr;
+}
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -157,6 +261,57 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
     <?php endforeach; ?>
+</div>
+<?php endif; ?>
+
+<?php if (!empty($incomingSwaps)): ?>
+<!-- Incoming Swap Requests -->
+<div class="card mb-4" style="border:2px solid #8e44ad">
+    <div class="card-header text-white" style="background:#8e44ad">
+        <h5 class="mb-0"><i class="bi bi-arrow-left-right me-1"></i>Αιτήματα Αντικατάστασης που σας απευθύνονται (<?= count($incomingSwaps) ?>)</h5>
+    </div>
+    <div class="list-group list-group-flush">
+        <?php foreach ($incomingSwaps as $sr): ?>
+        <div class="list-group-item">
+            <div class="row align-items-center">
+                <div class="col">
+                    <strong><?= h($sr['requester_name']) ?></strong> δεν μπορεί να παραστεί στη βάρδια:
+                    <div class="mt-1">
+                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sr['mission_title']) ?> &nbsp;
+                        <i class="bi bi-calendar3 me-1 text-muted"></i><?= formatDateTime($sr['start_time'], 'd/m/Y') ?> &nbsp;
+                        <i class="bi bi-clock me-1 text-muted"></i><?= formatDateTime($sr['start_time'], 'H:i') ?>–<?= formatDateTime($sr['end_time'], 'H:i') ?>
+                    </div>
+                    <?php if ($sr['message']): ?>
+                    <div class="mt-1 p-2 rounded" style="background:#ede7f6;font-size:.88rem;border-left:3px solid #8e44ad">
+                        <i class="bi bi-quote me-1"></i><?= h($sr['message']) ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <div class="col-auto d-flex gap-2 flex-wrap mt-2 mt-md-0">
+                    <form method="post" class="d-inline">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="respond_swap">
+                        <input type="hidden" name="swap_id" value="<?= $sr['id'] ?>">
+                        <input type="hidden" name="response" value="accept">
+                        <button type="submit" class="btn btn-sm btn-success">
+                            <i class="bi bi-check-lg me-1"></i>Αποδοχή
+                        </button>
+                    </form>
+                    <form method="post" class="d-inline"
+                          onsubmit="return confirm('Να αρνηθείτε το αίτημα αντικατάστασης;')">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="respond_swap">
+                        <input type="hidden" name="swap_id" value="<?= $sr['id'] ?>">
+                        <input type="hidden" name="response" value="decline">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                            <i class="bi bi-x-lg me-1"></i>Άρνηση
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
 </div>
 <?php endif; ?>
 
@@ -306,6 +461,7 @@ include __DIR__ . '/includes/header.php';
                         <th>Τοποθεσία</th>
                         <th>Κατάσταση</th>
                         <th>Εγκρίθηκε</th>
+                        <th>Αντικατάσταση</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -338,6 +494,33 @@ include __DIR__ . '/includes/header.php';
                                 <?= formatDateTime($p['decided_at'], 'd/m/Y H:i') ?>
                                 <?php if ($p['decided_by_name']): ?>
                                     <br><small class="text-muted">από <?= h($p['decided_by_name']) ?></small>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <?php if (!$isPast && isset($outgoingSwaps[$p['id']])): ?>
+                                    <?php $sw = $outgoingSwaps[$p['id']]; ?>
+                                    <?php if ($sw['status'] === SWAP_PENDING_RESPONSE): ?>
+                                        <span class="badge" style="background:#8e44ad">Αναμένει απάντηση</span>
+                                        <br><small class="text-muted"><?= h($sw['to_volunteer_name']) ?></small>
+                                        <form method="post" class="mt-1">
+                                            <?= csrfField() ?>
+                                            <input type="hidden" name="action" value="cancel_swap">
+                                            <input type="hidden" name="swap_id" value="<?= $sw['id'] ?>">
+                                            <button type="submit" class="btn btn-xs btn-outline-secondary" style="font-size:.75rem;padding:1px 6px">
+                                                <i class="bi bi-x"></i> Ακύρωση
+                                            </button>
+                                        </form>
+                                    <?php elseif ($sw['status'] === SWAP_ACCEPTED): ?>
+                                        <span class="badge bg-success">Αποδεχτήκε</span>
+                                        <br><small class="text-muted"><?= h($sw['to_volunteer_name']) ?></small><br>
+                                        <small class="text-muted">Αναμένει admin</small>
+                                    <?php endif; ?>
+                                <?php elseif (!$isPast && !isset($outgoingSwaps[$p['id']])): ?>
+                                    <a href="shift-swap.php?participation_id=<?= $p['id'] ?>" class="btn btn-sm btn-outline-secondary" style="font-size:.8rem">
+                                        <i class="bi bi-arrow-left-right me-1"></i>Αντικατάσταση
+                                    </a>
+                                <?php else: ?>
+                                    <span class="text-muted">—</span>
                                 <?php endif; ?>
                             </td>
                         </tr>
@@ -383,6 +566,32 @@ include __DIR__ . '/includes/header.php';
                                 <span class="text-muted">από <?= h($p['decided_by_name']) ?></span>
                             <?php endif; ?></small>
                         </div>
+                        <?php if (!$isPast && isset($outgoingSwaps[$p['id']])): ?>
+                            <?php $sw = $outgoingSwaps[$p['id']]; ?>
+                            <?php if ($sw['status'] === SWAP_PENDING_RESPONSE): ?>
+                            <div class="mobile-card-row mt-2">
+                                <span class="badge" style="background:#8e44ad">Εκκρεμεί αίτημα αντικ.</span>
+                                <small class="text-muted"><?= h($sw['to_volunteer_name']) ?></small>
+                                <form method="post" class="ms-auto">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="cancel_swap">
+                                    <input type="hidden" name="swap_id" value="<?= $sw['id'] ?>">
+                                    <button class="btn btn-xs btn-outline-secondary" style="font-size:.75rem;padding:1px 6px"><i class="bi bi-x"></i> Ακύρωση</button>
+                                </form>
+                            </div>
+                            <?php elseif ($sw['status'] === SWAP_ACCEPTED): ?>
+                            <div class="mobile-card-row mt-2">
+                                <span class="badge bg-success">Αποδεχτήκε</span>
+                                <small class="text-muted"><?= h($sw['to_volunteer_name']) ?> — αναμένει admin</small>
+                            </div>
+                            <?php endif; ?>
+                        <?php elseif (!$isPast && !isset($outgoingSwaps[$p['id']])): ?>
+                        <div class="d-grid mt-2">
+                            <a href="shift-swap.php?participation_id=<?= $p['id'] ?>" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-arrow-left-right me-1"></i>Αντικατάσταση
+                            </a>
+                        </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endforeach; ?>

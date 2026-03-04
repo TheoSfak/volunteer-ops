@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.52.9');
+define('APP_VERSION', '3.53.0');
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
@@ -97,6 +97,14 @@ define('PARTICIPATION_CANCELED_BY_ADMIN', 'CANCELED_BY_ADMIN');
 define('APPROVAL_PENDING',  'PENDING');
 define('APPROVAL_APPROVED', 'APPROVED');
 define('APPROVAL_REJECTED', 'REJECTED');
+
+// Shift swap request statuses
+define('SWAP_PENDING_RESPONSE', 'PENDING_RESPONSE');
+define('SWAP_ACCEPTED',         'ACCEPTED');
+define('SWAP_DECLINED',         'DECLINED');
+define('SWAP_APPROVED',         'APPROVED');
+define('SWAP_REJECTED',         'REJECTED');
+define('SWAP_CANCELED',         'CANCELED');
 
 // Training question types
 define('QUESTION_TYPE_MC', 'MULTIPLE_CHOICE');

@@ -67,7 +67,7 @@ if (isPost()) {
     $prId = post('participation_id');
 
     // Block all management actions when mission is COMPLETED
-    $adminActions = ['approve', 'reject', 'reactivate', 'mark_attended', 'delete', 'add_volunteer', 'update_notes'];
+    $adminActions = ['approve', 'reject', 'reactivate', 'mark_attended', 'delete', 'add_volunteer', 'update_notes', 'approve_swap', 'reject_swap'];
     if ($missionCompleted && in_array($action, $adminActions)) {
         setFlash('error', 'Η αποστολή είναι ολοκληρωμένη. Αλλάξτε πρώτα την κατάσταση σε «Κλειστή» για να κάνετε αλλαγές.');
         redirect('shift-view.php?id=' . $id);
@@ -504,6 +504,109 @@ if (isPost()) {
                 setFlash('success', 'Το σχόλιο ενημερώθηκε.');
             }
             break;
+
+        case 'approve_swap':
+            if ($canManage) {
+                $swapId = (int) post('swap_id');
+                $swap = dbFetchOne(
+                    "SELECT ssr.*, fu.name as from_name, fu.email as from_email, tu.name as to_name, tu.email as to_email
+                     FROM shift_swap_requests ssr
+                     JOIN users fu ON ssr.from_volunteer_id = fu.id
+                     JOIN users tu ON ssr.to_volunteer_id = tu.id
+                     WHERE ssr.id = ? AND ssr.shift_id = ? AND ssr.status = ?",
+                    [$swapId, $id, SWAP_ACCEPTED]
+                );
+                if ($swap) {
+                    $db = db();
+                    $db->beginTransaction();
+                    try {
+                        // Cancel original volunteer's participation
+                        dbExecute(
+                            "UPDATE participation_requests SET status = ?, updated_at = NOW() WHERE id = ?",
+                            [PARTICIPATION_CANCELED_BY_USER, $swap['participation_id']]
+                        );
+                        // Approve replacement volunteer (upsert)
+                        $existingPr = dbFetchOne(
+                            "SELECT id FROM participation_requests WHERE shift_id = ? AND volunteer_id = ?",
+                            [$id, $swap['to_volunteer_id']]
+                        );
+                        if ($existingPr) {
+                            dbExecute(
+                                "UPDATE participation_requests SET status = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
+                                [PARTICIPATION_APPROVED, $user['id'], $existingPr['id']]
+                            );
+                        } else {
+                            dbInsert(
+                                "INSERT INTO participation_requests (shift_id, volunteer_id, status, decided_by, decided_at, created_at, updated_at) VALUES (?,?,?,?,NOW(),NOW(),NOW())",
+                                [$id, $swap['to_volunteer_id'], PARTICIPATION_APPROVED, $user['id']]
+                            );
+                        }
+                        // Mark swap as approved
+                        dbExecute(
+                            "UPDATE shift_swap_requests SET status = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
+                            [SWAP_APPROVED, $user['id'], $swapId]
+                        );
+                        $db->commit();
+                        logAudit('approve_swap', 'shift_swap_requests', $swapId);
+
+                        // Notify both volunteers
+                        $shiftInfo = $shift['start_time'];
+                        $missionTitle = $shift['mission_title'] ?? 'Αποστολή';
+                        $vars = [
+                            'mission_title' => $missionTitle,
+                            'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
+                            'shift_time'    => formatDateTime($shift['start_time'], 'H:i') . ' - ' . formatDateTime($shift['end_time'], 'H:i'),
+                        ];
+                        if (!empty($swap['from_email']) && isNotificationEnabled('shift_swap_approved')) {
+                            sendNotificationEmail('shift_swap_approved', $swap['from_email'],
+                                array_merge($vars, ['user_name' => $swap['from_name'], 'replacement_name' => $swap['to_name']]));
+                        }
+                        if (!empty($swap['to_email']) && isNotificationEnabled('shift_swap_approved')) {
+                            sendNotificationEmail('shift_swap_approved', $swap['to_email'],
+                                array_merge($vars, ['user_name' => $swap['to_name'], 'replacement_name' => $swap['to_name']]));
+                        }
+                        sendNotification($swap['from_volunteer_id'], 'Αντικατάσταση Εγκρίθηκε',
+                            'Η αντικατάστασή σας από τον/την ' . $swap['to_name'] . ' εγκρίθηκε από τον διαχειριστή.');
+                        sendNotification($swap['to_volunteer_id'], 'Εγκρίθηκε η Συμμετοχή σας',
+                            'Εγκριθήκατε ως αντικατάσταση για τη βάρδια της αποστολής: ' . $missionTitle . '.');
+
+                        setFlash('success', 'Η αντικατάσταση εγκρίθηκε επιτυχώς.');
+                    } catch (Exception $e) {
+                        $db->rollBack();
+                        setFlash('error', 'Σφάλμα κατά την έγκριση αντικατάστασης.');
+                    }
+                } else {
+                    setFlash('error', 'Δεν βρέθηκε το αίτημα αντικατάστασης.');
+                }
+            }
+            break;
+
+        case 'reject_swap':
+            if ($canManage) {
+                $swapId = (int) post('swap_id');
+                $swap = dbFetchOne(
+                    "SELECT ssr.*, fu.name as from_name, tu.name as to_name
+                     FROM shift_swap_requests ssr
+                     JOIN users fu ON ssr.from_volunteer_id = fu.id
+                     JOIN users tu ON ssr.to_volunteer_id = tu.id
+                     WHERE ssr.id = ? AND ssr.shift_id = ? AND ssr.status = ?",
+                    [$swapId, $id, SWAP_ACCEPTED]
+                );
+                if ($swap) {
+                    dbExecute(
+                        "UPDATE shift_swap_requests SET status = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
+                        [SWAP_REJECTED, $user['id'], $swapId]
+                    );
+                    logAudit('reject_swap', 'shift_swap_requests', $swapId);
+                    // Notify both
+                    sendNotification($swap['from_volunteer_id'], 'Αίτημα Αντικατάστασης Απορρίφθηκε',
+                        'Ο διαχειριστής απέρριψε το αίτημα αντικατάστασης σας.');
+                    sendNotification($swap['to_volunteer_id'], 'Αίτημα Αντικατάστασης Απορρίφθηκε',
+                        'Ο διαχειριστής απέρριψε το αίτημα αντικατάστασης.');
+                    setFlash('warning', 'Το αίτημα αντικατάστασης απορρίφθηκε.');
+                }
+            }
+            break;
     }
     
     redirect('shift-view.php?id=' . $id);
@@ -543,6 +646,21 @@ foreach ($participants as $p) {
 $isPast = strtotime($shift['end_time']) < time();
 $isActive = strtotime($shift['start_time']) <= time() && strtotime($shift['end_time']) >= time();
 $missionOverdue = in_array($shift['mission_status'], [STATUS_OPEN, STATUS_CLOSED]) && strtotime($shift['mission_end_datetime']) < time();
+
+// Pending swap requests awaiting admin approval (both parties agreed)
+$pendingSwaps = [];
+if ($canManage) {
+    $pendingSwaps = dbFetchAll(
+        "SELECT ssr.*, fu.name as from_name, fu.email as from_email,
+                tu.name as to_name, tu.email as to_email
+         FROM shift_swap_requests ssr
+         JOIN users fu ON ssr.from_volunteer_id = fu.id
+         JOIN users tu ON ssr.to_volunteer_id = tu.id
+         WHERE ssr.shift_id = ? AND ssr.status = ?
+         ORDER BY ssr.to_volunteer_responded_at DESC",
+        [$id, SWAP_ACCEPTED]
+    );
+}
 
 // Get available volunteers for manual add (exclude only PENDING/APPROVED — rejected/canceled can be re-added)
 $availableVolunteers = [];
@@ -851,6 +969,52 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
         
+        <!-- Pending Swap Requests -->
+        <?php if ($canManage && !empty($pendingSwaps)): ?>
+        <div class="card mb-4 border-warning">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0"><i class="bi bi-arrow-left-right me-1"></i>Αιτήματα Αντικατάστασης &mdash; Αναμένουν Έγκριση (<?= count($pendingSwaps) ?>)</h5>
+            </div>
+            <div class="list-group list-group-flush">
+                <?php foreach ($pendingSwaps as $sw): ?>
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                        <div>
+                            <strong><?= h($sw['from_name']) ?></strong>
+                            <i class="bi bi-arrow-right mx-2 text-muted"></i>
+                            <strong><?= h($sw['to_name']) ?></strong>
+                            <?php if ($sw['message']): ?>
+                            <div class="mt-1 p-2 rounded" style="background:#fff8e1;font-size:.85rem;border-left:3px solid #f0ad4e">
+                                <i class="bi bi-quote me-1"></i><?= h($sw['message']) ?>
+                            </div>
+                            <?php endif; ?>
+                            <small class="text-muted d-block mt-1">Απαντήθηκε: <?= $sw['to_volunteer_responded_at'] ? formatDateTime($sw['to_volunteer_responded_at']) : '&mdash;' ?></small>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <form method="post">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="approve_swap">
+                                <input type="hidden" name="swap_id" value="<?= $sw['id'] ?>">
+                                <button class="btn btn-sm btn-success">
+                                    <i class="bi bi-check-lg me-1"></i>Έγκριση
+                                </button>
+                            </form>
+                            <form method="post" onsubmit="return confirm('Απόρριψη αιτήματος;')">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="reject_swap">
+                                <input type="hidden" name="swap_id" value="<?= $sw['id'] ?>">
+                                <button class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-x-lg me-1"></i>Απόρριψη
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <!-- Admin Actions -->
         <?php if ($canManage): ?>
             <div class="card mb-4">
