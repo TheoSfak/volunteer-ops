@@ -1082,7 +1082,7 @@ include __DIR__ . '/includes/header.php';
                         </small>
                         <span class="badge <?= $sl['class'] ?>"><?= $sl['label'] ?></span>
                     </div>
-                    <?php if ($sw['message']): ?>
+                    <?php if ($sw['message'] && ($canManage || $sw['from_volunteer_id'] == getCurrentUserId() || $sw['to_volunteer_id'] == getCurrentUserId())): ?>
                     <div class="p-2 rounded mt-1" style="background:#fff8e1;font-size:.8rem;border-left:3px solid #f0ad4e">
                         <i class="bi bi-quote me-1 text-muted"></i><?= h($sw['message']) ?>
                     </div>
