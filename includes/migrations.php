@@ -2519,25 +2519,25 @@ function runSchemaMigrations(): void {
                 // ── 2. Email templates ────────────────────────────────────────────────
                 $templates = [
                     'shift_swap_requested' => [
-                        'name'    => '\u0391\u03af\u03c4\u03b7\u03bc\u03b1 \u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2 \u0392\u03ac\u03c1\u03b4\u03b9\u03b1\u03c2',
-                        'subject' => '\u0391\u03af\u03c4\u03b7\u03bc\u03b1 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2 \u03b3\u03b9\u03b1 \u03b1\u03c0\u03bf\u03c3\u03c4\u03bf\u03bb\u03ae {{mission_title}}',
-                        'desc'    => '\u0391\u03c0\u03bf\u03c3\u03c4\u03ad\u03bb\u03bb\u03b5\u03c4\u03b1\u03b9 \u03c3\u03c4\u03bf\u03bd \u03b5\u03b8\u03b5\u03bb\u03bf\u03bd\u03c4\u03ae \u03c0\u03bf\u03c5 \u03b6\u03b7\u03c4\u03ae\u03b8\u03b7\u03ba\u03b5 \u03bd\u03b1 \u03ba\u03b1\u03bb\u03cd\u03c8\u03b5\u03b9 \u03c4\u03b7 \u03b2\u03ac\u03c1\u03b4\u03b9\u03b1',
+                        'name'    => 'Αίτημα Αντικατάστασης Βάρδιας',
+                        'subject' => 'Αίτημα αντικατάστασης για αποστολή {{mission_title}}',
+                        'desc'    => 'Αποστέλλεται στον εθελοντή που ζητήθηκε να καλύψει τη βάρδια',
                         'vars'    => '{{user_name}}, {{requester_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}, {{message}}',
-                        'html'    => '<div style="font-family:Arial,sans-serif"><div style="background:#8e44ad;color:#fff;padding:16px 20px"><h2 style="margin:0">&#128257; \u0391\u03af\u03c4\u03b7\u03bc\u03b1 \u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2</h2></div><div style="padding:20px"><p>\u0393\u03b5\u03b9\u03b1, <strong>{{user_name}}</strong>!</p><p>\u039f/\u0397 <strong>{{requester_name}}</strong> \u03c3\u03b1\u03c2 \u03b6\u03b7\u03c4\u03ac \u03bd\u03b1 \u03c4\u03bf\u03bd/\u03c4\u03b7\u03bd \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03b1\u03c3\u03c4\u03ae\u03c3\u03b5\u03c4\u03b5 \u03c3\u03c4\u03b7 \u03b2\u03ac\u03c1\u03b4\u03b9\u03b1:</p><ul><li><strong>\u0391\u03c0\u03bf\u03c3\u03c4\u03bf\u03bb\u03ae:</strong> {{mission_title}}</li><li><strong>\u0397\u03bc/\u03bd\u03af\u03b1:</strong> {{shift_date}}</li><li><strong>\u038f\u03c1\u03b1:</strong> {{shift_time}}</li></ul><p>\u03a3\u03c5\u03bd\u03b4\u03b5\u03b8\u03b5\u03af\u03c4\u03b5 \u03b3\u03b9\u03b1 \u03bd\u03b1 \u03b1\u03c0\u03bf\u03b4\u03b5\u03c7\u03c4\u03b5\u03af\u03c4\u03b5 \u03ae \u03bd\u03b1 \u03b1\u03c1\u03bd\u03b7\u03b8\u03b5\u03af\u03c4\u03b5 \u03c4\u03bf \u03b1\u03af\u03c4\u03b7\u03bc\u03b1.</p></div></div>',
+                        'html'    => '<div style="font-family:Arial,sans-serif"><div style="background:#8e44ad;color:#fff;padding:16px 20px"><h2 style="margin:0">&#128257; Αίτημα Αντικατάστασης</h2></div><div style="padding:20px"><p>Γεια, <strong>{{user_name}}</strong>!</p><p>Ο/Η <strong>{{requester_name}}</strong> σας ζητά να τον/την αντικαταστήσετε στη βάρδια:</p><ul><li><strong>Αποστολή:</strong> {{mission_title}}</li><li><strong>Ημ/νία:</strong> {{shift_date}}</li><li><strong>Ώρα:</strong> {{shift_time}}</li></ul><p>Συνδεθείτε για να αποδεχτείτε ή να αρνηθείτε το αίτημα.</p></div></div>',
                     ],
                     'shift_swap_accepted' => [
-                        'name'    => '\u0391\u03c0\u03bf\u03b4\u03bf\u03c7\u03ae \u0391\u03b9\u03c4\u03ae\u03bc\u03b1\u03c4\u03bf\u03c2 \u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2',
-                        'subject' => '\u039f/\u0397 {{replacement_name}} \u03b1\u03c0\u03bf\u03b4\u03ad\u03c7\u03c4\u03b7\u03ba\u03b5 \u03c4\u03bf \u03b1\u03af\u03c4\u03b7\u03bc\u03b1 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2',
-                        'desc'    => '\u0391\u03c0\u03bf\u03c3\u03c4\u03ad\u03bb\u03bb\u03b5\u03c4\u03b1\u03b9 \u03c3\u03c4\u03bf\u03bd \u03b1\u03b9\u03c4\u03bf\u03cd\u03bd\u03c4\u03b1 \u03cc\u03c4\u03b1\u03bd \u03bf \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03b1\u03c3\u03c4\u03ac\u03c4\u03b7\u03c2 \u03b1\u03c0\u03bf\u03b4\u03b5\u03c7\u03c4\u03b5\u03af',
+                        'name'    => 'Αποδοχή Αιτήματος Αντικατάστασης',
+                        'subject' => 'Ο/Η {{replacement_name}} αποδέχτηκε το αίτημα αντικατάστασης',
+                        'desc'    => 'Αποστέλλεται στον αιτούντα όταν ο αντικατάστατης αποδεχτεί',
                         'vars'    => '{{user_name}}, {{replacement_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}',
-                        'html'    => '<div style="font-family:Arial,sans-serif"><div style="background:#27ae60;color:#fff;padding:16px 20px"><h2 style="margin:0">&#10003; \u0391\u03c0\u03bf\u03b4\u03bf\u03c7\u03ae \u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2</h2></div><div style="padding:20px"><p>\u0393\u03b5\u03b9\u03b1, <strong>{{user_name}}</strong>!</p><p>\u039f/\u0397 <strong>{{replacement_name}}</strong> \u03b1\u03c0\u03bf\u03b4\u03ad\u03c7\u03c4\u03b7\u03ba\u03b5 \u03c4\u03bf \u03b1\u03af\u03c4\u03b7\u03bc\u03ac \u03c3\u03b1\u03c2 \u03b3\u03b9\u03b1 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7:</p><ul><li><strong>\u0391\u03c0\u03bf\u03c3\u03c4\u03bf\u03bb\u03ae:</strong> {{mission_title}}</li><li><strong>\u0397\u03bc/\u03bd\u03af\u03b1:</strong> {{shift_date}}</li><li><strong>\u038f\u03c1\u03b1:</strong> {{shift_time}}</li></ul><p>\u0391\u03bd\u03b1\u03bc\u03ad\u03bd\u03b5\u03c4\u03b1\u03b9 \u03b7 \u03c4\u03b5\u03bb\u03b9\u03ba\u03ae \u03ad\u03b3\u03ba\u03c1\u03b9\u03c3\u03b7 \u03b1\u03c0\u03cc \u03c4\u03bf\u03bd \u03b4\u03b9\u03b1\u03c7\u03b5\u03b9\u03c1\u03b9\u03c3\u03c4\u03ae.</p></div></div>',
+                        'html'    => '<div style="font-family:Arial,sans-serif"><div style="background:#27ae60;color:#fff;padding:16px 20px"><h2 style="margin:0">&#10003; Αποδοχή Αντικατάστασης</h2></div><div style="padding:20px"><p>Γεια, <strong>{{user_name}}</strong>!</p><p>Ο/Η <strong>{{replacement_name}}</strong> αποδέχτηκε το αίτημά σας για αντικατάσταση στη βάρδια:</p><ul><li><strong>Αποστολή:</strong> {{mission_title}}</li><li><strong>Ημ/νία:</strong> {{shift_date}}</li><li><strong>Ώρα:</strong> {{shift_time}}</li></ul><p>Αναμένεται η τελική έγκριση από τον διαχειριστή.</p></div></div>',
                     ],
                     'shift_swap_approved' => [
-                        'name'    => '\u0388\u03b3\u03ba\u03c1\u03b9\u03c3\u03b7 \u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2 \u0392\u03ac\u03c1\u03b4\u03b9\u03b1\u03c2',
-                        'subject' => '\u0397 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7 \u03b3\u03b9\u03b1 {{mission_title}} \u03b5\u03b3\u03ba\u03c1\u03af\u03b8\u03b7\u03ba\u03b5',
-                        'desc'    => '\u0391\u03c0\u03bf\u03c3\u03c4\u03ad\u03bb\u03bb\u03b5\u03c4\u03b1\u03b9 \u03ba\u03b1\u03b9 \u03c3\u03c4\u03bf\u03c5\u03c2 \u03b4\u03cd\u03bf \u03b5\u03b8\u03b5\u03bb\u03bf\u03bd\u03c4\u03ad\u03c2 \u03cc\u03c4\u03b1\u03bd \u03bf admin \u03b5\u03b3\u03ba\u03c1\u03af\u03bd\u03b5\u03b9',
+                        'name'    => 'Έγκριση Αντικατάστασης Βάρδιας',
+                        'subject' => 'Η αντικατάσταση για {{mission_title}} εγκρίθηκε',
+                        'desc'    => 'Αποστέλλεται και στους δύο εθελοντές όταν ο διαχειριστής εγκρίνει',
                         'vars'    => '{{user_name}}, {{replacement_name}}, {{mission_title}}, {{shift_date}}, {{shift_time}}',
-                        'html'    => '<div style="font-family:Arial,sans-serif"><div style="background:#2980b9;color:#fff;padding:16px 20px"><h2 style="margin:0">&#9989; \u0391\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7 \u0395\u03b3\u03ba\u03c1\u03af\u03b8\u03b7\u03ba\u03b5</h2></div><div style="padding:20px"><p>\u0393\u03b5\u03b9\u03b1, <strong>{{user_name}}</strong>!</p><p>\u0397 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7 \u03b3\u03b9\u03b1 \u03c4\u03b7 \u03b2\u03ac\u03c1\u03b4\u03b9\u03b1 \u03b5\u03b3\u03ba\u03c1\u03af\u03b8\u03b7\u03ba\u03b5 \u03b1\u03c0\u03cc \u03c4\u03bf\u03bd \u03b4\u03b9\u03b1\u03c7\u03b5\u03b9\u03c1\u03b9\u03c3\u03c4\u03ae:</p><ul><li><strong>\u0391\u03c0\u03bf\u03c3\u03c4\u03bf\u03bb\u03ae:</strong> {{mission_title}}</li><li><strong>\u0397\u03bc/\u03bd\u03af\u03b1:</strong> {{shift_date}}</li><li><strong>\u038f\u03c1\u03b1:</strong> {{shift_time}}</li></ul></div></div>',
+                        'html'    => '<div style="font-family:Arial,sans-serif"><div style="background:#2980b9;color:#fff;padding:16px 20px"><h2 style="margin:0">&#9989; Αντικατάσταση Εγκρίθηκε</h2></div><div style="padding:20px"><p>Γεια, <strong>{{user_name}}</strong>!</p><p>Η αντικατάσταση για τη βάρδια εγκρίθηκε από τον διαχειριστή:</p><ul><li><strong>Αποστολή:</strong> {{mission_title}}</li><li><strong>Ημ/νία:</strong> {{shift_date}}</li><li><strong>Ώρα:</strong> {{shift_time}}</li></ul></div></div>',
                     ],
                 ];
 
@@ -2546,16 +2546,19 @@ function runSchemaMigrations(): void {
                         "INSERT INTO email_templates
                             (code, name, subject, body_html, description, available_variables)
                          VALUES (?, ?, ?, ?, ?, ?)
-                         ON DUPLICATE KEY UPDATE updated_at = updated_at",
+                         ON DUPLICATE KEY UPDATE
+                            name = VALUES(name), subject = VALUES(subject),
+                            body_html = VALUES(body_html), description = VALUES(description),
+                            available_variables = VALUES(available_variables)",
                         [$code, $meta['name'], $meta['subject'], $meta['html'], $meta['desc'], $meta['vars']]
                     );
                 }
 
                 // ── 3. Notification settings rows ─────────────────────────────────
                 $notifSettings = [
-                    'shift_swap_requested' => '\u0391\u03af\u03c4\u03b7\u03bc\u03b1 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2 \u03b2\u03ac\u03c1\u03b4\u03b9\u03b1\u03c2 (\u03c0\u03c1\u03bf\u03c2 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03b1\u03c3\u03c4\u03ac\u03c4\u03b7)',
-                    'shift_swap_accepted'  => '\u0391\u03c0\u03bf\u03b4\u03bf\u03c7\u03ae \u03b1\u03b9\u03c4\u03ae\u03bc\u03b1\u03c4\u03bf\u03c2 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2 (\u03c0\u03c1\u03bf\u03c2 \u03b1\u03b9\u03c4\u03bf\u03cd\u03bd\u03c4\u03b1)',
-                    'shift_swap_approved'  => '\u0388\u03b3\u03ba\u03c1\u03b9\u03c3\u03b7 \u03b1\u03bd\u03c4\u03b9\u03ba\u03b1\u03c4\u03ac\u03c3\u03c4\u03b1\u03c3\u03b7\u03c2 (\u03ba\u03b1\u03b9 \u03c3\u03c4\u03bf\u03c5\u03c2 \u03b4\u03cd\u03bf)',
+                    'shift_swap_requested' => 'Αίτημα αντικατάστασης βάρδιας (προς αντικατάστατη)',
+                    'shift_swap_accepted'  => 'Αποδοχή αιτήματος αντικατάστασης (προς αιτούντα)',
+                    'shift_swap_approved'  => 'Έγκριση αντικατάστασης (και στους δύο)',
                 ];
                 foreach ($notifSettings as $code => $name) {
                     $tplId = dbFetchValue(
@@ -2564,7 +2567,7 @@ function runSchemaMigrations(): void {
                     dbExecute(
                         "INSERT INTO notification_settings (code, name, email_enabled, email_template_id)
                          VALUES (?, ?, 1, ?)
-                         ON DUPLICATE KEY UPDATE updated_at = updated_at",
+                         ON DUPLICATE KEY UPDATE name = VALUES(name), email_template_id = VALUES(email_template_id)",
                         [$code, $name, $tplId]
                     );
                 }
