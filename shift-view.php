@@ -798,95 +798,131 @@ include __DIR__ . '/includes/header.php';
                 <?php if (empty($participants)): ?>
                     <p class="text-muted">Δεν υπάρχουν αιτήσεις.</p>
                 <?php else: ?>
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Εθελοντής</th>
-                                    <th>Κατάσταση</th>
-                                    <th>Ημ/νία</th>
-                                    <?php if ($canManage): ?><th>Ενέργειες</th><?php endif; ?>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($participants as $p): ?>
-                                    <tr>
-                                        <td>
-                                            <strong><?= h($p['name']) ?></strong><?= volunteerTypeBadge($p['volunteer_type'] ?? VTYPE_RESCUER) ?>
-                                            <?php if ($canManage): ?>
-                                                <button type="button" class="btn btn-sm btn-link p-0 ms-1 edit-notes-btn" 
-                                                        data-id="<?= $p['id'] ?>"
-                                                        data-name="<?= h($p['name']) ?>"
-                                                        data-notes="<?= h($p['admin_notes']) ?>">
-                                                    <i class="bi bi-chat-left-text <?= $p['admin_notes'] ? 'text-info' : 'text-muted' ?>"></i>
-                                                </button>
-                                            <?php endif; ?>
-                                            <?php if ($canManage): ?>
-                                                <br><small class="text-muted"><?= h($p['email']) ?> | <?php if ($p['phone']): ?><a href="tel:<?= h($p['phone']) ?>" class="text-muted"><?= h($p['phone']) ?></a><?php else: ?>-<?php endif; ?></small>
-                                            <?php endif; ?>
-                                            <?php if ($p['notes']): ?>
-                                                <br><small><em><i class="bi bi-quote me-1"></i><?= h($p['notes']) ?></em></small>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
+                    <?php
+                    // Determine border accent colour per participation status
+                    $statusBorderMap = [
+                        PARTICIPATION_APPROVED           => '#198754',  // green
+                        PARTICIPATION_PENDING            => '#f0ad4e',  // yellow
+                        PARTICIPATION_REJECTED           => '#dc3545',  // red
+                        PARTICIPATION_CANCELED_BY_USER   => '#6c757d',  // grey
+                        PARTICIPATION_CANCELED_BY_ADMIN  => '#6c757d',  // grey
+                    ];
+                    ?>
+                    <div class="row row-cols-1 row-cols-sm-2 row-cols-xl-3 g-3">
+                        <?php foreach ($participants as $p):
+                            $accentColor = $statusBorderMap[$p['status']] ?? '#6c757d';
+                        ?>
+                        <div class="col">
+                            <div class="card h-100 shadow-sm" style="border-left:4px solid <?= $accentColor ?>;border-radius:.6rem;">
+                                <div class="card-body pb-2">
+                                    <!-- Name row -->
+                                    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                        <div>
+                                            <strong class="fs-6"><?= h($p['name']) ?></strong>
+                                            <?= volunteerTypeBadge($p['volunteer_type'] ?? VTYPE_RESCUER) ?>
+                                        </div>
+                                        <div class="d-flex flex-column align-items-end gap-1">
                                             <?= statusBadge($p['status'], 'participation') ?>
                                             <?php if ($p['attended']): ?>
-                                                <span class="badge bg-success"><i class="bi bi-check"></i> Παρών</span>
+                                                <span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>Παρών</span>
                                             <?php endif; ?>
-                                        </td>
-                                        <td><?= formatDate($p['created_at']) ?></td>
-                                        <?php if ($canManage): ?>
-                                            <td>
-                                                <?php if ($p['status'] === PARTICIPATION_PENDING): ?>
-                                                    <form method="post" class="d-inline">
-                                                        <?= csrfField() ?>
-                                                        <input type="hidden" name="action" value="approve">
-                                                        <input type="hidden" name="participation_id" value="<?= $p['id'] ?>">
-                                                        <button type="submit" class="btn btn-sm btn-success" title="Έγκριση">
-                                                            <i class="bi bi-check-lg"></i>
-                                                        </button>
-                                                    </form>
-                                                    <button type="button" class="btn btn-sm btn-danger reject-btn" 
-                                                            data-id="<?= $p['id'] ?>"
-                                                            data-name="<?= h($p['name']) ?>"
-                                                            data-type="reject"
-                                                            title="Απόρριψη">
-                                                        <i class="bi bi-x-lg"></i>
-                                                    </button>
-                                                <?php elseif ($p['status'] === PARTICIPATION_APPROVED && !$p['attended']): ?>
-                                                    <?php if ($isPast): ?>
-                                                    <button type="button" class="btn btn-sm btn-primary attend-btn"
-                                                            data-id="<?= $p['id'] ?>"
-                                                            data-name="<?= h($p['name']) ?>"
-                                                            data-hours="<?= number_format(calculateShiftHours($shift), 1) ?>">
-                                                        <i class="bi bi-check2-circle me-1"></i>Παρουσία
-                                                    </button>
-                                                    <?php endif; ?>
-                                                    <button type="button" class="btn btn-sm btn-outline-danger reject-btn" 
-                                                            data-id="<?= $p['id'] ?>"
-                                                            data-name="<?= h($p['name']) ?>"
-                                                            data-type="cancel"
-                                                            title="Ακύρωση έγκρισης">
-                                                        <i class="bi bi-x-lg"></i>
-                                                    </button>
-                                                <?php elseif (in_array($p['status'], [PARTICIPATION_REJECTED, PARTICIPATION_CANCELED_BY_ADMIN, PARTICIPATION_CANCELED_BY_USER]) && !$p['attended']): ?>
-                                                    <button type="button" class="btn btn-sm btn-outline-success reactivate-btn"
-                                                            data-id="<?= $p['id'] ?>"
-                                                            data-name="<?= h($p['name']) ?>"
-                                                            title="Επανενεργοποίηση">
-                                                        <i class="bi bi-arrow-clockwise me-1"></i>Επανενεργοποίηση
-                                                    </button>
-                                                <?php elseif ($p['attended']): ?>
-                                                    <span class="text-success">
-                                                        <?= $p['actual_hours'] ? number_format($p['actual_hours'], 1) . ' ώρες' : '' ?>
-                                                    </span>
-                                                <?php endif; ?>
-                                            </td>
+                                        </div>
+                                    </div>
+
+                                    <!-- Contact info (admins/shift leaders only) -->
+                                    <?php if ($canManage): ?>
+                                    <div class="text-muted small mb-1">
+                                        <i class="bi bi-envelope me-1"></i><?= h($p['email']) ?>
+                                        <?php if ($p['phone']): ?>
+                                            &nbsp;|&nbsp;<i class="bi bi-telephone me-1"></i><a href="tel:<?= h($p['phone']) ?>" class="text-muted"><?= h($p['phone']) ?></a>
                                         <?php endif; ?>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
+                                    </div>
+                                    <?php endif; ?>
+
+                                    <!-- Application date -->
+                                    <div class="text-muted small">
+                                        <i class="bi bi-calendar3 me-1"></i><?= formatDate($p['created_at']) ?>
+                                    </div>
+
+                                    <!-- Volunteer notes -->
+                                    <?php if ($p['notes']): ?>
+                                    <div class="mt-2 p-2 rounded small" style="background:#f8f9fa;border-left:3px solid #adb5bd">
+                                        <i class="bi bi-quote me-1 text-muted"></i><?= h($p['notes']) ?>
+                                    </div>
+                                    <?php endif; ?>
+
+                                    <!-- Admin notes -->
+                                    <?php if ($canManage && $p['admin_notes']): ?>
+                                    <div class="mt-2 p-2 rounded small" style="background:#fff8e1;border-left:3px solid #f0ad4e">
+                                        <i class="bi bi-chat-left-text me-1 text-warning"></i><?= h($p['admin_notes']) ?>
+                                    </div>
+                                    <?php endif; ?>
+
+                                    <!-- Actual hours (if attended) -->
+                                    <?php if ($p['attended'] && $p['actual_hours']): ?>
+                                    <div class="mt-2 text-success small fw-semibold">
+                                        <i class="bi bi-clock me-1"></i><?= number_format($p['actual_hours'], 1) ?> ώρες καταγράφηκαν
+                                    </div>
+                                    <?php endif; ?>
+                                </div>
+
+                                <!-- Action footer (admins/shift leaders only) -->
+                                <?php if ($canManage): ?>
+                                <div class="card-footer bg-transparent pt-2 pb-2 d-flex gap-2 flex-wrap align-items-center">
+                                    <!-- Admin notes button -->
+                                    <button type="button" class="btn btn-sm btn-outline-secondary edit-notes-btn"
+                                            data-id="<?= $p['id'] ?>"
+                                            data-name="<?= h($p['name']) ?>"
+                                            data-notes="<?= h($p['admin_notes']) ?>"
+                                            title="Σχόλιο διαχειριστή">
+                                        <i class="bi bi-chat-left-text <?= $p['admin_notes'] ? 'text-info' : '' ?>"></i>
+                                    </button>
+
+                                    <?php if ($p['status'] === PARTICIPATION_PENDING): ?>
+                                        <form method="post" class="d-inline">
+                                            <?= csrfField() ?>
+                                            <input type="hidden" name="action" value="approve">
+                                            <input type="hidden" name="participation_id" value="<?= $p['id'] ?>">
+                                            <button type="submit" class="btn btn-sm btn-success" title="Έγκριση">
+                                                <i class="bi bi-check-lg me-1"></i>Έγκριση
+                                            </button>
+                                        </form>
+                                        <button type="button" class="btn btn-sm btn-danger reject-btn"
+                                                data-id="<?= $p['id'] ?>"
+                                                data-name="<?= h($p['name']) ?>"
+                                                data-type="reject"
+                                                title="Απόρριψη">
+                                            <i class="bi bi-x-lg me-1"></i>Απόρριψη
+                                        </button>
+                                    <?php elseif ($p['status'] === PARTICIPATION_APPROVED && !$p['attended']): ?>
+                                        <?php if ($isPast): ?>
+                                        <button type="button" class="btn btn-sm btn-primary attend-btn"
+                                                data-id="<?= $p['id'] ?>"
+                                                data-name="<?= h($p['name']) ?>"
+                                                data-hours="<?= number_format(calculateShiftHours($shift), 1) ?>">
+                                            <i class="bi bi-check2-circle me-1"></i>Παρουσία
+                                        </button>
+                                        <?php endif; ?>
+                                        <button type="button" class="btn btn-sm btn-outline-danger reject-btn"
+                                                data-id="<?= $p['id'] ?>"
+                                                data-name="<?= h($p['name']) ?>"
+                                                data-type="cancel"
+                                                title="Ακύρωση έγκρισης">
+                                            <i class="bi bi-x-lg me-1"></i>Ακύρωση
+                                        </button>
+                                    <?php elseif (in_array($p['status'], [PARTICIPATION_REJECTED, PARTICIPATION_CANCELED_BY_ADMIN, PARTICIPATION_CANCELED_BY_USER]) && !$p['attended']): ?>
+                                        <button type="button" class="btn btn-sm btn-outline-success reactivate-btn"
+                                                data-id="<?= $p['id'] ?>"
+                                                data-name="<?= h($p['name']) ?>"
+                                                title="Επανενεργοποίηση">
+                                            <i class="bi bi-arrow-clockwise me-1"></i>Επανενεργοποίηση
+                                        </button>
+                                    <?php endif; ?>
+                                </div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
                     </div>
                     
                 <?php endif; ?>
