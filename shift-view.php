@@ -829,13 +829,16 @@ include __DIR__ . '/includes/header.php';
                                         </div>
                                     </div>
 
-                                    <!-- Contact info (admins/shift leaders only) -->
+                                    <!-- Phone (visible to all) -->
+                                    <?php if ($p['phone']): ?>
+                                    <div class="small mb-1">
+                                        <i class="bi bi-telephone me-1 text-muted"></i><a href="tel:<?= h($p['phone']) ?>" class="text-decoration-none"><?= h($p['phone']) ?></a>
+                                    </div>
+                                    <?php endif; ?>
+                                    <!-- Email (admins/shift leaders only) -->
                                     <?php if ($canManage): ?>
                                     <div class="text-muted small mb-1">
                                         <i class="bi bi-envelope me-1"></i><?= h($p['email']) ?>
-                                        <?php if ($p['phone']): ?>
-                                            &nbsp;|&nbsp;<i class="bi bi-telephone me-1"></i><a href="tel:<?= h($p['phone']) ?>" class="text-muted"><?= h($p['phone']) ?></a>
-                                        <?php endif; ?>
                                     </div>
                                     <?php endif; ?>
 
