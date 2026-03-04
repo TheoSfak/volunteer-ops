@@ -647,19 +647,20 @@ $isPast = strtotime($shift['end_time']) < time();
 $isActive = strtotime($shift['start_time']) <= time() && strtotime($shift['end_time']) >= time();
 $missionOverdue = in_array($shift['mission_status'], [STATUS_OPEN, STATUS_CLOSED]) && strtotime($shift['mission_end_datetime']) < time();
 
+// Swap history for this shift — all statuses, visible to all users
+$swapHistory = dbFetchAll(
+    "SELECT ssr.*, fu.name as from_name, tu.name as to_name
+     FROM shift_swap_requests ssr
+     JOIN users fu ON ssr.from_volunteer_id = fu.id
+     JOIN users tu ON ssr.to_volunteer_id = tu.id
+     WHERE ssr.shift_id = ?
+     ORDER BY ssr.created_at DESC",
+    [$id]
+);
 // Pending swap requests awaiting admin approval (both parties agreed)
 $pendingSwaps = [];
 if ($canManage) {
-    $pendingSwaps = dbFetchAll(
-        "SELECT ssr.*, fu.name as from_name, fu.email as from_email,
-                tu.name as to_name, tu.email as to_email
-         FROM shift_swap_requests ssr
-         JOIN users fu ON ssr.from_volunteer_id = fu.id
-         JOIN users tu ON ssr.to_volunteer_id = tu.id
-         WHERE ssr.shift_id = ? AND ssr.status = ?
-         ORDER BY ssr.to_volunteer_responded_at DESC",
-        [$id, SWAP_ACCEPTED]
-    );
+    $pendingSwaps = array_values(array_filter($swapHistory, fn($s) => $s['status'] === SWAP_ACCEPTED));
 }
 
 // Get available volunteers for manual add (exclude only PENDING/APPROVED — rejected/canceled can be re-added)
@@ -1009,6 +1010,45 @@ include __DIR__ . '/includes/header.php';
                             </form>
                         </div>
                     </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <!-- Swap History (visible to all users) -->
+        <?php if (!empty($swapHistory)): ?>
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-arrow-left-right me-1"></i>Ιστορικό Αντικαταστάσεων</h5>
+            </div>
+            <div class="list-group list-group-flush">
+                <?php 
+                $swapStatusLabels = [
+                    SWAP_PENDING_RESPONSE => ['label' => 'Αναμονή αποδοχής', 'class' => 'bg-secondary'],
+                    SWAP_ACCEPTED         => ['label' => 'Αναμένει έγκριση',  'class' => 'bg-warning text-dark'],
+                    SWAP_APPROVED         => ['label' => 'Εγκρίθηκε',         'class' => 'bg-success'],
+                    SWAP_REJECTED         => ['label' => 'Απορρίφθηκε',       'class' => 'bg-danger'],
+                    SWAP_CANCELED         => ['label' => 'Ακυρώθηκε',         'class' => 'bg-secondary'],
+                ];
+                foreach ($swapHistory as $sw): 
+                    $sl = $swapStatusLabels[$sw['status']] ?? ['label' => $sw['status'], 'class' => 'bg-secondary'];
+                ?>
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-1 mb-1">
+                        <small>
+                            <strong><?= h($sw['from_name']) ?></strong>
+                            <i class="bi bi-arrow-right mx-1 text-muted"></i>
+                            <strong><?= h($sw['to_name']) ?></strong>
+                        </small>
+                        <span class="badge <?= $sl['class'] ?>"><?= $sl['label'] ?></span>
+                    </div>
+                    <?php if ($sw['message']): ?>
+                    <div class="p-2 rounded mt-1" style="background:#fff8e1;font-size:.8rem;border-left:3px solid #f0ad4e">
+                        <i class="bi bi-quote me-1 text-muted"></i><?= h($sw['message']) ?>
+                    </div>
+                    <?php endif; ?>
+                    <small class="text-muted d-block mt-1"><?= formatDateTime($sw['created_at']) ?></small>
                 </div>
                 <?php endforeach; ?>
             </div>

@@ -51,11 +51,14 @@ $shifts = dbFetchAll(
 // Check if current user has applied to any shift
 $userParticipations = [];
 if (!isAdmin()) {
-    $userParticipations = dbFetchAll(
-        "SELECT shift_id, status FROM participation_requests WHERE volunteer_id = ? AND shift_id IN (SELECT id FROM shifts WHERE mission_id = ?)",
+    $rawParts = dbFetchAll(
+        "SELECT id, shift_id, status FROM participation_requests WHERE volunteer_id = ? AND shift_id IN (SELECT id FROM shifts WHERE mission_id = ?)",
         [$user['id'], $id]
     );
-    $userParticipations = array_column($userParticipations, 'status', 'shift_id');
+    $userParticipations = [];
+    foreach ($rawParts as $rp) {
+        $userParticipations[$rp['shift_id']] = ['status' => $rp['status'], 'id' => $rp['id']];
+    }
 }
 
 // Check if user has approved participation (for chat access)
@@ -918,19 +921,30 @@ include __DIR__ . '/includes/header.php';
                                         </td>
                                         <td class="text-end">
                                             <?php if (!isAdmin()): ?>
-                                                <?php if (isset($userParticipations[$shift['id']])): ?>
-                                                    <?= statusBadge($userParticipations[$shift['id']], 'participation') ?>
-                                                <?php elseif (!$isPast && !$isFull && $mission['status'] === STATUS_OPEN && !$isOverdue): ?>
-                                                    <button type="button" class="btn btn-sm btn-primary apply-btn" 
-                                                            data-shift-id="<?= $shift['id'] ?>"
-                                                            data-shift-date="<?= formatDateTime($shift['start_time'], 'd/m/Y H:i') ?>">
-                                                        <i class="bi bi-hand-index"></i> Αίτηση
-                                                    </button>
-                                                <?php elseif ($isOverdue && $mission['status'] === STATUS_OPEN): ?>
-                                                    <span class="badge bg-secondary" title="Ο χρόνος διεξαγωγής έχει παρέλθει" data-bs-toggle="tooltip">
-                                                        <i class="bi bi-clock-history me-1"></i>Έληξε
-                                                    </span>
-                                                <?php endif; ?>
+                                                <div class="d-flex gap-1 justify-content-end flex-wrap align-items-center">
+                                                    <a href="shift-view.php?id=<?= $shift['id'] ?>" class="btn btn-sm btn-outline-primary" title="Προβολή βάρδιας">
+                                                        <i class="bi bi-eye"></i>
+                                                    </a>
+                                                    <?php if (isset($userParticipations[$shift['id']])): ?>
+                                                        <?= statusBadge($userParticipations[$shift['id']]['status'], 'participation') ?>
+                                                        <?php if ($userParticipations[$shift['id']]['status'] === PARTICIPATION_APPROVED && !$isPast): ?>
+                                                            <a href="shift-swap.php?participation_id=<?= $userParticipations[$shift['id']]['id'] ?>"
+                                                               class="btn btn-sm btn-outline-secondary" title="Αίτημα Αντικατάστασης">
+                                                                <i class="bi bi-arrow-left-right"></i>
+                                                            </a>
+                                                        <?php endif; ?>
+                                                    <?php elseif (!$isPast && !$isFull && $mission['status'] === STATUS_OPEN && !$isOverdue): ?>
+                                                        <button type="button" class="btn btn-sm btn-primary apply-btn" 
+                                                                data-shift-id="<?= $shift['id'] ?>"
+                                                                data-shift-date="<?= formatDateTime($shift['start_time'], 'd/m/Y H:i') ?>">
+                                                            <i class="bi bi-hand-index"></i> Αίτηση
+                                                        </button>
+                                                    <?php elseif ($isOverdue && $mission['status'] === STATUS_OPEN): ?>
+                                                        <span class="badge bg-secondary" title="Ο χρόνος διεξαγωγής έχει παρέλθει" data-bs-toggle="tooltip">
+                                                            <i class="bi bi-clock-history me-1"></i>Έληξε
+                                                        </span>
+                                                    <?php endif; ?>
+                                                </div>
                                             <?php else: ?>
                                                 <a href="shift-view.php?id=<?= $shift['id'] ?>" class="btn btn-sm btn-outline-primary">
                                                     <i class="bi bi-eye"></i>
@@ -983,12 +997,19 @@ include __DIR__ . '/includes/header.php';
                                     
                                     <div class="mobile-card-actions">
                                         <?php if (!isAdmin()): ?>
+                                            <a href="shift-view.php?id=<?= $shift['id'] ?>" class="btn btn-sm btn-outline-primary">
+                                                <i class="bi bi-eye me-1"></i>Προβολή
+                                            </a>
                                             <?php if (isset($userParticipations[$shift['id']])): ?>
-                                                <span class="d-flex justify-content-center w-100">
-                                                    <?= statusBadge($userParticipations[$shift['id']], 'participation') ?>
-                                                </span>
+                                                <?= statusBadge($userParticipations[$shift['id']]['status'], 'participation') ?>
+                                                <?php if ($userParticipations[$shift['id']]['status'] === PARTICIPATION_APPROVED && !$isPast): ?>
+                                                    <a href="shift-swap.php?participation_id=<?= $userParticipations[$shift['id']]['id'] ?>"
+                                                       class="btn btn-sm btn-outline-secondary">
+                                                        <i class="bi bi-arrow-left-right me-1"></i>Αντικατάσταση
+                                                    </a>
+                                                <?php endif; ?>
                                             <?php elseif (!$isPast && !$isFull && $mission['status'] === STATUS_OPEN && !$isOverdue): ?>
-                                                <button type="button" class="btn btn-sm btn-primary apply-btn w-100" 
+                                                <button type="button" class="btn btn-sm btn-primary apply-btn" 
                                                         data-shift-id="<?= $shift['id'] ?>"
                                                         data-shift-date="<?= formatDateTime($shift['start_time'], 'd/m/Y H:i') ?>">
                                                     <i class="bi bi-hand-index me-1"></i>Αίτηση
