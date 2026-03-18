@@ -58,8 +58,12 @@ if (isPost()) {
             }
             
             // Validate MIME type server-side (don't trust browser-supplied type)
-            $finfo = new finfo(FILEINFO_MIME_TYPE);
-            $detectedMime = $finfo->file($file['tmp_name']);
+            if (class_exists('finfo')) {
+                $fi = new finfo(FILEINFO_MIME_TYPE);
+                $detectedMime = $fi->file($file['tmp_name']);
+            } else {
+                $detectedMime = mime_content_type($file['tmp_name']);
+            }
             $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
             
             if (!in_array($detectedMime, TRAINING_ALLOWED_TYPES) || !in_array($ext, ['pdf'])) {
