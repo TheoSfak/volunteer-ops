@@ -105,8 +105,12 @@ if (isPost()) {
             $tmpName  = $_FILES['doc_files']['tmp_name'][$i];
             $origName = basename($_FILES['doc_files']['name'][$i]);
             $ext      = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
-            $finfo    = new finfo(FILEINFO_MIME_TYPE);
-            $mime     = $finfo->file($tmpName);
+            if (class_exists('finfo')) {
+                $fi   = new finfo(FILEINFO_MIME_TYPE);
+                $mime = $fi->file($tmpName);
+            } else {
+                $mime = mime_content_type($tmpName);
+            }
             if (!in_array($ext, $allowedExt) || !in_array($mime, $allowedMime)) {
                 $errors[] = 'Μη επιτρεπτός τύπος: ' . $origName;
                 continue;

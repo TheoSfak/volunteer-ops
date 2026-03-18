@@ -428,8 +428,12 @@ if (isPost()) {
             $maxSize = 2 * 1024 * 1024; // 2MB
 
             // Detect MIME from actual file content, not browser-supplied header
-            $finfo = new finfo(FILEINFO_MIME_TYPE);
-            $detectedMime = $finfo->file($file['tmp_name']);
+            if (class_exists('finfo')) {
+                $finfo = new finfo(FILEINFO_MIME_TYPE);
+                $detectedMime = $finfo->file($file['tmp_name']);
+            } else {
+                $detectedMime = mime_content_type($file['tmp_name']);
+            }
             $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
 
             if (!in_array($detectedMime, $allowedTypes) || !in_array($ext, $allowedExtensions)) {
