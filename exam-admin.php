@@ -25,9 +25,13 @@ if (isPost()) {
                 setFlash('error', 'Δεν μπορείτε να ξεκινήσετε διαγώνισμα χωρίς όριο χρόνου. Ορίστε πρώτα χρονικό όριο.');
                 redirect('exam-admin.php');
             }
-            $questionCount = dbFetchValue("SELECT COUNT(*) FROM training_exam_questions WHERE exam_id = ?", [$id]);
+            if (!empty($exam['use_random_pool'])) {
+                $questionCount = dbFetchValue("SELECT COUNT(*) FROM training_exam_questions WHERE category_id = ?", [$exam['category_id']]);
+            } else {
+                $questionCount = dbFetchValue("SELECT COUNT(*) FROM training_exam_questions WHERE exam_id = ?", [$id]);
+            }
             if ($questionCount < $exam['questions_per_attempt']) {
-                setFlash('error', 'Δεν υπάρχουν αρκετές ερωτήσεις (χρειάζονται τουλάχιστον ' . $exam['questions_per_attempt'] . ', υπάρχουν ' . $questionCount . ').');
+                setFlash('error', 'Δεν υπάρχουν αρκετές ερωτήσεις στο pool (χρειάζονται τουλάχιστον ' . $exam['questions_per_attempt'] . ', υπάρχουν ' . $questionCount . ').');
                 redirect('exam-admin.php');
             }
             // Set available_from = NOW, available_until = NOW + time_limit, is_active = 1
