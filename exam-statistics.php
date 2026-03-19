@@ -54,7 +54,7 @@ if ($filterStatus === 'passed') {
 }
 
 if (!empty($searchTerm)) {
-    $searchParam = '%' . $searchTerm . '%';
+    $searchParam = '%' . dbEscape($searchTerm) . '%';
     $examFilters[] = "(u.name LIKE ? OR te.title LIKE ?)";
     $quizFilters[] = "(u.name LIKE ? OR tq.title LIKE ?)";
     $examParams[] = $searchParam;

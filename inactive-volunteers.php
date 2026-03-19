@@ -24,9 +24,9 @@ $params = [];
 
 if ($search) {
     $where[]  = "(u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)";
-    $params[] = "%$search%";
-    $params[] = "%$search%";
-    $params[] = "%$search%";
+    $params[] = '%' . dbEscape($search) . '%';
+    $params[] = '%' . dbEscape($search) . '%';
+    $params[] = '%' . dbEscape($search) . '%';
 }
 if ($role) {
     $where[]  = "u.role = ?";

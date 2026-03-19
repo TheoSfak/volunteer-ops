@@ -42,7 +42,7 @@ if ($department) {
 
 if ($search) {
     $where[] = '(m.title LIKE ? OR m.description LIKE ? OR m.location LIKE ?)';
-    $searchTerm = "%$search%";
+    $searchTerm = '%' . dbEscape($search) . '%';
     $params = array_merge($params, [$searchTerm, $searchTerm, $searchTerm]);
 }
 

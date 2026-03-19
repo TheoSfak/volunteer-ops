@@ -103,7 +103,7 @@ $params = [];
 
 if ($search) {
     $where[] = "(first_name_gr LIKE ? OR last_name_gr LIKE ? OR first_name_lat LIKE ? OR last_name_lat LIKE ? OR email LIKE ? OR phone LIKE ?)";
-    $params = array_merge($params, array_fill(0, 6, "%{$search}%"));
+    $params = array_merge($params, array_fill(0, 6, '%' . dbEscape($search) . '%'));
 }
 if ($filterContact !== '') {
     $where[] = "contact_done = ?";

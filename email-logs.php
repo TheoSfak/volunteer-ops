@@ -138,7 +138,7 @@ if ($filterStatus) {
 }
 if ($filterEmail) {
     $where[] = 'el.recipient_email LIKE ?';
-    $params[] = "%$filterEmail%";
+    $params[] = '%' . dbEscape($filterEmail) . '%';
 }
 if ($filterCode) {
     if ($filterCode === 'manual/test') {
