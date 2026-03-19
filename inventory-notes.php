@@ -190,7 +190,7 @@ if ($filterType) {
 if ($filterSearch) {
     $query      .= " AND (n.content LIKE ? OR n.item_name LIKE ? OR i.barcode LIKE ?)";
     $countQuery .= " AND (n.content LIKE ? OR n.item_name LIKE ?)";
-    $s = '%' . $filterSearch . '%';
+    $s = '%' . dbEscape($filterSearch) . '%';
     $params[]      = $s;
     $params[]      = $s;
     $params[]      = $s;

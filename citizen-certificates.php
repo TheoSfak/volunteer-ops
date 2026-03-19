@@ -80,7 +80,7 @@ $params = [];
 
 if ($search) {
     $where[] = "(cc.first_name LIKE ? OR cc.last_name LIKE ? OR cc.father_name LIKE ?)";
-    $params = array_merge($params, array_fill(0, 3, "%{$search}%"));
+    $params = array_merge($params, array_fill(0, 3, '%' . dbEscape($search) . '%'));
 }
 if ($filterExpired === '1') {
     $where[] = "cc.expiry_date IS NOT NULL AND cc.expiry_date < CURDATE()";

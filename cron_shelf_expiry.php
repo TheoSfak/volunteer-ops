@@ -9,6 +9,11 @@
  * Cron:  0 8 * * * php /path/to/cron_shelf_expiry.php
  */
 
+// CLI or manual admin trigger only
+if (php_sapi_name() !== 'cli' && !defined('CRON_MANUAL_RUN')) {
+    die('This script can only be run from command line.');
+}
+
 if (!defined('VOLUNTEEROPS')) {
     require_once __DIR__ . '/bootstrap.php';
 }

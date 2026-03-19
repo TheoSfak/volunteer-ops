@@ -34,7 +34,7 @@ if ($filterPriority && array_key_exists($filterPriority, COMPLAINT_PRIORITY_LABE
 }
 if ($search) {
     $where[] = "(c.subject LIKE ? OR c.body LIKE ? OR u.name LIKE ?)";
-    $searchParam = '%' . $search . '%';
+    $searchParam = '%' . dbEscape($search) . '%';
     $params[] = $searchParam;
     $params[] = $searchParam;
     $params[] = $searchParam;

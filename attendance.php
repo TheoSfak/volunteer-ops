@@ -119,6 +119,9 @@ if (isPost()) {
         );
         
         $pointsAwarded = 0;
+        $pdo = db();
+        $pdo->beginTransaction();
+        try {
         foreach ($toAward as $pr) {
             // Calculate hours
             $hours = $pr['actual_hours'];
@@ -150,6 +153,13 @@ if (isPost()) {
             $pointsAwarded++;
         }
         
+        $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            setFlash('error', 'Σφάλμα κατά την απονομή πόντων.');
+            redirect('attendance.php?mission_id=' . $missionId);
+        }
+
         if ($pointsAwarded > 0) {
             setFlash('success', "Απονεμήθηκαν πόντοι σε $pointsAwarded εθελοντές.");
         } else {

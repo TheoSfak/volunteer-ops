@@ -70,7 +70,7 @@ if ($tab === 'missing') {
         $searchParams = [];
         if ($filterSearch) {
             $searchWhere = " AND (u.name LIKE ? OR u.email LIKE ?)";
-            $searchParams = ["%{$filterSearch}%", "%{$filterSearch}%"];
+            $searchParams = ['%' . dbEscape($filterSearch) . '%', '%' . dbEscape($filterSearch) . '%'];
         }
         $allMissing = dbFetchAll(
             "SELECT ct.id as type_id, u.id, u.name, u.email, d.name as department_name
@@ -111,9 +111,9 @@ if ($tab === 'missing') {
 
     if ($filterSearch) {
         $where .= " AND (u.name LIKE ? OR u.email LIKE ? OR ct.name LIKE ?)";
-        $params[] = "%{$filterSearch}%";
-        $params[] = "%{$filterSearch}%";
-        $params[] = "%{$filterSearch}%";
+        $params[] = '%' . dbEscape($filterSearch) . '%';
+        $params[] = '%' . dbEscape($filterSearch) . '%';
+        $params[] = '%' . dbEscape($filterSearch) . '%';
     }
 
     // Pagination

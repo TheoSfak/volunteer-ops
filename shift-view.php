@@ -368,11 +368,7 @@ if (isPost()) {
                     
                     // Send email notification
                     if ($volunteerInfo && !empty($volunteerInfo['email']) && isNotificationEnabled('admin_added_volunteer')) {
-                        $gcalLink = 'https://calendar.google.com/calendar/render?action=TEMPLATE'
-                            . '&text=' . rawurlencode($shift['mission_title'])
-                            . '&dates=' . date('Ymd\THis', strtotime($shift['start_time'])) . '/' . date('Ymd\THis', strtotime($shift['end_time']))
-                            . '&details=' . rawurlencode('Βάρδια εθελοντισμού')
-                            . '&location=' . rawurlencode($shift['location'] ?: '');
+                        $gcalLink = buildGcalLink($shift['mission_title'], $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
                         sendNotificationEmail(
                             'admin_added_volunteer',
                             $volunteerInfo['email'],

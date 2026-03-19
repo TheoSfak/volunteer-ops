@@ -94,8 +94,8 @@ if (isPost()) {
         $data['department_id'] = $currentUser['department_id'];
     }
     
-    // Password for new users
-    $password = post('password');
+    // Password for new users — use raw $_POST to preserve whitespace
+    $password = $_POST['password'] ?? '';
     if (!$volunteer && empty($password)) {
         $errors[] = 'Ο κωδικός είναι υποχρεωτικός για νέους χρήστες.';
     } elseif (!$volunteer && strlen($password) < 6) {

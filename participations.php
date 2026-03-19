@@ -42,7 +42,7 @@ if ($filterMission) {
 
 if ($search) {
     $where[] = "(m.title LIKE ? OR u.name LIKE ?)";
-    $searchTerm = "%$search%";
+    $searchTerm = '%' . dbEscape($search) . '%';
     $params[] = $searchTerm;
     $params[] = $searchTerm;
 }

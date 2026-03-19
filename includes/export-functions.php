@@ -33,7 +33,7 @@ function exportMissionsToCsv($filters = []) {
     
     if (!empty($filters['search'])) {
         $where[] = '(m.title LIKE ? OR m.description LIKE ? OR m.location LIKE ?)';
-        $term = '%' . $filters['search'] . '%';
+        $term = '%' . dbEscape($filters['search']) . '%';
         $params = array_merge($params, [$term, $term, $term]);
     }
     
