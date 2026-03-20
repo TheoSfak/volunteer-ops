@@ -180,7 +180,7 @@ if (get('export') === 'csv') {
     header('Content-Disposition: attachment; filename="citizens_' . date('Y-m-d_His') . '.csv"');
     $out = fopen('php://output', 'w');
     fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // UTF-8 BOM for Excel
-    fputcsv($out, ['#', 'Επίθετο (GR)', 'Όνομα (GR)', 'Επίθετο (LAT)', 'Όνομα (LAT)', 'Ημ. Γέννησης', 'Email', 'Τηλέφωνο', 'Επικοινωνία', 'Ημ/νία Επικοινωνίας', 'Πληρωμή', 'Ημ/νία Πληρωμής', 'Ολοκλήρωση', 'Ημ/νία Ολοκλήρωσης', 'Σημειώσεις'], ';');
+    fputcsv($out, ['#', 'Επίθετο (GR)', 'Όνομα (GR)', 'Επίθετο (LAT)', 'Όνομα (LAT)', 'Ημ. Γέννησης', 'Email', 'Τηλέφωνο', 'Επικοινωνία', 'Ημ/νία Επικοινωνίας', 'Πληρωμή', 'Ημ/νία Πληρωμής', 'Ολοκλήρωση', 'Ημ/νία Ολοκλήρωσης', 'Σημειώσεις'], ';', '"', '\\');
     foreach ($rows as $i => $r) {
         fputcsv($out, [
             $i + 1,
@@ -198,7 +198,7 @@ if (get('export') === 'csv') {
             $r['completed'] ? 'Ναι' : 'Όχι',
             ($r['completed_at'] ?? null) ? formatDateTime($r['completed_at']) : '',
             $r['notes'] ?? '',
-        ], ';');
+        ], ';', '"', '\\');
     }
     fclose($out);
     exit;
