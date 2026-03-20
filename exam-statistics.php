@@ -113,11 +113,11 @@ $quizQuery = "
         tq.title as quiz_title,
         tc.name as category_name,
         qa.score,
-        (SELECT COUNT(*) FROM training_quiz_questions tqqc WHERE tqqc.quiz_id = qa.quiz_id) as total_questions,
-        NULL as passed,
+        qa.total_questions as total_questions,
+        qa.passed,
         qa.completed_at,
         qa.time_taken_seconds,
-        ROUND((qa.score / NULLIF((SELECT COUNT(*) FROM training_quiz_questions tqqc2 WHERE tqqc2.quiz_id = qa.quiz_id), 0) * 100), 2) as percentage
+        ROUND((qa.score / NULLIF(qa.total_questions, 0) * 100), 2) as percentage
     FROM quiz_attempts qa
     INNER JOIN users u ON qa.user_id = u.id
     INNER JOIN training_quizzes tq ON qa.quiz_id = tq.id
