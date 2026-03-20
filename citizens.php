@@ -148,11 +148,11 @@ if (get('export') === 'csv') {
             $r['email'] ?? '',
             $r['phone'] ?? '',
             $r['contact_done'] ? 'Ναι' : 'Όχι',
-            $r['contact_done_at'] ? formatDateTime($r['contact_done_at']) : '',
+            ($r['contact_done_at'] ?? null) ? formatDateTime($r['contact_done_at']) : '',
             $r['payment_done'] ? 'Ναι' : 'Όχι',
-            $r['payment_done_at'] ? formatDateTime($r['payment_done_at']) : '',
+            ($r['payment_done_at'] ?? null) ? formatDateTime($r['payment_done_at']) : '',
             $r['completed'] ? 'Ναι' : 'Όχι',
-            $r['completed_at'] ? formatDateTime($r['completed_at']) : '',
+            ($r['completed_at'] ?? null) ? formatDateTime($r['completed_at']) : '',
             $r['notes'] ?? '',
         ], ';');
     }
@@ -301,10 +301,10 @@ include __DIR__ . '/includes/header.php';
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="toggle_contact">
                                 <input type="hidden" name="citizen_id" value="<?= $c['id'] ?>">
-                                <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['contact_done'] && $c['contact_done_at'] ? 'Επικοινωνία: ' . formatDateTime($c['contact_done_at']) : 'Εναλλαγή' ?>">
+                                <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['contact_done'] && ($c['contact_done_at'] ?? null) ? 'Επικοινωνία: ' . formatDateTime($c['contact_done_at']) : 'Εναλλαγή' ?>">
                                     <i class="bi <?= $c['contact_done'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?> fs-5"></i>
                                 </button>
-                                <?php if ($c['contact_done'] && $c['contact_done_at']): ?>
+                                <?php if ($c['contact_done'] && ($c['contact_done_at'] ?? null)): ?>
                                 <div class="small text-muted" style="font-size:0.7rem"><?= formatDateTime($c['contact_done_at']) ?></div>
                                 <?php endif; ?>
                             </form>
@@ -314,10 +314,10 @@ include __DIR__ . '/includes/header.php';
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="toggle_payment">
                                 <input type="hidden" name="citizen_id" value="<?= $c['id'] ?>">
-                                <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['payment_done'] && $c['payment_done_at'] ? 'Πληρωμή: ' . formatDateTime($c['payment_done_at']) : 'Εναλλαγή' ?>">
+                                <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['payment_done'] && ($c['payment_done_at'] ?? null) ? 'Πληρωμή: ' . formatDateTime($c['payment_done_at']) : 'Εναλλαγή' ?>">
                                     <i class="bi <?= $c['payment_done'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?> fs-5"></i>
                                 </button>
-                                <?php if ($c['payment_done'] && $c['payment_done_at']): ?>
+                                <?php if ($c['payment_done'] && ($c['payment_done_at'] ?? null)): ?>
                                 <div class="small text-muted" style="font-size:0.7rem"><?= formatDateTime($c['payment_done_at']) ?></div>
                                 <?php endif; ?>
                             </form>
@@ -327,10 +327,10 @@ include __DIR__ . '/includes/header.php';
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="toggle_completed">
                                 <input type="hidden" name="citizen_id" value="<?= $c['id'] ?>">
-                                <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['completed'] && $c['completed_at'] ? 'Ολοκλήρωση: ' . formatDateTime($c['completed_at']) : 'Εναλλαγή' ?>">
+                                <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['completed'] && ($c['completed_at'] ?? null) ? 'Ολοκλήρωση: ' . formatDateTime($c['completed_at']) : 'Εναλλαγή' ?>">
                                     <i class="bi <?= $c['completed'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?> fs-5"></i>
                                 </button>
-                                <?php if ($c['completed'] && $c['completed_at']): ?>
+                                <?php if ($c['completed'] && ($c['completed_at'] ?? null)): ?>
                                 <div class="small text-muted" style="font-size:0.7rem"><?= formatDateTime($c['completed_at']) ?></div>
                                 <?php endif; ?>
                             </form>
