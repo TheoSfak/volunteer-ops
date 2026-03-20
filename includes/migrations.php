@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 40;
+    $LATEST_MIGRATION_VERSION = 41;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -2639,6 +2639,18 @@ function runSchemaMigrations(): void {
                     dbExecute("UPDATE citizens SET contact_done_at = updated_at WHERE contact_done = 1 AND contact_done_at IS NULL");
                     dbExecute("UPDATE citizens SET payment_done_at = updated_at WHERE payment_done = 1 AND payment_done_at IS NULL");
                     dbExecute("UPDATE citizens SET completed_at = updated_at WHERE completed = 1 AND completed_at IS NULL");
+                }
+            },
+        ],
+
+        // ── v38: Rename father_name to phone in citizen_certificates ──
+        [
+            'version'     => 38,
+            'description' => 'Rename father_name column to phone in citizen_certificates',
+            'up'          => function () {
+                $cols = dbFetchAll("SHOW COLUMNS FROM citizen_certificates LIKE 'father_name'");
+                if (!empty($cols)) {
+                    dbExecute("ALTER TABLE citizen_certificates CHANGE `father_name` `phone` VARCHAR(30) NULL COMMENT 'Τηλέφωνο'");
                 }
             },
         ],

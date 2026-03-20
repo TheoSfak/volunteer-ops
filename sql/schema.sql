@@ -1617,7 +1617,7 @@ CREATE TABLE IF NOT EXISTS `citizen_certificates` (
     `certificate_type_id` INT UNSIGNED NULL,
     `first_name` VARCHAR(100) NOT NULL COMMENT 'Όνομα',
     `last_name` VARCHAR(100) NOT NULL COMMENT 'Επίθετο',
-    `father_name` VARCHAR(100) NULL COMMENT 'Όνομα Πατρός',
+    `phone` VARCHAR(30) NULL COMMENT 'Τηλέφωνο',
     `birth_date` DATE NULL COMMENT 'Ημερομηνία γέννησης',
     `issue_date` DATE NULL COMMENT 'Ημ. Έκδοσης',
     `expiry_date` DATE NULL COMMENT 'Ημ. Λήξης',
