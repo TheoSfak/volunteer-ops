@@ -11,6 +11,12 @@ $pageTitle = 'Λίστα Πολιτών';
 
 // Check if timestamp columns exist (migration 37 may not have run yet)
 $_hasTsCols = !empty(dbFetchAll("SHOW COLUMNS FROM citizens LIKE 'contact_done_at'"));
+if (!$_hasTsCols) {
+    // Migration hasn't run — clear any cooldown so it retries on next page load
+    try {
+        dbExecute("DELETE FROM settings WHERE setting_key = 'migration_last_failure'");
+    } catch (Exception $e) {}
+}
 
 // Handle POST actions
 if (isPost()) {
