@@ -9,13 +9,26 @@ requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
 
 $pageTitle = 'Λίστα Πολιτών';
 
-// Check if timestamp columns exist (migration 37 may not have run yet)
+// Check if timestamp columns exist — if not, create them directly
 $_hasTsCols = !empty(dbFetchAll("SHOW COLUMNS FROM citizens LIKE 'contact_done_at'"));
 if (!$_hasTsCols) {
-    // Migration hasn't run — clear any cooldown so it retries on next page load
     try {
+        dbExecute("ALTER TABLE citizens
+            ADD COLUMN contact_done_at DATETIME NULL AFTER contact_done,
+            ADD COLUMN payment_done_at DATETIME NULL AFTER payment_done,
+            ADD COLUMN completed_at DATETIME NULL AFTER completed");
+        dbExecute("UPDATE citizens SET contact_done_at = updated_at WHERE contact_done = 1");
+        dbExecute("UPDATE citizens SET payment_done_at = updated_at WHERE payment_done = 1");
+        dbExecute("UPDATE citizens SET completed_at = updated_at WHERE completed = 1");
+        // Mark migration 37 as done so it doesn't re-run
+        dbExecute("INSERT INTO settings (setting_key, setting_value, updated_at)
+            VALUES ('db_schema_version', '37', NOW())
+            ON DUPLICATE KEY UPDATE setting_value = GREATEST(setting_value, '37'), updated_at = NOW()");
         dbExecute("DELETE FROM settings WHERE setting_key = 'migration_last_failure'");
-    } catch (Exception $e) {}
+        $_hasTsCols = true;
+    } catch (Exception $e) {
+        // Columns might already partially exist or other issue — continue gracefully
+    }
 }
 
 // Handle POST actions
