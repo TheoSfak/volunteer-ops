@@ -117,6 +117,38 @@ $certs = dbFetchAll(
 // Load certificate types for form dropdown and filter
 $certTypes = dbFetchAll("SELECT * FROM citizen_certificate_types WHERE is_active = 1 ORDER BY name");
 
+// CSV Export
+if (get('export') === 'csv') {
+    $expRows = dbFetchAll(
+        "SELECT cc.*, cct.name as type_name
+         FROM citizen_certificates cc
+         LEFT JOIN citizen_certificate_types cct ON cc.certificate_type_id = cct.id
+         WHERE $whereClause ORDER BY cc.last_name, cc.first_name",
+        $params
+    );
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="citizen_certificates_' . date('Y-m-d_His') . '.csv"');
+    $out = fopen('php://output', 'w');
+    fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // UTF-8 BOM
+    fputcsv($out, ['#', 'Επίθετο', 'Όνομα', 'Τηλέφωνο', 'Τύπος', 'Email', 'Ημ. Γέννησης', 'Ημ. Έκδοσης', 'Ημ. Λήξης', 'Σημειώσεις'], ';', '"', '\\');
+    foreach ($expRows as $i => $r) {
+        fputcsv($out, [
+            $i + 1,
+            $r['last_name'] ?? '',
+            $r['first_name'] ?? '',
+            $r['phone'] ?? '',
+            $r['type_name'] ?? '',
+            $r['email'] ?? '',
+            $r['birth_date'] ? formatDate($r['birth_date']) : '',
+            $r['issue_date'] ? formatDate($r['issue_date']) : '',
+            $r['expiry_date'] ? formatDate($r['expiry_date']) : '',
+            $r['notes'] ?? '',
+        ], ';', '"', '\\');
+    }
+    fclose($out);
+    exit;
+}
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -133,7 +165,7 @@ include __DIR__ . '/includes/header.php';
         <form method="get" class="row g-3 align-items-end">
             <div class="col-md-5">
                 <label class="form-label">Αναζήτηση</label>
-                <input type="text" name="search" class="form-control" placeholder="Όνομα, Επίθετο, Πατρώνυμο..." value="<?= h($search) ?>">
+                <input type="text" name="search" class="form-control" placeholder="Όνομα, Επίθετο, Τηλέφωνο..." value="<?= h($search) ?>">
             </div>
             <div class="col-md-3">
                 <label class="form-label">Τύπος Πιστοποιητικού</label>
@@ -154,6 +186,11 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="col-md-1">
                 <button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-search"></i> Φίλτρο</button>
+            </div>
+            <div class="col-auto">
+                <a href="?<?= http_build_query(array_merge($_GET, ['export' => 'csv'])) ?>" class="btn btn-outline-success w-100">
+                    <i class="bi bi-filetype-csv"></i> CSV
+                </a>
             </div>
         </form>
     </div>
