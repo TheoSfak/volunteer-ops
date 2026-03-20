@@ -2624,6 +2624,25 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        // ── v37: Citizens status timestamp columns ──
+        [
+            'version'     => 37,
+            'description' => 'Add timestamp columns to citizens for contact/payment/completed',
+            'up'          => function () {
+                $cols = dbFetchAll("SHOW COLUMNS FROM citizens LIKE 'contact_done_at'");
+                if (empty($cols)) {
+                    dbExecute("ALTER TABLE citizens
+                        ADD COLUMN contact_done_at DATETIME NULL COMMENT 'Ημερομηνία επικοινωνίας' AFTER contact_done,
+                        ADD COLUMN payment_done_at DATETIME NULL COMMENT 'Ημερομηνία πληρωμής' AFTER payment_done,
+                        ADD COLUMN completed_at DATETIME NULL COMMENT 'Ημερομηνία ολοκλήρωσης' AFTER completed");
+                    // Backfill existing checked rows
+                    dbExecute("UPDATE citizens SET contact_done_at = updated_at WHERE contact_done = 1 AND contact_done_at IS NULL");
+                    dbExecute("UPDATE citizens SET payment_done_at = updated_at WHERE payment_done = 1 AND payment_done_at IS NULL");
+                    dbExecute("UPDATE citizens SET completed_at = updated_at WHERE completed = 1 AND completed_at IS NULL");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
