@@ -28,15 +28,15 @@ if (isAdmin()) {
     
     $stats = [
         'missions_total' => dbFetchValue(
-            "SELECT COUNT(*) FROM missions m WHERE start_datetime >= ? AND start_datetime < ? $departmentFilter",
-            array_merge([$yearStart, $yearEnd], $params)
+            "SELECT COUNT(*) FROM missions m WHERE start_datetime >= ? AND start_datetime < ? AND m.deleted_at IS NULL AND m.status != ? $departmentFilter",
+            array_merge([$yearStart, $yearEnd, STATUS_DRAFT], $params)
         ),
         'missions_open' => dbFetchValue(
-            "SELECT COUNT(*) FROM missions m WHERE status = ? AND start_datetime >= ? AND start_datetime < ? $departmentFilter",
+            "SELECT COUNT(*) FROM missions m WHERE status = ? AND start_datetime >= ? AND start_datetime < ? AND m.deleted_at IS NULL $departmentFilter",
             array_merge([STATUS_OPEN, $yearStart, $yearEnd], $params)
         ),
         'missions_completed' => dbFetchValue(
-            "SELECT COUNT(*) FROM missions m WHERE status = ? AND start_datetime >= ? AND start_datetime < ? $departmentFilter",
+            "SELECT COUNT(*) FROM missions m WHERE status = ? AND start_datetime >= ? AND start_datetime < ? AND m.deleted_at IS NULL $departmentFilter",
             array_merge([STATUS_COMPLETED, $yearStart, $yearEnd], $params)
         ),
         'volunteers_total' => dbFetchValue(
@@ -51,28 +51,28 @@ if (isAdmin()) {
             "SELECT COUNT(*) FROM participation_requests pr 
              JOIN shifts s ON pr.shift_id = s.id 
              JOIN missions m ON s.mission_id = m.id 
-             WHERE pr.status = ? $departmentFilter",
+             WHERE pr.status = ? AND m.deleted_at IS NULL $departmentFilter",
             array_merge([PARTICIPATION_PENDING], $params)
         ),
         'total_hours_this_month' => dbFetchValue(
             "SELECT COALESCE(SUM(pr.actual_hours), 0) FROM participation_requests pr
              JOIN shifts s ON pr.shift_id = s.id
              JOIN missions m ON s.mission_id = m.id
-             WHERE pr.attended = 1 AND s.start_time >= ? AND s.start_time < ? + INTERVAL 1 MONTH $departmentFilter",
+             WHERE pr.attended = 1 AND s.start_time >= ? AND s.start_time < ? + INTERVAL 1 MONTH AND m.deleted_at IS NULL $departmentFilter",
             array_merge([$currentMonth . '-01', $currentMonth . '-01'], $params)
         ),
         'total_hours_last_month' => dbFetchValue(
             "SELECT COALESCE(SUM(pr.actual_hours), 0) FROM participation_requests pr
              JOIN shifts s ON pr.shift_id = s.id
              JOIN missions m ON s.mission_id = m.id
-             WHERE pr.attended = 1 AND s.start_time >= ? AND s.start_time < ? + INTERVAL 1 MONTH $departmentFilter",
+             WHERE pr.attended = 1 AND s.start_time >= ? AND s.start_time < ? + INTERVAL 1 MONTH AND m.deleted_at IS NULL $departmentFilter",
             array_merge([$previousMonth . '-01', $previousMonth . '-01'], $params)
         ),
         'active_volunteers_this_month' => dbFetchValue(
             "SELECT COUNT(DISTINCT pr.volunteer_id) FROM participation_requests pr
              JOIN shifts s ON pr.shift_id = s.id
              JOIN missions m ON s.mission_id = m.id
-             WHERE pr.attended = 1 AND s.start_time >= ? AND s.start_time < ? + INTERVAL 1 MONTH $departmentFilter",
+             WHERE pr.attended = 1 AND s.start_time >= ? AND s.start_time < ? + INTERVAL 1 MONTH AND m.deleted_at IS NULL $departmentFilter",
             array_merge([$currentMonth . '-01', $currentMonth . '-01'], $params)
         ),
     ];
@@ -80,12 +80,12 @@ if (isAdmin()) {
     // Calculate completion rate
     $completedThisMonth = dbFetchValue(
         "SELECT COUNT(*) FROM missions m 
-         WHERE status = ? AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 MONTH $departmentFilter",
+         WHERE status = ? AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 MONTH AND m.deleted_at IS NULL $departmentFilter",
         array_merge([STATUS_COMPLETED, $currentMonth . '-01', $currentMonth . '-01'], $params)
     );
     $totalThisMonth = dbFetchValue(
         "SELECT COUNT(*) FROM missions m 
-         WHERE m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 MONTH AND status != ? $departmentFilter",
+         WHERE m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 MONTH AND status != ? AND m.deleted_at IS NULL $departmentFilter",
         array_merge([$currentMonth . '-01', $currentMonth . '-01', STATUS_DRAFT], $params)
     );
     $stats['completion_rate'] = $totalThisMonth > 0 ? round(($completedThisMonth / $totalThisMonth) * 100) : 0;
@@ -97,9 +97,9 @@ if (isAdmin()) {
     $missionRows = dbFetchAll(
         "SELECT DATE_FORMAT(start_datetime, '%Y-%m') as month, COUNT(*) as missions
          FROM missions m
-         WHERE start_datetime >= ? AND start_datetime < ? $departmentFilter
+         WHERE start_datetime >= ? AND start_datetime < ? AND m.deleted_at IS NULL AND m.status != ? $departmentFilter
          GROUP BY DATE_FORMAT(start_datetime, '%Y-%m')",
-        array_merge([$sixMonthsAgo, $nextMonth], $params)
+        array_merge([$sixMonthsAgo, $nextMonth, STATUS_DRAFT], $params)
     );
     $missionsMap = array_column($missionRows, 'missions', 'month');
 
@@ -110,7 +110,7 @@ if (isAdmin()) {
          FROM participation_requests pr
          JOIN shifts s ON pr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
-         WHERE pr.attended = 1 AND s.start_time >= ? AND s.start_time < ? $departmentFilter
+         WHERE pr.attended = 1 AND s.start_time >= ? AND s.start_time < ? AND m.deleted_at IS NULL $departmentFilter
          GROUP BY DATE_FORMAT(s.start_time, '%Y-%m')",
         array_merge([$sixMonthsAgo, $nextMonth], $params)
     );
@@ -745,7 +745,7 @@ $randomQuote = $quotes[array_rand($quotes)];
                         </div>
                         <div class="flex-grow-1">
                             <div class="stat-label">Ενεργοί Εθελοντές</div>
-                            <div class="stat-number"><?= $stats['active_volunteers_this_month'] ?></div>
+                            <div class="stat-number"><?= $stats['volunteers_active'] ?></div>
                             <span class="stat-trend neutral">
                                 <?= $stats['volunteers_active'] ?> / <?= $stats['volunteers_total'] ?> σύνολο
                             </span>
@@ -982,6 +982,7 @@ $randomQuote = $quotes[array_rand($quotes)];
                         status
                     FROM missions
                     WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                      AND deleted_at IS NULL AND status != 'DRAFT'
                     UNION ALL
                     SELECT 
                         'participation' as type,
