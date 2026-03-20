@@ -270,33 +270,9 @@ include __DIR__ . '/includes/header.php';
                             <button class="btn btn-sm btn-outline-primary" onclick="editCert(<?= h(json_encode($c)) ?>)" title="Επεξεργασία">
                                 <i class="bi bi-pencil"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteModal<?= $c['id'] ?>" title="Διαγραφή">
+                            <button class="btn btn-sm btn-outline-danger" onclick="confirmDelete(<?= $c['id'] ?>, '<?= h($c['last_name'] . ' ' . $c['first_name']) ?>')" title="Διαγραφή">
                                 <i class="bi bi-trash"></i>
                             </button>
-                            <!-- Delete Modal -->
-                            <div class="modal fade" id="deleteModal<?= $c['id'] ?>" tabindex="-1">
-                                <div class="modal-dialog">
-                                    <div class="modal-content">
-                                        <div class="modal-header bg-danger text-white">
-                                            <h5 class="modal-title">Διαγραφή Πιστοποιητικού</h5>
-                                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                                        </div>
-                                        <div class="modal-body">
-                                            Είστε σίγουροι ότι θέλετε να διαγράψετε το πιστοποιητικό του
-                                            <strong><?= h($c['last_name'] . ' ' . $c['first_name']) ?></strong>;
-                                        </div>
-                                        <div class="modal-footer">
-                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
-                                            <form method="post" class="d-inline">
-                                                <?= csrfField() ?>
-                                                <input type="hidden" name="action" value="delete">
-                                                <input type="hidden" name="cert_id" value="<?= $c['id'] ?>">
-                                                <button type="submit" class="btn btn-danger">Διαγραφή</button>
-                                            </form>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
                         </td>
                     </tr>
                     <?php endforeach; ?>
@@ -310,6 +286,31 @@ include __DIR__ . '/includes/header.php';
         <?= paginationLinks($pagination) ?>
     </div>
     <?php endif; ?>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">Διαγραφή Πιστοποιητικού</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                Είστε σίγουροι ότι θέλετε να διαγράψετε το πιστοποιητικό του
+                <strong id="deleteNameLabel"></strong>;
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                <form method="post" class="d-inline">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="cert_id" id="deleteIdInput" value="0">
+                    <button type="submit" class="btn btn-danger">Διαγραφή</button>
+                </form>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Create / Edit Modal -->
@@ -380,6 +381,13 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
+function confirmDelete(id, name) {
+    document.getElementById('deleteIdInput').value = id;
+    document.getElementById('deleteNameLabel').textContent = name;
+    var modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+    modal.show();
+}
+
 function resetForm() {
     document.getElementById('formAction').value = 'create';
     document.getElementById('formCertId').value = '0';
