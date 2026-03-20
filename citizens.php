@@ -38,20 +38,38 @@ if (isPost()) {
             }
 
             if ($action === 'update' && $id > 0) {
+                $old = dbFetchOne("SELECT contact_done, payment_done, completed FROM citizens WHERE id = ?", [$id]);
+                $tsUpdates = '';
+                if ($old) {
+                    $newContact = $data[7]; $newPayment = $data[8]; $newCompleted = $data[9];
+                    if ($newContact && !$old['contact_done']) $tsUpdates .= ', contact_done_at=NOW()';
+                    if (!$newContact && $old['contact_done']) $tsUpdates .= ', contact_done_at=NULL';
+                    if ($newPayment && !$old['payment_done']) $tsUpdates .= ', payment_done_at=NOW()';
+                    if (!$newPayment && $old['payment_done']) $tsUpdates .= ', payment_done_at=NULL';
+                    if ($newCompleted && !$old['completed']) $tsUpdates .= ', completed_at=NOW()';
+                    if (!$newCompleted && $old['completed']) $tsUpdates .= ', completed_at=NULL';
+                }
                 dbExecute(
                     "UPDATE citizens SET first_name_gr=?, last_name_gr=?, first_name_lat=?, last_name_lat=?,
-                     birth_date=?, email=?, phone=?, contact_done=?, payment_done=?, completed=?, notes=?,
-                     updated_at=NOW() WHERE id=?",
+                     birth_date=?, email=?, phone=?, contact_done=?, payment_done=?, completed=?, notes=?
+                     {$tsUpdates}, updated_at=NOW() WHERE id=?",
                     array_merge($data, [$id])
                 );
                 logAudit('update', 'citizens', $id);
                 setFlash('success', 'Ο πολίτης ενημερώθηκε επιτυχώς.');
             } else {
+                $contactAt = $data[7] ? date('Y-m-d H:i:s') : null;
+                $paymentAt = $data[8] ? date('Y-m-d H:i:s') : null;
+                $completedAt = $data[9] ? date('Y-m-d H:i:s') : null;
+                $data[] = $contactAt;
+                $data[] = $paymentAt;
+                $data[] = $completedAt;
                 $data[] = getCurrentUserId();
                 $newId = dbInsert(
                     "INSERT INTO citizens (first_name_gr, last_name_gr, first_name_lat, last_name_lat,
-                     birth_date, email, phone, contact_done, payment_done, completed, notes, created_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     birth_date, email, phone, contact_done, payment_done, completed, notes,
+                     contact_done_at, payment_done_at, completed_at, created_by)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     $data
                 );
                 logAudit('create', 'citizens', $newId);
@@ -80,14 +98,66 @@ if (isPost()) {
                 'payment' => 'payment_done',
                 'completed' => 'completed',
             ];
+            $tsMap = [
+                'contact' => 'contact_done_at',
+                'payment' => 'payment_done_at',
+                'completed' => 'completed_at',
+            ];
             if ($id > 0 && isset($fieldMap[$field])) {
                 $col = $fieldMap[$field];
-                dbExecute("UPDATE citizens SET {$col} = IF({$col}=1, 0, 1), updated_at=NOW() WHERE id = ?", [$id]);
+                $tsCol = $tsMap[$field];
+                dbExecute(
+                    "UPDATE citizens SET {$col} = IF({$col}=1, 0, 1), {$tsCol} = IF({$col}=1, NULL, NOW()), updated_at=NOW() WHERE id = ?",
+                    [$id]
+                );
                 logAudit('update', 'citizens', $id);
             }
             redirect('citizens.php' . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : ''));
             break;
     }
+}
+
+// CSV Export
+if (get('export') === 'csv') {
+    $expWhere = ['1=1'];
+    $expParams = [];
+    $expSearch = get('search', '');
+    if ($expSearch) {
+        $expWhere[] = "(first_name_gr LIKE ? OR last_name_gr LIKE ? OR first_name_lat LIKE ? OR last_name_lat LIKE ? OR email LIKE ? OR phone LIKE ?)";
+        $expParams = array_merge($expParams, array_fill(0, 6, '%' . dbEscape($expSearch) . '%'));
+    }
+    if (get('contact', '') !== '') { $expWhere[] = "contact_done = ?"; $expParams[] = (int) get('contact'); }
+    if (get('payment', '') !== '') { $expWhere[] = "payment_done = ?"; $expParams[] = (int) get('payment'); }
+    if (get('completed', '') !== '') { $expWhere[] = "completed = ?"; $expParams[] = (int) get('completed'); }
+    $expWhereClause = implode(' AND ', $expWhere);
+    $rows = dbFetchAll("SELECT * FROM citizens WHERE $expWhereClause ORDER BY last_name_gr, first_name_gr", $expParams);
+
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="citizens_' . date('Y-m-d_His') . '.csv"');
+    $out = fopen('php://output', 'w');
+    fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // UTF-8 BOM for Excel
+    fputcsv($out, ['#', 'Επίθετο (GR)', 'Όνομα (GR)', 'Επίθετο (LAT)', 'Όνομα (LAT)', 'Ημ. Γέννησης', 'Email', 'Τηλέφωνο', 'Επικοινωνία', 'Ημ/νία Επικοινωνίας', 'Πληρωμή', 'Ημ/νία Πληρωμής', 'Ολοκλήρωση', 'Ημ/νία Ολοκλήρωσης', 'Σημειώσεις'], ';');
+    foreach ($rows as $i => $r) {
+        fputcsv($out, [
+            $i + 1,
+            $r['last_name_gr'],
+            $r['first_name_gr'],
+            $r['last_name_lat'] ?? '',
+            $r['first_name_lat'] ?? '',
+            $r['birth_date'] ? formatDate($r['birth_date']) : '',
+            $r['email'] ?? '',
+            $r['phone'] ?? '',
+            $r['contact_done'] ? 'Ναι' : 'Όχι',
+            $r['contact_done_at'] ? formatDateTime($r['contact_done_at']) : '',
+            $r['payment_done'] ? 'Ναι' : 'Όχι',
+            $r['payment_done_at'] ? formatDateTime($r['payment_done_at']) : '',
+            $r['completed'] ? 'Ναι' : 'Όχι',
+            $r['completed_at'] ? formatDateTime($r['completed_at']) : '',
+            $r['notes'] ?? '',
+        ], ';');
+    }
+    fclose($out);
+    exit;
 }
 
 // Filters
@@ -139,9 +209,14 @@ include __DIR__ . '/includes/header.php';
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-person-vcard"></i> Λίστα Πολιτών</h2>
-    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#citizenModal" onclick="resetForm()">
-        <i class="bi bi-plus-lg"></i> Νέος Πολίτης
-    </button>
+    <div>
+        <a href="citizens.php?export=csv&search=<?= urlencode($search) ?>&contact=<?= urlencode($filterContact) ?>&payment=<?= urlencode($filterPayment) ?>&completed=<?= urlencode($filterCompleted) ?>" class="btn btn-success me-2">
+            <i class="bi bi-filetype-csv"></i> Εξαγωγή CSV
+        </a>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#citizenModal" onclick="resetForm()">
+            <i class="bi bi-plus-lg"></i> Νέος Πολίτης
+        </button>
+    </div>
 </div>
 
 <!-- Filters -->
@@ -226,9 +301,12 @@ include __DIR__ . '/includes/header.php';
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="toggle_contact">
                                 <input type="hidden" name="citizen_id" value="<?= $c['id'] ?>">
-                                <button type="submit" class="btn btn-sm btn-link p-0" title="Εναλλαγή">
+                                <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['contact_done'] && $c['contact_done_at'] ? 'Επικοινωνία: ' . formatDateTime($c['contact_done_at']) : 'Εναλλαγή' ?>">
                                     <i class="bi <?= $c['contact_done'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?> fs-5"></i>
                                 </button>
+                                <?php if ($c['contact_done'] && $c['contact_done_at']): ?>
+                                <div class="small text-muted" style="font-size:0.7rem"><?= formatDateTime($c['contact_done_at']) ?></div>
+                                <?php endif; ?>
                             </form>
                         </td>
                         <td class="text-center">
@@ -236,9 +314,12 @@ include __DIR__ . '/includes/header.php';
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="toggle_payment">
                                 <input type="hidden" name="citizen_id" value="<?= $c['id'] ?>">
-                                <button type="submit" class="btn btn-sm btn-link p-0" title="Εναλλαγή">
+                                <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['payment_done'] && $c['payment_done_at'] ? 'Πληρωμή: ' . formatDateTime($c['payment_done_at']) : 'Εναλλαγή' ?>">
                                     <i class="bi <?= $c['payment_done'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?> fs-5"></i>
                                 </button>
+                                <?php if ($c['payment_done'] && $c['payment_done_at']): ?>
+                                <div class="small text-muted" style="font-size:0.7rem"><?= formatDateTime($c['payment_done_at']) ?></div>
+                                <?php endif; ?>
                             </form>
                         </td>
                         <td class="text-center">
@@ -246,9 +327,12 @@ include __DIR__ . '/includes/header.php';
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="toggle_completed">
                                 <input type="hidden" name="citizen_id" value="<?= $c['id'] ?>">
-                                <button type="submit" class="btn btn-sm btn-link p-0" title="Εναλλαγή">
+                                <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['completed'] && $c['completed_at'] ? 'Ολοκλήρωση: ' . formatDateTime($c['completed_at']) : 'Εναλλαγή' ?>">
                                     <i class="bi <?= $c['completed'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?> fs-5"></i>
                                 </button>
+                                <?php if ($c['completed'] && $c['completed_at']): ?>
+                                <div class="small text-muted" style="font-size:0.7rem"><?= formatDateTime($c['completed_at']) ?></div>
+                                <?php endif; ?>
                             </form>
                         </td>
                         <td class="text-center">
