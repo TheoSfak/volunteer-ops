@@ -21,7 +21,7 @@ if (isPost()) {
             $certificateTypeId = (int) post('certificate_type_id') ?: null;
             $firstName = trim(post('first_name'));
             $lastName = trim(post('last_name'));
-            $fatherName = trim(post('father_name')) ?: null;
+            $phone = trim(post('phone')) ?: null;
             $birthDate = post('birth_date') ?: null;
             $issueDate = post('issue_date') ?: null;
             $expiryDate = post('expiry_date') ?: null;
@@ -33,11 +33,11 @@ if (isPost()) {
                 redirect('citizen-certificates.php');
             }
 
-            $data = [$certificateTypeId, $firstName, $lastName, $fatherName, $birthDate, $issueDate, $expiryDate, $email, $notes];
+            $data = [$certificateTypeId, $firstName, $lastName, $phone, $birthDate, $issueDate, $expiryDate, $email, $notes];
 
             if ($action === 'update' && $id > 0) {
                 dbExecute(
-                    "UPDATE citizen_certificates SET certificate_type_id=?, first_name=?, last_name=?, father_name=?,
+                    "UPDATE citizen_certificates SET certificate_type_id=?, first_name=?, last_name=?, phone=?,
                      birth_date=?, issue_date=?, expiry_date=?, email=?, notes=?, updated_at=NOW() WHERE id=?",
                     array_merge($data, [$id])
                 );
@@ -46,7 +46,7 @@ if (isPost()) {
             } else {
                 $data[] = getCurrentUserId();
                 $newId = dbInsert(
-                    "INSERT INTO citizen_certificates (certificate_type_id, first_name, last_name, father_name,
+                    "INSERT INTO citizen_certificates (certificate_type_id, first_name, last_name, phone,
                      birth_date, issue_date, expiry_date, email, notes, created_by)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     $data
@@ -79,7 +79,7 @@ $where = ['1=1'];
 $params = [];
 
 if ($search) {
-    $where[] = "(cc.first_name LIKE ? OR cc.last_name LIKE ? OR cc.father_name LIKE ?)";
+    $where[] = "(cc.first_name LIKE ? OR cc.last_name LIKE ? OR cc.phone LIKE ?)";
     $params = array_merge($params, array_fill(0, 3, '%' . dbEscape($search) . '%'));
 }
 if ($filterExpired === '1') {
@@ -165,7 +165,7 @@ include __DIR__ . '/includes/header.php';
                         <th>Τύπος</th>
                         <th>Όνομα</th>
                         <th>Επίθετο</th>
-                        <th>Όνομα Πατρός</th>
+                        <th>Τηλέφωνο</th>
                         <th>Ημ. Γέννησης</th>
                         <th>Email</th>
                         <th>Ημ. Έκδοσης</th>
@@ -205,7 +205,7 @@ include __DIR__ . '/includes/header.php';
                         <td><?= h($c['type_name'] ?? '-') ?></td>
                         <td><?= h($c['first_name']) ?></td>
                         <td><?= h($c['last_name']) ?></td>
-                        <td><?= h($c['father_name'] ?? '-') ?></td>
+                        <td><?= h($c['phone'] ?? '-') ?></td>
                         <td><?= $c['birth_date'] ? formatDate($c['birth_date']) : '-' ?></td>
                         <td><?= h($c['email'] ?? '-') ?></td>
                         <td><?= $c['issue_date'] ? formatDate($c['issue_date']) : '-' ?></td>
@@ -300,8 +300,8 @@ include __DIR__ . '/includes/header.php';
                             <input type="text" name="last_name" id="last_name" class="form-control" required>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label">Όνομα Πατρός</label>
-                            <input type="text" name="father_name" id="father_name" class="form-control">
+                            <label class="form-label">Τηλέφωνο</label>
+                            <input type="text" name="phone" id="cert_phone" class="form-control">
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Ημερομηνία Γέννησης</label>
@@ -348,7 +348,7 @@ function editCert(c) {
     document.getElementById('modalTitle').textContent = 'Επεξεργασία Πιστοποιητικού';
     document.getElementById('first_name').value = c.first_name || '';
     document.getElementById('last_name').value = c.last_name || '';
-    document.getElementById('father_name').value = c.father_name || '';
+    document.getElementById('cert_phone').value = c.phone || '';
     document.getElementById('birth_date').value = c.birth_date || '';
     document.getElementById('cert_email').value = c.email || '';
     document.getElementById('issue_date').value = c.issue_date || '';
