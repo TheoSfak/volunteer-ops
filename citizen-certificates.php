@@ -154,9 +154,14 @@ include __DIR__ . '/includes/header.php';
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-file-earmark-medical"></i> Πιστοποιητικά Πολιτών</h2>
-    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#certModal" onclick="resetForm()">
-        <i class="bi bi-plus-lg"></i> Νέο Πιστοποιητικό
-    </button>
+    <div>
+        <a href="?<?= http_build_query(array_merge($_GET, ['export' => 'csv'])) ?>" class="btn btn-success me-2">
+            <i class="bi bi-filetype-csv"></i> Εξαγωγή CSV
+        </a>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#certModal" onclick="resetForm()">
+            <i class="bi bi-plus-lg"></i> Νέο Πιστοποιητικό
+        </button>
+    </div>
 </div>
 
 <!-- Filters -->
@@ -186,11 +191,6 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="col-md-1">
                 <button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-search"></i> Φίλτρο</button>
-            </div>
-            <div class="col-auto">
-                <a href="?<?= http_build_query(array_merge($_GET, ['export' => 'csv'])) ?>" class="btn btn-outline-success w-100">
-                    <i class="bi bi-filetype-csv"></i> CSV
-                </a>
             </div>
         </form>
     </div>
