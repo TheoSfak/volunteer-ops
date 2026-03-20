@@ -9,6 +9,9 @@ requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
 
 $pageTitle = 'Λίστα Πολιτών';
 
+// Check if timestamp columns exist (migration 37 may not have run yet)
+$_hasTsCols = !empty(dbFetchAll("SHOW COLUMNS FROM citizens LIKE 'contact_done_at'"));
+
 // Handle POST actions
 if (isPost()) {
     verifyCsrf();
@@ -38,16 +41,18 @@ if (isPost()) {
             }
 
             if ($action === 'update' && $id > 0) {
-                $old = dbFetchOne("SELECT contact_done, payment_done, completed FROM citizens WHERE id = ?", [$id]);
                 $tsUpdates = '';
-                if ($old) {
-                    $newContact = $data[7]; $newPayment = $data[8]; $newCompleted = $data[9];
-                    if ($newContact && !$old['contact_done']) $tsUpdates .= ', contact_done_at=NOW()';
-                    if (!$newContact && $old['contact_done']) $tsUpdates .= ', contact_done_at=NULL';
-                    if ($newPayment && !$old['payment_done']) $tsUpdates .= ', payment_done_at=NOW()';
-                    if (!$newPayment && $old['payment_done']) $tsUpdates .= ', payment_done_at=NULL';
-                    if ($newCompleted && !$old['completed']) $tsUpdates .= ', completed_at=NOW()';
-                    if (!$newCompleted && $old['completed']) $tsUpdates .= ', completed_at=NULL';
+                if ($_hasTsCols) {
+                    $old = dbFetchOne("SELECT contact_done, payment_done, completed FROM citizens WHERE id = ?", [$id]);
+                    if ($old) {
+                        $newContact = $data[7]; $newPayment = $data[8]; $newCompleted = $data[9];
+                        if ($newContact && !$old['contact_done']) $tsUpdates .= ', contact_done_at=NOW()';
+                        if (!$newContact && $old['contact_done']) $tsUpdates .= ', contact_done_at=NULL';
+                        if ($newPayment && !$old['payment_done']) $tsUpdates .= ', payment_done_at=NOW()';
+                        if (!$newPayment && $old['payment_done']) $tsUpdates .= ', payment_done_at=NULL';
+                        if ($newCompleted && !$old['completed']) $tsUpdates .= ', completed_at=NOW()';
+                        if (!$newCompleted && $old['completed']) $tsUpdates .= ', completed_at=NULL';
+                    }
                 }
                 dbExecute(
                     "UPDATE citizens SET first_name_gr=?, last_name_gr=?, first_name_lat=?, last_name_lat=?,
@@ -58,20 +63,31 @@ if (isPost()) {
                 logAudit('update', 'citizens', $id);
                 setFlash('success', 'Ο πολίτης ενημερώθηκε επιτυχώς.');
             } else {
-                $contactAt = $data[7] ? date('Y-m-d H:i:s') : null;
-                $paymentAt = $data[8] ? date('Y-m-d H:i:s') : null;
-                $completedAt = $data[9] ? date('Y-m-d H:i:s') : null;
-                $data[] = $contactAt;
-                $data[] = $paymentAt;
-                $data[] = $completedAt;
+                if ($_hasTsCols) {
+                    $contactAt = $data[7] ? date('Y-m-d H:i:s') : null;
+                    $paymentAt = $data[8] ? date('Y-m-d H:i:s') : null;
+                    $completedAt = $data[9] ? date('Y-m-d H:i:s') : null;
+                    $data[] = $contactAt;
+                    $data[] = $paymentAt;
+                    $data[] = $completedAt;
+                }
                 $data[] = getCurrentUserId();
-                $newId = dbInsert(
-                    "INSERT INTO citizens (first_name_gr, last_name_gr, first_name_lat, last_name_lat,
-                     birth_date, email, phone, contact_done, payment_done, completed, notes,
-                     contact_done_at, payment_done_at, completed_at, created_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    $data
-                );
+                if ($_hasTsCols) {
+                    $newId = dbInsert(
+                        "INSERT INTO citizens (first_name_gr, last_name_gr, first_name_lat, last_name_lat,
+                         birth_date, email, phone, contact_done, payment_done, completed, notes,
+                         contact_done_at, payment_done_at, completed_at, created_by)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        $data
+                    );
+                } else {
+                    $newId = dbInsert(
+                        "INSERT INTO citizens (first_name_gr, last_name_gr, first_name_lat, last_name_lat,
+                         birth_date, email, phone, contact_done, payment_done, completed, notes, created_by)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        $data
+                    );
+                }
                 logAudit('create', 'citizens', $newId);
                 setFlash('success', 'Ο πολίτης προστέθηκε επιτυχώς.');
             }
@@ -105,11 +121,15 @@ if (isPost()) {
             ];
             if ($id > 0 && isset($fieldMap[$field])) {
                 $col = $fieldMap[$field];
-                $tsCol = $tsMap[$field];
-                dbExecute(
-                    "UPDATE citizens SET {$col} = IF({$col}=1, 0, 1), {$tsCol} = IF({$col}=1, NULL, NOW()), updated_at=NOW() WHERE id = ?",
-                    [$id]
-                );
+                if ($_hasTsCols) {
+                    $tsCol = $tsMap[$field];
+                    dbExecute(
+                        "UPDATE citizens SET {$col} = IF({$col}=1, 0, 1), {$tsCol} = IF({$col}=1, NULL, NOW()), updated_at=NOW() WHERE id = ?",
+                        [$id]
+                    );
+                } else {
+                    dbExecute("UPDATE citizens SET {$col} = IF({$col}=1, 0, 1), updated_at=NOW() WHERE id = ?", [$id]);
+                }
                 logAudit('update', 'citizens', $id);
             }
             redirect('citizens.php' . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : ''));
