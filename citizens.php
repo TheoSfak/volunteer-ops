@@ -142,10 +142,15 @@ if (isPost()) {
                 $col = $fieldMap[$field];
                 if ($_hasTsCols) {
                     $tsCol = $tsMap[$field];
-                    dbExecute(
-                        "UPDATE citizens SET {$col} = IF({$col}=1, 0, 1), {$tsCol} = IF({$col}=1, NULL, NOW()), updated_at=NOW() WHERE id = ?",
-                        [$id]
-                    );
+                    // Read current value first — MySQL SET evaluates left-to-right
+                    $current = (int) dbFetchValue("SELECT {$col} FROM citizens WHERE id = ?", [$id]);
+                    if ($current) {
+                        // Currently checked → uncheck and clear timestamp
+                        dbExecute("UPDATE citizens SET {$col} = 0, {$tsCol} = NULL, updated_at=NOW() WHERE id = ?", [$id]);
+                    } else {
+                        // Currently unchecked → check and set timestamp
+                        dbExecute("UPDATE citizens SET {$col} = 1, {$tsCol} = NOW(), updated_at=NOW() WHERE id = ?", [$id]);
+                    }
                 } else {
                     dbExecute("UPDATE citizens SET {$col} = IF({$col}=1, 0, 1), updated_at=NOW() WHERE id = ?", [$id]);
                 }
