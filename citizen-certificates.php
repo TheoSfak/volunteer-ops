@@ -7,6 +7,14 @@ require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
 
+// Self-healing: rename father_name → phone if migration hasn't run yet
+try {
+    $cols = dbFetchAll("SHOW COLUMNS FROM citizen_certificates LIKE 'father_name'");
+    if (!empty($cols)) {
+        dbExecute("ALTER TABLE citizen_certificates CHANGE `father_name` `phone` VARCHAR(30) NULL COMMENT 'Τηλέφωνο'");
+    }
+} catch (Exception $e) {}
+
 $pageTitle = 'Πιστοποιητικά Πολιτών';
 
 // Handle POST actions
