@@ -267,11 +267,16 @@ function sendSmtpEmail(string $to, string $subject, string $htmlBody, array $smt
             throw new Exception("Σύνδεση απέτυχε: $errstr ($errno)");
         }
         
-        // Read greeting
-        $response = fgets($socket, 515);
-        $log[] = "S: " . trim($response);
-        if (substr($response, 0, 3) !== '220') {
-            throw new Exception("Μη αναμενόμενη απάντηση: $response");
+        // Read greeting (may be multi-line, e.g. Exim)
+        $response = '';
+        while ($line = fgets($socket, 515)) {
+            $response = $line;
+            $log[] = "S: " . trim($line);
+            if (substr($line, 0, 3) !== '220') {
+                throw new Exception("Μη αναμενόμενη απάντηση: $line");
+            }
+            // Last line of multi-line response has space at position 3 (not '-')
+            if (substr($line, 3, 1) === ' ' || substr($line, 3, 1) === "\r" || strlen(trim($line)) === 3) break;
         }
         
         // EHLO
