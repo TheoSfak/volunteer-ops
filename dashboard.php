@@ -246,16 +246,19 @@ if (isAdmin()) {
         $availMissionsParams
     );
 
-    // Annual attendance progress
+    // Annual attendance progress (only Υγειονομική + Διασωστική count)
     $currentYear = date('Y');
+    $attTypeIds = getAttendanceMissionTypeIds();
+    $attPlaceholders = implode(',', array_fill(0, count($attTypeIds), '?'));
     $missionAttendance = (int) dbFetchValue(
         "SELECT COUNT(DISTINCT m.id)
          FROM participation_requests pr
          JOIN shifts s ON pr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
          WHERE pr.volunteer_id = ? AND pr.attended = 1
-         AND YEAR(m.start_datetime) = ?",
-        [$user['id'], $currentYear]
+         AND YEAR(m.start_datetime) = ?
+         AND m.mission_type_id IN ($attPlaceholders)",
+        array_merge([$user['id'], $currentYear], $attTypeIds)
     );
     $attendanceGoal = 10;
     $attendancePct = min(100, round(($missionAttendance / $attendanceGoal) * 100));

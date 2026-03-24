@@ -531,14 +531,28 @@ function getTepMissionTypeId(): int {
 }
 
 /**
- * Return the mission_type id for Εκπαιδευτική missions (cached per request).
+ * Return the mission_type id for Επανεκπαίδευση Εθελοντών missions (cached per request).
  */
 function getEduMissionTypeId(): int {
     static $eduId = null;
     if ($eduId === null) {
-        $eduId = (int) dbFetchValue("SELECT id FROM mission_types WHERE name = 'Εκπαιδευτική' LIMIT 1");
+        $eduId = (int) dbFetchValue("SELECT id FROM mission_types WHERE name = 'Επανεκπαίδευση Εθελοντών' LIMIT 1");
     }
     return $eduId;
+}
+
+/**
+ * Return mission_type IDs that count for annual attendance (Υγειονομική + Διασωστική).
+ */
+function getAttendanceMissionTypeIds(): array {
+    static $ids = null;
+    if ($ids === null) {
+        $ids = array_map('intval', array_column(
+            dbFetchAll("SELECT id FROM mission_types WHERE name IN ('Υγειονομική', 'Διασωστική')"),
+            'id'
+        ));
+    }
+    return $ids;
 }
 
 /**
