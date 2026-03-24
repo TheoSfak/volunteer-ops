@@ -55,6 +55,22 @@ $defaults = [
     'citizen_cert_notify_1month' => '1',
     'citizen_cert_notify_1week' => '1',
     'citizen_cert_notify_expired' => '1',
+    // Prerequisites
+    'prereq_attendance_enabled' => '1',
+    'prereq_attendance_goal' => '10',
+    'prereq_hours_enabled' => '0',
+    'prereq_hours_goal' => '0',
+    'prereq_mission_types' => '',
+    'prereq_tep_attendance_enabled' => '0',
+    'prereq_tep_attendance_goal' => '0',
+    'prereq_tep_hours_enabled' => '1',
+    'prereq_tep_hours_goal' => '40',
+    'prereq_tep_mission_types' => '',
+    'prereq_edu_attendance_enabled' => '1',
+    'prereq_edu_attendance_goal' => '2',
+    'prereq_edu_hours_enabled' => '0',
+    'prereq_edu_hours_goal' => '0',
+    'prereq_edu_mission_types' => '',
 ];
 
 foreach ($defaults as $key => $value) {
@@ -787,6 +803,38 @@ if (isPost()) {
         setFlash('success', "Διαγράφηκαν $deleted εγγραφές email log παλαιότερες $months μηνών.");
         redirect('settings.php?tab=health');
 
+    } elseif ($action === 'save_prerequisites') {
+        $prereqKeys = [
+            'prereq_attendance_enabled', 'prereq_attendance_goal',
+            'prereq_hours_enabled', 'prereq_hours_goal',
+            'prereq_mission_types',
+            'prereq_tep_attendance_enabled', 'prereq_tep_attendance_goal',
+            'prereq_tep_hours_enabled', 'prereq_tep_hours_goal',
+            'prereq_tep_mission_types',
+            'prereq_edu_attendance_enabled', 'prereq_edu_attendance_goal',
+            'prereq_edu_hours_enabled', 'prereq_edu_hours_goal',
+            'prereq_edu_mission_types',
+        ];
+        foreach ($prereqKeys as $key) {
+            if (strpos($key, '_enabled') !== false) {
+                $value = isset($_POST[$key]) ? '1' : '0';
+            } elseif (strpos($key, '_mission_types') !== false) {
+                $arr = $_POST[$key] ?? [];
+                $value = is_array($arr) ? implode(',', array_map('intval', $arr)) : '';
+            } else {
+                $value = (string)(int) post($key, '0');
+            }
+            dbExecute(
+                "INSERT INTO settings (setting_key, setting_value, created_at, updated_at)
+                 VALUES (?, ?, NOW(), NOW())
+                 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()",
+                [$key, $value]
+            );
+        }
+        logAudit('settings_update', 'settings', null, 'Ενημέρωση προαπαιτούμενων');
+        setFlash('success', 'Τα προαπαιτούμενα ενημερώθηκαν επιτυχώς.');
+        redirect('settings.php?tab=prerequisites');
+
     } elseif ($action === 'reset_data') {
         $confirmation = post('confirmation', '');
         if ($confirmation !== 'DELETE') {
@@ -902,6 +950,11 @@ include __DIR__ . '/includes/header.php';
     <li class="nav-item">
         <a class="nav-link <?= $activeTab === 'health' ? 'active' : '' ?>" href="settings.php?tab=health">
             <i class="bi bi-heart-pulse me-1"></i>Υγεία Εφαρμογής
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $activeTab === 'prerequisites' ? 'active' : '' ?>" href="settings.php?tab=prerequisites">
+            <i class="bi bi-list-check me-1"></i>Προαπαιτούμενα
         </a>
     </li>
     <li class="nav-item">
@@ -2248,6 +2301,135 @@ unset($_SESSION['health_results'], $_SESSION['health_ran']);
     </p>
 </div>
 <?php endif; ?>
+<?php endif; ?>
+
+<?php if ($activeTab === 'prerequisites'): ?>
+<?php
+    $missionTypes = dbFetchAll("SELECT id, name FROM mission_types ORDER BY name");
+    $selAttendance = array_filter(explode(',', getSetting('prereq_mission_types', '')));
+    $selTep        = array_filter(explode(',', getSetting('prereq_tep_mission_types', '')));
+    $selEdu        = array_filter(explode(',', getSetting('prereq_edu_mission_types', '')));
+?>
+<form method="post">
+    <?= csrfField() ?>
+    <input type="hidden" name="action" value="save_prerequisites">
+
+    <div class="alert alert-info mb-4">
+        <i class="bi bi-info-circle me-1"></i>
+        Ρυθμίστε τους στόχους προαπαιτούμενων για κάθε κατηγορία. Οι στόχοι μπορούν να βασίζονται σε αριθμό παρουσιών ή/και ωρών.
+        Επιλέξτε τους τύπους αποστολών που μετρούν για κάθε κατηγορία.
+    </div>
+
+    <!-- Παρουσίες Αποστολών -->
+    <div class="card mb-4">
+        <div class="card-header"><h6 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Παρουσίες Αποστολών</h6></div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="prereq_attendance_enabled" name="prereq_attendance_enabled" value="1"
+                            <?= getSetting('prereq_attendance_enabled', '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="prereq_attendance_enabled">Παρουσίες</label>
+                    </div>
+                    <input type="number" class="form-control form-control-sm" name="prereq_attendance_goal" min="0"
+                        value="<?= h(getSetting('prereq_attendance_goal', '10')) ?>" placeholder="Στόχος παρουσιών">
+                </div>
+                <div class="col-md-3">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="prereq_hours_enabled" name="prereq_hours_enabled" value="1"
+                            <?= getSetting('prereq_hours_enabled', '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="prereq_hours_enabled">Ώρες</label>
+                    </div>
+                    <input type="number" class="form-control form-control-sm" name="prereq_hours_goal" min="0"
+                        value="<?= h(getSetting('prereq_hours_goal', '0')) ?>" placeholder="Στόχος ωρών">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Τύποι Αποστολών</label>
+                    <select class="form-select form-select-sm" name="prereq_mission_types[]" multiple size="4">
+                        <?php foreach ($missionTypes as $mt): ?>
+                        <option value="<?= $mt['id'] ?>" <?= in_array($mt['id'], $selAttendance) ? 'selected' : '' ?>><?= h($mt['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text">Ctrl+click για πολλαπλή επιλογή. Αν δεν επιλέξετε κανένα, μετρούν όλοι οι τύποι.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Τ.Ε.Π. -->
+    <div class="card mb-4">
+        <div class="card-header"><h6 class="mb-0"><i class="bi bi-hospital me-2"></i>Τ.Ε.Π.</h6></div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="prereq_tep_attendance_enabled" name="prereq_tep_attendance_enabled" value="1"
+                            <?= getSetting('prereq_tep_attendance_enabled', '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="prereq_tep_attendance_enabled">Παρουσίες</label>
+                    </div>
+                    <input type="number" class="form-control form-control-sm" name="prereq_tep_attendance_goal" min="0"
+                        value="<?= h(getSetting('prereq_tep_attendance_goal', '0')) ?>" placeholder="Στόχος παρουσιών">
+                </div>
+                <div class="col-md-3">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="prereq_tep_hours_enabled" name="prereq_tep_hours_enabled" value="1"
+                            <?= getSetting('prereq_tep_hours_enabled', '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="prereq_tep_hours_enabled">Ώρες</label>
+                    </div>
+                    <input type="number" class="form-control form-control-sm" name="prereq_tep_hours_goal" min="0"
+                        value="<?= h(getSetting('prereq_tep_hours_goal', '40')) ?>" placeholder="Στόχος ωρών">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Τύποι Αποστολών</label>
+                    <select class="form-select form-select-sm" name="prereq_tep_mission_types[]" multiple size="4">
+                        <?php foreach ($missionTypes as $mt): ?>
+                        <option value="<?= $mt['id'] ?>" <?= in_array($mt['id'], $selTep) ? 'selected' : '' ?>><?= h($mt['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text">Ctrl+click για πολλαπλή επιλογή.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Επανεκπαίδευση Εθελοντών -->
+    <div class="card mb-4">
+        <div class="card-header"><h6 class="mb-0"><i class="bi bi-mortarboard me-2"></i>Επανεκπαίδευση Εθελοντών</h6></div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="prereq_edu_attendance_enabled" name="prereq_edu_attendance_enabled" value="1"
+                            <?= getSetting('prereq_edu_attendance_enabled', '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="prereq_edu_attendance_enabled">Παρουσίες</label>
+                    </div>
+                    <input type="number" class="form-control form-control-sm" name="prereq_edu_attendance_goal" min="0"
+                        value="<?= h(getSetting('prereq_edu_attendance_goal', '2')) ?>" placeholder="Στόχος παρουσιών">
+                </div>
+                <div class="col-md-3">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="prereq_edu_hours_enabled" name="prereq_edu_hours_enabled" value="1"
+                            <?= getSetting('prereq_edu_hours_enabled', '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="prereq_edu_hours_enabled">Ώρες</label>
+                    </div>
+                    <input type="number" class="form-control form-control-sm" name="prereq_edu_hours_goal" min="0"
+                        value="<?= h(getSetting('prereq_edu_hours_goal', '0')) ?>" placeholder="Στόχος ωρών">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Τύποι Αποστολών</label>
+                    <select class="form-select form-select-sm" name="prereq_edu_mission_types[]" multiple size="4">
+                        <?php foreach ($missionTypes as $mt): ?>
+                        <option value="<?= $mt['id'] ?>" <?= in_array($mt['id'], $selEdu) ? 'selected' : '' ?>><?= h($mt['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text">Ctrl+click για πολλαπλή επιλογή.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Αποθήκευση</button>
+</form>
 <?php endif; ?>
 
 <?php if ($activeTab === 'reset'): ?>

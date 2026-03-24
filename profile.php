@@ -59,13 +59,13 @@ $missionAttendance = (int) dbFetchValue(
      AND m.mission_type_id IN ($attPlaceholders)",
     array_merge([$user['id'], $currentYear], $attTypeIds)
 );
-$attendanceGoal = 10;
-$attendancePct = min(100, round(($missionAttendance / $attendanceGoal) * 100));
+$attendanceGoal = (int) getSetting('prereq_attendance_goal', '10');
+$attendancePct = $attendanceGoal > 0 ? min(100, round(($missionAttendance / $attendanceGoal) * 100)) : 0;
 $attendanceColor = $missionAttendance >= $attendanceGoal ? 'success' : ($missionAttendance >= 7 ? 'info' : ($missionAttendance >= 4 ? 'warning' : 'danger'));
 
 // Educational missions (only for RESCUER)
 $eduMissions = 0;
-$eduGoal = 2;
+$eduGoal = (int) getSetting('prereq_edu_attendance_goal', '2');
 $eduPct = 0;
 $eduColor = 'danger';
 if (($user['volunteer_type'] ?? '') === VTYPE_RESCUER) {
@@ -79,7 +79,7 @@ if (($user['volunteer_type'] ?? '') === VTYPE_RESCUER) {
            AND m.mission_type_id = ?",
         [$user['id'], $currentYear, getEduMissionTypeId()]
     );
-    $eduPct = min(100, round(($eduMissions / $eduGoal) * 100));
+    $eduPct = $eduGoal > 0 ? min(100, round(($eduMissions / $eduGoal) * 100)) : 0;
     $eduColor = $eduMissions >= $eduGoal ? 'success' : ($eduMissions >= 1 ? 'warning' : 'danger');
 }
 
