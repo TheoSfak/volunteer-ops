@@ -313,8 +313,10 @@ include __DIR__ . '/includes/header.php';
                 <thead class="table-light">
                     <tr>
                         <th>#</th>
-                        <th>Ονοματεπώνυμο (GR)</th>
-                        <th>Name (LAT)</th>
+                        <th>Όνομα (GR)</th>
+                        <th>Επίθετο (GR)</th>
+                        <th>Όνομα (LAT)</th>
+                        <th>Επίθετο (LAT)</th>
                         <th>Ημ. Γέν.</th>
                         <th>Email</th>
                         <th>Τηλέφωνο</th>
@@ -326,13 +328,15 @@ include __DIR__ . '/includes/header.php';
                 </thead>
                 <tbody>
                     <?php if (empty($citizens)): ?>
-                    <tr><td colspan="10" class="text-center text-muted py-4">Δεν βρέθηκαν πολίτες.</td></tr>
+                    <tr><td colspan="12" class="text-center text-muted py-4">Δεν βρέθηκαν πολίτες.</td></tr>
                     <?php else: ?>
                     <?php foreach ($citizens as $i => $c): ?>
                     <tr>
                         <td><?= $pagination['offset'] + $i + 1 ?></td>
-                        <td class="text-nowrap"><?= h($c['last_name_gr'] . ' ' . $c['first_name_gr']) ?></td>
-                        <td class="text-nowrap"><?= h(trim(($c['last_name_lat'] ?? '') . ' ' . ($c['first_name_lat'] ?? ''))) ?: '-' ?></td>
+                        <td><?= h($c['first_name_gr']) ?></td>
+                        <td><?= h($c['last_name_gr']) ?></td>
+                        <td><?= h($c['first_name_lat'] ?? '') ?></td>
+                        <td><?= h($c['last_name_lat'] ?? '') ?></td>
                         <td class="text-nowrap"><?= $c['birth_date'] ? formatDate($c['birth_date']) : '-' ?></td>
                         <td><?= h($c['email'] ?? '-') ?></td>
                         <td class="text-nowrap"><?= h($c['phone'] ?? '-') ?></td>
