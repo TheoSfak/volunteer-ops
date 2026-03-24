@@ -240,6 +240,22 @@ if (isPost()) {
         redirect('volunteer-view.php?id=' . $id);
     }
 
+    if ($action === 'update_member_since') {
+        if (!isAdmin()) {
+            setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
+            redirect('volunteer-view.php?id=' . $id);
+        }
+        $newDate = post('member_since_date', '');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $newDate) || !strtotime($newDate)) {
+            setFlash('error', 'Μη έγκυρη ημερομηνία.');
+        } else {
+            dbExecute("UPDATE users SET created_at = ? WHERE id = ?", [$newDate . ' 00:00:00', $id]);
+            logAudit('update_member_since', 'users', $id, 'Αλλαγή ημερομηνίας μέλους σε ' . $newDate);
+            setFlash('success', 'Η ημερομηνία μέλους ενημερώθηκε.');
+        }
+        redirect('volunteer-view.php?id=' . $id);
+    }
+
     // ════ CERTIFICATE ACTIONS ════════════════════════════════════════════════
     if ($action === 'add_certificate') {
         if (!isAdmin()) {
@@ -673,7 +689,7 @@ include __DIR__ . '/includes/header.php';
                     <span class="badge bg-secondary" style="font-size:.72rem">Ανενεργός</span>
                 <?php endif; ?>
                 <?= roleBadge($volunteer['role']) ?>
-                <span class="badge bg-light text-dark ms-1" style="font-size:.72rem"><i class="bi bi-calendar3 me-1"></i>Μέλος από <?= formatDate($volunteer['created_at']) ?></span>
+                <span class="badge bg-light text-dark ms-1" style="font-size:.72rem"><i class="bi bi-calendar3 me-1"></i>Μέλος από <?= formatDate($volunteer['created_at']) ?><?php if (isAdmin()): ?> <a href="#" data-bs-toggle="modal" data-bs-target="#memberSinceModal" style="color:#6c757d;" title="Αλλαγή ημερομηνίας"><i class="bi bi-pencil-square"></i></a><?php endif; ?></span>
             </div>
         </div>
         <div class="hero-actions d-flex gap-2 flex-shrink-0">
@@ -1729,6 +1745,32 @@ document.addEventListener('DOMContentLoaded', function() {
     if (issueDate) issueDate.addEventListener('change', autoCalcExpiry);
 });
 </script>
+
+<?php if (isAdmin()): ?>
+<!-- Member Since Date Edit Modal -->
+<div class="modal fade" id="memberSinceModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="update_member_since">
+                <div class="modal-header">
+                    <h6 class="modal-title"><i class="bi bi-calendar3 me-2"></i>Ημερομηνία Μέλους</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label">Μέλος από</label>
+                    <input type="date" class="form-control" name="member_since_date" value="<?= date('Y-m-d', strtotime($volunteer['created_at'])) ?>" required>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check-lg me-1"></i>Αποθήκευση</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
 
