@@ -377,13 +377,16 @@ $certTypes = dbFetchAll("SELECT * FROM certificate_types WHERE is_active = 1 ORD
 $assignedCertTypeIds = array_column($certificates, 'certificate_type_id');
 
 // Get achievements
-$achievements = dbFetchAll(
-    "SELECT a.*, ua.earned_at FROM achievements a
-     JOIN user_achievements ua ON a.id = ua.achievement_id
-     WHERE ua.user_id = ?
-     ORDER BY ua.earned_at DESC",
-    [$id]
-);
+$achievements = [];
+if (getSetting('achievements_enabled', '1') === '1') {
+    $achievements = dbFetchAll(
+        "SELECT a.*, ua.earned_at FROM achievements a
+         JOIN user_achievements ua ON a.id = ua.achievement_id
+         WHERE ua.user_id = ?
+         ORDER BY ua.earned_at DESC",
+        [$id]
+    );
+}
 
 // Get recent participations
 $participations = dbFetchAll(
@@ -1288,6 +1291,7 @@ include __DIR__ . '/includes/header.php';
         </div>
         
         <!-- Achievements -->
+        <?php if (getSetting('achievements_enabled', '1') === '1'): ?>
         <div class="card vp-card border-accent-warning mb-4">
             <div class="card-header">
                 <h5 class="mb-0"><i class="bi bi-trophy text-warning me-2"></i>Επιτεύγματα</h5>
@@ -1308,6 +1312,7 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
             </div>
         </div>
+        <?php endif; ?>
         
         <!-- Documents -->
         <?php

@@ -3,7 +3,7 @@ if (!defined('VOLUNTEEROPS')) die('Direct access not permitted');
 
 // ── Achievement badge popup ─────────────────────────────────────────────────
 $_pendingBadges = [];
-if (isLoggedIn()) {
+if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     try {
         $_pendingBadges = dbFetchAll(
             "SELECT a.* FROM user_achievements ua

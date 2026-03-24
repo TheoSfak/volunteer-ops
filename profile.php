@@ -39,10 +39,10 @@ $stats = [
         WHERE pr.volunteer_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "' AND pr.attended = 1",
         [$user['id']]
     ),
-    'achievements' => dbFetchValue(
+    'achievements' => (getSetting('achievements_enabled', '1') === '1') ? dbFetchValue(
         "SELECT COUNT(*) FROM user_achievements WHERE user_id = ?",
         [$user['id']]
-    ),
+    ) : 0,
 ];
 
 // Mission attendance for current year
@@ -508,6 +508,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
+    <?php if (getSetting('achievements_enabled', '1') === '1'): ?>
     <div class="col-6 col-md-3">
         <div class="card pp-stat-card">
             <div class="card-body d-flex align-items-center gap-3 py-3 px-3">
@@ -519,6 +520,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
+    <?php endif; ?>
 </div>
 
 <!-- Exam Attempts History -->

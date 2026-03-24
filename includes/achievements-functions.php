@@ -15,6 +15,11 @@ if (!function_exists('checkAndAwardAchievements')) {
  */
 function checkAndAwardAchievements(int $userId): array
 {
+    // Skip if achievements are disabled
+    if (getSetting('achievements_enabled', '1') !== '1') {
+        return [];
+    }
+
     $newlyAwarded = [];
 
     try {

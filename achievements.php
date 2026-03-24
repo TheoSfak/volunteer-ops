@@ -6,6 +6,12 @@
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 
+// Check if achievements are enabled
+if (getSetting('achievements_enabled', '1') !== '1') {
+    setFlash('warning', 'Τα επιτεύγματα είναι απενεργοποιημένα.');
+    redirect('dashboard.php');
+}
+
 $pageTitle = 'Επιτεύγματα';
 $user = getCurrentUser();
 
