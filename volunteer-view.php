@@ -167,9 +167,10 @@ if (isPost()) {
             redirect('volunteer-view.php?id=' . $id);
         }
         dbExecute("DELETE FROM user_skills WHERE user_id = ?", [$id]);
+        $validLevels = ['BEGINNER', 'INTERMEDIATE', 'ADVANCED', 'EXPERT'];
         if (!empty($_POST['skills'])) {
             foreach ($_POST['skills'] as $skillId => $level) {
-                if (!empty($level)) {
+                if (!empty($level) && in_array($level, $validLevels, true)) {
                     dbInsert(
                         "INSERT INTO user_skills (user_id, skill_id, level) VALUES (?, ?, ?)",
                         [$id, (int)$skillId, $level]
@@ -977,8 +978,10 @@ include __DIR__ . '/includes/header.php';
                         <?php endif; ?>
                             <span class="badge bg-primary mb-1">
                                 <?= h($sk['name']) ?>
-                                <?php if ($sk['level']): ?>
-                                    <span class="badge bg-light text-dark"><?= h($sk['level']) ?></span>
+                                <?php if ($sk['level']):
+                                    $skillLevelLabels = ['BEGINNER' => 'Αρχάριος', 'INTERMEDIATE' => 'Μέτριος', 'ADVANCED' => 'Προχωρημένος', 'EXPERT' => 'Εμπειρογνώμων'];
+                                ?>
+                                    <span class="badge bg-light text-dark"><?= h($skillLevelLabels[$sk['level']] ?? $sk['level']) ?></span>
                                 <?php endif; ?>
                             </span>
                         <?php endforeach; ?>
@@ -1009,8 +1012,8 @@ include __DIR__ . '/includes/header.php';
                                         <div class="d-flex align-items-center gap-2">
                                             <select class="form-select form-select-sm" name="skills[<?= $s['id'] ?>]">
                                                 <option value="">— <?= h($s['name']) ?> —</option>
-                                                <?php foreach (['Αρχάριος','Μέτριος','Προχωρημένος','Εμπειρογνώμων'] as $lvl): ?>
-                                                    <option value="<?= $lvl ?>" <?= (($userSkillMap[$s['id']] ?? '') === $lvl) ? 'selected' : '' ?>>
+                                                <?php foreach (['BEGINNER' => 'Αρχάριος', 'INTERMEDIATE' => 'Μέτριος', 'ADVANCED' => 'Προχωρημένος', 'EXPERT' => 'Εμπειρογνώμων'] as $enumVal => $lvl): ?>
+                                                    <option value="<?= $enumVal ?>" <?= (($userSkillMap[$s['id']] ?? '') === $enumVal) ? 'selected' : '' ?>>
                                                         <?= $lvl ?>
                                                     </option>
                                                 <?php endforeach; ?>
