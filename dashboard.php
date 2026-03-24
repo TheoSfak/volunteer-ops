@@ -295,21 +295,25 @@ if (isAdmin()) {
     );
 
     // Recent achievements & next to earn
-    $recentAchievements = dbFetchAll(
-        "SELECT a.*, ua.earned_at FROM achievements a
-         JOIN user_achievements ua ON a.id = ua.achievement_id
-         WHERE ua.user_id = ?
-         ORDER BY ua.earned_at DESC LIMIT 2",
-        [$user['id']]
-    );
-    $nextAchievement = dbFetchOne(
-        "SELECT * FROM achievements
-         WHERE is_active = 1
-           AND id NOT IN (SELECT achievement_id FROM user_achievements WHERE user_id = ?)
-           AND required_points > 0
-         ORDER BY required_points ASC LIMIT 1",
-        [$user['id']]
-    );
+    $recentAchievements = [];
+    $nextAchievement = null;
+    if (getSetting('achievements_enabled', '1') === '1') {
+        $recentAchievements = dbFetchAll(
+            "SELECT a.*, ua.earned_at FROM achievements a
+             JOIN user_achievements ua ON a.id = ua.achievement_id
+             WHERE ua.user_id = ?
+             ORDER BY ua.earned_at DESC LIMIT 2",
+            [$user['id']]
+        );
+        $nextAchievement = dbFetchOne(
+            "SELECT * FROM achievements
+             WHERE is_active = 1
+               AND id NOT IN (SELECT achievement_id FROM user_achievements WHERE user_id = ?)
+               AND required_points > 0
+             ORDER BY required_points ASC LIMIT 1",
+            [$user['id']]
+        );
+    }
 }
 
 include __DIR__ . '/includes/header.php';
@@ -1582,6 +1586,7 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
         </div>
     </div>
 
+    <?php if (getSetting('achievements_enabled', '1') === '1'): ?>
     <div class="col-md-4">
         <div class="card ds-widget accent-gold h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -1618,6 +1623,7 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
             </div>
         </div>
     </div>
+    <?php endif; // achievements_enabled ?>
 
     <div class="col-md-4">
         <div class="card ds-widget h-100">
@@ -1634,9 +1640,11 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
                 <a href="leaderboard.php" class="btn btn-outline-warning w-100 text-start">
                     <i class="bi bi-trophy me-2"></i>Leaderboard
                 </a>
+                <?php if (getSetting('achievements_enabled', '1') === '1'): ?>
                 <a href="achievements.php" class="btn btn-outline-secondary w-100 text-start">
                     <i class="bi bi-award me-2"></i>Τα Επιτεύγματά μου
                 </a>
+                <?php endif; ?>
                 <a href="profile.php" class="btn btn-outline-dark w-100 text-start">
                     <i class="bi bi-person-circle me-2"></i>Το Προφίλ μου
                 </a>

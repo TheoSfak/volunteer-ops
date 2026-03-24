@@ -7,6 +7,7 @@ require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 
 $pageTitle = 'Κατάταξη';
+$achievementsEnabled = getSetting('achievements_enabled', '1') === '1';
 
 // Time period filter
 $period = get('period', 'all');
@@ -42,13 +43,16 @@ if ($period === 'all') {
     $total = dbFetchValue("SELECT COUNT(*) FROM users u WHERE $whereClause", $params);
     $pagination = paginate($total, $page, $perPage);
     
+    $achSelect = $achievementsEnabled ? 'COUNT(DISTINCT ua.achievement_id) as achievements_count,' : '';
+    $achJoin = $achievementsEnabled ? 'LEFT JOIN user_achievements ua ON ua.user_id = u.id' : '';
+    
     $leaderboard = dbFetchAll(
         "SELECT u.id, u.name, u.total_points, u.department_id, d.name as department_name,
-                COUNT(DISTINCT ua.achievement_id) as achievements_count,
+                $achSelect
                 COUNT(DISTINCT CASE WHEN pr.attended = 1 THEN pr.id END) as shifts_count
          FROM users u
          LEFT JOIN departments d ON u.department_id = d.id
-         LEFT JOIN user_achievements ua ON ua.user_id = u.id
+         $achJoin
          LEFT JOIN participation_requests pr ON pr.volunteer_id = u.id AND pr.attended = 1
          WHERE $whereClause
          GROUP BY u.id
@@ -73,15 +77,18 @@ if ($period === 'all') {
     );
     $pagination = paginate($total, $page, $perPage);
     
+    $achSelect2 = $achievementsEnabled ? 'COUNT(DISTINCT ua.achievement_id) as achievements_count,' : '';
+    $achJoin2 = $achievementsEnabled ? 'LEFT JOIN user_achievements ua ON ua.user_id = u.id' : '';
+    
     $leaderboard = dbFetchAll(
         "SELECT u.id, u.name, u.department_id, d.name as department_name,
                 COALESCE(SUM(vp.points), 0) as total_points,
-                COUNT(DISTINCT ua.achievement_id) as achievements_count,
+                $achSelect2
                 COUNT(DISTINCT CASE WHEN vp.pointable_type = 'App\\\\Models\\\\Shift' THEN vp.pointable_id END) as shifts_count
          FROM users u
          LEFT JOIN departments d ON u.department_id = d.id
          LEFT JOIN volunteer_points vp ON u.id = vp.user_id $periodFilter
-         LEFT JOIN user_achievements ua ON ua.user_id = u.id
+         $achJoin2
          WHERE $whereClause
          GROUP BY u.id
          HAVING total_points > 0
@@ -176,7 +183,9 @@ include __DIR__ . '/includes/header.php';
                         <th>Εθελοντής</th>
                         <th>Τμήμα</th>
                         <th class="text-center">Βάρδιες</th>
+                        <?php if ($achievementsEnabled): ?>
                         <th class="text-center">Επιτεύγματα</th>
+                        <?php endif; ?>
                         <th class="text-end">Πόντοι</th>
                     </tr>
                 </thead>
@@ -208,6 +217,7 @@ include __DIR__ . '/includes/header.php';
                             <td class="text-center">
                                 <span class="badge bg-secondary"><?= $entry['shifts_count'] ?></span>
                             </td>
+                            <?php if ($achievementsEnabled): ?>
                             <td class="text-center">
                                 <?php if ($entry['achievements_count'] > 0): ?>
                                     <span class="badge bg-info"><?= $entry['achievements_count'] ?> 🏆</span>
@@ -215,6 +225,7 @@ include __DIR__ . '/includes/header.php';
                                     <span class="text-muted">-</span>
                                 <?php endif; ?>
                             </td>
+                            <?php endif; ?>
                             <td class="text-end">
                                 <strong class="text-warning fs-5"><?= number_format($entry['total_points']) ?></strong>
                             </td>

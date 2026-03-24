@@ -31,6 +31,7 @@ $defaults = [
     'weekend_multiplier' => '1.5',
     'night_multiplier' => '1.5',
     'medical_multiplier' => '2.0',
+    'achievements_enabled' => '1',
     'registration_enabled' => '1',
     'show_register_button' => '0',
     'require_approval' => '0',
@@ -491,6 +492,7 @@ if (isPost()) {
         $fieldsToUpdate = [
             'app_name', 'app_description', 'admin_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
+            'achievements_enabled',
             'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode',
             'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled'
         ];
@@ -498,7 +500,7 @@ if (isPost()) {
         foreach ($fieldsToUpdate as $field) {
             $value = isset($_POST[$field]) ? $_POST[$field] : '';
             
-            if (in_array($field, ['registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled'])) {
+            if (in_array($field, ['achievements_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled'])) {
                 $value = isset($_POST[$field]) ? '1' : '0';
             }
             
@@ -1024,9 +1026,18 @@ include __DIR__ . '/includes/header.php';
             <!-- Points Settings -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-star me-1"></i>Ρυθμίσεις Πόντων</h5>
+                    <h5 class="mb-0"><i class="bi bi-star me-1"></i>Ρυθμίσεις Πόντων & Επιτευγμάτων</h5>
                 </div>
                 <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="achievements_enabled" id="achievementsEnabled"
+                               <?= $settings['achievements_enabled'] === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="achievementsEnabled">
+                            <strong>Ενεργοποίηση Επιτευγμάτων (Badges)</strong>
+                        </label>
+                        <div class="form-text">Αν απενεργοποιηθεί, τα επιτεύγματα κρύβονται από όλες τις σελίδες. Τα δεδομένα διατηρούνται.</div>
+                    </div>
+                    <hr>
                     <div class="mb-3">
                         <label class="form-label">Πόντοι ανά ώρα</label>
                         <input type="number" class="form-control" name="points_per_hour" 

@@ -936,11 +936,13 @@ if (isLoggedIn()) {
                     <i class="bi bi-trophy"></i> Κατάταξη
                 </a>
             </li>
+            <?php if (getSetting('achievements_enabled', '1') === '1'): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'achievements' ? 'active' : '' ?>" href="achievements.php">
                     <i class="bi bi-award"></i> Επιτεύγματα
                 </a>
             </li>
+            <?php endif; ?>
             
             <?php if (isAdmin()): ?>
             <div class="sidebar-section">Πολίτες</div>
