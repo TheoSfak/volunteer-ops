@@ -9,6 +9,15 @@ requireRole([ROLE_SYSTEM_ADMIN]);
 
 $pageTitle = 'Ιστορικό Ενεργειών';
 
+// Handle clear audit log
+if (isPost() && post('action') === 'clear_audit') {
+    verifyCsrf();
+    dbExecute("DELETE FROM audit_logs");
+    logAudit('clear_audit_log', 'audit_logs', null);
+    setFlash('success', 'Το ιστορικό ενεργειών διαγράφηκε επιτυχώς.');
+    redirect('audit.php');
+}
+
 // Filters
 $userId = get('user_id', '');
 $action = get('action', '');
@@ -80,6 +89,36 @@ include __DIR__ . '/includes/header.php';
     <h1 class="h3 mb-0">
         <i class="bi bi-journal-text me-2"></i>Ιστορικό Ενεργειών
     </h1>
+    <?php if ($total > 0): ?>
+    <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#clearAuditModal">
+        <i class="bi bi-trash me-1"></i>Εκκαθάριση Ιστορικού
+    </button>
+    <?php endif; ?>
+</div>
+
+<!-- Clear Audit Log Modal -->
+<div class="modal fade" id="clearAuditModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="clear_audit">
+                <div class="modal-header">
+                    <h5 class="modal-title">Εκκαθάριση Ιστορικού</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-danger fw-bold"><i class="bi bi-exclamation-triangle me-1"></i>Προσοχή!</p>
+                    <p>Πρόκειται να διαγράψετε <strong><?= number_format($total) ?></strong> εγγραφές από το ιστορικό ενεργειών. Η ενέργεια αυτή δεν μπορεί να αναιρεθεί.</p>
+                    <p>Είστε σίγουροι ότι θέλετε να συνεχίσετε;</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>Διαγραφή Όλων</button>
+                </div>
+            </form>
+        </div>
+    </div>
 </div>
 
 <!-- Filters -->
