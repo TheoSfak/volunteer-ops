@@ -2655,6 +2655,46 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        // ── v41: Prerequisite settings (goals, hours, mission types) ──
+        [
+            'version'     => 41,
+            'description' => 'Seed prerequisite settings for attendance, TEP, and education goals',
+            'up' => function () {
+                // Lookup mission type IDs by name
+                $medicalId = (int) dbFetchValue("SELECT id FROM mission_types WHERE name = 'Υγειονομική' LIMIT 1");
+                $rescueId  = (int) dbFetchValue("SELECT id FROM mission_types WHERE name = 'Διασωστική' LIMIT 1");
+                $tepId     = (int) dbFetchValue("SELECT id FROM mission_types WHERE name = 'Τ.Ε.Π.' LIMIT 1");
+                $eduId     = (int) dbFetchValue("SELECT id FROM mission_types WHERE name LIKE '%Επανεκπαίδευση%' LIMIT 1");
+
+                $prereqDefaults = [
+                    'prereq_attendance_enabled' => '1',
+                    'prereq_attendance_goal'    => '10',
+                    'prereq_hours_enabled'      => '0',
+                    'prereq_hours_goal'         => '0',
+                    'prereq_mission_types'      => implode(',', array_filter([$medicalId, $rescueId])),
+                    'prereq_tep_attendance_enabled' => '0',
+                    'prereq_tep_attendance_goal'    => '0',
+                    'prereq_tep_hours_enabled'      => '1',
+                    'prereq_tep_hours_goal'         => '40',
+                    'prereq_tep_mission_types'      => $tepId ? (string) $tepId : '',
+                    'prereq_edu_attendance_enabled' => '1',
+                    'prereq_edu_attendance_goal'    => '2',
+                    'prereq_edu_hours_enabled'      => '0',
+                    'prereq_edu_hours_goal'         => '0',
+                    'prereq_edu_mission_types'      => $eduId ? (string) $eduId : '',
+                ];
+
+                foreach ($prereqDefaults as $key => $value) {
+                    dbExecute(
+                        "INSERT INTO settings (setting_key, setting_value, created_at, updated_at)
+                         VALUES (?, ?, NOW(), NOW())
+                         ON DUPLICATE KEY UPDATE setting_key = setting_key",
+                        [$key, $value]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

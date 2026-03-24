@@ -260,13 +260,13 @@ if (isAdmin()) {
          AND m.mission_type_id IN ($attPlaceholders)",
         array_merge([$user['id'], $currentYear], $attTypeIds)
     );
-    $attendanceGoal = 10;
-    $attendancePct = min(100, round(($missionAttendance / $attendanceGoal) * 100));
+    $attendanceGoal = (int) getSetting('prereq_attendance_goal', '10');
+    $attendancePct = $attendanceGoal > 0 ? min(100, round(($missionAttendance / $attendanceGoal) * 100)) : 0;
     $attendanceColor = $missionAttendance >= $attendanceGoal ? 'success' : ($missionAttendance >= 7 ? 'info' : ($missionAttendance >= 4 ? 'warning' : 'danger'));
 
     // Τ.Ε.Π. hours progress (only for trainees)
     $tepHours = 0;
-    $tepGoal = 40;
+    $tepGoal = (int) getSetting('prereq_tep_hours_goal', '40');
     $tepPct = 0;
     $tepColor = 'danger';
     if (isTraineeRescuer()) {
@@ -282,7 +282,7 @@ if (isAdmin()) {
               AND m.mission_type_id = ?",
             [$user['id'], PARTICIPATION_APPROVED, getTepMissionTypeId()]
         );
-        $tepPct = min(100, round(($tepHours / $tepGoal) * 100));
+        $tepPct = $tepGoal > 0 ? min(100, round(($tepHours / $tepGoal) * 100)) : 0;
         $tepColor = $tepHours >= $tepGoal ? 'success' : ($tepHours >= 25 ? 'info' : ($tepHours >= 10 ? 'warning' : 'danger'));
     }
 

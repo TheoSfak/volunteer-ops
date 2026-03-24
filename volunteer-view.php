@@ -434,13 +434,13 @@ $missionAttendance = (int) dbFetchValue(
      AND m.mission_type_id IN ($attPlaceholders)",
     array_merge([$id, $currentYear], $attTypeIds)
 );
-$attendanceGoal = 10;
-$attendancePct = min(100, round(($missionAttendance / $attendanceGoal) * 100));
+$attendanceGoal = (int) getSetting('prereq_attendance_goal', '10');
+$attendancePct = $attendanceGoal > 0 ? min(100, round(($missionAttendance / $attendanceGoal) * 100)) : 0;
 $attendanceColor = $missionAttendance >= $attendanceGoal ? 'success' : ($missionAttendance >= 7 ? 'info' : ($missionAttendance >= 4 ? 'warning' : 'danger'));
 
 // Τ.Ε.Π. hours (only relevant for TRAINEE_RESCUER)
 $tepHours = 0;
-$tepGoal = 40;
+$tepGoal = (int) getSetting('prereq_tep_hours_goal', '40');
 $tepPct = 0;
 $tepColor = 'danger';
 if (($volunteer['volunteer_type'] ?? '') === VTYPE_TRAINEE) {
@@ -456,13 +456,13 @@ if (($volunteer['volunteer_type'] ?? '') === VTYPE_TRAINEE) {
           AND m.mission_type_id = ?",
         [$id, PARTICIPATION_APPROVED, getTepMissionTypeId()]
     );
-    $tepPct = min(100, round(($tepHours / $tepGoal) * 100));
+    $tepPct = $tepGoal > 0 ? min(100, round(($tepHours / $tepGoal) * 100)) : 0;
     $tepColor = $tepHours >= $tepGoal ? 'success' : ($tepHours >= 25 ? 'info' : ($tepHours >= 10 ? 'warning' : 'danger'));
 }
 
 // Educational missions (only for RESCUER)
 $eduMissions = 0;
-$eduGoal = 2;
+$eduGoal = (int) getSetting('prereq_edu_attendance_goal', '2');
 $eduPct = 0;
 $eduColor = 'danger';
 if (($volunteer['volunteer_type'] ?? '') === VTYPE_RESCUER) {
@@ -476,7 +476,7 @@ if (($volunteer['volunteer_type'] ?? '') === VTYPE_RESCUER) {
            AND m.mission_type_id = ?",
         [$id, $currentYear, getEduMissionTypeId()]
     );
-    $eduPct = min(100, round(($eduMissions / $eduGoal) * 100));
+    $eduPct = $eduGoal > 0 ? min(100, round(($eduMissions / $eduGoal) * 100)) : 0;
     $eduColor = $eduMissions >= $eduGoal ? 'success' : ($eduMissions >= 1 ? 'warning' : 'danger');
 }
 

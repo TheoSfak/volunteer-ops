@@ -520,39 +520,44 @@ function getSettings() {
 // Training module functions moved to includes/training-functions.php
 
 /**
+ * Return mission_type IDs from a CSV setting key, with fallback DB lookup.
+ */
+function getPrereqMissionTypeIds(string $settingKey, string $fallbackSql = '', array $fallbackParams = []): array {
+    static $cache = [];
+    if (isset($cache[$settingKey])) return $cache[$settingKey];
+
+    $csv = getSetting($settingKey, '');
+    if ($csv !== '') {
+        $cache[$settingKey] = array_map('intval', array_filter(explode(',', $csv), 'strlen'));
+    } elseif ($fallbackSql) {
+        $cache[$settingKey] = array_map('intval', array_column(dbFetchAll($fallbackSql, $fallbackParams), 'id'));
+    } else {
+        $cache[$settingKey] = [];
+    }
+    return $cache[$settingKey];
+}
+
+/**
  * Return the mission_type id for Τ.Ε.Π. (cached per request).
  */
 function getTepMissionTypeId(): int {
-    static $tepId = null;
-    if ($tepId === null) {
-        $tepId = (int) dbFetchValue("SELECT id FROM mission_types WHERE name = 'Τ.Ε.Π.' LIMIT 1");
-    }
-    return $tepId;
+    $ids = getPrereqMissionTypeIds('prereq_tep_mission_types', "SELECT id FROM mission_types WHERE name = 'Τ.Ε.Π.' LIMIT 1");
+    return $ids[0] ?? 0;
 }
 
 /**
  * Return the mission_type id for Επανεκπαίδευση Εθελοντών missions (cached per request).
  */
 function getEduMissionTypeId(): int {
-    static $eduId = null;
-    if ($eduId === null) {
-        $eduId = (int) dbFetchValue("SELECT id FROM mission_types WHERE name = 'Επανεκπαίδευση Εθελοντών' LIMIT 1");
-    }
-    return $eduId;
+    $ids = getPrereqMissionTypeIds('prereq_edu_mission_types', "SELECT id FROM mission_types WHERE name = 'Επανεκπαίδευση Εθελοντών' LIMIT 1");
+    return $ids[0] ?? 0;
 }
 
 /**
  * Return mission_type IDs that count for annual attendance (Υγειονομική + Διασωστική).
  */
 function getAttendanceMissionTypeIds(): array {
-    static $ids = null;
-    if ($ids === null) {
-        $ids = array_map('intval', array_column(
-            dbFetchAll("SELECT id FROM mission_types WHERE name IN ('Υγειονομική', 'Διασωστική')"),
-            'id'
-        ));
-    }
-    return $ids;
+    return getPrereqMissionTypeIds('prereq_mission_types', "SELECT id FROM mission_types WHERE name IN ('Υγειονομική', 'Διασωστική')");
 }
 
 /**
