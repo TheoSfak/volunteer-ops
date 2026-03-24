@@ -63,6 +63,28 @@ $attendanceGoal = (int) getSetting('prereq_attendance_goal', '10');
 $attendancePct = $attendanceGoal > 0 ? min(100, round(($missionAttendance / $attendanceGoal) * 100)) : 0;
 $attendanceColor = $missionAttendance >= $attendanceGoal ? 'success' : ($missionAttendance >= 7 ? 'info' : ($missionAttendance >= 4 ? 'warning' : 'danger'));
 
+// Τ.Ε.Π. hours (only for TRAINEE_RESCUER)
+$tepHours = 0;
+$tepGoal = (int) getSetting('prereq_tep_hours_goal', '40');
+$tepPct = 0;
+$tepColor = 'danger';
+if (isTraineeRescuer()) {
+    $tepHours = (float) dbFetchValue(
+        "SELECT COALESCE(SUM(
+            CASE WHEN pr.actual_hours IS NOT NULL THEN pr.actual_hours
+            ELSE TIMESTAMPDIFF(HOUR, s.start_time, s.end_time) END
+        ), 0)
+        FROM participation_requests pr
+        JOIN shifts s ON pr.shift_id = s.id
+        JOIN missions m ON s.mission_id = m.id
+        WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1
+          AND m.mission_type_id = ?",
+        [$user['id'], PARTICIPATION_APPROVED, getTepMissionTypeId()]
+    );
+    $tepPct = $tepGoal > 0 ? min(100, round(($tepHours / $tepGoal) * 100)) : 0;
+    $tepColor = $tepHours >= $tepGoal ? 'success' : ($tepHours >= 25 ? 'info' : ($tepHours >= 10 ? 'warning' : 'danger'));
+}
+
 // Educational missions (only for RESCUER)
 $eduMissions = 0;
 $eduGoal = (int) getSetting('prereq_edu_attendance_goal', '2');
@@ -386,7 +408,7 @@ include __DIR__ . '/includes/header.php';
             <div style="opacity:.85">
                 <i class="bi bi-envelope me-1"></i><?= h($user['email']) ?>
                 <?php if ($user['phone']): ?>
-                    <span class="ms-3"><i class="bi bi-telephone me-1"></i><?php if ($user['phone']): ?><a href="tel:<?= h($user['phone']) ?>"><?= h($user['phone']) ?></a><?php else: ?>-<?php endif; ?></span>
+                    <span class="ms-3"><i class="bi bi-telephone me-1"></i><?php if ($user['phone']): ?><a href="tel:<?= h($user['phone']) ?>" style="color:#fff !important; text-decoration:none;"><?= h($user['phone']) ?></a><?php else: ?>-<?php endif; ?></span>
                 <?php endif; ?>
             </div>
             <div class="mt-1">
@@ -442,6 +464,39 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?php if (isTraineeRescuer()): ?>
+<!-- Τ.Ε.Π. Hours Progress Bar (only for trainees) -->
+<div class="card pp-card mb-4" style="border-left: 4px solid var(--bs-<?= $tepColor ?>)">
+    <div class="card-body py-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>
+                <i class="bi bi-hospital text-<?= $tepColor ?> me-1"></i>
+                <strong>Ώρες Τ.Ε.Π.</strong>
+                <span class="text-muted ms-2 d-none d-md-inline">(στόχος: <?= $tepGoal ?> ώρες)</span>
+            </div>
+            <div>
+                <span class="badge bg-<?= $tepColor ?> fs-6"><?= round($tepHours, 1) ?> / <?= $tepGoal ?></span>
+                <?php if ($tepHours >= $tepGoal): ?>
+                    <i class="bi bi-check-circle-fill text-success ms-1" title="Πληροί την προϋπόθεση!"></i>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="progress" style="height: 22px;">
+            <div class="progress-bar bg-<?= $tepColor ?><?= $tepHours < $tepGoal ? ' progress-bar-striped progress-bar-animated' : '' ?>"
+                 role="progressbar" style="width: <?= $tepPct ?>%"
+                 aria-valuenow="<?= round($tepHours, 1) ?>" aria-valuemin="0" aria-valuemax="<?= $tepGoal ?>">
+                <?= $tepPct ?>%
+            </div>
+        </div>
+        <?php if ($tepHours < $tepGoal): ?>
+            <small class="text-muted mt-1 d-block">Απομένουν <strong><?= round($tepGoal - $tepHours, 1) ?></strong> ώρες Τ.Ε.Π. για ολοκλήρωση</small>
+        <?php else: ?>
+            <small class="text-success mt-1 d-block"><i class="bi bi-check-lg"></i> Έχετε ολοκληρώσει τις απαιτούμενες ώρες Τ.Ε.Π.!</small>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if (($user['volunteer_type'] ?? '') === VTYPE_RESCUER): ?>
 <!-- Εκπαιδευτικές Αποστολές Progress Bar (only for rescuers) -->
