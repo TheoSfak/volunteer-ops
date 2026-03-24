@@ -203,24 +203,23 @@ include __DIR__ . '/includes/header.php';
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover table-striped mb-0">
+            <table class="table table-hover table-striped table-sm mb-0" style="font-size:.85rem">
                 <thead class="table-light">
                     <tr>
                         <th>#</th>
                         <th>Τύπος</th>
                         <th>Όνομα</th>
                         <th>Επίθετο</th>
-                        <th>Τηλέφωνο</th>
-                        <th>Ημ. Γέννησης</th>
+                        <th>Τηλ.</th>
                         <th>Email</th>
-                        <th>Ημ. Έκδοσης</th>
-                        <th>Ημ. Λήξης</th>
-                        <th class="text-center">Ενέργειες</th>
+                        <th>Έκδοση</th>
+                        <th>Λήξη</th>
+                        <th class="text-center">Ενέργ.</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($certs)): ?>
-                    <tr><td colspan="10" class="text-center text-muted py-4">Δεν βρέθηκαν πιστοποιητικά.</td></tr>
+                    <tr><td colspan="8" class="text-center text-muted py-4">Δεν βρέθηκαν πιστοποιητικά.</td></tr>
                     <?php else: ?>
                     <?php foreach ($certs as $i => $c): ?>
                     <?php
@@ -251,9 +250,8 @@ include __DIR__ . '/includes/header.php';
                         <td><?= h($c['first_name']) ?></td>
                         <td><?= h($c['last_name']) ?></td>
                         <td><?= h($c['phone'] ?? '-') ?></td>
-                        <td><?= $c['birth_date'] ? formatDate($c['birth_date']) : '-' ?></td>
                         <td><?= h($c['email'] ?? '-') ?></td>
-                        <td><?= $c['issue_date'] ? formatDate($c['issue_date']) : '-' ?></td>
+                        <td title="<?= $c['birth_date'] ? 'Γέν: ' . formatDate($c['birth_date']) : '' ?>"><?= $c['issue_date'] ? formatDate($c['issue_date']) : '-' ?></td>
                         <td>
                             <?php if ($c['expiry_date']): ?>
                                 <?php if ($isExpired): ?>
@@ -267,10 +265,10 @@ include __DIR__ . '/includes/header.php';
                             <?php endif; ?>
                         </td>
                         <td class="text-center">
-                            <button class="btn btn-sm btn-outline-primary" onclick="editCert(<?= h(json_encode($c)) ?>)" title="Επεξεργασία">
+                            <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="editCert(<?= h(json_encode($c)) ?>)" title="Επεξεργασία">
                                 <i class="bi bi-pencil"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="confirmDelete(<?= $c['id'] ?>, '<?= h($c['last_name'] . ' ' . $c['first_name']) ?>')" title="Διαγραφή">
+                            <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="confirmDelete(<?= $c['id'] ?>, '<?= h($c['last_name'] . ' ' . $c['first_name']) ?>')" title="Διαγραφή">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </td>
