@@ -750,15 +750,11 @@ if (isPost()) {
                     throw new Exception('Λείπουν παράμετροι ενημέρωσης');
                 }
                 
-                // Step 1: Create backup first
+                // User confirmed they have a backup — proceed directly
                 updateLog("=== ΕΝΑΡΞΗ ΕΝΗΜΕΡΩΣΗΣ σε {$version} ===");
-                $backup = createBackup();
+                updateLog('Ο χρήστης επιβεβαίωσε ότι έχει λάβει backup.');
                 
-                if (!$backup['db_backed_up']) {
-                    throw new Exception('Αποτυχία δημιουργίας backup βάσης δεδομένων. Η ενημέρωση ακυρώθηκε.');
-                }
-                
-                // Step 2: Download update
+                // Step 1: Download update
                 $download = downloadUpdate($zipUrl, $version);
                 
                 // Step 3: Extract
@@ -1032,18 +1028,29 @@ include __DIR__ . '/includes/header.php';
                         <input type="hidden" name="version" value="<?= h($latestRelease['tag_name']) ?>">
                         <input type="hidden" name="zip_url" value="<?= h($latestRelease['zipball_url'] ?? '') ?>">
                         
-                        <div class="alert alert-info">
-                            <i class="bi bi-info-circle me-1"></i>
+                        <div class="alert alert-warning">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                            <strong>Προσοχή — Πριν την ενημέρωση:</strong>
+                            <ul class="mb-2 mt-2">
+                                <li>Βεβαιωθείτε ότι έχετε πάρει <strong>αντίγραφο ασφαλείας</strong> (backup) μόνοι σας</li>
+                                <li>Μπορείτε να χρησιμοποιήσετε το κουμπί «Δημιουργία Backup» παρακάτω, ή να κατεβάσετε τα αρχεία χειροκίνητα</li>
+                            </ul>
                             <strong>Η ενημέρωση θα:</strong>
-                            <ol class="mb-0 mt-2">
-                                <li>Δημιουργήσει αυτόματο backup (αρχεία + βάση)</li>
+                            <ol class="mb-0 mt-1">
                                 <li>Κατεβάσει τη νέα έκδοση από GitHub</li>
                                 <li>Εφαρμόσει τις αλλαγές (διατηρώντας τις ρυθμίσεις σας)</li>
                                 <li>Εκτελέσει τυχόν database migrations</li>
                             </ol>
                         </div>
                         
-                        <button type="button" class="btn btn-success btn-lg" onclick="confirmUpdate()">
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="backupConfirm" onchange="toggleUpdateBtn()">
+                            <label class="form-check-label fw-bold" for="backupConfirm">
+                                Επιβεβαιώνω ότι έχω λάβει αντίγραφο ασφαλείας (backup) πριν την ενημέρωση
+                            </label>
+                        </div>
+                        
+                        <button type="button" class="btn btn-success btn-lg" id="updateBtn" onclick="confirmUpdate()" disabled>
                             <i class="bi bi-cloud-download me-1"></i>Ενημέρωση σε <?= h($latestRelease['tag_name']) ?>
                         </button>
                     </form>
@@ -1259,7 +1266,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="modal-body text-center py-5">
                 <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;"></div>
-                <h5 id="updateStatus">Δημιουργία backup...</h5>
+                <h5 id="updateStatus">Λήψη νέας έκδοσης...</h5>
                 <p class="text-muted mb-0">Παρακαλώ μην κλείσετε το παράθυρο.</p>
                 <div class="progress mt-4" style="height: 20px;">
                     <div class="progress-bar progress-bar-striped progress-bar-animated" id="updateProgress" style="width: 10%;">10%</div>
@@ -1270,37 +1277,40 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
+function toggleUpdateBtn() {
+    document.getElementById('updateBtn').disabled = !document.getElementById('backupConfirm').checked;
+}
+
 function confirmUpdate() {
-    if (confirm('Είστε σίγουροι ότι θέλετε να ενημερώσετε το σύστημα;\n\nΘα δημιουργηθεί αυτόματα backup πριν την ενημέρωση.')) {
-        // Show progress modal
-        const modal = new bootstrap.Modal(document.getElementById('updateModal'));
-        modal.show();
-        
-        // Simulate progress (actual progress would need AJAX)
-        let progress = 10;
-        const steps = [
-            { percent: 25, text: 'Δημιουργία backup...' },
-            { percent: 50, text: 'Λήψη νέας έκδοσης...' },
-            { percent: 75, text: 'Εφαρμογή ενημέρωσης...' },
-            { percent: 90, text: 'Εκτέλεση migrations...' },
-            { percent: 100, text: 'Ολοκλήρωση...' }
-        ];
-        
-        let stepIndex = 0;
-        const interval = setInterval(() => {
-            if (stepIndex < steps.length) {
-                document.getElementById('updateProgress').style.width = steps[stepIndex].percent + '%';
-                document.getElementById('updateProgress').textContent = steps[stepIndex].percent + '%';
-                document.getElementById('updateStatus').textContent = steps[stepIndex].text;
-                stepIndex++;
-            } else {
-                clearInterval(interval);
-            }
-        }, 1500);
-        
-        // Submit form
-        document.getElementById('updateForm').submit();
-    }
+    if (!document.getElementById('backupConfirm').checked) return;
+    
+    // Show progress modal
+    const modal = new bootstrap.Modal(document.getElementById('updateModal'));
+    modal.show();
+    
+    // Simulate progress (actual progress would need AJAX)
+    const steps = [
+        { percent: 20, text: 'Λήψη νέας έκδοσης...' },
+        { percent: 50, text: 'Εφαρμογή ενημέρωσης...' },
+        { percent: 75, text: 'Εκτέλεση migrations...' },
+        { percent: 90, text: 'Ολοκλήρωση...' },
+        { percent: 100, text: 'Ανακατεύθυνση...' }
+    ];
+    
+    let stepIndex = 0;
+    const interval = setInterval(() => {
+        if (stepIndex < steps.length) {
+            document.getElementById('updateProgress').style.width = steps[stepIndex].percent + '%';
+            document.getElementById('updateProgress').textContent = steps[stepIndex].percent + '%';
+            document.getElementById('updateStatus').textContent = steps[stepIndex].text;
+            stepIndex++;
+        } else {
+            clearInterval(interval);
+        }
+    }, 1500);
+    
+    // Submit form
+    document.getElementById('updateForm').submit();
 }
 </script>
 
