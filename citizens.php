@@ -309,48 +309,41 @@ include __DIR__ . '/includes/header.php';
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover table-striped mb-0">
+            <table class="table table-hover table-striped table-sm mb-0" style="font-size:.85rem">
                 <thead class="table-light">
                     <tr>
                         <th>#</th>
-                        <th>Όνομα (GR)</th>
-                        <th>Επίθετο (GR)</th>
-                        <th>Όνομα (LAT)</th>
-                        <th>Επίθετο (LAT)</th>
-                        <th>Ημ. Γέννησης</th>
+                        <th>Ονοματεπώνυμο (GR)</th>
+                        <th>Name (LAT)</th>
+                        <th>Ημ. Γέν.</th>
                         <th>Email</th>
                         <th>Τηλέφωνο</th>
-                        <th class="text-center">Επικοινωνία</th>
-                        <th class="text-center">Πληρωμή</th>
-                        <th class="text-center">Ολοκλήρωση</th>
+                        <th class="text-center">Επικ.</th>
+                        <th class="text-center">Πληρ.</th>
+                        <th class="text-center">Ολοκλ.</th>
                         <th class="text-center">Ενέργειες</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($citizens)): ?>
-                    <tr><td colspan="12" class="text-center text-muted py-4">Δεν βρέθηκαν πολίτες.</td></tr>
+                    <tr><td colspan="10" class="text-center text-muted py-4">Δεν βρέθηκαν πολίτες.</td></tr>
                     <?php else: ?>
                     <?php foreach ($citizens as $i => $c): ?>
                     <tr>
                         <td><?= $pagination['offset'] + $i + 1 ?></td>
-                        <td><?= h($c['first_name_gr']) ?></td>
-                        <td><?= h($c['last_name_gr']) ?></td>
-                        <td><?= h($c['first_name_lat'] ?? '') ?></td>
-                        <td><?= h($c['last_name_lat'] ?? '') ?></td>
-                        <td><?= $c['birth_date'] ? formatDate($c['birth_date']) : '-' ?></td>
+                        <td class="text-nowrap"><?= h($c['last_name_gr'] . ' ' . $c['first_name_gr']) ?></td>
+                        <td class="text-nowrap"><?= h(trim(($c['last_name_lat'] ?? '') . ' ' . ($c['first_name_lat'] ?? ''))) ?: '-' ?></td>
+                        <td class="text-nowrap"><?= $c['birth_date'] ? formatDate($c['birth_date']) : '-' ?></td>
                         <td><?= h($c['email'] ?? '-') ?></td>
-                        <td><?= h($c['phone'] ?? '-') ?></td>
+                        <td class="text-nowrap"><?= h($c['phone'] ?? '-') ?></td>
                         <td class="text-center">
                             <form method="post" class="d-inline">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="toggle_contact">
                                 <input type="hidden" name="citizen_id" value="<?= $c['id'] ?>">
                                 <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['contact_done'] && ($c['contact_done_at'] ?? null) ? 'Επικοινωνία: ' . formatDateTime($c['contact_done_at']) : 'Εναλλαγή' ?>">
-                                    <i class="bi <?= $c['contact_done'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?> fs-5"></i>
+                                    <i class="bi <?= $c['contact_done'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?>"></i>
                                 </button>
-                                <?php if ($c['contact_done'] && ($c['contact_done_at'] ?? null)): ?>
-                                <div class="small text-muted" style="font-size:0.7rem"><?= formatDateTime($c['contact_done_at']) ?></div>
-                                <?php endif; ?>
                             </form>
                         </td>
                         <td class="text-center">
@@ -359,11 +352,8 @@ include __DIR__ . '/includes/header.php';
                                 <input type="hidden" name="action" value="toggle_payment">
                                 <input type="hidden" name="citizen_id" value="<?= $c['id'] ?>">
                                 <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['payment_done'] && ($c['payment_done_at'] ?? null) ? 'Πληρωμή: ' . formatDateTime($c['payment_done_at']) : 'Εναλλαγή' ?>">
-                                    <i class="bi <?= $c['payment_done'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?> fs-5"></i>
+                                    <i class="bi <?= $c['payment_done'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?>"></i>
                                 </button>
-                                <?php if ($c['payment_done'] && ($c['payment_done_at'] ?? null)): ?>
-                                <div class="small text-muted" style="font-size:0.7rem"><?= formatDateTime($c['payment_done_at']) ?></div>
-                                <?php endif; ?>
                             </form>
                         </td>
                         <td class="text-center">
@@ -372,18 +362,15 @@ include __DIR__ . '/includes/header.php';
                                 <input type="hidden" name="action" value="toggle_completed">
                                 <input type="hidden" name="citizen_id" value="<?= $c['id'] ?>">
                                 <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['completed'] && ($c['completed_at'] ?? null) ? 'Ολοκλήρωση: ' . formatDateTime($c['completed_at']) : 'Εναλλαγή' ?>">
-                                    <i class="bi <?= $c['completed'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?> fs-5"></i>
+                                    <i class="bi <?= $c['completed'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?>"></i>
                                 </button>
-                                <?php if ($c['completed'] && ($c['completed_at'] ?? null)): ?>
-                                <div class="small text-muted" style="font-size:0.7rem"><?= formatDateTime($c['completed_at']) ?></div>
-                                <?php endif; ?>
                             </form>
                         </td>
-                        <td class="text-center">
-                            <button class="btn btn-sm btn-outline-primary" onclick="editCitizen(<?= h(json_encode($c)) ?>)" title="Επεξεργασία">
+                        <td class="text-center text-nowrap">
+                            <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="editCitizen(<?= h(json_encode($c)) ?>)" title="Επεξεργασία">
                                 <i class="bi bi-pencil"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="confirmDelete(<?= $c['id'] ?>, '<?= h($c['last_name_gr'] . ' ' . $c['first_name_gr']) ?>')" title="Διαγραφή">
+                            <button class="btn btn-sm btn-outline-danger py-0 px-1" onclick="confirmDelete(<?= $c['id'] ?>, '<?= h($c['last_name_gr'] . ' ' . $c['first_name_gr']) ?>')" title="Διαγραφή">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </td>
