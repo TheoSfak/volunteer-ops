@@ -62,10 +62,17 @@ if (isPost()) {
     }
 
     // Save action (create/edit)
+    // Parse dd/mm/yyyy → YYYY-MM-DD for MySQL
+    $regDateRaw = trim(post('registration_date'));
+    $regDateSql = null;
+    if ($regDateRaw && preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})$#', $regDateRaw, $m)) {
+        $regDateSql = sprintf('%04d-%02d-%02d', $m[3], $m[2], $m[1]);
+    }
+
     $data = [
         'barcode'              => trim(post('barcode')),
         'name'                 => trim(post('name')),
-        'registration_date'    => post('registration_date') ?: null,
+        'registration_date'    => $regDateSql,
         'registration_number'  => trim(post('registration_number')) ?: null,
         'description'          => post('description'),
         'category_id'          => post('category_id') ?: null,
@@ -202,8 +209,9 @@ include __DIR__ . '/includes/header.php';
                     <div class="row">
                         <div class="col-md-4 mb-3">
                             <label for="registration_date" class="form-label">Ημ/νία Εγγραφής</label>
-                            <input type="date" class="form-control" id="registration_date" name="registration_date"
-                                   value="<?= h($item['registration_date'] ?? post('registration_date')) ?>">
+                            <input type="text" class="form-control" id="registration_date" name="registration_date"
+                                   value="<?= h(!empty($item['registration_date']) ? date('d/m/Y', strtotime($item['registration_date'])) : post('registration_date')) ?>"
+                                   placeholder="ηη/μμ/εεεε" maxlength="10">
                         </div>
                         <div class="col-md-4 mb-3">
                             <label for="registration_number" class="form-label">Α.Μ (Αριθμός Μητρώου)</label>
