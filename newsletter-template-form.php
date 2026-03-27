@@ -209,6 +209,7 @@ $(function() {
     var snConfig = {
         lang: 'el-GR',
         height: 250,
+        dialogsInBody: true,
         toolbar: [
             ['style', ['style']],
             ['font', ['bold', 'italic', 'underline', 'clear']],
@@ -217,7 +218,15 @@ $(function() {
             ['table', ['table']],
             ['insert', ['link', 'picture', 'hr']],
             ['view', ['fullscreen', 'codeview']]
-        ]
+        ],
+        callbacks: {
+            onInit: function() {
+                $('.note-editor .note-btn').each(function() {
+                    var t = bootstrap.Tooltip.getInstance(this);
+                    if (t) t.dispose();
+                });
+            }
+        }
     };
 
     // Init Summernote editors
