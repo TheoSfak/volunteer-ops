@@ -191,14 +191,17 @@ include __DIR__ . '/includes/header.php';
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h3 mb-0"><i class="bi bi-grid-3x3 me-2"></i>Υλικά Ραφιού</h1>
-        <div>
-            <span class="badge bg-secondary me-2"><?= $totalItems ?> υλικά</span>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-secondary me-1"><?= $totalItems ?> υλικά</span>
             <?php if ($expiredCount > 0): ?>
-                <span class="badge bg-danger me-2"><?= $expiredCount ?> ληγμένα</span>
+                <span class="badge bg-danger me-1"><?= $expiredCount ?> ληγμένα</span>
             <?php endif; ?>
             <?php if ($warningCount > 0): ?>
-                <span class="badge bg-warning text-dark"><?= $warningCount ?> κοντά σε λήξη</span>
+                <span class="badge bg-warning text-dark me-2"><?= $warningCount ?> κοντά σε λήξη</span>
             <?php endif; ?>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="window.print()" title="Εκτύπωση λίστας ραφιού">
+                <i class="bi bi-printer me-1"></i>Εκτύπωση
+            </button>
         </div>
     </div>
     
@@ -420,5 +423,27 @@ document.getElementById('deleteModal')?.addEventListener('show.bs.modal', functi
 // Initialize tooltips
 document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
 </script>
+
+<style>
+@media print {
+    .no-print, .sidebar, .navbar, .btn-group, .card-header.bg-primary,
+    [data-bs-toggle="modal"], .modal { display: none !important; }
+    body { background: #fff !important; font-size: 11pt; }
+    .container-fluid { padding: 0 !important; }
+    .card { border: none !important; box-shadow: none !important; }
+    .card-body { padding: 0 !important; }
+    .card.shadow-sm.mt-4 { display: none !important; }
+    .table { font-size: 10pt; border-collapse: collapse; }
+    .table th, .table td { padding: 4px 8px !important; border: 1px solid #ccc !important; }
+    h1.h3 { font-size: 14pt !important; }
+    .badge { border: 1px solid #999 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    .btn { display: none !important; }
+    .d-flex.gap-3.align-items-center.small.text-muted { margin-bottom: 8px !important; }
+    @page { size: A4 portrait; margin: 10mm; }
+    .print-footer { display: block !important; text-align: right; font-size: 9pt; color: #999; margin-top: 10px; }
+}
+.print-footer { display: none; }
+</style>
+<div class="print-footer">Εκτυπώθηκε: <script>document.write(new Date().toLocaleDateString('el-GR') + ' ' + new Date().toLocaleTimeString('el-GR', {hour:'2-digit',minute:'2-digit'}))</script></div>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
