@@ -572,14 +572,7 @@ $(document).ready(function() {
             ['insert', ['link']],
             ['view', ['codeview']]
         ],
-        callbacks: {
-            onInit: function() {
-                $('.note-editor .note-btn').each(function() {
-                    var t = bootstrap.Tooltip.getInstance(this);
-                    if (t) t.dispose();
-                });
-            }
-        }
+
     });
 });
 </script>

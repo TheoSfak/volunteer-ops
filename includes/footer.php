@@ -49,6 +49,46 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
     <!-- Bootstrap 5 JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Global Summernote + Bootstrap 5 compatibility fix -->
+    <script>
+    (function() {
+        // Fix: BS5 auto-initializes dropdowns on [data-bs-toggle="dropdown"] which conflicts
+        // with Summernote's own dropdown handling, causing menus to flash open/close.
+        // Solution: MutationObserver removes data-bs-toggle from Summernote buttons.
+        function fixSummernoteEditor(editorEl) {
+            editorEl.querySelectorAll('.note-btn[data-bs-toggle="dropdown"]').forEach(function(btn) {
+                btn.removeAttribute('data-bs-toggle');
+                // Also dispose any BS5 Dropdown instance that was auto-created
+                var dd = bootstrap.Dropdown.getInstance(btn);
+                if (dd) dd.dispose();
+            });
+            editorEl.querySelectorAll('.note-btn').forEach(function(btn) {
+                var t = bootstrap.Tooltip.getInstance(btn);
+                if (t) t.dispose();
+            });
+        }
+        // Watch for .note-editor elements being added to the DOM
+        var observer = new MutationObserver(function(mutations) {
+            mutations.forEach(function(m) {
+                m.addedNodes.forEach(function(node) {
+                    if (node.nodeType !== 1) return;
+                    if (node.classList && node.classList.contains('note-editor')) {
+                        fixSummernoteEditor(node);
+                    }
+                    // Also check children (e.g. dialogsInBody appends into body)
+                    if (node.querySelectorAll) {
+                        node.querySelectorAll('.note-editor').forEach(fixSummernoteEditor);
+                    }
+                });
+            });
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        // Expose for manual calls
+        window.fixSummernoteBS5 = fixSummernoteEditor;
+    })();
+    </script>
+
     <!-- Flatpickr -->
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/gr.js"></script>

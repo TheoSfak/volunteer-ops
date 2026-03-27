@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 45;
+    $LATEST_MIGRATION_VERSION = 46;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -2850,10 +2850,23 @@ body { margin:0; padding:0; background:#eef1f6; font-family: "Segoe UI", -apple-
 </body>
 </html>';
 
-                    dbInsert(
-                        "INSERT INTO newsletter_templates (name, header_html, footer_html, is_default, created_at, updated_at) VALUES (?, ?, ?, 1, NOW(), NOW())",
-                        ['Βασικό πρότυπο', $header, $footer]
+                    // Check which schema we have (fresh install may have body_html from schema.sql)
+                    $hasBodyCol = dbFetchOne(
+                        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_templates' AND COLUMN_NAME = 'body_html'"
                     );
+                    if ($hasBodyCol) {
+                        // Fresh install with v46+ schema: insert as single body_html
+                        dbInsert(
+                            "INSERT INTO newsletter_templates (name, body_html, is_default, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())",
+                            ['Βασικό πρότυπο', $header . '{content}' . $footer]
+                        );
+                    } else {
+                        dbInsert(
+                            "INSERT INTO newsletter_templates (name, header_html, footer_html, is_default, created_at, updated_at) VALUES (?, ?, ?, 1, NOW(), NOW())",
+                            ['Βασικό πρότυπο', $header, $footer]
+                        );
+                    }
                 }
 
                 // 3. Add template_id column to newsletters
@@ -2936,8 +2949,54 @@ body { margin:0; padding:0; background:#eef1f6; font-family: "Segoe UI", -apple-
 </body>
 </html>';
 
-                    dbExecute("UPDATE newsletter_templates SET name='Βασικό πρότυπο', header_html=?, footer_html=?, updated_at=NOW() WHERE id=?",
-                        [$header, $footer, $defaultTpl['id']]);
+                    // Check which schema we have
+                    $hasBodyCol = dbFetchOne(
+                        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_templates' AND COLUMN_NAME = 'body_html'"
+                    );
+                    if ($hasBodyCol) {
+                        dbExecute("UPDATE newsletter_templates SET name='Βασικό πρότυπο', body_html=?, updated_at=NOW() WHERE id=?",
+                            [$header . '{content}' . $footer, $defaultTpl['id']]);
+                    } else {
+                        dbExecute("UPDATE newsletter_templates SET name='Βασικό πρότυπο', header_html=?, footer_html=?, updated_at=NOW() WHERE id=?",
+                            [$header, $footer, $defaultTpl['id']]);
+                    }
+                }
+            },
+        ],
+
+        // ── v46 ── Merge header_html + footer_html into single body_html with {content} ──
+        [
+            'version'     => 46,
+            'description' => 'Merge newsletter template header/footer into single body_html with {content}',
+            'up'          => function () {
+                // 1. Add body_html column if not exists
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_templates' AND COLUMN_NAME = 'body_html'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE newsletter_templates ADD COLUMN body_html MEDIUMTEXT NULL AFTER name");
+                }
+
+                // 2. Migrate existing data: body_html = header_html + {content} + footer_html
+                $hCol = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_templates' AND COLUMN_NAME = 'header_html'"
+                );
+                if ($hCol) {
+                    $templates = dbFetchAll("SELECT id, header_html, footer_html FROM newsletter_templates WHERE body_html IS NULL");
+                    foreach ($templates as $tpl) {
+                        $bodyHtml = ($tpl['header_html'] ?? '') . '{content}' . ($tpl['footer_html'] ?? '');
+                        dbExecute("UPDATE newsletter_templates SET body_html = ? WHERE id = ?", [$bodyHtml, $tpl['id']]);
+                    }
+                }
+
+                // 3. Make body_html NOT NULL and drop old columns
+                dbExecute("ALTER TABLE newsletter_templates MODIFY body_html MEDIUMTEXT NOT NULL");
+
+                if ($hCol) {
+                    dbExecute("ALTER TABLE newsletter_templates DROP COLUMN header_html, DROP COLUMN footer_html");
                 }
             },
         ],

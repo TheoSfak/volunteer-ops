@@ -238,12 +238,6 @@ $(document).ready(function() {
             ['view', ['fullscreen', 'codeview', 'help']]
         ],
         callbacks: {
-            onInit: function() {
-                $('.note-editor .note-btn').each(function() {
-                    var t = bootstrap.Tooltip.getInstance(this);
-                    if (t) t.dispose();
-                });
-            },
             onChange: function(contents) {
                 $('#htmlEditor').val(contents);
             }
