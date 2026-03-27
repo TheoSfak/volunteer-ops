@@ -122,6 +122,9 @@ include __DIR__ . '/includes/header.php';
     gap: 4px;
     padding: 0 8px;
     line-height: 1;
+    white-space: nowrap;
+    overflow: visible;
+    flex-wrap: nowrap;
 }
 .vol-bar .progress-bar.bg-danger {
     background: linear-gradient(90deg, #dc3545, #ff6b6b) !important;
