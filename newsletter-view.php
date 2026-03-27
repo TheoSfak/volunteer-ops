@@ -34,7 +34,7 @@ if (isPost()) {
         $testUser['dept_name'] = dbFetchValue("SELECT name FROM departments WHERE id = ?", [$testUser['department_id'] ?? 0]) ?: '';
         $token   = generateUnsubscribeToken();
         $subject = replaceNewsletterTags($nl['subject'], $testUser, $token);
-        $body    = wrapNewsletterBody(replaceNewsletterTags($nl['body_html'], $testUser, $token), $nl['title']);
+        $body    = wrapNewsletterBody(replaceNewsletterTags($nl['body_html'], $testUser, $token), $nl['title'], (int)($nl['template_id'] ?? 0) ?: null);
         $result  = sendEmail($testUser['email'], $subject, $body);
         if ($result['success']) {
             setFlash('success', 'Δοκιμαστικό email στάλθηκε στο ' . h($testUser['email']));
@@ -92,7 +92,7 @@ if (isPost()) {
                 [$recipient['id'], $recipient['email'], $token, $id]);
 
             $subject = replaceNewsletterTags($nl['subject'], $recipient, $token);
-            $body    = wrapNewsletterBody(replaceNewsletterTags($nl['body_html'], $recipient, $token), $nl['title']);
+            $body    = wrapNewsletterBody(replaceNewsletterTags($nl['body_html'], $recipient, $token), $nl['title'], (int)($nl['template_id'] ?? 0) ?: null);
 
             $result = sendEmail($recipient['email'], $subject, $body);
 
@@ -133,7 +133,7 @@ if (isPost()) {
             }
             $token  = generateUnsubscribeToken();
             $subject = replaceNewsletterTags($nl['subject'], $recipient, $token);
-            $body    = wrapNewsletterBody(replaceNewsletterTags($nl['body_html'], $recipient, $token), $nl['title']);
+            $body    = wrapNewsletterBody(replaceNewsletterTags($nl['body_html'], $recipient, $token), $nl['title'], (int)($nl['template_id'] ?? 0) ?: null);
             $result  = sendEmail($send['email'], $subject, $body);
             if ($result['success']) {
                 dbExecute("UPDATE newsletter_sends SET status='sent', error_msg=NULL, sent_at=NOW() WHERE id=?", [$send['id']]);
@@ -195,27 +195,27 @@ $sendLog = dbFetchAll("
 $failedCount = dbFetchValue("SELECT COUNT(*) FROM newsletter_sends WHERE newsletter_id=? AND status='failed'", [$id]);
 
 // ── Helper: wrap body in styled email envelope for display ──
-function wrapNewsletterBody(string $body, string $title): string {
+function wrapNewsletterBody(string $body, string $title, ?int $templateId = null): string {
     $fromName = getSetting('smtp_from_name', 'VolunteerOps');
 
-    $defaultHeader = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:0}
-.wrap{max-width:600px;margin:30px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}
-.hdr{background:#c0392b;padding:24px 32px;color:#fff}.hdr h2{margin:0;font-size:22px}
-.body{padding:32px;color:#333;line-height:1.6}.ftr{background:#f8f8f8;padding:16px 32px;font-size:12px;color:#aaa;text-align:center}
-</style></head><body>
-<div class="wrap">
-  <div class="hdr"><h2>{from_name}</h2></div>
-  <div class="body">';
-    $defaultFooter = '</div>
-  <div class="ftr"><p>Αυτό το email στάλθηκε από {from_name}.</p></div>
-</div></body></html>';
+    // Load template from newsletter_templates table
+    $tpl = null;
+    if ($templateId) {
+        $tpl = dbFetchOne("SELECT header_html, footer_html FROM newsletter_templates WHERE id = ?", [$templateId]);
+    }
+    if (!$tpl) {
+        $tpl = dbFetchOne("SELECT header_html, footer_html FROM newsletter_templates WHERE is_default = 1 LIMIT 1");
+    }
 
-    $header = getSetting('newsletter_template_header', $defaultHeader);
-    $footer = getSetting('newsletter_template_footer', $defaultFooter);
+    $header = $tpl ? $tpl['header_html'] : '';
+    $footer = $tpl ? $tpl['footer_html'] : '';
 
-    $header = str_replace('{from_name}', h($fromName), $header);
-    $footer = str_replace('{from_name}', h($fromName), $footer);
+    // Replace logo placeholder
+    $appLogo = getSetting('app_logo', '');
+    $logoHtml = $appLogo ? '<img src="uploads/logos/' . h($appLogo) . '" alt="" style="max-height:50px;margin-bottom:10px;">' : '';
+
+    $header = str_replace(['{from_name}', '{logo_url}'], [h($fromName), $logoHtml], $header);
+    $footer = str_replace(['{from_name}', '{logo_url}'], [h($fromName), $logoHtml], $footer);
 
     return $header . $body . $footer;
 }
@@ -449,22 +449,32 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<?php
+// Load template for JS preview
+$previewTpl = null;
+if (!empty($nl['template_id'])) {
+    $previewTpl = dbFetchOne("SELECT header_html, footer_html FROM newsletter_templates WHERE id = ?", [(int)$nl['template_id']]);
+}
+if (!$previewTpl) {
+    $previewTpl = dbFetchOne("SELECT header_html, footer_html FROM newsletter_templates WHERE is_default = 1 LIMIT 1");
+}
+$previewHeader = $previewTpl ? $previewTpl['header_html'] : '';
+$previewFooter = $previewTpl ? $previewTpl['footer_html'] : '';
+$previewLogo   = getSetting('app_logo', '');
+$previewLogoHtml = $previewLogo ? '<img src="uploads/logos/' . h($previewLogo) . '" alt="" style="max-height:50px;margin-bottom:10px;">' : '';
+?>
+
 <script>
 // Inject body preview into iframe using stored template
 (function() {
     var body = <?= json_encode($nl['body_html']) ?>;
     var fromName = <?= json_encode(getSetting('smtp_from_name', 'VolunteerOps')) ?>;
-    var header = <?= json_encode(getSetting('newsletter_template_header', '')) ?>;
-    var footer = <?= json_encode(getSetting('newsletter_template_footer', '')) ?>;
+    var logoHtml = <?= json_encode($previewLogoHtml) ?>;
+    var header = <?= json_encode($previewHeader) ?>;
+    var footer = <?= json_encode($previewFooter) ?>;
 
-    // Fallback to hardcoded default if settings are empty
-    if (!header) {
-        header = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:0}.wrap{max-width:600px;margin:30px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}.hdr{background:#c0392b;padding:24px 32px;color:#fff}.hdr h2{margin:0;font-size:22px}.body{padding:32px;color:#333;line-height:1.6}.ftr{background:#f8f8f8;padding:16px 32px;font-size:12px;color:#aaa;text-align:center}</style></head><body><div class="wrap"><div class="hdr"><h2>{from_name}</h2></div><div class="body">';
-        footer = '</div><div class="ftr"><p>Αυτό το email στάλθηκε από {from_name}.</p></div></div></body></html>';
-    }
-
-    header = header.replace(/\{from_name\}/g, fromName);
-    footer = footer.replace(/\{from_name\}/g, fromName);
+    header = header.replace(/\{from_name\}/g, fromName).replace(/\{logo_url\}/g, logoHtml);
+    footer = footer.replace(/\{from_name\}/g, fromName).replace(/\{logo_url\}/g, logoHtml);
     var html = header + body + footer;
 
     var frame = document.getElementById('previewFrame');

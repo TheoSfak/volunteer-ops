@@ -27,6 +27,7 @@ $allRoles     = [
     ROLE_SYSTEM_ADMIN       => 'Διαχειριστές Συστήματος',
 ];
 $emailTemplates = dbFetchAll("SELECT id, name, subject, body_html FROM email_templates WHERE is_active = 1 ORDER BY name");
+$nlTemplates = dbFetchAll("SELECT id, name, is_default FROM newsletter_templates ORDER BY is_default DESC, name");
 
 // AJAX: count recipients
 if (get('action') === 'count_recipients') {
@@ -48,6 +49,7 @@ if (isPost()) {
     $roles   = $_POST['filter_roles'] ?? [];
     $deptId  = (int)post('filter_dept_id');
     $extraEmails = trim(post('extra_emails'));
+    $templateId = (int)post('template_id') ?: null;
 
     $errors = [];
     if (empty($title))   $errors[] = 'Ο τίτλος είναι υποχρεωτικός.';
@@ -60,14 +62,14 @@ if (isPost()) {
         $extraStore = $extraEmails !== '' ? $extraEmails : null;
 
         if ($isEdit) {
-            dbExecute("UPDATE newsletters SET title=?, subject=?, body_html=?, filter_roles=?, filter_dept_id=?, extra_emails=?, updated_at=NOW() WHERE id=?",
-                [$title, $subject, $body, $rolesJson, $deptStore, $extraStore, $id]);
+            dbExecute("UPDATE newsletters SET title=?, subject=?, body_html=?, filter_roles=?, filter_dept_id=?, extra_emails=?, template_id=?, updated_at=NOW() WHERE id=?",
+                [$title, $subject, $body, $rolesJson, $deptStore, $extraStore, $templateId, $id]);
             logAudit('newsletter_update', 'newsletters', $id);
-            setFlash('success', 'Το πρόχειρο αποθηκεύτηκε.');
+            setFlash('success', 'То πρόχειρο αποθηκεύτηκε.');
             redirect("newsletter-view.php?id={$id}");
         } else {
-            $newId = dbInsert("INSERT INTO newsletters (title, subject, body_html, filter_roles, filter_dept_id, extra_emails, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,NOW(),NOW())",
-                [$title, $subject, $body, $rolesJson, $deptStore, $extraStore, getCurrentUserId()]);
+            $newId = dbInsert("INSERT INTO newsletters (title, subject, body_html, filter_roles, filter_dept_id, extra_emails, template_id, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,NOW(),NOW())",
+                [$title, $subject, $body, $rolesJson, $deptStore, $extraStore, $templateId, getCurrentUserId()]);
             logAudit('newsletter_create', 'newsletters', $newId);
             setFlash('success', 'Το πρόχειρο δημιουργήθηκε. Ελέγξτε και αποστείλετε.');
             redirect("newsletter-view.php?id={$newId}");
@@ -81,6 +83,7 @@ if (isPost()) {
             'filter_roles'   => json_encode($roles),
             'filter_dept_id' => $deptId ?: null,
             'extra_emails'   => $extraEmails,
+            'template_id'    => $templateId,
         ];
     }
 }
@@ -92,8 +95,7 @@ if ($nl && !empty($nl['filter_roles'])) {
     if (is_array($decoded)) $savedRoles = $decoded;
 }
 if (empty($savedRoles)) {
-    // Default: all roles checked
-    $savedRoles = array_keys($allRoles);
+    $savedRoles = [];
 }
 
 include __DIR__ . '/includes/header.php';
@@ -187,6 +189,24 @@ $countUrl = 'newsletter-form.php?action=count_recipients';
 
         <!-- Right column: settings -->
         <div class="col-lg-4">
+
+            <!-- Newsletter Template -->
+            <div class="card shadow-sm mb-3">
+                <div class="card-header"><strong><i class="bi bi-palette me-1"></i>Πρότυπο Email</strong></div>
+                <div class="card-body">
+                    <select class="form-select" name="template_id" id="templateSelect">
+                        <?php
+                        $savedTemplateId = $nl['template_id'] ?? null;
+                        foreach ($nlTemplates as $t):
+                            $selected = ($savedTemplateId ? ($savedTemplateId == $t['id']) : $t['is_default']) ? 'selected' : '';
+                        ?>
+                        <option value="<?= $t['id'] ?>" <?= $selected ?>><?= h($t['name']) ?><?= $t['is_default'] ? ' ★' : '' ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <small class="text-muted">Περιτύλιγμα header/footer γύρω από το σώμα.</small>
+                    <div class="mt-2"><a href="newsletter-templates.php" class="small"><i class="bi bi-gear me-1"></i>Διαχείριση προτύπων</a></div>
+                </div>
+            </div>
 
             <!-- Recipient filter -->
             <div class="card shadow-sm mb-3">

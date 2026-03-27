@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 43;
+    $LATEST_MIGRATION_VERSION = 44;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -2765,6 +2765,87 @@ function runSchemaMigrations(): void {
                      ON DUPLICATE KEY UPDATE setting_key = setting_key",
                     [$defaultFooter]
                 );
+            },
+        ],
+
+        // ── v44: Newsletter templates table + newsletters.template_id ──
+        [
+            'version'     => 44,
+            'description' => 'Create newsletter_templates table, add newsletters.template_id, seed default template',
+            'up' => function () {
+                // 1. Create newsletter_templates table
+                $tbl = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_templates'"
+                );
+                if (!$tbl) {
+                    dbExecute("CREATE TABLE newsletter_templates (
+                        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        name VARCHAR(100) NOT NULL,
+                        header_html MEDIUMTEXT NOT NULL,
+                        footer_html MEDIUMTEXT NOT NULL,
+                        is_default TINYINT(1) NOT NULL DEFAULT 0,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                }
+
+                // 2. Seed default template if table is empty
+                $cnt = (int)dbFetchValue("SELECT COUNT(*) FROM newsletter_templates");
+                if ($cnt === 0) {
+                    $header = '<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body { font-family: \"Segoe UI\", Arial, sans-serif; background: #f0f2f5; margin: 0; padding: 0; }
+.email-wrap { max-width: 600px; margin: 30px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
+.email-header { background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%); padding: 28px 32px; text-align: center; }
+.email-header img { max-height: 50px; margin-bottom: 10px; }
+.email-header h2 { margin: 0; color: #ffffff; font-size: 20px; font-weight: 600; letter-spacing: 0.3px; }
+.email-body { padding: 36px 32px; color: #2c3e50; line-height: 1.7; font-size: 15px; }
+.email-footer { background: #f8f9fa; padding: 20px 32px; text-align: center; border-top: 1px solid #eee; }
+.email-footer p { margin: 4px 0; font-size: 12px; color: #95a5a6; }
+.email-footer a { color: #c0392b; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="email-wrap">
+  <div class="email-header">
+    {logo_url}
+    <h2>{from_name}</h2>
+  </div>
+  <div class="email-body">';
+
+                    $footer = '</div>
+  <div class="email-footer">
+    <p>&copy; ' . date('Y') . ' {from_name}. Με επιφύλαξη παντός δικαιώματος.</p>
+    <p style="margin-top:8px;font-size:11px;color:#bdc3c7;">Λάβατε αυτό το email επειδή είστε εγγεγραμμένος/η στο σύστημά μας.</p>
+  </div>
+</div>
+</body>
+</html>';
+
+                    dbInsert(
+                        "INSERT INTO newsletter_templates (name, header_html, footer_html, is_default, created_at, updated_at) VALUES (?, ?, ?, 1, NOW(), NOW())",
+                        ['Βασικό πρότυπο', $header, $footer]
+                    );
+                }
+
+                // 3. Add template_id column to newsletters
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'newsletters'
+                       AND COLUMN_NAME  = 'template_id'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE newsletters ADD COLUMN template_id INT UNSIGNED NULL AFTER extra_emails");
+                }
+
+                // 4. Clean up old settings-based template (optional)
+                dbExecute("DELETE FROM settings WHERE setting_key IN ('newsletter_template_header', 'newsletter_template_footer')");
             },
         ],
 
