@@ -19,8 +19,8 @@ $status = get('status', '');
 $skillId = (int) get('skill_id', 0);
 $page = max(1, (int) get('page', 1));
 $allowedPerPage = [10, 20, 30, 50, 100];
-$perPage = (int) get('per_page', 20);
-if (!in_array($perPage, $allowedPerPage)) $perPage = 20;
+$perPage = (int) get('per_page', 50);
+if (!in_array($perPage, $allowedPerPage)) $perPage = 50;
 
 // Build query — always show active users that haven't been soft-deleted
 $where = ['u.is_active = 1', 'u.deleted_at IS NULL'];
@@ -252,6 +252,15 @@ if (isSystemAdmin()) {
 
 include __DIR__ . '/includes/header.php';
 ?>
+
+<style>
+.table { font-size: 0.82rem; }
+.table th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.3px; padding: 6px 8px !important; }
+.table td { padding: 5px 8px !important; }
+.badge { font-size: 0.72rem; }
+.btn-sm { font-size: 0.75rem; padding: 2px 8px; }
+.dropdown-menu { font-size: 0.82rem; }
+</style>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0">
