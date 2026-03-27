@@ -75,7 +75,8 @@ $missions = dbFetchAll(
     "SELECT m.*, d.name as department_name, u.name as creator_name,
             mt.name as type_name, mt.color as type_color, mt.icon as type_icon,
             COUNT(DISTINCT sh.id) as shift_count,
-            COUNT(DISTINCT CASE WHEN pr.status = '" . PARTICIPATION_APPROVED . "' THEN pr.id END) as volunteer_count
+            COUNT(DISTINCT CASE WHEN pr.status = '" . PARTICIPATION_APPROVED . "' THEN pr.id END) as volunteer_count,
+            (SELECT COALESCE(SUM(s2.max_volunteers), 0) FROM shifts s2 WHERE s2.mission_id = m.id) as max_volunteers
      FROM missions m
      LEFT JOIN departments d ON m.department_id = d.id
      LEFT JOIN users u ON m.created_by = u.id
@@ -228,8 +229,22 @@ include __DIR__ . '/includes/header.php';
                                 </td>
                                 <td><span class="badge bg-secondary"><?= $mission['shift_count'] ?></span></td>
                                 <td><span class="badge bg-info"><?= $mission['volunteer_count'] ?></span></td>
-                                <td>
-                                    <?= statusBadge($mission['status']) ?>
+                                <td style="min-width: 130px;">
+                                    <?php if ($mission['status'] === STATUS_OPEN && $mission['max_volunteers'] > 0):
+                                        $vPct = min(100, round(($mission['volunteer_count'] / $mission['max_volunteers']) * 100));
+                                        $vColor = $vPct >= 100 ? 'success' : ($vPct >= 50 ? 'warning' : 'danger');
+                                        $vAnim = $vPct < 100 ? ' progress-bar-striped progress-bar-animated' : '';
+                                    ?>
+                                        <div class="progress" style="height: 10px;" title="<?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?> εθελοντές">
+                                            <div class="progress-bar bg-<?= $vColor ?><?= $vAnim ?>" role="progressbar" style="width: <?= $vPct ?>%" aria-valuenow="<?= $mission['volunteer_count'] ?>" aria-valuemin="0" aria-valuemax="<?= $mission['max_volunteers'] ?>"></div>
+                                        </div>
+                                        <small class="fw-bold text-<?= $vColor ?>">
+                                            <?php if ($vPct >= 100): ?><i class="bi bi-check-circle-fill me-1"></i><?php endif; ?>
+                                            <?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?> εθελοντές
+                                        </small>
+                                    <?php else: ?>
+                                        <?= statusBadge($mission['status']) ?>
+                                    <?php endif; ?>
                                     <?php
                                     // Show overdue badge for OPEN/CLOSED missions past their end date
                                     if (in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED]) && strtotime($mission['end_datetime']) < time()):
@@ -319,6 +334,26 @@ include __DIR__ . '/includes/header.php';
                                     <span class="text-muted ms-1"><?= formatDateTime($mission['start_datetime'], 'H:i') ?></span>
                                 </small>
                             </div>
+                            <?php if ($mission['status'] === STATUS_OPEN && $mission['max_volunteers'] > 0):
+                                $mPct = min(100, round(($mission['volunteer_count'] / $mission['max_volunteers']) * 100));
+                                $mColor = $mPct >= 100 ? 'success' : ($mPct >= 50 ? 'warning' : 'danger');
+                                $mAnim = $mPct < 100 ? ' progress-bar-striped progress-bar-animated' : '';
+                            ?>
+                            <div class="mobile-card-row">
+                                <div class="progress" style="height: 20px; border-radius: 6px;">
+                                    <div class="progress-bar bg-<?= $mColor ?><?= $mAnim ?>" role="progressbar" style="width: <?= max($mPct, 15) ?>%; font-size: 0.8rem; font-weight: 600;" aria-valuenow="<?= $mission['volunteer_count'] ?>" aria-valuemin="0" aria-valuemax="<?= $mission['max_volunteers'] ?>">
+                                        <?php if ($mPct >= 100): ?><i class="bi bi-check-circle-fill me-1"></i><?php endif; ?>
+                                        <?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mobile-card-row">
+                                <small>
+                                    <span class="badge bg-secondary"><?= $mission['shift_count'] ?></span>
+                                    <span class="text-muted ms-1">βάρδιες</span>
+                                </small>
+                            </div>
+                            <?php else: ?>
                             <div class="mobile-card-row">
                                 <small>
                                     <span class="badge bg-secondary"><?= $mission['shift_count'] ?></span>
@@ -327,6 +362,7 @@ include __DIR__ . '/includes/header.php';
                                     <span class="text-muted ms-1">εθελοντές</span>
                                 </small>
                             </div>
+                            <?php endif; ?>
                             
                             <div class="mobile-card-actions">
                                 <a href="mission-view.php?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-primary">
