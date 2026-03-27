@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 47;
+    $LATEST_MIGRATION_VERSION = 48;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -3123,6 +3123,220 @@ body { margin:0; padding:0; background:#f4f6f9; font-family: "Segoe UI", -apple-
 
                 foreach ($templates as $tpl) {
                     // Only insert if name doesn't already exist
+                    $exists = dbFetchValue("SELECT COUNT(*) FROM newsletter_templates WHERE name = ?", [$tpl['name']]);
+                    if (!$exists) {
+                        dbInsert(
+                            "INSERT INTO newsletter_templates (name, body_html, is_default, created_at, updated_at) VALUES (?, ?, 0, NOW(), NOW())",
+                            [$tpl['name'], $tpl['body']]
+                        );
+                    }
+                }
+            },
+        ],
+
+        // ── v48 ── Replace basic demo templates with truly unique designs ──
+        [
+            'version'     => 48,
+            'description' => 'Replace color-only demo templates with unique header/footer designs',
+            'up'          => function () {
+                // Delete the 5 basic color-swap templates from v47
+                $oldNames = ['Μπλε Κλασικό', 'Πράσινο Φύση', 'Κόκκινο Επείγον', 'Μωβ Εκδήλωση', 'Πορτοκαλί Ζεστό'];
+                foreach ($oldNames as $name) {
+                    // Only delete if not used by any newsletter
+                    $used = (int)dbFetchValue(
+                        "SELECT COUNT(*) FROM newsletters n JOIN newsletter_templates t ON n.template_id = t.id WHERE t.name = ?",
+                        [$name]
+                    );
+                    if (!$used) {
+                        dbExecute("DELETE FROM newsletter_templates WHERE name = ? AND is_default = 0", [$name]);
+                    }
+                }
+
+                $year = date('Y');
+
+                // ── 1. Minimal Clean ──────────────────────────────────────
+                $tpl1 = '<!DOCTYPE html>
+<html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;padding:0;background:#ffffff;font-family:Georgia,"Times New Roman",serif;color:#333;}
+</style></head><body>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td align="center" style="padding:40px 20px 0;">
+  <table role="presentation" width="560" cellpadding="0" cellspacing="0">
+    <tr><td style="border-bottom:2px solid #333;padding-bottom:20px;">
+      <table role="presentation" width="100%"><tr>
+        <td style="font-size:28px;font-weight:bold;color:#1a1a1a;letter-spacing:-0.5px;">{from_name}</td>
+        <td align="right" style="vertical-align:middle;">{logo_url}</td>
+      </tr></table>
+    </td></tr>
+    <tr><td style="padding:32px 0;font-size:16px;line-height:1.8;color:#444;">
+{content}
+    </td></tr>
+    <tr><td style="border-top:1px solid #ddd;padding-top:20px;padding-bottom:40px;text-align:center;">
+      <p style="margin:0;font-size:12px;color:#999;">&copy; ' . $year . ' {from_name} &middot; Ενημερωτικό Δελτίο</p>
+    </td></tr>
+  </table>
+</td></tr></table>
+</body></html>';
+
+                // ── 2. Bold Magazine ──────────────────────────────────────
+                $tpl2 = '<!DOCTYPE html>
+<html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;padding:0;background:#f0f0f0;font-family:"Segoe UI",Roboto,Arial,sans-serif;}
+</style></head><body>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f0f0;">
+<tr><td align="center" style="padding:30px 16px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:0;">
+  <!-- Thick top bar -->
+  <tr><td style="height:8px;background:#ff2d55;"></td></tr>
+  <!-- Header: large bold title -->
+  <tr><td style="padding:40px 40px 10px;text-align:left;">
+    <table role="presentation" width="100%"><tr>
+      <td>{logo_url}</td>
+      <td align="right" style="font-size:11px;text-transform:uppercase;letter-spacing:2px;color:#999;font-weight:600;">Τεύχος ' . date('m/Y') . '</td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="padding:0 40px 30px;">
+    <h1 style="margin:0;font-size:36px;font-weight:900;color:#1a1a1a;line-height:1.1;letter-spacing:-1px;">{from_name}</h1>
+    <div style="width:60px;height:4px;background:#ff2d55;margin-top:16px;border-radius:2px;"></div>
+  </td></tr>
+  <!-- Body -->
+  <tr><td style="padding:10px 40px 40px;font-size:15px;line-height:1.8;color:#333;">
+{content}
+  </td></tr>
+  <!-- Footer -->
+  <tr><td style="background:#1a1a1a;padding:30px 40px;">
+    <table role="presentation" width="100%"><tr>
+      <td style="font-size:13px;color:#888;">&copy; ' . $year . ' {from_name}</td>
+      <td align="right" style="font-size:11px;color:#666;">Powered by <span style="color:#ff2d55;">VolunteerOps</span></td>
+    </tr></table>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>';
+
+                // ── 3. Card Style ─────────────────────────────────────────
+                $tpl3 = '<!DOCTYPE html>
+<html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;padding:0;background:#e8ecf1;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+</style></head><body>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#e8ecf1;">
+<tr><td align="center" style="padding:40px 16px;">
+  <!-- Logo bar -->
+  <table role="presentation" width="580" cellpadding="0" cellspacing="0">
+    <tr><td align="center" style="padding-bottom:24px;">
+      <div style="display:inline-block;background:#ffffff;border-radius:50%;width:70px;height:70px;text-align:center;line-height:70px;box-shadow:0 4px 15px rgba(0,0,0,.1);">
+        {logo_url}
+      </div>
+    </td></tr>
+    <tr><td align="center" style="padding-bottom:8px;">
+      <h1 style="margin:0;font-size:22px;font-weight:700;color:#2c3e50;">{from_name}</h1>
+      <p style="margin:4px 0 20px;font-size:13px;color:#7f8c8d;letter-spacing:0.5px;">Ενημερωτικό Δελτίο</p>
+    </td></tr>
+  </table>
+  <!-- Content card -->
+  <table role="presentation" width="580" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;box-shadow:0 2px 20px rgba(0,0,0,.08);">
+    <tr><td style="padding:36px 40px;font-size:15px;line-height:1.8;color:#2c3e50;">
+{content}
+    </td></tr>
+  </table>
+  <!-- Footer -->
+  <table role="presentation" width="580" cellpadding="0" cellspacing="0">
+    <tr><td align="center" style="padding:24px 0;">
+      <p style="margin:0;font-size:12px;color:#95a5a6;">&copy; ' . $year . ' {from_name}</p>
+      <p style="margin:4px 0 0;font-size:11px;color:#bdc3c7;">Αυτό το email στάλθηκε μέσω VolunteerOps</p>
+    </td></tr>
+  </table>
+</td></tr></table>
+</body></html>';
+
+                // ── 4. Split Header ───────────────────────────────────────
+                $tpl4 = '<!DOCTYPE html>
+<html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;padding:0;background:#f5f5f5;font-family:"Segoe UI",Roboto,Arial,sans-serif;}
+</style></head><body>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;">
+<tr><td align="center" style="padding:30px 16px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="border-radius:8px;overflow:hidden;box-shadow:0 1px 12px rgba(0,0,0,.1);">
+  <!-- Two-tone header -->
+  <tr>
+    <td width="180" style="background:#2c3e50;padding:28px 24px;vertical-align:middle;text-align:center;">
+      <div style="display:inline-block;background:rgba(255,255,255,.12);border-radius:12px;padding:12px;">{logo_url}</div>
+    </td>
+    <td style="background:#34495e;padding:28px 32px;vertical-align:middle;">
+      <h1 style="margin:0;font-size:22px;font-weight:700;color:#ffffff;">{from_name}</h1>
+      <p style="margin:6px 0 0;font-size:12px;color:#bdc3c7;text-transform:uppercase;letter-spacing:1.5px;">Εθελοντική Ομάδα</p>
+    </td>
+  </tr>
+  <!-- Accent line -->
+  <tr><td colspan="2" style="height:4px;background:linear-gradient(90deg,#3498db,#2ecc71);"></td></tr>
+  <!-- Body -->
+  <tr><td colspan="2" style="background:#ffffff;padding:36px 40px;font-size:15px;line-height:1.8;color:#2c3e50;">
+{content}
+  </td></tr>
+  <!-- Footer -->
+  <tr><td colspan="2" style="background:#ecf0f1;padding:20px 40px;">
+    <table role="presentation" width="100%"><tr>
+      <td style="font-size:12px;color:#7f8c8d;">{from_name} &copy; ' . $year . '</td>
+      <td align="right" style="font-size:11px;color:#95a5a6;">
+        <span style="color:#3498db;">&hearts;</span> Powered by VolunteerOps
+      </td>
+    </tr></table>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>';
+
+                // ── 5. Dark Mode ──────────────────────────────────────────
+                $tpl5 = '<!DOCTYPE html>
+<html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;}
+</style></head><body>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0d1117;">
+<tr><td align="center" style="padding:30px 16px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0">
+  <!-- Header -->
+  <tr><td style="background:#161b22;padding:32px 40px;border-bottom:1px solid #30363d;">
+    <table role="presentation" width="100%"><tr>
+      <td style="vertical-align:middle;">
+        <div style="display:inline-block;vertical-align:middle;margin-right:14px;">{logo_url}</div>
+        <span style="font-size:20px;font-weight:700;color:#f0f6fc;vertical-align:middle;">{from_name}</span>
+      </td>
+      <td align="right" style="vertical-align:middle;">
+        <span style="display:inline-block;background:#238636;color:#fff;font-size:11px;font-weight:600;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.5px;">Newsletter</span>
+      </td>
+    </tr></table>
+  </td></tr>
+  <!-- Body -->
+  <tr><td style="background:#0d1117;padding:36px 40px;font-size:15px;line-height:1.8;color:#c9d1d9;">
+{content}
+  </td></tr>
+  <!-- Footer -->
+  <tr><td style="background:#161b22;padding:24px 40px;border-top:1px solid #30363d;">
+    <table role="presentation" width="100%"><tr>
+      <td style="font-size:12px;color:#484f58;">&copy; ' . $year . ' {from_name}</td>
+      <td align="right" style="font-size:11px;color:#484f58;">
+        Made with <span style="color:#238636;">&hearts;</span> by VolunteerOps
+      </td>
+    </tr></table>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>';
+
+                $newTemplates = [
+                    ['name' => 'Minimal Clean',    'body' => $tpl1],
+                    ['name' => 'Bold Magazine',    'body' => $tpl2],
+                    ['name' => 'Card Style',       'body' => $tpl3],
+                    ['name' => 'Split Header',     'body' => $tpl4],
+                    ['name' => 'Dark Mode',        'body' => $tpl5],
+                ];
+
+                foreach ($newTemplates as $tpl) {
                     $exists = dbFetchValue("SELECT COUNT(*) FROM newsletter_templates WHERE name = ?", [$tpl['name']]);
                     if (!$exists) {
                         dbInsert(
