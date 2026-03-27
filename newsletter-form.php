@@ -26,7 +26,6 @@ $allRoles     = [
     ROLE_DEPARTMENT_ADMIN   => 'Διαχειριστές Τμήματος',
     ROLE_SYSTEM_ADMIN       => 'Διαχειριστές Συστήματος',
 ];
-$emailTemplates = dbFetchAll("SELECT id, name, subject, body_html FROM email_templates WHERE is_active = 1 ORDER BY name");
 $nlTemplates = dbFetchAll("SELECT id, name, is_default FROM newsletter_templates ORDER BY is_default DESC, name");
 
 // AJAX: count recipients
@@ -121,24 +120,6 @@ $countUrl = 'newsletter-form.php?action=count_recipients';
 
         <!-- Left column: content -->
         <div class="col-lg-8">
-
-            <!-- Load from template -->
-            <div class="card shadow-sm mb-3">
-                <div class="card-body py-2 d-flex align-items-center gap-3">
-                    <label class="fw-semibold text-muted mb-0 small"><i class="bi bi-lightning me-1"></i>Φόρτωση από πρότυπο:</label>
-                    <select id="loadTemplate" class="form-select form-select-sm w-auto">
-                        <option value="">— επιλέξτε —</option>
-                        <?php foreach ($emailTemplates as $tpl): ?>
-                        <option value="<?= $tpl['id'] ?>"
-                                data-subject="<?= h($tpl['subject']) ?>"
-                                data-body="<?= h($tpl['body_html']) ?>">
-                            <?= h($tpl['name']) ?>
-                        </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <small class="text-muted">Αντικαθιστά εντελώς τα παρακάτω πεδία.</small>
-                </div>
-            </div>
 
             <div class="card shadow-sm mb-3">
                 <div class="card-body">
@@ -306,16 +287,6 @@ $(function() {
     $(document).on('mousedown', '.tag-insert', function(e) {
         e.preventDefault(); // keeps Summernote focused so cursor stays in place
         $('#bodyHtml').summernote('insertText', $(this).data('tag'));
-    });
-
-    // Load from template
-    $('#loadTemplate').on('change', function() {
-        var sel = this.options[this.selectedIndex];
-        if (!sel.value) return;
-        if (!confirm('Αντικατάσταση θέματος και σώματος από το πρότυπο "' + sel.text + '";')) return;
-        $('#subjectField').val($(sel).data('subject'));
-        $('#bodyHtml').summernote('code', $(sel).data('body'));
-        this.value = '';
     });
 
     // Force Summernote to sync textarea content before form submit
