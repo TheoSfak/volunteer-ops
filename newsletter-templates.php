@@ -81,8 +81,8 @@ include __DIR__ . '/includes/header.php';
                     <span class="badge bg-info"><i class="bi bi-check-circle me-1"></i>Προεπιλογή</span>
                 <?php endif; ?>
             </div>
-            <div class="card-body p-0">
-                <iframe class="tpl-preview" style="width:100%;height:200px;border:0;pointer-events:none;" 
+            <div class="card-body p-0" style="height:220px;overflow:hidden;">
+                <iframe class="tpl-preview" style="width:200%;height:200%;border:0;pointer-events:none;transform:scale(0.5);transform-origin:top left;" 
                         data-header="<?= h($tpl['header_html']) ?>"
                         data-footer="<?= h($tpl['footer_html']) ?>"
                         sandbox="allow-same-origin"></iframe>
