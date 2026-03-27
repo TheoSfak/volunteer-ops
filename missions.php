@@ -105,51 +105,51 @@ include __DIR__ . '/includes/header.php';
 ?>
 
 <style>
-.vol-bar .progress {
-    background: rgba(0,0,0,.08);
-    border-radius: 8px;
-    overflow: hidden;
-}
-.vol-bar .progress-bar {
-    border-radius: 8px;
-    font-weight: 700;
-    font-size: 0.8rem;
-    letter-spacing: 0.5px;
-    transition: width .6s ease-in-out;
-    display: flex;
+.vol-pill {
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    gap: 4px;
-    padding: 0 8px;
-    line-height: 1;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 50px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #fff;
     white-space: nowrap;
-    overflow: visible;
-    flex-wrap: nowrap;
+    position: relative;
+    transition: all .3s ease;
 }
-.vol-bar .progress-bar.bg-danger {
-    background: linear-gradient(90deg, #dc3545, #ff6b6b) !important;
-    box-shadow: 0 0 10px rgba(220,53,69,.4);
+.vol-pill .vol-num {
+    font-size: 0.95rem;
+    letter-spacing: 0.5px;
 }
-.vol-bar .progress-bar.bg-warning {
-    background: linear-gradient(90deg, #fd7e14, #ffc107) !important;
-    box-shadow: 0 0 10px rgba(253,126,20,.35);
-    color: #fff !important;
+.vol-pill .bi {
+    font-size: 0.9rem;
 }
-.vol-bar .progress-bar.bg-success {
-    background: linear-gradient(90deg, #198754, #20c997) !important;
-    box-shadow: 0 0 12px rgba(25,135,84,.45);
+.vol-pill-danger {
+    background: linear-gradient(90deg, #dc3545 var(--fill), #f8d7da var(--fill));
+    box-shadow: 0 2px 8px rgba(220,53,69,.3);
 }
-.vol-bar .progress-bar.bar-full {
-    animation: pulse-green 1.5s ease-in-out infinite;
+.vol-pill-warning {
+    background: linear-gradient(90deg, #fd7e14 var(--fill), #fff3cd var(--fill));
+    box-shadow: 0 2px 8px rgba(253,126,20,.3);
 }
-@keyframes pulse-green {
-    0%, 100% { box-shadow: 0 0 8px rgba(25,135,84,.4); }
-    50% { box-shadow: 0 0 18px rgba(32,201,151,.7); }
+.vol-pill-success {
+    background: linear-gradient(90deg, #198754 var(--fill), #d1e7dd var(--fill));
+    box-shadow: 0 3px 12px rgba(25,135,84,.35);
+    animation: pill-glow 1.5s ease-in-out infinite;
 }
-.vol-bar .vol-label {
+@keyframes pill-glow {
+    0%, 100% { box-shadow: 0 2px 8px rgba(25,135,84,.3); }
+    50% { box-shadow: 0 4px 20px rgba(32,201,151,.6); }
+}
+.vol-pill-danger .vol-num,
+.vol-pill-warning .vol-num {
+    text-shadow: 0 1px 2px rgba(0,0,0,.2);
+}
+.vol-label {
     font-size: 0.78rem;
     font-weight: 600;
-    margin-top: 3px;
+    margin-top: 4px;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -285,16 +285,13 @@ include __DIR__ . '/includes/header.php';
                                     <?php if ($mission['status'] === STATUS_OPEN && $mission['max_volunteers'] > 0):
                                         $vPct = min(100, round(($mission['volunteer_count'] / $mission['max_volunteers']) * 100));
                                         $vColor = $vPct >= 100 ? 'success' : ($vPct >= 50 ? 'warning' : 'danger');
-                                        $vAnim = $vPct < 100 ? ' progress-bar-striped progress-bar-animated' : '';
-                                        $vFull = $vPct >= 100 ? ' bar-full' : '';
                                     ?>
-                                        <div class="vol-bar">
-                                            <div class="progress" style="height: 26px;">
-                                                <div class="progress-bar bg-<?= $vColor ?><?= $vAnim ?><?= $vFull ?>" role="progressbar" style="width: <?= max($vPct, 14) ?>%;" aria-valuenow="<?= $mission['volunteer_count'] ?>" aria-valuemin="0" aria-valuemax="<?= $mission['max_volunteers'] ?>">
-                                                    <?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?> <i class="bi bi-people-fill"></i>
-                                                </div>
-                                            </div>
-                                            <div class="vol-label text-<?= $vColor ?>">
+                                        <div class="text-center">
+                                            <span class="vol-pill vol-pill-<?= $vColor ?>" style="--fill: <?= $vPct ?>%;">
+                                                <span class="vol-num"><?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?></span>
+                                                <i class="bi bi-people-fill"></i>
+                                            </span>
+                                            <div class="vol-label justify-content-center text-<?= $vColor ?>">
                                                 <?php if ($vPct >= 100): ?>
                                                     <i class="bi bi-check-circle-fill"></i> Πλήρης!
                                                 <?php elseif ($vPct == 0): ?>
@@ -399,24 +396,21 @@ include __DIR__ . '/includes/header.php';
                             <?php if ($mission['status'] === STATUS_OPEN && $mission['max_volunteers'] > 0):
                                 $mPct = min(100, round(($mission['volunteer_count'] / $mission['max_volunteers']) * 100));
                                 $mColor = $mPct >= 100 ? 'success' : ($mPct >= 50 ? 'warning' : 'danger');
-                                $mAnim = $mPct < 100 ? ' progress-bar-striped progress-bar-animated' : '';
-                                $mFull = $mPct >= 100 ? ' bar-full' : '';
                             ?>
-                            <div class="mobile-card-row vol-bar">
-                                <div class="progress" style="height: 28px;">
-                                    <div class="progress-bar bg-<?= $mColor ?><?= $mAnim ?><?= $mFull ?>" role="progressbar" style="width: <?= max($mPct, 15) ?>%;" aria-valuenow="<?= $mission['volunteer_count'] ?>" aria-valuemin="0" aria-valuemax="<?= $mission['max_volunteers'] ?>">
-                                        <?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?> <i class="bi bi-people-fill"></i>
-                                    </div>
-                                </div>
-                                <div class="vol-label text-<?= $mColor ?>">
+                            <div class="mobile-card-row">
+                                <span class="vol-pill vol-pill-<?= $mColor ?>" style="--fill: <?= $mPct ?>%;">
+                                    <span class="vol-num"><?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?></span>
+                                    <i class="bi bi-people-fill"></i>
+                                </span>
+                                <span class="vol-label d-inline-flex ms-2 text-<?= $mColor ?>">
                                     <?php if ($mPct >= 100): ?>
                                         <i class="bi bi-check-circle-fill"></i> Πλήρης!
                                     <?php elseif ($mPct == 0): ?>
-                                        <i class="bi bi-exclamation-triangle-fill"></i> Χρειάζονται εθελοντές
+                                        <i class="bi bi-exclamation-triangle-fill"></i> Κενό
                                     <?php else: ?>
-                                        <i class="bi bi-hourglass-split"></i> Απομένουν <?= $mission['max_volunteers'] - $mission['volunteer_count'] ?>
+                                        <i class="bi bi-hourglass-split"></i> -<?= $mission['max_volunteers'] - $mission['volunteer_count'] ?>
                                     <?php endif; ?>
-                                </div>
+                                </span>
                             </div>
                             <div class="mobile-card-row">
                                 <small>
