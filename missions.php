@@ -106,45 +106,43 @@ include __DIR__ . '/includes/header.php';
 
 <style>
 .vol-pill {
-    display: inline-flex;
+    display: flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
-    padding: 6px 14px;
+    padding: 7px 16px;
     border-radius: 50px;
     font-weight: 700;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     color: #fff;
     white-space: nowrap;
-    position: relative;
     transition: all .3s ease;
+    text-shadow: 0 1px 3px rgba(0,0,0,.35);
+    width: 100%;
 }
 .vol-pill .vol-num {
-    font-size: 0.95rem;
+    font-size: 1rem;
     letter-spacing: 0.5px;
 }
 .vol-pill .bi {
-    font-size: 0.9rem;
+    font-size: 0.95rem;
 }
 .vol-pill-danger {
-    background: linear-gradient(90deg, #dc3545 var(--fill), #f8d7da var(--fill));
+    background: linear-gradient(90deg, #dc3545 var(--fill), #6c2029 var(--fill));
     box-shadow: 0 2px 8px rgba(220,53,69,.3);
 }
 .vol-pill-warning {
-    background: linear-gradient(90deg, #fd7e14 var(--fill), #fff3cd var(--fill));
+    background: linear-gradient(90deg, #fd7e14 var(--fill), #7a3d0a var(--fill));
     box-shadow: 0 2px 8px rgba(253,126,20,.3);
 }
 .vol-pill-success {
-    background: linear-gradient(90deg, #198754 var(--fill), #d1e7dd var(--fill));
+    background: linear-gradient(90deg, #198754 var(--fill), #0a4a2e var(--fill));
     box-shadow: 0 3px 12px rgba(25,135,84,.35);
     animation: pill-glow 1.5s ease-in-out infinite;
 }
 @keyframes pill-glow {
     0%, 100% { box-shadow: 0 2px 8px rgba(25,135,84,.3); }
     50% { box-shadow: 0 4px 20px rgba(32,201,151,.6); }
-}
-.vol-pill-danger .vol-num,
-.vol-pill-warning .vol-num {
-    text-shadow: 0 1px 2px rgba(0,0,0,.2);
 }
 .vol-label {
     font-size: 0.78rem;
