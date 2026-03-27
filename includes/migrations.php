@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 42;
+    $LATEST_MIGRATION_VERSION = 43;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -2719,6 +2719,52 @@ function runSchemaMigrations(): void {
                 if (!$col2) {
                     dbExecute("ALTER TABLE inventory_items ADD COLUMN registration_number VARCHAR(50) NULL AFTER registration_date");
                 }
+            },
+        ],
+
+        // ── v43: Newsletter template settings + extra_emails column ──
+        [
+            'version'     => 43,
+            'description' => 'Add newsletter_template_header/footer settings and newsletters.extra_emails column',
+            'up' => function () {
+                // 1. Add extra_emails column to newsletters
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'newsletters'
+                       AND COLUMN_NAME  = 'extra_emails'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE newsletters ADD COLUMN extra_emails TEXT NULL AFTER filter_dept_id");
+                }
+
+                // 2. Insert default newsletter template header
+                $defaultHeader = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:0}
+.wrap{max-width:600px;margin:30px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.hdr{background:#c0392b;padding:24px 32px;color:#fff}.hdr h2{margin:0;font-size:22px}
+.body{padding:32px;color:#333;line-height:1.6}.ftr{background:#f8f8f8;padding:16px 32px;font-size:12px;color:#aaa;text-align:center}
+</style></head><body>
+<div class="wrap">
+  <div class="hdr"><h2>{from_name}</h2></div>
+  <div class="body">';
+
+                $defaultFooter = '</div>
+  <div class="ftr"><p>Αυτό το email στάλθηκε από {from_name}.</p></div>
+</div></body></html>';
+
+                dbExecute(
+                    "INSERT INTO settings (setting_key, setting_value, created_at, updated_at)
+                     VALUES ('newsletter_template_header', ?, NOW(), NOW())
+                     ON DUPLICATE KEY UPDATE setting_key = setting_key",
+                    [$defaultHeader]
+                );
+                dbExecute(
+                    "INSERT INTO settings (setting_key, setting_value, created_at, updated_at)
+                     VALUES ('newsletter_template_footer', ?, NOW(), NOW())
+                     ON DUPLICATE KEY UPDATE setting_key = setting_key",
+                    [$defaultFooter]
+                );
             },
         ],
 

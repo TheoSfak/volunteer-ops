@@ -1534,6 +1534,7 @@ CREATE TABLE IF NOT EXISTS `newsletters` (
     `status` ENUM('draft','sending','sent','failed') NOT NULL DEFAULT 'draft',
     `filter_roles` JSON NULL COMMENT 'Array of roles to send to, NULL = all',
     `filter_dept_id` INT UNSIGNED NULL COMMENT 'Limit to one department, NULL = all',
+    `extra_emails` TEXT NULL COMMENT 'Manual email addresses, one per line',
     `total_recipients` INT UNSIGNED NOT NULL DEFAULT 0,
     `sent_count` INT UNSIGNED NOT NULL DEFAULT 0,
     `failed_count` INT UNSIGNED NOT NULL DEFAULT 0,
