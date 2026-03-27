@@ -79,7 +79,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <!-- Stats Cards -->
-<div class="row g-3 mb-4">
+<div class="row g-3 mb-4 no-print">
     <div class="col-6 col-md-3 col-xl">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body text-center py-3">
@@ -123,7 +123,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <!-- Filters -->
-<div class="card mb-4">
+<div class="card mb-4 no-print">
     <div class="card-body">
         <form method="get" class="row g-3">
             <div class="col-md-3">
@@ -164,7 +164,7 @@ include __DIR__ . '/includes/header.php';
 
 <?php if (isAdmin() && count($departments) > 0): ?>
 <!-- Warehouse filter -->
-<div class="card mb-4">
+<div class="card mb-4 no-print">
     <div class="card-body py-2">
         <form method="post" class="d-flex align-items-center gap-3">
             <?= csrfField() ?>
@@ -220,7 +220,7 @@ include __DIR__ . '/includes/header.php';
                             <?php endif; ?>
                             <th>Κατάσταση</th>
                             <th>Χρεωμένο σε</th>
-                            <th class="text-end">Ενέργειες</th>
+                            <th class="text-end col-actions">Ενέργειες</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -284,7 +284,7 @@ include __DIR__ . '/includes/header.php';
                                         <span class="text-muted">-</span>
                                     <?php endif; ?>
                                 </td>
-                                <td class="text-end">
+                                <td class="text-end col-actions">
                                     <div class="btn-group btn-group-sm">
                                         <a href="inventory-view.php?id=<?= $item['id'] ?>" class="btn btn-outline-primary" title="Προβολή">
                                             <i class="bi bi-eye"></i>
@@ -320,7 +320,7 @@ include __DIR__ . '/includes/header.php';
 @media print {
     .no-print, .sidebar, .navbar, .card-footer, .btn-group,
     #btnPrintSelected, .form-check-input, #chkAll,
-    [data-bs-toggle="modal"] { display: none !important; }
+    [data-bs-toggle="modal"], .col-actions { display: none !important; }
     body { background: #fff !important; font-size: 11pt; }
     .card { border: none !important; box-shadow: none !important; }
     .card-body { padding: 0 !important; }
