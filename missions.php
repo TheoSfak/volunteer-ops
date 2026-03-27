@@ -116,6 +116,12 @@ include __DIR__ . '/includes/header.php';
     font-size: 0.8rem;
     letter-spacing: 0.5px;
     transition: width .6s ease-in-out;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 0 8px;
+    line-height: 1;
 }
 .vol-bar .progress-bar.bg-danger {
     background: linear-gradient(90deg, #dc3545, #ff6b6b) !important;
@@ -280,9 +286,9 @@ include __DIR__ . '/includes/header.php';
                                         $vFull = $vPct >= 100 ? ' bar-full' : '';
                                     ?>
                                         <div class="vol-bar">
-                                            <div class="progress" style="height: 22px;">
-                                                <div class="progress-bar bg-<?= $vColor ?><?= $vAnim ?><?= $vFull ?>" role="progressbar" style="width: <?= max($vPct, 12) ?>%;" aria-valuenow="<?= $mission['volunteer_count'] ?>" aria-valuemin="0" aria-valuemax="<?= $mission['max_volunteers'] ?>">
-                                                    <i class="bi bi-people-fill me-1"></i><?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?>
+                                            <div class="progress" style="height: 26px;">
+                                                <div class="progress-bar bg-<?= $vColor ?><?= $vAnim ?><?= $vFull ?>" role="progressbar" style="width: <?= max($vPct, 14) ?>%;" aria-valuenow="<?= $mission['volunteer_count'] ?>" aria-valuemin="0" aria-valuemax="<?= $mission['max_volunteers'] ?>">
+                                                    <?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?> <i class="bi bi-people-fill"></i>
                                                 </div>
                                             </div>
                                             <div class="vol-label text-<?= $vColor ?>">
@@ -394,9 +400,9 @@ include __DIR__ . '/includes/header.php';
                                 $mFull = $mPct >= 100 ? ' bar-full' : '';
                             ?>
                             <div class="mobile-card-row vol-bar">
-                                <div class="progress" style="height: 24px;">
+                                <div class="progress" style="height: 28px;">
                                     <div class="progress-bar bg-<?= $mColor ?><?= $mAnim ?><?= $mFull ?>" role="progressbar" style="width: <?= max($mPct, 15) ?>%;" aria-valuenow="<?= $mission['volunteer_count'] ?>" aria-valuemin="0" aria-valuemax="<?= $mission['max_volunteers'] ?>">
-                                        <i class="bi bi-people-fill me-1"></i><?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?>
+                                        <?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?> <i class="bi bi-people-fill"></i>
                                     </div>
                                 </div>
                                 <div class="vol-label text-<?= $mColor ?>">
