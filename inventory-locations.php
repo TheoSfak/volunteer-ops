@@ -96,6 +96,21 @@ if (isPost()) {
         setFlash('success', $isActive ? 'Η τοποθεσία ενεργοποιήθηκε.' : 'Η τοποθεσία απενεργοποιήθηκε.');
         redirect('inventory-locations.php');
     }
+
+    if ($action === 'delete') {
+        $locId = (int)post('location_id');
+        // Check if location has active items
+        $itemCount = (int)dbFetchValue("SELECT COUNT(*) FROM inventory_items WHERE location_id = ? AND is_active = 1", [$locId]);
+        if ($itemCount > 0) {
+            setFlash('error', 'Δεν μπορεί να διαγραφεί η τοποθεσία γιατί περιέχει ' . $itemCount . ' ενεργά υλικά. Μετακινήστε τα πρώτα.');
+        } else {
+            $loc = dbFetchOne("SELECT name FROM inventory_locations WHERE id = ?", [$locId]);
+            dbExecute("DELETE FROM inventory_locations WHERE id = ?", [$locId]);
+            logAudit('inventory_location_delete', 'inventory_locations', $locId);
+            setFlash('success', 'Η τοποθεσία «' . ($loc['name'] ?? '') . '» διαγράφηκε.');
+        }
+        redirect('inventory-locations.php');
+    }
 }
 
 // Fetch all locations (including inactive for admin)
@@ -210,6 +225,16 @@ include __DIR__ . '/includes/header.php';
                                                             title="<?= $loc['is_active'] ? 'Απενεργοποίηση' : 'Ενεργοποίηση' ?>"
                                                             onclick="return confirm('<?= $loc['is_active'] ? 'Απενεργοποίηση' : 'Ενεργοποίηση' ?> τοποθεσίας;')">
                                                         <i class="bi bi-<?= $loc['is_active'] ? 'pause' : 'play' ?>"></i>
+                                                    </button>
+                                                </form>
+                                                <form method="post" class="d-inline">
+                                                    <?= csrfField() ?>
+                                                    <input type="hidden" name="action" value="delete">
+                                                    <input type="hidden" name="location_id" value="<?= $loc['id'] ?>">
+                                                    <button type="submit" class="btn btn-outline-danger"
+                                                            title="Διαγραφή"
+                                                            onclick="return confirm('Διαγραφή τοποθεσίας «<?= h($loc['name']) ?>»;\n<?= $loc['item_count'] > 0 ? 'Περιέχει ' . $loc['item_count'] . ' υλικά!' : 'Δεν περιέχει υλικά.' ?>')">
+                                                        <i class="bi bi-trash"></i>
                                                     </button>
                                                 </form>
                                             </div>
