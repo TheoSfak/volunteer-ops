@@ -90,6 +90,7 @@ foreach ($items as $it) {
             border: 1.5px dashed #aaa;
             border-radius: 6px;
             width: 180px;
+            height: 140px;
             display: flex;
             flex-direction: column;
             align-items: center;
