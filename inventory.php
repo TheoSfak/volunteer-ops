@@ -321,6 +321,11 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <style>
+.form-check-input {
+    width: 1.4em !important;
+    height: 1.4em !important;
+    cursor: pointer;
+}
 @media print {
     .no-print, .sidebar, .navbar, .card-footer, .btn-group,
     #btnPrintSelected, .form-check-input, #chkAll,
