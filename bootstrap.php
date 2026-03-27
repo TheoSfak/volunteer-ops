@@ -43,7 +43,7 @@ initSession();
 header('X-Frame-Options: SAMEORIGIN');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: strict-origin-when-cross-origin');
-header('Permissions-Policy: camera=(), microphone=(), geolocation=(self)');
+header('Permissions-Policy: camera=(self), microphone=(), geolocation=(self)');
 header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self'");
 if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
