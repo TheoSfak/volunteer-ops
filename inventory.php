@@ -249,7 +249,7 @@ include __DIR__ . '/includes/header.php';
                                         </a>
                                     <?php endif; ?>
                                 </td>
-                                <td><small><?= $item['registration_date'] ? formatDate($item['registration_date']) : '<span class="text-muted">-</span>' ?></small></td>
+                                <td><small><?= !empty($item['registration_date'] ?? null) ? formatDate($item['registration_date']) : '<span class="text-muted">-</span>' ?></small></td>
                                 <td><small><?= h($item['registration_number'] ?? '-') ?></small></td>
                                 <td>
                                     <?php if ($item['category_name']): ?>
