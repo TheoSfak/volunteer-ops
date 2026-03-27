@@ -203,7 +203,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         <?php else: ?>
             <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
+                <table class="table table-hover table-sm align-middle mb-0" style="font-size:0.85rem;">
                     <thead class="table-light">
                         <tr>
                             <?php if (canManageInventory()): ?>
@@ -213,6 +213,8 @@ include __DIR__ . '/includes/header.php';
                             <?php endif; ?>
                             <th>Barcode</th>
                             <th>Όνομα</th>
+                            <th>Εγγραφή</th>
+                            <th>Α.Μ</th>
                             <th>Κατηγορία</th>
                             <th>Τοποθεσία</th>
                             <?php if (isSystemAdmin()): ?>
@@ -247,6 +249,8 @@ include __DIR__ . '/includes/header.php';
                                         </a>
                                     <?php endif; ?>
                                 </td>
+                                <td><small><?= $item['registration_date'] ? formatDate($item['registration_date']) : '<span class="text-muted">-</span>' ?></small></td>
+                                <td><small><?= h($item['registration_number'] ?? '-') ?></small></td>
                                 <td>
                                     <?php if ($item['category_name']): ?>
                                         <span class="badge" style="background-color: <?= h($item['category_color']) ?>">
@@ -324,8 +328,8 @@ include __DIR__ . '/includes/header.php';
     body { background: #fff !important; font-size: 11pt; }
     .card { border: none !important; box-shadow: none !important; }
     .card-body { padding: 0 !important; }
-    .table { font-size: 10pt; }
-    .table th, .table td { padding: 4px 8px !important; }
+    .table { font-size: 9pt; }
+    .table th, .table td { padding: 3px 5px !important; white-space: nowrap; }
     h1.h3 { font-size: 14pt !important; }
     .badge { border: 1px solid #999 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
     @page { size: A4 landscape; margin: 10mm; }

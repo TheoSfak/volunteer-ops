@@ -157,6 +157,14 @@ include __DIR__ . '/includes/header.php';
                         <code class="fs-5 text-primary"><?= h($item['barcode']) ?></code>
                     </div>
                     <div class="col-md-4">
+                        <strong class="text-muted d-block mb-1">Ημ/νία Εγγραφής</strong>
+                        <?= $item['registration_date'] ? formatDate($item['registration_date']) : '<span class="text-muted">—</span>' ?>
+                    </div>
+                    <div class="col-md-4">
+                        <strong class="text-muted d-block mb-1">Α.Μ (Αριθμός Μητρώου)</strong>
+                        <?= !empty($item['registration_number']) ? h($item['registration_number']) : '<span class="text-muted">—</span>' ?>
+                    </div>
+                    <div class="col-md-4">
                         <strong class="text-muted d-block mb-1">Κατηγορία</strong>
                         <?php if ($item['category_name']): ?>
                             <span class="badge" style="background-color: <?= h($item['category_color']) ?>">

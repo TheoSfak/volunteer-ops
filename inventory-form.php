@@ -63,16 +63,18 @@ if (isPost()) {
 
     // Save action (create/edit)
     $data = [
-        'barcode'         => trim(post('barcode')),
-        'name'            => trim(post('name')),
-        'description'     => post('description'),
-        'category_id'     => post('category_id') ?: null,
-        'department_id'   => post('department_id') ?: null,
-        'location_id'     => post('location_id') ?: null,
-        'location_notes'  => post('location_notes'),
-        'status'          => post('status', 'available'),
-        'condition_notes' => post('condition_notes'),
-        'quantity'        => max(1, (int)post('quantity', 1)),
+        'barcode'              => trim(post('barcode')),
+        'name'                 => trim(post('name')),
+        'registration_date'    => post('registration_date') ?: null,
+        'registration_number'  => trim(post('registration_number')) ?: null,
+        'description'          => post('description'),
+        'category_id'          => post('category_id') ?: null,
+        'department_id'        => post('department_id') ?: null,
+        'location_id'          => post('location_id') ?: null,
+        'location_notes'       => post('location_notes'),
+        'status'               => post('status', 'available'),
+        'condition_notes'      => post('condition_notes'),
+        'quantity'             => max(1, (int)post('quantity', 1)),
     ];
 
     // Validation
@@ -96,12 +98,14 @@ if (isPost()) {
             if ($isEdit) {
                 dbExecute("
                     UPDATE inventory_items SET
-                        barcode = ?, name = ?, description = ?, category_id = ?,
+                        barcode = ?, name = ?, registration_date = ?, registration_number = ?,
+                        description = ?, category_id = ?,
                         department_id = ?, location_id = ?, location_notes = ?,
                         status = ?, condition_notes = ?, quantity = ?, updated_at = NOW()
                     WHERE id = ?
                 ", [
-                    $data['barcode'], $data['name'], $data['description'], $data['category_id'],
+                    $data['barcode'], $data['name'], $data['registration_date'], $data['registration_number'],
+                    $data['description'], $data['category_id'],
                     $data['department_id'], $data['location_id'], $data['location_notes'],
                     $data['status'], $data['condition_notes'], $data['quantity'], $id
                 ]);
@@ -111,11 +115,13 @@ if (isPost()) {
             } else {
                 $newId = dbInsert("
                     INSERT INTO inventory_items 
-                        (barcode, name, description, category_id, department_id, location_id,
+                        (barcode, name, registration_date, registration_number,
+                         description, category_id, department_id, location_id,
                          location_notes, status, condition_notes, quantity, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ", [
-                    $data['barcode'], $data['name'], $data['description'], $data['category_id'],
+                    $data['barcode'], $data['name'], $data['registration_date'], $data['registration_number'],
+                    $data['description'], $data['category_id'],
                     $data['department_id'], $data['location_id'], $data['location_notes'],
                     $data['status'], $data['condition_notes'], $data['quantity'], $user['id']
                 ]);
@@ -190,6 +196,20 @@ include __DIR__ . '/includes/header.php';
                             <label for="name" class="form-label">Όνομα *</label>
                             <input type="text" class="form-control" id="name" name="name"
                                    value="<?= h($item['name'] ?? post('name')) ?>" required>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="registration_date" class="form-label">Ημ/νία Εγγραφής</label>
+                            <input type="date" class="form-control" id="registration_date" name="registration_date"
+                                   value="<?= h($item['registration_date'] ?? post('registration_date')) ?>">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="registration_number" class="form-label">Α.Μ (Αριθμός Μητρώου)</label>
+                            <input type="text" class="form-control" id="registration_number" name="registration_number"
+                                   value="<?= h($item['registration_number'] ?? post('registration_number')) ?>"
+                                   placeholder="π.χ. 12345">
                         </div>
                     </div>
 
