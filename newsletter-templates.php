@@ -83,8 +83,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="card-body p-0" style="height:220px;overflow:hidden;">
                 <iframe class="tpl-preview" style="width:200%;height:200%;border:0;pointer-events:none;transform:scale(0.5);transform-origin:top left;" 
-                        data-header="<?= h($tpl['header_html']) ?>"
-                        data-footer="<?= h($tpl['footer_html']) ?>"
+                        data-body="<?= h($tpl['body_html']) ?>"
                         sandbox="allow-same-origin"></iframe>
             </div>
             <div class="card-footer bg-white">
@@ -133,9 +132,10 @@ include __DIR__ . '/includes/header.php';
     var logoHtml = logoUrl ? '<img src="uploads/logos/' + logoUrl + '" alt="" style="max-height:50px;margin-bottom:10px;">' : '';
 
     document.querySelectorAll('.tpl-preview').forEach(function(frame) {
-        var header = (frame.dataset.header || '').replace(/\{from_name\}/g, fromName).replace(/\{logo_url\}/g, logoHtml);
-        var footer = (frame.dataset.footer || '').replace(/\{from_name\}/g, fromName).replace(/\{logo_url\}/g, logoHtml);
-        var html = header + '<p style="color:#999;font-style:italic;padding:0 10px;">Δείγμα περιεχομένου newsletter…</p>' + footer;
+        var tplBody = (frame.dataset.body || '{content}');
+        var html = tplBody.replace(/\{from_name\}/g, fromName)
+                          .replace(/\{logo_url\}/g, logoHtml)
+                          .replace(/\{content\}/g, '<p style="color:#999;font-style:italic;padding:0 10px;">Δείγμα περιεχομένου newsletter…</p>');
         frame.srcdoc = html;
     });
 })();

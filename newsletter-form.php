@@ -273,11 +273,6 @@ $(function() {
         callbacks: {
             onInit: function() {
                 updateRecipientCount();
-                // Fix BS5 tooltip interference on toolbar buttons
-                $('.note-editor .note-btn').each(function() {
-                    var t = bootstrap.Tooltip.getInstance(this);
-                    if (t) t.dispose();
-                });
             }
         }
     });
