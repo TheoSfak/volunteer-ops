@@ -16,6 +16,11 @@ if (!defined('VOLUNTEEROPS')) {
  * @return array [int $count, array $users]
  */
 function buildRecipientQuery(array $roles, int $deptId, bool $countOnly = false): array {
+    // Empty roles = no recipients (manual-only mode)
+    if (empty($roles) && $deptId <= 0) {
+        return [0, []];
+    }
+
     $params = [];
     $where  = ['u.is_active = 1', 'u.deleted_at IS NULL', 'u.email IS NOT NULL', "u.email != ''", 'u.newsletter_unsubscribed = 0'];
 

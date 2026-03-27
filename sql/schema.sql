@@ -1525,6 +1525,17 @@ CREATE TABLE IF NOT EXISTS `inventory_kit_items` (
 -- NEWSLETTER SYSTEM TABLES
 -- =============================================
 
+-- NEWSLETTER TEMPLATES
+CREATE TABLE IF NOT EXISTS `newsletter_templates` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(100) NOT NULL,
+    `header_html` MEDIUMTEXT NOT NULL,
+    `footer_html` MEDIUMTEXT NOT NULL,
+    `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- NEWSLETTERS
 CREATE TABLE IF NOT EXISTS `newsletters` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -1535,6 +1546,7 @@ CREATE TABLE IF NOT EXISTS `newsletters` (
     `filter_roles` JSON NULL COMMENT 'Array of roles to send to, NULL = all',
     `filter_dept_id` INT UNSIGNED NULL COMMENT 'Limit to one department, NULL = all',
     `extra_emails` TEXT NULL COMMENT 'Manual email addresses, one per line',
+    `template_id` INT UNSIGNED NULL COMMENT 'FK to newsletter_templates',
     `total_recipients` INT UNSIGNED NOT NULL DEFAULT 0,
     `sent_count` INT UNSIGNED NOT NULL DEFAULT 0,
     `failed_count` INT UNSIGNED NOT NULL DEFAULT 0,

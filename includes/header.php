@@ -968,7 +968,7 @@ if (isLoggedIn()) {
             <div class="sidebar-section">Επικοινωνία</div>
             
             <li class="nav-item">
-                <a class="nav-link <?= in_array($currentPage, ['newsletters', 'newsletter-form', 'newsletter-view', 'newsletter-log']) ? 'active' : '' ?>" href="newsletters.php">
+                <a class="nav-link <?= in_array($currentPage, ['newsletters', 'newsletter-form', 'newsletter-view', 'newsletter-log', 'newsletter-templates', 'newsletter-template-form']) ? 'active' : '' ?>" href="newsletters.php">
                     <i class="bi bi-envelope-paper"></i> Ενημερωτικά
                 </a>
             </li>

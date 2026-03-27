@@ -7,22 +7,6 @@ requireRole([ROLE_SYSTEM_ADMIN]);
 
 $pageTitle = 'Ενημερωτικά Δελτία';
 
-// Handle save template
-if (isPost() && post('action') === 'save_template') {
-    verifyCsrf();
-    $header = post('newsletter_template_header');
-    $footer = post('newsletter_template_footer');
-    dbExecute("INSERT INTO settings (setting_key, setting_value, created_at, updated_at)
-               VALUES ('newsletter_template_header', ?, NOW(), NOW())
-               ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()", [$header]);
-    dbExecute("INSERT INTO settings (setting_key, setting_value, created_at, updated_at)
-               VALUES ('newsletter_template_footer', ?, NOW(), NOW())
-               ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()", [$footer]);
-    logAudit('newsletter_template_update', 'settings', 0);
-    setFlash('success', 'Το πρότυπο email αποθηκεύτηκε.');
-    redirect('newsletters.php');
-}
-
 // Handle delete draft
 if (isPost() && post('action') === 'delete') {
     verifyCsrf();
@@ -56,31 +40,15 @@ $totalEmailsSent  = dbFetchValue("SELECT COALESCE(SUM(sent_count),0) FROM newsle
 $totalUnsubs      = dbFetchValue("SELECT COUNT(*) FROM newsletter_unsubscribes WHERE unsubscribed_at IS NOT NULL");
 $totalFailed      = dbFetchValue("SELECT COALESCE(SUM(failed_count),0) FROM newsletters WHERE status = 'sent'");
 
-// Newsletter template defaults
-$defaultHeader = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:0}
-.wrap{max-width:600px;margin:30px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}
-.hdr{background:#c0392b;padding:24px 32px;color:#fff}.hdr h2{margin:0;font-size:22px}
-.body{padding:32px;color:#333;line-height:1.6}.ftr{background:#f8f8f8;padding:16px 32px;font-size:12px;color:#aaa;text-align:center}
-</style></head><body>
-<div class="wrap">
-  <div class="hdr"><h2>{from_name}</h2></div>
-  <div class="body">';
-$defaultFooter = '</div>
-  <div class="ftr"><p>Αυτό το email στάλθηκε από {from_name}.</p></div>
-</div></body></html>';
-$tplHeader = getSetting('newsletter_template_header', $defaultHeader);
-$tplFooter = getSetting('newsletter_template_footer', $defaultFooter);
-
 include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0"><i class="bi bi-envelope-paper me-2"></i><?= h($pageTitle) ?></h1>
     <div class="d-flex gap-2">
-        <button class="btn btn-outline-info" type="button" data-bs-toggle="collapse" data-bs-target="#templateEditor">
-            <i class="bi bi-palette me-1"></i>Πρότυπο Email
-        </button>
+        <a href="newsletter-templates.php" class="btn btn-outline-info">
+            <i class="bi bi-palette me-1"></i>Πρότυπα Email
+        </a>
         <a href="newsletter-log.php" class="btn btn-outline-secondary">
             <i class="bi bi-bar-chart me-1"></i>Στατιστικά
         </a>
@@ -91,40 +59,6 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?= displayFlash() ?>
-
-<!-- Newsletter email template editor (collapsible) -->
-<div class="collapse mb-4" id="templateEditor">
-    <div class="card shadow-sm border-info">
-        <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center">
-            <strong><i class="bi bi-palette me-2"></i>Πρότυπο Email Newsletter</strong>
-            <small class="text-muted">Χρησιμοποιήστε <code>{from_name}</code> για το όνομα αποστολέα</small>
-        </div>
-        <div class="card-body">
-            <form method="post" id="templateForm">
-                <?= csrfField() ?>
-                <input type="hidden" name="action" value="save_template">
-                <div class="row g-3">
-                    <div class="col-lg-6">
-                        <label class="form-label fw-semibold">Header HTML <small class="text-muted">(πριν το περιεχόμενο)</small></label>
-                        <textarea class="form-control font-monospace" name="newsletter_template_header" id="tplHeader" rows="10" style="font-size:0.8rem;"><?= h($tplHeader) ?></textarea>
-                    </div>
-                    <div class="col-lg-6">
-                        <label class="form-label fw-semibold">Footer HTML <small class="text-muted">(μετά το περιεχόμενο)</small></label>
-                        <textarea class="form-control font-monospace" name="newsletter_template_footer" id="tplFooter" rows="10" style="font-size:0.8rem;"><?= h($tplFooter) ?></textarea>
-                    </div>
-                    <div class="col-12">
-                        <label class="form-label fw-semibold">Προεπισκόπηση</label>
-                        <iframe id="tplPreview" style="width:100%;height:300px;border:1px solid #dee2e6;border-radius:6px;" sandbox="allow-same-origin"></iframe>
-                    </div>
-                    <div class="col-12 d-flex justify-content-end gap-2">
-                        <button type="button" class="btn btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#templateEditor">Κλείσιμο</button>
-                        <button type="submit" class="btn btn-info"><i class="bi bi-floppy me-1"></i>Αποθήκευση Προτύπου</button>
-                    </div>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
 
 <!-- Stats cards -->
 <div class="row g-3 mb-4">
@@ -265,26 +199,6 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
-// Template preview
-(function() {
-    var fromName = <?= json_encode(getSetting('smtp_from_name', 'VolunteerOps')) ?>;
-    var headerEl = document.getElementById('tplHeader');
-    var footerEl = document.getElementById('tplFooter');
-    var preview  = document.getElementById('tplPreview');
-    function updatePreview() {
-        var h = (headerEl.value || '').replace(/\{from_name\}/g, fromName);
-        var f = (footerEl.value || '').replace(/\{from_name\}/g, fromName);
-        var html = h + '<p style="color:#999;font-style:italic;">Εδώ εμφανίζεται το περιεχόμενο του newsletter…</p>' + f;
-        preview.srcdoc = html;
-    }
-    headerEl.addEventListener('input', updatePreview);
-    footerEl.addEventListener('input', updatePreview);
-    // Initial render when collapse opens
-    document.getElementById('templateEditor').addEventListener('shown.bs.collapse', updatePreview);
-    // Also render immediately if already visible
-    updatePreview();
-})();
-
 document.getElementById('deleteModal').addEventListener('show.bs.modal', function(e) {
     var btn = e.relatedTarget;
     document.getElementById('deleteId').value    = btn.dataset.id;
