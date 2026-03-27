@@ -36,6 +36,7 @@ $defaults = [
     'show_register_button' => '0',
     'require_approval' => '0',
     'maintenance_mode' => '0',
+    'session_timeout_minutes' => '120',
     'shift_reminder_hours' => '24',
     'resend_mission_hours_before' => '48',
     'resend_mission_enabled' => '1',
@@ -510,6 +511,7 @@ if (isPost()) {
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled',
             'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode',
+            'session_timeout_minutes',
             'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled'
         ];
         
@@ -1070,6 +1072,13 @@ include __DIR__ . '/includes/header.php';
                         <label class="form-check-label text-danger" for="maintenance">
                             <strong>Λειτουργία Συντήρησης</strong> (μόνο διαχειριστές έχουν πρόσβαση)
                         </label>
+                    </div>
+                    <hr>
+                    <div class="mb-0">
+                        <label class="form-label" for="sessionTimeout"><i class="bi bi-clock-history me-1"></i>Αυτόματη αποσύνδεση μετά από αδράνεια (λεπτά)</label>
+                        <input type="number" class="form-control" name="session_timeout_minutes" id="sessionTimeout"
+                               value="<?= h($settings['session_timeout_minutes'] ?? '120') ?>" min="5" max="1440" style="max-width:200px;">
+                        <div class="form-text">Αν ο χρήστης είναι ανενεργός για τόσα λεπτά, αποσυνδέεται αυτόματα. (5-1440 λεπτά)</div>
                     </div>
                 </div>
             </div>
