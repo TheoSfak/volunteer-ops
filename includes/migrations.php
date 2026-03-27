@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 44;
+    $LATEST_MIGRATION_VERSION = 45;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -2799,31 +2799,54 @@ function runSchemaMigrations(): void {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-body { font-family: \"Segoe UI\", Arial, sans-serif; background: #f0f2f5; margin: 0; padding: 0; }
-.email-wrap { max-width: 600px; margin: 30px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
-.email-header { background: linear-gradient(135deg, #c0392b 0%, #e74c3c 100%); padding: 28px 32px; text-align: center; }
-.email-header img { max-height: 50px; margin-bottom: 10px; }
-.email-header h2 { margin: 0; color: #ffffff; font-size: 20px; font-weight: 600; letter-spacing: 0.3px; }
-.email-body { padding: 36px 32px; color: #2c3e50; line-height: 1.7; font-size: 15px; }
-.email-footer { background: #f8f9fa; padding: 20px 32px; text-align: center; border-top: 1px solid #eee; }
-.email-footer p { margin: 4px 0; font-size: 12px; color: #95a5a6; }
-.email-footer a { color: #c0392b; text-decoration: none; }
+body { margin:0; padding:0; background:#eef1f6; font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+.email-container { max-width:600px; margin:0 auto; }
+.email-preheader { display:none !important; font-size:1px; line-height:1px; max-height:0; overflow:hidden; }
+.email-top-accent { height:6px; background: linear-gradient(90deg, #c0392b 0%, #e74c3c 25%, #f39c12 50%, #27ae60 75%, #2980b9 100%); }
+.email-header { background: linear-gradient(160deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%); padding:40px 32px 32px; text-align:center; }
+.email-header .logo-circle { display:inline-block; width:72px; height:72px; border-radius:50%; background:rgba(255,255,255,.12); border:2px solid rgba(255,255,255,.2); padding:10px; margin-bottom:16px; }
+.email-header .logo-circle img { max-height:48px; max-width:48px; vertical-align:middle; }
+.email-header h1 { margin:0; color:#ffffff; font-size:26px; font-weight:700; letter-spacing:0.5px; text-shadow:0 2px 8px rgba(0,0,0,.3); }
+.email-header .tagline { margin:8px 0 0; color:rgba(255,255,255,.7); font-size:13px; font-weight:400; letter-spacing:1px; text-transform:uppercase; }
+.email-divider { height:4px; background: linear-gradient(90deg, #e74c3c, #f39c12, #e74c3c); margin:0; border:0; }
+.email-body { background:#ffffff; padding:40px 36px; color:#2c3e50; line-height:1.8; font-size:15px; }
+.email-body h2 { color:#1a1a2e; margin:0 0 16px; font-size:20px; font-weight:700; }
+.email-body a { color:#e74c3c; text-decoration:none; font-weight:600; }
+.email-body a:hover { text-decoration:underline; }
+@media only screen and (max-width:620px) {
+  .email-body { padding:28px 20px !important; }
+  .email-header { padding:28px 20px 24px !important; }
+  .email-header h1 { font-size:22px !important; }
+}
 </style>
 </head>
 <body>
-<div class="email-wrap">
+<div class="email-preheader">&nbsp;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;">
+<tr><td align="center" style="padding:30px 12px;">
+<div class="email-container">
+  <div class="email-top-accent"></div>
   <div class="email-header">
-    {logo_url}
-    <h2>{from_name}</h2>
+    <div class="logo-circle">{logo_url}</div>
+    <h1>{from_name}</h1>
+    <p class="tagline">Ενημερωτικό Δελτίο</p>
   </div>
+  <div class="email-divider"></div>
   <div class="email-body">';
 
                     $footer = '</div>
-  <div class="email-footer">
-    <p>&copy; ' . date('Y') . ' {from_name}. Με επιφύλαξη παντός δικαιώματος.</p>
-    <p style="margin-top:8px;font-size:11px;color:#bdc3c7;">Λάβατε αυτό το email επειδή είστε εγγεγραμμένος/η στο σύστημά μας.</p>
-  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#1a1a2e;">
+    <tr><td style="padding:28px 32px; text-align:center;">
+      <p style="margin:0 0 6px; font-size:13px; color:rgba(255,255,255,.6);">&copy; ' . date('Y') . ' {from_name}</p>
+      <p style="margin:0 0 12px; font-size:11px; color:rgba(255,255,255,.35);">Λάβατε αυτό το email επειδή είστε εγγεγραμμένος/η στο σύστημά μας.</p>
+      <div style="border-top:1px solid rgba(255,255,255,.1); padding-top:12px; margin-top:4px;">
+        <p style="margin:0; font-size:11px; color:rgba(255,255,255,.3);">Powered by <span style="color:#e74c3c;">VolunteerOps</span></p>
+      </div>
+    </td></tr>
+  </table>
 </div>
+</td></tr>
+</table>
 </body>
 </html>';
 
@@ -2846,6 +2869,76 @@ body { font-family: \"Segoe UI\", Arial, sans-serif; background: #f0f2f5; margin
 
                 // 4. Clean up old settings-based template (optional)
                 dbExecute("DELETE FROM settings WHERE setting_key IN ('newsletter_template_header', 'newsletter_template_footer')");
+            },
+        ],
+
+        // ── v45 ── Upgrade default newsletter template to premium design ──
+        [
+            'version'     => 45,
+            'description' => 'Upgrade default newsletter template to premium design',
+            'up'          => function () {
+                $defaultTpl = dbFetchOne("SELECT id FROM newsletter_templates WHERE is_default = 1 AND name = 'Βασικό πρότυπο' LIMIT 1");
+                if ($defaultTpl) {
+                    $header = '<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body { margin:0; padding:0; background:#eef1f6; font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+.email-container { max-width:600px; margin:0 auto; }
+.email-preheader { display:none !important; font-size:1px; line-height:1px; max-height:0; overflow:hidden; }
+.email-top-accent { height:6px; background: linear-gradient(90deg, #c0392b 0%, #e74c3c 25%, #f39c12 50%, #27ae60 75%, #2980b9 100%); }
+.email-header { background: linear-gradient(160deg, #1a1a2e 0%, #16213e 40%, #0f3460 100%); padding:40px 32px 32px; text-align:center; }
+.email-header .logo-circle { display:inline-block; width:72px; height:72px; border-radius:50%; background:rgba(255,255,255,.12); border:2px solid rgba(255,255,255,.2); padding:10px; margin-bottom:16px; }
+.email-header .logo-circle img { max-height:48px; max-width:48px; vertical-align:middle; }
+.email-header h1 { margin:0; color:#ffffff; font-size:26px; font-weight:700; letter-spacing:0.5px; text-shadow:0 2px 8px rgba(0,0,0,.3); }
+.email-header .tagline { margin:8px 0 0; color:rgba(255,255,255,.7); font-size:13px; font-weight:400; letter-spacing:1px; text-transform:uppercase; }
+.email-divider { height:4px; background: linear-gradient(90deg, #e74c3c, #f39c12, #e74c3c); margin:0; border:0; }
+.email-body { background:#ffffff; padding:40px 36px; color:#2c3e50; line-height:1.8; font-size:15px; }
+.email-body h2 { color:#1a1a2e; margin:0 0 16px; font-size:20px; font-weight:700; }
+.email-body a { color:#e74c3c; text-decoration:none; font-weight:600; }
+.email-body a:hover { text-decoration:underline; }
+@media only screen and (max-width:620px) {
+  .email-body { padding:28px 20px !important; }
+  .email-header { padding:28px 20px 24px !important; }
+  .email-header h1 { font-size:22px !important; }
+}
+</style>
+</head>
+<body>
+<div class="email-preheader">&nbsp;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;">
+<tr><td align="center" style="padding:30px 12px;">
+<div class="email-container">
+  <div class="email-top-accent"></div>
+  <div class="email-header">
+    <div class="logo-circle">{logo_url}</div>
+    <h1>{from_name}</h1>
+    <p class="tagline">Ενημερωτικό Δελτίο</p>
+  </div>
+  <div class="email-divider"></div>
+  <div class="email-body">';
+
+                    $footer = '</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#1a1a2e;">
+    <tr><td style="padding:28px 32px; text-align:center;">
+      <p style="margin:0 0 6px; font-size:13px; color:rgba(255,255,255,.6);">&copy; ' . date('Y') . ' {from_name}</p>
+      <p style="margin:0 0 12px; font-size:11px; color:rgba(255,255,255,.35);">Λάβατε αυτό το email επειδή είστε εγγεγραμμένος/η στο σύστημά μας.</p>
+      <div style="border-top:1px solid rgba(255,255,255,.1); padding-top:12px; margin-top:4px;">
+        <p style="margin:0; font-size:11px; color:rgba(255,255,255,.3);">Powered by <span style="color:#e74c3c;">VolunteerOps</span></p>
+      </div>
+    </td></tr>
+  </table>
+</div>
+</td></tr>
+</table>
+</body>
+</html>';
+
+                    dbExecute("UPDATE newsletter_templates SET name='Βασικό πρότυπο', header_html=?, footer_html=?, updated_at=NOW() WHERE id=?",
+                        [$header, $footer, $defaultTpl['id']]);
+                }
             },
         ],
 
