@@ -66,6 +66,11 @@ include __DIR__ . '/includes/header.php';
             <button type="button" class="btn btn-outline-primary" id="btnPrintSelected" style="display:none;" onclick="printSelected()" title="Εκτύπωση ετικετών για επιλεγμένα υλικά">
                 <i class="bi bi-qr-code me-1"></i>Εκτύπωση επιλεγμένων (<span id="selectedCount">0</span>)
             </button>
+        <?php endif; ?>
+        <button type="button" class="btn btn-outline-secondary" onclick="printInventoryList()" title="Εκτύπωση λίστας υλικών">
+            <i class="bi bi-printer me-1"></i>Εκτύπωση Λίστας
+        </button>
+        <?php if (canManageInventory()): ?>
             <a href="inventory-form.php" class="btn btn-primary">
                 <i class="bi bi-plus-lg me-1"></i>Νέο Υλικό
             </a>
@@ -311,7 +316,34 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
 </div>
 
+<style>
+@media print {
+    .no-print, .sidebar, .navbar, .card-footer, .btn-group,
+    #btnPrintSelected, .form-check-input, #chkAll,
+    [data-bs-toggle="modal"] { display: none !important; }
+    body { background: #fff !important; font-size: 11pt; }
+    .card { border: none !important; box-shadow: none !important; }
+    .card-body { padding: 0 !important; }
+    .table { font-size: 10pt; }
+    .table th, .table td { padding: 4px 8px !important; }
+    h1.h3 { font-size: 14pt !important; }
+    .badge { border: 1px solid #999 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    @page { size: A4 landscape; margin: 10mm; }
+    .print-header { display: block !important; }
+    .print-footer { display: block !important; text-align: right; font-size: 9pt; color: #999; margin-top: 10px; }
+}
+.print-header { display: none; }
+.print-footer { display: none; }
+</style>
+<div class="print-footer">Εκτυπώθηκε: <script>document.write(new Date().toLocaleDateString('el-GR') + ' ' + new Date().toLocaleTimeString('el-GR', {hour:'2-digit',minute:'2-digit'}))</script></div>
+
 <?php include __DIR__ . '/includes/footer.php'; ?>
+
+<script>
+function printInventoryList() {
+    window.print();
+}
+</script>
 
 <?php if (canManageInventory()): ?>
 <script>
