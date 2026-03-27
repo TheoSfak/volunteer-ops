@@ -668,6 +668,19 @@ if (isLoggedIn()) {
                 margin-bottom: 0.3rem;
             }
         }
+
+        /* ── Summernote + Bootstrap 5 popup fix ── */
+        .note-modal-backdrop { display: none !important; }
+        .note-modal.open { display: flex !important; align-items: center; justify-content: center; background: rgba(0,0,0,.4); }
+        .note-modal .note-modal-content { margin: auto; max-width: 600px; width: 90%; }
+        .note-popover.popover { display: none; }
+        .note-popover.popover.in, .note-popover.popover.show { display: block !important; z-index: 3050 !important; }
+        .note-toolbar .dropdown-menu { z-index: 3060 !important; }
+        .note-color .note-dropdown-menu,
+        .note-table .note-dropdown-menu,
+        .note-style .note-dropdown-menu,
+        .note-para .note-dropdown-menu { z-index: 3060 !important; }
+        .note-editor .note-toolbar .note-dropdown-toggle::after { display: none; }
     </style>
 </head>
 <body>

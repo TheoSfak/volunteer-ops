@@ -565,12 +565,21 @@ $(document).ready(function() {
     $('.summernote-basic').summernote({
         height: 200,
         lang: 'el-GR',
+        dialogsInBody: true,
         toolbar: [
             ['style', ['bold', 'italic', 'underline']],
             ['para', ['ul', 'ol', 'paragraph']],
             ['insert', ['link']],
             ['view', ['codeview']]
-        ]
+        ],
+        callbacks: {
+            onInit: function() {
+                $('.note-editor .note-btn').each(function() {
+                    var t = bootstrap.Tooltip.getInstance(this);
+                    if (t) t.dispose();
+                });
+            }
+        }
     });
 });
 </script>
