@@ -104,6 +104,49 @@ if (canSeeTep()) {
 include __DIR__ . '/includes/header.php';
 ?>
 
+<style>
+.vol-bar .progress {
+    background: rgba(0,0,0,.08);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.vol-bar .progress-bar {
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 0.8rem;
+    letter-spacing: 0.5px;
+    transition: width .6s ease-in-out;
+}
+.vol-bar .progress-bar.bg-danger {
+    background: linear-gradient(90deg, #dc3545, #ff6b6b) !important;
+    box-shadow: 0 0 10px rgba(220,53,69,.4);
+}
+.vol-bar .progress-bar.bg-warning {
+    background: linear-gradient(90deg, #fd7e14, #ffc107) !important;
+    box-shadow: 0 0 10px rgba(253,126,20,.35);
+    color: #fff !important;
+}
+.vol-bar .progress-bar.bg-success {
+    background: linear-gradient(90deg, #198754, #20c997) !important;
+    box-shadow: 0 0 12px rgba(25,135,84,.45);
+}
+.vol-bar .progress-bar.bar-full {
+    animation: pulse-green 1.5s ease-in-out infinite;
+}
+@keyframes pulse-green {
+    0%, 100% { box-shadow: 0 0 8px rgba(25,135,84,.4); }
+    50% { box-shadow: 0 0 18px rgba(32,201,151,.7); }
+}
+.vol-bar .vol-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin-top: 3px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+</style>
+
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0">
         <i class="bi bi-flag me-2"></i>Αποστολές
@@ -229,19 +272,29 @@ include __DIR__ . '/includes/header.php';
                                 </td>
                                 <td><span class="badge bg-secondary"><?= $mission['shift_count'] ?></span></td>
                                 <td><span class="badge bg-info"><?= $mission['volunteer_count'] ?></span></td>
-                                <td style="min-width: 130px;">
+                                <td style="min-width: 140px;">
                                     <?php if ($mission['status'] === STATUS_OPEN && $mission['max_volunteers'] > 0):
                                         $vPct = min(100, round(($mission['volunteer_count'] / $mission['max_volunteers']) * 100));
                                         $vColor = $vPct >= 100 ? 'success' : ($vPct >= 50 ? 'warning' : 'danger');
                                         $vAnim = $vPct < 100 ? ' progress-bar-striped progress-bar-animated' : '';
+                                        $vFull = $vPct >= 100 ? ' bar-full' : '';
                                     ?>
-                                        <div class="progress" style="height: 10px;" title="<?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?> εθελοντές">
-                                            <div class="progress-bar bg-<?= $vColor ?><?= $vAnim ?>" role="progressbar" style="width: <?= $vPct ?>%" aria-valuenow="<?= $mission['volunteer_count'] ?>" aria-valuemin="0" aria-valuemax="<?= $mission['max_volunteers'] ?>"></div>
+                                        <div class="vol-bar">
+                                            <div class="progress" style="height: 22px;">
+                                                <div class="progress-bar bg-<?= $vColor ?><?= $vAnim ?><?= $vFull ?>" role="progressbar" style="width: <?= max($vPct, 12) ?>%;" aria-valuenow="<?= $mission['volunteer_count'] ?>" aria-valuemin="0" aria-valuemax="<?= $mission['max_volunteers'] ?>">
+                                                    <i class="bi bi-people-fill me-1"></i><?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?>
+                                                </div>
+                                            </div>
+                                            <div class="vol-label text-<?= $vColor ?>">
+                                                <?php if ($vPct >= 100): ?>
+                                                    <i class="bi bi-check-circle-fill"></i> Πλήρης!
+                                                <?php elseif ($vPct == 0): ?>
+                                                    <i class="bi bi-exclamation-triangle-fill"></i> Χρειάζονται εθελοντές
+                                                <?php else: ?>
+                                                    <i class="bi bi-hourglass-split"></i> Απομένουν <?= $mission['max_volunteers'] - $mission['volunteer_count'] ?>
+                                                <?php endif; ?>
+                                            </div>
                                         </div>
-                                        <small class="fw-bold text-<?= $vColor ?>">
-                                            <?php if ($vPct >= 100): ?><i class="bi bi-check-circle-fill me-1"></i><?php endif; ?>
-                                            <?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?> εθελοντές
-                                        </small>
                                     <?php else: ?>
                                         <?= statusBadge($mission['status']) ?>
                                     <?php endif; ?>
@@ -338,13 +391,22 @@ include __DIR__ . '/includes/header.php';
                                 $mPct = min(100, round(($mission['volunteer_count'] / $mission['max_volunteers']) * 100));
                                 $mColor = $mPct >= 100 ? 'success' : ($mPct >= 50 ? 'warning' : 'danger');
                                 $mAnim = $mPct < 100 ? ' progress-bar-striped progress-bar-animated' : '';
+                                $mFull = $mPct >= 100 ? ' bar-full' : '';
                             ?>
-                            <div class="mobile-card-row">
-                                <div class="progress" style="height: 20px; border-radius: 6px;">
-                                    <div class="progress-bar bg-<?= $mColor ?><?= $mAnim ?>" role="progressbar" style="width: <?= max($mPct, 15) ?>%; font-size: 0.8rem; font-weight: 600;" aria-valuenow="<?= $mission['volunteer_count'] ?>" aria-valuemin="0" aria-valuemax="<?= $mission['max_volunteers'] ?>">
-                                        <?php if ($mPct >= 100): ?><i class="bi bi-check-circle-fill me-1"></i><?php endif; ?>
-                                        <?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?>
+                            <div class="mobile-card-row vol-bar">
+                                <div class="progress" style="height: 24px;">
+                                    <div class="progress-bar bg-<?= $mColor ?><?= $mAnim ?><?= $mFull ?>" role="progressbar" style="width: <?= max($mPct, 15) ?>%;" aria-valuenow="<?= $mission['volunteer_count'] ?>" aria-valuemin="0" aria-valuemax="<?= $mission['max_volunteers'] ?>">
+                                        <i class="bi bi-people-fill me-1"></i><?= $mission['volunteer_count'] ?>/<?= $mission['max_volunteers'] ?>
                                     </div>
+                                </div>
+                                <div class="vol-label text-<?= $mColor ?>">
+                                    <?php if ($mPct >= 100): ?>
+                                        <i class="bi bi-check-circle-fill"></i> Πλήρης!
+                                    <?php elseif ($mPct == 0): ?>
+                                        <i class="bi bi-exclamation-triangle-fill"></i> Χρειάζονται εθελοντές
+                                    <?php else: ?>
+                                        <i class="bi bi-hourglass-split"></i> Απομένουν <?= $mission['max_volunteers'] - $mission['volunteer_count'] ?>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                             <div class="mobile-card-row">
