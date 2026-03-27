@@ -47,6 +47,7 @@ if (isPost()) {
     $body    = post('body_html');
     $roles   = $_POST['filter_roles'] ?? [];
     $deptId  = (int)post('filter_dept_id');
+    $extraEmails = trim(post('extra_emails'));
 
     $errors = [];
     if (empty($title))   $errors[] = 'Ο τίτλος είναι υποχρεωτικός.';
@@ -56,16 +57,17 @@ if (isPost()) {
     if (empty($errors)) {
         $rolesJson = !empty($roles) ? json_encode(array_values($roles)) : null;
         $deptStore = $deptId > 0 ? $deptId : null;
+        $extraStore = $extraEmails !== '' ? $extraEmails : null;
 
         if ($isEdit) {
-            dbExecute("UPDATE newsletters SET title=?, subject=?, body_html=?, filter_roles=?, filter_dept_id=?, updated_at=NOW() WHERE id=?",
-                [$title, $subject, $body, $rolesJson, $deptStore, $id]);
+            dbExecute("UPDATE newsletters SET title=?, subject=?, body_html=?, filter_roles=?, filter_dept_id=?, extra_emails=?, updated_at=NOW() WHERE id=?",
+                [$title, $subject, $body, $rolesJson, $deptStore, $extraStore, $id]);
             logAudit('newsletter_update', 'newsletters', $id);
             setFlash('success', 'Το πρόχειρο αποθηκεύτηκε.');
             redirect("newsletter-view.php?id={$id}");
         } else {
-            $newId = dbInsert("INSERT INTO newsletters (title, subject, body_html, filter_roles, filter_dept_id, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,NOW(),NOW())",
-                [$title, $subject, $body, $rolesJson, $deptStore, getCurrentUserId()]);
+            $newId = dbInsert("INSERT INTO newsletters (title, subject, body_html, filter_roles, filter_dept_id, extra_emails, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,NOW(),NOW())",
+                [$title, $subject, $body, $rolesJson, $deptStore, $extraStore, getCurrentUserId()]);
             logAudit('newsletter_create', 'newsletters', $newId);
             setFlash('success', 'Το πρόχειρο δημιουργήθηκε. Ελέγξτε και αποστείλετε.');
             redirect("newsletter-view.php?id={$newId}");
@@ -78,6 +80,7 @@ if (isPost()) {
             'body_html'      => $body,
             'filter_roles'   => json_encode($roles),
             'filter_dept_id' => $deptId ?: null,
+            'extra_emails'   => $extraEmails,
         ];
     }
 }
@@ -215,8 +218,15 @@ $countUrl = 'newsletter-form.php?action=count_recipients';
                     <div class="alert alert-light border mb-0 text-center">
                         <div class="fs-4 fw-bold text-primary" id="recipientCount">…</div>
                         <small class="text-muted">εκτιμώμενοι αποδέκτες</small>
+                        <span id="extraEmailsCount" class="d-none"><br><small class="text-info fw-semibold">+ <span id="extraCount">0</span> χειροκίνητα</small></span>
                         <br><small class="text-muted">(εξαιρούνται unsubscribed)</small>
                     </div>
+
+                    <hr class="my-3">
+                    <label class="form-label fw-semibold small text-uppercase text-muted">Επιπλέον email (χειροκίνητα)</label>
+                    <textarea class="form-control form-control-sm font-monospace" name="extra_emails" id="extraEmails"
+                              rows="4" placeholder="Ένα email ανά γραμμή&#10;example@mail.com&#10;another@mail.com"><?= h($nl['extra_emails'] ?? '') ?></textarea>
+                    <small class="text-muted">Αυτά τα email λαμβάνουν το δελτίο ανεξάρτητα από τα φίλτρα ρόλων/τμήματος.</small>
                 </div>
             </div>
 
@@ -306,5 +316,23 @@ $(function() {
 
     $('.role-check').on('change', updateRecipientCount);
     $('#deptFilter').on('change', updateRecipientCount);
+
+    // Count extra manual emails
+    function updateExtraCount() {
+        var lines = $('#extraEmails').val().split('\n');
+        var count = 0;
+        var emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        $.each(lines, function(i, line) {
+            if (emailRe.test($.trim(line))) count++;
+        });
+        if (count > 0) {
+            $('#extraCount').text(count);
+            $('#extraEmailsCount').removeClass('d-none');
+        } else {
+            $('#extraEmailsCount').addClass('d-none');
+        }
+    }
+    $('#extraEmails').on('input', updateExtraCount);
+    updateExtraCount();
 });
 </script>

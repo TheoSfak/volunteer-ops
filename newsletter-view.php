@@ -54,6 +54,28 @@ if (isPost()) {
 
         [, $recipients] = buildRecipientQuery($roles, $deptId, false);
 
+        // Add manual extra email addresses
+        if (!empty($nl['extra_emails'])) {
+            $existingEmails = array_column($recipients, 'email');
+            $existingEmails = array_map('strtolower', $existingEmails);
+            $lines = preg_split('/\r?\n/', trim($nl['extra_emails']));
+            foreach ($lines as $line) {
+                $email = trim($line);
+                if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) continue;
+                if (in_array(strtolower($email), $existingEmails)) continue;
+                $recipients[] = [
+                    'id'           => null,
+                    'name'         => '',
+                    'email'        => $email,
+                    'role'         => '',
+                    'total_points' => 0,
+                    'department_id'=> null,
+                    'dept_name'    => '',
+                ];
+                $existingEmails[] = strtolower($email);
+            }
+        }
+
         // Mark as sending
         dbExecute("UPDATE newsletters SET status='sending', total_recipients=?, updated_at=NOW() WHERE id=?", [count($recipients), $id]);
 
@@ -150,6 +172,17 @@ $rolesDisplay  = empty($filterRoles) ? 'Όλοι' : implode(', ', array_map(fn($
 // Recipient count estimate
 [$estCount,] = buildRecipientQuery($filterRoles, (int)($nl['filter_dept_id'] ?? 0), true);
 
+// Count extra manual emails
+$extraEmailCount = 0;
+if (!empty($nl['extra_emails'])) {
+    $lines = preg_split('/\r?\n/', trim($nl['extra_emails']));
+    foreach ($lines as $line) {
+        $email = trim($line);
+        if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) $extraEmailCount++;
+    }
+}
+$totalEstCount = $estCount + $extraEmailCount;
+
 // Send log
 $sendLog = dbFetchAll("
     SELECT ns.*, u.name AS linked_user_name
@@ -164,17 +197,27 @@ $failedCount = dbFetchValue("SELECT COUNT(*) FROM newsletter_sends WHERE newslet
 // ── Helper: wrap body in styled email envelope for display ──
 function wrapNewsletterBody(string $body, string $title): string {
     $fromName = getSetting('smtp_from_name', 'VolunteerOps');
-    return '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+
+    $defaultHeader = '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:0}
 .wrap{max-width:600px;margin:30px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}
 .hdr{background:#c0392b;padding:24px 32px;color:#fff}.hdr h2{margin:0;font-size:22px}
 .body{padding:32px;color:#333;line-height:1.6}.ftr{background:#f8f8f8;padding:16px 32px;font-size:12px;color:#aaa;text-align:center}
 </style></head><body>
 <div class="wrap">
-  <div class="hdr"><h2>' . h($fromName) . '</h2></div>
-  <div class="body">' . $body . '</div>
-  <div class="ftr"><p>Αυτό το email στάλθηκε από ' . h($fromName) . '.</p></div>
+  <div class="hdr"><h2>{from_name}</h2></div>
+  <div class="body">';
+    $defaultFooter = '</div>
+  <div class="ftr"><p>Αυτό το email στάλθηκε από {from_name}.</p></div>
 </div></body></html>';
+
+    $header = getSetting('newsletter_template_header', $defaultHeader);
+    $footer = getSetting('newsletter_template_footer', $defaultFooter);
+
+    $header = str_replace('{from_name}', h($fromName), $header);
+    $footer = str_replace('{from_name}', h($fromName), $footer);
+
+    return $header . $body . $footer;
 }
 
 include __DIR__ . '/includes/header.php';
@@ -226,6 +269,9 @@ include __DIR__ . '/includes/header.php';
                         <i class="bi bi-person-check me-1 text-primary"></i><?= h($rolesDisplay) ?>
                         <?php if ($nl['dept_name']): ?>
                             <br><i class="bi bi-building me-1 text-muted"></i><?= h($nl['dept_name']) ?>
+                        <?php endif; ?>
+                        <?php if ($extraEmailCount > 0): ?>
+                            <br><i class="bi bi-envelope-plus me-1 text-info"></i><span class="text-info"><?= $extraEmailCount ?> χειροκίνητα email</span>
                         <?php endif; ?>
                     </div>
                     <div class="col-sm-3">
@@ -333,8 +379,11 @@ include __DIR__ . '/includes/header.php';
                 <?php if ($nl['status'] === 'draft'): ?>
                 <!-- Estimated recipients -->
                 <div class="alert alert-info py-2 text-center mb-2">
-                    <div class="fs-5 fw-bold"><?= $estCount ?></div>
+                    <div class="fs-5 fw-bold"><?= $totalEstCount ?></div>
                     <small>εκτιμώμενοι αποδέκτες</small>
+                    <?php if ($extraEmailCount > 0): ?>
+                        <br><small class="text-info">(<?= $estCount ?> από φίλτρα + <?= $extraEmailCount ?> χειροκίνητα)</small>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Test send -->
@@ -348,7 +397,7 @@ include __DIR__ . '/includes/header.php';
 
                 <!-- Real send -->
                 <button class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#sendModal">
-                    <i class="bi bi-send-fill me-1"></i>Αποστολή σε <?= $estCount ?> αποδέκτες
+                    <i class="bi bi-send-fill me-1"></i>Αποστολή σε <?= $totalEstCount ?> αποδέκτες
                 </button>
                 <?php endif; ?>
 
@@ -388,7 +437,7 @@ include __DIR__ . '/includes/header.php';
                 <?= csrfField() ?>
                 <input type="hidden" name="action" value="send">
                 <div class="modal-body">
-                    <p>Πρόκειται να σταλεί το δελτίο <strong><?= h($nl['title']) ?></strong> σε <strong><?= $estCount ?> αποδέκτες</strong>.</p>
+                    <p>Πρόκειται να σταλεί το δελτίο <strong><?= h($nl['title']) ?></strong> σε <strong><?= $totalEstCount ?> αποδέκτες</strong>.</p>
                     <p class="text-muted small mb-0">Η αποστολή θα ξεκινήσει αμέσως. Μην κλείσετε τον browser μέχρι να ολοκληρωθεί.</p>
                 </div>
                 <div class="modal-footer">
@@ -401,14 +450,23 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
-// Inject body preview into iframe
+// Inject body preview into iframe using stored template
 (function() {
     var body = <?= json_encode($nl['body_html']) ?>;
-    var title = <?= json_encode($nl['title']) ?>;
     var fromName = <?= json_encode(getSetting('smtp_from_name', 'VolunteerOps')) ?>;
-    var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:0}.wrap{max-width:600px;margin:30px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}.hdr{background:#c0392b;padding:24px 32px;color:#fff}.hdr h2{margin:0;font-size:22px}.body{padding:32px;color:#333;line-height:1.6}.ftr{background:#f8f8f8;padding:16px 32px;font-size:12px;color:#aaa;text-align:center}</style></head><body>'
-        + '<div class="wrap"><div class="hdr"><h2>' + fromName + '</h2></div><div class="body">' + body + '</div>'
-        + '<div class="ftr"><p>Αυτό το email στάλθηκε από ' + fromName + '.</p></div></div></body></html>';
+    var header = <?= json_encode(getSetting('newsletter_template_header', '')) ?>;
+    var footer = <?= json_encode(getSetting('newsletter_template_footer', '')) ?>;
+
+    // Fallback to hardcoded default if settings are empty
+    if (!header) {
+        header = '<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif;background:#f4f4f4;margin:0;padding:0}.wrap{max-width:600px;margin:30px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.1)}.hdr{background:#c0392b;padding:24px 32px;color:#fff}.hdr h2{margin:0;font-size:22px}.body{padding:32px;color:#333;line-height:1.6}.ftr{background:#f8f8f8;padding:16px 32px;font-size:12px;color:#aaa;text-align:center}</style></head><body><div class="wrap"><div class="hdr"><h2>{from_name}</h2></div><div class="body">';
+        footer = '</div><div class="ftr"><p>Αυτό το email στάλθηκε από {from_name}.</p></div></div></body></html>';
+    }
+
+    header = header.replace(/\{from_name\}/g, fromName);
+    footer = footer.replace(/\{from_name\}/g, fromName);
+    var html = header + body + footer;
+
     var frame = document.getElementById('previewFrame');
     if (frame) { frame.srcdoc = html; }
 })();
