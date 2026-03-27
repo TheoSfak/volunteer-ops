@@ -2695,6 +2695,33 @@ function runSchemaMigrations(): void {
             },
         ],
 
+        // ── v42: Add registration_date & registration_number to inventory_items ──
+        [
+            'version'     => 42,
+            'description' => 'Add registration_date and registration_number columns to inventory_items',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'inventory_items'
+                       AND COLUMN_NAME  = 'registration_date'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE inventory_items ADD COLUMN registration_date DATE NULL AFTER name");
+                }
+
+                $col2 = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'inventory_items'
+                       AND COLUMN_NAME  = 'registration_number'"
+                );
+                if (!$col2) {
+                    dbExecute("ALTER TABLE inventory_items ADD COLUMN registration_number VARCHAR(50) NULL AFTER registration_date");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

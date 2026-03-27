@@ -1341,6 +1341,8 @@ CREATE TABLE IF NOT EXISTS `inventory_items` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `barcode` VARCHAR(50) NOT NULL,
     `name` VARCHAR(255) NOT NULL,
+    `registration_date` DATE NULL,
+    `registration_number` VARCHAR(50) NULL,
     `description` TEXT NULL,
     `category_id` INT UNSIGNED NULL,
     `department_id` INT UNSIGNED NULL,
