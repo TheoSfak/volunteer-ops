@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 46;
+    $LATEST_MIGRATION_VERSION = 47;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -2997,6 +2997,139 @@ body { margin:0; padding:0; background:#eef1f6; font-family: "Segoe UI", -apple-
 
                 if ($hCol) {
                     dbExecute("ALTER TABLE newsletter_templates DROP COLUMN header_html, DROP COLUMN footer_html");
+                }
+            },
+        ],
+
+        // ── v47 ── Add demo newsletter templates + session_timeout_minutes setting ──
+        [
+            'version'     => 47,
+            'description' => 'Add 5 demo newsletter templates with different designs + session_timeout_minutes setting',
+            'up'          => function () {
+                // Shared helper to build a template
+                $buildTemplate = function(string $headerBg, string $accentColor, string $headerText, string $footerBg, string $tagline, string $bodyLinkColor): string {
+                    return '<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body { margin:0; padding:0; background:#f4f6f9; font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+.email-container { max-width:600px; margin:0 auto; }
+.email-preheader { display:none !important; font-size:1px; line-height:1px; max-height:0; overflow:hidden; }
+.email-top-accent { height:5px; background: ' . $accentColor . '; }
+.email-header { background: ' . $headerBg . '; padding:36px 32px 28px; text-align:center; }
+.email-header .logo-circle { display:inline-block; width:68px; height:68px; border-radius:50%; background:rgba(255,255,255,.15); border:2px solid rgba(255,255,255,.25); padding:10px; margin-bottom:14px; }
+.email-header .logo-circle img { max-height:44px; max-width:44px; vertical-align:middle; }
+.email-header h1 { margin:0; color:' . $headerText . '; font-size:24px; font-weight:700; letter-spacing:0.5px; }
+.email-header .tagline { margin:6px 0 0; color:rgba(255,255,255,.7); font-size:12px; font-weight:400; letter-spacing:1px; text-transform:uppercase; }
+.email-divider { height:3px; background: ' . $accentColor . '; margin:0; border:0; }
+.email-body { background:#ffffff; padding:36px 32px; color:#2c3e50; line-height:1.8; font-size:15px; }
+.email-body h2 { color:#1a1a2e; margin:0 0 14px; font-size:19px; font-weight:700; }
+.email-body a { color:' . $bodyLinkColor . '; text-decoration:none; font-weight:600; }
+.email-body a:hover { text-decoration:underline; }
+@media only screen and (max-width:620px) {
+  .email-body { padding:24px 18px !important; }
+  .email-header { padding:24px 18px 20px !important; }
+  .email-header h1 { font-size:20px !important; }
+}
+</style>
+</head>
+<body>
+<div class="email-preheader">&nbsp;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;">
+<tr><td align="center" style="padding:28px 12px;">
+<div class="email-container">
+  <div class="email-top-accent"></div>
+  <div class="email-header">
+    <div class="logo-circle">{logo_url}</div>
+    <h1>{from_name}</h1>
+    <p class="tagline">' . $tagline . '</p>
+  </div>
+  <div class="email-divider"></div>
+  <div class="email-body">
+{content}
+  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:' . $footerBg . ';">
+    <tr><td style="padding:24px 32px; text-align:center;">
+      <p style="margin:0 0 5px; font-size:12px; color:rgba(255,255,255,.6);">&copy; ' . date('Y') . ' {from_name}</p>
+      <p style="margin:0; font-size:11px; color:rgba(255,255,255,.35);">Λάβατε αυτό το email επειδή είστε εγγεγραμμένος/η.</p>
+    </td></tr>
+  </table>
+</div>
+</td></tr>
+</table>
+</body>
+</html>';
+                };
+
+                $templates = [
+                    [
+                        'name' => 'Μπλε Κλασικό',
+                        'body' => $buildTemplate(
+                            'linear-gradient(135deg, #1e3a5f 0%, #2c5f8a 100%)',
+                            'linear-gradient(90deg, #2980b9, #3498db, #2980b9)',
+                            '#ffffff',
+                            '#1e3a5f',
+                            'Ενημερωτικό Δελτίο',
+                            '#2980b9'
+                        ),
+                    ],
+                    [
+                        'name' => 'Πράσινο Φύση',
+                        'body' => $buildTemplate(
+                            'linear-gradient(135deg, #1a472a 0%, #2d6a4f 100%)',
+                            'linear-gradient(90deg, #27ae60, #2ecc71, #27ae60)',
+                            '#ffffff',
+                            '#1a472a',
+                            'Εθελοντικές Δράσεις',
+                            '#27ae60'
+                        ),
+                    ],
+                    [
+                        'name' => 'Κόκκινο Επείγον',
+                        'body' => $buildTemplate(
+                            'linear-gradient(135deg, #7b1c1c 0%, #c0392b 100%)',
+                            'linear-gradient(90deg, #e74c3c, #ff6b6b, #e74c3c)',
+                            '#ffffff',
+                            '#7b1c1c',
+                            'Σημαντική Ενημέρωση',
+                            '#e74c3c'
+                        ),
+                    ],
+                    [
+                        'name' => 'Μωβ Εκδήλωση',
+                        'body' => $buildTemplate(
+                            'linear-gradient(135deg, #2d1b4e 0%, #6c3483 100%)',
+                            'linear-gradient(90deg, #8e44ad, #9b59b6, #8e44ad)',
+                            '#ffffff',
+                            '#2d1b4e',
+                            'Πρόσκληση Εκδήλωσης',
+                            '#8e44ad'
+                        ),
+                    ],
+                    [
+                        'name' => 'Πορτοκαλί Ζεστό',
+                        'body' => $buildTemplate(
+                            'linear-gradient(135deg, #7c4a03 0%, #d35400 100%)',
+                            'linear-gradient(90deg, #e67e22, #f39c12, #e67e22)',
+                            '#ffffff',
+                            '#7c4a03',
+                            'Νέα & Ανακοινώσεις',
+                            '#e67e22'
+                        ),
+                    ],
+                ];
+
+                foreach ($templates as $tpl) {
+                    // Only insert if name doesn't already exist
+                    $exists = dbFetchValue("SELECT COUNT(*) FROM newsletter_templates WHERE name = ?", [$tpl['name']]);
+                    if (!$exists) {
+                        dbInsert(
+                            "INSERT INTO newsletter_templates (name, body_html, is_default, created_at, updated_at) VALUES (?, ?, 0, NOW(), NOW())",
+                            [$tpl['name'], $tpl['body']]
+                        );
+                    }
                 }
             },
         ],

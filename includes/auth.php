@@ -23,8 +23,17 @@ function initSession() {
         session_name(SESSION_NAME);
         session_start();
 
-        // Enforce session timeout
-        if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > SESSION_LIFETIME) {
+        // Enforce session timeout (use DB setting if available, else SESSION_LIFETIME constant)
+        $timeoutSeconds = SESSION_LIFETIME;
+        try {
+            $dbTimeout = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'session_timeout_minutes'");
+            if ($dbTimeout !== null && $dbTimeout !== false && (int)$dbTimeout > 0) {
+                $timeoutSeconds = (int)$dbTimeout * 60;
+            }
+        } catch (Exception $e) {
+            // DB not ready yet (install phase), use constant
+        }
+        if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeoutSeconds) {
             logout();
             session_start();
             setFlash('warning', 'Η συνεδρία σας έληξε. Παρακαλώ συνδεθείτε ξανά.');
