@@ -161,10 +161,31 @@ setFlash('error', 'Δεν βρέθηκε η εγγραφή.');
 5. Include header.php at top, footer.php at bottom
 6. Add navigation link in `includes/header.php` sidebar
 
-### Database Changes
-1. Edit `sql/schema.sql` (add new columns/tables)
-2. Re-run installer OR manually execute ALTER statements
-3. **CRITICAL:** Always check form field names match DB column names
+### Database Changes (Auto-Migration System)
+Schema changes use versioned migrations in `includes/migrations.php`, NOT manual ALTER statements.
+
+**Adding a new migration:**
+1. Add entry at the end of the `$migrations` array in `includes/migrations.php`:
+```php
+[
+    'version'     => N,     // Next sequential number
+    'description' => 'Add X column to Y table',
+    'up'          => function () {
+        // MUST be idempotent — check before altering
+        $col = dbFetchOne("SHOW COLUMNS FROM table_name LIKE 'new_col'");
+        if (!$col) {
+            dbExecute("ALTER TABLE table_name ADD COLUMN new_col VARCHAR(255) DEFAULT NULL");
+        }
+    },
+],
+```
+2. **Increment `$LATEST_MIGRATION_VERSION`** in `includes/migrations.php` (line ~32)
+3. **Increment `LATEST_MIGRATION_VERSION`** in `bootstrap.php` (line ~24) — **BOTH files, same number!**
+4. Also update `sql/schema.sql` to keep it in sync for fresh installs
+
+**How it works:** `bootstrap.php` compares DB `settings.db_schema_version` against `LATEST_MIGRATION_VERSION`. If behind, it loads `migrations.php` (180KB) and runs pending migrations. Skipped on every normal request when DB is current.
+
+**CRITICAL:** Always check form field names match DB column names
 
 ### Participation Flow
 1. Volunteer applies → `participation_requests` status=PENDING
@@ -190,14 +211,32 @@ To add new: INSERT into `notification_settings` + `email_templates` in `sql/sche
 
 ### Version Bump & Release (REQUIRED on every commit to GitHub)
 **Every single commit must include a version bump, tag, AND GitHub release. No exceptions.**
+
+**Two independent version numbers:**
+- `APP_VERSION` in `config.php` — bump on EVERY feature commit (user-facing)
+- `LATEST_MIGRATION_VERSION` in `bootstrap.php` + `includes/migrations.php` — bump ONLY when adding DB migrations
+
+**3-Folder Sync:** Source is `volunteer-ops-github/`. After editing, sync to the other two:
 ```powershell
-# 1. Bump APP_VERSION in config.php (both xampp AND volunteer-ops-github)
-# 2. Copy all changed files to volunteer-ops-github/
-# 3. git add . ; git commit -m "feat: description vX.Y.Z"
-# 4. git tag vX.Y.Z ; git push origin main --tags
-# 5. gh release create vX.Y.Z --title "vX.Y.Z - Short description" --notes "## What's New`n`n### feat: ...\n- bullet points"
+# Sync to desktop copy
+robocopy "volunteer-ops-github" "volunteerops" /MIR /XD .git node_modules /XF .gitignore .gitattributes /NFL /NDL /NJH /NJS /NC /NS /NP
+# Sync to XAMPP live
+robocopy "volunteer-ops-github" "C:\xampp\htdocs\volunteerops" /MIR /XD .git node_modules /XF .gitignore .gitattributes /NFL /NDL /NJH /NJS /NC /NS /NP
+```
+Robocopy exit code 1 = files copied (success). Exit code 0 = nothing to copy.
+
+**Full release workflow:**
+```powershell
+# 1. Bump APP_VERSION in config.php
+# 2. Robocopy sync to both targets (see above)
+# 3. cd volunteer-ops-github
+# 4. git add -A ; git status  (verify changes)
+# 5. git commit -m "vX.Y.Z: description"
+# 6. git tag vX.Y.Z ; git push origin main --tags
+# 7. gh release create vX.Y.Z --title "vX.Y.Z - Title" --notes "## Changes\n- bullet points"
 ```
 Version format: `MAJOR.MINOR.PATCH` — increment PATCH for fixes/small features, MINOR for significant features.
+PHP syntax check before commit: `C:\xampp\php\php.exe -l includes\migrations.php`
 
 ### Delete Confirmations
 Missions and shifts with participants require Bootstrap modal showing affected volunteers, then notifications to all.
@@ -221,15 +260,22 @@ Run comprehensive tests: `php test_full.php`
 | `inventory*.php` | Equipment inventory (book/return/warehouse/shelf/label) — blocked for `TRAINEE_RESCUER` |
 | `exam-*.php` / `training*.php` / `questions-pool.php` | Training & exam module |
 | `newsletters.php` / `newsletter-*.php` | Newsletter system via `includes/newsletter-functions.php` |
+| `certificates.php` / `certificate-types.php` | Volunteer certificates with expiry tracking |
+| `citizen-certificates.php` / `citizen-certificate-types.php` | Citizen certificate management |
+| `complaints.php` / `complaint-form.php` / `complaint-view.php` | Complaints system |
 | `branches.php` / `departments.php` / `skills.php` | Organisational structure |
 | `tasks.php` | Task management |
-| `cron_*.php` | Cron jobs — run via CLI scheduler, not web |
+| `cron_*.php` | Cron jobs — CLI only (`php_sapi_name() !== 'cli'` guard) |
 | `email-template-edit.php` / `email-template-preview.php` | Manage DB email templates |
 | `settings.php` | System settings (system admin) |
-| `audit.php` | Audit log viewer (system admin) |
+| `audit.php` / `email-logs.php` | Audit log + email log viewers (system admin) |
+| `includes/migrations.php` | Auto-migration runner (versioned `$migrations` array) |
+| `includes/newsletter-functions.php` | `buildRecipientQuery()`, `replaceNewsletterTags()` |
 | `includes/inventory-functions.php` | Inventory business logic |
-| `includes/export-functions.php` | Excel/CSV export helpers |
-| `includes/migrations.php` | DB migration runner |
+| `includes/export-functions.php` | CSV/Excel export helpers |
+| `includes/import-functions.php` | Bulk CSV import engine |
+| `includes/training-functions.php` | Training module helpers |
+| `includes/achievements-functions.php` | Gamification badge logic |
 
 ## Common Patterns
 
@@ -300,5 +346,7 @@ if ($isEdit && !$item) {
 4. **English in UI**: All user-visible text must be Greek
 5. **Hardcoded emails**: Use `sendNotificationEmail()` with DB templates, not raw `sendEmail()`
 6. **Skipping version bump/tag/release**: Every GitHub commit MUST bump `APP_VERSION`, create a git tag, AND create a `gh release` — all three, every time
-7. **calculatePoints/calculateShiftHours**: Defined locally in `shift-view.php`, not in a global include
-8. **Direct DB queries**: Use helper functions (dbFetchAll, etc.), never raw PDO
+7. **Migration version mismatch**: `LATEST_MIGRATION_VERSION` must be identical in both `bootstrap.php` AND `includes/migrations.php`
+8. **Non-idempotent migrations**: Always check column/table existence before ALTER — migrations may re-run
+9. **calculatePoints/calculateShiftHours**: Defined locally in `shift-view.php`, not in a global include
+10. **Direct DB queries**: Use helper functions (dbFetchAll, etc.), never raw PDO
