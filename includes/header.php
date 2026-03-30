@@ -246,6 +246,10 @@ if (isLoggedIn()) {
             padding: 1rem 1.25rem;
         }
         
+        .card-header[class*="bg-"] {
+            background-image: none;
+        }
+        
         /* Stats Cards with Gradients */
         .stats-card {
             border-left: none !important;
