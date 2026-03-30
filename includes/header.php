@@ -594,11 +594,6 @@ if (isLoggedIn()) {
             }
             
             .top-navbar .dropdown-toggle {
-                max-width: 75vw;
-                overflow: visible;
-                display: inline-flex;
-                align-items: center;
-                flex-wrap: wrap;
                 font-size: 0.85rem;
                 padding: 0.25rem 0.4rem;
             }
@@ -616,14 +611,7 @@ if (isLoggedIn()) {
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-                max-width: 55vw;
-            }
-
-            .user-type-badge-mobile {
-                display: block;
-                width: 100%;
-                margin-top: 2px;
-                font-size: 0.7rem;
+                max-width: 30vw;
             }
             
             
@@ -1023,22 +1011,21 @@ if (isLoggedIn()) {
     <!-- Main Content -->
     <div class="main-content">
         <!-- Top Navbar -->
-        <nav class="top-navbar d-flex justify-content-between align-items-center">
-            <div class="d-flex align-items-center">
-                <button class="btn btn-link sidebar-toggle p-0" onclick="toggleSidebar()">
-                    <i class="bi bi-list fs-4"></i>
-                </button>
-                <a href="dashboard.php" class="d-lg-none d-flex align-items-center text-decoration-none ms-2" style="gap:0.4rem;">
-                    <?php if (!empty($appLogo) && file_exists(__DIR__ . '/../uploads/logos/' . $appLogo)): ?>
-                        <img src="uploads/logos/<?= h($appLogo) ?>" alt="" style="height:28px;width:auto;border-radius:6px;">
-                    <?php else: ?>
-                        <i class="bi bi-heart-pulse" style="font-size:1.3rem;color:var(--accent-color);"></i>
-                    <?php endif; ?>
-                    <span class="fw-bold" style="font-size:0.95rem;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40vw;"><?= h($appName) ?></span>
-                </a>
-            </div>
+        <nav class="top-navbar d-flex align-items-center">
+            <button class="btn btn-link sidebar-toggle p-0 me-2" onclick="toggleSidebar()">
+                <i class="bi bi-list fs-4"></i>
+            </button>
+            <a href="dashboard.php" class="d-lg-none d-flex align-items-center text-decoration-none me-auto" style="gap:0.4rem;min-width:0;">
+                <?php if (!empty($appLogo) && file_exists(__DIR__ . '/../uploads/logos/' . $appLogo)): ?>
+                    <img src="uploads/logos/<?= h($appLogo) ?>" alt="" style="height:28px;width:auto;border-radius:6px;flex-shrink:0;">
+                <?php else: ?>
+                    <i class="bi bi-heart-pulse flex-shrink-0" style="font-size:1.3rem;color:var(--accent-color);"></i>
+                <?php endif; ?>
+                <span class="fw-bold text-truncate" style="font-size:0.95rem;color:#1e293b;"><?= h($appName) ?></span>
+            </a>
+            <div class="d-none d-lg-block me-auto"></div>
             
-            <div class="d-flex align-items-center ms-auto">
+            <div class="d-flex align-items-center flex-shrink-0">
                 <!-- Notification Bell -->
                 <div class="dropdown me-3">
                     <a class="btn btn-link text-dark position-relative p-1" href="notifications.php" id="notifBell"
@@ -1102,9 +1089,8 @@ if (isLoggedIn()) {
                         <?php else: ?>
                             <i class="bi bi-person-circle me-1 flex-shrink-0"></i>
                         <?php endif; ?>
-                        <span class="user-name-text"><?= h($currentUser['name'] ?? 'Χρήστης') ?></span>
+                        <span class="user-name-text d-none d-sm-inline"><?= h($currentUser['name'] ?? 'Χρήστης') ?></span>
                         <span class="user-type-badge d-none d-md-inline"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_RESCUER) ?></span>
-                        <span class="user-type-badge-mobile d-md-none"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_RESCUER) ?></span>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i>Το Προφίλ μου</a></li>
