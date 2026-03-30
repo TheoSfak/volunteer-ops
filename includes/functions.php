@@ -139,7 +139,7 @@ function statusBadge($status, $type = 'status') {
     $color = $colors[$status] ?? 'secondary';
     $label = $labels[$status] ?? $status;
 
-    return '<span class="badge bg-' . $color . '">' . h($label) . '</span>';
+    return '<span class="badge bg-' . $color . '" style="white-space:nowrap">' . h($label) . '</span>';
 }
 
 /**
