@@ -201,21 +201,23 @@ function wrapNewsletterBody(string $body, string $title, ?int $templateId = null
     // Load template from newsletter_templates table
     $tpl = null;
     if ($templateId) {
-        $tpl = dbFetchOne("SELECT body_html FROM newsletter_templates WHERE id = ?", [$templateId]);
+        $tpl = dbFetchOne("SELECT header_html, footer_html FROM newsletter_templates WHERE id = ?", [$templateId]);
     }
     if (!$tpl) {
-        $tpl = dbFetchOne("SELECT body_html FROM newsletter_templates WHERE is_default = 1 LIMIT 1");
+        $tpl = dbFetchOne("SELECT header_html, footer_html FROM newsletter_templates WHERE is_default = 1 LIMIT 1");
     }
 
-    $templateBody = $tpl ? $tpl['body_html'] : '{content}';
+    $header = $tpl ? $tpl['header_html'] : '';
+    $footer = $tpl ? $tpl['footer_html'] : '';
 
     // Replace logo placeholder
     $appLogo = getSetting('app_logo', '');
     $logoHtml = $appLogo ? '<img src="uploads/logos/' . h($appLogo) . '" alt="" style="max-height:50px;margin-bottom:10px;">' : '';
 
-    $templateBody = str_replace(['{from_name}', '{logo_url}'], [h($fromName), $logoHtml], $templateBody);
+    $header = str_replace(['{from_name}', '{logo_url}'], [h($fromName), $logoHtml], $header);
+    $footer = str_replace(['{from_name}', '{logo_url}'], [h($fromName), $logoHtml], $footer);
 
-    return str_replace('{content}', $body, $templateBody);
+    return $header . $body . $footer;
 }
 
 include __DIR__ . '/includes/header.php';
@@ -451,12 +453,13 @@ include __DIR__ . '/includes/header.php';
 // Load template for JS preview
 $previewTpl = null;
 if (!empty($nl['template_id'])) {
-    $previewTpl = dbFetchOne("SELECT body_html FROM newsletter_templates WHERE id = ?", [(int)$nl['template_id']]);
+    $previewTpl = dbFetchOne("SELECT header_html, footer_html FROM newsletter_templates WHERE id = ?", [(int)$nl['template_id']]);
 }
 if (!$previewTpl) {
-    $previewTpl = dbFetchOne("SELECT body_html FROM newsletter_templates WHERE is_default = 1 LIMIT 1");
+    $previewTpl = dbFetchOne("SELECT header_html, footer_html FROM newsletter_templates WHERE is_default = 1 LIMIT 1");
 }
-$previewBody   = $previewTpl ? $previewTpl['body_html'] : '{content}';
+$previewHeader = $previewTpl ? $previewTpl['header_html'] : '';
+$previewFooter = $previewTpl ? $previewTpl['footer_html'] : '';
 $previewLogo   = getSetting('app_logo', '');
 $previewLogoHtml = $previewLogo ? '<img src="uploads/logos/' . h($previewLogo) . '" alt="" style="max-height:50px;margin-bottom:10px;">' : '';
 ?>
@@ -467,11 +470,12 @@ $previewLogoHtml = $previewLogo ? '<img src="uploads/logos/' . h($previewLogo) .
     var body = <?= json_encode($nl['body_html']) ?>;
     var fromName = <?= json_encode(getSetting('smtp_from_name', 'VolunteerOps')) ?>;
     var logoHtml = <?= json_encode($previewLogoHtml) ?>;
-    var tplBody = <?= json_encode($previewBody) ?>;
+    var header = <?= json_encode($previewHeader) ?>;
+    var footer = <?= json_encode($previewFooter) ?>;
 
-    var html = tplBody.replace(/\{from_name\}/g, fromName)
-                      .replace(/\{logo_url\}/g, logoHtml)
-                      .replace(/\{content\}/g, body);
+    header = header.replace(/\{from_name\}/g, fromName).replace(/\{logo_url\}/g, logoHtml);
+    footer = footer.replace(/\{from_name\}/g, fromName).replace(/\{logo_url\}/g, logoHtml);
+    var html = header + body + footer;
 
     var frame = document.getElementById('previewFrame');
     if (frame) { frame.srcdoc = html; }
