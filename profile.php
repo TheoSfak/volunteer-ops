@@ -680,49 +680,47 @@ $myRequiredMissing = dbFetchAll(
     </div>
     <div class="card-body">
         <?php if (!empty($myCertificates)): ?>
-        <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle">
-                <thead class="table-light">
-                    <tr>
-                        <th>Τύπος</th>
-                        <th>Ημ. Έκδοσης</th>
-                        <th>Ημ. Λήξης</th>
-                        <th>Κατάσταση</th>
-                        <th>Φορέας</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($myCertificates as $cert):
-                        $certBadge = '<span class="badge bg-secondary">Αόριστη</span>';
-                        $rowClass = '';
-                        if ($cert['expiry_date']) {
-                            $daysLeft = (int) ((strtotime($cert['expiry_date']) - time()) / 86400);
-                            if ($daysLeft < 0) {
-                                $certBadge = '<span class="badge bg-danger">Ληγμένο (' . abs($daysLeft) . ' ημ.)</span>';
-                                $rowClass = 'table-danger';
-                            } elseif ($daysLeft <= 30) {
-                                $certBadge = '<span class="badge bg-warning text-dark">Λήγει σε ' . $daysLeft . ' ημ.</span>';
-                                $rowClass = 'table-warning';
-                            } else {
-                                $certBadge = '<span class="badge bg-success">Ενεργό</span>';
-                            }
-                        }
-                    ?>
-                    <tr class="<?= $rowClass ?>">
-                        <td class="fw-semibold">
-                            <?php if ($cert['is_required']): ?>
-                                <i class="bi bi-exclamation-circle text-danger me-1" title="Υποχρεωτικό"></i>
+        <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 g-3">
+            <?php foreach ($myCertificates as $cert):
+                $certBadge = '<span class="badge bg-secondary">Αόριστη</span>';
+                $borderColor = '#6c757d';
+                if ($cert['expiry_date']) {
+                    $daysLeft = (int) ((strtotime($cert['expiry_date']) - time()) / 86400);
+                    if ($daysLeft < 0) {
+                        $certBadge = '<span class="badge bg-danger">Ληγμένο (' . abs($daysLeft) . ' ημ.)</span>';
+                        $borderColor = '#dc3545';
+                    } elseif ($daysLeft <= 30) {
+                        $certBadge = '<span class="badge bg-warning text-dark">Λήγει σε ' . $daysLeft . ' ημ.</span>';
+                        $borderColor = '#ffc107';
+                    } else {
+                        $certBadge = '<span class="badge bg-success">Ενεργό</span>';
+                        $borderColor = '#198754';
+                    }
+                }
+            ?>
+            <div class="col">
+                <div class="card h-100 shadow-sm" style="border-left: 4px solid <?= $borderColor ?>; border-radius: .6rem;">
+                    <div class="card-body py-3 px-3">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="mb-0 fw-semibold">
+                                <?php if ($cert['is_required']): ?>
+                                    <i class="bi bi-exclamation-circle text-danger me-1" title="Υποχρεωτικό"></i>
+                                <?php endif; ?>
+                                <?= h($cert['type_name']) ?>
+                            </h6>
+                            <?= $certBadge ?>
+                        </div>
+                        <div class="small text-muted">
+                            <div class="mb-1"><i class="bi bi-calendar-check me-1"></i>Έκδοση: <?= formatDate($cert['issue_date']) ?></div>
+                            <div class="mb-1"><i class="bi bi-calendar-x me-1"></i>Λήξη: <?= $cert['expiry_date'] ? formatDate($cert['expiry_date']) : 'Αόριστη' ?></div>
+                            <?php if (!empty($cert['issuing_body'])): ?>
+                            <div><i class="bi bi-building me-1"></i><?= h($cert['issuing_body']) ?></div>
                             <?php endif; ?>
-                            <?= h($cert['type_name']) ?>
-                        </td>
-                        <td><?= formatDate($cert['issue_date']) ?></td>
-                        <td><?= $cert['expiry_date'] ? formatDate($cert['expiry_date']) : '—' ?></td>
-                        <td><?= $certBadge ?></td>
-                        <td class="text-muted small"><?= h($cert['issuing_body'] ?? '—') ?></td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <?php endforeach; ?>
         </div>
         <?php endif; ?>
 
