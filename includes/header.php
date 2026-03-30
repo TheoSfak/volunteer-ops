@@ -1024,9 +1024,19 @@ if (isLoggedIn()) {
     <div class="main-content">
         <!-- Top Navbar -->
         <nav class="top-navbar d-flex justify-content-between align-items-center">
-            <button class="btn btn-link sidebar-toggle p-0" onclick="toggleSidebar()">
-                <i class="bi bi-list fs-4"></i>
-            </button>
+            <div class="d-flex align-items-center">
+                <button class="btn btn-link sidebar-toggle p-0" onclick="toggleSidebar()">
+                    <i class="bi bi-list fs-4"></i>
+                </button>
+                <a href="dashboard.php" class="d-lg-none d-flex align-items-center text-decoration-none ms-2" style="gap:0.4rem;">
+                    <?php if (!empty($appLogo) && file_exists(__DIR__ . '/../uploads/logos/' . $appLogo)): ?>
+                        <img src="uploads/logos/<?= h($appLogo) ?>" alt="" style="height:28px;width:auto;border-radius:6px;">
+                    <?php else: ?>
+                        <i class="bi bi-heart-pulse" style="font-size:1.3rem;color:var(--accent-color);"></i>
+                    <?php endif; ?>
+                    <span class="fw-bold" style="font-size:0.95rem;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40vw;"><?= h($appName) ?></span>
+                </a>
+            </div>
             
             <div class="d-flex align-items-center ms-auto">
                 <!-- Notification Bell -->
