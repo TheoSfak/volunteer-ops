@@ -603,6 +603,15 @@ if (isLoggedIn()) {
                 padding: 0.25rem 0.4rem;
             }
 
+            /* Notification dropdown: anchor to right edge of viewport on mobile */
+            .top-navbar .dropdown .dropdown-menu.dropdown-menu-end {
+                position: fixed !important;
+                right: 0.5rem !important;
+                left: auto !important;
+                top: auto !important;
+                transform: none !important;
+            }
+
             .top-navbar .dropdown-toggle .user-name-text {
                 overflow: hidden;
                 text-overflow: ellipsis;
