@@ -27,7 +27,11 @@ $allRoles     = [
     ROLE_SYSTEM_ADMIN       => 'Διαχειριστές Συστήματος',
 ];
 $nlTemplates = dbFetchAll("SELECT id, name, is_default FROM newsletter_templates ORDER BY is_default DESC, name");
-$nlPresets = dbFetchAll("SELECT id, name, description FROM newsletter_presets ORDER BY name");
+$nlPresets = [];
+$presetsTableExists = dbFetchOne("SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_presets'");
+if ($presetsTableExists) {
+    $nlPresets = dbFetchAll("SELECT id, name, description FROM newsletter_presets ORDER BY name");
+}
 
 // AJAX: count recipients
 if (get('action') === 'count_recipients') {
