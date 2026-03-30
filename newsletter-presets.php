@@ -7,8 +7,13 @@ requireRole([ROLE_SYSTEM_ADMIN]);
 
 $pageTitle = 'Πρότυπα Περιεχομένου';
 
+// Check if table exists (migration may not have run yet)
+$tableReady = (bool)dbFetchOne(
+    "SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_presets'"
+);
+
 // ── POST actions ──
-if (isPost()) {
+if ($tableReady && isPost()) {
     verifyCsrf();
     $action = post('action');
 
@@ -27,19 +32,23 @@ if (isPost()) {
 // AJAX: fetch preset body for newsletter-form integration
 if (get('action') === 'get_body') {
     header('Content-Type: application/json');
-    $presetId = (int)get('id');
-    $preset = dbFetchOne("SELECT body_html FROM newsletter_presets WHERE id = ?", [$presetId]);
-    echo json_encode(['body_html' => $preset ? $preset['body_html'] : '']);
+    if ($tableReady) {
+        $presetId = (int)get('id');
+        $preset = dbFetchOne("SELECT body_html FROM newsletter_presets WHERE id = ?", [$presetId]);
+        echo json_encode(['body_html' => $preset ? $preset['body_html'] : '']);
+    } else {
+        echo json_encode(['body_html' => '']);
+    }
     exit;
 }
 
 // Fetch all presets
-$presets = dbFetchAll("
+$presets = $tableReady ? dbFetchAll("
     SELECT np.*, u.name AS creator_name
     FROM newsletter_presets np
     LEFT JOIN users u ON u.id = np.created_by
     ORDER BY np.name ASC
-");
+") : [];
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -57,7 +66,9 @@ include __DIR__ . '/includes/header.php';
 
 <?= displayFlash() ?>
 
-<?php if (empty($presets)): ?>
+<?php if (!$tableReady): ?>
+    <div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>Ο πίνακας <code>newsletter_presets</code> δεν έχει δημιουργηθεί ακόμα. Η αυτόματη μετάβαση βάσης (migration) δεν έχει ολοκληρωθεί. Ελέγξτε τα migrations ή ανανεώστε τη σελίδα.</div>
+<?php elseif (empty($presets)): ?>
     <div class="alert alert-info">Δεν υπάρχουν πρότυπα περιεχομένου ακόμα. Δημιουργήστε ένα για να ξεκινήσετε.</div>
 <?php else: ?>
 

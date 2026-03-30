@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 48;
+    $LATEST_MIGRATION_VERSION = 49;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }

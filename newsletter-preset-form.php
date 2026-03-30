@@ -6,6 +6,15 @@
 require_once __DIR__ . '/bootstrap.php';
 requireRole([ROLE_SYSTEM_ADMIN]);
 
+// Check if table exists (migration may not have run yet)
+$tableReady = (bool)dbFetchOne(
+    "SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_presets'"
+);
+if (!$tableReady) {
+    setFlash('warning', 'Ο πίνακας newsletter_presets δεν έχει δημιουργηθεί ακόμα. Περιμένετε να ολοκληρωθεί η μετάβαση βάσης.');
+    redirect('newsletters.php');
+}
+
 $id     = (int)get('id');
 $isEdit = $id > 0;
 $preset = null;
