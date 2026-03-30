@@ -1586,6 +1586,17 @@ CREATE TABLE IF NOT EXISTS `newsletter_unsubscribes` (
     INDEX `idx_nu_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- NEWSLETTER PRESETS (Πρότυπα Περιεχομένου)
+CREATE TABLE IF NOT EXISTS `newsletter_presets` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(150) NOT NULL,
+    `description` VARCHAR(255) NULL,
+    `body_html` MEDIUMTEXT NOT NULL,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- =============================================
 -- CITIZENS TABLE (Πολίτες)
 -- =============================================

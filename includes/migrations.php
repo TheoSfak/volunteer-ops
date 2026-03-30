@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 45;
+    $LATEST_MIGRATION_VERSION = 48;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -2850,10 +2850,23 @@ body { margin:0; padding:0; background:#eef1f6; font-family: "Segoe UI", -apple-
 </body>
 </html>';
 
-                    dbInsert(
-                        "INSERT INTO newsletter_templates (name, header_html, footer_html, is_default, created_at, updated_at) VALUES (?, ?, ?, 1, NOW(), NOW())",
-                        ['Βασικό πρότυπο', $header, $footer]
+                    // Check which schema we have (fresh install may have body_html from schema.sql)
+                    $hasBodyCol = dbFetchOne(
+                        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_templates' AND COLUMN_NAME = 'body_html'"
                     );
+                    if ($hasBodyCol) {
+                        // Fresh install with v46+ schema: insert as single body_html
+                        dbInsert(
+                            "INSERT INTO newsletter_templates (name, body_html, is_default, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())",
+                            ['Βασικό πρότυπο', $header . '{content}' . $footer]
+                        );
+                    } else {
+                        dbInsert(
+                            "INSERT INTO newsletter_templates (name, header_html, footer_html, is_default, created_at, updated_at) VALUES (?, ?, ?, 1, NOW(), NOW())",
+                            ['Βασικό πρότυπο', $header, $footer]
+                        );
+                    }
                 }
 
                 // 3. Add template_id column to newsletters
@@ -2936,8 +2949,519 @@ body { margin:0; padding:0; background:#eef1f6; font-family: "Segoe UI", -apple-
 </body>
 </html>';
 
-                    dbExecute("UPDATE newsletter_templates SET name='Βασικό πρότυπο', header_html=?, footer_html=?, updated_at=NOW() WHERE id=?",
-                        [$header, $footer, $defaultTpl['id']]);
+                    // Check which schema we have
+                    $hasBodyCol = dbFetchOne(
+                        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_templates' AND COLUMN_NAME = 'body_html'"
+                    );
+                    if ($hasBodyCol) {
+                        dbExecute("UPDATE newsletter_templates SET name='Βασικό πρότυπο', body_html=?, updated_at=NOW() WHERE id=?",
+                            [$header . '{content}' . $footer, $defaultTpl['id']]);
+                    } else {
+                        dbExecute("UPDATE newsletter_templates SET name='Βασικό πρότυπο', header_html=?, footer_html=?, updated_at=NOW() WHERE id=?",
+                            [$header, $footer, $defaultTpl['id']]);
+                    }
+                }
+            },
+        ],
+
+        // ── v46 ── Merge header_html + footer_html into single body_html with {content} ──
+        [
+            'version'     => 46,
+            'description' => 'Merge newsletter template header/footer into single body_html with {content}',
+            'up'          => function () {
+                // 1. Add body_html column if not exists
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_templates' AND COLUMN_NAME = 'body_html'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE newsletter_templates ADD COLUMN body_html MEDIUMTEXT NULL AFTER name");
+                }
+
+                // 2. Migrate existing data: body_html = header_html + {content} + footer_html
+                $hCol = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_templates' AND COLUMN_NAME = 'header_html'"
+                );
+                if ($hCol) {
+                    $templates = dbFetchAll("SELECT id, header_html, footer_html FROM newsletter_templates WHERE body_html IS NULL");
+                    foreach ($templates as $tpl) {
+                        $bodyHtml = ($tpl['header_html'] ?? '') . '{content}' . ($tpl['footer_html'] ?? '');
+                        dbExecute("UPDATE newsletter_templates SET body_html = ? WHERE id = ?", [$bodyHtml, $tpl['id']]);
+                    }
+                }
+
+                // 3. Make body_html NOT NULL and drop old columns
+                dbExecute("ALTER TABLE newsletter_templates MODIFY body_html MEDIUMTEXT NOT NULL");
+
+                if ($hCol) {
+                    dbExecute("ALTER TABLE newsletter_templates DROP COLUMN header_html, DROP COLUMN footer_html");
+                }
+            },
+        ],
+
+        // ── v47 ── Add demo newsletter templates + session_timeout_minutes setting ──
+        [
+            'version'     => 47,
+            'description' => 'Add 5 demo newsletter templates with different designs + session_timeout_minutes setting',
+            'up'          => function () {
+                // Shared helper to build a template
+                $buildTemplate = function(string $headerBg, string $accentColor, string $headerText, string $footerBg, string $tagline, string $bodyLinkColor): string {
+                    return '<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body { margin:0; padding:0; background:#f4f6f9; font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+.email-container { max-width:600px; margin:0 auto; }
+.email-preheader { display:none !important; font-size:1px; line-height:1px; max-height:0; overflow:hidden; }
+.email-top-accent { height:5px; background: ' . $accentColor . '; }
+.email-header { background: ' . $headerBg . '; padding:36px 32px 28px; text-align:center; }
+.email-header .logo-circle { display:inline-block; width:68px; height:68px; border-radius:50%; background:rgba(255,255,255,.15); border:2px solid rgba(255,255,255,.25); padding:10px; margin-bottom:14px; }
+.email-header .logo-circle img { max-height:44px; max-width:44px; vertical-align:middle; }
+.email-header h1 { margin:0; color:' . $headerText . '; font-size:24px; font-weight:700; letter-spacing:0.5px; }
+.email-header .tagline { margin:6px 0 0; color:rgba(255,255,255,.7); font-size:12px; font-weight:400; letter-spacing:1px; text-transform:uppercase; }
+.email-divider { height:3px; background: ' . $accentColor . '; margin:0; border:0; }
+.email-body { background:#ffffff; padding:36px 32px; color:#2c3e50; line-height:1.8; font-size:15px; }
+.email-body h2 { color:#1a1a2e; margin:0 0 14px; font-size:19px; font-weight:700; }
+.email-body a { color:' . $bodyLinkColor . '; text-decoration:none; font-weight:600; }
+.email-body a:hover { text-decoration:underline; }
+@media only screen and (max-width:620px) {
+  .email-body { padding:24px 18px !important; }
+  .email-header { padding:24px 18px 20px !important; }
+  .email-header h1 { font-size:20px !important; }
+}
+</style>
+</head>
+<body>
+<div class="email-preheader">&nbsp;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;">
+<tr><td align="center" style="padding:28px 12px;">
+<div class="email-container">
+  <div class="email-top-accent"></div>
+  <div class="email-header">
+    <div class="logo-circle">{logo_url}</div>
+    <h1>{from_name}</h1>
+    <p class="tagline">' . $tagline . '</p>
+  </div>
+  <div class="email-divider"></div>
+  <div class="email-body">
+{content}
+  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:' . $footerBg . ';">
+    <tr><td style="padding:24px 32px; text-align:center;">
+      <p style="margin:0 0 5px; font-size:12px; color:rgba(255,255,255,.6);">&copy; ' . date('Y') . ' {from_name}</p>
+      <p style="margin:0; font-size:11px; color:rgba(255,255,255,.35);">Λάβατε αυτό το email επειδή είστε εγγεγραμμένος/η.</p>
+    </td></tr>
+  </table>
+</div>
+</td></tr>
+</table>
+</body>
+</html>';
+                };
+
+                $templates = [
+                    [
+                        'name' => 'Μπλε Κλασικό',
+                        'body' => $buildTemplate(
+                            'linear-gradient(135deg, #1e3a5f 0%, #2c5f8a 100%)',
+                            'linear-gradient(90deg, #2980b9, #3498db, #2980b9)',
+                            '#ffffff',
+                            '#1e3a5f',
+                            'Ενημερωτικό Δελτίο',
+                            '#2980b9'
+                        ),
+                    ],
+                    [
+                        'name' => 'Πράσινο Φύση',
+                        'body' => $buildTemplate(
+                            'linear-gradient(135deg, #1a472a 0%, #2d6a4f 100%)',
+                            'linear-gradient(90deg, #27ae60, #2ecc71, #27ae60)',
+                            '#ffffff',
+                            '#1a472a',
+                            'Εθελοντικές Δράσεις',
+                            '#27ae60'
+                        ),
+                    ],
+                    [
+                        'name' => 'Κόκκινο Επείγον',
+                        'body' => $buildTemplate(
+                            'linear-gradient(135deg, #7b1c1c 0%, #c0392b 100%)',
+                            'linear-gradient(90deg, #e74c3c, #ff6b6b, #e74c3c)',
+                            '#ffffff',
+                            '#7b1c1c',
+                            'Σημαντική Ενημέρωση',
+                            '#e74c3c'
+                        ),
+                    ],
+                    [
+                        'name' => 'Μωβ Εκδήλωση',
+                        'body' => $buildTemplate(
+                            'linear-gradient(135deg, #2d1b4e 0%, #6c3483 100%)',
+                            'linear-gradient(90deg, #8e44ad, #9b59b6, #8e44ad)',
+                            '#ffffff',
+                            '#2d1b4e',
+                            'Πρόσκληση Εκδήλωσης',
+                            '#8e44ad'
+                        ),
+                    ],
+                    [
+                        'name' => 'Πορτοκαλί Ζεστό',
+                        'body' => $buildTemplate(
+                            'linear-gradient(135deg, #7c4a03 0%, #d35400 100%)',
+                            'linear-gradient(90deg, #e67e22, #f39c12, #e67e22)',
+                            '#ffffff',
+                            '#7c4a03',
+                            'Νέα & Ανακοινώσεις',
+                            '#e67e22'
+                        ),
+                    ],
+                ];
+
+                foreach ($templates as $tpl) {
+                    // Only insert if name doesn't already exist
+                    $exists = dbFetchValue("SELECT COUNT(*) FROM newsletter_templates WHERE name = ?", [$tpl['name']]);
+                    if (!$exists) {
+                        dbInsert(
+                            "INSERT INTO newsletter_templates (name, body_html, is_default, created_at, updated_at) VALUES (?, ?, 0, NOW(), NOW())",
+                            [$tpl['name'], $tpl['body']]
+                        );
+                    }
+                }
+            },
+        ],
+
+        // ── v48 ── Replace basic demo templates with truly unique designs ──
+        [
+            'version'     => 48,
+            'description' => 'Replace color-only demo templates with unique header/footer designs',
+            'up'          => function () {
+                // Delete the 5 basic color-swap templates from v47
+                $oldNames = ['Μπλε Κλασικό', 'Πράσινο Φύση', 'Κόκκινο Επείγον', 'Μωβ Εκδήλωση', 'Πορτοκαλί Ζεστό'];
+                foreach ($oldNames as $name) {
+                    // Only delete if not used by any newsletter
+                    $used = (int)dbFetchValue(
+                        "SELECT COUNT(*) FROM newsletters n JOIN newsletter_templates t ON n.template_id = t.id WHERE t.name = ?",
+                        [$name]
+                    );
+                    if (!$used) {
+                        dbExecute("DELETE FROM newsletter_templates WHERE name = ? AND is_default = 0", [$name]);
+                    }
+                }
+
+                $year = date('Y');
+
+                // ── 1. Minimal Clean ──────────────────────────────────────
+                $tpl1 = '<!DOCTYPE html>
+<html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;padding:0;background:#ffffff;font-family:Georgia,"Times New Roman",serif;color:#333;}
+</style></head><body>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+<tr><td align="center" style="padding:40px 20px 0;">
+  <table role="presentation" width="560" cellpadding="0" cellspacing="0">
+    <tr><td style="border-bottom:2px solid #333;padding-bottom:20px;">
+      <table role="presentation" width="100%"><tr>
+        <td style="font-size:28px;font-weight:bold;color:#1a1a1a;letter-spacing:-0.5px;">{from_name}</td>
+        <td align="right" style="vertical-align:middle;">{logo_url}</td>
+      </tr></table>
+    </td></tr>
+    <tr><td style="padding:32px 0;font-size:16px;line-height:1.8;color:#444;">
+{content}
+    </td></tr>
+    <tr><td style="border-top:1px solid #ddd;padding-top:20px;padding-bottom:40px;text-align:center;">
+      <p style="margin:0;font-size:12px;color:#999;">&copy; ' . $year . ' {from_name} &middot; Ενημερωτικό Δελτίο</p>
+    </td></tr>
+  </table>
+</td></tr></table>
+</body></html>';
+
+                // ── 2. Bold Magazine ──────────────────────────────────────
+                $tpl2 = '<!DOCTYPE html>
+<html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;padding:0;background:#f0f0f0;font-family:"Segoe UI",Roboto,Arial,sans-serif;}
+</style></head><body>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f0f0f0;">
+<tr><td align="center" style="padding:30px 16px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:0;">
+  <!-- Thick top bar -->
+  <tr><td style="height:8px;background:#ff2d55;"></td></tr>
+  <!-- Header: large bold title -->
+  <tr><td style="padding:40px 40px 10px;text-align:left;">
+    <table role="presentation" width="100%"><tr>
+      <td>{logo_url}</td>
+      <td align="right" style="font-size:11px;text-transform:uppercase;letter-spacing:2px;color:#999;font-weight:600;">Τεύχος ' . date('m/Y') . '</td>
+    </tr></table>
+  </td></tr>
+  <tr><td style="padding:0 40px 30px;">
+    <h1 style="margin:0;font-size:36px;font-weight:900;color:#1a1a1a;line-height:1.1;letter-spacing:-1px;">{from_name}</h1>
+    <div style="width:60px;height:4px;background:#ff2d55;margin-top:16px;border-radius:2px;"></div>
+  </td></tr>
+  <!-- Body -->
+  <tr><td style="padding:10px 40px 40px;font-size:15px;line-height:1.8;color:#333;">
+{content}
+  </td></tr>
+  <!-- Footer -->
+  <tr><td style="background:#1a1a1a;padding:30px 40px;">
+    <table role="presentation" width="100%"><tr>
+      <td style="font-size:13px;color:#888;">&copy; ' . $year . ' {from_name}</td>
+      <td align="right" style="font-size:11px;color:#666;">Powered by <span style="color:#ff2d55;">VolunteerOps</span></td>
+    </tr></table>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>';
+
+                // ── 3. Card Style ─────────────────────────────────────────
+                $tpl3 = '<!DOCTYPE html>
+<html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;padding:0;background:#e8ecf1;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+</style></head><body>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#e8ecf1;">
+<tr><td align="center" style="padding:40px 16px;">
+  <!-- Logo bar -->
+  <table role="presentation" width="580" cellpadding="0" cellspacing="0">
+    <tr><td align="center" style="padding-bottom:24px;">
+      <div style="display:inline-block;background:#ffffff;border-radius:50%;width:70px;height:70px;text-align:center;line-height:70px;box-shadow:0 4px 15px rgba(0,0,0,.1);">
+        {logo_url}
+      </div>
+    </td></tr>
+    <tr><td align="center" style="padding-bottom:8px;">
+      <h1 style="margin:0;font-size:22px;font-weight:700;color:#2c3e50;">{from_name}</h1>
+      <p style="margin:4px 0 20px;font-size:13px;color:#7f8c8d;letter-spacing:0.5px;">Ενημερωτικό Δελτίο</p>
+    </td></tr>
+  </table>
+  <!-- Content card -->
+  <table role="presentation" width="580" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;box-shadow:0 2px 20px rgba(0,0,0,.08);">
+    <tr><td style="padding:36px 40px;font-size:15px;line-height:1.8;color:#2c3e50;">
+{content}
+    </td></tr>
+  </table>
+  <!-- Footer -->
+  <table role="presentation" width="580" cellpadding="0" cellspacing="0">
+    <tr><td align="center" style="padding:24px 0;">
+      <p style="margin:0;font-size:12px;color:#95a5a6;">&copy; ' . $year . ' {from_name}</p>
+      <p style="margin:4px 0 0;font-size:11px;color:#bdc3c7;">Αυτό το email στάλθηκε μέσω VolunteerOps</p>
+    </td></tr>
+  </table>
+</td></tr></table>
+</body></html>';
+
+                // ── 4. Split Header ───────────────────────────────────────
+                $tpl4 = '<!DOCTYPE html>
+<html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;padding:0;background:#f5f5f5;font-family:"Segoe UI",Roboto,Arial,sans-serif;}
+</style></head><body>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;">
+<tr><td align="center" style="padding:30px 16px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="border-radius:8px;overflow:hidden;box-shadow:0 1px 12px rgba(0,0,0,.1);">
+  <!-- Two-tone header -->
+  <tr>
+    <td width="180" style="background:#2c3e50;padding:28px 24px;vertical-align:middle;text-align:center;">
+      <div style="display:inline-block;background:rgba(255,255,255,.12);border-radius:12px;padding:12px;">{logo_url}</div>
+    </td>
+    <td style="background:#34495e;padding:28px 32px;vertical-align:middle;">
+      <h1 style="margin:0;font-size:22px;font-weight:700;color:#ffffff;">{from_name}</h1>
+      <p style="margin:6px 0 0;font-size:12px;color:#bdc3c7;text-transform:uppercase;letter-spacing:1.5px;">Εθελοντική Ομάδα</p>
+    </td>
+  </tr>
+  <!-- Accent line -->
+  <tr><td colspan="2" style="height:4px;background:linear-gradient(90deg,#3498db,#2ecc71);"></td></tr>
+  <!-- Body -->
+  <tr><td colspan="2" style="background:#ffffff;padding:36px 40px;font-size:15px;line-height:1.8;color:#2c3e50;">
+{content}
+  </td></tr>
+  <!-- Footer -->
+  <tr><td colspan="2" style="background:#ecf0f1;padding:20px 40px;">
+    <table role="presentation" width="100%"><tr>
+      <td style="font-size:12px;color:#7f8c8d;">{from_name} &copy; ' . $year . '</td>
+      <td align="right" style="font-size:11px;color:#95a5a6;">
+        <span style="color:#3498db;">&hearts;</span> Powered by VolunteerOps
+      </td>
+    </tr></table>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>';
+
+                // ── 5. Dark Mode ──────────────────────────────────────────
+                $tpl5 = '<!DOCTYPE html>
+<html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;}
+</style></head><body>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0d1117;">
+<tr><td align="center" style="padding:30px 16px;">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0">
+  <!-- Header -->
+  <tr><td style="background:#161b22;padding:32px 40px;border-bottom:1px solid #30363d;">
+    <table role="presentation" width="100%"><tr>
+      <td style="vertical-align:middle;">
+        <div style="display:inline-block;vertical-align:middle;margin-right:14px;">{logo_url}</div>
+        <span style="font-size:20px;font-weight:700;color:#f0f6fc;vertical-align:middle;">{from_name}</span>
+      </td>
+      <td align="right" style="vertical-align:middle;">
+        <span style="display:inline-block;background:#238636;color:#fff;font-size:11px;font-weight:600;padding:4px 12px;border-radius:20px;text-transform:uppercase;letter-spacing:0.5px;">Newsletter</span>
+      </td>
+    </tr></table>
+  </td></tr>
+  <!-- Body -->
+  <tr><td style="background:#0d1117;padding:36px 40px;font-size:15px;line-height:1.8;color:#c9d1d9;">
+{content}
+  </td></tr>
+  <!-- Footer -->
+  <tr><td style="background:#161b22;padding:24px 40px;border-top:1px solid #30363d;">
+    <table role="presentation" width="100%"><tr>
+      <td style="font-size:12px;color:#484f58;">&copy; ' . $year . ' {from_name}</td>
+      <td align="right" style="font-size:11px;color:#484f58;">
+        Made with <span style="color:#238636;">&hearts;</span> by VolunteerOps
+      </td>
+    </tr></table>
+  </td></tr>
+</table>
+</td></tr></table>
+</body></html>';
+
+                $newTemplates = [
+                    ['name' => 'Minimal Clean',    'body' => $tpl1],
+                    ['name' => 'Bold Magazine',    'body' => $tpl2],
+                    ['name' => 'Card Style',       'body' => $tpl3],
+                    ['name' => 'Split Header',     'body' => $tpl4],
+                    ['name' => 'Dark Mode',        'body' => $tpl5],
+                ];
+
+                foreach ($newTemplates as $tpl) {
+                    $exists = dbFetchValue("SELECT COUNT(*) FROM newsletter_templates WHERE name = ?", [$tpl['name']]);
+                    if (!$exists) {
+                        dbInsert(
+                            "INSERT INTO newsletter_templates (name, body_html, is_default, created_at, updated_at) VALUES (?, ?, 0, NOW(), NOW())",
+                            [$tpl['name'], $tpl['body']]
+                        );
+                    }
+                }
+            },
+        ],
+
+        // ── v49 ── Newsletter content presets table + seed data ──────────
+        [
+            'version'     => 49,
+            'description' => 'Create newsletter_presets table with 4 Greek seed presets',
+            'up'          => function () {
+                // Create table if not exists
+                $exists = dbFetchOne(
+                    "SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_presets'"
+                );
+                if (!$exists) {
+                    dbExecute("
+                        CREATE TABLE `newsletter_presets` (
+                            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            `name` VARCHAR(150) NOT NULL,
+                            `description` VARCHAR(255) NULL,
+                            `body_html` MEDIUMTEXT NOT NULL,
+                            `created_by` INT UNSIGNED NULL,
+                            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    ");
+                }
+
+                // Seed 4 default presets
+                $presets = [
+                    [
+                        'name' => 'Μηνιαία Ενημέρωση',
+                        'description' => 'Μηνιαία ανασκόπηση δραστηριοτήτων και νέων',
+                        'body' => '<h2 style="color:#2c3e50;">📋 Μηνιαία Ενημέρωση</h2>
+<p>Αγαπητοί εθελοντές,</p>
+<p>Ακολουθεί η μηνιαία ανασκόπηση των δραστηριοτήτων μας:</p>
+
+<h3 style="color:#3498db;">🎯 Αποστολές του μήνα</h3>
+<ul>
+<li>[Περιγραφή αποστολής 1]</li>
+<li>[Περιγραφή αποστολής 2]</li>
+</ul>
+
+<h3 style="color:#27ae60;">🏆 Κορυφαίοι Εθελοντές</h3>
+<p>[Αναφέρετε τους εθελοντές με τους περισσότερους πόντους]</p>
+
+<h3 style="color:#e67e22;">📅 Προσεχείς Δραστηριότητες</h3>
+<p>[Προσθέστε τις επερχόμενες αποστολές και εκδηλώσεις]</p>
+
+<p>Σας ευχαριστούμε για την προσφορά σας!</p>
+<p>Με εκτίμηση,<br>{name}</p>',
+                    ],
+                    [
+                        'name' => 'Πρόσκληση Αποστολής',
+                        'description' => 'Πρόσκληση συμμετοχής σε νέα αποστολή',
+                        'body' => '<h2 style="color:#e74c3c;">🚨 Νέα Αποστολή - Χρειαζόμαστε τη βοήθειά σας!</h2>
+<p>Αγαπητέ/ή {name},</p>
+<p>Σας ενημερώνουμε για μια <strong>νέα αποστολή</strong> που χρειάζεται εθελοντές:</p>
+
+<table style="width:100%;border-collapse:collapse;margin:16px 0;">
+<tr style="background:#f8f9fa;"><td style="padding:10px;border:1px solid #dee2e6;font-weight:bold;">📍 Τοποθεσία</td><td style="padding:10px;border:1px solid #dee2e6;">[Τοποθεσία]</td></tr>
+<tr><td style="padding:10px;border:1px solid #dee2e6;font-weight:bold;">📅 Ημερομηνία</td><td style="padding:10px;border:1px solid #dee2e6;">[Ημερομηνία]</td></tr>
+<tr style="background:#f8f9fa;"><td style="padding:10px;border:1px solid #dee2e6;font-weight:bold;">⏰ Ώρες</td><td style="padding:10px;border:1px solid #dee2e6;">[Ώρες]</td></tr>
+<tr><td style="padding:10px;border:1px solid #dee2e6;font-weight:bold;">👥 Εθελοντές που χρειάζονται</td><td style="padding:10px;border:1px solid #dee2e6;">[Αριθμός]</td></tr>
+</table>
+
+<p><strong>Δηλώστε συμμετοχή</strong> μέσω της πλατφόρμας VolunteerOps το συντομότερο δυνατό!</p>
+
+<p>Με εκτίμηση,<br>Η Ομάδα Διαχείρισης</p>',
+                    ],
+                    [
+                        'name' => 'Γενική Ανακοίνωση',
+                        'description' => 'Γενικού σκοπού ανακοίνωση προς εθελοντές',
+                        'body' => '<h2 style="color:#2c3e50;">📢 Ανακοίνωση</h2>
+<p>Αγαπητοί εθελοντές,</p>
+
+<p>[Γράψτε εδώ το κύριο μήνυμα της ανακοίνωσης]</p>
+
+<div style="background:#f8f9fa;border-left:4px solid #3498db;padding:16px;margin:16px 0;border-radius:4px;">
+<strong>ℹ️ Σημαντική πληροφορία:</strong><br>
+[Προσθέστε οποιαδήποτε σημαντική λεπτομέρεια]
+</div>
+
+<p>Για ερωτήσεις ή διευκρινίσεις, μη διστάσετε να επικοινωνήσετε μαζί μας.</p>
+
+<p>Με εκτίμηση,<br>Η Ομάδα Διαχείρισης</p>',
+                    ],
+                    [
+                        'name' => 'Καλωσόρισμα Νέων Μελών',
+                        'description' => 'Μήνυμα καλωσορίσματος για νέους εθελοντές',
+                        'body' => '<h2 style="color:#27ae60;">🎉 Καλώς ήρθατε στην ομάδα μας!</h2>
+<p>Αγαπητέ/ή {name},</p>
+<p>Σας καλωσορίζουμε στην εθελοντική μας ομάδα! Είμαστε χαρούμενοι που είστε μαζί μας.</p>
+
+<h3 style="color:#3498db;">🚀 Πρώτα βήματα</h3>
+<ol>
+<li><strong>Συνδεθείτε</strong> στην πλατφόρμα VolunteerOps</li>
+<li><strong>Συμπληρώστε</strong> το προφίλ σας με τα στοιχεία σας</li>
+<li><strong>Δείτε</strong> τις διαθέσιμες αποστολές</li>
+<li><strong>Δηλώστε</strong> συμμετοχή στη βάρδια που σας ενδιαφέρει</li>
+</ol>
+
+<h3 style="color:#e67e22;">🏆 Σύστημα Πόντων</h3>
+<p>Κερδίζετε πόντους για κάθε βάρδια που ολοκληρώνετε! Παρακολουθήστε τη βαθμολογία σας στο leaderboard.</p>
+
+<p>Ανυπομονούμε να σας δούμε στην πρώτη σας αποστολή!</p>
+
+<p>Με εκτίμηση,<br>Η Ομάδα Διαχείρισης</p>',
+                    ],
+                ];
+
+                foreach ($presets as $p) {
+                    $exists = dbFetchValue("SELECT COUNT(*) FROM newsletter_presets WHERE name = ?", [$p['name']]);
+                    if (!$exists) {
+                        dbInsert(
+                            "INSERT INTO newsletter_presets (name, description, body_html, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())",
+                            [$p['name'], $p['description'], $p['body']]
+                        );
+                    }
                 }
             },
         ],
