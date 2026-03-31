@@ -502,6 +502,11 @@ include __DIR__ . '/includes/header.php';
                                         </a>
                                     </li>
                                     <li>
+                                        <a class="dropdown-item" href="volunteer-report.php?id=<?= $v['id'] ?>" target="_blank">
+                                            <i class="bi bi-file-earmark-text me-1"></i>Αναφορά
+                                        </a>
+                                    </li>
+                                    <li>
                                         <a class="dropdown-item" href="volunteer-form.php?id=<?= $v['id'] ?>">
                                             <i class="bi bi-pencil me-1"></i>Επεξεργασία
                                         </a>
