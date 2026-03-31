@@ -995,6 +995,11 @@ if (isLoggedIn()) {
             <div class="sidebar-section">Σύστημα</div>
             
             <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'report-municipality' ? 'active' : '' ?>" href="report-municipality.php">
+                    <i class="bi bi-file-earmark-pdf"></i> Αναφορά Δήμου
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'audit' ? 'active' : '' ?>" href="audit.php">
                     <i class="bi bi-journal-text"></i> Αρχείο Καταγραφής
                 </a>
