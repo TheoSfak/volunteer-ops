@@ -198,6 +198,118 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     <?= $pageScripts ?>
     <?php endif; ?>
 
+<?php if (isLoggedIn()): ?>
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SERVICE WORKER REGISTRATION + PWA INSTALL PROMPT
+     ══════════════════════════════════════════════════════════════════════════ -->
+<script>
+(function() {
+    // ── Service Worker Registration ──
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('<?= rtrim(BASE_URL, '/') ?>/sw.js')
+            .then(function(reg) {
+                // Check for updates periodically
+                setInterval(function() { reg.update(); }, 60 * 60 * 1000); // hourly
+                
+                // New SW available — show update toast
+                reg.addEventListener('updatefound', function() {
+                    var newWorker = reg.installing;
+                    newWorker.addEventListener('statechange', function() {
+                        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                            showUpdateToast();
+                        }
+                    });
+                });
+            })
+            .catch(function(err) {
+                console.log('SW registration failed:', err);
+            });
+    }
+
+    // ── Update Available Toast ──
+    function showUpdateToast() {
+        if (document.getElementById('vo-update-toast')) return;
+        var toast = document.createElement('div');
+        toast.id = 'vo-update-toast';
+        toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:99998;background:#1e3c72;color:#fff;padding:12px 20px;border-radius:12px;box-shadow:0 8px 25px rgba(0,0,0,.3);display:flex;align-items:center;gap:12px;font-size:14px;font-weight:500;animation:voSlideUp .4s ease;max-width:90vw;';
+        toast.innerHTML = '<i class="bi bi-arrow-repeat" style="font-size:18px;"></i>' +
+            '<span>Νέα έκδοση διαθέσιμη!</span>' +
+            '<button onclick="location.reload()" style="background:#667eea;color:#fff;border:none;padding:6px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;">Ανανέωση</button>' +
+            '<button onclick="this.parentElement.remove()" style="background:none;border:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:18px;padding:0 4px;">✕</button>';
+        document.body.appendChild(toast);
+    }
+
+    // ── PWA Install Prompt ──
+    var deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        deferredPrompt = e;
+        // Don't show if user already dismissed
+        if (localStorage.getItem('vo-pwa-dismissed')) return;
+        showInstallBanner();
+    });
+
+    function showInstallBanner() {
+        if (document.getElementById('vo-install-banner')) return;
+        var banner = document.createElement('div');
+        banner.id = 'vo-install-banner';
+        banner.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:99997;background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;padding:16px 20px;border-radius:16px;box-shadow:0 12px 35px rgba(0,0,0,.3);max-width:340px;animation:voSlideUp .5s ease;';
+        banner.innerHTML = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">' +
+            '<img src="<?= rtrim(BASE_URL, '/') ?>/assets/icons/icon-72.png" style="width:40px;height:40px;border-radius:8px;" alt="">' +
+            '<div><strong style="font-size:14px;">Εγκατάσταση Εφαρμογής</strong><br><span style="font-size:12px;color:rgba(255,255,255,.7);">Προσθήκη στην αρχική οθόνη</span></div>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;">' +
+            '<button id="vo-install-btn" style="flex:1;background:#667eea;color:#fff;border:none;padding:8px;border-radius:10px;font-weight:600;cursor:pointer;font-size:13px;">Εγκατάσταση</button>' +
+            '<button id="vo-install-dismiss" style="background:rgba(255,255,255,.1);color:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.2);padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;">Όχι τώρα</button>' +
+            '</div>';
+        document.body.appendChild(banner);
+
+        document.getElementById('vo-install-btn').addEventListener('click', function() {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then(function() { deferredPrompt = null; });
+            }
+            banner.remove();
+        });
+        document.getElementById('vo-install-dismiss').addEventListener('click', function() {
+            localStorage.setItem('vo-pwa-dismissed', '1');
+            banner.remove();
+        });
+    }
+})();
+</script>
+<!-- Push Notification Manager -->
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/push.js"></script>
+<?php
+    $__vapidKey = getSetting('vapid_public_key', '');
+    if ($__vapidKey):
+?>
+<script>VoPush.init('<?= h($__vapidKey) ?>', '<?= rtrim(BASE_URL, '/') ?>');</script>
+<?php endif; ?>
+<!-- Online/Offline Indicator -->
+<div id="vo-offline-bar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc3545;color:#fff;text-align:center;padding:6px 12px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.2);">
+    <i class="bi bi-wifi-off"></i> Εκτός σύνδεσης — Ορισμένες λειτουργίες δεν είναι διαθέσιμες
+</div>
+<script>
+(function() {
+    var bar = document.getElementById('vo-offline-bar');
+    function update() { bar.style.display = navigator.onLine ? 'none' : 'block'; }
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    update();
+})();
+</script>
+<style>
+@keyframes voSlideUp {
+    from { transform: translateY(30px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+#vo-update-toast {
+    animation: voSlideUp .4s ease;
+}
+</style>
+<?php endif; ?>
+
 <?php if (!empty($_pendingBadges)): ?>
 <!-- ══════════════════════════════════════════════════════════════════════════
      ACHIEVEMENT BADGE POPUP — fires once per session when new badges earned
