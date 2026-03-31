@@ -415,6 +415,7 @@ include __DIR__ . '/includes/header.php';
                 <?= roleBadge($user['role']) ?>
                 <?= volunteerTypeBadge($user['volunteer_type'] ?? VTYPE_RESCUER) ?>
                 <span class="badge bg-light text-dark ms-1" style="font-size:.72rem"><i class="bi bi-calendar3 me-1"></i>Μέλος από <?= formatDate($user['created_at']) ?></span>
+                <a href="volunteer-report.php?id=<?= $user['id'] ?>" target="_blank" class="badge bg-info text-white ms-1 text-decoration-none" style="font-size:.72rem"><i class="bi bi-file-earmark-text me-1"></i>Αναφορά</a>
             </div>
         </div>
     </div>
