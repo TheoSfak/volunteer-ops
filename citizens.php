@@ -349,6 +349,9 @@ include __DIR__ . '/includes/header.php';
                                     <i class="bi <?= $c['contact_done'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?>"></i>
                                 </button>
                             </form>
+                            <?php if ($c['contact_done'] && ($c['contact_done_at'] ?? null)): ?>
+                                <br><small class="text-muted" style="font-size:0.7rem;"><?= formatDateTime($c['contact_done_at']) ?></small>
+                            <?php endif; ?>
                         </td>
                         <td class="text-center">
                             <form method="post" class="d-inline">
@@ -359,6 +362,9 @@ include __DIR__ . '/includes/header.php';
                                     <i class="bi <?= $c['payment_done'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?>"></i>
                                 </button>
                             </form>
+                            <?php if ($c['payment_done'] && ($c['payment_done_at'] ?? null)): ?>
+                                <br><small class="text-muted" style="font-size:0.7rem;"><?= formatDateTime($c['payment_done_at']) ?></small>
+                            <?php endif; ?>
                         </td>
                         <td class="text-center">
                             <form method="post" class="d-inline">
@@ -369,6 +375,9 @@ include __DIR__ . '/includes/header.php';
                                     <i class="bi <?= $c['completed'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?>"></i>
                                 </button>
                             </form>
+                            <?php if ($c['completed'] && ($c['completed_at'] ?? null)): ?>
+                                <br><small class="text-muted" style="font-size:0.7rem;"><?= formatDateTime($c['completed_at']) ?></small>
+                            <?php endif; ?>
                         </td>
                         <td class="text-center text-nowrap">
                             <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="editCitizen(<?= h(json_encode($c)) ?>)" title="Επεξεργασία">
