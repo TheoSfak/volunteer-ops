@@ -14,6 +14,7 @@ require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/email.php';
+require_once __DIR__ . '/includes/webpush.php';
 require_once __DIR__ . '/includes/newsletter-functions.php';
 require_once __DIR__ . '/includes/training-functions.php';
 require_once __DIR__ . '/includes/achievements-functions.php';
@@ -21,7 +22,7 @@ require_once __DIR__ . '/includes/achievements-functions.php';
 
 // Migrations: only load the heavy 180KB file if schema needs updating.
 // IMPORTANT: Update this number whenever you add a new migration!
-define('LATEST_MIGRATION_VERSION', 49);
+define('LATEST_MIGRATION_VERSION', 50);
 try {
     $__schemaVer = (int) dbFetchValue(
         "SELECT setting_value FROM settings WHERE setting_key = 'db_schema_version'"
@@ -44,7 +45,7 @@ header('X-Frame-Options: SAMEORIGIN');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: strict-origin-when-cross-origin');
 header('Permissions-Policy: camera=(self), microphone=(), geolocation=(self)');
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com");
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://*.push.services.mozilla.com https://fcm.googleapis.com https://updates.push.services.mozilla.com; worker-src 'self'");
 if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 }

@@ -27,6 +27,7 @@ if (isPost()) {
         $prefs[$code] = [
             'email_enabled'  => isset($_POST['email_' . $code]) ? 1 : 0,
             'in_app_enabled' => isset($_POST['inapp_' . $code]) ? 1 : 0,
+            'push_enabled'   => isset($_POST['push_' . $code]) ? 1 : 0,
         ];
     }
 
@@ -49,6 +50,25 @@ include __DIR__ . '/includes/header.php';
     <h2><i class="bi bi-bell"></i> <?= h($pageTitle) ?></h2>
 </div>
 
+<!-- ══ Push Notification Subscription Card ══ -->
+<div class="card shadow-sm mb-4 border-primary border-opacity-25">
+    <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between">
+            <div>
+                <h5 class="mb-1"><i class="bi bi-phone-vibrate text-primary"></i> Push Ειδοποιήσεις</h5>
+                <p class="text-muted mb-0 small">Λάβετε ειδοποιήσεις στον browser σας ακόμα και όταν δεν είστε στην εφαρμογή.</p>
+            </div>
+            <div class="text-end">
+                <div id="vo-push-status" class="mb-2"><span class="badge bg-secondary">Έλεγχος...</span></div>
+                <button type="button" id="vo-push-toggle" class="btn btn-secondary btn-sm" disabled>Φόρτωση...</button>
+                <button type="button" id="vo-push-test" class="btn btn-outline-success btn-sm ms-1" style="display:none;" onclick="VoPush.sendTest().then(function(r){alert(r.success?'Στάλθηκε!':'Αποτυχία');})">
+                    <i class="bi bi-send"></i> Δοκιμή
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="card shadow-sm">
     <div class="card-body">
         <p class="text-muted mb-4">
@@ -64,14 +84,17 @@ include __DIR__ . '/includes/header.php';
                 <table class="table table-hover align-middle">
                     <thead class="table-light">
                         <tr>
-                            <th style="width: 40%;">Ειδοποίηση</th>
-                            <th class="text-center" style="width: 20%;">
+                            <th style="width: 30%;">Ειδοποίηση</th>
+                            <th class="text-center" style="width: 15%;">
                                 <i class="bi bi-envelope"></i> Email
                             </th>
-                            <th class="text-center" style="width: 20%;">
-                                <i class="bi bi-bell"></i> Εντός Εφαρμογής
+                            <th class="text-center" style="width: 15%;">
+                                <i class="bi bi-bell"></i> Εντός Εφ.
                             </th>
-                            <th style="width: 20%;">Κατάσταση</th>
+                            <th class="text-center" style="width: 15%;">
+                                <i class="bi bi-phone-vibrate"></i> Push
+                            </th>
+                            <th style="width: 15%;">Κατάσταση</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -83,6 +106,7 @@ include __DIR__ . '/includes/header.php';
                             // User prefs: default to ON if no row exists
                             $userEmail = isset($userPrefs[$code]) ? $userPrefs[$code]['email_enabled'] : 1;
                             $userInApp = isset($userPrefs[$code]) ? $userPrefs[$code]['in_app_enabled'] : 1;
+                            $userPush  = isset($userPrefs[$code]) ? ($userPrefs[$code]['push_enabled'] ?? 1) : 1;
                         ?>
                         <tr class="<?= (!$globalEnabled && !$isMandatory) ? 'table-secondary' : '' ?>">
                             <td>
@@ -116,6 +140,21 @@ include __DIR__ . '/includes/header.php';
                                                name="inapp_<?= h($code) ?>" value="1"
                                                id="inapp_<?= h($code) ?>"
                                                <?= $userInApp ? 'checked' : '' ?>>
+                                    </div>
+                                <?php endif; ?>
+                            </td>
+                            <td class="text-center">
+                                <?php if ($isMandatory): ?>
+                                    <i class="bi bi-check-circle-fill text-success fs-5" title="Υποχρεωτική"></i>
+                                    <input type="hidden" name="push_<?= h($code) ?>" value="1">
+                                <?php elseif (!$globalEnabled): ?>
+                                    <i class="bi bi-x-circle text-muted fs-5" title="Απενεργοποιημένο από διαχειριστή"></i>
+                                <?php else: ?>
+                                    <div class="form-check form-switch d-flex justify-content-center">
+                                        <input class="form-check-input" type="checkbox" role="switch"
+                                               name="push_<?= h($code) ?>" value="1"
+                                               id="push_<?= h($code) ?>"
+                                               <?= $userPush ? 'checked' : '' ?>>
                                     </div>
                                 <?php endif; ?>
                             </td>

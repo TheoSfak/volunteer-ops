@@ -25,13 +25,14 @@ function getUserNotificationPrefs(int $userId): array {
     $prefs = [];
     try {
         $rows = dbFetchAll(
-            "SELECT notification_code, email_enabled, in_app_enabled FROM user_notification_preferences WHERE user_id = ?",
+            "SELECT notification_code, email_enabled, in_app_enabled, push_enabled FROM user_notification_preferences WHERE user_id = ?",
             [$userId]
         );
         foreach ($rows as $row) {
             $prefs[$row['notification_code']] = [
                 'email_enabled'  => (int)$row['email_enabled'],
                 'in_app_enabled' => (int)$row['in_app_enabled'],
+                'push_enabled'   => (int)($row['push_enabled'] ?? 1),
             ];
         }
     } catch (Exception $e) {
@@ -45,15 +46,16 @@ function getUserNotificationPrefs(int $userId): array {
 /**
  * Check if a specific notification channel is enabled for a user.
  * Default: true (opted-in) when no row exists.
- * $channel = 'email' | 'in_app'
+ * $channel = 'email' | 'in_app' | 'push'
  */
 function isUserNotifEnabled(int $userId, string $code, string $channel = 'email'): bool {
     $prefs = getUserNotificationPrefs($userId);
     if (!isset($prefs[$code])) {
         return true; // no preference set = opted-in
     }
-    $key = ($channel === 'email') ? 'email_enabled' : 'in_app_enabled';
-    return (bool)$prefs[$code][$key];
+    $map = ['email' => 'email_enabled', 'in_app' => 'in_app_enabled', 'push' => 'push_enabled'];
+    $key = $map[$channel] ?? 'email_enabled';
+    return (bool)($prefs[$code][$key] ?? true);
 }
 
 /**
@@ -64,11 +66,12 @@ function saveUserNotificationPrefs(int $userId, array $prefs): void {
     foreach ($prefs as $code => $settings) {
         $emailEnabled  = (int)($settings['email_enabled'] ?? 1);
         $inAppEnabled  = (int)($settings['in_app_enabled'] ?? 1);
+        $pushEnabled   = (int)($settings['push_enabled'] ?? 1);
         dbExecute(
-            "INSERT INTO user_notification_preferences (user_id, notification_code, email_enabled, in_app_enabled, updated_at)
-             VALUES (?, ?, ?, ?, NOW())
-             ON DUPLICATE KEY UPDATE email_enabled = VALUES(email_enabled), in_app_enabled = VALUES(in_app_enabled), updated_at = NOW()",
-            [$userId, $code, $emailEnabled, $inAppEnabled]
+            "INSERT INTO user_notification_preferences (user_id, notification_code, email_enabled, in_app_enabled, push_enabled, updated_at)
+             VALUES (?, ?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE email_enabled = VALUES(email_enabled), in_app_enabled = VALUES(in_app_enabled), push_enabled = VALUES(push_enabled), updated_at = NOW()",
+            [$userId, $code, $emailEnabled, $inAppEnabled, $pushEnabled]
         );
     }
     // Clear cache for this user
@@ -533,16 +536,26 @@ function sendNotificationEmail(string $notificationCode, string $to, array $vari
  * Pass $notificationCode to check per-user in-app preference.
  */
 function sendNotification(int $userId, string $title, string $message, string $type = 'info', string $notificationCode = ''): void {
-    // Check per-user in-app preference when a code is provided
-    if ($notificationCode !== '' && !in_array($notificationCode, NON_CONFIGURABLE_NOTIFICATIONS)) {
-        if (!isUserNotifEnabled($userId, $notificationCode, 'in_app')) {
-            return;
+    $isMandatory = ($notificationCode === '' || in_array($notificationCode, NON_CONFIGURABLE_NOTIFICATIONS));
+
+    // In-app notification
+    $sendInApp = $isMandatory || isUserNotifEnabled($userId, $notificationCode, 'in_app');
+    if ($sendInApp) {
+        dbInsert(
+            "INSERT INTO notifications (user_id, type, title, message, created_at) VALUES (?, ?, ?, ?, NOW())",
+            [$userId, $type, $title, $message]
+        );
+    }
+
+    // Push notification (non-blocking)
+    $sendPush = $isMandatory || isUserNotifEnabled($userId, $notificationCode, 'push');
+    if ($sendPush) {
+        try {
+            sendPushToUser($userId, $title, $message);
+        } catch (\Exception $e) {
+            // Push failure should never block the main flow
         }
     }
-    dbInsert(
-        "INSERT INTO notifications (user_id, type, title, message, created_at) VALUES (?, ?, ?, ?, NOW())",
-        [$userId, $type, $title, $message]
-    );
 }
 
 /**
@@ -552,25 +565,45 @@ function sendNotification(int $userId, string $title, string $message, string $t
 function sendBulkNotifications(array $userIds, string $title, string $message, string $type = 'info', string $notificationCode = ''): void {
     if (empty($userIds)) return;
     
-    // Filter out users who opted out of this in-app notification
-    if ($notificationCode !== '' && !in_array($notificationCode, NON_CONFIGURABLE_NOTIFICATIONS)) {
-        $userIds = array_filter($userIds, function ($uid) use ($notificationCode) {
+    $isMandatory = ($notificationCode === '' || in_array($notificationCode, NON_CONFIGURABLE_NOTIFICATIONS));
+
+    // Filter for in-app
+    $inAppIds = $userIds;
+    if (!$isMandatory) {
+        $inAppIds = array_filter($userIds, function ($uid) use ($notificationCode) {
             return isUserNotifEnabled((int)$uid, $notificationCode, 'in_app');
         });
-        $userIds = array_values($userIds); // re-index
-        if (empty($userIds)) return;
+        $inAppIds = array_values($inAppIds);
     }
-    
-    $values = [];
-    $params = [];
-    foreach ($userIds as $userId) {
-        $values[] = "(?, ?, ?, ?, NOW())";
-        $params[] = $userId;
-        $params[] = $type;
-        $params[] = $title;
-        $params[] = $message;
+
+    // Bulk insert in-app notifications
+    if (!empty($inAppIds)) {
+        $values = [];
+        $params = [];
+        foreach ($inAppIds as $userId) {
+            $values[] = "(?, ?, ?, ?, NOW())";
+            $params[] = $userId;
+            $params[] = $type;
+            $params[] = $title;
+            $params[] = $message;
+        }
+        $sql = "INSERT INTO notifications (user_id, type, title, message, created_at) VALUES " . implode(', ', $values);
+        dbExecute($sql, $params);
     }
-    
-    $sql = "INSERT INTO notifications (user_id, type, title, message, created_at) VALUES " . implode(', ', $values);
-    dbExecute($sql, $params);
+
+    // Push notifications
+    $pushIds = $userIds;
+    if (!$isMandatory) {
+        $pushIds = array_filter($userIds, function ($uid) use ($notificationCode) {
+            return isUserNotifEnabled((int)$uid, $notificationCode, 'push');
+        });
+        $pushIds = array_values($pushIds);
+    }
+    foreach ($pushIds as $uid) {
+        try {
+            sendPushToUser((int)$uid, $title, $message);
+        } catch (\Exception $e) {
+            // Push failure should never block the main flow
+        }
+    }
 }

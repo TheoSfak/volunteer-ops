@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update this number whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 49;
+    $LATEST_MIGRATION_VERSION = 50;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -3462,6 +3462,43 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                             [$p['name'], $p['description'], $p['body']]
                         );
                     }
+                }
+            },
+        ],
+
+        [
+            'version'     => 50,
+            'description' => 'Create push_subscriptions table and add push_enabled column',
+            'up' => function () {
+                // Create push_subscriptions table
+                $tbl = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'push_subscriptions'"
+                );
+                if (!$tbl) {
+                    dbExecute("CREATE TABLE push_subscriptions (
+                        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        user_id INT UNSIGNED NOT NULL,
+                        endpoint TEXT NOT NULL,
+                        p256dh_key VARCHAR(255) NOT NULL,
+                        auth_key VARCHAR(255) NOT NULL,
+                        user_agent VARCHAR(512) DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                        INDEX idx_push_user (user_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                }
+
+                // Add push_enabled column to user_notification_preferences
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME = 'user_notification_preferences'
+                       AND COLUMN_NAME = 'push_enabled'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE user_notification_preferences ADD COLUMN push_enabled TINYINT(1) NOT NULL DEFAULT 1 AFTER in_app_enabled");
                 }
             },
         ],
