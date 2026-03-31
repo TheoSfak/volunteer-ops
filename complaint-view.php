@@ -100,6 +100,13 @@ if (isPost() && isAdmin()) {
             }
             redirect('complaint-view.php?id=' . $id);
             break;
+            
+        case 'delete':
+            dbExecute("DELETE FROM complaints WHERE id = ?", [$id]);
+            logAudit('delete_complaint', 'complaints', $id);
+            setFlash('success', 'Το παράπονο #' . $id . ' διαγράφηκε επιτυχώς.');
+            redirect('complaints.php');
+            break;
     }
 }
 
@@ -245,6 +252,43 @@ include __DIR__ . '/includes/header.php';
                                 </div>
                             </div>
                         </form>
+                        
+                        <hr>
+                        
+                        <!-- Delete -->
+                        <button type="button" class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#deleteComplaintModal">
+                            <i class="bi bi-trash me-1"></i>Διαγραφή Παραπόνου
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Delete Confirmation Modal -->
+                <div class="modal fade" id="deleteComplaintModal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <form method="post">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="delete">
+                                <div class="modal-header bg-danger text-white">
+                                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Διαγραφή Παραπόνου</h5>
+                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <p>Είστε σίγουρος/η ότι θέλετε να διαγράψετε το παράπονο <strong>#<?= $id ?></strong>;</p>
+                                    <p class="mb-0"><strong>Θέμα:</strong> <?= h($complaint['subject']) ?></p>
+                                    <p class="text-muted mb-0"><strong>Από:</strong> <?= h($complaint['user_name']) ?></p>
+                                    <div class="alert alert-warning mt-3 mb-0">
+                                        <i class="bi bi-exclamation-triangle me-1"></i>Η ενέργεια αυτή είναι μη αναστρέψιμη.
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                                    <button type="submit" class="btn btn-danger">
+                                        <i class="bi bi-trash me-1"></i>Διαγραφή
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
                     </div>
                 </div>
             <?php endif; ?>
