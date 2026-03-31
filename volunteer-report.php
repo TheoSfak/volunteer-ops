@@ -11,7 +11,7 @@ if (!$id) {
 }
 
 // Access control: volunteers can only see their own report
-if (!isAdmin() && !hasRole(ROLE_SHIFT_LEADER) && getCurrentUserId() !== $id) {
+if (!isAdmin() && !hasRole(ROLE_SHIFT_LEADER) && (int)getCurrentUserId() !== $id) {
     setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή την αναφορά.');
     redirect('dashboard.php');
 }
