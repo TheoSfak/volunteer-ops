@@ -32,6 +32,7 @@ $selectedTypes = array_map('intval', (array)(get('types') ?: []));
 $period = get('period', '');
 $customStart = get('start_date', '');
 $customEnd = get('end_date', '');
+$showIncidents = get('show_incidents', '') === '1';
 $generate = !empty($selectedTypes) && !empty($period);
 
 $startDate = '';
@@ -247,6 +248,18 @@ if ($generate) {
         $baseParams
     );
 
+    // --- Full incident list (when checkbox enabled) ---
+    $incidentList = [];
+    if ($showIncidents) {
+        $incidentList = safeAll(
+            "SELECT m.title, m.start_datetime, md.incidents, md.created_at as debrief_date
+             FROM mission_debriefs md JOIN missions m ON md.mission_id = m.id
+             WHERE md.incidents IS NOT NULL AND md.incidents != '' AND $baseWhere
+             ORDER BY m.start_datetime DESC",
+            $baseParams
+        );
+    }
+
     // Selected type names
     $selectedTypeNames = [];
     foreach ($missionTypes as $mt) {
@@ -268,7 +281,7 @@ if ($generate) {
         'avgRating', 'debriefCount', 'objectivesMetFull', 'objectivesPartial', 'incidentCount',
         'typeBreakdown', 'monthlyTrend', 'topVolunteers', 'deptBreakdown',
         'statusDist', 'debriefDetails', 'selectedTypeNames',
-        'avgHoursPerVolunteer', 'avgVolPerMission'
+        'avgHoursPerVolunteer', 'avgVolPerMission', 'incidentList'
     );
 }
 
@@ -328,6 +341,17 @@ include __DIR__ . '/includes/header.php';
                         <label class="form-label">Έως</label>
                         <input type="date" class="form-control" name="end_date" value="<?= h($customEnd) ?>">
                     </div>
+                </div>
+            </div>
+            <div class="mb-4">
+                <label class="form-label fw-bold"><i class="bi bi-sliders me-1"></i>Επιλογές Αναφοράς</label>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="show_incidents" value="1" 
+                           id="show_incidents" <?= $showIncidents ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="show_incidents">
+                        <i class="bi bi-exclamation-triangle text-danger me-1"></i>Συμπερίληψη Αναφοράς Συμβάντων
+                    </label>
+                    <div class="form-text">Εμφανίζει αναλυτικά όλα τα συμβάντα από τα debrief αποστολών</div>
                 </div>
             </div>
             <button type="submit" class="btn btn-primary btn-lg">
@@ -777,6 +801,34 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
     <?php endif; ?>
 
+    <!-- ===== INCIDENT REPORT SECTION ===== -->
+    <?php if ($showIncidents && !empty($reportData['incidentList'])): ?>
+    <div class="page-break-before"></div>
+    <div class="section-title" style="color: #dc3545;">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        <span>Αναφορά Συμβάντων</span>
+    </div>
+    <p class="text-muted mb-3" style="font-size: 0.9rem;">
+        Καταγραφή <?= count($reportData['incidentList']) ?> συμβάντων που αναφέρθηκαν κατά τη διάρκεια αποστολών στην επιλεγμένη περίοδο.
+    </p>
+    <?php foreach ($reportData['incidentList'] as $idx => $inc): ?>
+    <div class="incident-card mb-3">
+        <div class="incident-header">
+            <div>
+                <span class="badge bg-danger me-2">#<?= $idx + 1 ?></span>
+                <strong><?= h($inc['title']) ?></strong>
+            </div>
+            <div class="text-muted" style="font-size: 0.85rem;">
+                <i class="bi bi-calendar3 me-1"></i><?= formatDate($inc['start_datetime']) ?>
+            </div>
+        </div>
+        <div class="incident-body">
+            <?= nl2br(h($inc['incidents'])) ?>
+        </div>
+    </div>
+    <?php endforeach; ?>
+    <?php endif; ?>
+
     <!-- ===== REPORT FOOTER ===== -->
     <div class="report-footer">
         <div class="report-footer-line"></div>
@@ -1009,6 +1061,29 @@ include __DIR__ . '/includes/header.php';
 .debrief-stat-value { font-size: 1.5rem; font-weight: 700; }
 .debrief-stat-label { font-size: 0.8rem; color: #666; margin-top: 0.3rem; }
 
+/* ===== Incident Cards ===== */
+.incident-card {
+    border: 1px solid #f5c6cb;
+    border-left: 4px solid #dc3545;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fff;
+}
+.incident-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: #fff5f5;
+    border-bottom: 1px solid #f5c6cb;
+}
+.incident-body {
+    padding: 0.75rem 1rem;
+    font-size: 0.9rem;
+    color: #333;
+    line-height: 1.6;
+}
+
 /* ===== Footer ===== */
 .report-footer { margin-top: 3rem; padding-top: 1rem; }
 .report-footer-line { height: 3px; background: linear-gradient(90deg, #1a3a5c, #2c6faa, #1a3a5c); border-radius: 2px; }
@@ -1081,6 +1156,10 @@ include __DIR__ . '/includes/header.php';
     .section-title { page-break-after: avoid; }
     .report-table { page-break-inside: auto; }
     .report-table tr { page-break-inside: avoid; }
+    
+    /* Incident cards */
+    .incident-card { page-break-inside: avoid; border-left: 4px solid #dc3545 !important; }
+    .incident-header { background: #fff5f5 !important; }
     
     /* Funnel bars */
     .funnel-bar { min-width: 80px; }
