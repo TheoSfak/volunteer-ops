@@ -49,13 +49,20 @@ var VoPush = (function() {
      * Subscribe to push notifications
      */
     function subscribe() {
-        if (!swRegistration || !vapidPublicKey) return Promise.reject('Not initialized');
+        if (!vapidPublicKey) return Promise.reject('No VAPID key');
 
         updateUI('loading');
 
+        // Wait for SW to be ready if not yet registered
+        var swReady = swRegistration
+            ? Promise.resolve(swRegistration)
+            : navigator.serviceWorker.ready.then(function(reg) { swRegistration = reg; return reg; });
+
+        return swReady.then(function(reg) {
+
         var applicationServerKey = urlBase64ToUint8Array(vapidPublicKey);
 
-        return swRegistration.pushManager.subscribe({
+        return reg.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: applicationServerKey
         }).then(function(subscription) {
@@ -66,6 +73,7 @@ var VoPush = (function() {
             return true;
         }).catch(function(err) {
             console.error('[VoPush] Subscribe failed:', err);
+            alert('[VoPush] Αποτυχία εγγραφής: ' + err);
             if (Notification.permission === 'denied') {
                 updateUI('denied');
             } else {
@@ -73,6 +81,8 @@ var VoPush = (function() {
             }
             return false;
         });
+
+        }); // end swReady.then
     }
 
     /**
@@ -120,7 +130,11 @@ var VoPush = (function() {
             body: JSON.stringify(method === 'DELETE' ? { endpoint: subscription.endpoint } : body),
             credentials: 'same-origin'
         }).then(function(response) {
-            if (!response.ok) throw new Error('Server error: ' + response.status);
+            if (!response.ok) {
+                return response.text().then(function(body) {
+                    throw new Error('Server ' + response.status + ': ' + body.substring(0, 200));
+                });
+            }
             return response.json();
         });
     }

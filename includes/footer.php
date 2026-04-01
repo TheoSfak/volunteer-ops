@@ -312,7 +312,7 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
 })();
 </script>
 <!-- Push Notification Manager -->
-<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/push.js"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/push.js?v=<?= APP_VERSION ?>"></script>
 <?php
     $__vapidKey = getSetting('vapid_public_key', '');
     if ($__vapidKey):
