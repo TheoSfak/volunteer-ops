@@ -1006,7 +1006,7 @@ if (isLoggedIn()) {
             
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'report-municipality' ? 'active' : '' ?>" href="report-municipality.php">
-                    <i class="bi bi-file-earmark-pdf"></i> Αναφορά Δήμου
+                    <i class="bi bi-file-earmark-pdf"></i> Αναφορά <?= h(getSetting('app_name', APP_NAME)) ?>
                 </a>
             </li>
             <li class="nav-item">
