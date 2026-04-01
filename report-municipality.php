@@ -8,7 +8,7 @@ require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
 
-$pageTitle = 'Αναφορά Δήμου';
+$pageTitle = 'Αναφορά ' . getSetting('app_name', APP_NAME);
 $currentPage = 'report-municipality';
 $currentUser = getCurrentUser();
 
@@ -291,7 +291,7 @@ include __DIR__ . '/includes/header.php';
 <!-- Filter Form -->
 <div class="card shadow-sm mb-4 no-print">
     <div class="card-header bg-primary bg-opacity-10">
-        <h4 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>Αναφορά Δήμου</h4>
+        <h4 class="mb-0"><i class="bi bi-file-earmark-pdf me-2"></i>Αναφορά <?= h($appName) ?></h4>
     </div>
     <div class="card-body">
         <form method="get" id="reportForm">
