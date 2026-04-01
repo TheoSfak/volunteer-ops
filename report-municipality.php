@@ -662,7 +662,9 @@ include __DIR__ . '/includes/header.php';
                     <th class="text-center">Ώρες</th>
                     <th class="text-center">Αποστολές</th>
                     <th class="text-center">Βάρδιες</th>
+                    <?php if (getSetting('points_enabled', '1') === '1'): ?>
                     <th class="text-center">Πόντοι</th>
+                    <?php endif; ?>
                 </tr>
             </thead>
             <tbody>
@@ -684,7 +686,9 @@ include __DIR__ . '/includes/header.php';
                     <td class="text-center fw-bold"><?= number_format((float)$v['total_hours'], 1) ?></td>
                     <td class="text-center"><?= (int)$v['mission_count'] ?></td>
                     <td class="text-center"><?= (int)$v['shifts_attended'] ?></td>
+                    <?php if (getSetting('points_enabled', '1') === '1'): ?>
                     <td class="text-center"><span class="points-badge"><?= number_format((int)$v['total_points']) ?></span></td>
+                    <?php endif; ?>
                 </tr>
                 <?php endforeach; ?>
             </tbody>

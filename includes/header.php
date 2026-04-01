@@ -953,11 +953,13 @@ if (isLoggedIn()) {
             
             <div class="sidebar-section">Gamification</div>
             
+            <?php if (getSetting('points_enabled', '1') === '1'): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'leaderboard' ? 'active' : '' ?>" href="leaderboard.php">
                     <i class="bi bi-trophy"></i> Κατάταξη
                 </a>
             </li>
+            <?php endif; ?>
             <?php if (getSetting('achievements_enabled', '1') === '1'): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'achievements' ? 'active' : '' ?>" href="achievements.php">
@@ -1113,7 +1115,9 @@ if (isLoggedIn()) {
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i>Το Προφίλ μου</a></li>
                         <li><a class="dropdown-item" href="my-participations.php"><i class="bi bi-list-check me-2"></i>Οι Αιτήσεις μου</a></li>
+                        <?php if (getSetting('points_enabled', '1') === '1'): ?>
                         <li><a class="dropdown-item" href="my-points.php"><i class="bi bi-star me-2"></i>Οι Πόντοι μου</a></li>
+                        <?php endif; ?>
                         <li><a class="dropdown-item" href="notification-preferences.php"><i class="bi bi-bell me-2"></i>Ρυθμίσεις Ειδοποιήσεων</a></li>
                         <li><a class="dropdown-item" href="complaint-form.php"><i class="bi bi-exclamation-triangle me-2"></i>Αναφορά Παραπόνου</a></li>
                         <li><a class="dropdown-item" href="my-complaints.php"><i class="bi bi-chat-left-dots me-2"></i>Τα Παράπονά μου</a></li>

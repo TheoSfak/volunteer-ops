@@ -187,7 +187,9 @@ include __DIR__ . '/includes/header.php';
                     <th>Ρόλος</th>
                     <th>Σώμα</th>
                     <th class="text-center">Βάρδιες</th>
+                    <?php if (getSetting('points_enabled', '1') === '1'): ?>
                     <th class="text-center">Πόντοι</th>
+                    <?php endif; ?>
                     <th></th>
                 </tr>
             </thead>
@@ -212,9 +214,11 @@ include __DIR__ . '/includes/header.php';
                                 <br><small class="text-muted"><?= number_format($v['total_hours'], 1) ?> ώρες</small>
                             <?php endif; ?>
                         </td>
+                        <?php if (getSetting('points_enabled', '1') === '1'): ?>
                         <td class="text-center">
                             <span class="badge bg-warning text-dark"><?= number_format($v['total_points']) ?></span>
                         </td>
+                        <?php endif; ?>
                         <td>
                             <div class="dropdown">
                                 <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">

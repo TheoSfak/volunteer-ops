@@ -32,6 +32,7 @@ $defaults = [
     'night_multiplier' => '1.5',
     'medical_multiplier' => '2.0',
     'achievements_enabled' => '1',
+    'points_enabled' => '1',
     'registration_enabled' => '1',
     'show_register_button' => '0',
     'require_approval' => '0',
@@ -509,7 +510,7 @@ if (isPost()) {
         $fieldsToUpdate = [
             'app_name', 'app_description', 'admin_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
-            'achievements_enabled',
+            'achievements_enabled', 'points_enabled',
             'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode',
             'session_timeout_minutes',
             'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled'
@@ -518,7 +519,7 @@ if (isPost()) {
         foreach ($fieldsToUpdate as $field) {
             $value = isset($_POST[$field]) ? $_POST[$field] : '';
             
-            if (in_array($field, ['achievements_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled'])) {
+            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled'])) {
                 $value = isset($_POST[$field]) ? '1' : '0';
             }
             
@@ -1091,6 +1092,14 @@ include __DIR__ . '/includes/header.php';
                     <h5 class="mb-0"><i class="bi bi-star me-1"></i>Ρυθμίσεις Πόντων & Επιτευγμάτων</h5>
                 </div>
                 <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="points_enabled" id="pointsEnabled"
+                               <?= $settings['points_enabled'] === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="pointsEnabled">
+                            <strong>Ενεργοποίηση Συστήματος Πόντων</strong>
+                        </label>
+                        <div class="form-text">Αν απενεργοποιηθεί, οι πόντοι, η κατάταξη (leaderboard) και οι σχετικές στατιστικές κρύβονται από όλες τις σελίδες. Τα δεδομένα διατηρούνται.</div>
+                    </div>
                     <div class="form-check form-switch mb-3">
                         <input class="form-check-input" type="checkbox" name="achievements_enabled" id="achievementsEnabled"
                                <?= $settings['achievements_enabled'] === '1' ? 'checked' : '' ?>>

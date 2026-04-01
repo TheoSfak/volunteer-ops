@@ -444,7 +444,9 @@ include __DIR__ . '/includes/header.php';
                     <th>Παράρτημα</th>
                     <th class="text-center">Χρονιά</th>
                     <th class="text-center">Βάρδιες</th>
+                    <?php if (getSetting('points_enabled', '1') === '1'): ?>
                     <th class="text-center">Πόντοι</th>
+                    <?php endif; ?>
                     <th>Κατάσταση</th>
                     <th></th>
                 </tr>
@@ -480,9 +482,11 @@ include __DIR__ . '/includes/header.php';
                                 <br><small class="text-muted"><?= number_format($v['total_hours'], 1) ?> ώρ.</small>
                             <?php endif; ?>
                         </td>
+                        <?php if (getSetting('points_enabled', '1') === '1'): ?>
                         <td class="text-center">
                             <span class="badge bg-warning text-dark"><?= number_format($v['total_points']) ?></span>
                         </td>
+                        <?php endif; ?>
                         <td>
                             <?php if ($v['is_active']): ?>
                                 <span class="badge bg-success">Ενεργός</span>

@@ -833,6 +833,7 @@ $randomQuote = $quotes[array_rand($quotes)];
                 </div>
             </div>
         </div>
+        <?php if (getSetting('points_enabled', '1') === '1'): ?>
         <div class="col-6 col-md-6 col-lg-3">
             <div class="card ds-stat">
                 <div class="card-body p-3">
@@ -848,7 +849,8 @@ $randomQuote = $quotes[array_rand($quotes)];
                 </div>
             </div>
         </div>
-    <?php endif; ?>
+        <?php endif; ?>
+    <?php endif; // else (volunteer stats) ?>
 </div>
 
 <?php if (isAdmin()): ?>
@@ -939,9 +941,11 @@ $randomQuote = $quotes[array_rand($quotes)];
                                         <?= $vol['shifts_count'] ?> βάρδιες
                                     </small>
                                 </div>
+                                <?php if (getSetting('points_enabled', '1') === '1'): ?>
                                 <span class="badge bg-warning text-dark" style="font-size:.8rem">
                                     <i class="bi bi-star-fill me-1"></i><?= number_format($vol['total_points']) ?>
                                 </span>
+                                <?php endif; ?>
                             </div>
                         <?php endforeach; ?>
                     </div>
@@ -1579,11 +1583,13 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
             <div class="card-body text-center py-4">
                 <div style="font-size:2.8rem; font-weight:800; color:#7c3aed; line-height:1;">#<?= $leaderboardRank ?></div>
                 <div class="text-muted mt-1">από <?= $leaderboardTotal ?> εθελοντές</div>
+                <?php if (getSetting('points_enabled', '1') === '1'): ?>
                 <div class="mt-3">
                     <span class="badge bg-warning text-dark fs-6">
                         <i class="bi bi-star-fill me-1"></i><?= number_format($user['total_points'] ?? 0) ?> πόντοι
                     </span>
                 </div>
+                <?php endif; ?>
                 <a href="leaderboard.php" class="btn btn-sm btn-outline-secondary mt-3">Δες Κατάταξη</a>
             </div>
         </div>
@@ -1640,9 +1646,11 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
                 <a href="my-participations.php" class="btn btn-outline-primary w-100 text-start">
                     <i class="bi bi-list-check me-2"></i>Ιστορικό Συμμετοχών
                 </a>
+                <?php if (getSetting('points_enabled', '1') === '1'): ?>
                 <a href="leaderboard.php" class="btn btn-outline-warning w-100 text-start">
                     <i class="bi bi-trophy me-2"></i>Leaderboard
                 </a>
+                <?php endif; ?>
                 <?php if (getSetting('achievements_enabled', '1') === '1'): ?>
                 <a href="achievements.php" class="btn btn-outline-secondary w-100 text-start">
                     <i class="bi bi-award me-2"></i>Τα Επιτεύγματά μου
