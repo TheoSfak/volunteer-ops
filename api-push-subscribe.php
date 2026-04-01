@@ -22,6 +22,17 @@ $userId = (int) getCurrentUserId();
 $method = $_SERVER['REQUEST_METHOD'];
 $input = json_decode(file_get_contents('php://input'), true);
 
+if ($method === 'POST' && ($_GET['action'] ?? '') === 'test') {
+    // ── Send Test Push ──
+    $count = sendPushToUser($userId, 'Δοκιμαστική Ειδοποίηση', 'Οι push ειδοποιήσεις λειτουργούν σωστά!', [
+        'url' => 'notification-preferences.php',
+        'tag' => 'vo-test-' . time()
+    ]);
+    echo json_encode(['success' => $count > 0, 'sent' => $count,
+        'message' => $count > 0 ? 'Εστάλη σε ' . $count . ' συσκευή/ές' : 'Δεν βρέθηκε ενεργή συνδρομή push']);
+    exit;
+}
+
 if ($method === 'POST') {
     // ── Subscribe ──
     $endpoint = $input['endpoint'] ?? '';
@@ -62,16 +73,6 @@ if ($method === 'POST') {
     }
 
     echo json_encode(['success' => true, 'message' => 'Subscription saved']);
-    exit;
-}
-
-if ($method === 'POST' && ($input['test'] ?? false)) {
-    // ── Send Test Push ──
-    $count = sendPushToUser($userId, 'Δοκιμαστική Ειδοποίηση', 'Οι push ειδοποιήσεις λειτουργούν σωστά! 🎉', [
-        'url' => 'notification-preferences.php',
-        'tag' => 'vo-test-' . time()
-    ]);
-    echo json_encode(['success' => $count > 0, 'sent' => $count]);
     exit;
 }
 
