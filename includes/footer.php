@@ -287,15 +287,20 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
 <script>VoPush.init('<?= h($__vapidKey) ?>', '<?= rtrim(BASE_URL, '/') ?>');</script>
 <?php endif; ?>
 <!-- Online/Offline Indicator -->
-<div id="vo-offline-bar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc3545;color:#fff;text-align:center;padding:6px 12px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.2);">
-    <i class="bi bi-wifi-off"></i> Εκτός σύνδεσης — Ορισμένες λειτουργίες δεν είναι διαθέσιμες
+<div id="vo-offline-bar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc3545;color:#fff;text-align:center;padding:8px 12px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.2);transition:transform .3s ease;">
+    <i class="bi bi-wifi-off"></i> Εκτός σύνδεσης — Μπορείτε μόνο να βλέπετε σελίδες που έχουν ήδη φορτωθεί
 </div>
 <script>
 (function() {
     var bar = document.getElementById('vo-offline-bar');
-    function update() { bar.style.display = navigator.onLine ? 'none' : 'block'; }
+    function update() {
+        var offline = !navigator.onLine;
+        bar.style.display = offline ? 'block' : 'none';
+        document.body.style.paddingTop = offline ? (bar.offsetHeight + 'px') : '';
+    }
     window.addEventListener('online', update);
     window.addEventListener('offline', update);
+    window.addEventListener('resize', function() { if (!navigator.onLine) update(); });
     update();
 })();
 </script>
