@@ -53,7 +53,7 @@ include __DIR__ . '/includes/header.php';
 <!-- ══ Push Notification Subscription Card ══ -->
 <div class="card shadow-sm mb-4 border-primary border-opacity-25">
     <div class="card-body">
-        <div class="d-flex align-items-center justify-content-between">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
             <div>
                 <h5 class="mb-1"><i class="bi bi-phone-vibrate text-primary"></i> Push Ειδοποιήσεις</h5>
                 <p class="text-muted mb-0 small">Λάβετε ειδοποιήσεις στον browser σας ακόμα και όταν δεν είστε στην εφαρμογή.</p>
@@ -66,8 +66,53 @@ include __DIR__ . '/includes/header.php';
                 </button>
             </div>
         </div>
+
+        <!-- iOS instructions — shown only on iOS Safari -->
+        <div id="vo-ios-push-info" style="display:none;" class="mt-3 alert alert-info mb-0 small">
+            <strong><i class="bi bi-apple"></i> Χρήστες iPhone / iPad:</strong>
+            Οι push ειδοποιήσεις στο iOS απαιτούν να έχετε <strong>εγκαταστήσει την εφαρμογή</strong> στην αρχική οθόνη
+            <em>και</em> να την ανοίγετε από εκεί (όχι από το Safari).
+            <ol class="mt-2 mb-0 ps-3">
+                <li>Ανοίξτε <strong>Safari</strong> και πηγαίνετε στο <code><?= h(BASE_URL) ?></code></li>
+                <li>Πατήστε το κουμπί <strong>Κοινοποίηση</strong> <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16"><path d="M11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.499 2.499 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5z"/></svg></li>
+                <li>Επιλέξτε <strong>«Προσθήκη στην Αρχική Οθόνη»</strong></li>
+                <li>Ανοίξτε την εφαρμογή <strong>από το εικονίδιο</strong> στην αρχική οθόνη</li>
+                <li>Επιστρέψτε σε αυτή τη σελίδα και πατήστε <strong>«Ενεργοποίηση Push»</strong></li>
+            </ol>
+            <div class="mt-2 text-muted">Απαιτείται iOS 16.4 ή νεότερο.</div>
+        </div>
+
+        <!-- Android battery optimization tip — shown only on Android -->
+        <div id="vo-android-push-info" style="display:none;" class="mt-3 alert alert-warning mb-0 small">
+            <strong><i class="bi bi-android2"></i> Χρήστες Android:</strong>
+            Αν λαμβάνετε σφάλμα σύνδεσης με FCM, ελέγξτε:
+            <ul class="mt-1 mb-0 ps-3">
+                <li>Ρυθμίσεις → Εφαρμογές → Chrome → Μπαταρία → επιλέξτε <strong>«Χωρίς περιορισμούς»</strong></li>
+                <li>Απενεργοποιήστε το <strong>«Παύση δραστηριότητας εφαρμογής»</strong> για το Chrome</li>
+            </ul>
+        </div>
     </div>
 </div>
+<script>
+(function() {
+    var ua = navigator.userAgent;
+    var isIos = /iphone|ipad|ipod/i.test(ua);
+    var isAndroid = /android/i.test(ua);
+    var isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+    if (isIos) {
+        document.getElementById('vo-ios-push-info').style.display = '';
+        // Hide the toggle button on iOS non-standalone (push won't work)
+        if (!isStandalone) {
+            var btn = document.getElementById('vo-push-toggle');
+            if (btn) { btn.style.display = 'none'; }
+            var st = document.getElementById('vo-push-status');
+            if (st) { st.innerHTML = '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-circle"></i> Απαιτείται εγκατάσταση PWA</span>'; }
+        }
+    } else if (isAndroid) {
+        document.getElementById('vo-android-push-info').style.display = '';
+    }
+})();
+</script>
 
 <div class="card shadow-sm">
     <div class="card-body">
