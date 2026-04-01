@@ -276,6 +276,39 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
             banner.remove();
         });
     }
+
+    // ── iOS Install Tip ──
+    // iOS doesn't support beforeinstallprompt — show manual instructions instead
+    var isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    var isStandalone = window.navigator.standalone === true;
+    if (isIos && !isStandalone && !localStorage.getItem('vo-ios-tip-dismissed')) {
+        setTimeout(showIosTip, 2000); // slight delay so page loads first
+    }
+
+    function showIosTip() {
+        if (document.getElementById('vo-ios-tip')) return;
+        var tip = document.createElement('div');
+        tip.id = 'vo-ios-tip';
+        tip.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:99997;background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;padding:18px 20px 28px;border-radius:20px 20px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.35);animation:voSlideUp .4s ease;';
+        tip.innerHTML =
+            '<button onclick="localStorage.setItem(\'vo-ios-tip-dismissed\',\'1\');this.parentElement.remove();" ' +
+            'style="position:absolute;top:12px;right:14px;background:none;border:none;color:rgba(255,255,255,.6);font-size:22px;cursor:pointer;line-height:1;">✕</button>' +
+            '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
+            '<img src="<?= rtrim(BASE_URL, '/') ?>/assets/icons/icon-72.png" style="width:44px;height:44px;border-radius:10px;" alt="">' +
+            '<div><strong style="font-size:15px;">Εγκατάσταση Εφαρμογής</strong><br><span style="font-size:12px;color:rgba(255,255,255,.75);">Προσθήκη στην αρχική οθόνη</span></div>' +
+            '</div>' +
+            '<div style="font-size:13px;line-height:1.7;color:rgba(255,255,255,.9);">' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+            '<span style="background:rgba(255,255,255,.15);border-radius:8px;padding:2px 8px;font-weight:700;">1</span>' +
+            'Πατήστε το κουμπί <strong>Κοινοποίηση</strong> ' +
+            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="vertical-align:middle;"><path d="M11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.499 2.499 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5z"/></svg>' +
+            ' στο κάτω μέρος της οθόνης</div>' +
+            '<div style="display:flex;align-items:center;gap:8px;">' +
+            '<span style="background:rgba(255,255,255,.15);border-radius:8px;padding:2px 8px;font-weight:700;">2</span>' +
+            'Επιλέξτε <strong>«Προσθήκη στην Αρχική Οθόνη»</strong> <span style="font-size:16px;">＋</span></div>' +
+            '</div>';
+        document.body.appendChild(tip);
+    }
 })();
 </script>
 <!-- Push Notification Manager -->
