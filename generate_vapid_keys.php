@@ -45,13 +45,14 @@ if (!$pkey) {
 $details = openssl_pkey_get_details($pkey);
 
 // Extract the raw public key (uncompressed point: 04 || x || y) — 65 bytes
-$publicKeyRaw = $details['ec']['x'] . $details['ec']['y'];
-// Prepend 0x04 (uncompressed point indicator)
-$publicKeyUncompressed = chr(4) . $publicKeyRaw;
+// Pad coordinates to exactly 32 bytes each (leading zeros may be stripped by OpenSSL)
+$x = str_pad($details['ec']['x'], 32, "\x00", STR_PAD_LEFT);
+$y = str_pad($details['ec']['y'], 32, "\x00", STR_PAD_LEFT);
+$publicKeyUncompressed = "\x04" . $x . $y;
 $publicKeyB64 = rtrim(strtr(base64_encode($publicKeyUncompressed), '+/', '-_'), '=');
 
-// Extract the raw private key (d parameter) — 32 bytes
-$privateKeyRaw = $details['ec']['d'];
+// Extract the raw private key (d parameter) — pad to 32 bytes
+$privateKeyRaw = str_pad($details['ec']['d'], 32, "\x00", STR_PAD_LEFT);
 $privateKeyB64 = rtrim(strtr(base64_encode($privateKeyRaw), '+/', '-_'), '=');
 
 // Store in settings table
