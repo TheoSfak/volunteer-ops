@@ -556,6 +556,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
+    <?php if (getSetting('points_enabled', '1') === '1'): ?>
     <div class="col-6 col-md-3">
         <div class="card pp-stat-card">
             <div class="card-body d-flex align-items-center gap-3 py-3 px-3">
@@ -567,6 +568,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
+    <?php endif; ?>
     <?php if (getSetting('achievements_enabled', '1') === '1'): ?>
     <div class="col-6 col-md-3">
         <div class="card pp-stat-card">

@@ -255,12 +255,14 @@ $greekMonths = [
                     <div class="lbl">Ώρες Προσφοράς</div>
                 </div>
             </div>
+            <?php if (getSetting('points_enabled', '1') === '1'): ?>
             <div class="col-6 col-md-3">
                 <div class="stat-card" style="background:#fefce8;">
                     <div class="num" style="color:#b45309;"><?= number_format($totalPoints) ?></div>
                     <div class="lbl">Πόντοι</div>
                 </div>
             </div>
+            <?php endif; ?>
             <div class="col-6 col-md-3">
                 <div class="stat-card" style="background:#fdf4ff;">
                     <div class="num" style="color:#7e22ce;"><?= $totalAchievements ?></div>

@@ -6,6 +6,11 @@
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 
+if (getSetting('points_enabled', '1') !== '1') {
+    setFlash('warning', 'Το σύστημα πόντων είναι απενεργοποιημένο.');
+    redirect('dashboard.php');
+}
+
 $pageTitle = 'Κατάταξη';
 $achievementsEnabled = getSetting('achievements_enabled', '1') === '1';
 

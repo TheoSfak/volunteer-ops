@@ -838,6 +838,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
+    <?php if (getSetting('points_enabled', '1') === '1'): ?>
     <div class="col-6 col-md-3">
         <div class="card vp-stat-card">
             <div class="card-body d-flex align-items-center gap-3 py-3 px-3">
@@ -849,6 +850,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
+    <?php endif; ?>
 </div>
 
 <div class="row">
@@ -1411,6 +1413,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
 
+        <?php if (getSetting('points_enabled', '1') === '1'): ?>
         <!-- Points History -->
         <div class="card">
             <div class="card-header">
@@ -1434,6 +1437,7 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
             </div>
         </div>
+        <?php endif; // points_enabled ?>
     </div>
 </div>
 

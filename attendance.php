@@ -256,6 +256,7 @@ include __DIR__ . '/includes/header.php';
                             <!-- Bulk Actions -->
                             <?php if ($isPast): ?>
                             <div class="d-flex justify-content-between mb-3">
+                                <?php if (getSetting('points_enabled', '1') === '1'): ?>
                                 <form method="post" class="d-inline">
                                     <?= csrfField() ?>
                                     <input type="hidden" name="action" value="award_points">
@@ -265,6 +266,7 @@ include __DIR__ . '/includes/header.php';
                                         <i class="bi bi-star me-1"></i>Απονομή Πόντων
                                     </button>
                                 </form>
+                                <?php endif; ?>
                             </div>
                             <?php endif; ?>
                             
@@ -284,7 +286,9 @@ include __DIR__ . '/includes/header.php';
                                             <th>Εθελοντής</th>
                                             <th>Επικοινωνία</th>
                                             <th>Παρουσία</th>
+                                            <?php if (getSetting('points_enabled', '1') === '1'): ?>
                                             <th>Πόντοι</th>
+                                            <?php endif; ?>
                                             <th>Ενέργειες</th>
                                         </tr>
                                     </thead>
@@ -315,6 +319,7 @@ include __DIR__ . '/includes/header.php';
                                                     <span class="badge bg-secondary">Εκκρεμεί</span>
                                                 <?php endif; ?>
                                             </td>
+                                            <?php if (getSetting('points_enabled', '1') === '1'): ?>
                                             <td>
                                                 <?php if ($p['points_awarded']): ?>
                                                     <span class="badge bg-warning text-dark"><i class="bi bi-star-fill me-1"></i>Απονεμήθηκαν</span>
@@ -322,6 +327,7 @@ include __DIR__ . '/includes/header.php';
                                                     <span class="text-muted">-</span>
                                                 <?php endif; ?>
                                             </td>
+                                            <?php endif; ?>
                                             <td>
                                                 <button type="button" class="btn btn-sm btn-outline-primary" 
                                                         data-bs-toggle="modal" data-bs-target="#editModal"
