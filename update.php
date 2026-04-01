@@ -205,43 +205,46 @@ function copyDirectory($source, $dest) {
 
 function exportDatabase() {
     $tables = dbFetchAll("SHOW TABLES");
-    $dump = "-- VolunteerOps Database Backup\n";
+    $dump  = "-- VolunteerOps Database Backup\n";
     $dump .= "-- Generated: " . date('Y-m-d H:i:s') . "\n";
     $dump .= "-- Version: " . APP_VERSION . "\n\n";
+    $dump .= "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;\n";
     $dump .= "SET FOREIGN_KEY_CHECKS = 0;\n\n";
-    
+
+    $pdo = db();
+
     foreach ($tables as $tableRow) {
         $tableName = array_values($tableRow)[0];
-        
+
         // Get CREATE TABLE statement
         $createResult = dbFetchOne("SHOW CREATE TABLE `{$tableName}`");
-        $createStmt = $createResult['Create Table'] ?? '';
-        
+        $createStmt   = $createResult['Create Table'] ?? '';
+
         $dump .= "-- Table: {$tableName}\n";
         $dump .= "DROP TABLE IF EXISTS `{$tableName}`;\n";
         $dump .= $createStmt . ";\n\n";
-        
+
         // Get data
         $rows = dbFetchAll("SELECT * FROM `{$tableName}`");
-        
+
         if (!empty($rows)) {
-            $columns = array_keys($rows[0]);
-            $columnList = implode('`, `', $columns);
-            
+            $columns    = array_keys($rows[0]);
+            $columnList = '`' . implode('`, `', $columns) . '`';
+
             foreach ($rows as $row) {
-                $values = array_map(function($val) {
+                $values = array_map(function ($val) use ($pdo) {
                     if ($val === null) return 'NULL';
-                    return "'" . addslashes($val) . "'";
+                    return $pdo->quote((string)$val);
                 }, array_values($row));
-                
-                $dump .= "INSERT INTO `{$tableName}` (`{$columnList}`) VALUES (" . implode(', ', $values) . ");\n";
+
+                $dump .= "INSERT INTO `{$tableName}` ({$columnList}) VALUES (" . implode(', ', $values) . ");\n";
             }
             $dump .= "\n";
         }
     }
-    
+
     $dump .= "SET FOREIGN_KEY_CHECKS = 1;\n";
-    
+
     return $dump;
 }
 
@@ -599,19 +602,23 @@ function getBackups() {
     rsort($dirs); // Most recent first
     
     foreach ($dirs as $dir) {
+        // Skip incomplete backups (state.json present means not finalized)
+        if (file_exists($dir . '/state.json')) continue;
+
         $infoFile = $dir . '/backup_info.json';
         $info = file_exists($infoFile) ? json_decode(file_get_contents($infoFile), true) : [];
-        
+
         $backups[] = [
-            'name' => basename($dir),
-            'path' => $dir,
-            'timestamp' => $info['timestamp'] ?? basename($dir),
-            'version' => $info['version'] ?? 'Άγνωστη',
+            'name'        => basename($dir),
+            'path'        => $dir,
+            'timestamp'   => $info['timestamp'] ?? basename($dir),
+            'version'     => $info['version'] ?? 'Άγνωστη',
             'db_included' => $info['db_included'] ?? false,
-            'size' => getDirectorySize($dir)
+            'skipped'     => $info['skipped_tables'] ?? [],
+            'size'        => getDirectorySize($dir),
         ];
     }
-    
+
     return $backups;
 }
 
@@ -638,46 +645,113 @@ function formatBytes($bytes) {
 
 function restoreBackup($backupPath) {
     updateLog("Επαναφορά από backup: " . basename($backupPath));
-    
+
     $results = [
         'files_restored' => 0,
-        'db_restored' => false,
-        'errors' => []
+        'db_restored'    => false,
+        'errors'         => [],
     ];
-    
-    // 1. Restore database if exists
+
+    // 1. Restore database with quote-aware parser + transaction
     $dbFile = $backupPath . '/database.sql';
     if (file_exists($dbFile)) {
         updateLog('Επαναφορά βάσης δεδομένων...');
-        
+
         try {
             $sql = file_get_contents($dbFile);
-            $statements = array_filter(array_map('trim', explode(';', $sql)));
-            
-            foreach ($statements as $stmt) {
-                if (!empty($stmt) && !preg_match('/^--/', $stmt)) {
-                    dbExecute($stmt);
+
+            // Strip comment-only lines
+            $lines    = explode("\n", $sql);
+            $filtered = array_filter($lines, fn($l) => !preg_match('/^\s*--/', $l));
+            $cleanSql = implode("\n", $filtered);
+
+            // Quote-aware semicolon splitter (handles semicolons inside string values)
+            $statements    = [];
+            $current       = '';
+            $inSingleQuote = false;
+            $len           = strlen($cleanSql);
+            for ($ci = 0; $ci < $len; $ci++) {
+                $ch = $cleanSql[$ci];
+                if ($ch === "'" && !$inSingleQuote) {
+                    $inSingleQuote = true;
+                    $current .= $ch;
+                } elseif ($ch === "'" && $inSingleQuote) {
+                    if ($ci + 1 < $len && $cleanSql[$ci + 1] === "'") {
+                        $current .= "''";
+                        $ci++;
+                    } else {
+                        $inSingleQuote = false;
+                        $current .= $ch;
+                    }
+                } elseif ($ch === '\\' && $inSingleQuote && $ci + 1 < $len) {
+                    $current .= $ch . $cleanSql[$ci + 1];
+                    $ci++;
+                } elseif ($ch === ';' && !$inSingleQuote) {
+                    $stmt = trim($current);
+                    if (!empty($stmt)) $statements[] = $stmt;
+                    $current = '';
+                } else {
+                    $current .= $ch;
                 }
             }
-            
-            $results['db_restored'] = true;
-            updateLog('Βάση δεδομένων επαναφέρθηκε');
+            $stmt = trim($current);
+            if (!empty($stmt)) $statements[] = $stmt;
+
+            // Execute inside a transaction — rollback on any error
+            $pdo = db();
+            $pdo->beginTransaction();
+            try {
+                foreach ($statements as $stmt) {
+                    if (!empty($stmt)) {
+                        $pdo->exec($stmt);
+                    }
+                }
+                $pdo->commit();
+                $results['db_restored'] = true;
+                updateLog('Βάση δεδομένων επαναφέρθηκε επιτυχώς (' . count($statements) . ' statements)');
+            } catch (Exception $innerEx) {
+                $pdo->rollBack();
+                throw $innerEx;
+            }
         } catch (Exception $e) {
             $results['errors'][] = 'DB Restore Error: ' . $e->getMessage();
-            updateLog('Σφάλμα επαναφοράς DB: ' . $e->getMessage(), 'error');
+            updateLog('Σφάλμα επαναφοράς DB (rollback εκτελέστηκε): ' . $e->getMessage(), 'error');
         }
     }
-    
-    // 2. Restore files
+
+    // 2. Restore files — config.local.php is intentionally excluded to preserve
+    //    current DB credentials.
     $filesDir = $backupPath . '/files';
     if (is_dir($filesDir)) {
-        updateLog('Επαναφορά αρχείων...');
-        copyDirectory($filesDir, __DIR__);
+        updateLog('Επαναφορά αρχείων (εξαιρείται config.local.php)...');
+        copyDirectoryExcluding($filesDir, __DIR__, ['config.local.php']);
         $results['files_restored'] = 1;
         updateLog('Αρχεία επαναφέρθηκαν');
     }
-    
+
     return $results;
+}
+
+/**
+ * Recursive directory copy, skipping specific filenames at the top level.
+ */
+function copyDirectoryExcluding(string $source, string $dest, array $excludeFiles = []): void {
+    if (!is_dir($dest)) {
+        mkdir($dest, 0755, true);
+    }
+    $dh = opendir($source);
+    while (($file = readdir($dh)) !== false) {
+        if ($file === '.' || $file === '..') continue;
+        if (in_array($file, $excludeFiles, true)) continue;
+        $srcPath  = "{$source}/{$file}";
+        $destPath = "{$dest}/{$file}";
+        if (is_dir($srcPath)) {
+            copyDirectoryExcluding($srcPath, $destPath, []);
+        } else {
+            copy($srcPath, $destPath);
+        }
+    }
+    closedir($dh);
 }
 
 function deleteBackup($backupPath) {
@@ -1068,13 +1142,9 @@ include __DIR__ . '/includes/header.php';
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-archive me-1"></i>Backups</h5>
-                <form method="post" class="d-inline">
-                    <?= csrfField() ?>
-                    <input type="hidden" name="action" value="create_backup">
-                    <button type="submit" class="btn btn-sm btn-outline-success">
-                        <i class="bi bi-plus-lg me-1"></i>Νέο Backup
-                    </button>
-                </form>
+                <button type="button" class="btn btn-sm btn-outline-success" onclick="openBackupModal()">
+                    <i class="bi bi-plus-lg me-1"></i>Νέο Backup
+                </button>
             </div>
             <div class="card-body">
                 <?php if (empty($backups)): ?>
@@ -1200,13 +1270,9 @@ include __DIR__ . '/includes/header.php';
                 <h5 class="mb-0"><i class="bi bi-lightning me-1"></i>Γρήγορες Ενέργειες</h5>
             </div>
             <div class="card-body">
-                <form method="post" class="d-grid gap-2">
-                    <?= csrfField() ?>
-                    <input type="hidden" name="action" value="create_backup">
-                    <button type="submit" class="btn btn-outline-success">
+                                <button type="button" class="btn btn-outline-success" onclick="openBackupModal()">
                         <i class="bi bi-archive me-1"></i>Δημιουργία Backup
                     </button>
-                </form>
                 <a href="audit.php" class="btn btn-outline-secondary w-100 mt-2">
                     <i class="bi bi-journal-text me-1"></i>Audit Log
                 </a>
@@ -1311,6 +1377,193 @@ function confirmUpdate() {
     
     // Submit form
     document.getElementById('updateForm').submit();
+}
+</script>
+
+<!-- Backup Progress Modal -->
+<div class="modal fade" id="backupModal" tabindex="-1" aria-labelledby="backupModalLabel">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title" id="backupModalLabel"><i class="bi bi-archive me-2"></i>Backup</h5>
+            </div>
+            <div class="modal-body" id="backupModalBody">
+
+                <!-- Step 1: Options (visible before start) -->
+                <div id="backupOptions">
+                    <p class="text-muted mb-3">Eπιλέξτε τι θέλετε να παραλείψετε (εξοικονομεί χώρο &amp; χρόνο):</p>
+                    <div class="list-group list-group-flush mb-3">
+                        <label class="list-group-item d-flex gap-2 py-2">
+                            <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" id="skip_audit_log" value="audit_log" checked>
+                            <span><strong>audit_log</strong><br><small class="text-muted">Ιστορικό ενεργειών &mdash; αναπαράγεται αυτόματα</small></span>
+                        </label>
+                        <label class="list-group-item d-flex gap-2 py-2">
+                            <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" id="skip_email_logs" value="email_logs" checked>
+                            <span><strong>email_logs</strong><br><small class="text-muted">Παραδοθέντα email &mdash; δεν χρειάζονται για restore</small></span>
+                        </label>
+                        <label class="list-group-item d-flex gap-2 py-2">
+                            <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" id="skip_notifications" value="notifications" checked>
+                            <span><strong>notifications</strong><br><small class="text-muted">Ειδοποιήσεις &mdash; αναπαράγονται αυτόματα</small></span>
+                        </label>
+                    </div>
+                    <div class="d-flex gap-2 justify-content-end">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Aκύρωση</button>
+                        <button type="button" class="btn btn-success" id="startBackupBtn" onclick="startBackup()">
+                            <i class="bi bi-play-fill me-1"></i>Έναρξη Backup
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Step 2: Progress (visible while running) -->
+                <div id="backupProgress" class="d-none">
+                    <div class="progress mb-3" style="height:22px">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
+                             id="backupProgressBar" role="progressbar" style="width:0%">0%</div>
+                    </div>
+                    <div class="text-center mb-1" id="backupStatusMain" style="font-size:.9rem;font-weight:600">Εκκίνηση...</div>
+                    <div class="text-center text-muted" id="backupStatusSub" style="font-size:.8rem"></div>
+                </div>
+
+                <!-- Step 3: Done (visible on success) -->
+                <div id="backupDone" class="d-none text-center py-3">
+                    <i class="bi bi-check-circle-fill text-success" style="font-size:2.5rem"></i>
+                    <h5 class="mt-2">Το backup ολοκληρώθηκε!</h5>
+                    <p class="text-muted" id="backupDoneName"></p>
+                </div>
+
+                <!-- Step 4: Error -->
+                <div id="backupError" class="d-none">
+                    <div class="alert alert-danger mb-2" id="backupErrorMsg"></div>
+                    <button type="button" class="btn btn-secondary w-100" data-bs-dismiss="modal">Κλείσιμο</button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const CSRF_TOKEN = <?= json_encode($_SESSION['csrf_token'] ?? '') ?>;
+
+function openBackupModal() {
+    // Reset to step 1
+    document.getElementById('backupOptions').classList.remove('d-none');
+    document.getElementById('backupProgress').classList.add('d-none');
+    document.getElementById('backupDone').classList.add('d-none');
+    document.getElementById('backupError').classList.add('d-none');
+    setBackupProgress(0, 'Εκκίνηση...', '');
+    new bootstrap.Modal(document.getElementById('backupModal')).show();
+}
+
+function setBackupProgress(pct, main, sub) {
+    const bar = document.getElementById('backupProgressBar');
+    bar.style.width = pct + '%';
+    bar.textContent = pct + '%';
+    document.getElementById('backupStatusMain').textContent = main;
+    document.getElementById('backupStatusSub').textContent  = sub;
+}
+
+async function backupAjax(action, extra = {}) {
+    const params = new URLSearchParams({ action, csrf_token: CSRF_TOKEN, ...extra });
+    const res    = await fetch('backup-ajax.php', { method: 'POST', body: params });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Αγνωστο σφάλμα');
+    return data;
+}
+
+async function startBackup() {
+    // Collect skipped tables
+    const skipTables = ['audit_log', 'email_logs', 'notifications']
+        .filter(t => document.getElementById('skip_' + t)?.checked);
+
+    // Switch to progress view
+    document.getElementById('backupOptions').classList.add('d-none');
+    document.getElementById('backupProgress').classList.remove('d-none');
+    // Prevent modal close while running
+    const modalEl = document.getElementById('backupModal');
+    modalEl.setAttribute('data-bs-backdrop', 'static');
+    modalEl.setAttribute('data-bs-keyboard', 'false');
+
+    let backupId = null;
+    try {
+        // --- INIT ---
+        setBackupProgress(2, 'Αρχικοποίηση...', '');
+        const skipParam = {};
+        skipTables.forEach((t, i) => { skipParam['skip_tables[' + i + ']'] = t; });
+        const init = await backupAjax('init', skipParam);
+        backupId = init.backup_id;
+
+        const tables     = init.tables;
+        const totalFiles = init.total_files;
+        const totalSteps = tables.length + Math.ceil(totalFiles / 20) + 1; // +1 finalize
+        let   step       = 0;
+
+        // --- DUMP TABLES ---
+        for (let ti = 0; ti < tables.length; ti++) {
+            const table  = tables[ti];
+            let   offset = 0;
+            let   done   = false;
+            while (!done) {
+                step++;
+                const pct = Math.round((step / totalSteps) * 90);
+                setBackupProgress(pct,
+                    'Βάση: πίνακας ' + (ti + 1) + '/' + tables.length + ': ' + table,
+                    'Αρχεία: σε αναμονή'
+                );
+                const r = await backupAjax('dump_table', {
+                    backup_id:  backupId,
+                    table_name: table,
+                    offset:     offset,
+                });
+                done   = r.done;
+                offset = r.next_offset;
+            }
+        }
+
+        // --- COPY FILES ---
+        let fileOffset = 0;
+        let filesDone  = (totalFiles === 0);
+        while (!filesDone) {
+            step++;
+            const pct = Math.round((step / totalSteps) * 90);
+            const r = await backupAjax('copy_batch', {
+                backup_id: backupId,
+                offset:    fileOffset,
+            });
+            setBackupProgress(pct,
+                'Αρχεία: ' + r.next_offset + ' / ' + totalFiles,
+                ''
+            );
+            filesDone  = r.done;
+            fileOffset = r.next_offset;
+        }
+
+        // --- FINALIZE ---
+        setBackupProgress(97, 'Ολοκλήρωση...', '');
+        const fin = await backupAjax('finalize', { backup_id: backupId });
+
+        // Success
+        setBackupProgress(100, 'Ολοκληρώθηκε!', '');
+        document.getElementById('backupProgress').classList.add('d-none');
+        document.getElementById('backupDone').classList.remove('d-none');
+        document.getElementById('backupDoneName').textContent = fin.backup_name;
+        // Allow modal close, reload after 1.5s
+        modalEl.removeAttribute('data-bs-backdrop');
+        modalEl.removeAttribute('data-bs-keyboard');
+        setTimeout(() => location.reload(), 1500);
+
+    } catch (err) {
+        // Try to clean up the incomplete backup
+        if (backupId) {
+            try { await backupAjax('cancel', { backup_id: backupId }); } catch (_) {}
+        }
+        document.getElementById('backupProgress').classList.add('d-none');
+        document.getElementById('backupError').classList.remove('d-none');
+        document.getElementById('backupErrorMsg').textContent = err.message;
+        modalEl.removeAttribute('data-bs-backdrop');
+        modalEl.removeAttribute('data-bs-keyboard');
+    }
 }
 </script>
 
