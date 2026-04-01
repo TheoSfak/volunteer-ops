@@ -1,8 +1,8 @@
-<?php
+﻿<?php
 /**
  * VolunteerOps - Web Push Notification Library
  * Raw PHP implementation using openssl + curl (no Composer required)
- * Implements RFC 8291 (Message Encryption for Web Push) + VAPID (RFC 8292)
+ * Implements RFC 8291 (Message Encryption for Web Push) + RFC 8188 (aes128gcm) + RFC 8292 (VAPID)
  */
 
 if (!defined('VOLUNTEEROPS')) die('Direct access not permitted');
@@ -32,7 +32,7 @@ function sendPushToUser(int $userId, string $title, string $body, array $extraDa
         if ($result === true) {
             $sent++;
         } elseif ($result === 410 || $result === 404) {
-            // Subscription expired or invalid — clean up
+            // Subscription expired or invalid  clean up
             dbExecute("DELETE FROM push_subscriptions WHERE id = ?", [$sub['id']]);
         }
     }
@@ -71,8 +71,9 @@ function sendPushToAll(string $title, string $body, array $extraData = []): int 
 /**
  * Core Web Push send function
  * Implements VAPID authentication and payload encryption
+ * RFC 8291 (Message Encryption) + RFC 8188 (aes128gcm) + RFC 8292 (VAPID)
  *
- * @return true|int true on success, HTTP status code on failure
+ * @return true|int|false true on success, HTTP status code on failure, false on error
  */
 function sendWebPush(string $endpoint, string $userPublicKey, string $userAuthToken, string $payload) {
     $vapidPublicKey  = getSetting('vapid_public_key', '');
@@ -84,73 +85,75 @@ function sendWebPush(string $endpoint, string $userPublicKey, string $userAuthTo
     }
 
     try {
-        // ── Decode keys from URL-safe Base64 ──
-        $userPubKeyBin  = base64UrlDecode($userPublicKey);
-        $userAuthBin    = base64UrlDecode($userAuthToken);
-        $serverPubBin   = base64UrlDecode($vapidPublicKey);
-        $serverPrivBin  = base64UrlDecode($vapidPrivateKey);
+        //  Decode keys 
+        $userPubKeyBin = base64UrlDecode($userPublicKey);
+        $userAuthBin   = base64UrlDecode($userAuthToken);
+        $serverPubBin  = base64UrlDecode($vapidPublicKey);
+        $serverPrivBin = base64UrlDecode($vapidPrivateKey);
 
-        // ── Generate local ECDH key pair for encryption ──
+        //  Generate ephemeral ECDH key pair 
         $localKey = openssl_pkey_new([
             'curve_name'       => 'prime256v1',
             'private_key_type' => OPENSSL_KEYTYPE_EC,
         ]);
+        if (!$localKey) throw new \Exception('Failed to generate EC key pair');
+
         $localDetails = openssl_pkey_get_details($localKey);
-        $localPubRaw = chr(4) . $localDetails['ec']['x'] . $localDetails['ec']['y'];
+        // Pad x and y to exactly 32 bytes each (required for correct uncompressed point format)
+        $x = str_pad($localDetails['ec']['x'], 32, "\x00", STR_PAD_LEFT);
+        $y = str_pad($localDetails['ec']['y'], 32, "\x00", STR_PAD_LEFT);
+        $localPubRaw = "\x04" . $x . $y; // 65-byte uncompressed EC point
 
-        // ── ECDH shared secret ──
-        // Build PEM from user's public key for openssl_pkey_get_public
+        //  ECDH shared secret 
+        // Correct order: openssl_pkey_derive(peer_pub_key, our_priv_key, keylen)
         $userPubPem = makeEcPublicPem($userPubKeyBin);
-        $sharedSecret = '';
-        openssl_pkey_derive($localKey, openssl_pkey_get_public($userPubPem), $sharedSecret, 32);
+        $userPubKey = openssl_pkey_get_public($userPubPem);
+        if (!$userPubKey) throw new \Exception('Invalid subscriber public key');
 
-        // ── HKDF for key derivation (RFC 8291) ──
-        // IKM
-        $ikm = $sharedSecret;
+        $sharedSecret = openssl_pkey_derive($userPubKey, $localKey, 32);
+        if (!$sharedSecret) throw new \Exception('ECDH key derivation failed');
 
-        // Info for auth: "WebPush: info" || 0x00 || ua_public || as_public
-        $authInfo = "WebPush: info\x00" . $userPubKeyBin . $localPubRaw;
-        $prk = hkdfExtractExpand($userAuthBin, $ikm, $authInfo, 32);
+        //  WebPush IKM derivation (RFC 8291 3.3) 
+        // IKM = HKDF(salt=auth_secret, IKM=ecdh_secret, info="WebPush: info\x00"+ua_pub+as_pub, L=32)
+        $ikmInfo = "WebPush: info\x00" . $userPubKeyBin . $localPubRaw;
+        $prk1 = hash_hmac('sha256', $sharedSecret, $userAuthBin, true);             // HKDF-Extract
+        $ikm  = substr(hash_hmac('sha256', $ikmInfo . "\x01", $prk1, true), 0, 32); // HKDF-Expand T(1)
 
-        // Content encryption key
-        $cekInfo = createInfo('aesgcm', $userPubKeyBin, $localPubRaw);
-        $contentEncryptionKey = hkdfExtractExpand($prk, '', $cekInfo, 16, true);
+        //  Derive CEK and Nonce (RFC 8188 2.2) 
+        $salt  = random_bytes(16);
+        $prk2  = hash_hmac('sha256', $ikm, $salt, true); // HKDF-Extract(salt=random_salt, IKM=ikm)
 
-        // Nonce
-        $nonceInfo = createInfo('nonce', $userPubKeyBin, $localPubRaw);
-        $nonce = hkdfExtractExpand($prk, '', $nonceInfo, 12, true);
+        $cek   = substr(hash_hmac('sha256', "Content-Encoding: aes128gcm\x00\x01", $prk2, true), 0, 16);
+        $nonce = substr(hash_hmac('sha256', "Content-Encoding: nonce\x00\x01",      $prk2, true), 0, 12);
 
-        // ── Pad and encrypt payload (AES-128-GCM) ──
-        $padding = pack('n', 0); // 2-byte padding length = 0
-        $padded = $padding . $payload;
-
+        //  Encrypt payload (aes128gcm: append 0x02 record delimiter for last record) 
+        $tag = '';
         $encrypted = openssl_encrypt(
-            $padded,
+            $payload . "\x02",
             'aes-128-gcm',
-            $contentEncryptionKey,
+            $cek,
             OPENSSL_RAW_DATA,
             $nonce,
             $tag,
             '',
             16
         );
+        if ($encrypted === false) throw new \Exception('AES-GCM encryption failed');
         $ciphertext = $encrypted . $tag;
 
-        // ── Salt (random 16 bytes) ──
-        $salt = random_bytes(16);
+        //  Build aes128gcm body (RFC 8188 2.1) 
+        $body = $salt           // 16 bytes: random salt
+              . pack('N', 4096) // 4 bytes:  record size (big-endian uint32)
+              . chr(65)         // 1 byte:   keyid length (65-byte uncompressed P-256 point)
+              . $localPubRaw    // 65 bytes: ephemeral server public key
+              . $ciphertext;    // n bytes:  ciphertext + 16-byte GCM auth tag
 
-        // ── Build encrypted body ──
-        $body = $salt                                    // 16 bytes
-              . pack('N', 4096)                          // record size (4 bytes)
-              . chr(strlen($localPubRaw)) . $localPubRaw // key length + key
-              . $ciphertext;
-
-        // ── VAPID Authorization header (JWT) ──
+        //  VAPID JWT (RFC 8292) 
         $audience = parse_url($endpoint, PHP_URL_SCHEME) . '://' . parse_url($endpoint, PHP_URL_HOST);
         $jwt = createVapidJwt($audience, $vapidContact, $serverPubBin, $serverPrivBin);
         $vapidHeader = 'vapid t=' . $jwt . ', k=' . $vapidPublicKey;
 
-        // ── Send via cURL ──
+        //  Send via cURL 
         $headers = [
             'Content-Type: application/octet-stream',
             'Content-Encoding: aes128gcm',
@@ -172,21 +175,23 @@ function sendWebPush(string $endpoint, string $userPublicKey, string $userAuthTo
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr  = curl_error($ch);
         curl_close($ch);
 
         if ($httpCode >= 200 && $httpCode < 300) {
             return true;
         }
 
+        error_log("WebPush: HTTP $httpCode  " . substr($endpoint, 0, 60) . "  $curlErr  $response");
         return $httpCode;
 
-    } catch (Exception $e) {
+    } catch (\Exception $e) {
         error_log('WebPush error: ' . $e->getMessage());
         return false;
     }
 }
 
-// ── Helper functions ────────────────────────────────────────────────────────
+//  Helper functions 
 
 function base64UrlDecode(string $input): string {
     return base64_decode(strtr($input, '-_', '+/') . str_repeat('=', (4 - strlen($input) % 4) % 4));
@@ -197,95 +202,30 @@ function base64UrlEncode(string $input): string {
 }
 
 /**
- * Build a PEM-encoded EC public key from raw uncompressed point
+ * Build a PEM-encoded EC public key from raw uncompressed point (65 bytes: 0x04 || x || y)
  */
 function makeEcPublicPem(string $rawPublicKey): string {
     // ASN.1 structure for EC public key on P-256
-    // SEQUENCE { SEQUENCE { OID ecPublicKey, OID prime256v1 }, BIT STRING { publicKey } }
-    $ecOid = "\x06\x07\x2a\x86\x48\xce\x3d\x02\x01"; // 1.2.840.10045.2.1
-    $p256Oid = "\x06\x08\x2a\x86\x48\xce\x3d\x03\x01\x07"; // 1.2.840.10045.3.1.7
-    $algId = "\x30" . chr(strlen($ecOid) + strlen($p256Oid)) . $ecOid . $p256Oid;
-    $bitString = "\x03" . chr(strlen($rawPublicKey) + 1) . "\x00" . $rawPublicKey;
-    $der = "\x30" . chr(strlen($algId) + strlen($bitString)) . $algId . $bitString;
+    $ecOid   = "\x06\x07\x2a\x86\x48\xce\x3d\x02\x01";         // OID 1.2.840.10045.2.1
+    $p256Oid = "\x06\x08\x2a\x86\x48\xce\x3d\x03\x01\x07";     // OID 1.2.840.10045.3.1.7
+    $algId   = "\x30" . chr(strlen($ecOid) + strlen($p256Oid)) . $ecOid . $p256Oid;
+    $bitStr  = "\x03" . chr(strlen($rawPublicKey) + 1) . "\x00" . $rawPublicKey;
+    $der     = "\x30" . chr(strlen($algId) + strlen($bitStr)) . $algId . $bitStr;
     return "-----BEGIN PUBLIC KEY-----\n" . chunk_split(base64_encode($der), 64, "\n") . "-----END PUBLIC KEY-----\n";
 }
 
 /**
- * HKDF Extract and Expand (simplified for Web Push)
- */
-function hkdfExtractExpand(string $salt, string $ikm, string $info, int $length, bool $skipExtract = false): string {
-    if ($skipExtract) {
-        // ikm is already the PRK (from previous extraction)
-        $prk = $salt ?: str_repeat("\x00", 32);
-    } else {
-        $prk = hash_hmac('sha256', $ikm, $salt, true);
-    }
-    // Expand
-    $infoHmac = hash_hmac('sha256', $info . "\x01", $prk, true);
-    return substr($infoHmac, 0, $length);
-}
-
-/**
- * Create content encoding info per RFC 8188
- */
-function createInfo(string $type, string $clientPublicKey, string $serverPublicKey): string {
-    return "Content-Encoding: " . $type . "\x00"
-         . "P-256" . "\x00"
-         . pack('n', strlen($clientPublicKey)) . $clientPublicKey
-         . pack('n', strlen($serverPublicKey)) . $serverPublicKey;
-}
-
-/**
- * Create a VAPID JWT token (ES256 signed)
- */
-function createVapidJwt(string $audience, string $subject, string $serverPubBin, string $serverPrivBin): string {
-    $header = base64UrlEncode(json_encode(['typ' => 'JWT', 'alg' => 'ES256']));
-
-    $payload = base64UrlEncode(json_encode([
-        'aud' => $audience,
-        'exp' => time() + 86400,
-        'sub' => $subject,
-    ]));
-
-    $signingInput = $header . '.' . $payload;
-    $hash = hash('sha256', $signingInput, true);
-
-    // Build EC private key PEM for signing
-    $privPem = makeEcPrivatePem($serverPrivBin, $serverPubBin);
-
-    $pkey = openssl_pkey_get_private($privPem);
-    openssl_sign($signingInput, $derSig, $pkey, OPENSSL_ALGO_SHA256);
-
-    // Convert DER signature to raw r||s (64 bytes)
-    $rawSig = derToRaw($derSig);
-
-    return $header . '.' . $payload . '.' . base64UrlEncode($rawSig);
-}
-
-/**
- * Build a PEM-encoded EC private key from raw d and public point
+ * Build a PEM-encoded EC private key from raw d (private scalar) and uncompressed public point
  */
 function makeEcPrivatePem(string $privKeyRaw, string $pubKeyRaw): string {
-    // Reconstruct uncompressed public key if needed
-    if (strlen($pubKeyRaw) === 65) {
-        $pubPoint = $pubKeyRaw;
-    } else {
-        $pubPoint = chr(4) . $pubKeyRaw;
-    }
+    $pubPoint = (strlen($pubKeyRaw) === 65) ? $pubKeyRaw : ("\x04" . $pubKeyRaw);
 
-    // ASN.1 ECPrivateKey structure:
-    // SEQUENCE {
-    //   INTEGER 1,
-    //   OCTET STRING privateKey,
-    //   [0] OID prime256v1,
-    //   [1] BIT STRING publicKey
-    // }
-    $p256Oid = "\x06\x08\x2a\x86\x48\xce\x3d\x03\x01\x07"; // 1.2.840.10045.3.1.7
-    $version = "\x02\x01\x01"; // INTEGER 1
+    $p256Oid   = "\x06\x08\x2a\x86\x48\xce\x3d\x03\x01\x07"; // OID 1.2.840.10045.3.1.7
+    $version   = "\x02\x01\x01"; // INTEGER 1
     $privOctet = "\x04" . chr(strlen($privKeyRaw)) . $privKeyRaw;
-    $oidTag = "\xa0" . chr(strlen($p256Oid)) . $p256Oid;
-    $pubBit = "\x03" . chr(strlen($pubPoint) + 1) . "\x00" . $pubPoint;
-    $pubTag = "\xa1" . chr(strlen($pubBit)) . $pubBit;
+    $oidTag    = "\xa0" . chr(strlen($p256Oid)) . $p256Oid;
+    $pubBit    = "\x03" . chr(strlen($pubPoint) + 1) . "\x00" . $pubPoint;
+    $pubTag    = "\xa1" . chr(strlen($pubBit)) . $pubBit;
 
     $inner = $version . $privOctet . $oidTag . $pubTag;
     $ecKey = "\x30" . asn1Length(strlen($inner)) . $inner;
@@ -300,11 +240,30 @@ function asn1Length(int $length): string {
 }
 
 /**
+ * Create a VAPID JWT token signed with ES256
+ */
+function createVapidJwt(string $audience, string $subject, string $serverPubBin, string $serverPrivBin): string {
+    $header  = base64UrlEncode(json_encode(['typ' => 'JWT', 'alg' => 'ES256']));
+    $payload = base64UrlEncode(json_encode([
+        'aud' => $audience,
+        'exp' => time() + 86400,
+        'sub' => $subject,
+    ]));
+
+    $signingInput = $header . '.' . $payload;
+
+    $privPem = makeEcPrivatePem($serverPrivBin, $serverPubBin);
+    $pkey    = openssl_pkey_get_private($privPem);
+    openssl_sign($signingInput, $derSig, $pkey, OPENSSL_ALGO_SHA256);
+
+    return $header . '.' . $payload . '.' . base64UrlEncode(derToRaw($derSig));
+}
+
+/**
  * Convert DER-encoded ECDSA signature to raw r||s (64 bytes)
  */
 function derToRaw(string $der): string {
     $pos = 0;
-    // SEQUENCE
     if (ord($der[$pos++]) !== 0x30) throw new \Exception('Invalid DER signature');
     $seqLen = ord($der[$pos++]);
     if ($seqLen > 127) $pos++; // skip extended length byte
@@ -320,7 +279,7 @@ function derToRaw(string $der): string {
     $sLen = ord($der[$pos++]);
     $s = substr($der, $pos, $sLen);
 
-    // Pad/trim to 32 bytes each
+    // Pad/trim to exactly 32 bytes each
     $r = str_pad(ltrim($r, "\x00"), 32, "\x00", STR_PAD_LEFT);
     $s = str_pad(ltrim($s, "\x00"), 32, "\x00", STR_PAD_LEFT);
 
