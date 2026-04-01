@@ -73,7 +73,12 @@ var VoPush = (function() {
             return true;
         }).catch(function(err) {
             console.error('[VoPush] Subscribe failed:', err);
-            alert('[VoPush] Αποτυχία εγγραφής: ' + err);
+            var msg = err.toString();
+            if (msg.indexOf('push service error') !== -1) {
+                alert('Αποτυχία σύνδεσης με την υπηρεσία push (FCM).\n\nΛύση: Ανοίξτε Chrome Ρυθμίσεις → Ρυθμίσεις ιστότοπου → βρείτε ' + window.location.hostname + ' → Εκκαθάριση & επαναφορά.\nΈπειτα κλείστε και ανοίξτε ξανά το Chrome και δοκιμάστε.');
+            } else {
+                alert('[VoPush] Αποτυχία εγγραφής: ' + msg);
+            }
             if (Notification.permission === 'denied') {
                 updateUI('denied');
             } else {
