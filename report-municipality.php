@@ -32,7 +32,13 @@ $selectedTypes = array_map('intval', (array)(get('types') ?: []));
 $period = get('period', '');
 $customStart = get('start_date', '');
 $customEnd = get('end_date', '');
-$showIncidents = get('show_incidents', '') === '1';
+// Section visibility (default: all enabled when nothing selected)
+$allSections = ['sec_summary', 'sec_status', 'sec_types', 'sec_trend', 'sec_funnel', 'sec_top10', 'sec_depts', 'sec_debrief', 'sec_incidents'];
+$rawSections = isset($_GET['sections']) ? (array)$_GET['sections'] : [];
+$selectedSections = !empty($rawSections)
+    ? array_filter($rawSections, fn($s) => in_array($s, $allSections, true))
+    : $allSections;
+$showIncidents = in_array('sec_incidents', $selectedSections);
 $generate = !empty($selectedTypes) && !empty($period);
 
 $startDate = '';
@@ -61,6 +67,7 @@ if ($currentUser['role'] === ROLE_DEPARTMENT_ADMIN && !empty($currentUser['depar
 }
 
 $appName = getSetting('app_name', APP_NAME);
+$appLogo = getSetting('app_logo', '');
 
 // ---------- GATHER REPORT DATA ----------
 $reportData = null;
@@ -344,14 +351,41 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
             <div class="mb-4">
-                <label class="form-label fw-bold"><i class="bi bi-sliders me-1"></i>Επιλογές Αναφοράς</label>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="show_incidents" value="1" 
-                           id="show_incidents" <?= $showIncidents ? 'checked' : '' ?>>
-                    <label class="form-check-label" for="show_incidents">
-                        <i class="bi bi-exclamation-triangle text-danger me-1"></i>Συμπερίληψη Αναφοράς Συμβάντων
-                    </label>
-                    <div class="form-text">Εμφανίζει αναλυτικά όλα τα συμβάντα από τα debrief αποστολών</div>
+                <label class="form-label fw-bold"><i class="bi bi-layout-text-window me-1"></i>Ενότητες Αναφοράς</label>
+                <div class="mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAllSections(true)">
+                        <i class="bi bi-check-all me-1"></i>Επιλογή Όλων
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1" onclick="toggleAllSections(false)">
+                        <i class="bi bi-x-lg me-1"></i>Αποεπιλογή
+                    </button>
+                </div>
+                <div class="row g-2">
+                    <?php
+                    $sectionOptions = [
+                        'sec_summary'   => ['Συνοπτική Επισκόπηση',   'bi-speedometer2',        'primary'],
+                        'sec_status'    => ['Κατανομή Κατάστασης',    'bi-pie-chart',            'info'],
+                        'sec_types'     => ['Ανάλυση ανά Τύπο',       'bi-bar-chart',            'info'],
+                        'sec_trend'     => ['Μηνιαία Εξέλιξη',        'bi-graph-up',             'success'],
+                        'sec_funnel'    => ['Χωνί Συμμετοχής',        'bi-funnel',               'warning'],
+                        'sec_top10'     => ['Κορυφαίοι 10 Εθελοντές', 'bi-trophy',               'warning'],
+                        'sec_depts'     => ['Ανάλυση ανά Τμήμα',      'bi-building',             'secondary'],
+                        'sec_debrief'   => ['Αξιολόγηση / Debrief',   'bi-clipboard-data',       'dark'],
+                        'sec_incidents' => ['Αναφορά Συμβάντων',      'bi-exclamation-triangle', 'danger'],
+                    ];
+                    foreach ($sectionOptions as $key => [$label, $icon, $color]):
+                        $checked = in_array($key, $selectedSections) ? 'checked' : '';
+                    ?>
+                    <div class="col-md-4 col-lg-3">
+                        <div class="form-check">
+                            <input class="form-check-input section-checkbox" type="checkbox"
+                                   name="sections[]" value="<?= $key ?>" id="<?= $key ?>" <?= $checked ?>>
+                            <label class="form-check-label" for="<?= $key ?>">
+                                <i class="bi <?= $icon ?> text-<?= $color ?> me-1"></i><?= $label ?>
+                            </label>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
                 </div>
             </div>
             <button type="submit" class="btn btn-primary btn-lg">
@@ -376,7 +410,11 @@ include __DIR__ . '/includes/header.php';
     <div class="report-cover">
         <div class="report-cover-inner">
             <div class="report-emblem">
-                <i class="bi bi-shield-check"></i>
+                <?php if (!empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLogo)): ?>
+                    <img src="uploads/logos/<?= h($appLogo) ?>" alt="<?= h($appName) ?>" style="max-height:100px;max-width:220px;width:auto;height:auto;border-radius:10px;object-fit:contain;filter:drop-shadow(0 2px 8px rgba(0,0,0,0.3));">
+                <?php else: ?>
+                    <i class="bi bi-shield-check"></i>
+                <?php endif; ?>
             </div>
             <div class="report-org"><?= h($appName) ?></div>
             <h1 class="report-title">Αναφορά Δραστηριοτήτων<br>Εθελοντών</h1>
@@ -392,6 +430,7 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 
+    <?php if (in_array('sec_summary', $selectedSections)): ?>
     <!-- ===== EXECUTIVE SUMMARY (8 KPIs) ===== -->
     <div class="section-title">
         <i class="bi bi-speedometer2"></i>
@@ -468,9 +507,10 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
+    <?php endif; // sec_summary ?>
 
     <!-- ===== MISSION STATUS DISTRIBUTION ===== -->
-    <?php if (!empty($reportData['statusDist'])): ?>
+    <?php if (in_array('sec_status', $selectedSections) && !empty($reportData['statusDist'])): ?>
     <div class="section-title">
         <i class="bi bi-pie-chart"></i>
         <span>Κατανομή Κατάστασης Αποστολών</span>
@@ -513,7 +553,7 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
 
     <!-- ===== MISSION TYPE BREAKDOWN ===== -->
-    <?php if (!empty($reportData['typeBreakdown'])): ?>
+    <?php if (in_array('sec_types', $selectedSections) && !empty($reportData['typeBreakdown'])): ?>
     <div class="section-title">
         <i class="bi bi-bar-chart"></i>
         <span>Ανάλυση ανά Τύπο Αποστολής</span>
@@ -563,7 +603,7 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
 
     <!-- ===== MONTHLY TREND ===== -->
-    <?php if (!empty($reportData['monthlyTrend'])): ?>
+    <?php if (in_array('sec_trend', $selectedSections) && !empty($reportData['monthlyTrend'])): ?>
     <div class="section-title page-break-before">
         <i class="bi bi-graph-up"></i>
         <span>Μηνιαία Εξέλιξη Δραστηριοτήτων</span>
@@ -606,6 +646,7 @@ include __DIR__ . '/includes/header.php';
     </div>
     <?php endif; ?>
 
+    <?php if (in_array('sec_funnel', $selectedSections)): ?>
     <!-- ===== PARTICIPATION FUNNEL ===== -->
     <div class="section-title">
         <i class="bi bi-funnel"></i>
@@ -645,9 +686,10 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
+    <?php endif; // sec_funnel ?>
 
     <!-- ===== TOP 10 VOLUNTEERS ===== -->
-    <?php if (!empty($reportData['topVolunteers'])): ?>
+    <?php if (in_array('sec_top10', $selectedSections) && !empty($reportData['topVolunteers'])): ?>
     <div class="section-title">
         <i class="bi bi-trophy"></i>
         <span>Κορυφαίοι 10 Εθελοντές</span>
@@ -697,7 +739,7 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
 
     <!-- ===== DEPARTMENT BREAKDOWN ===== -->
-    <?php if (!empty($reportData['deptBreakdown']) && count($reportData['deptBreakdown']) > 0): ?>
+    <?php if (in_array('sec_depts', $selectedSections) && !empty($reportData['deptBreakdown']) && count($reportData['deptBreakdown']) > 0): ?>
     <div class="section-title page-break-before">
         <i class="bi bi-building"></i>
         <span>Ανάλυση ανά Τμήμα</span>
@@ -731,7 +773,7 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
 
     <!-- ===== DEBRIEF / EVALUATION SUMMARY ===== -->
-    <?php if ($reportData['debriefCount'] > 0): ?>
+    <?php if (in_array('sec_debrief', $selectedSections) && $reportData['debriefCount'] > 0): ?>
     <div class="section-title">
         <i class="bi bi-clipboard-data"></i>
         <span>Αξιολόγηση Αποστολών (Debrief)</span>
@@ -892,7 +934,8 @@ include __DIR__ . '/includes/header.php';
     0%, 100% { transform: scale(1); opacity: 0.5; }
     50% { transform: scale(1.1); opacity: 1; }
 }
-.report-emblem { font-size: 3.5rem; margin-bottom: 0.5rem; opacity: 0.9; }
+.report-emblem { font-size: 3.5rem; margin-bottom: 0.5rem; opacity: 0.9; min-height: 60px; display: flex; align-items: center; justify-content: center; }
+.report-emblem img { opacity: 1; }
 .report-org { font-size: 1rem; text-transform: uppercase; letter-spacing: 4px; opacity: 0.7; margin-bottom: 0.5rem; }
 .report-title { font-size: 2rem; font-weight: 700; letter-spacing: 1px; margin-bottom: 1rem; line-height: 1.3; }
 .report-period { font-size: 1.1rem; opacity: 0.85; }
@@ -1175,6 +1218,9 @@ include __DIR__ . '/includes/header.php';
 <script>
 function toggleAllTypes(checked) {
     document.querySelectorAll('.type-checkbox').forEach(cb => cb.checked = checked);
+}
+function toggleAllSections(checked) {
+    document.querySelectorAll('.section-checkbox').forEach(cb => cb.checked = checked);
 }
 function toggleCustomDates() {
     const custom = document.getElementById('period_custom');
