@@ -67,7 +67,7 @@ function respond(bool $success, string $message, array $extra = []): void
  */
 function backupPath(string $backupId): string
 {
-    if (!preg_match('/^backup_[\d_]+$/', $backupId)) {
+    if (!preg_match('/^backup_[\d_-]+$/', $backupId)) {
         throw new \InvalidArgumentException('Άκυρο backup ID');
     }
     return BACKUP_DIR . '/' . $backupId;
