@@ -615,7 +615,7 @@ function getBackups() {
             'version'     => $info['version'] ?? 'Άγνωστη',
             'db_included' => $info['db_included'] ?? false,
             'skipped'     => $info['skipped_tables'] ?? [],
-            'size'        => getDirectorySize($dir),
+            'size'        => $info['db_size_bytes'] ?? getDirectorySize($dir),
         ];
     }
 
@@ -981,9 +981,8 @@ if (isPost()) {
                     $backupInfo['skipped_folders'] ?? []
                 );
 
-                // Normalise paths to forward slashes for consistent comparison
-                $appRoot   = str_replace('\\', '/', realpath(__DIR__));
-                $backupDir = str_replace('\\', '/', realpath(BACKUP_DIR));
+                // Normalise app root to forward slashes
+                $appRoot   = rtrim(str_replace('\\', '/', realpath(__DIR__)), '/');
                 $zipFile   = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $backupName . '.zip';
 
                 $zip = new ZipArchive();
@@ -994,7 +993,7 @@ if (isPost()) {
 
                 set_time_limit(300); // Up to 5 min for large sites
 
-                $appRootLen  = strlen($appRoot) + 1; // +1 for the trailing slash
+                $appRootLen  = strlen($appRoot) + 1; // +1 for trailing slash
                 $uploadsRoot = $appRoot . '/uploads/';
 
                 $it = new RecursiveIteratorIterator(
@@ -1002,17 +1001,18 @@ if (isPost()) {
                 );
                 foreach ($it as $file) {
                     if (!$file->isFile()) continue;
-                    $real = str_replace('\\', '/', realpath($file->getPathname()) ?: $file->getPathname());
+                    $real = str_replace('\\', '/', $file->getPathname());
+                    $relPath = substr($real, $appRootLen);
 
                     // Skip the backups directory (avoid recursive self-inclusion)
-                    if (str_starts_with($real, $backupDir . '/')) continue;
+                    if (str_starts_with($relPath, 'backups/')) continue;
 
                     // Skip config.local.php (host-specific DB credentials)
-                    if ($real === $appRoot . '/config.local.php') continue;
+                    if ($relPath === 'config.local.php') continue;
 
                     // Skip upload folders that were excluded when this backup was created
-                    if (!empty($skippedFolders) && str_starts_with($real, $uploadsRoot)) {
-                        $relUpload = substr($real, strlen($uploadsRoot));
+                    if (!empty($skippedFolders) && str_starts_with($relPath, 'uploads/')) {
+                        $relUpload = substr($relPath, strlen('uploads/'));
                         foreach ($skippedFolders as $folder) {
                             if (str_starts_with($relUpload, $folder . '/') || $relUpload === $folder) {
                                 continue 2;
@@ -1020,7 +1020,7 @@ if (isPost()) {
                         }
                     }
 
-                    $zip->addFile($real, substr($real, $appRootLen));
+                    $zip->addFile($file->getPathname(), $relPath);
                 }
 
                 // Add the SQL dump from the backup folder at the zip root
@@ -1251,7 +1251,7 @@ include __DIR__ . '/includes/header.php';
                                     <th style="width:36px"></th>
                                     <th>Ημερομηνία</th>
                                     <th>Έκδοση</th>
-                                    <th>Μέγεθος</th>
+                                    <th title="Μέγεθος SQL dump">SQL dump</th>
                                     <th>Βάση</th>
                                     <th class="text-end">Ενέργειες</th>
                                 </tr>
