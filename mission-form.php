@@ -541,10 +541,18 @@ include __DIR__ . '/includes/header.php';
 
                     <!-- Series end date -->
                     <div class="mb-2">
-                        <label for="recur_end_date" class="form-label fw-semibold">
+                        <label for="recur_end_date_display" class="form-label fw-semibold">
                             <i class="bi bi-calendar-x me-1 text-danger"></i>Τέλος σειράς
                         </label>
-                        <input type="date" class="form-control" id="recur_end_date" name="recur_end_date">
+                        <input type="hidden" id="recur_end_date" name="recur_end_date">
+                        <div class="input-group" style="max-width:220px;">
+                            <input type="text" id="recur_end_date_display" class="form-control bg-white"
+                                   placeholder="ηη/μμ/εεεε" readonly style="cursor:pointer;"
+                                   onclick="openRecurEndDateModal()">
+                            <button type="button" class="btn btn-outline-secondary" onclick="openRecurEndDateModal()" tabindex="-1">
+                                <i class="bi bi-calendar3"></i>
+                            </button>
+                        </div>
                         <small class="text-muted">Τελευταία ημερομηνία για δημιουργία αποστολών</small>
                     </div>
 
@@ -605,7 +613,7 @@ include __DIR__ . '/includes/header.php';
                                onfocus="this.style.borderColor='#4f46e5';this.style.boxShadow='0 0 0 4px rgba(79,70,229,0.15)'"
                                onblur="this.style.borderColor='#e0ddff';this.style.boxShadow='0 2px 8px rgba(79,70,229,0.08)'">
                     </div>
-                    <div class="col-5">
+                    <div class="col-5" id="modalTimeCol">
                         <label class="form-label text-muted small fw-semibold text-uppercase mb-2">
                             <i class="bi bi-clock me-1"></i>Ώρα
                         </label>
@@ -679,8 +687,28 @@ if (_isoStart && !document.getElementById('start_datetime').value) {
 
 window._dpField = null;
 window._dpModal = null;
+window._dpDateOnly = false;
+
+function openRecurEndDateModal() {
+    window._dpDateOnly = true;
+    const currentVal = document.getElementById('recur_end_date').value; // Y-m-d
+    document.getElementById('modalDatePart').value = currentVal || '';
+    document.getElementById('modalTimePart').value = '00:00';
+    document.getElementById('datePickerModalLabel').textContent = 'Τέλος Σειράς Αποστολών';
+    document.getElementById('datePickerModalSub').textContent = 'Τελευταία ημερομηνία δημιουργίας';
+    document.getElementById('durationSection').style.display = 'none';
+    document.getElementById('modalTimeCol').style.display = 'none';
+    if (!window._dpModal) window._dpModal = new bootstrap.Modal(document.getElementById('datePickerModal'));
+    window._dpModal.show();
+    document.getElementById('datePickerModal').addEventListener('shown.bs.modal', function focusIt() {
+        document.getElementById('modalDatePart').focus();
+        document.getElementById('datePickerModal').removeEventListener('shown.bs.modal', focusIt);
+    });
+}
 
 function openDateModal(field) {
+    window._dpDateOnly = false;
+    document.getElementById('modalTimeCol').style.display = '';
     window._dpField = field;
     const hiddenId = field + '_datetime';
     const currentVal = document.getElementById(hiddenId).value;
@@ -739,6 +767,15 @@ document.getElementById('durationCustom').addEventListener('input', function() {
 
 document.getElementById('confirmDateBtn').addEventListener('click', function() {
     const datePart = document.getElementById('modalDatePart').value; // yyyy-mm-dd
+    if (window._dpDateOnly) {
+        if (!datePart) return;
+        document.getElementById('recur_end_date').value = datePart;
+        const p = datePart.split('-');
+        document.getElementById('recur_end_date_display').value = p[2] + '/' + p[1] + '/' + p[0];
+        window._dpModal.hide();
+        updateRecurPreview();
+        return;
+    }
     const timePart = document.getElementById('modalTimePart').value; // HH:ii
     if (!datePart || !timePart) { return; }
     const isoVal = datePart + 'T' + timePart;
@@ -764,8 +801,13 @@ document.getElementById('confirmDateBtn').addEventListener('click', function() {
 document.getElementById('clearDateBtn').addEventListener('click', function() {
     document.getElementById('modalDatePart').value = '';
     document.getElementById('modalTimePart').value = '';
-    document.getElementById(window._dpField + '_datetime').value = '';
-    document.getElementById(window._dpField + '_datetime_display').value = '';
+    if (window._dpDateOnly) {
+        document.getElementById('recur_end_date').value = '';
+        document.getElementById('recur_end_date_display').value = '';
+    } else {
+        document.getElementById(window._dpField + '_datetime').value = '';
+        document.getElementById(window._dpField + '_datetime_display').value = '';
+    }
     window._dpModal.hide();
 });
 
