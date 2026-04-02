@@ -412,8 +412,54 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
 
+        </div>
+        
+        <div class="col-lg-4">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Κατάσταση</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="status" class="form-label">Κατάσταση</label>
+                        <select class="form-select" id="status" name="status">
+                            <?php 
+                            $allowedStatuses = [STATUS_DRAFT, STATUS_OPEN];
+                            if ($isEdit && in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED, STATUS_CANCELED])) {
+                                $allowedStatuses[] = $mission['status'];
+                            }
+                            foreach ($allowedStatuses as $s): ?>
+                                <option value="<?= $s ?>" <?= ($mission['status'] ?? post('status', STATUS_DRAFT)) === $s ? 'selected' : '' ?>>
+                                    <?= h($GLOBALS['STATUS_LABELS'][$s]) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="is_urgent" name="is_urgent" 
+                               <?= ($mission['is_urgent'] ?? post('is_urgent')) ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="is_urgent">
+                            <i class="bi bi-exclamation-triangle text-danger"></i> Επείγουσα Αποστολή
+                        </label>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="responsible_user_id" class="form-label">Υπεύθυνος Αποστολής</label>
+                        <select class="form-select" id="responsible_user_id" name="responsible_user_id">
+                            <option value="">Χωρίς υπεύθυνο</option>
+                            <?php foreach ($allVolunteers as $v): ?>
+                                <option value="<?= $v['id'] ?>" <?= ($mission['responsible_user_id'] ?? '') == $v['id'] ? 'selected' : '' ?>>
+                                    <?= h($v['name']) ?> (<?= h($GLOBALS['ROLE_LABELS'][$v['role']]) ?>)
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="text-muted">Επιλέξτε υπεύθυνο για την αποστολή</small>
+                    </div>
+                </div>
+            </div>
+
             <?php if (!$isEdit): ?>
-            <!-- ══ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΗ ΑΠΟΣΤΟΛΗ ══════════════════════════════════ -->
             <div class="card mb-4 border-info" id="recurringCard">
                 <div class="card-header bg-info bg-opacity-10">
                     <div class="form-check mb-0">
@@ -468,7 +514,6 @@ include __DIR__ . '/includes/header.php';
                             </button>
                             <?php endforeach; ?>
                         </div>
-                        <!-- Hidden inputs injected by JS -->
                         <div id="weekdayHiddenInputs"></div>
                     </div>
 
@@ -494,13 +539,12 @@ include __DIR__ . '/includes/header.php';
                         </div>
                     </div>
 
-                    <!-- Series end date (always visible in recurring panel) -->
+                    <!-- Series end date -->
                     <div class="mb-2">
                         <label for="recur_end_date" class="form-label fw-semibold">
                             <i class="bi bi-calendar-x me-1 text-danger"></i>Τέλος σειράς
                         </label>
-                        <input type="date" class="form-control" id="recur_end_date" name="recur_end_date"
-                               style="max-width:220px;">
+                        <input type="date" class="form-control" id="recur_end_date" name="recur_end_date">
                         <small class="text-muted">Τελευταία ημερομηνία για δημιουργία αποστολών</small>
                     </div>
 
@@ -511,53 +555,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
             <?php endif; ?>
-        </div>
-        
-        <div class="col-lg-4">
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Κατάσταση</h5>
-                </div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label for="status" class="form-label">Κατάσταση</label>
-                        <select class="form-select" id="status" name="status">
-                            <?php 
-                            $allowedStatuses = [STATUS_DRAFT, STATUS_OPEN];
-                            if ($isEdit && in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED, STATUS_CANCELED])) {
-                                $allowedStatuses[] = $mission['status'];
-                            }
-                            foreach ($allowedStatuses as $s): ?>
-                                <option value="<?= $s ?>" <?= ($mission['status'] ?? post('status', STATUS_DRAFT)) === $s ? 'selected' : '' ?>>
-                                    <?= h($GLOBALS['STATUS_LABELS'][$s]) ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    
-                    <div class="form-check mb-3">
-                        <input class="form-check-input" type="checkbox" id="is_urgent" name="is_urgent" 
-                               <?= ($mission['is_urgent'] ?? post('is_urgent')) ? 'checked' : '' ?>>
-                        <label class="form-check-label" for="is_urgent">
-                            <i class="bi bi-exclamation-triangle text-danger"></i> Επείγουσα Αποστολή
-                        </label>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="responsible_user_id" class="form-label">Υπεύθυνος Αποστολής</label>
-                        <select class="form-select" id="responsible_user_id" name="responsible_user_id">
-                            <option value="">Χωρίς υπεύθυνο</option>
-                            <?php foreach ($allVolunteers as $v): ?>
-                                <option value="<?= $v['id'] ?>" <?= ($mission['responsible_user_id'] ?? '') == $v['id'] ? 'selected' : '' ?>>
-                                    <?= h($v['name']) ?> (<?= h($GLOBALS['ROLE_LABELS'][$v['role']]) ?>)
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                        <small class="text-muted">Επιλέξτε υπεύθυνο για την αποστολή</small>
-                    </div>
-                </div>
-            </div>
-            
+
             <div class="d-grid gap-2">
                 <button type="submit" class="btn btn-primary btn-lg">
                     <i class="bi bi-check-lg me-1"></i>
