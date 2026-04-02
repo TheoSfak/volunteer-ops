@@ -1278,7 +1278,7 @@ include __DIR__ . '/includes/header.php';
                                         <?php endif; ?>
                                     </td>
                                     <td class="text-end">
-                                        <form method="post" class="d-inline">
+                                        <form method="post" class="d-inline" onsubmit="startDownload(this)">
                                             <?= csrfField() ?>
                                             <input type="hidden" name="action" value="download_backup">
                                             <input type="hidden" name="backup_name" value="<?= h($backup['name']) ?>">
@@ -1317,6 +1317,14 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
         <script>
+        function startDownload(form) {
+            const ov = document.getElementById('downloadOverlay');
+            ov.classList.remove('d-none');
+            ov.style.display = 'flex';
+            // Hide after 90s in case browser pops save dialog without page reload
+            setTimeout(() => { ov.classList.add('d-none'); ov.style.display = ''; }, 90000);
+        }
+
         function massDeleteBackups() {
             if (!confirm('Διαγραφή επιλεγμένων backups; Η ενέργεια δεν αναιρείται.')) return;
             const form = document.getElementById('massDeleteForm');
@@ -1354,7 +1362,17 @@ include __DIR__ . '/includes/header.php';
         })();
         </script>
     </div>
-    
+
+<!-- Download overlay -->
+<div id="downloadOverlay" class="d-none position-fixed top-0 start-0 w-100 h-100"
+     style="background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center">
+    <div class="bg-white rounded-3 shadow p-4 text-center mx-auto" style="max-width:340px;width:90%;margin-top:20vh">
+        <div class="spinner-border text-primary mb-3" style="width:3rem;height:3rem" role="status"></div>
+        <h5 class="mb-1">Τα αρχεία ετοιμάζονται&hellip;</h5>
+        <p class="text-muted mb-0 small">Παρακαλώ μην κλείσετε την σελίδα. Η λήψη θα αρχίσει αυτόματα.</p>
+    </div>
+</div>
+
     <!-- Sidebar -->
     <div class="col-lg-4">
         <!-- Quick Actions -->
