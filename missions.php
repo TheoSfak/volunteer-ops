@@ -74,6 +74,7 @@ $pagination = paginate($total, $page, $perPage);
 $missions = dbFetchAll(
     "SELECT m.*, d.name as department_name, u.name as creator_name,
             mt.name as type_name, mt.color as type_color, mt.icon as type_icon,
+            m.recurrence_id,
             COUNT(DISTINCT sh.id) as shift_count,
             COUNT(DISTINCT CASE WHEN pr.status = '" . PARTICIPATION_APPROVED . "' THEN pr.id END) as volunteer_count,
             (SELECT COALESCE(SUM(s2.max_volunteers), 0) FROM shifts s2 WHERE s2.mission_id = m.id) as max_volunteers
@@ -255,6 +256,11 @@ include __DIR__ . '/includes/header.php';
                                     </a>
                                     <?php if ($mission['is_urgent']): ?>
                                         <span class="badge bg-danger ms-1">Επείγον</span>
+                                    <?php endif; ?>
+                                    <?php if ($mission['recurrence_id']): ?>
+                                        <span class="badge bg-info text-dark ms-1" title="Αποστολή σε επαναλαμβανόμενη σειρά">
+                                            <i class="bi bi-arrow-repeat me-1"></i>Σειρά
+                                        </span>
                                     <?php endif; ?>
                                     <br>
                                     <small class="text-muted">

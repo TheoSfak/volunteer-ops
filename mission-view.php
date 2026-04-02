@@ -31,6 +31,23 @@ if (!$mission) {
 $pageTitle = $mission['title'];
 $user = getCurrentUser();
 
+// Load series siblings if this mission belongs to a recurrence series
+$seriesMissions = [];
+$recurrenceInfo = null;
+if (!empty($mission['recurrence_id'])) {
+    $seriesMissions = dbFetchAll(
+        "SELECT id, title, start_datetime, end_datetime, recurrence_instance_date, status
+         FROM missions
+         WHERE recurrence_id = ? AND deleted_at IS NULL
+         ORDER BY start_datetime ASC",
+        [$mission['recurrence_id']]
+    );
+    $recurrenceInfo = dbFetchOne(
+        "SELECT type, weekdays, random_dates, interval_days, end_date FROM mission_recurrences WHERE id = ?",
+        [$mission['recurrence_id']]
+    );
+}
+
 // Τ.Ε.Π.: αποκλεισμός για μη-δόκιμους / μη-admins που δεν είναι υπεύθυνοι αποστολής
 if (isTepMission((int)($mission['mission_type_id'] ?? 0)) && !canSeeTep($mission['responsible_user_id'])) {
     setFlash('error', 'Δεν έχετε πρόσβαση σε αποστολές Τ.Ε.Π.');
@@ -1265,6 +1282,57 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
+
+        <?php if (!empty($seriesMissions)): ?>
+        <!-- ── Series Panel ─────────────────────────────────────────────── -->
+        <div class="card mt-4">
+            <div class="card-header bg-info bg-opacity-10 d-flex justify-content-between align-items-center"
+                 style="cursor:pointer;" data-bs-toggle="collapse" data-bs-target="#seriesCollapse">
+                <h6 class="mb-0">
+                    <i class="bi bi-arrow-repeat me-2 text-info"></i>Σειρά Αποστολών
+                    <span class="badge bg-info text-dark ms-1"><?= count($seriesMissions) ?></span>
+                </h6>
+                <i class="bi bi-chevron-down text-muted"></i>
+            </div>
+            <div class="collapse show" id="seriesCollapse">
+                <div class="card-body p-0">
+                    <?php if ($recurrenceInfo): ?>
+                    <div class="px-3 py-2 border-bottom bg-light small text-muted">
+                        <?php
+                        $typeLabels = ['weekly' => 'Εβδομαδιαία', 'random_days' => 'Επιλεγμένες ημερομηνίες', 'interval' => 'Σταθερό διάστημα'];
+                        echo h($typeLabels[$recurrenceInfo['type']] ?? $recurrenceInfo['type']);
+                        if ($recurrenceInfo['interval_days']) {
+                            echo ' · κάθε ' . (int)$recurrenceInfo['interval_days'] . ' ημέρες';
+                        }
+                        echo ' · έως ' . formatDateGreek($recurrenceInfo['end_date']);
+                        ?>
+                    </div>
+                    <?php endif; ?>
+                    <ul class="list-group list-group-flush" style="max-height:320px;overflow-y:auto;">
+                        <?php foreach ($seriesMissions as $sm):
+                            $isCurrent = $sm['id'] == $id;
+                        ?>
+                        <li class="list-group-item px-3 py-2<?= $isCurrent ? ' bg-info bg-opacity-10 fw-semibold' : '' ?>">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <?php if ($isCurrent): ?>
+                                        <i class="bi bi-arrow-right-circle-fill text-info me-1"></i>
+                                    <?php endif; ?>
+                                    <a href="mission-view.php?id=<?= $sm['id'] ?>" class="text-decoration-none">
+                                        <?= formatDate($sm['start_datetime']) ?>
+                                    </a>
+                                    <small class="text-muted ms-1"><?= formatDateTime($sm['start_datetime'], 'H:i') ?></small>
+                                </div>
+                                <?= statusBadge($sm['status']) ?>
+                            </div>
+                        </li>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
     </div>
 </div>
 

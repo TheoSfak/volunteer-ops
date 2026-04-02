@@ -62,6 +62,19 @@ if (isPost()) {
     if (empty($data['location'])) $errors[] = 'Η τοποθεσία είναι υποχρεωτική.';
     if (empty($data['start_datetime'])) $errors[] = 'Η ημερομηνία έναρξης είναι υποχρεωτική.';
     if (empty($data['end_datetime'])) $errors[] = 'Η ημερομηνία λήξης είναι υποχρεωτική.';
+
+    // Recurring fields (create-only)
+    $isRecurring = !$isEdit && isset($_POST['is_recurring']);
+    $recurType    = post('recur_type');      // 'weekly' | 'random_days' | 'interval'
+    $recurEndDate = post('recur_end_date');  // Y-m-d
+    if ($isRecurring) {
+        if (!in_array($recurType, ['weekly', 'random_days', 'interval'])) {
+            $errors[] = 'Επιλέξτε έγκυρο τύπο επανάληψης.';
+        }
+        if (empty($recurEndDate)) {
+            $errors[] = 'Η ημερομηνία λήξης σειράς είναι υποχρεωτική.';
+        }
+    }
     
     // Convert date format
     if (!empty($data['start_datetime'])) {
@@ -90,21 +103,140 @@ if (isPost()) {
                 logAudit('update', 'missions', $id, $mission, $data);
                 setFlash('success', 'Η αποστολή ενημερώθηκε επιτυχώς.');
             } else {
-                $sql = "INSERT INTO missions 
-                        (title, description, mission_type_id, department_id, location, location_details, 
-                         latitude, longitude, start_datetime, end_datetime, requirements, notes,
-                         is_urgent, status, responsible_user_id, created_by, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
-                $newId = dbInsert($sql, [
-                    $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
-                    $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
-                    $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
-                    $data['is_urgent'], $data['status'], $data['responsible_user_id'], $user['id']
-                ]);
-                
-                logAudit('create', 'missions', $newId, null, $data);
-                setFlash('success', 'Η αποστολή δημιουργήθηκε επιτυχώς.');
-                redirect('mission-view.php?id=' . $newId);
+                if ($isRecurring) {
+                    // ── RECURRING MISSIONS ──────────────────────────────────────────
+                    $startDT       = new DateTime($data['start_datetime']);
+                    $endDT         = new DateTime($data['end_datetime']);
+                    $startDateOnly = new DateTime($startDT->format('Y-m-d'));
+                    $endDateSeries = new DateTime($recurEndDate);
+                    $startTime     = $startDT->format('H:i:s');
+                    $endTime       = $endDT->format('H:i:s');
+                    $recurDates    = [];
+                    $meta          = [];
+
+                    if ($recurType === 'weekly') {
+                        $rawWeekdays = array_unique(array_map('intval', array_filter(
+                            (array)($_POST['recur_weekdays'] ?? []),
+                            fn($d) => $d >= 1 && $d <= 7
+                        )));
+                        if (empty($rawWeekdays)) {
+                            throw new Exception('Επιλέξτε τουλάχιστον μία ημέρα εβδομάδας.');
+                        }
+                        $cursor = clone $startDateOnly;
+                        while ($cursor <= $endDateSeries) {
+                            if (in_array((int)$cursor->format('N'), $rawWeekdays)) {
+                                $recurDates[] = $cursor->format('Y-m-d');
+                            }
+                            $cursor->modify('+1 day');
+                        }
+                        $meta = ['weekdays' => array_values($rawWeekdays)];
+
+                    } elseif ($recurType === 'random_days') {
+                        $rawDates = post('recur_random_dates');
+                        foreach (array_filter(array_map('trim', explode(',', $rawDates))) as $d) {
+                            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) {
+                                $dt = new DateTime($d);
+                                if ($dt >= $startDateOnly && $dt <= $endDateSeries) {
+                                    $recurDates[] = $dt->format('Y-m-d');
+                                }
+                            }
+                        }
+                        $recurDates = array_values(array_unique($recurDates));
+                        sort($recurDates);
+                        if (empty($recurDates)) {
+                            throw new Exception('Επιλέξτε τουλάχιστον μία ημερομηνία στο καθορισμένο εύρος.');
+                        }
+                        $meta = ['random_dates' => $recurDates];
+
+                    } else { // interval
+                        $intervalDays = max(1, min(6, (int)post('recur_interval_days', 1)));
+                        $cursor = clone $startDateOnly;
+                        while ($cursor <= $endDateSeries) {
+                            $recurDates[] = $cursor->format('Y-m-d');
+                            $cursor->modify('+' . $intervalDays . ' days');
+                        }
+                        $meta = [
+                            'interval_days'       => $intervalDays,
+                            'interval_start_date' => $startDateOnly->format('Y-m-d'),
+                        ];
+                    }
+
+                    if (count($recurDates) > 100) {
+                        throw new Exception('Υπέρβαση ορίου 100 αποστολών ανά σειρά (βρέθηκαν ' . count($recurDates) . '). Μειώστε το εύρος ημερομηνιών.');
+                    }
+                    if (empty($recurDates)) {
+                        throw new Exception('Δεν βρέθηκαν ημερομηνίες στο εύρος που ορίσατε.');
+                    }
+
+                    // Insert recurrence record
+                    $recurrenceId = dbInsert(
+                        "INSERT INTO mission_recurrences (type, weekdays, random_dates, interval_days, interval_start_date, end_date, created_by)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        [
+                            $recurType,
+                            isset($meta['weekdays'])      ? json_encode($meta['weekdays'])      : null,
+                            isset($meta['random_dates'])  ? json_encode($meta['random_dates'])  : null,
+                            isset($meta['interval_days']) ? $meta['interval_days']              : null,
+                            isset($meta['interval_start_date']) ? $meta['interval_start_date']  : null,
+                            $recurEndDate,
+                            $user['id'],
+                        ]
+                    );
+
+                    // Insert one mission + one default shift per date
+                    $createdCount = 0;
+                    foreach ($recurDates as $instanceDate) {
+                        $instStart = $instanceDate . ' ' . $startTime;
+                        $instEnd   = $instanceDate . ' ' . $endTime;
+                        $missionId = dbInsert(
+                            "INSERT INTO missions
+                             (title, description, mission_type_id, department_id, location, location_details,
+                              latitude, longitude, start_datetime, end_datetime, requirements, notes,
+                              is_urgent, status, responsible_user_id, created_by, recurrence_id, recurrence_instance_date, created_at, updated_at)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+                            [
+                                $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
+                                $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
+                                $instStart, $instEnd, $data['requirements'], $data['notes'],
+                                $data['is_urgent'], STATUS_OPEN, $data['responsible_user_id'], $user['id'],
+                                $recurrenceId, $instanceDate,
+                            ]
+                        );
+                        dbInsert(
+                            "INSERT INTO shifts (mission_id, start_time, end_time, max_volunteers, min_volunteers, created_at, updated_at)
+                             VALUES (?, ?, ?, 5, 1, NOW(), NOW())",
+                            [$missionId, $instStart, $instEnd]
+                        );
+                        logAudit('create', 'missions', $missionId, null, [
+                            'title'        => $data['title'],
+                            'recurrence_id' => $recurrenceId,
+                        ]);
+                        $createdCount++;
+                    }
+
+                    $firstDate = formatDateGreek($recurDates[0]);
+                    $lastDate  = formatDateGreek(end($recurDates));
+                    setFlash('success', 'Δημιουργήθηκαν ' . $createdCount . ' αποστολές σε νέα σειρά (' . $firstDate . ' – ' . $lastDate . ').');
+                    redirect('missions.php');
+
+                } else {
+                    // ── SINGLE MISSION ───────────────────────────────────────────────
+                    $sql = "INSERT INTO missions 
+                            (title, description, mission_type_id, department_id, location, location_details, 
+                             latitude, longitude, start_datetime, end_datetime, requirements, notes,
+                             is_urgent, status, responsible_user_id, created_by, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                    $newId = dbInsert($sql, [
+                        $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
+                        $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
+                        $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
+                        $data['is_urgent'], $data['status'], $data['responsible_user_id'], $user['id']
+                    ]);
+
+                    logAudit('create', 'missions', $newId, null, $data);
+                    setFlash('success', 'Η αποστολή δημιουργήθηκε επιτυχώς.');
+                    redirect('mission-view.php?id=' . $newId);
+                }
             }
             
             redirect('missions.php');
@@ -279,6 +411,106 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
             </div>
+
+            <?php if (!$isEdit): ?>
+            <!-- ══ ΕΠΑΝΑΛΑΜΒΑΝΟΜΕΝΗ ΑΠΟΣΤΟΛΗ ══════════════════════════════════ -->
+            <div class="card mb-4 border-info" id="recurringCard">
+                <div class="card-header bg-info bg-opacity-10">
+                    <div class="form-check mb-0">
+                        <input class="form-check-input" type="checkbox" id="is_recurring" name="is_recurring"
+                               onchange="toggleRecurring(this.checked)">
+                        <label class="form-check-label fw-semibold" for="is_recurring">
+                            <i class="bi bi-arrow-repeat me-1 text-info"></i>Επαναλαμβανόμενη Αποστολή
+                        </label>
+                        <small class="text-muted d-block ms-4">Δημιουργεί αυτόματα πολλές αποστολές με βάση χρονοδιάγραμμα</small>
+                    </div>
+                </div>
+                <div class="card-body" id="recurringBody" style="display:none;">
+
+                    <!-- Type selector -->
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Τύπος Επανάληψης</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <div class="form-check form-check-inline border rounded px-3 py-2">
+                                <input class="form-check-input" type="radio" name="recur_type" id="recurTypeWeekly"
+                                       value="weekly" checked onchange="switchRecurType('weekly')">
+                                <label class="form-check-label" for="recurTypeWeekly">
+                                    <i class="bi bi-calendar-week me-1"></i>Εβδομαδιαία
+                                </label>
+                            </div>
+                            <div class="form-check form-check-inline border rounded px-3 py-2">
+                                <input class="form-check-input" type="radio" name="recur_type" id="recurTypeRandom"
+                                       value="random_days" onchange="switchRecurType('random_days')">
+                                <label class="form-check-label" for="recurTypeRandom">
+                                    <i class="bi bi-calendar3 me-1"></i>Επιλεγμένες ημερομηνίες
+                                </label>
+                            </div>
+                            <div class="form-check form-check-inline border rounded px-3 py-2">
+                                <input class="form-check-input" type="radio" name="recur_type" id="recurTypeInterval"
+                                       value="interval" onchange="switchRecurType('interval')">
+                                <label class="form-check-label" for="recurTypeInterval">
+                                    <i class="bi bi-arrow-right-circle me-1"></i>Κάθε N ημέρες
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Weekly panel -->
+                    <div id="recurPanelWeekly" class="mb-3">
+                        <label class="form-label fw-semibold">Ημέρες Εβδομάδας</label>
+                        <div class="d-flex flex-wrap gap-2" id="weekdayChips">
+                            <?php
+                            $greekDays = [1=>'Δευτ',2=>'Τρίτ',3=>'Τετ',4=>'Πέμπ',5=>'Παρ',6=>'Σάββ',7=>'Κυρ'];
+                            foreach ($greekDays as $iso => $label): ?>
+                            <button type="button" class="btn btn-outline-secondary rounded-pill px-3 wday-chip"
+                                    data-day="<?= $iso ?>" onclick="toggleWeekday(this)">
+                                <?= $label ?>
+                            </button>
+                            <?php endforeach; ?>
+                        </div>
+                        <!-- Hidden inputs injected by JS -->
+                        <div id="weekdayHiddenInputs"></div>
+                    </div>
+
+                    <!-- Random days panel (calendar) -->
+                    <div id="recurPanelRandom" class="mb-3" style="display:none;">
+                        <label class="form-label fw-semibold">Επιλέξτε Ημερομηνίες</label>
+                        <input type="hidden" id="recur_random_dates" name="recur_random_dates">
+                        <div id="recurCalContainer"></div>
+                    </div>
+
+                    <!-- Interval panel -->
+                    <div id="recurPanelInterval" class="mb-3" style="display:none;">
+                        <label class="form-label fw-semibold">Επανάληψη κάθε</label>
+                        <div class="d-flex align-items-center gap-2" style="max-width:260px;">
+                            <select class="form-select" name="recur_interval_days" id="recurIntervalDays">
+                                <option value="1">1 ημέρα (καθημερινά)</option>
+                                <option value="2">2 ημέρες</option>
+                                <option value="3">3 ημέρες</option>
+                                <option value="4">4 ημέρες</option>
+                                <option value="5">5 ημέρες</option>
+                                <option value="6">6 ημέρες</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Series end date (always visible in recurring panel) -->
+                    <div class="mb-2">
+                        <label for="recur_end_date" class="form-label fw-semibold">
+                            <i class="bi bi-calendar-x me-1 text-danger"></i>Τέλος σειράς
+                        </label>
+                        <input type="date" class="form-control" id="recur_end_date" name="recur_end_date"
+                               style="max-width:220px;">
+                        <small class="text-muted">Τελευταία ημερομηνία για δημιουργία αποστολών</small>
+                    </div>
+
+                    <div class="alert alert-info py-2 mb-0 mt-3" id="recurPreviewAlert" style="display:none;">
+                        <i class="bi bi-info-circle me-1"></i>
+                        <span id="recurPreviewText"></span>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
         
         <div class="col-lg-4">
@@ -575,5 +807,233 @@ $(document).ready(function() {
 
     });
 });
+</script>
+
+<style>
+/* ── Recurring Calendar ─────────────────────────── */
+.recur-cal-wrap { display: flex; flex-wrap: wrap; gap: 20px; }
+.recur-cal-month { min-width: 210px; }
+.recur-cal-grid  { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.recur-cal-hdr   { text-align:center; font-size:.68rem; font-weight:600; color:#6c757d; padding:3px 1px; }
+.recur-cal-day   { text-align:center; padding:5px 2px; font-size:.78rem; border-radius:5px; cursor:pointer; transition:background .15s; }
+.recur-cal-day:hover         { background:#dbeafe; }
+.recur-cal-day.selected      { background:#4f46e5; color:#fff; font-weight:600; }
+.recur-cal-day.disabled      { color:#ccc; cursor:default; pointer-events:none; }
+.recur-cal-day.today         { outline:2px solid #4f46e5; outline-offset:-2px; }
+.recur-cal-month-header      { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:.85rem; font-weight:600; }
+</style>
+
+<script>
+// ══ RECURRING MISSIONS JS ════════════════════════════════════════════════════
+
+function toggleRecurring(on) {
+    document.getElementById('recurringBody').style.display = on ? '' : 'none';
+    if (on && window._recurCalInstance) window._recurCalInstance.render();
+    if (on) updateRecurPreview();
+}
+
+function switchRecurType(type) {
+    document.getElementById('recurPanelWeekly').style.display   = type === 'weekly'      ? '' : 'none';
+    document.getElementById('recurPanelRandom').style.display   = type === 'random_days' ? '' : 'none';
+    document.getElementById('recurPanelInterval').style.display = type === 'interval'    ? '' : 'none';
+    if (type === 'random_days') {
+        if (!window._recurCalInstance) {
+            window._recurCalInstance = new RecurCalendar('recurCalContainer', 'recur_random_dates');
+        } else {
+            window._recurCalInstance.render();
+        }
+    }
+    updateRecurPreview();
+}
+
+// ── Weekday chips ───────────────────────────────────────────────────────────
+function toggleWeekday(btn) {
+    btn.classList.toggle('btn-primary');
+    btn.classList.toggle('text-white');
+    btn.classList.toggle('btn-outline-secondary');
+    rebuildWeekdayInputs();
+    updateRecurPreview();
+}
+
+function rebuildWeekdayInputs() {
+    const wrap = document.getElementById('weekdayHiddenInputs');
+    wrap.innerHTML = '';
+    document.querySelectorAll('.wday-chip.btn-primary').forEach(function(b) {
+        const inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.name = 'recur_weekdays[]';
+        inp.value = b.dataset.day;
+        wrap.appendChild(inp);
+    });
+}
+
+// ── Count preview ────────────────────────────────────────────────────────────
+document.getElementById('recur_end_date').addEventListener('change', updateRecurPreview);
+document.getElementById('recurIntervalDays').addEventListener('change', updateRecurPreview);
+
+function getSeriesStartDate() {
+    const startVal = document.getElementById('start_datetime').value;
+    if (!startVal) return null;
+    const m = startVal.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (!m) return null;
+    return new Date(parseInt(m[3]), parseInt(m[2])-1, parseInt(m[1]));
+}
+
+function updateRecurPreview() {
+    const endDateVal = document.getElementById('recur_end_date').value;
+    if (!endDateVal) { hidePreview(); return; }
+    const endDate = new Date(endDateVal + 'T00:00:00');
+    const startDate = getSeriesStartDate();
+    if (!startDate || endDate < startDate) { hidePreview(); return; }
+
+    const type = document.querySelector('input[name="recur_type"]:checked')?.value;
+    let count = 0;
+
+    if (type === 'weekly') {
+        const selectedDays = Array.from(document.querySelectorAll('.wday-chip.btn-primary'))
+                                  .map(b => parseInt(b.dataset.day));
+        if (!selectedDays.length) { hidePreview(); return; }
+        const cursor = new Date(startDate);
+        while (cursor <= endDate) {
+            const dow = cursor.getDay() === 0 ? 7 : cursor.getDay(); // ISO
+            if (selectedDays.includes(dow)) count++;
+            cursor.setDate(cursor.getDate() + 1);
+            if (count > 100) break;
+        }
+    } else if (type === 'random_days') {
+        const raw = document.getElementById('recur_random_dates').value;
+        count = raw ? raw.split(',').filter(Boolean).length : 0;
+    } else if (type === 'interval') {
+        const n = parseInt(document.getElementById('recurIntervalDays').value) || 1;
+        const cursor = new Date(startDate);
+        while (cursor <= endDate) {
+            count++;
+            cursor.setDate(cursor.getDate() + n);
+            if (count > 100) break;
+        }
+    }
+
+    if (count === 0) { hidePreview(); return; }
+    const alert = document.getElementById('recurPreviewAlert');
+    alert.style.display = '';
+    if (count > 100) {
+        alert.className = 'alert alert-danger py-2 mb-0 mt-3';
+        document.getElementById('recurPreviewText').textContent = 'Υπέρβαση ορίου: > 100 αποστολές. Μειώστε το εύρος.';
+    } else {
+        alert.className = 'alert alert-info py-2 mb-0 mt-3';
+        document.getElementById('recurPreviewText').textContent = 'Θα δημιουργηθούν ' + count + ' αποστολές.';
+    }
+}
+
+function hidePreview() {
+    document.getElementById('recurPreviewAlert').style.display = 'none';
+}
+
+// ══ VANILLA JS CALENDAR ══════════════════════════════════════════════════════
+class RecurCalendar {
+    constructor(containerId, hiddenInputId) {
+        this.container = document.getElementById(containerId);
+        this.hidden    = document.getElementById(hiddenInputId);
+        this.selected  = new Set(this.hidden.value ? this.hidden.value.split(',').filter(Boolean) : []);
+        const now = new Date();
+        this.year  = now.getFullYear();
+        this.month = now.getMonth(); // 0-based
+        this.render();
+    }
+
+    getStartLimit() {
+        const d = getSeriesStartDate();
+        return d;
+    }
+
+    getEndLimit() {
+        const v = document.getElementById('recur_end_date').value;
+        return v ? new Date(v + 'T00:00:00') : null;
+    }
+
+    renderMonth(year, month) {
+        const startLimit = this.getStartLimit();
+        const endLimit   = this.getEndLimit();
+        const firstDay   = new Date(year, month, 1);
+        const lastDay    = new Date(year, month + 1, 0);
+        const monthNames = ['Ιανουάριος','Φεβρουάριος','Μάρτιος','Απρίλιος','Μάιος','Ιούνιος',
+                            'Ιούλιος','Αύγουστος','Σεπτέμβριος','Οκτώβριος','Νοέμβριος','Δεκέμβριος'];
+        const dayNames = ['Δε','Τρ','Τε','Πε','Πα','Σα','Κυ'];
+        const today    = new Date(); today.setHours(0,0,0,0);
+        const pad = n => String(n).padStart(2,'0');
+        const self = this;
+
+        let html = '<div class="recur-cal-month"><div class="recur-cal-month-header">';
+        html += '<strong>' + monthNames[month] + ' ' + year + '</strong></div>';
+        html += '<div class="recur-cal-grid">';
+        dayNames.forEach(function(d) { html += '<div class="recur-cal-hdr">' + d + '</div>'; });
+
+        // Leading blanks (Mon=0)
+        let startDow = firstDay.getDay();
+        startDow = startDow === 0 ? 6 : startDow - 1;
+        for (let i = 0; i < startDow; i++) html += '<div></div>';
+
+        for (let d = 1; d <= lastDay.getDate(); d++) {
+            const dt  = new Date(year, month, d);
+            const key = year + '-' + pad(month+1) + '-' + pad(d);
+            const isToday    = dt.getTime() === today.getTime();
+            const isPast     = (startLimit && dt < startLimit) || (endLimit && dt > endLimit);
+            const isSelected = self.selected.has(key);
+            let cls = 'recur-cal-day';
+            if (isPast) cls += ' disabled';
+            else if (isSelected) cls += ' selected';
+            if (isToday) cls += ' today';
+            const click = isPast ? '' : ' onclick="window._recurCalInstance.toggle(\'' + key + '\')"';
+            html += '<div class="' + cls + '" data-date="' + key + '"' + click + '>' + d + '</div>';
+        }
+        html += '</div></div>';
+        return html;
+    }
+
+    render() {
+        let nm = this.month + 1, ny = this.year;
+        if (nm > 11) { nm = 0; ny++; }
+
+        let html = '<div class="recur-cal-wrap">';
+        html += this.renderMonth(this.year, this.month);
+        html += this.renderMonth(ny, nm);
+        html += '</div>';
+        html += '<div class="mt-2 d-flex gap-2 align-items-center flex-wrap">';
+        html += '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="window._recurCalInstance.prevMonths()"><i class="bi bi-chevron-left"></i> Προηγ.</button>';
+        html += '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="window._recurCalInstance.nextMonths()">Επόμ. <i class="bi bi-chevron-right"></i></button>';
+        if (this.selected.size > 0) {
+            html += '<button type="button" class="btn btn-sm btn-outline-danger ms-1" onclick="window._recurCalInstance.clearAll()"><i class="bi bi-x-circle me-1"></i>Καθαρισμός</button>';
+        }
+        html += '<span class="ms-auto text-muted small">' + this.selected.size + ' επιλεγμένες</span>';
+        html += '</div>';
+        this.container.innerHTML = html;
+        updateRecurPreview();
+    }
+
+    toggle(key) {
+        if (this.selected.has(key)) this.selected.delete(key);
+        else this.selected.add(key);
+        this.hidden.value = Array.from(this.selected).sort().join(',');
+        this.render();
+    }
+
+    clearAll() {
+        this.selected.clear();
+        this.hidden.value = '';
+        this.render();
+    }
+
+    prevMonths() {
+        this.month--;
+        if (this.month < 0) { this.month = 11; this.year--; }
+        this.render();
+    }
+
+    nextMonths() {
+        this.month++;
+        if (this.month > 11) { this.month = 0; this.year++; }
+        this.render();
+    }
+}
 </script>
 <?php include __DIR__ . '/includes/footer.php'; ?>
