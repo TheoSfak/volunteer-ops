@@ -1405,6 +1405,19 @@ function confirmUpdate() {
                             <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" id="skip_notifications" value="notifications" checked>
                             <span><strong>notifications</strong><br><small class="text-muted">Ειδοποιήσεις &mdash; αναπαράγονται αυτόματα</small></span>
                         </label>
+                        <li class="list-group-item py-1"><small class="text-muted fw-semibold">ΦΑΚΕΛΟΙ UPLOADS</small></li>
+                        <label class="list-group-item d-flex gap-2 py-2">
+                            <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" id="skip_folder_volunteer-docs" value="volunteer-docs" checked>
+                            <span><strong>volunteer-docs/</strong><br><small class="text-muted">Έγγραφα εθελοντών &mdash; έως 15 MB/αρχείο <span class="text-warning fw-bold">⚠ Μεγάλα</span></small></span>
+                        </label>
+                        <label class="list-group-item d-flex gap-2 py-2">
+                            <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" id="skip_folder_training" value="training" checked>
+                            <span><strong>training/</strong><br><small class="text-muted">Υλικό εκπαίδευσης &mdash; έως 20 MB/αρχείο <span class="text-warning fw-bold">⚠ Μεγάλα</span></small></span>
+                        </label>
+                        <label class="list-group-item d-flex gap-2 py-2">
+                            <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" id="skip_folder_avatars" value="avatars">
+                            <span><strong>avatars/</strong><br><small class="text-muted">Φωτογραφίες εθελοντών &mdash; μικρά αρχεία</small></span>
+                        </label>
                     </div>
                     <div class="d-flex gap-2 justify-content-end">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Aκύρωση</button>
@@ -1473,9 +1486,11 @@ async function backupAjax(action, extra = {}) {
 }
 
 async function startBackup() {
-    // Collect skipped tables
+    // Collect skipped tables + folders
     const skipTables = ['audit_log', 'email_logs', 'notifications']
         .filter(t => document.getElementById('skip_' + t)?.checked);
+    const skipFolders = ['volunteer-docs', 'training', 'avatars', 'logos']
+        .filter(id => document.getElementById('skip_folder_' + id)?.checked);
 
     // Switch to progress view
     document.getElementById('backupOptions').classList.add('d-none');
@@ -1491,6 +1506,7 @@ async function startBackup() {
         setBackupProgress(2, 'Αρχικοποίηση...', '');
         const skipParam = {};
         skipTables.forEach((t, i) => { skipParam['skip_tables[' + i + ']'] = t; });
+        skipFolders.forEach((f, i) => { skipParam['skip_folders[' + i + ']'] = f; });
         const init = await backupAjax('init', skipParam);
         backupId = init.backup_id;
 

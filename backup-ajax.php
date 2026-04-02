@@ -84,6 +84,12 @@ function handleInit(): void
         fn($t) => preg_match('/^[a-zA-Z0-9_]+$/', $t)
     ));
 
+    // Validate and sanitise skip_folders (no path traversal allowed)
+    $skipFolders = array_values(array_filter(
+        (array)($_POST['skip_folders'] ?? []),
+        fn($f) => preg_match('/^[a-zA-Z0-9_\-\/]+$/', $f) && !str_contains($f, '..')
+    ));
+
     // Build table list (excluding skipped tables)
     $allTables = dbFetchAll('SHOW TABLES');
     $tables = [];
@@ -94,17 +100,30 @@ function handleInit(): void
         }
     }
 
-    // Collect uploads file paths
-    $uploadsDir = __DIR__ . '/uploads';
-    $fileList   = [];
+    // Collect uploads file paths (respecting skip_folders)
+    $uploadsDir    = __DIR__ . '/uploads';
+    $uploadsPrefix = realpath($uploadsDir) . DIRECTORY_SEPARATOR;
+    $fileList      = [];
     if (is_dir($uploadsDir)) {
         $it = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($uploadsDir, RecursiveDirectoryIterator::SKIP_DOTS)
         );
         foreach ($it as $file) {
-            if ($file->isFile()) {
-                $fileList[] = $file->getPathname();
+            if (!$file->isFile()) continue;
+            if (!empty($skipFolders)) {
+                // Relative path from uploads/, normalized to forward slashes
+                $relPath = str_replace('\\', '/', substr($file->getPathname(), strlen($uploadsPrefix)));
+                $skip = false;
+                foreach ($skipFolders as $folder) {
+                    $folder = rtrim(str_replace('\\', '/', $folder), '/');
+                    if (str_starts_with($relPath, $folder . '/') || $relPath === $folder) {
+                        $skip = true;
+                        break;
+                    }
+                }
+                if ($skip) continue;
             }
+            $fileList[] = $file->getPathname();
         }
     }
 
@@ -138,12 +157,13 @@ function handleInit(): void
 
     // Write state.json — its presence marks the backup as INCOMPLETE
     $state = [
-        'backup_id'   => $backupId,
-        'tables'      => $tables,
-        'skip_tables' => $skipTables,
-        'file_list'   => $fileList,
-        'total_files' => count($fileList),
-        'started_at'  => date('Y-m-d H:i:s'),
+        'backup_id'    => $backupId,
+        'tables'       => $tables,
+        'skip_tables'  => $skipTables,
+        'skip_folders' => $skipFolders,
+        'file_list'    => $fileList,
+        'total_files'  => count($fileList),
+        'started_at'   => date('Y-m-d H:i:s'),
     ];
     file_put_contents($dir . '/state.json', json_encode($state, JSON_PRETTY_PRINT));
 
@@ -301,9 +321,10 @@ function handleFinalize(): void
         'version'        => APP_VERSION,
         'php_version'    => PHP_VERSION,
         'files_count'    => $state['total_files'] ?? 0,
-        'db_included'    => true,
-        'skipped_tables' => $state['skip_tables'] ?? [],
-        'db_size_bytes'  => file_exists($sqlFile) ? filesize($sqlFile) : 0,
+        'db_included'     => true,
+        'skipped_tables'  => $state['skip_tables'] ?? [],
+        'skipped_folders' => $state['skip_folders'] ?? [],
+        'db_size_bytes'   => file_exists($sqlFile) ? filesize($sqlFile) : 0,
     ], JSON_PRETTY_PRINT));
 
     // Remove state.json — this marks the backup as COMPLETE
