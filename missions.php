@@ -149,26 +149,25 @@ include __DIR__ . '/includes/header.php';
 
 <style>
 .vol-pill {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    padding: 7px 16px;
+    gap: 4px;
+    padding: 3px 10px;
     border-radius: 50px;
     font-weight: 700;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     color: #fff;
     white-space: nowrap;
     transition: all .3s ease;
     text-shadow: 0 1px 3px rgba(0,0,0,.35);
-    width: 100%;
 }
 .vol-pill .vol-num {
-    font-size: 1rem;
+    font-size: 0.85rem;
     letter-spacing: 0.5px;
 }
 .vol-pill .bi {
-    font-size: 0.95rem;
+    font-size: 0.82rem;
 }
 .vol-pill-danger {
     background: linear-gradient(90deg, #dc3545 var(--fill), #6c2029 var(--fill));
@@ -188,12 +187,12 @@ include __DIR__ . '/includes/header.php';
     50% { box-shadow: 0 4px 20px rgba(32,201,151,.6); }
 }
 .vol-label {
-    font-size: 0.78rem;
+    font-size: 0.7rem;
     font-weight: 600;
-    margin-top: 4px;
+    margin-top: 2px;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
 }
 </style>
 
@@ -221,13 +220,13 @@ include __DIR__ . '/includes/header.php';
 <!-- Filters -->
 <div class="card mb-4">
     <div class="card-body">
-        <form method="get" class="row g-3">
+        <form method="get" class="row g-2">
             <div class="col-md-3">
-                <input type="text" class="form-control" name="search" placeholder="Αναζήτηση..." 
+                <input type="text" class="form-control form-control-sm" name="search" placeholder="Αναζήτηση..." 
                        value="<?= h($search) ?>">
             </div>
             <div class="col-md-2">
-                <select class="form-select" name="status">
+                <select class="form-select form-select-sm" name="status">
                     <option value="">Όλες οι καταστάσεις</option>
                     <?php foreach ($GLOBALS['STATUS_LABELS'] as $key => $label): ?>
                         <option value="<?= $key ?>" <?= $status === $key ? 'selected' : '' ?>>
@@ -237,7 +236,7 @@ include __DIR__ . '/includes/header.php';
                 </select>
             </div>
             <div class="col-md-2">
-                <select class="form-select" name="mission_type">
+                <select class="form-select form-select-sm" name="mission_type">
                     <option value="">Όλοι οι τύποι</option>
                     <?php foreach ($missionTypesFilter as $mtf): ?>
                         <option value="<?= $mtf['id'] ?>" <?= $missionType == $mtf['id'] ? 'selected' : '' ?>>
@@ -247,7 +246,7 @@ include __DIR__ . '/includes/header.php';
                 </select>
             </div>
             <div class="col-md-3">
-                <select class="form-select" name="department">
+                <select class="form-select form-select-sm" name="department">
                     <option value="">Όλα τα τμήματα</option>
                     <?php foreach ($departments as $dept): ?>
                         <option value="<?= $dept['id'] ?>" <?= $department == $dept['id'] ? 'selected' : '' ?>>
@@ -276,7 +275,7 @@ include __DIR__ . '/includes/header.php';
         <?php else: ?>
             <!-- Desktop/Tablet table view (hidden on portrait phones) -->
             <div class="table-responsive d-none d-sm-block">
-                <table class="table table-hover align-middle mb-0">
+                <table class="table table-hover table-sm align-middle mb-0">
                     <thead class="table-light">
                         <tr>
                             <th>Τίτλος</th>
@@ -320,10 +319,9 @@ include __DIR__ . '/includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td><?= h($mission['department_name'] ?? '-') ?></td>
-                                <td>
+                                <td class="text-nowrap">
                                     <?= formatDate($mission['start_datetime']) ?>
-                                    <br>
-                                    <small class="text-muted"><?= formatDateTime($mission['start_datetime'], 'H:i') ?></small>
+                                    <span class="text-muted"> · <?= formatDateTime($mission['start_datetime'], 'H:i') ?></span>
                                 </td>
                                 <td><span class="badge bg-secondary"><?= $mission['shift_count'] ?></span></td>
                                 <td><span class="badge bg-info"><?= $mission['volunteer_count'] ?></span></td>
