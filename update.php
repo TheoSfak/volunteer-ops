@@ -972,23 +972,66 @@ if (isPost()) {
                     setFlash('error', 'Η επέκταση zip δεν είναι ενεργοποιημένη στον server.');
                     redirect('update.php');
                 }
-                $zipFile = sys_get_temp_dir() . '/' . $backupName . '.zip';
+
+                // Read backup_info to know which upload folders were excluded during backup
+                $infoFile     = $backupPath . '/backup_info.json';
+                $backupInfo   = file_exists($infoFile) ? (json_decode(file_get_contents($infoFile), true) ?: []) : [];
+                $skippedFolders = array_map(
+                    fn($f) => rtrim(str_replace('\\', '/', $f), '/'),
+                    $backupInfo['skipped_folders'] ?? []
+                );
+
+                // Normalise paths to forward slashes for consistent comparison
+                $appRoot   = str_replace('\\', '/', realpath(__DIR__));
+                $backupDir = str_replace('\\', '/', realpath(BACKUP_DIR));
+                $zipFile   = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $backupName . '.zip';
+
                 $zip = new ZipArchive();
                 if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
                     setFlash('error', 'Αδυναμία δημιουργίας zip αρχείου.');
                     redirect('update.php');
                 }
-                $baseLen = strlen($backupPath) + 1;
+
+                set_time_limit(300); // Up to 5 min for large sites
+
+                $appRootLen  = strlen($appRoot) + 1; // +1 for the trailing slash
+                $uploadsRoot = $appRoot . '/uploads/';
+
                 $it = new RecursiveIteratorIterator(
-                    new RecursiveDirectoryIterator($backupPath, RecursiveDirectoryIterator::SKIP_DOTS)
+                    new RecursiveDirectoryIterator($appRoot, RecursiveDirectoryIterator::SKIP_DOTS)
                 );
                 foreach ($it as $file) {
-                    if ($file->isFile()) {
-                        $zip->addFile($file->getPathname(), substr($file->getPathname(), $baseLen));
+                    if (!$file->isFile()) continue;
+                    $real = str_replace('\\', '/', realpath($file->getPathname()) ?: $file->getPathname());
+
+                    // Skip the backups directory (avoid recursive self-inclusion)
+                    if (str_starts_with($real, $backupDir . '/')) continue;
+
+                    // Skip config.local.php (host-specific DB credentials)
+                    if ($real === $appRoot . '/config.local.php') continue;
+
+                    // Skip upload folders that were excluded when this backup was created
+                    if (!empty($skippedFolders) && str_starts_with($real, $uploadsRoot)) {
+                        $relUpload = substr($real, strlen($uploadsRoot));
+                        foreach ($skippedFolders as $folder) {
+                            if (str_starts_with($relUpload, $folder . '/') || $relUpload === $folder) {
+                                continue 2;
+                            }
+                        }
                     }
+
+                    $zip->addFile($real, substr($real, $appRootLen));
                 }
+
+                // Add the SQL dump from the backup folder at the zip root
+                $sqlDump = $backupPath . '/database.sql';
+                if (file_exists($sqlDump)) {
+                    $zip->addFile(realpath($sqlDump), 'database.sql');
+                }
+
                 $zip->close();
-                // Stream the zip to browser
+
+                // Stream zip to browser
                 header('Content-Type: application/zip');
                 header('Content-Disposition: attachment; filename="' . $backupName . '.zip"');
                 header('Content-Length: ' . filesize($zipFile));
