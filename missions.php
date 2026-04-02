@@ -8,6 +8,48 @@ requireLogin();
 
 $user = getCurrentUser();
 
+// Handle duplicate action
+if (isPost() && post('action') === 'duplicate' && isAdmin()) {
+    verifyCsrf();
+    $srcId = (int)post('mission_id');
+    $src = dbFetchOne(
+        "SELECT * FROM missions WHERE id = ? AND deleted_at IS NULL",
+        [$srcId]
+    );
+    if ($src) {
+        $newId = dbInsert(
+            "INSERT INTO missions
+             (title, description, mission_type_id, department_id, location, location_details,
+              latitude, longitude, start_datetime, end_datetime, requirements, notes,
+              is_urgent, status, responsible_user_id, created_by, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+            [
+                'Αντίγραφο: ' . $src['title'],
+                $src['description'],
+                $src['mission_type_id'],
+                $src['department_id'],
+                $src['location'],
+                $src['location_details'],
+                $src['latitude'],
+                $src['longitude'],
+                $src['start_datetime'],
+                $src['end_datetime'],
+                $src['requirements'],
+                $src['notes'],
+                $src['is_urgent'],
+                STATUS_DRAFT,
+                $src['responsible_user_id'],
+                $user['id'],
+            ]
+        );
+        logAudit('duplicate', 'missions', $newId, null, ['source_id' => $srcId]);
+        setFlash('success', 'Η αποστολή αντιγράφηκε. Μπορείτε να την επεξεργαστείτε.');
+        redirect('mission-form.php?id=' . $newId);
+    }
+    setFlash('error', 'Δεν βρέθηκε η αποστολή.');
+    redirect('missions.php');
+}
+
 // Filters
 $status = get('status', STATUS_OPEN);
 $department = get('department');
@@ -333,6 +375,14 @@ include __DIR__ . '/includes/header.php';
                                         <a href="mission-form.php?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-secondary" title="Επεξεργασία">
                                             <i class="bi bi-pencil"></i>
                                         </a>
+                                        <form method="post" class="d-inline">
+                                            <?= csrfField() ?>
+                                            <input type="hidden" name="action" value="duplicate">
+                                            <input type="hidden" name="mission_id" value="<?= $mission['id'] ?>">
+                                            <button type="submit" class="btn btn-sm btn-outline-info" title="Αντιγραφή">
+                                                <i class="bi bi-copy"></i>
+                                            </button>
+                                        </form>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -441,6 +491,14 @@ include __DIR__ . '/includes/header.php';
                                     <a href="mission-form.php?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-secondary">
                                         <i class="bi bi-pencil me-1"></i>Επεξεργασία
                                     </a>
+                                    <form method="post" class="d-inline">
+                                        <?= csrfField() ?>
+                                        <input type="hidden" name="action" value="duplicate">
+                                        <input type="hidden" name="mission_id" value="<?= $mission['id'] ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-info">
+                                            <i class="bi bi-copy me-1"></i>Αντιγραφή
+                                        </button>
+                                    </form>
                                 <?php endif; ?>
                             </div>
                         </div>
