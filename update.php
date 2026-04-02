@@ -973,15 +973,19 @@ if (isPost()) {
                     redirect('update.php');
                 }
 
-                // Read backup_info to know which upload folders were excluded during backup
+                // Read backup_info to know which upload folders/root files were excluded during backup
                 $infoFile     = $backupPath . '/backup_info.json';
                 $backupInfo   = file_exists($infoFile) ? (json_decode(file_get_contents($infoFile), true) ?: []) : [];
-                // Normalise skip folder paths — handle both new format ('uploads/volunteer-docs')
-                // and legacy format ('volunteer-docs', relative to uploads/)
+                // Normalise skip folder paths
                 $skippedFolders = array_map(function($f) {
                     $f = rtrim(str_replace('\\', '/', $f), '/');
                     return str_contains($f, '/') ? $f : 'uploads/' . $f;
                 }, $backupInfo['skipped_folders'] ?? []);
+                // Root-level files to skip
+                $skippedFiles = array_filter(
+                    $backupInfo['skipped_files'] ?? [],
+                    fn($f) => preg_match('/^[a-zA-Z0-9_\-\.]+$/', $f) && !str_contains($f, '/')
+                );
 
                 // Normalise app root to forward slashes
                 $appRoot   = rtrim(str_replace('\\', '/', realpath(__DIR__)), '/');
@@ -1011,6 +1015,11 @@ if (isPost()) {
 
                     // Skip config.local.php (host-specific DB credentials)
                     if ($relPath === 'config.local.php') continue;
+
+                    // Skip root files excluded by admin
+                    if (!empty($skippedFiles) && !str_contains($relPath, '/')) {
+                        if (in_array($relPath, $skippedFiles, true)) continue;
+                    }
 
                     // Skip upload folders that were excluded when this backup was created
                     if (!empty($skippedFolders) && str_starts_with($relPath, 'uploads/')) {
@@ -1583,7 +1592,7 @@ function openBackupModal() {
     // Scan folders then reveal options
     backupAjax('scan')
         .then(data => {
-            renderFolderList(data.items || []);
+            renderFolderList(data.items || [], data.root_files || []);
             document.getElementById('backupScanning').classList.add('d-none');
             document.getElementById('backupOptions').classList.remove('d-none');
         })
@@ -1602,13 +1611,43 @@ function formatBytesJS(bytes) {
     return bytes + ' B';
 }
 
-function renderFolderList(items) {
+function renderFolderList(items, rootFiles) {
     const list = document.getElementById('folderSkipList');
     list.innerHTML = '';
+
+    // --- Root-level files section ---
+    if (rootFiles && rootFiles.length) {
+        list.insertAdjacentHTML('beforeend',
+            '<div class="list-group-item py-1 bg-light"><small class="text-muted fw-semibold">ΑΡΧΕΙΑ ROOT</small></div>'
+        );
+        rootFiles.forEach(f => {
+            const large = f.size > 5 * 1024 * 1024;
+            const badge = large ? '<span class="badge bg-warning text-dark ms-1">⚠ Μεγάλο</span>' : '';
+            const fid   = 'sffile_' + f.name.replace(/[^a-z0-9]/gi, '_');
+            list.insertAdjacentHTML('beforeend',
+                `<label class="list-group-item d-flex gap-2 py-2">
+                    <input class="form-check-input flex-shrink-0 mt-0 skip-file-check" type="checkbox"
+                           id="${fid}" value="${f.name}" ${large ? 'checked' : ''}>
+                    <span class="d-flex align-items-center flex-wrap gap-1">
+                        <i class="bi bi-file-earmark text-secondary"></i>
+                        <strong>${f.name}</strong>
+                        <small class="text-muted">${formatBytesJS(f.size)}</small>
+                        ${badge}
+                    </span>
+                </label>`
+            );
+        });
+    }
+
+    // --- Directories section ---
     if (!items.length) {
-        list.innerHTML = '<div class="list-group-item text-muted small text-center">Δεν βρέθηκαν φάκελοι</div>';
+        if (!rootFiles || !rootFiles.length)
+            list.innerHTML = '<div class="list-group-item text-muted small text-center">Δεν βρέθηκαν φάκελοι</div>';
         return;
     }
+    list.insertAdjacentHTML('beforeend',
+        '<div class="list-group-item py-1 bg-light"><small class="text-muted fw-semibold">ΦΑΚΕΛΟΙ</small></div>'
+    );
     items.forEach(item => {
         const large = item.size > 10 * 1024 * 1024;
         const badge = large ? '<span class="badge bg-warning text-dark ms-1">⚠ Μεγάλο</span>' : '';
@@ -1686,6 +1725,9 @@ async function startBackup() {
     // Collect skipped folders from dynamic checkboxes
     const skipFolders = Array.from(document.querySelectorAll('.skip-folder-check:checked'))
         .map(el => el.value);
+    // Collect skipped root files from dynamic checkboxes
+    const skipFiles = Array.from(document.querySelectorAll('.skip-file-check:checked'))
+        .map(el => el.value);
 
     // Switch to progress view
     document.getElementById('backupOptions').classList.add('d-none');
@@ -1702,6 +1744,7 @@ async function startBackup() {
         const skipParam = {};
         skipTables.forEach((t, i) => { skipParam['skip_tables[' + i + ']'] = t; });
         skipFolders.forEach((f, i) => { skipParam['skip_folders[' + i + ']'] = f; });
+        skipFiles.forEach((f, i)  => { skipParam['skip_files[' + i + ']'] = f; });
         const init = await backupAjax('init', skipParam);
         backupId = init.backup_id;
 
