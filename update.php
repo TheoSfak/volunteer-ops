@@ -957,6 +957,47 @@ if (isPost()) {
                 redirect('update.php');
                 break;
                 
+            case 'download_backup':
+                $backupName = post('backup_name', '');
+                if (!preg_match('/^backup_[\d_-]+$/', $backupName)) {
+                    setFlash('error', 'Μη έγκυρο όνομα backup.');
+                    redirect('update.php');
+                }
+                $backupPath = BACKUP_DIR . '/' . $backupName;
+                if (!is_dir($backupPath)) {
+                    setFlash('error', 'Το backup δεν βρέθηκε.');
+                    redirect('update.php');
+                }
+                if (!class_exists('ZipArchive')) {
+                    setFlash('error', 'Η επέκταση zip δεν είναι ενεργοποιημένη στον server.');
+                    redirect('update.php');
+                }
+                $zipFile = sys_get_temp_dir() . '/' . $backupName . '.zip';
+                $zip = new ZipArchive();
+                if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+                    setFlash('error', 'Αδυναμία δημιουργίας zip αρχείου.');
+                    redirect('update.php');
+                }
+                $baseLen = strlen($backupPath) + 1;
+                $it = new RecursiveIteratorIterator(
+                    new RecursiveDirectoryIterator($backupPath, RecursiveDirectoryIterator::SKIP_DOTS)
+                );
+                foreach ($it as $file) {
+                    if ($file->isFile()) {
+                        $zip->addFile($file->getPathname(), substr($file->getPathname(), $baseLen));
+                    }
+                }
+                $zip->close();
+                // Stream the zip to browser
+                header('Content-Type: application/zip');
+                header('Content-Disposition: attachment; filename="' . $backupName . '.zip"');
+                header('Content-Length: ' . filesize($zipFile));
+                header('Cache-Control: no-cache, no-store, must-revalidate');
+                ob_end_clean();
+                readfile($zipFile);
+                unlink($zipFile);
+                exit;
+
             case 'restore_backup':
                 $backupName = post('backup_name', '');
                 $backupPath = BACKUP_DIR . '/' . basename($backupName);
@@ -1193,6 +1234,14 @@ include __DIR__ . '/includes/header.php';
                                         <?php endif; ?>
                                     </td>
                                     <td class="text-end">
+                                        <form method="post" class="d-inline">
+                                            <?= csrfField() ?>
+                                            <input type="hidden" name="action" value="download_backup">
+                                            <input type="hidden" name="backup_name" value="<?= h($backup['name']) ?>">
+                                            <button type="submit" class="btn btn-sm btn-outline-primary" title="Λήψη">
+                                                <i class="bi bi-download"></i>
+                                            </button>
+                                        </form>
                                         <form method="post" class="d-inline" onsubmit="return confirm('Επαναφορά από αυτό το backup; Η τρέχουσα κατάσταση θα χαθεί.');">
                                             <?= csrfField() ?>
                                             <input type="hidden" name="action" value="restore_backup">
