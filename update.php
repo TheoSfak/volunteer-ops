@@ -976,10 +976,12 @@ if (isPost()) {
                 // Read backup_info to know which upload folders were excluded during backup
                 $infoFile     = $backupPath . '/backup_info.json';
                 $backupInfo   = file_exists($infoFile) ? (json_decode(file_get_contents($infoFile), true) ?: []) : [];
-                $skippedFolders = array_map(
-                    fn($f) => rtrim(str_replace('\\', '/', $f), '/'),
-                    $backupInfo['skipped_folders'] ?? []
-                );
+                // Normalise skip folder paths — handle both new format ('uploads/volunteer-docs')
+                // and legacy format ('volunteer-docs', relative to uploads/)
+                $skippedFolders = array_map(function($f) {
+                    $f = rtrim(str_replace('\\', '/', $f), '/');
+                    return str_contains($f, '/') ? $f : 'uploads/' . $f;
+                }, $backupInfo['skipped_folders'] ?? []);
 
                 // Normalise app root to forward slashes
                 $appRoot   = rtrim(str_replace('\\', '/', realpath(__DIR__)), '/');
@@ -1012,9 +1014,8 @@ if (isPost()) {
 
                     // Skip upload folders that were excluded when this backup was created
                     if (!empty($skippedFolders) && str_starts_with($relPath, 'uploads/')) {
-                        $relUpload = substr($relPath, strlen('uploads/'));
                         foreach ($skippedFolders as $folder) {
-                            if (str_starts_with($relUpload, $folder . '/') || $relUpload === $folder) {
+                            if (str_starts_with($relPath, $folder . '/') || $relPath === $folder) {
                                 continue 2;
                             }
                         }
@@ -1472,18 +1473,26 @@ function confirmUpdate() {
 }
 </script>
 
-<!-- Backup Progress Modal -->
+<!-- Backup Modal -->
 <div class="modal fade" id="backupModal" tabindex="-1" aria-labelledby="backupModalLabel">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content">
             <div class="modal-header bg-success text-white">
                 <h5 class="modal-title" id="backupModalLabel"><i class="bi bi-archive me-2"></i>Backup</h5>
             </div>
             <div class="modal-body" id="backupModalBody">
 
-                <!-- Step 1: Options (visible before start) -->
-                <div id="backupOptions">
-                    <p class="text-muted mb-3">Eπιλέξτε τι θέλετε να παραλείψετε (εξοικονομεί χώρο &amp; χρόνο):</p>
+                <!-- Step 0: Scanning -->
+                <div id="backupScanning" class="text-center py-4">
+                    <div class="spinner-border text-success mb-3" role="status" style="width:2.5rem;height:2.5rem"></div>
+                    <p class="text-muted mb-0">Σάρωση φακέλων, παρακαλώ περιμένετε...</p>
+                </div>
+
+                <!-- Step 1: Options -->
+                <div id="backupOptions" class="d-none">
+                    <p class="text-muted mb-2 small">Επιλέξτε τι θέλετε να <strong>εξαιρέσετε</strong> από το backup. Τα επιλεγμένα παραλείπονται.</p>
+
+                    <p class="mb-1 mt-2 small fw-semibold text-uppercase text-muted">Πίνακες βάσης δεδομένων</p>
                     <div class="list-group list-group-flush mb-3">
                         <label class="list-group-item d-flex gap-2 py-2">
                             <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" id="skip_audit_log" value="audit_log" checked>
@@ -1497,29 +1506,22 @@ function confirmUpdate() {
                             <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" id="skip_notifications" value="notifications" checked>
                             <span><strong>notifications</strong><br><small class="text-muted">Ειδοποιήσεις &mdash; αναπαράγονται αυτόματα</small></span>
                         </label>
-                        <li class="list-group-item py-1"><small class="text-muted fw-semibold">ΦΑΚΕΛΟΙ UPLOADS</small></li>
-                        <label class="list-group-item d-flex gap-2 py-2">
-                            <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" id="skip_folder_volunteer-docs" value="volunteer-docs" checked>
-                            <span><strong>volunteer-docs/</strong><br><small class="text-muted">Έγγραφα εθελοντών &mdash; έως 15 MB/αρχείο <span class="text-warning fw-bold">⚠ Μεγάλα</span></small></span>
-                        </label>
-                        <label class="list-group-item d-flex gap-2 py-2">
-                            <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" id="skip_folder_training" value="training" checked>
-                            <span><strong>training/</strong><br><small class="text-muted">Υλικό εκπαίδευσης &mdash; έως 20 MB/αρχείο <span class="text-warning fw-bold">⚠ Μεγάλα</span></small></span>
-                        </label>
-                        <label class="list-group-item d-flex gap-2 py-2">
-                            <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" id="skip_folder_avatars" value="avatars">
-                            <span><strong>avatars/</strong><br><small class="text-muted">Φωτογραφίες εθελοντών &mdash; μικρά αρχεία</small></span>
-                        </label>
                     </div>
+
+                    <p class="mb-1 mt-2 small fw-semibold text-uppercase text-muted">Φάκελοι &amp; αρχεία</p>
+                    <div class="list-group list-group-flush mb-3" id="folderSkipList">
+                        <!-- populated dynamically after scan -->
+                    </div>
+
                     <div class="d-flex gap-2 justify-content-end">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Aκύρωση</button>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
                         <button type="button" class="btn btn-success" id="startBackupBtn" onclick="startBackup()">
                             <i class="bi bi-play-fill me-1"></i>Έναρξη Backup
                         </button>
                     </div>
                 </div>
 
-                <!-- Step 2: Progress (visible while running) -->
+                <!-- Step 2: Progress -->
                 <div id="backupProgress" class="d-none">
                     <div class="progress mb-3" style="height:22px">
                         <div class="progress-bar progress-bar-striped progress-bar-animated bg-success"
@@ -1529,7 +1531,7 @@ function confirmUpdate() {
                     <div class="text-center text-muted" id="backupStatusSub" style="font-size:.8rem"></div>
                 </div>
 
-                <!-- Step 3: Done (visible on success) -->
+                <!-- Step 3: Done -->
                 <div id="backupDone" class="d-none text-center py-3">
                     <i class="bi bi-check-circle-fill text-success" style="font-size:2.5rem"></i>
                     <h5 class="mt-2">Το backup ολοκληρώθηκε!</h5>
@@ -1551,13 +1553,95 @@ function confirmUpdate() {
 const CSRF_TOKEN = <?= json_encode($_SESSION['csrf_token'] ?? '') ?>;
 
 function openBackupModal() {
-    // Reset to step 1
-    document.getElementById('backupOptions').classList.remove('d-none');
+    // Show scanning state, hide everything else
+    document.getElementById('backupScanning').classList.remove('d-none');
+    document.getElementById('backupOptions').classList.add('d-none');
     document.getElementById('backupProgress').classList.add('d-none');
     document.getElementById('backupDone').classList.add('d-none');
     document.getElementById('backupError').classList.add('d-none');
     setBackupProgress(0, 'Εκκίνηση...', '');
     new bootstrap.Modal(document.getElementById('backupModal')).show();
+
+    // Scan folders then reveal options
+    backupAjax('scan')
+        .then(data => {
+            renderFolderList(data.items || []);
+            document.getElementById('backupScanning').classList.add('d-none');
+            document.getElementById('backupOptions').classList.remove('d-none');
+        })
+        .catch(err => {
+            document.getElementById('backupScanning').classList.add('d-none');
+            document.getElementById('folderSkipList').innerHTML =
+                '<div class="list-group-item text-danger small">Αδυναμία σάρωσης: ' + err.message + '</div>';
+            document.getElementById('backupOptions').classList.remove('d-none');
+        });
+}
+
+function formatBytesJS(bytes) {
+    if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2) + ' GB';
+    if (bytes >= 1048576)    return (bytes / 1048576).toFixed(1) + ' MB';
+    if (bytes >= 1024)       return Math.round(bytes / 1024) + ' KB';
+    return bytes + ' B';
+}
+
+function renderFolderList(items) {
+    const list = document.getElementById('folderSkipList');
+    list.innerHTML = '';
+    if (!items.length) {
+        list.innerHTML = '<div class="list-group-item text-muted small text-center">Δεν βρέθηκαν φάκελοι</div>';
+        return;
+    }
+    items.forEach(item => {
+        const large = item.size > 10 * 1024 * 1024;
+        const badge = large ? '<span class="badge bg-warning text-dark ms-1">⚠ Μεγάλο</span>' : '';
+
+        // uploads/ — show as non-selectable header + per-subfolder checkboxes
+        if (item.children !== null && item.children !== undefined) {
+            list.insertAdjacentHTML('beforeend',
+                `<div class="list-group-item py-2 bg-light d-flex align-items-center gap-2">
+                    <i class="bi bi-folder2-open text-warning"></i>
+                    <strong>${item.name}/</strong>
+                    <small class="text-muted ms-1">${formatBytesJS(item.size)} &mdash; ${item.files} αρχεία σύνολο</small>
+                </div>`
+            );
+            if (!item.children.length) {
+                list.insertAdjacentHTML('beforeend',
+                    '<div class="list-group-item py-1 ps-5 text-muted small">(κενός φάκελος)</div>'
+                );
+            }
+            item.children.forEach(child => {
+                const cl    = child.size > 10 * 1024 * 1024;
+                const cbadge = cl ? '<span class="badge bg-warning text-dark ms-1">⚠ Μεγάλο</span>' : '';
+                const cid   = 'sfchk_' + child.rel_path.replace(/[^a-z0-9]/gi, '_');
+                list.insertAdjacentHTML('beforeend',
+                    `<label class="list-group-item d-flex gap-2 py-2 ps-5">
+                        <input class="form-check-input flex-shrink-0 mt-0 skip-folder-check" type="checkbox"
+                               id="${cid}" value="${child.rel_path}" ${cl ? 'checked' : ''}>
+                        <span class="d-flex align-items-center flex-wrap gap-1">
+                            <i class="bi bi-folder text-warning"></i>
+                            <strong>${child.name}/</strong>
+                            <small class="text-muted">${formatBytesJS(child.size)} &mdash; ${child.files} αρχεία</small>
+                            ${cbadge}
+                        </span>
+                    </label>`
+                );
+            });
+            return;
+        }
+
+        // Regular folder — no checkbox (code/config, always in backup)
+        list.insertAdjacentHTML('beforeend',
+            `<div class="list-group-item d-flex align-items-center gap-2 py-2 text-muted">
+                <i class="bi bi-folder text-secondary"></i>
+                <span>
+                    <strong>${item.name}/</strong>
+                    <small class="ms-1">${formatBytesJS(item.size)} &mdash; ${item.files} αρχεία</small>
+                    ${badge}
+                </span>
+                <span class="ms-auto badge bg-secondary">Σταθερό</span>
+            </div>`
+        );
+    });
 }
 
 function setBackupProgress(pct, main, sub) {
@@ -1578,11 +1662,12 @@ async function backupAjax(action, extra = {}) {
 }
 
 async function startBackup() {
-    // Collect skipped tables + folders
+    // Collect skipped tables
     const skipTables = ['audit_log', 'email_logs', 'notifications']
         .filter(t => document.getElementById('skip_' + t)?.checked);
-    const skipFolders = ['volunteer-docs', 'training', 'avatars', 'logos']
-        .filter(id => document.getElementById('skip_folder_' + id)?.checked);
+    // Collect skipped folders from dynamic checkboxes
+    const skipFolders = Array.from(document.querySelectorAll('.skip-folder-check:checked'))
+        .map(el => el.value);
 
     // Switch to progress view
     document.getElementById('backupOptions').classList.add('d-none');

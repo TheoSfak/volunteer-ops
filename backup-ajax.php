@@ -40,6 +40,7 @@ $action = $_POST['action'] ?? '';
 
 try {
     switch ($action) {
+        case 'scan':       handleScan();       break;
         case 'init':       handleInit();       break;
         case 'dump_table': handleDumpTable();  break;
         case 'copy_batch': handleCopyBatch();  break;
@@ -112,16 +113,15 @@ function handleInit(): void
             if (!$file->isFile()) continue;
             if (!empty($skipFolders)) {
                 // Relative path from uploads/, normalized to forward slashes
-                $relPath = str_replace('\\', '/', substr($file->getPathname(), strlen($uploadsPrefix)));
-                $skip = false;
+                $relFromUploads = str_replace('\\', '/', substr($file->getPathname(), strlen($uploadsPrefix)));
                 foreach ($skipFolders as $folder) {
-                    $folder = rtrim(str_replace('\\', '/', $folder), '/');
-                    if (str_starts_with($relPath, $folder . '/') || $relPath === $folder) {
-                        $skip = true;
-                        break;
+                    $folder = rtrim($folder, '/');
+                    // Accept both 'uploads/volunteer-docs' (new) and 'volunteer-docs' (legacy)
+                    $folderRel = str_starts_with($folder, 'uploads/') ? substr($folder, 8) : $folder;
+                    if (str_starts_with($relFromUploads, $folderRel . '/') || $relFromUploads === $folderRel) {
+                        continue 2;
                     }
                 }
-                if ($skip) continue;
             }
             $fileList[] = $file->getPathname();
         }
@@ -336,6 +336,74 @@ function handleFinalize(): void
     respond(true, 'Backup ολοκληρώθηκε: ' . $backupId, [
         'backup_name' => $backupId,
     ]);
+}
+
+// ---------------------------------------------------------------------------
+// ACTION: scan — Returns folder sizes for the backup options preview
+// ---------------------------------------------------------------------------
+function handleScan(): void
+{
+    $appRoot = rtrim(__DIR__, '/\\');
+    $items   = [];
+
+    // Scan all root-level directories (backups/ is always excluded from backup)
+    $dirs = glob($appRoot . '/*', GLOB_ONLYDIR) ?: [];
+    sort($dirs);
+
+    foreach ($dirs as $dir) {
+        $name = basename($dir);
+        if ($name === 'backups') continue;
+
+        [$size, $count] = dirStats($dir);
+        $item = [
+            'name'     => $name,
+            'rel_path' => $name,
+            'size'     => $size,
+            'files'    => $count,
+            'children' => null,
+        ];
+
+        // For uploads/: break down by subfolder so admin can exclude individually
+        if ($name === 'uploads') {
+            $subs = [];
+            foreach (glob($dir . '/*', GLOB_ONLYDIR) ?: [] as $subdir) {
+                [$sSize, $sCount] = dirStats($subdir);
+                $subs[] = [
+                    'name'     => basename($subdir),
+                    'rel_path' => 'uploads/' . basename($subdir),
+                    'size'     => $sSize,
+                    'files'    => $sCount,
+                ];
+            }
+            usort($subs, fn($a, $b) => $b['size'] - $a['size']);
+            $item['children'] = $subs;
+        }
+
+        $items[] = $item;
+    }
+
+    // Sort by size desc so large folders appear first
+    usort($items, fn($a, $b) => $b['size'] - $a['size']);
+
+    respond(true, 'OK', ['items' => $items]);
+}
+
+function dirStats(string $dir): array
+{
+    $size  = 0;
+    $count = 0;
+    try {
+        $it = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, RecursiveDirectoryIterator::SKIP_DOTS)
+        );
+        foreach ($it as $file) {
+            if ($file->isFile()) {
+                $size  += $file->getSize();
+                $count++;
+            }
+        }
+    } catch (\Throwable) {}
+    return [$size, $count];
 }
 
 // ---------------------------------------------------------------------------
