@@ -91,6 +91,12 @@ function handleInit(): void
         fn($f) => preg_match('/^[a-zA-Z0-9_\-\/]+$/', $f) && !str_contains($f, '..')
     ));
 
+    // Validate and sanitise skip_files (root-level filenames only, no slashes)
+    $skipFiles = array_values(array_filter(
+        (array)($_POST['skip_files'] ?? []),
+        fn($f) => preg_match('/^[a-zA-Z0-9_\-\.]+$/', $f) && !str_contains($f, '/')
+    ));
+
     // Build table list (excluding skipped tables)
     $allTables = dbFetchAll('SHOW TABLES');
     $tables = [];
@@ -161,6 +167,7 @@ function handleInit(): void
         'tables'       => $tables,
         'skip_tables'  => $skipTables,
         'skip_folders' => $skipFolders,
+        'skip_files'   => $skipFiles,
         'file_list'    => $fileList,
         'total_files'  => count($fileList),
         'started_at'   => date('Y-m-d H:i:s'),
@@ -324,6 +331,7 @@ function handleFinalize(): void
         'db_included'     => true,
         'skipped_tables'  => $state['skip_tables'] ?? [],
         'skipped_folders' => $state['skip_folders'] ?? [],
+        'skipped_files'   => $state['skip_files'] ?? [],
         'db_size_bytes'   => file_exists($sqlFile) ? filesize($sqlFile) : 0,
     ], JSON_PRETTY_PRINT));
 
@@ -385,7 +393,21 @@ function handleScan(): void
     // Sort by size desc so large folders appear first
     usort($items, fn($a, $b) => $b['size'] - $a['size']);
 
-    respond(true, 'OK', ['items' => $items]);
+    // Scan root-level files (non-directories), skip always-excluded ones
+    $alwaysExclude = ['config.local.php'];
+    $rootFiles = [];
+    foreach (glob($appRoot . '/*') ?: [] as $path) {
+        if (!is_file($path)) continue;
+        $name = basename($path);
+        if (in_array($name, $alwaysExclude, true)) continue;
+        $rootFiles[] = [
+            'name' => $name,
+            'size' => filesize($path),
+        ];
+    }
+    usort($rootFiles, fn($a, $b) => $b['size'] - $a['size']);
+
+    respond(true, 'OK', ['items' => $items, 'root_files' => $rootFiles]);
 }
 
 function dirStats(string $dir): array
