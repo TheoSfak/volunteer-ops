@@ -77,7 +77,9 @@ function getWeatherForMission(array $mission): ?array
     $lon = isset($mission['longitude']) && $mission['longitude'] !== null ? (float)$mission['longitude'] : null;
 
     if (($lat === null || $lon === null) && !empty($mission['location'])) {
-        [$lat, $lon] = _owmGeocode($mission['location'], $apiKey);
+        // Append country hint for better geocoding accuracy with Greek location names
+        $locationQuery = trim($mission['location']) . ', Ελλάδα';
+        [$lat, $lon] = _owmGeocode($locationQuery, $apiKey);
     }
 
     if ($lat === null || $lon === null) {

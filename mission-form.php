@@ -348,15 +348,31 @@ include __DIR__ . '/includes/header.php';
                                placeholder="π.χ. Είσοδος από την οδό...">
                     </div>
                     
+                    <div class="mb-3">
+                        <label for="maps_link" class="form-label">
+                            <i class="bi bi-geo-alt-fill text-danger me-1"></i>Σύνδεσμος Google Maps
+                        </label>
+                        <div class="input-group">
+                            <input type="url" class="form-control" id="maps_link" name="maps_link"
+                                   placeholder="https://maps.app.goo.gl/... ή https://www.google.com/maps?q=..."
+                                   value="<?= h($mission['maps_link'] ?? post('maps_link')) ?>">
+                            <button type="button" class="btn btn-outline-secondary" id="parseMapsBtn" title="Εξαγωγή συντεταγμένων">
+                                <i class="bi bi-crosshair"></i>
+                            </button>
+                        </div>
+                        <div class="form-text">Επικολλήστε έναν σύνδεσμο από Google Maps για ακριβή πρόβλεψη καιρού. Τα συντεταγμένα εξάγονται αυτόματα.</div>
+                        <div id="mapsParseStatus" class="mt-1"></div>
+                    </div>
+
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label for="latitude" class="form-label">Γεωγραφικό Πλάτος</label>
-                            <input type="text" class="form-control" id="latitude" name="latitude" 
+                            <input type="text" class="form-control" id="latitude" name="latitude"
                                    value="<?= h($mission['latitude'] ?? post('latitude')) ?>">
                         </div>
                         <div class="col-md-6 mb-3">
                             <label for="longitude" class="form-label">Γεωγραφικό Μήκος</label>
-                            <input type="text" class="form-control" id="longitude" name="longitude" 
+                            <input type="text" class="form-control" id="longitude" name="longitude"
                                    value="<?= h($mission['longitude'] ?? post('longitude')) ?>">
                         </div>
                     </div>
@@ -574,6 +590,77 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </form>
+
+<!-- Google Maps Link Parser -->
+<script>
+(function() {
+    function extractLatLng(url) {
+        if (!url) return null;
+
+        // Pattern 1: @lat,lng in path  e.g. /@37.9716,23.7257,15z
+        var m = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+        if (m) return { lat: m[1], lng: m[2] };
+
+        // Pattern 2: ?q=lat,lng or &q=lat,lng  e.g. ?q=37.9716,23.7257
+        m = url.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
+        if (m) return { lat: m[1], lng: m[2] };
+
+        // Pattern 3: /place/name/@lat,lng or ll=lat,lng
+        m = url.match(/[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)/);
+        if (m) return { lat: m[1], lng: m[2] };
+
+        // Pattern 4: !3d<lat>!4d<lng> in Maps URLs
+        m = url.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+        if (m) return { lat: m[1], lng: m[2] };
+
+        return null;
+    }
+
+    function applyCoords(coords, source) {
+        document.getElementById('latitude').value  = coords.lat;
+        document.getElementById('longitude').value = coords.lng;
+        var status = document.getElementById('mapsParseStatus');
+        status.innerHTML = '<small class="text-success"><i class="bi bi-check-circle me-1"></i>' +
+            'Συντεταγμένα: ' + parseFloat(coords.lat).toFixed(5) + ', ' + parseFloat(coords.lng).toFixed(5) + '</small>';
+    }
+
+    function handleMapsInput(url) {
+        url = url.trim();
+        if (!url) return;
+        var coords = extractLatLng(url);
+        if (coords) {
+            applyCoords(coords, 'direct');
+        } else {
+            // Short link or unrecognised — notify user to expand it first
+            document.getElementById('mapsParseStatus').innerHTML =
+                '<small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>' +
+                'Δεν βρέθηκαν συντεταγμένα. Δοκιμάστε να χρησιμοποιήσετε τον κανονικό σύνδεσμο "Κοινή χρήση συνδέσμου" από το Google Maps.</small>';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        var input = document.getElementById('maps_link');
+        var btn   = document.getElementById('parseMapsBtn');
+
+        // Auto-parse on paste
+        input.addEventListener('paste', function(e) {
+            setTimeout(function() { handleMapsInput(input.value); }, 50);
+        });
+
+        // Parse on button click
+        btn.addEventListener('click', function() {
+            handleMapsInput(input.value);
+        });
+
+        // If editing & lat/lng already set, show confirmation
+        <?php if (!empty($mission['latitude']) && !empty($mission['longitude'])): ?>
+        document.getElementById('mapsParseStatus').innerHTML =
+            '<small class="text-success"><i class="bi bi-check-circle me-1"></i>' +
+            'Συντεταγμένα: <?= $mission['latitude'] ?>, <?= $mission['longitude'] ?></small>';
+        <?php endif; ?>
+    });
+}());
+</script>
 
 <!-- Summernote JS -->
 <script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.js"></script>
