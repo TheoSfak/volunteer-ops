@@ -207,11 +207,13 @@ CREATE TABLE IF NOT EXISTS `shifts` (
     `max_volunteers` INT DEFAULT 5,
     `min_volunteers` INT DEFAULT 1,
     `notes` TEXT NULL,
+    `qr_token` VARCHAR(64) NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     INDEX `idx_shifts_mission` (`mission_id`),
-    INDEX `idx_shifts_time` (`start_time`)
+    INDEX `idx_shifts_time` (`start_time`),
+    UNIQUE KEY `uq_shift_qr_token` (`qr_token`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================

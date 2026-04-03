@@ -514,13 +514,14 @@ if (isPost()) {
             'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode',
             'session_timeout_minutes',
             'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled',
+            'qr_checkin_enabled',
             'openweathermap_api_key',
         ];
         
         foreach ($fieldsToUpdate as $field) {
             $value = isset($_POST[$field]) ? $_POST[$field] : '';
             
-            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled'])) {
+            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled'])) {
                 $value = isset($_POST[$field]) ? '1' : '0';
             }
 
@@ -1255,6 +1256,26 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
+
+            <!-- QR Check-in Settings -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-qr-code me-1"></i>QR Check-in Παρουσίας</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" name="qr_checkin_enabled" id="qrCheckinEnabled"
+                               <?= ($settings['qr_checkin_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="qrCheckinEnabled">
+                            <strong>Ενεργοποίηση QR Check-in</strong>
+                        </label>
+                    </div>
+                    <div class="form-text">
+                        Όταν είναι ενεργό, κάθε βάρδια αποκτά μοναδικό QR κωδικό. Ο υπεύθυνος βάρδιας ανοίγει το QR από τη βάρδια και οι εθελοντές σκανάρουν για αυτόματο check-in παρουσίας.
+                    </div>
+                </div>
+            </div>
+    </div>
     </div>
     
     <div class="card">
