@@ -127,6 +127,10 @@ $debrief = dbFetchOne(
     [$id]
 );
 
+// Weather forecast (null if not applicable or no API key configured)
+require_once __DIR__ . '/includes/weather.php';
+$weather = getWeatherForMission($mission);
+
 // Handle actions
 if (isPost()) {
     verifyCsrf();
@@ -1282,6 +1286,64 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
         </div>
+
+        <!-- Weather Widget -->
+        <?php if ($weather !== null): ?>
+        <div class="card mt-4">
+            <?php if ($weather['status'] === 'ok'): ?>
+            <div class="card-header py-2 <?= $weather['severity'] === 'danger' ? 'bg-danger bg-opacity-10' : ($weather['severity'] === 'warning' ? 'bg-warning bg-opacity-10' : 'bg-light') ?>">
+                <h6 class="mb-0"><i class="bi bi-cloud-sun me-1 text-primary"></i>Καιρός Αποστολής</h6>
+            </div>
+            <div class="card-body py-2 px-3">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <img src="https://openweathermap.org/img/wn/<?= h($weather['icon']) ?>@2x.png"
+                         width="50" height="50" alt="<?= h($weather['description']) ?>"
+                         style="margin:-6px 0 -6px -4px;">
+                    <div>
+                        <div class="fw-bold" style="font-size:1.3rem;"><?= $weather['temp'] ?>&deg;C</div>
+                        <div class="text-muted small"><?= h($weather['description']) ?></div>
+                    </div>
+                </div>
+                <div class="d-flex gap-3 small text-muted mb-2">
+                    <span title="Αίσθηση"><i class="bi bi-thermometer-half"></i> <?= $weather['feels_like'] ?>&deg;C</span>
+                    <span><i class="bi bi-wind"></i> <?= $weather['wind_speed'] ?> m/s</span>
+                    <span><i class="bi bi-droplet-half"></i> <?= $weather['humidity'] ?>%</span>
+                </div>
+                <?php if (!empty($weather['warnings'])): ?>
+                <div class="alert alert-<?= $weather['severity'] === 'danger' ? 'danger' : 'warning' ?> py-2 px-3 mb-2 small">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                    <?php foreach ($weather['warnings'] as $warn): ?>
+                        <div><?= h($warn) ?></div>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+                <div class="text-muted" style="font-size:0.68rem;">
+                    Πρόβλεψη για <?= date('d/m H:i', $weather['forecast_dt']) ?> &middot; Πηγή: OpenWeatherMap
+                </div>
+            </div>
+            <?php elseif ($weather['status'] === 'too_far'): ?>
+            <div class="card-header py-2 bg-light">
+                <h6 class="mb-0"><i class="bi bi-cloud-sun me-1 text-muted"></i>Καιρός Αποστολής</h6>
+            </div>
+            <div class="card-body py-2 px-3">
+                <p class="text-muted small mb-0">
+                    <i class="bi bi-calendar3 me-1"></i>Πρόβλεψη διαθέσιμη από <strong><?= h($weather['available_from']) ?></strong>
+                </p>
+            </div>
+            <?php elseif (isAdmin() && in_array($weather['status'], ['no_location', 'api_error'])): ?>
+            <div class="card-header py-2 bg-light">
+                <h6 class="mb-0"><i class="bi bi-cloud-slash me-1 text-muted"></i>Καιρός Αποστολής</h6>
+            </div>
+            <div class="card-body py-2 px-3">
+                <?php if ($weather['status'] === 'no_location'): ?>
+                <p class="text-muted small mb-0"><i class="bi bi-geo-alt me-1"></i>Δεν βρέθηκαν συντεταγμένες για αυτή την αποστολή.</p>
+                <?php else: ?>
+                <p class="text-muted small mb-0"><i class="bi bi-exclamation-circle me-1"></i><?= h($weather['message'] ?? 'Σφάλμα λήψης καιρού') ?></p>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
 
         <?php if (!empty($seriesMissions)): ?>
         <!-- ── Series Panel ─────────────────────────────────────────────── -->
