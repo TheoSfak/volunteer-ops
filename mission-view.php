@@ -727,6 +727,11 @@ include __DIR__ . '/includes/header.php';
                                 <?php if ($mission['location_details']): ?>
                                     <div class="text-muted" style="font-size:.8rem"><?= h($mission['location_details']) ?></div>
                                 <?php endif; ?>
+                                <?php if (!empty($mission['latitude']) && !empty($mission['longitude'])): ?>
+                                    <a href="https://www.google.com/maps?q=<?= urlencode($mission['latitude'] . ',' . $mission['longitude']) ?>" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary btn-sm mt-1 py-0 px-2" style="font-size:.75rem">
+                                        <i class="bi bi-map me-1"></i>Χάρτης
+                                    </a>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
