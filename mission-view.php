@@ -1350,6 +1350,23 @@ include __DIR__ . '/includes/header.php';
         </div>
         <?php endif; ?>
 
+        <?php if (!empty($mission['latitude']) && !empty($mission['longitude'])): ?>
+        <!-- Mission Location Map -->
+        <div class="card mt-4">
+            <div class="card-header py-2 bg-light d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-map me-1 text-primary"></i>Χάρτης Τοποθεσίας</h6>
+                <a href="https://www.google.com/maps?q=<?= urlencode($mission['latitude'] . ',' . $mission['longitude']) ?>"
+                   target="_blank" rel="noopener noreferrer"
+                   class="btn btn-outline-primary btn-sm py-0 px-2" style="font-size:.75rem">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>Google Maps
+                </a>
+            </div>
+            <div class="card-body p-0">
+                <div id="missionMap" style="height:220px;border-radius:0 0 .375rem .375rem;"></div>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <?php if (!empty($seriesMissions)): ?>
         <!-- ── Series Panel ─────────────────────────────────────────────── -->
         <div class="card mt-4">
@@ -1702,4 +1719,21 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 <?php endif; ?>
 
+<?php if (!empty($mission['latitude']) && !empty($mission['longitude'])): ?>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+    var lat = <?= (float)$mission['latitude'] ?>;
+    var lng = <?= (float)$mission['longitude'] ?>;
+    var label = <?= json_encode($mission['location']) ?>;
+    var map = L.map('missionMap', { zoomControl: true, scrollWheelZoom: false }).setView([lat, lng], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19
+    }).addTo(map);
+    L.marker([lat, lng]).addTo(map).bindPopup(label).openPopup();
+})();
+</script>
+<?php endif; ?>
 <?php include __DIR__ . '/includes/footer.php'; ?>
