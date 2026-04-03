@@ -3,7 +3,7 @@
  * Handles caching, offline fallback, and push notifications
  */
 
-const CACHE_VERSION = 'vo-v3.62.10';
+const CACHE_VERSION = 'vo-v3.63.0';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime';
 

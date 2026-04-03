@@ -49,6 +49,9 @@ $participants = dbFetchAll(
     [$id]
 );
 
+// QR check-in feature flag
+$qrEnabled = getSetting('qr_checkin_enabled', '0') === '1';
+
 // Check if current user has applied
 $myParticipation = null;
 if (!isAdmin()) {
@@ -283,7 +286,28 @@ if (isPost()) {
                 }
             }
             break;
-            
+
+        case 'self_checkin':
+            // Shift leader self check-in via the "Είμαι Παρών" button
+            if ($qrEnabled && hasRole(ROLE_SHIFT_LEADER)) {
+                $selfPr = dbFetchOne(
+                    "SELECT * FROM participation_requests WHERE shift_id = ? AND volunteer_id = ? AND status = ?",
+                    [$id, $user['id'], PARTICIPATION_APPROVED]
+                );
+                if ($selfPr && empty($selfPr['attendance_confirmed_at'])) {
+                    dbExecute(
+                        "UPDATE participation_requests
+                         SET attendance_confirmed_at = NOW(), attendance_confirmed_by = ?, updated_at = NOW()
+                         WHERE id = ?",
+                        [$user['id'], $selfPr['id']]
+                    );
+                    logAudit('self_checkin', 'participation_requests', $selfPr['id'], 'Shift leader self check-in');
+                    setFlash('success', 'Η παρουσία σας καταγράφηκε με επιτυχία.');
+                }
+            }
+            redirect('shift-view.php?id=' . $id);
+            break;
+
         case 'delete':
             if ($canManage) {
                 // Get all participants to notify them
@@ -680,6 +704,13 @@ if ($canManage) {
     );
 }
 
+// Lazy-generate QR token for this shift if not yet set (admin/leader only)
+if ($qrEnabled && $canManage && empty($shift['qr_token'])) {
+    $token = bin2hex(random_bytes(32));
+    dbExecute("UPDATE shifts SET qr_token = ? WHERE id = ?", [$token, $id]);
+    $shift['qr_token'] = $token;
+}
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -690,7 +721,12 @@ include __DIR__ . '/includes/header.php';
             Αποστολή: <a href="mission-view.php?id=<?= $shift['mission_id'] ?>"><?= h($shift['mission_title']) ?></a>
         </small>
     </div>
-    <div>
+    <div class="d-flex gap-2 flex-wrap">
+        <?php if ($qrEnabled && $canManage && !empty($shift['qr_token'])): ?>
+            <button type="button" class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#qrModal">
+                <i class="bi bi-qr-code me-1"></i>QR Check-in
+            </button>
+        <?php endif; ?>
         <?php if ($canManage): ?>
             <a href="shift-form.php?id=<?= $id ?>" class="btn btn-outline-primary">
                 <i class="bi bi-pencil me-1"></i>Επεξεργασία
@@ -821,6 +857,8 @@ include __DIR__ . '/includes/header.php';
                                             <?= statusBadge($p['status'], 'participation') ?>
                                             <?php if ($p['attended']): ?>
                                                 <span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>Παρών</span>
+                                            <?php elseif (!empty($p['attendance_confirmed_at'])): ?>
+                                                <span class="badge bg-info text-dark" title="QR check-in: <?= h(formatDateTime($p['attendance_confirmed_at'])) ?>"><i class="bi bi-qr-code me-1"></i>QR ✓</span>
                                             <?php endif; ?>
                                         </div>
                                     </div>
@@ -950,10 +988,29 @@ include __DIR__ . '/includes/header.php';
                                 </button>
                             </form>
                         <?php elseif ($myParticipation['status'] === PARTICIPATION_APPROVED): ?>
-                            <div class="alert alert-success mb-0">
-                                <i class="bi bi-check-circle me-1"></i>
-                                Η συμμετοχή σας έχει εγκριθεί!
-                            </div>
+                            <?php if (!empty($myParticipation['attendance_confirmed_at'])): ?>
+                                <div class="alert alert-success mb-2">
+                                    <i class="bi bi-qr-code me-1"></i>
+                                    Check-in: <strong><?= formatDateTime($myParticipation['attendance_confirmed_at']) ?></strong>
+                                </div>
+                            <?php elseif ($qrEnabled && hasRole(ROLE_SHIFT_LEADER)): ?>
+                                <div class="alert alert-success mb-2">
+                                    <i class="bi bi-check-circle me-1"></i>
+                                    Η συμμετοχή σας έχει εγκριθεί!
+                                </div>
+                                <form method="post">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="self_checkin">
+                                    <button type="submit" class="btn btn-success w-100">
+                                        <i class="bi bi-person-check me-1"></i>Είμαι Παρών
+                                    </button>
+                                </form>
+                            <?php else: ?>
+                                <div class="alert alert-success mb-0">
+                                    <i class="bi bi-check-circle me-1"></i>
+                                    Η συμμετοχή σας έχει εγκριθεί!
+                                </div>
+                            <?php endif; ?>
                         <?php elseif ($myParticipation['status'] === PARTICIPATION_REJECTED): ?>
                             <div class="alert alert-danger mb-0">
                                 <i class="bi bi-x-circle me-1"></i>
@@ -1406,6 +1463,54 @@ $activeParticipants = array_filter($participants, function($p) {
         </div>
     </div>
 </div>
+<?php endif; ?>
+
+<?php if ($qrEnabled && $canManage && !empty($shift['qr_token'])): ?>
+<!-- QR Check-in Modal -->
+<div class="modal fade" id="qrModal" tabindex="-1" aria-labelledby="qrModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title" id="qrModalLabel"><i class="bi bi-qr-code me-2"></i>QR Check-in Βάρδιας</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-center py-4">
+                <?php
+                $checkinUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http')
+                    . '://' . $_SERVER['HTTP_HOST']
+                    . rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\') . '/checkin.php?token='
+                    . urlencode($shift['qr_token']);
+                ?>
+                <p class="text-muted small mb-3">
+                    <strong><?= h($shift['mission_title']) ?></strong><br>
+                    <?= formatDateTime($shift['start_time']) ?> – <?= date('H:i', strtotime($shift['end_time'])) ?>
+                </p>
+                <div class="d-inline-block p-2 border rounded-3 bg-white shadow-sm mb-3" id="qrImageWrapper">
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&ecc=M&data=<?= urlencode($checkinUrl) ?>"
+                         width="220" height="220" alt="QR Check-in"
+                         class="d-block mx-auto">
+                </div>
+                <p class="text-muted" style="font-size:.8rem; word-break:break-all;">
+                    <i class="bi bi-link-45deg me-1"></i><?= h($checkinUrl) ?>
+                </p>
+            </div>
+            <div class="modal-footer justify-content-between">
+                <button type="button" class="btn btn-outline-secondary" onclick="window.print()">
+                    <i class="bi bi-printer me-1"></i>Εκτύπωση
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Κλείσιμο</button>
+            </div>
+        </div>
+    </div>
+</div>
+<style>
+@media print {
+    body > *:not(#qrPrintArea) { display: none !important; }
+    .modal { display: block !important; position: static !important; }
+    .modal-dialog { box-shadow: none; }
+    .modal-footer, .modal-header .btn-close { display: none !important; }
+}
+</style>
 <?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
