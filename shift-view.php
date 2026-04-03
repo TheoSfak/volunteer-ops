@@ -899,6 +899,13 @@ include __DIR__ . '/includes/header.php';
                                         <i class="bi bi-clock me-1"></i><?= number_format($p['actual_hours'], 1) ?> ώρες καταγράφηκαν
                                     </div>
                                     <?php endif; ?>
+
+                                    <!-- QR check-in timestamp (visible to admin/leader) -->
+                                    <?php if ($canManage && !empty($p['attendance_confirmed_at'])): ?>
+                                    <div class="mt-2 small" style="color:#0dcaf0;">
+                                        <i class="bi bi-qr-code me-1"></i>QR check-in: <strong><?= h(formatDateTime($p['attendance_confirmed_at'])) ?></strong>
+                                    </div>
+                                    <?php endif; ?>
                                 </div>
 
                                 <!-- Action footer (admins/shift leaders only) -->
