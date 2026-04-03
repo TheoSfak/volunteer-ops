@@ -52,14 +52,12 @@ $participants = dbFetchAll(
 // QR check-in feature flag
 $qrEnabled = getSetting('qr_checkin_enabled', '0') === '1';
 
-// Check if current user has applied
+// Check if current user has applied (checked for all roles including admin)
 $myParticipation = null;
-if (!isAdmin()) {
-    foreach ($participants as $p) {
-        if ($p['volunteer_id'] == $user['id']) {
-            $myParticipation = $p;
-            break;
-        }
+foreach ($participants as $p) {
+    if ($p['volunteer_id'] == $user['id']) {
+        $myParticipation = $p;
+        break;
     }
 }
 
@@ -288,8 +286,8 @@ if (isPost()) {
             break;
 
         case 'self_checkin':
-            // Shift leader self check-in via the "Είμαι Παρών" button
-            if ($qrEnabled && hasRole(ROLE_SHIFT_LEADER)) {
+            // Shift leader or admin self check-in via the "Είμαι Παρών" button
+            if ($qrEnabled && (isAdmin() || hasRole(ROLE_SHIFT_LEADER))) {
                 $selfPr = dbFetchOne(
                     "SELECT * FROM participation_requests WHERE shift_id = ? AND volunteer_id = ? AND status = ?",
                     [$id, $user['id'], PARTICIPATION_APPROVED]
@@ -1493,6 +1491,22 @@ $activeParticipants = array_filter($participants, function($p) {
                 <p class="text-muted" style="font-size:.8rem; word-break:break-all;">
                     <i class="bi bi-link-45deg me-1"></i><?= h($checkinUrl) ?>
                 </p>
+                <?php if ($myParticipation && $myParticipation['status'] === PARTICIPATION_APPROVED): ?>
+                <hr class="my-2">
+                <?php if (!empty($myParticipation['attendance_confirmed_at'])): ?>
+                    <div class="alert alert-success py-2 mb-0 small">
+                        <i class="bi bi-check-circle-fill me-1"></i>Check-in καταγράφηκε: <strong><?= formatDateTime($myParticipation['attendance_confirmed_at']) ?></strong>
+                    </div>
+                <?php else: ?>
+                    <form method="post" class="mt-2">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="self_checkin">
+                        <button type="submit" class="btn btn-success w-100" data-bs-dismiss="modal">
+                            <i class="bi bi-person-check me-1"></i>Είμαι Παρών (δικό μου check-in)
+                        </button>
+                    </form>
+                <?php endif; ?>
+                <?php endif; ?>
             </div>
             <div class="modal-footer justify-content-between">
                 <button type="button" class="btn btn-outline-secondary" onclick="window.print()">
