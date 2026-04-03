@@ -513,7 +513,8 @@ if (isPost()) {
             'achievements_enabled', 'points_enabled',
             'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode',
             'session_timeout_minutes',
-            'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled'
+            'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled',
+            'openweathermap_api_key',
         ];
         
         foreach ($fieldsToUpdate as $field) {
@@ -521,6 +522,11 @@ if (isPost()) {
             
             if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled'])) {
                 $value = isset($_POST[$field]) ? '1' : '0';
+            }
+
+            // Don't overwrite API key if form was submitted empty (acts like a "keep existing" field)
+            if ($field === 'openweathermap_api_key' && empty($value) && !empty($settings['openweathermap_api_key'] ?? '')) {
+                continue;
             }
             
             $exists = dbFetchValue("SELECT COUNT(*) FROM settings WHERE setting_key = ?", [$field]);
@@ -1218,6 +1224,34 @@ include __DIR__ . '/includes/header.php';
                             <td><?= dbFetchValue("SELECT COUNT(*) FROM missions WHERE deleted_at IS NULL") ?></td>
                         </tr>
                     </table>
+                </div>
+            </div>
+
+            <!-- Weather API Settings -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-cloud-sun me-1"></i>Ρυθμίσεις Καιρού</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="weatherApiKey">OpenWeatherMap API Key</label>
+                        <input type="password" class="form-control" id="weatherApiKey"
+                               name="openweathermap_api_key"
+                               placeholder="<?= !empty($settings['openweathermap_api_key'] ?? '') ? '••••••••' : 'Εισάγετε το API key σας' ?>">
+                        <div class="form-text">
+                            Απαιτείται για την εμφάνιση πρόβλεψης καιρού στις αποστολές.
+                            <a href="https://openweathermap.org/appid" target="_blank" rel="noopener noreferrer">Δωρεάν εγγραφή στο OpenWeatherMap</a>
+                        </div>
+                    </div>
+                    <?php if (!empty($settings['openweathermap_api_key'] ?? '')): ?>
+                    <div class="alert alert-success py-1 px-2 mb-0 small">
+                        <i class="bi bi-check-circle me-1"></i>API Key έχει οριστεί
+                    </div>
+                    <?php else: ?>
+                    <div class="alert alert-secondary py-1 px-2 mb-0 small">
+                        <i class="bi bi-info-circle me-1"></i>Χωρίς API key η πρόβλεψη καιρού δεν εμφανίζεται στις αποστολές
+                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
