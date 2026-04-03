@@ -252,7 +252,7 @@ if (isPost()) {
 
                     // Award points
                     $pr = dbFetchOne("SELECT * FROM participation_requests WHERE id = ?", [$prId]);
-                    if ($pr) {
+                    if ($pr && getSetting('points_enabled', '1') === '1') {
                         $hours = $actualHours ?: calculateShiftHours($shift);
                         $points = calculatePoints($shift, $hours);
 
@@ -277,7 +277,7 @@ if (isPost()) {
                         checkAndAwardAchievements((int)$pr['volunteer_id']);
                     }
 
-                    setFlash('success', 'Η παρουσία καταγράφηκε και δόθηκαν πόντοι.');
+                    setFlash('success', getSetting('points_enabled', '1') === '1' ? 'Η παρουσία καταγράφηκε και δόθηκαν πόντοι.' : 'Η παρουσία καταγράφηκε επιτυχώς.');
                 } catch (Exception $e) {
                     db()->rollBack();
                     setFlash('error', 'Σφάλμα κατά την καταγραφή παρουσίας. Παρακαλώ δοκιμάστε ξανά.');
@@ -1056,6 +1056,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         <?php endif; ?>
         
+        <?php if (getSetting('points_enabled', '1') === '1'): ?>
         <!-- Points Preview -->
         <div class="card mb-4">
             <div class="card-header">
@@ -1066,6 +1067,7 @@ include __DIR__ . '/includes/header.php';
                 <small class="text-muted">πόντοι για αυτή τη βάρδια</small>
             </div>
         </div>
+        <?php endif; ?>
         
         <!-- Pending Swap Requests -->
         <?php if ($canManage && !empty($pendingSwaps)): ?>
