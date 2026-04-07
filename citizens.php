@@ -189,8 +189,11 @@ if (isPost()) {
                         setFlash('warning', 'Ο πολίτης σημειώθηκε ως ολοκληρωμένος, αλλά δεν δημιουργήθηκε πιστοποιητικό γιατί υπάρχει ήδη εγγραφή με το ίδιο email.');
                     } else {
                         $certTypeId = (int) post('certificate_type_id') ?: null;
-                        $issueDate  = date('Y-m-d');
-                        $expiryDate = date('Y-m-d', strtotime('+3 years'));
+                        $issueDate  = post('issue_date')  ?: date('Y-m-d');
+                        $expiryDate = post('expiry_date') ?: date('Y-m-d', strtotime('+3 years'));
+                        // Validate date format — fallback to defaults if malformed
+                        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $issueDate))  $issueDate  = date('Y-m-d');
+                        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $expiryDate)) $expiryDate = date('Y-m-d', strtotime('+3 years'));
                         $newCertId  = dbInsert(
                             "INSERT INTO citizen_certificates
                              (certificate_type_id, first_name, last_name, phone, birth_date,
@@ -497,6 +500,8 @@ include __DIR__ . '/includes/header.php';
     <input type="hidden" name="action" value="create_cert_from_citizen">
     <input type="hidden" name="citizen_id" id="certCitizenId" value="0">
     <input type="hidden" name="certificate_type_id" id="certTypeFromModal" value="">
+    <input type="hidden" name="issue_date" id="certIssueDateFromModal" value="">
+    <input type="hidden" name="expiry_date" id="certExpiryDateFromModal" value="">
 </form>
 
 <!-- Completed → Certificate Modal -->
@@ -510,15 +515,24 @@ include __DIR__ . '/includes/header.php';
             <div class="modal-body">
                 <p>Ο πολίτης <strong id="certModalCitizenName"></strong> θα σημειωθεί ως <span class="badge bg-success">Ολοκληρωμένος</span>.</p>
                 <p class="mb-3">Θέλετε να καταχωρήσετε και πιστοποιητικό στο μητρώο πιστοποιητικών πολιτών;</p>
-                <div class="mb-0">
-                    <label class="form-label fw-semibold">Τύπος πιστοποιητικού</label>
-                    <select class="form-select" id="certModalTypeSelect">
-                        <option value="">-- Χωρίς τύπο --</option>
-                        <?php foreach ($certTypes as $ct): ?>
-                        <option value="<?= $ct['id'] ?>"><?= h($ct['name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <div class="form-text">Ημ. έκδοσης: <strong><?= date('d/m/Y') ?></strong> &nbsp;|&nbsp; Ημ. λήξης: <strong><?= date('d/m/Y', strtotime('+3 years')) ?></strong></div>
+                <div class="row g-3">
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Τύπος πιστοποιητικού</label>
+                        <select class="form-select" id="certModalTypeSelect">
+                            <option value="">-- Χωρίς τύπο --</option>
+                            <?php foreach ($certTypes as $ct): ?>
+                            <option value="<?= $ct['id'] ?>"><?= h($ct['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label fw-semibold">Ημερομηνία έκδοσης</label>
+                        <input type="date" class="form-control" id="certModalIssueDate" value="<?= date('Y-m-d') ?>">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label fw-semibold">Ημερομηνία λήξης</label>
+                        <input type="date" class="form-control" id="certModalExpiryDate" value="<?= date('Y-m-d', strtotime('+3 years')) ?>">
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -639,6 +653,10 @@ function editCitizen(c) {
     modal.show();
 }
 
+// Default dates for the certificate modal (ISO format for <input type="date">)
+var _certDefaultIssue  = '<?= date('Y-m-d') ?>';
+var _certDefaultExpiry = '<?= date('Y-m-d', strtotime('+3 years')) ?>';
+
 function clickToggleCompleted(citizenId, isCompleted, citizenName) {
     document.getElementById('toggleCompletedCitizenId').value = citizenId;
     if (isCompleted == 1) {
@@ -649,6 +667,8 @@ function clickToggleCompleted(citizenId, isCompleted, citizenName) {
         document.getElementById('certCitizenId').value = citizenId;
         document.getElementById('certModalCitizenName').textContent = citizenName;
         document.getElementById('certModalTypeSelect').value = '';
+        document.getElementById('certModalIssueDate').value  = _certDefaultIssue;
+        document.getElementById('certModalExpiryDate').value = _certDefaultExpiry;
         var modal = new bootstrap.Modal(document.getElementById('completedCertModal'));
         modal.show();
     }
@@ -660,7 +680,9 @@ function submitToggleOnly() {
 }
 
 function submitWithCert() {
-    document.getElementById('certTypeFromModal').value = document.getElementById('certModalTypeSelect').value;
+    document.getElementById('certTypeFromModal').value    = document.getElementById('certModalTypeSelect').value;
+    document.getElementById('certIssueDateFromModal').value  = document.getElementById('certModalIssueDate').value  || _certDefaultIssue;
+    document.getElementById('certExpiryDateFromModal').value = document.getElementById('certModalExpiryDate').value || _certDefaultExpiry;
     bootstrap.Modal.getInstance(document.getElementById('completedCertModal')).hide();
     document.getElementById('certCreationForm').submit();
 }
