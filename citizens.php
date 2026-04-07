@@ -158,6 +158,64 @@ if (isPost()) {
             }
             redirect('citizens.php' . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : ''));
             break;
+
+        case 'create_cert_from_citizen':
+            $id = (int) post('citizen_id');
+            if ($id > 0) {
+                $citizen = dbFetchOne("SELECT * FROM citizens WHERE id = ?", [$id]);
+                if ($citizen) {
+                    // Mark as completed (only if not already)
+                    if (!$citizen['completed']) {
+                        if ($_hasTsCols) {
+                            dbExecute("UPDATE citizens SET completed = 1, completed_at = NOW(), updated_at = NOW() WHERE id = ?", [$id]);
+                        } else {
+                            dbExecute("UPDATE citizens SET completed = 1, updated_at = NOW() WHERE id = ?", [$id]);
+                        }
+                        logAudit('update', 'citizens', $id);
+                    }
+
+                    // Duplicate email check (only when citizen has email)
+                    $citizenEmail = trim($citizen['email'] ?? '');
+                    $isDuplicate = false;
+                    if ($citizenEmail !== '') {
+                        $dupCount = (int) dbFetchValue(
+                            "SELECT COUNT(*) FROM citizen_certificates WHERE email = ?",
+                            [$citizenEmail]
+                        );
+                        $isDuplicate = $dupCount > 0;
+                    }
+
+                    if ($isDuplicate) {
+                        setFlash('warning', 'Ο πολίτης σημειώθηκε ως ολοκληρωμένος, αλλά δεν δημιουργήθηκε πιστοποιητικό γιατί υπάρχει ήδη εγγραφή με το ίδιο email.');
+                    } else {
+                        $certTypeId = (int) post('certificate_type_id') ?: null;
+                        $issueDate  = date('Y-m-d');
+                        $expiryDate = date('Y-m-d', strtotime('+3 years'));
+                        $newCertId  = dbInsert(
+                            "INSERT INTO citizen_certificates
+                             (certificate_type_id, first_name, last_name, phone, birth_date,
+                              issue_date, expiry_date, email, notes, created_by)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            [
+                                $certTypeId,
+                                $citizen['first_name_gr'],
+                                $citizen['last_name_gr'],
+                                $citizen['phone'] ?: null,
+                                $citizen['birth_date'] ?: null,
+                                $issueDate,
+                                $expiryDate,
+                                $citizenEmail !== '' ? $citizenEmail : null,
+                                null,
+                                getCurrentUserId(),
+                            ]
+                        );
+                        logAudit('create', 'citizen_certificates', $newCertId);
+                        setFlash('success', 'Ο πολίτης σημειώθηκε ως ολοκληρωμένος και το πιστοποιητικό καταχωρήθηκε επιτυχώς (λήξη: ' . date('d/m/Y', strtotime($expiryDate)) . ').');
+                    }
+                }
+            }
+            redirect('citizens.php' . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : ''));
+            break;
     }
 }
 
@@ -247,6 +305,9 @@ $editId = (int) get('edit');
 if ($editId) {
     $editCitizen = dbFetchOne("SELECT * FROM citizens WHERE id = ?", [$editId]);
 }
+
+// Certificate types for the cert-creation modal
+$certTypes = dbFetchAll("SELECT * FROM citizen_certificate_types WHERE is_active = 1 ORDER BY name");
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -367,14 +428,11 @@ include __DIR__ . '/includes/header.php';
                             <?php endif; ?>
                         </td>
                         <td class="text-center">
-                            <form method="post" class="d-inline">
-                                <?= csrfField() ?>
-                                <input type="hidden" name="action" value="toggle_completed">
-                                <input type="hidden" name="citizen_id" value="<?= $c['id'] ?>">
-                                <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['completed'] && ($c['completed_at'] ?? null) ? 'Ολοκλήρωση: ' . formatDateTime($c['completed_at']) : 'Εναλλαγή' ?>">
-                                    <i class="bi <?= $c['completed'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?>"></i>
-                                </button>
-                            </form>
+                            <button type="button" class="btn btn-sm btn-link p-0"
+                                title="<?= $c['completed'] && ($c['completed_at'] ?? null) ? 'Ολοκλήρωση: ' . formatDateTime($c['completed_at']) : 'Εναλλαγή' ?>"
+                                onclick="clickToggleCompleted(<?= $c['id'] ?>, <?= (int)$c['completed'] ?>, '<?= h(addslashes($c['last_name_gr'] . ' ' . $c['first_name_gr'])) ?>')">
+                                <i class="bi <?= $c['completed'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?>"></i>
+                            </button>
                             <?php if ($c['completed'] && ($c['completed_at'] ?? null)): ?>
                                 <br><small class="text-muted" style="font-size:0.7rem;"><?= formatDateTime($c['completed_at']) ?></small>
                             <?php endif; ?>
@@ -421,6 +479,55 @@ include __DIR__ . '/includes/header.php';
                     <input type="hidden" name="citizen_id" id="deleteIdInput" value="0">
                     <button type="submit" class="btn btn-danger">Διαγραφή</button>
                 </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Hidden form: plain toggle_completed (no cert) -->
+<form method="post" id="toggleCompletedForm" style="display:none">
+    <?= csrfField() ?>
+    <input type="hidden" name="action" value="toggle_completed">
+    <input type="hidden" name="citizen_id" id="toggleCompletedCitizenId" value="0">
+</form>
+
+<!-- Hidden form: toggle completed + create certificate -->
+<form method="post" id="certCreationForm" style="display:none">
+    <?= csrfField() ?>
+    <input type="hidden" name="action" value="create_cert_from_citizen">
+    <input type="hidden" name="citizen_id" id="certCitizenId" value="0">
+    <input type="hidden" name="certificate_type_id" id="certTypeFromModal" value="">
+</form>
+
+<!-- Completed → Certificate Modal -->
+<div class="modal fade" id="completedCertModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-patch-check"></i> Ολοκλήρωση &amp; Πιστοποιητικό</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Ο πολίτης <strong id="certModalCitizenName"></strong> θα σημειωθεί ως <span class="badge bg-success">Ολοκληρωμένος</span>.</p>
+                <p class="mb-3">Θέλετε να καταχωρήσετε και πιστοποιητικό στο μητρώο πιστοποιητικών πολιτών;</p>
+                <div class="mb-0">
+                    <label class="form-label fw-semibold">Τύπος πιστοποιητικού</label>
+                    <select class="form-select" id="certModalTypeSelect">
+                        <option value="">-- Χωρίς τύπο --</option>
+                        <?php foreach ($certTypes as $ct): ?>
+                        <option value="<?= $ct['id'] ?>"><?= h($ct['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text">Ημ. έκδοσης: <strong><?= date('d/m/Y') ?></strong> &nbsp;|&nbsp; Ημ. λήξης: <strong><?= date('d/m/Y', strtotime('+3 years')) ?></strong></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="submitToggleOnly()">
+                    <i class="bi bi-check-circle"></i> Όχι, μόνο ολοκλήρωση
+                </button>
+                <button type="button" class="btn btn-success" onclick="submitWithCert()">
+                    <i class="bi bi-file-earmark-plus"></i> Ναι, καταχώρηση πιστοποιητικού
+                </button>
             </div>
         </div>
     </div>
@@ -530,6 +637,32 @@ function editCitizen(c) {
 
     var modal = new bootstrap.Modal(document.getElementById('citizenModal'));
     modal.show();
+}
+
+function clickToggleCompleted(citizenId, isCompleted, citizenName) {
+    document.getElementById('toggleCompletedCitizenId').value = citizenId;
+    if (isCompleted == 1) {
+        // Unchecking — no modal needed, just toggle off
+        document.getElementById('toggleCompletedForm').submit();
+    } else {
+        // Checking ON — ask about certificate
+        document.getElementById('certCitizenId').value = citizenId;
+        document.getElementById('certModalCitizenName').textContent = citizenName;
+        document.getElementById('certModalTypeSelect').value = '';
+        var modal = new bootstrap.Modal(document.getElementById('completedCertModal'));
+        modal.show();
+    }
+}
+
+function submitToggleOnly() {
+    bootstrap.Modal.getInstance(document.getElementById('completedCertModal')).hide();
+    document.getElementById('toggleCompletedForm').submit();
+}
+
+function submitWithCert() {
+    document.getElementById('certTypeFromModal').value = document.getElementById('certModalTypeSelect').value;
+    bootstrap.Modal.getInstance(document.getElementById('completedCertModal')).hide();
+    document.getElementById('certCreationForm').submit();
 }
 </script>
 
