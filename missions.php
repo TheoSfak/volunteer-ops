@@ -52,6 +52,12 @@ if (isPost() && post('action') === 'duplicate' && isAdmin()) {
 
 // Filters
 $status = get('status', STATUS_OPEN);
+
+// Non-admins can only see OPEN missions
+if (!isAdmin() && $status !== STATUS_OPEN) {
+    $status = STATUS_OPEN;
+}
+
 $department = get('department');
 $missionType = (int)get('mission_type', 0);
 $search = get('search');
