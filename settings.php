@@ -1243,6 +1243,7 @@ include __DIR__ . '/includes/header.php';
                         <label class="form-label" for="weatherApiKey">OpenWeatherMap API Key</label>
                         <input type="password" class="form-control" id="weatherApiKey"
                                name="openweathermap_api_key"
+                               autocomplete="new-password"
                                placeholder="<?= !empty($settings['openweathermap_api_key'] ?? '') ? '••••••••' : 'Εισάγετε το API key σας' ?>">
                         <div class="form-text">
                             Απαιτείται για την εμφάνιση πρόβλεψης καιρού στις αποστολές.
@@ -1336,6 +1337,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Password</label>
                             <input type="password" class="form-control" name="smtp_password" 
+                                   autocomplete="new-password"
                                    placeholder="<?= !empty($settings['smtp_password']) ? '••••••••' : '' ?>">
                             <small class="text-muted">Αφήστε κενό για να διατηρηθεί ο υπάρχων κωδικός</small>
                         </div>
