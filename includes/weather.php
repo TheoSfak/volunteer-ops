@@ -82,8 +82,12 @@ function getWeatherForMission(array $mission): ?array
         [$lat, $lon] = _owmGeocode($locationQuery, $apiKey);
     }
 
+    $fallbackLocation = false;
     if ($lat === null || $lon === null) {
-        return ['status' => 'no_location'];
+        // Fall back to Heraklion, Crete when no coordinates are available
+        $lat = 35.3387;
+        $lon = 25.1442;
+        $fallbackLocation = true;
     }
 
     // Fetch forecast
@@ -96,6 +100,9 @@ function getWeatherForMission(array $mission): ?array
     $parsed  = _owmParseWarnings($data);
     $data    = array_merge($data, $parsed);
     $data['status'] = 'ok';
+    if ($fallbackLocation) {
+        $data['fallback_location'] = true;
+    }
 
     // Persist to cache (upsert)
     $json = json_encode($data);

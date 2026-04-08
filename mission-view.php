@@ -1334,6 +1334,11 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </div>
                 <?php endif; ?>
+                <?php if (!empty($weather['fallback_location'])): ?>
+                <div class="alert alert-info py-1 px-2 mb-2 small">
+                    <i class="bi bi-geo-alt me-1"></i>Δεν έχει οριστεί σημείο στο χάρτη. Εμφανίζεται πρόβλεψη για <strong>Ηράκλειο Κρήτης</strong>.
+                </div>
+                <?php endif; ?>
                 <div class="text-muted" style="font-size:0.68rem;">
                     Πρόβλεψη για <?= date('d/m H:i', $weather['forecast_dt']) ?> &middot; Πηγή: OpenWeatherMap
                 </div>
@@ -1347,16 +1352,12 @@ include __DIR__ . '/includes/header.php';
                     <i class="bi bi-calendar3 me-1"></i>Πρόβλεψη διαθέσιμη από <strong><?= h($weather['available_from']) ?></strong>
                 </p>
             </div>
-            <?php elseif (isAdmin() && in_array($weather['status'], ['no_location', 'api_error'])): ?>
+            <?php elseif (isAdmin() && $weather['status'] === 'api_error'): ?>
             <div class="card-header py-2 bg-light">
                 <h6 class="mb-0"><i class="bi bi-cloud-slash me-1 text-muted"></i>Καιρός Αποστολής</h6>
             </div>
             <div class="card-body py-2 px-3">
-                <?php if ($weather['status'] === 'no_location'): ?>
-                <p class="text-muted small mb-0"><i class="bi bi-geo-alt me-1"></i>Δεν βρέθηκαν συντεταγμένες για αυτή την αποστολή.</p>
-                <?php else: ?>
                 <p class="text-muted small mb-0"><i class="bi bi-exclamation-circle me-1"></i><?= h($weather['message'] ?? 'Σφάλμα λήψης καιρού') ?></p>
-                <?php endif; ?>
             </div>
             <?php endif; ?>
         </div>
