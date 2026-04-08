@@ -525,6 +525,11 @@ if (isPost()) {
                 $value = isset($_POST[$field]) ? '1' : '0';
             }
 
+            // Trim the API key to avoid whitespace issues from copy-paste
+            if ($field === 'openweathermap_api_key') {
+                $value = trim($value);
+            }
+
             // Don't overwrite API key if form was submitted empty (acts like a "keep existing" field)
             if ($field === 'openweathermap_api_key' && empty($value) && !empty($settings['openweathermap_api_key'] ?? '')) {
                 continue;
@@ -1245,9 +1250,15 @@ include __DIR__ . '/includes/header.php';
                         </div>
                     </div>
                     <?php if (!empty($settings['openweathermap_api_key'] ?? '')): ?>
-                    <div class="alert alert-success py-1 px-2 mb-0 small">
-                        <i class="bi bi-check-circle me-1"></i>API Key έχει οριστεί
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <div class="alert alert-success py-1 px-2 mb-0 small flex-grow-1">
+                            <i class="bi bi-check-circle me-1"></i>API Key έχει οριστεί
+                        </div>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnTestWeatherKey">
+                            <i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης
+                        </button>
                     </div>
+                    <div id="weatherTestResult" class="mt-2" style="display:none;"></div>
                     <?php else: ?>
                     <div class="alert alert-secondary py-1 px-2 mb-0 small">
                         <i class="bi bi-info-circle me-1"></i>Χωρίς API key η πρόβλεψη καιρού δεν εμφανίζεται στις αποστολές
@@ -2577,6 +2588,37 @@ document.getElementById('resetConfirmInput').addEventListener('input', function(
 function confirmReset() {
     return confirm('ΤΕΛΕΥΤΑΙΑ ΕΠΙΒΕΒΑΙΩΣΗ: Είστε απολύτως σίγουροι; Αυτή η ενέργεια είναι ΜΗ ΑΝΑΣΤΡΕΨΙΜΗ.');
 }
+</script>
+<?php endif; ?>
+
+<?php if (!empty($settings['openweathermap_api_key'] ?? '')): ?>
+<script>
+document.getElementById('btnTestWeatherKey') && document.getElementById('btnTestWeatherKey').addEventListener('click', function() {
+    var btn = this;
+    var result = document.getElementById('weatherTestResult');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Έλεγχος...';
+    result.style.display = 'none';
+
+    fetch('api-weather-test.php', { method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'} })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            result.style.display = '';
+            if (data.ok) {
+                result.innerHTML = '<div class="alert alert-success py-1 px-2 small mb-0"><i class="bi bi-check-circle me-1"></i>' + data.message + '</div>';
+            } else {
+                result.innerHTML = '<div class="alert alert-danger py-1 px-2 small mb-0"><i class="bi bi-exclamation-triangle me-1"></i>' + data.message + '</div>';
+            }
+        })
+        .catch(function() {
+            result.style.display = '';
+            result.innerHTML = '<div class="alert alert-danger py-1 px-2 small mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Αποτυχία επικοινωνίας</div>';
+        })
+        .finally(function() {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης';
+        });
+});
 </script>
 <?php endif; ?>
 
