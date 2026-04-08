@@ -91,9 +91,10 @@ function getWeatherForMission(array $mission): ?array
     }
 
     // Fetch forecast
-    $data = _owmFetchForecast($lat, $lon, $startTs, $apiKey);
+    $fetchError = '';
+    $data = _owmFetchForecast($lat, $lon, $startTs, $apiKey, $fetchError);
     if ($data === null) {
-        return ['status' => 'api_error', 'message' => 'Αποτυχία ανάκτησης δεδομένων καιρού'];
+        return ['status' => 'api_error', 'message' => $fetchError ?: 'Αποτυχία ανάκτησης δεδομένων καιρού'];
     }
 
     // Add warnings + severity
@@ -153,9 +154,10 @@ function _owmGeocode(string $location, string $apiKey): array
 
 /**
  * Fetch the 3-hour forecast slot closest to $targetTs.
- * Returns a normalised array or null on failure.
+ * Returns a normalised array or null on failure;
+ * sets $errorMessage by reference with a diagnostic string.
  */
-function _owmFetchForecast(float $lat, float $lon, int $targetTs, string $apiKey): ?array
+function _owmFetchForecast(float $lat, float $lon, int $targetTs, string $apiKey, ?string &$errorMessage = null): ?array
 {
     $url = sprintf(
         'https://api.openweathermap.org/data/2.5/forecast?lat=%s&lon=%s&units=metric&lang=el&appid=%s',
@@ -164,8 +166,21 @@ function _owmFetchForecast(float $lat, float $lon, int $targetTs, string $apiKey
         urlencode($apiKey)
     );
 
-    $res = _owmCurlGet($url);
+    $httpCode  = 0;
+    $curlError = '';
+    $res = _owmCurlGet($url, $httpCode, $curlError);
     if ($res === null) {
+        if ($httpCode === 401) {
+            $errorMessage = 'Μη έγκυρο API key (HTTP 401) — ελέγξτε τις Ρυθμίσεις';
+        } elseif ($httpCode === 429) {
+            $errorMessage = 'Υπέρβαση ορίου κλήσεων OpenWeatherMap (HTTP 429)';
+        } elseif ($httpCode > 0) {
+            $errorMessage = 'Σφάλμα OpenWeatherMap API (HTTP ' . $httpCode . ')';
+        } elseif (!empty($curlError)) {
+            $errorMessage = 'Σφάλμα δικτύου: ' . $curlError;
+        } else {
+            $errorMessage = 'Αποτυχία σύνδεσης με OpenWeatherMap';
+        }
         return null;
     }
 
@@ -283,10 +298,12 @@ function _owmParseWarnings(array $w): array
 /**
  * Perform a secure GET request to an OWM endpoint.
  * Returns the response body string or null on failure.
+ * Sets $httpCode and $curlError by reference for diagnostics.
  */
-function _owmCurlGet(string $url): ?string
+function _owmCurlGet(string $url, ?int &$httpCode = null, ?string &$curlError = null): ?string
 {
     if (!function_exists('curl_init')) {
+        $curlError = 'curl not available';
         return null;
     }
 
@@ -299,8 +316,9 @@ function _owmCurlGet(string $url): ?string
         CURLOPT_FOLLOWLOCATION => false,
     ]);
 
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $response  = curl_exec($ch);
+    $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
     curl_close($ch);
 
     if ($response === false || $httpCode !== 200) {
