@@ -597,20 +597,23 @@ include __DIR__ . '/includes/header.php';
     function extractLatLng(url) {
         if (!url) return null;
 
-        // Pattern 1: @lat,lng in path  e.g. /@37.9716,23.7257,15z
-        var m = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+        // Pattern 1 (HIGHEST PRIORITY): !3d<lat>!4d<lng> — exact pin coordinates in place URLs
+        // e.g. /maps/place/Name/@35.33,25.13,13z/data=...!3d35.3387!4d25.1442
+        // This MUST be checked before @ because @ is the map VIEW center, not the pin.
+        var m = url.match(/!3d(-?\d+\.?\d*)!4d(-?\d+\.?\d*)/);
         if (m) return { lat: m[1], lng: m[2] };
 
         // Pattern 2: ?q=lat,lng or &q=lat,lng  e.g. ?q=37.9716,23.7257
         m = url.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
         if (m) return { lat: m[1], lng: m[2] };
 
-        // Pattern 3: /place/name/@lat,lng or ll=lat,lng
+        // Pattern 3: ll=lat,lng parameter
         m = url.match(/[?&]ll=(-?\d+\.\d+),(-?\d+\.\d+)/);
         if (m) return { lat: m[1], lng: m[2] };
 
-        // Pattern 4: !3d<lat>!4d<lng> in Maps URLs
-        m = url.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+        // Pattern 4 (LOWER PRIORITY): @lat,lng in path — map view center, used only as fallback
+        // e.g. /@37.9716,23.7257,15z
+        m = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
         if (m) return { lat: m[1], lng: m[2] };
 
         return null;
@@ -627,15 +630,40 @@ include __DIR__ . '/includes/header.php';
     function handleMapsInput(url) {
         url = url.trim();
         if (!url) return;
+
         var coords = extractLatLng(url);
         if (coords) {
             applyCoords(coords, 'direct');
-        } else {
-            // Short link or unrecognised — notify user to expand it first
-            document.getElementById('mapsParseStatus').innerHTML =
-                '<small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>' +
-                'Δεν βρέθηκαν συντεταγμένα. Δοκιμάστε να χρησιμοποιήσετε τον κανονικό σύνδεσμο "Κοινή χρήση συνδέσμου" από το Google Maps.</small>';
+            return;
         }
+
+        // Short link (maps.app.goo.gl, goo.gl, etc.) — resolve server-side
+        if (/goo\.gl|maps\.app\.goo\.gl/.test(url)) {
+            var status = document.getElementById('mapsParseStatus');
+            status.innerHTML = '<small class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Επεξεργασία συνδέσμου...</small>';
+            fetch('api-resolve-maps.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+                body: 'url=' + encodeURIComponent(url)
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.lat && data.lng) {
+                    applyCoords({ lat: data.lat, lng: data.lng }, 'resolved');
+                } else {
+                    status.innerHTML = '<small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>' +
+                        (data.error || 'Δεν βρέθηκαν συντεταγμένα στον σύνδεσμο.') + '</small>';
+                }
+            })
+            .catch(function() {
+                status.innerHTML = '<small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Αποτυχία επεξεργασίας συνδέσμου.</small>';
+            });
+            return;
+        }
+
+        document.getElementById('mapsParseStatus').innerHTML =
+            '<small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>' +
+            'Δεν βρέθηκαν συντεταγμένα. Χρησιμοποιήστε τον κανονικό σύνδεσμο από Google Maps (Κοινή χρήση &rarr; Αντιγραφή συνδέσμου).</small>';
     }
 
     document.addEventListener('DOMContentLoaded', function() {
