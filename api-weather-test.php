@@ -41,13 +41,29 @@ $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 $curlError = curl_error($ch);
 curl_close($ch);
 
-if ($response === false || $curlError) {
-    echo json_encode(['ok' => false, 'message' => 'Σφάλμα δικτύου: ' . $curlError]);
+if ($response === false) {
+    echo json_encode(['ok' => false, 'message' => 'Σφάλμα δικτύου: ' . ($curlError ?: 'άγνωστο σφάλμα')]);
+    exit;
+}
+
+if ($curlError) {
+    echo json_encode(['ok' => false, 'message' => 'Σφάλμα cURL: ' . $curlError]);
     exit;
 }
 
 if ($httpCode === 401) {
-    echo json_encode(['ok' => false, 'message' => 'Μη έγκυρο API key (HTTP 401) — ελέγξτε ότι το key είναι σωστό και ενεργό']);
+    // Parse OWM's own error message for better diagnostics
+    $owmMsg = '';
+    if ($response) {
+        $owmBody = json_decode($response, true);
+        $owmMsg  = $owmBody['message'] ?? '';
+    }
+    $detail = $owmMsg ? ' (' . $owmMsg . ')' : '';
+    echo json_encode([
+        'ok'      => false,
+        'message' => 'HTTP 401 — Μη έγκυρο ή ανενεργό API key' . $detail
+                   . '. Νέα keys χρειάζονται έως 2 ώρες για να ενεργοποιηθούν από το OpenWeatherMap.',
+    ]);
     exit;
 }
 
