@@ -22,7 +22,7 @@ require_once __DIR__ . '/includes/achievements-functions.php';
 
 // Migrations: only load the heavy 180KB file if schema needs updating.
 // IMPORTANT: Update this number whenever you add a new migration!
-define('LATEST_MIGRATION_VERSION', 50);
+define('LATEST_MIGRATION_VERSION', DB_SCHEMA_VERSION);
 try {
     $__schemaVer = (int) dbFetchValue(
         "SELECT setting_value FROM settings WHERE setting_key = 'db_schema_version'"

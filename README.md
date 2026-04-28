@@ -2,15 +2,15 @@
 
 **Σύστημα Διαχείρισης Εθελοντών** — Greek-language volunteer mission management system for rescue and civil protection organisations. Plain PHP/MySQL, no frameworks, deployable on any standard web host.
 
-**Version:** 3.53.7  
-**Author:** Theodore Sfakianakis  
+**Version:** 3.63.8
+**Author:** Theodore Sfakianakis
 **Email:** theodore.sfakianakis@gmail.com
 
 ![PHP](https://img.shields.io/badge/PHP-8.0+-777BB4?logo=php&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0+-4479A1?logo=mysql&logoColor=white)
 ![Bootstrap](https://img.shields.io/badge/Bootstrap-5.3-7952B3?logo=bootstrap&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-3.53.7-blue)
+![Version](https://img.shields.io/badge/version-3.63.8-blue)
 
 ---
 
@@ -175,7 +175,7 @@
 - PHP 8.0 or higher
 - MySQL 8.0 or MariaDB
 - Apache / Nginx (XAMPP recommended on Windows)
-- PHP extensions: `pdo_mysql`, `mbstring`, `openssl`, `zip` (optional, for exports)
+- PHP extensions: `pdo_mysql`, `mbstring`, `openssl`, `curl` (for push notifications), `zip` (optional, for exports)
 
 ---
 
@@ -258,7 +258,10 @@ Run via CLI: `php /path/to/volunteerops/cron_shift_reminders.php`
 
 ## Changelog
 
-### v3.53.7 — 2026-03-04 (Latest)
+### v3.63.8 - 2026-04-28 (Latest)
+- Harden PWA caching, push CSRF, private upload access, and push runtime guards
+
+### v3.53.7 — 2026-03-04
 - Swap sidebar nav links & layout adjustments
 
 ### v3.53.x — 2026-03-04

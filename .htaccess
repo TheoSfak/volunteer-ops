@@ -12,6 +12,12 @@
     Deny from all
 </Files>
 
+# Private uploads must be served only through authenticated PHP endpoints
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^uploads/(volunteer-docs|training/materials)/ - [F,L]
+</IfModule>
+
 # Block access to install.php after deployment
 # Uncomment the following lines after installation is complete:
 # <Files "install.php">

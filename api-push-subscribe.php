@@ -2,12 +2,14 @@
 /**
  * VolunteerOps - Push Subscription API
  * AJAX endpoint for managing push notification subscriptions
- * 
+ *
  * POST: Subscribe (save endpoint + keys)
  * DELETE: Unsubscribe (remove endpoint)
  */
 
 require_once __DIR__ . '/bootstrap.php';
+
+header('Content-Type: application/json');
 
 // Must be logged in
 if (!isLoggedIn()) {
@@ -16,11 +18,17 @@ if (!isLoggedIn()) {
     exit;
 }
 
-header('Content-Type: application/json');
-
 $userId = (int) getCurrentUserId();
 $method = $_SERVER['REQUEST_METHOD'];
-$input = json_decode(file_get_contents('php://input'), true);
+$input = json_decode(file_get_contents('php://input'), true) ?: [];
+
+$sessionToken = $_SESSION['csrf_token'] ?? '';
+$csrfToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($input['csrf_token'] ?? '');
+if ($sessionToken === '' || !hash_equals($sessionToken, (string)$csrfToken)) {
+    http_response_code(403);
+    echo json_encode(['error' => 'Invalid CSRF token']);
+    exit;
+}
 
 if ($method === 'POST' && ($_GET['action'] ?? '') === 'test') {
     // ── Send Test Push ──

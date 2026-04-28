@@ -27,9 +27,9 @@ function runSchemaMigrations(): void {
     }
 
     // ── Quick return if already up-to-date ───────────────────────────────────
-    // IMPORTANT: Update this number whenever you add a new migration!
+    // IMPORTANT: Update DB_SCHEMA_VERSION in config.php whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = 50;
+    $LATEST_MIGRATION_VERSION = defined('DB_SCHEMA_VERSION') ? DB_SCHEMA_VERSION : 50;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }

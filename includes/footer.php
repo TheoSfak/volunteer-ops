@@ -210,7 +210,6 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
             .then(function(reg) {
                 // Check for updates periodically
                 setInterval(function() { reg.update(); }, 60 * 60 * 1000); // hourly
-                
                 // New SW available — show update toast
                 reg.addEventListener('updatefound', function() {
                     var newWorker = reg.installing;

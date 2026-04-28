@@ -1,7 +1,7 @@
 <?php
 /**
  * VolunteerOps - VAPID Key Generator
- * Run once to generate and store VAPID keys for Web Push notifications. 
+ * Run once to generate and store VAPID keys for Web Push notifications.
  * Usage: Access via browser as admin or run from CLI.
  */
 
