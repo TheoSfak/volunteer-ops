@@ -29,7 +29,7 @@ function runSchemaMigrations(): void {
     // ── Quick return if already up-to-date ───────────────────────────────────
     // IMPORTANT: Update DB_SCHEMA_VERSION in config.php whenever you add a new migration!
     // This prevents PHP from building ~180KB of closures on every page load.
-    $LATEST_MIGRATION_VERSION = defined('DB_SCHEMA_VERSION') ? DB_SCHEMA_VERSION : 50;
+    $LATEST_MIGRATION_VERSION = defined('DB_SCHEMA_VERSION') ? DB_SCHEMA_VERSION : 51;
     if ($currentVersion >= $LATEST_MIGRATION_VERSION) {
         return;
     }
@@ -3499,6 +3499,74 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                 );
                 if (!$col) {
                     dbExecute("ALTER TABLE user_notification_preferences ADD COLUMN push_enabled TINYINT(1) NOT NULL DEFAULT 1 AFTER in_app_enabled");
+                }
+            },
+        ],
+
+        [
+            'version'     => 51,
+            'description' => 'Make default newsletter template email-client safe',
+            'up' => function () {
+                $year = date('Y');
+                $bodyHtml = '<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+</head>
+<body style="margin:0;padding:0;background:#eef1f6;font-family:Arial,Helvetica,sans-serif;">
+<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">&nbsp;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:#eef1f6;border-collapse:collapse;">
+  <tr>
+    <td align="center" style="padding:30px 12px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;border-collapse:collapse;background:#ffffff;">
+        <tr>
+          <td style="height:6px;line-height:6px;font-size:1px;background:#2980b9;">&nbsp;</td>
+        </tr>
+        <tr>
+          <td align="center" style="background:#0f3460;padding:38px 32px 30px;text-align:center;">
+            <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:0 auto 16px;border-collapse:collapse;">
+              <tr>
+                <td align="center" valign="middle" style="width:76px;height:76px;border-radius:38px;background:#ffffff;padding:10px;text-align:center;">
+                  {logo_url}
+                </td>
+              </tr>
+            </table>
+            <h1 style="margin:0;color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:26px;line-height:1.3;font-weight:700;letter-spacing:.4px;">{from_name}</h1>
+            <p style="margin:8px 0 0;color:#dbeafe;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;font-weight:400;letter-spacing:1px;text-transform:uppercase;">Newsletter</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="height:4px;line-height:4px;font-size:1px;background:#e74c3c;">&nbsp;</td>
+        </tr>
+        <tr>
+          <td style="background:#ffffff;padding:40px 36px;color:#2c3e50;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.8;">
+            {content}
+          </td>
+        </tr>
+        <tr>
+          <td align="center" style="background:#1a1a2e;padding:28px 32px;text-align:center;">
+            <p style="margin:0 0 6px;font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:#cbd5e1;">&copy; ' . $year . ' {from_name}</p>
+            <p style="margin:0 0 12px;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.5;color:#94a3b8;">You received this newsletter from VolunteerOps.</p>
+            <p style="margin:0;padding-top:12px;border-top:1px solid #334155;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.5;color:#64748b;">Powered by <span style="color:#e74c3c;">VolunteerOps</span></p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>';
+
+                $default = dbFetchOne("SELECT id FROM newsletter_templates WHERE is_default = 1 ORDER BY id LIMIT 1");
+                if ($default) {
+                    dbExecute("UPDATE newsletter_templates SET body_html = ?, updated_at = NOW() WHERE id = ?", [$bodyHtml, $default['id']]);
+                } else {
+                    dbInsert(
+                        "INSERT INTO newsletter_templates (name, body_html, is_default, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())",
+                        ['Email Safe Blue', $bodyHtml]
+                    );
                 }
             },
         ],
