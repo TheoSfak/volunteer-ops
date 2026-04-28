@@ -26,7 +26,8 @@ $allRoles     = [
     ROLE_DEPARTMENT_ADMIN   => 'Διαχειριστές Τμήματος',
     ROLE_SYSTEM_ADMIN       => 'Διαχειριστές Συστήματος',
 ];
-$nlTemplates = dbFetchAll("SELECT id, name, is_default FROM newsletter_templates ORDER BY is_default DESC, name");
+$nlTemplates = dbFetchAll("SELECT id, name, is_default FROM newsletter_templates ORDER BY is_default DESC, id ASC, name ASC");
+$defaultTemplateId = getDefaultNewsletterTemplateId();
 $nlPresets = [];
 $presetsTableExists = dbFetchOne("SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'newsletter_presets'");
 if ($presetsTableExists) {
@@ -200,8 +201,9 @@ $countUrl = 'newsletter-form.php?action=count_recipients';
                     <select class="form-select" name="template_id" id="templateSelect">
                         <?php
                         $savedTemplateId = $nl['template_id'] ?? null;
+                        $selectedTemplateId = $savedTemplateId ?: $defaultTemplateId;
                         foreach ($nlTemplates as $t):
-                            $selected = ($savedTemplateId ? ($savedTemplateId == $t['id']) : $t['is_default']) ? 'selected' : '';
+                            $selected = ((int)$selectedTemplateId === (int)$t['id']) ? 'selected' : '';
                         ?>
                         <option value="<?= $t['id'] ?>" <?= $selected ?>><?= h($t['name']) ?><?= $t['is_default'] ? ' ★' : '' ?></option>
                         <?php endforeach; ?>

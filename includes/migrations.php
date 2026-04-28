@@ -3571,6 +3571,90 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 52,
+            'description' => 'Normalize newsletter default template selection',
+            'up' => function () {
+                $fallbackBodyHtml = '<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+</head>
+<body style="margin:0;padding:0;background:#eef1f6;font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="width:100%;background:#eef1f6;border-collapse:collapse;">
+  <tr><td align="center" style="padding:30px 12px;">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;border-collapse:collapse;background:#ffffff;">
+      <tr><td style="height:6px;line-height:6px;font-size:1px;background:#2980b9;">&nbsp;</td></tr>
+      <tr><td align="center" style="background:#0f3460;padding:38px 32px 30px;text-align:center;">
+        <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:0 auto 16px;border-collapse:collapse;"><tr><td align="center" valign="middle" style="width:76px;height:76px;border-radius:38px;background:#ffffff;padding:10px;text-align:center;">{logo_url}</td></tr></table>
+        <h1 style="margin:0;color:#ffffff;font-size:26px;line-height:1.3;font-weight:700;letter-spacing:.4px;">{from_name}</h1>
+        <p style="margin:8px 0 0;color:#dbeafe;font-size:13px;line-height:1.5;letter-spacing:1px;text-transform:uppercase;">Newsletter</p>
+      </td></tr>
+      <tr><td style="height:4px;line-height:4px;font-size:1px;background:#e74c3c;">&nbsp;</td></tr>
+      <tr><td style="background:#ffffff;padding:40px 36px;color:#2c3e50;font-size:15px;line-height:1.8;">{content}</td></tr>
+      <tr><td align="center" style="background:#1a1a2e;padding:28px 32px;text-align:center;">
+        <p style="margin:0 0 6px;font-size:13px;line-height:1.5;color:#cbd5e1;">&copy; ' . date('Y') . ' {from_name}</p>
+        <p style="margin:0 0 12px;font-size:11px;line-height:1.5;color:#94a3b8;">You received this newsletter from VolunteerOps.</p>
+        <p style="margin:0;padding-top:12px;border-top:1px solid #334155;font-size:11px;line-height:1.5;color:#64748b;">Powered by <span style="color:#e74c3c;">VolunteerOps</span></p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>';
+
+                $oldDefaults = dbFetchAll("SELECT id FROM newsletter_templates WHERE is_default = 1 ORDER BY id ASC");
+                $oldDefaultIds = array_map('intval', array_column($oldDefaults, 'id'));
+
+                $blue = dbFetchOne(
+                    "SELECT id, body_html FROM newsletter_templates
+                     WHERE body_html LIKE '%background:#0f3460%' AND body_html LIKE '%{content}%'
+                     ORDER BY is_default DESC, id ASC LIMIT 1"
+                );
+
+                if ($blue) {
+                    $targetId = (int)$blue['id'];
+                    $bodyHtml = (string)$blue['body_html'];
+                } else {
+                    $targetId = (int)dbFetchValue("SELECT id FROM newsletter_templates WHERE is_default = 1 ORDER BY id ASC LIMIT 1");
+                    if ($targetId <= 0) {
+                        $targetId = (int)dbFetchValue("SELECT id FROM newsletter_templates ORDER BY id ASC LIMIT 1");
+                    }
+                    if ($targetId <= 0) {
+                        $targetId = dbInsert(
+                            "INSERT INTO newsletter_templates (name, body_html, is_default, created_at, updated_at) VALUES (?, ?, 1, NOW(), NOW())",
+                            ['Email Safe Blue', $fallbackBodyHtml]
+                        );
+                    }
+                    $bodyHtml = $fallbackBodyHtml;
+                }
+
+                dbExecute(
+                    "UPDATE newsletter_templates SET name = ?, body_html = ?, is_default = 1, updated_at = NOW() WHERE id = ?",
+                    ['Email Safe Blue', $bodyHtml, $targetId]
+                );
+                dbExecute("UPDATE newsletter_templates SET is_default = 0 WHERE id != ?", [$targetId]);
+
+                if (!empty($oldDefaultIds)) {
+                    $placeholders = implode(',', array_fill(0, count($oldDefaultIds), '?'));
+                    dbExecute(
+                        "UPDATE newsletters
+                         SET template_id = ?
+                         WHERE status = 'draft'
+                           AND (template_id IS NULL OR template_id IN ($placeholders))",
+                        array_merge([$targetId], $oldDefaultIds)
+                    );
+                } else {
+                    dbExecute(
+                        "UPDATE newsletters SET template_id = ? WHERE status = 'draft' AND template_id IS NULL",
+                        [$targetId]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
