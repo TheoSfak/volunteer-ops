@@ -387,7 +387,7 @@ if (isAdmin()) {
          LEFT JOIN shifts sh ON sh.mission_id = m.id
          WHERE {$availMissionsWhere}
          GROUP BY m.id
-         ORDER BY m.start_datetime ASC
+         ORDER BY m.start_datetime DESC, m.id DESC
          LIMIT 5",
         $availMissionsParams
     );
