@@ -194,30 +194,6 @@ $sendLog = dbFetchAll("
 ", [$id]);
 $failedCount = dbFetchValue("SELECT COUNT(*) FROM newsletter_sends WHERE newsletter_id=? AND status='failed'", [$id]);
 
-// ── Helper: wrap body in styled email envelope for display ──
-function wrapNewsletterBody(string $body, string $title, ?int $templateId = null): string {
-    $fromName = getSetting('smtp_from_name', 'VolunteerOps');
-
-    // Load template from newsletter_templates table
-    $tpl = null;
-    if ($templateId) {
-        $tpl = dbFetchOne("SELECT body_html FROM newsletter_templates WHERE id = ?", [$templateId]);
-    }
-    if (!$tpl) {
-        $tpl = dbFetchOne("SELECT body_html FROM newsletter_templates WHERE is_default = 1 LIMIT 1");
-    }
-
-    $templateBody = $tpl ? $tpl['body_html'] : '{content}';
-
-    // Replace logo placeholder
-    $appLogo = getSetting('app_logo', '');
-    $logoHtml = $appLogo ? '<img src="uploads/logos/' . h($appLogo) . '" alt="" style="max-height:50px;margin-bottom:10px;">' : '';
-
-    $templateBody = str_replace(['{from_name}', '{logo_url}'], [h($fromName), $logoHtml], $templateBody);
-
-    return str_replace('{content}', $body, $templateBody);
-}
-
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -447,34 +423,13 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<?php
-// Load template for JS preview
-$previewTpl = null;
-if (!empty($nl['template_id'])) {
-    $previewTpl = dbFetchOne("SELECT body_html FROM newsletter_templates WHERE id = ?", [(int)$nl['template_id']]);
-}
-if (!$previewTpl) {
-    $previewTpl = dbFetchOne("SELECT body_html FROM newsletter_templates WHERE is_default = 1 LIMIT 1");
-}
-$previewBody   = $previewTpl ? $previewTpl['body_html'] : '{content}';
-$previewLogo   = getSetting('app_logo', '');
-$previewLogoHtml = $previewLogo ? '<img src="uploads/logos/' . h($previewLogo) . '" alt="" style="max-height:50px;margin-bottom:10px;">' : '';
-?>
+<?php $previewHtml = wrapNewsletterBody($nl['body_html'], $nl['title'], (int)($nl['template_id'] ?? 0) ?: null); ?>
 
 <script>
-// Inject body preview into iframe using stored template
+// Inject exactly the same rendered HTML that the send path uses.
 (function() {
-    var body = <?= json_encode($nl['body_html']) ?>;
-    var fromName = <?= json_encode(getSetting('smtp_from_name', 'VolunteerOps')) ?>;
-    var logoHtml = <?= json_encode($previewLogoHtml) ?>;
-    var tplBody = <?= json_encode($previewBody) ?>;
-
-    var html = tplBody.replace(/\{from_name\}/g, fromName)
-                      .replace(/\{logo_url\}/g, logoHtml)
-                      .replace(/\{content\}/g, body);
-
     var frame = document.getElementById('previewFrame');
-    if (frame) { frame.srcdoc = html; }
+    if (frame) { frame.srcdoc = <?= json_encode($previewHtml) ?>; }
 })();
 </script>
 

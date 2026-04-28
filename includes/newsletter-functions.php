@@ -89,6 +89,63 @@ function replaceNewsletterTags(string $text, array $user, string $unsubscribeTok
 }
 
 /**
+ * Return an email-safe logo image for newsletter templates.
+ *
+ * Email clients cannot resolve relative image paths like uploads/logos/logo.png,
+ * so newsletters must use an absolute URL.
+ */
+function getNewsletterLogoHtml(): string {
+    $appLogo = trim((string)getSetting('app_logo', ''));
+    if ($appLogo === '') {
+        return '';
+    }
+
+    $baseUrl = defined('BASE_URL') ? rtrim(BASE_URL, '/') : '';
+    if ($baseUrl === '') {
+        return '';
+    }
+
+    $logoFile = rawurlencode(basename($appLogo));
+    $logoUrl = $baseUrl . '/uploads/logos/' . $logoFile;
+    $alt = defined('APP_NAME') ? APP_NAME : 'VolunteerOps';
+
+    return '<img src="' . h($logoUrl) . '" alt="' . h($alt) . '" width="48" '
+        . 'style="display:block;max-width:48px;max-height:48px;border:0;outline:none;text-decoration:none;">';
+}
+
+/**
+ * Wrap newsletter content in the selected visual email template.
+ *
+ * This is intentionally shared by preview, test-send, real-send and resend so
+ * the UI shows the same HTML that recipients receive.
+ */
+function wrapNewsletterBody(string $body, string $title, ?int $templateId = null): string {
+    $fromName = getSetting('smtp_from_name', 'VolunteerOps');
+
+    $tpl = null;
+    if ($templateId) {
+        $tpl = dbFetchOne("SELECT body_html FROM newsletter_templates WHERE id = ?", [$templateId]);
+    }
+    if (!$tpl) {
+        $tpl = dbFetchOne("SELECT body_html FROM newsletter_templates WHERE is_default = 1 LIMIT 1");
+    }
+
+    $templateBody = $tpl ? (string)$tpl['body_html'] : '{content}';
+    if (strpos($templateBody, '{content}') === false) {
+        $templateBody .= '{content}';
+    }
+
+    $replacements = [
+        '{from_name}' => h($fromName),
+        '{title}'     => h($title),
+        '{logo_url}'  => getNewsletterLogoHtml(),
+        '{content}'   => $body,
+    ];
+
+    return str_replace(array_keys($replacements), array_values($replacements), $templateBody);
+}
+
+/**
  * Generate a cryptographically secure unsubscribe token.
  */
 function generateUnsubscribeToken(): string {

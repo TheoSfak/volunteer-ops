@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.63.12');
-define('DB_SCHEMA_VERSION', 50);
+define('APP_VERSION', '3.63.13');
+define('DB_SCHEMA_VERSION', 51);
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
