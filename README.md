@@ -2,7 +2,7 @@
 
 **Σύστημα Διαχείρισης Εθελοντών** — Greek-language volunteer mission management system for rescue and civil protection organisations. Plain PHP/MySQL, no frameworks, deployable on any standard web host.
 
-**Version:** 3.63.8
+**Version:** 3.63.12
 **Author:** Theodore Sfakianakis
 **Email:** theodore.sfakianakis@gmail.com
 
@@ -10,7 +10,7 @@
 ![MySQL](https://img.shields.io/badge/MySQL-8.0+-4479A1?logo=mysql&logoColor=white)
 ![Bootstrap](https://img.shields.io/badge/Bootstrap-5.3-7952B3?logo=bootstrap&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Version](https://img.shields.io/badge/version-3.63.8-blue)
+![Version](https://img.shields.io/badge/version-3.63.12-blue)
 
 ---
 
@@ -258,7 +258,7 @@ Run via CLI: `php /path/to/volunteerops/cron_shift_reminders.php`
 
 ## Changelog
 
-### v3.63.8 - 2026-04-28 (Latest)
+### v3.63.12 - 2026-04-28 (Latest)
 - Harden PWA caching, push CSRF, private upload access, and push runtime guards
 
 ### v3.53.7 — 2026-03-04
