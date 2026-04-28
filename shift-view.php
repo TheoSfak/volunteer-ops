@@ -862,8 +862,10 @@ include __DIR__ . '/includes/header.php';
                                             <?= statusBadge($p['status'], 'participation') ?>
                                             <?php if ($p['attended']): ?>
                                                 <span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>Παρών</span>
-                                            <?php elseif (!empty($p['attendance_confirmed_at'])): ?>
+                                            <?php elseif (!empty($p['attendance_confirmed_at']) && (int)($p['attendance_confirmed_by'] ?? 0) === (int)$p['volunteer_id']): ?>
                                                 <span class="badge bg-info text-dark" title="QR check-in: <?= h(formatDateTime($p['attendance_confirmed_at'])) ?>"><i class="bi bi-qr-code me-1"></i>QR ✓</span>
+                                            <?php elseif (!empty($p['attendance_confirmed_at'])): ?>
+                                                <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Απών</span>
                                             <?php endif; ?>
                                         </div>
                                     </div>
@@ -907,10 +909,13 @@ include __DIR__ . '/includes/header.php';
                                     </div>
                                     <?php endif; ?>
 
-                                    <!-- QR check-in timestamp (visible to admin/leader) -->
+                                    <!-- Attendance confirmation timestamp (visible to admin/leader) -->
                                     <?php if ($canManage && !empty($p['attendance_confirmed_at'])): ?>
-                                    <div class="mt-2 small" style="color:#0dcaf0;">
-                                        <i class="bi bi-qr-code me-1"></i>QR check-in: <strong><?= h(formatDateTime($p['attendance_confirmed_at'])) ?></strong>
+                                    <?php $confirmedByVolunteer = (int)($p['attendance_confirmed_by'] ?? 0) === (int)$p['volunteer_id']; ?>
+                                    <div class="mt-2 small <?= $confirmedByVolunteer ? '' : 'text-muted' ?>" style="<?= $confirmedByVolunteer ? 'color:#0dcaf0;' : '' ?>">
+                                        <i class="bi <?= $confirmedByVolunteer ? 'bi-qr-code' : 'bi-clipboard-check' ?> me-1"></i>
+                                        <?= $confirmedByVolunteer ? 'QR check-in' : 'Έλεγχος παρουσίας' ?>:
+                                        <strong><?= h(formatDateTime($p['attendance_confirmed_at'])) ?></strong>
                                     </div>
                                     <?php endif; ?>
                                 </div>
