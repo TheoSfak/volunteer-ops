@@ -15,6 +15,138 @@ $yearEnd   = ($year + 1) . '-01-01';
 $currentMonth = date('Y-m');
 $previousMonth = date('Y-m', strtotime('-1 month'));
 
+if (isPost() && post('action') === 'bulk_complete_overdue') {
+    verifyCsrf();
+    requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+
+    $selectedMissionIds = array_values(array_unique(array_map('intval', post('mission_ids', []))));
+    $selectedMissionIds = array_values(array_filter($selectedMissionIds, fn($mid) => $mid > 0));
+    $markAttendance = post('mark_attendance') ? true : false;
+    $awardPoints = post('award_points') ? true : false;
+    $completeMissions = post('complete_missions') ? true : false;
+
+    if (empty($selectedMissionIds)) {
+        setFlash('warning', 'Επιλέξτε τουλάχιστον μία εκκρεμή αποστολή.');
+        redirect('dashboard.php');
+    }
+
+    $placeholders = implode(',', array_fill(0, count($selectedMissionIds), '?'));
+    $bulkParams = $selectedMissionIds;
+    $bulkParams[] = STATUS_OPEN;
+    $bulkParams[] = STATUS_CLOSED;
+    $deptSql = '';
+    if ($user['role'] === ROLE_DEPARTMENT_ADMIN && $user['department_id']) {
+        $deptSql = ' AND m.department_id = ?';
+        $bulkParams[] = $user['department_id'];
+    }
+
+    $bulkMissions = dbFetchAll(
+        "SELECT m.id, m.title, m.status
+         FROM missions m
+         WHERE m.id IN ($placeholders)
+           AND m.status IN (?, ?)
+           AND m.end_datetime < NOW()
+           AND m.deleted_at IS NULL
+           $deptSql",
+        $bulkParams
+    );
+
+    if (empty($bulkMissions)) {
+        setFlash('warning', 'Δεν βρέθηκαν έγκυρες εκκρεμείς αποστολές για μαζική ενέργεια.');
+        redirect('dashboard.php');
+    }
+
+    $attendanceRows = 0;
+    $pointsRows = 0;
+    $completedRows = 0;
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        foreach ($bulkMissions as $bulkMission) {
+            $missionId = (int)$bulkMission['id'];
+
+            if ($markAttendance) {
+                $attendanceRows += dbExecute(
+                    "UPDATE participation_requests pr
+                     JOIN shifts s ON s.id = pr.shift_id
+                     SET pr.attended = 1,
+                         pr.actual_hours = COALESCE(pr.actual_hours, ROUND(TIMESTAMPDIFF(MINUTE, s.start_time, s.end_time) / 60, 2)),
+                         pr.actual_start_time = COALESCE(pr.actual_start_time, TIME(s.start_time)),
+                         pr.actual_end_time = COALESCE(pr.actual_end_time, TIME(s.end_time)),
+                         pr.attendance_confirmed_at = NOW(),
+                         pr.attendance_confirmed_by = ?,
+                         pr.updated_at = NOW()
+                     WHERE s.mission_id = ?
+                       AND pr.status = ?",
+                    [$user['id'], $missionId, PARTICIPATION_APPROVED]
+                );
+                logAudit('bulk_mark_attendance', 'missions', $missionId);
+            }
+
+            if ($awardPoints && getSetting('points_enabled', '1') === '1') {
+                $toAward = dbFetchAll(
+                    "SELECT pr.id, pr.volunteer_id, pr.actual_hours, s.id AS shift_id, s.start_time, s.end_time
+                     FROM participation_requests pr
+                     JOIN shifts s ON s.id = pr.shift_id
+                     WHERE s.mission_id = ?
+                       AND pr.status = ?
+                       AND pr.attended = 1
+                       AND pr.points_awarded = 0",
+                    [$missionId, PARTICIPATION_APPROVED]
+                );
+
+                foreach ($toAward as $pr) {
+                    $hours = (float)($pr['actual_hours'] ?? 0);
+                    if ($hours <= 0) {
+                        $start = new DateTime($pr['start_time']);
+                        $end = new DateTime($pr['end_time']);
+                        $hours = max(0, ($end->getTimestamp() - $start->getTimestamp()) / 3600);
+                    }
+                    $points = (int)round($hours * POINTS_PER_HOUR);
+
+                    dbInsert(
+                        "INSERT INTO volunteer_points (user_id, points, reason, description, pointable_type, pointable_id, created_at)
+                         VALUES (?, ?, ?, ?, ?, ?, NOW())",
+                        [$pr['volunteer_id'], $points, 'SHIFT_COMPLETED', 'Βάρδια: ' . $bulkMission['title'], 'App\\Models\\Shift', $pr['shift_id']]
+                    );
+                    dbExecute(
+                        "UPDATE users SET total_points = total_points + ?, monthly_points = monthly_points + ? WHERE id = ?",
+                        [$points, $points, $pr['volunteer_id']]
+                    );
+                    dbExecute("UPDATE participation_requests SET points_awarded = 1, updated_at = NOW() WHERE id = ?", [$pr['id']]);
+                    $pointsRows++;
+                }
+                logAudit('bulk_award_points', 'missions', $missionId, null, ['awarded' => count($toAward)]);
+            }
+
+            if ($completeMissions) {
+                dbExecute(
+                    "UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?",
+                    [STATUS_COMPLETED, $missionId]
+                );
+                logAudit('bulk_complete_overdue', 'missions', $missionId, null, ['old_status' => $bulkMission['status']]);
+                $completedRows++;
+            }
+        }
+
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        setFlash('error', 'Η μαζική ενέργεια απέτυχε: ' . $e->getMessage());
+        redirect('dashboard.php');
+    }
+
+    setFlash(
+        'success',
+        'Μαζική ενέργεια ολοκληρώθηκε: ' .
+        count($bulkMissions) . ' αποστολές επεξεργάστηκαν, ' .
+        $attendanceRows . ' παρουσίες ενημερώθηκαν, ' .
+        $pointsRows . ' απονομές πόντων, ' .
+        $completedRows . ' αποστολές ολοκληρώθηκαν.'
+    );
+    redirect('dashboard.php');
+}
+
 // Get statistics based on role
 if (isAdmin()) {
     // Admin statistics
@@ -167,7 +299,21 @@ if (isAdmin()) {
     
     // Overdue missions (past end date but still OPEN or CLOSED)
     $overdueMissions = dbFetchAll(
-        "SELECT m.*, d.name as department_name
+        "SELECT m.*, d.name as department_name,
+                (SELECT COUNT(*) FROM shifts s WHERE s.mission_id = m.id) AS shift_count,
+                (SELECT COALESCE(SUM(s.max_volunteers), 0) FROM shifts s WHERE s.mission_id = m.id) AS capacity_total,
+                (SELECT COUNT(*)
+                 FROM participation_requests pr
+                 JOIN shifts s ON s.id = pr.shift_id
+                 WHERE s.mission_id = m.id AND pr.status = ?) AS approved_count,
+                (SELECT COUNT(*)
+                 FROM participation_requests pr
+                 JOIN shifts s ON s.id = pr.shift_id
+                 WHERE s.mission_id = m.id AND pr.status = ? AND pr.attended = 1) AS attended_count,
+                (SELECT COUNT(*)
+                 FROM participation_requests pr
+                 JOIN shifts s ON s.id = pr.shift_id
+                 WHERE s.mission_id = m.id AND pr.status = ? AND pr.attendance_confirmed_at IS NULL) AS unconfirmed_count
          FROM missions m
          LEFT JOIN departments d ON m.department_id = d.id
          WHERE m.status IN (?,?)
@@ -175,7 +321,7 @@ if (isAdmin()) {
            AND m.deleted_at IS NULL
            $departmentFilter
          ORDER BY m.end_datetime ASC",
-        array_merge([STATUS_OPEN, STATUS_CLOSED], $params)
+        array_merge([PARTICIPATION_APPROVED, PARTICIPATION_APPROVED, PARTICIPATION_APPROVED, STATUS_OPEN, STATUS_CLOSED], $params)
     );
     
     $pendingRequests = dbFetchAll(
@@ -653,6 +799,8 @@ $randomQuote = $quotes[array_rand($quotes)];
     </div>
 </div>
 
+<?= showFlash() ?>
+
 <?php if (!empty($liveExams)): ?>
     <?php foreach ($liveExams as $liveExam): ?>
         <?php
@@ -862,13 +1010,74 @@ $randomQuote = $quotes[array_rand($quotes)];
         <i class="bi bi-exclamation-triangle-fill fs-4 text-danger me-2"></i>
         <strong class="fs-5">Εκκρεμείς Αποστολές (<?= count($overdueMissions) ?>)</strong>
     </div>
-    <p class="mb-2 text-danger">Οι παρακάτω αποστολές έχουν λήξει αλλά δεν έχουν ολοκληρωθεί. Παρακαλώ κλείστε/ολοκληρώστε τες.</p>
+    <p class="mb-3 text-danger">Οι παρακάτω αποστολές έχουν λήξει αλλά δεν έχουν ολοκληρωθεί. Μπορείτε να ενημερώσετε παρουσίες και να τις ολοκληρώσετε μαζικά.</p>
+    <form method="post" id="bulkOverdueForm">
+        <?= csrfField() ?>
+        <input type="hidden" name="action" value="bulk_complete_overdue">
+
+        <div class="bg-white border rounded p-3 mb-3">
+            <div class="row g-3 align-items-center">
+                <div class="col-lg-5">
+                    <div class="d-flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="toggleOverdueSelection(true)">
+                            <i class="bi bi-check2-square me-1"></i>Επιλογή όλων
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleOverdueSelection(false)">
+                            <i class="bi bi-square me-1"></i>Καμία επιλογή
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-success" onclick="selectFullyCoveredMissions()">
+                            <i class="bi bi-shield-check me-1"></i>Πλήρης κάλυψη
+                        </button>
+                    </div>
+                    <small class="text-muted d-block mt-2">Η “Πλήρης κάλυψη” επιλέγει αποστολές όπου οι εγκεκριμένοι καλύπτουν όλη τη χωρητικότητα.</small>
+                </div>
+                <div class="col-lg-4">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="mark_attendance" id="bulkMarkAttendance" value="1" checked>
+                        <label class="form-check-label" for="bulkMarkAttendance">Όλοι οι εγκεκριμένοι ως παρόντες</label>
+                    </div>
+                    <?php if (getSetting('points_enabled', '1') === '1'): ?>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="award_points" id="bulkAwardPoints" value="1" checked>
+                        <label class="form-check-label" for="bulkAwardPoints">Απονομή πόντων όπου δεν έχουν δοθεί</label>
+                    </div>
+                    <?php endif; ?>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="complete_missions" id="bulkCompleteMissions" value="1" checked>
+                        <label class="form-check-label" for="bulkCompleteMissions">Ολοκλήρωση επιλεγμένων αποστολών</label>
+                    </div>
+                </div>
+                <div class="col-lg-3 text-lg-end">
+                    <button type="submit" class="btn btn-danger"
+                            onclick="return confirmBulkOverdueAction()">
+                        <i class="bi bi-lightning-charge-fill me-1"></i>Μαζική ολοκλήρωση
+                    </button>
+                </div>
+            </div>
+        </div>
+
     <div class="list-group">
         <?php foreach ($overdueMissions as $om): ?>
-        <a href="mission-view.php?id=<?= $om['id'] ?>" class="list-group-item list-group-item-action list-group-item-danger d-flex justify-content-between align-items-center">
-            <div>
-                <i class="bi bi-flag-fill me-1"></i>
-                <strong><?= h($om['title']) ?></strong>
+        <?php
+            $capacity = (int)($om['capacity_total'] ?? 0);
+            $approved = (int)($om['approved_count'] ?? 0);
+            $attended = (int)($om['attended_count'] ?? 0);
+            $coveragePct = $capacity > 0 ? min(100, round(($approved / $capacity) * 100)) : 0;
+            $fullyCovered = $capacity > 0 && $approved >= $capacity;
+        ?>
+        <div class="list-group-item list-group-item-danger">
+            <div class="d-flex align-items-start gap-3">
+                <div class="pt-1">
+                    <input class="form-check-input overdue-mission-check" type="checkbox"
+                           name="mission_ids[]" value="<?= $om['id'] ?>"
+                           data-fully-covered="<?= $fullyCovered ? '1' : '0' ?>">
+                </div>
+                <div class="flex-grow-1">
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <i class="bi bi-flag-fill"></i>
+                        <strong><?= h($om['title']) ?></strong>
+                        <?= statusBadge($om['status']) ?>
+                    </div>
                 <br>
                 <small>
                     <?= h($om['department_name'] ?? '-') ?> &middot; 
@@ -884,13 +1093,41 @@ $randomQuote = $quotes[array_rand($quotes)];
                     ?>
                     &middot; <strong class="text-danger">πριν <?= h($et) ?></strong>
                 </small>
+                    <div class="row g-2 mt-2">
+                        <div class="col-sm-4">
+                            <span class="badge bg-secondary"><?= (int)$om['shift_count'] ?> βάρδιες</span>
+                            <span class="badge bg-primary"><?= $approved ?> εγκεκριμένοι</span>
+                        </div>
+                        <div class="col-sm-4">
+                            <span class="badge bg-success"><?= $attended ?> παρόντες</span>
+                            <?php if ((int)$om['unconfirmed_count'] > 0): ?>
+                                <span class="badge bg-warning text-dark"><?= (int)$om['unconfirmed_count'] ?> χωρίς επιβεβαίωση</span>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-sm-4">
+                            <div class="d-flex align-items-center gap-2">
+                                <small class="text-muted text-nowrap">Κάλυψη <?= $approved ?>/<?= $capacity ?></small>
+                                <div class="progress flex-grow-1" style="height:8px;min-width:90px;">
+                                    <div class="progress-bar bg-<?= $fullyCovered ? 'success' : 'warning' ?>"
+                                         style="width:<?= $coveragePct ?>%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
             </div>
-            <div>
-                <?= statusBadge($om['status']) ?>
+                <div class="d-grid gap-1" style="min-width:160px;">
+                    <a href="attendance.php?mission_id=<?= $om['id'] ?>" class="btn btn-sm btn-info">
+                        <i class="bi bi-clipboard-check me-1"></i>Παρουσίες
+                    </a>
+                    <a href="mission-view.php?id=<?= $om['id'] ?>" class="btn btn-sm btn-outline-danger">
+                        <i class="bi bi-eye me-1"></i>Προβολή
+                    </a>
+                </div>
             </div>
-        </a>
+        </div>
         <?php endforeach; ?>
     </div>
+    </form>
 </div>
 <?php endif; ?>
 
@@ -1483,6 +1720,41 @@ document.getElementById('saveCustomizationBtn')?.addEventListener('click', funct
     document.body.appendChild(alert);
     setTimeout(() => alert.remove(), 3000);
 });
+
+function toggleOverdueSelection(checked) {
+    document.querySelectorAll('.overdue-mission-check').forEach(function(cb) {
+        cb.checked = checked;
+    });
+}
+
+function selectFullyCoveredMissions() {
+    document.querySelectorAll('.overdue-mission-check').forEach(function(cb) {
+        cb.checked = cb.dataset.fullyCovered === '1';
+    });
+}
+
+function confirmBulkOverdueAction() {
+    var selected = document.querySelectorAll('.overdue-mission-check:checked').length;
+    if (!selected) {
+        alert('Επιλέξτε τουλάχιστον μία εκκρεμή αποστολή.');
+        return false;
+    }
+
+    var markAttendance = document.getElementById('bulkMarkAttendance')?.checked;
+    var awardPoints = document.getElementById('bulkAwardPoints')?.checked;
+    var completeMissions = document.getElementById('bulkCompleteMissions')?.checked;
+    if (!markAttendance && !awardPoints && !completeMissions) {
+        alert('Επιλέξτε τουλάχιστον μία μαζική ενέργεια.');
+        return false;
+    }
+
+    var parts = [];
+    if (markAttendance) parts.push('να σημειωθούν παρόντες όλοι οι εγκεκριμένοι');
+    if (awardPoints) parts.push('να απονεμηθούν πόντοι όπου δεν έχουν δοθεί');
+    if (completeMissions) parts.push('να ολοκληρωθούν οι αποστολές');
+
+    return confirm('Θα εφαρμοστεί μαζική ενέργεια σε ' + selected + ' αποστολές: ' + parts.join(', ') + '.\n\nΣυνέχεια;');
+}
 
 // Reset layout
 document.getElementById('resetLayoutBtn')?.addEventListener('click', function() {
