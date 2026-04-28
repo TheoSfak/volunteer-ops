@@ -258,7 +258,10 @@ Run via CLI: `php /path/to/volunteerops/cron_shift_reminders.php`
 
 ## Changelog
 
-### v3.63.22 - 2026-04-28 (Latest)
+### v3.63.23 - 2026-04-28 (Latest)
+- Rename shelf inventory quantity labels to item number
+
+### v3.63.22 - 2026-04-28
 - Add seminar type dropdown to citizen registration, list, search, and CSV export
 
 ### v3.63.21 - 2026-04-28
