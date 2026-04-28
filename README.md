@@ -258,7 +258,10 @@ Run via CLI: `php /path/to/volunteerops/cron_shift_reminders.php`
 
 ## Changelog
 
-### v3.63.23 - 2026-04-28 (Latest)
+### v3.63.24 - 2026-04-28 (Latest)
+- Add AFM field to volunteer personal details, import, and export
+
+### v3.63.23 - 2026-04-28
 - Rename shelf inventory quantity labels to item number
 
 ### v3.63.22 - 2026-04-28

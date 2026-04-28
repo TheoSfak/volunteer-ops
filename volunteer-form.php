@@ -54,6 +54,7 @@ if (isPost()) {
         'is_active' => isset($_POST['is_active']) ? 1 : 0,
         'position_id' => post('position_id') ?: null,
         'id_card' => post('id_card') ?: null,
+        'afm' => post('afm') ?: null,
         'amka' => post('amka') ?: null,
         'driving_license' => post('driving_license') ?: null,
         'vehicle_plate' => post('vehicle_plate') ?: null,
@@ -117,7 +118,7 @@ if (isPost()) {
                 "UPDATE users SET 
                  name = ?, email = ?, phone = ?, role = ?, department_id = ?, warehouse_id = ?, is_active = ?,
                  volunteer_type = ?, cohort_year = ?, position_id = ?,
-                 id_card = ?, amka = ?, driving_license = ?, vehicle_plate = ?,
+                 id_card = ?, afm = ?, amka = ?, driving_license = ?, vehicle_plate = ?,
                  pants_size = ?, shirt_size = ?, blouse_size = ?, fleece_size = ?,
                  registry_epidrasis = ?, registry_ggpp = ?, updated_at = NOW()
                  WHERE id = ?",
@@ -125,7 +126,7 @@ if (isPost()) {
                     $data['name'], $data['email'], $data['phone'],
                     $data['role'], $data['department_id'], $data['warehouse_id'], $data['is_active'],
                     $volunteerType, $cohortYear, $data['position_id'],
-                    $data['id_card'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
+                    $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
                     $data['registry_epidrasis'], $data['registry_ggpp'], $id
                 ]
@@ -146,14 +147,14 @@ if (isPost()) {
             $id = dbInsert(
                 "INSERT INTO users 
                  (name, email, password, phone, role, department_id, warehouse_id, is_active, volunteer_type, cohort_year, position_id,
-                  id_card, amka, driving_license, vehicle_plate, pants_size, shirt_size, blouse_size, fleece_size,
+                  id_card, afm, amka, driving_license, vehicle_plate, pants_size, shirt_size, blouse_size, fleece_size,
                   registry_epidrasis, registry_ggpp, total_points, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                 [
                     $data['name'], $data['email'], password_hash($password, PASSWORD_DEFAULT),
                     $data['phone'], $data['role'], $data['department_id'], $data['warehouse_id'], $data['is_active'],
                     $volunteerType, $cohortYear, $data['position_id'],
-                    $data['id_card'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
+                    $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
                     $data['registry_epidrasis'], $data['registry_ggpp']
                 ]
@@ -220,6 +221,7 @@ $form = $volunteer ?: [
     'cohort_year' => null,
     'position_id' => null,
     'id_card' => '',
+    'afm' => '',
     'amka' => '',
     'driving_license' => '',
     'vehicle_plate' => '',
@@ -379,6 +381,13 @@ include __DIR__ . '/includes/header.php';
                     <label class="form-label">Ταυτότητα</label>
                     <input type="text" class="form-control" name="id_card" value="<?= h($form['id_card'] ?? '') ?>" placeholder="Αριθμός Ταυτότητας">
                 </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">ΑΦΜ</label>
+                    <input type="text" class="form-control" name="afm" value="<?= h($form['afm'] ?? '') ?>" placeholder="9 ψηφία" maxlength="9" inputmode="numeric">
+                </div>
+            </div>
+
+            <div class="row">
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Α.Μ.Κ.Α.</label>
                     <input type="text" class="form-control" name="amka" value="<?= h($form['amka'] ?? '') ?>" placeholder="11 ψηφία" maxlength="11">
