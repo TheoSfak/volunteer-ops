@@ -62,7 +62,7 @@ if ($user['role'] === ROLE_DEPARTMENT_ADMIN) {
 }
 
 $whereClause = implode(' AND ', $where);
-$volunteerSurnameOrder = "LOWER(TRIM(SUBSTRING_INDEX(TRIM(u.name), ' ', -1)))";
+$volunteerSurnameOrder = "LOWER(TRIM(SUBSTRING_INDEX(TRIM(u.name), ' ', 1)))";
 $volunteerNameOrder = "LOWER(TRIM(u.name))";
 
 // Count total
@@ -247,7 +247,7 @@ if (isSystemAdmin()) {
          FROM users u
          LEFT JOIN departments d ON u.department_id = d.id
          WHERE u.approval_status = ? AND u.email_verified_at IS NOT NULL AND u.deleted_at IS NULL
-         ORDER BY LOWER(TRIM(SUBSTRING_INDEX(TRIM(u.name), ' ', -1))) ASC, LOWER(TRIM(u.name)) ASC, u.id ASC",
+         ORDER BY LOWER(TRIM(SUBSTRING_INDEX(TRIM(u.name), ' ', 1))) ASC, LOWER(TRIM(u.name)) ASC, u.id ASC",
         [APPROVAL_PENDING]
     );
 }
