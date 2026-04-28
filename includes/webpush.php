@@ -76,6 +76,26 @@ function sendPushToAll(string $title, string $body, array $extraData = []): int 
  * @return true|int|false true on success, HTTP status code on failure, false on error
  */
 function sendWebPush(string $endpoint, string $userPublicKey, string $userAuthToken, string $payload) {
+    $requiredFunctions = [
+        'curl_init',
+        'curl_setopt_array',
+        'curl_exec',
+        'curl_getinfo',
+        'curl_close',
+        'openssl_pkey_new',
+        'openssl_pkey_get_details',
+        'openssl_pkey_get_public',
+        'openssl_pkey_derive',
+        'openssl_encrypt',
+        'openssl_sign',
+    ];
+    foreach ($requiredFunctions as $functionName) {
+        if (!function_exists($functionName)) {
+            error_log('WebPush unavailable: missing PHP function ' . $functionName);
+            return false;
+        }
+    }
+
     $vapidPublicKey  = getSetting('vapid_public_key', '');
     $vapidPrivateKey = getSetting('vapid_private_key', '');
     $vapidContact    = getSetting('vapid_contact', 'mailto:admin@volunteerops.gr');
@@ -85,13 +105,13 @@ function sendWebPush(string $endpoint, string $userPublicKey, string $userAuthTo
     }
 
     try {
-        //  Decode keys 
+        // Decode keys
         $userPubKeyBin = base64UrlDecode($userPublicKey);
         $userAuthBin   = base64UrlDecode($userAuthToken);
         $serverPubBin  = base64UrlDecode($vapidPublicKey);
         $serverPrivBin = base64UrlDecode($vapidPrivateKey);
 
-        //  Generate ephemeral ECDH key pair 
+        // Generate ephemeral ECDH key pair
         $localKey = openssl_pkey_new([
             'curve_name'       => 'prime256v1',
             'private_key_type' => OPENSSL_KEYTYPE_EC,
@@ -104,7 +124,7 @@ function sendWebPush(string $endpoint, string $userPublicKey, string $userAuthTo
         $y = str_pad($localDetails['ec']['y'], 32, "\x00", STR_PAD_LEFT);
         $localPubRaw = "\x04" . $x . $y; // 65-byte uncompressed EC point
 
-        //  ECDH shared secret 
+        // ECDH shared secret
         // Correct order: openssl_pkey_derive(peer_pub_key, our_priv_key, keylen)
         $userPubPem = makeEcPublicPem($userPubKeyBin);
         $userPubKey = openssl_pkey_get_public($userPubPem);
@@ -113,20 +133,20 @@ function sendWebPush(string $endpoint, string $userPublicKey, string $userAuthTo
         $sharedSecret = openssl_pkey_derive($userPubKey, $localKey, 32);
         if (!$sharedSecret) throw new \Exception('ECDH key derivation failed');
 
-        //  WebPush IKM derivation (RFC 8291 3.3) 
+        // WebPush IKM derivation (RFC 8291 3.3)
         // IKM = HKDF(salt=auth_secret, IKM=ecdh_secret, info="WebPush: info\x00"+ua_pub+as_pub, L=32)
         $ikmInfo = "WebPush: info\x00" . $userPubKeyBin . $localPubRaw;
         $prk1 = hash_hmac('sha256', $sharedSecret, $userAuthBin, true);             // HKDF-Extract
         $ikm  = substr(hash_hmac('sha256', $ikmInfo . "\x01", $prk1, true), 0, 32); // HKDF-Expand T(1)
 
-        //  Derive CEK and Nonce (RFC 8188 2.2) 
+        // Derive CEK and Nonce (RFC 8188 2.2)
         $salt  = random_bytes(16);
         $prk2  = hash_hmac('sha256', $ikm, $salt, true); // HKDF-Extract(salt=random_salt, IKM=ikm)
 
         $cek   = substr(hash_hmac('sha256', "Content-Encoding: aes128gcm\x00\x01", $prk2, true), 0, 16);
         $nonce = substr(hash_hmac('sha256', "Content-Encoding: nonce\x00\x01",      $prk2, true), 0, 12);
 
-        //  Encrypt payload (aes128gcm: append 0x02 record delimiter for last record) 
+        // Encrypt payload (aes128gcm: append 0x02 record delimiter for last record)
         $tag = '';
         $encrypted = openssl_encrypt(
             $payload . "\x02",
@@ -141,19 +161,19 @@ function sendWebPush(string $endpoint, string $userPublicKey, string $userAuthTo
         if ($encrypted === false) throw new \Exception('AES-GCM encryption failed');
         $ciphertext = $encrypted . $tag;
 
-        //  Build aes128gcm body (RFC 8188 2.1) 
+        // Build aes128gcm body (RFC 8188 2.1)
         $body = $salt           // 16 bytes: random salt
               . pack('N', 4096) // 4 bytes:  record size (big-endian uint32)
               . chr(65)         // 1 byte:   keyid length (65-byte uncompressed P-256 point)
               . $localPubRaw    // 65 bytes: ephemeral server public key
               . $ciphertext;    // n bytes:  ciphertext + 16-byte GCM auth tag
 
-        //  VAPID JWT (RFC 8292) 
+        // VAPID JWT (RFC 8292)
         $audience = parse_url($endpoint, PHP_URL_SCHEME) . '://' . parse_url($endpoint, PHP_URL_HOST);
         $jwt = createVapidJwt($audience, $vapidContact, $serverPubBin, $serverPrivBin);
         $vapidHeader = 'vapid t=' . $jwt . ', k=' . $vapidPublicKey;
 
-        //  Send via cURL 
+        // Send via cURL
         $headers = [
             'Content-Type: application/octet-stream',
             'Content-Encoding: aes128gcm',
@@ -185,13 +205,13 @@ function sendWebPush(string $endpoint, string $userPublicKey, string $userAuthTo
         error_log("WebPush: HTTP $httpCode  " . substr($endpoint, 0, 60) . "  $curlErr  $response");
         return $httpCode;
 
-    } catch (\Exception $e) {
+    } catch (\Throwable $e) {
         error_log('WebPush error: ' . $e->getMessage());
         return false;
     }
 }
 
-//  Helper functions 
+// Helper functions
 
 function base64UrlDecode(string $input): string {
     return base64_decode(strtr($input, '-_', '+/') . str_repeat('=', (4 - strlen($input) % 4) % 4));

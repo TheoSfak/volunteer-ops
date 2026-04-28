@@ -552,7 +552,7 @@ function sendNotification(int $userId, string $title, string $message, string $t
     if ($sendPush) {
         try {
             sendPushToUser($userId, $title, $message);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             // Push failure should never block the main flow
         }
     }
@@ -602,7 +602,7 @@ function sendBulkNotifications(array $userIds, string $title, string $message, s
     foreach ($pushIds as $uid) {
         try {
             sendPushToUser((int)$uid, $title, $message);
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             // Push failure should never block the main flow
         }
     }

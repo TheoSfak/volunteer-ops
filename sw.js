@@ -3,24 +3,22 @@
  * Handles caching, offline fallback, and push notifications
  */
 
-const CACHE_VERSION = 'vo-v3.63.7';
+const CACHE_VERSION = 'vo-v3.63.8';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime';
 
-// Static assets to pre-cache on install
+// Keep install resilient: only precache local assets that are required offline.
 const PRECACHE_URLS = [
-    './offline.html',
-    'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css',
-    'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css',
-    'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js',
-    'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap'
+    './offline.html'
 ];
 
 // ── INSTALL ─────────────────────────────────────────────────────────────────
 self.addEventListener('install', event => {
     event.waitUntil(
         caches.open(STATIC_CACHE)
-            .then(cache => cache.addAll(PRECACHE_URLS))
+            .then(cache => Promise.all(
+                PRECACHE_URLS.map(url => cache.add(url).catch(() => null))
+            ))
             .then(() => self.skipWaiting())
     );
 });
@@ -53,7 +51,7 @@ self.addEventListener('fetch', event => {
         event.respondWith(
             caches.match(request).then(cached => {
                 const fetchPromise = fetch(request).then(response => {
-                    if (response.ok) {
+                    if (response.ok && response.type !== 'opaque') {
                         const clone = response.clone();
                         caches.open(RUNTIME_CACHE).then(cache => cache.put(request, clone));
                     }
@@ -65,23 +63,11 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // PHP pages: network-first with offline fallback
+    // PHP pages contain authenticated/private content. Never cache them.
     if (url.pathname.endsWith('.php') || url.pathname.endsWith('/')) {
         event.respondWith(
             fetch(request)
-                .then(response => {
-                    // Cache successful page responses
-                    if (response.ok && response.status === 200) {
-                        const clone = response.clone();
-                        caches.open(RUNTIME_CACHE).then(cache => cache.put(request, clone));
-                    }
-                    return response;
-                })
-                .catch(() => {
-                    return caches.match(request).then(cached => {
-                        return cached || caches.match('./offline.html');
-                    });
-                })
+                .catch(() => caches.match('./offline.html'))
         );
         return;
     }

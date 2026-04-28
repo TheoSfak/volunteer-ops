@@ -34,6 +34,9 @@ if (isLoggedIn()) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <?php if (isLoggedIn()): ?>
+    <meta name="csrf-token" content="<?= h(csrfToken()) ?>">
+    <?php endif; ?>
     <title><?= h($pageTitle ?? $appName) ?> - <?= h($appName) ?></title>
     
     <!-- PWA -->
@@ -43,7 +46,7 @@ if (isLoggedIn()) {
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="<?= h($appName) ?>">
     <link rel="apple-touch-icon" href="<?= rtrim(BASE_URL, '/') ?>/assets/icons/icon-192.png">
-    
+
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Bootstrap Icons -->

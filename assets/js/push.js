@@ -121,6 +121,7 @@ var VoPush = (function() {
      * Send subscription data to server
      */
     function sendToServer(subscription, method) {
+        var csrfToken = getCsrfToken();
         var body = {
             endpoint: subscription.endpoint,
             keys: {
@@ -131,8 +132,11 @@ var VoPush = (function() {
 
         return fetch(baseUrl + '/api-push-subscribe.php', {
             method: method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(method === 'DELETE' ? { endpoint: subscription.endpoint } : body),
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify(method === 'DELETE' ? { endpoint: subscription.endpoint, csrf_token: csrfToken } : Object.assign(body, { csrf_token: csrfToken })),
             credentials: 'same-origin'
         }).then(function(response) {
             if (!response.ok) {
@@ -148,14 +152,23 @@ var VoPush = (function() {
      * Send test push notification
      */
     function sendTest() {
+        var csrfToken = getCsrfToken();
         return fetch(baseUrl + '/api-push-subscribe.php?action=test', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ test: true }),
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ test: true, csrf_token: csrfToken }),
             credentials: 'same-origin'
         }).then(function(response) {
             return response.json();
         });
+    }
+
+    function getCsrfToken() {
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
     }
 
     /**
