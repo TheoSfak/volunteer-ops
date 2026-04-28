@@ -62,6 +62,8 @@ if ($user['role'] === ROLE_DEPARTMENT_ADMIN) {
 }
 
 $whereClause = implode(' AND ', $where);
+$volunteerSurnameOrder = "LOWER(TRIM(SUBSTRING_INDEX(TRIM(u.name), ' ', -1)))";
+$volunteerNameOrder = "LOWER(TRIM(u.name))";
 
 // Count total
 $total = dbFetchValue("SELECT COUNT(*) FROM users u $skillJoin WHERE $whereClause", $params);
@@ -87,7 +89,7 @@ $volunteers = dbFetchAll(
          GROUP BY volunteer_id
      ) pr_stats ON u.id = pr_stats.volunteer_id
      WHERE $whereClause
-     ORDER BY u.cohort_year DESC, u.name ASC
+     ORDER BY {$volunteerSurnameOrder} ASC, {$volunteerNameOrder} ASC, u.id ASC
      LIMIT {$pagination['offset']}, {$pagination['per_page']}",
     array_merge([PARTICIPATION_APPROVED], $params)
 );
@@ -245,7 +247,7 @@ if (isSystemAdmin()) {
          FROM users u
          LEFT JOIN departments d ON u.department_id = d.id
          WHERE u.approval_status = ? AND u.email_verified_at IS NOT NULL AND u.deleted_at IS NULL
-         ORDER BY u.created_at ASC",
+         ORDER BY LOWER(TRIM(SUBSTRING_INDEX(TRIM(u.name), ' ', -1))) ASC, LOWER(TRIM(u.name)) ASC, u.id ASC",
         [APPROVAL_PENDING]
     );
 }

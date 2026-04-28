@@ -182,7 +182,7 @@ function exportVolunteersToCsv($filters = []) {
             LEFT JOIN departments wh ON u.warehouse_id   = wh.id
             LEFT JOIN volunteer_profiles vp ON vp.user_id = u.id
             WHERE " . implode(' AND ', $where) . "
-            ORDER BY u.name";
+            ORDER BY LOWER(TRIM(SUBSTRING_INDEX(TRIM(u.name), ' ', -1))) ASC, LOWER(TRIM(u.name)) ASC, u.id ASC";
 
     $volunteers = dbFetchAll($sql, $params);
 

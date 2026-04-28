@@ -235,7 +235,7 @@ if (get('export') === 'csv') {
     if (get('payment', '') !== '') { $expWhere[] = "payment_done = ?"; $expParams[] = (int) get('payment'); }
     if (get('completed', '') !== '') { $expWhere[] = "completed = ?"; $expParams[] = (int) get('completed'); }
     $expWhereClause = implode(' AND ', $expWhere);
-    $rows = dbFetchAll("SELECT * FROM citizens WHERE $expWhereClause ORDER BY last_name_gr, first_name_gr", $expParams);
+    $rows = dbFetchAll("SELECT * FROM citizens WHERE $expWhereClause ORDER BY last_name_gr ASC, first_name_gr ASC, id ASC", $expParams);
 
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="citizens_' . date('Y-m-d_His') . '.csv"');
@@ -298,7 +298,7 @@ $total = dbFetchValue("SELECT COUNT(*) FROM citizens WHERE $whereClause", $param
 $pagination = paginate($total, $page, $perPage);
 
 $citizens = dbFetchAll(
-    "SELECT * FROM citizens WHERE $whereClause ORDER BY last_name_gr, first_name_gr LIMIT ? OFFSET ?",
+    "SELECT * FROM citizens WHERE $whereClause ORDER BY last_name_gr ASC, first_name_gr ASC, id ASC LIMIT ? OFFSET ?",
     array_merge($params, [$pagination['per_page'], $pagination['offset']])
 );
 
