@@ -29,6 +29,50 @@ if (!$mission) {
 $pageTitle = 'Διαχείριση Παρουσιών - ' . $mission['title'];
 $user = getCurrentUser();
 
+function reverseShiftPointsForParticipation(array $participation): void {
+    if (empty($participation['points_awarded'])) {
+        return;
+    }
+
+    $pointableType = 'App\\Models\\Shift';
+    $pointSums = dbFetchOne(
+        "SELECT
+            COALESCE(SUM(points), 0) AS total_points,
+            COALESCE(SUM(CASE WHEN created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01') THEN points ELSE 0 END), 0) AS monthly_points
+         FROM volunteer_points
+         WHERE user_id = ?
+           AND reason = ?
+           AND pointable_type = ?
+           AND pointable_id = ?",
+        [$participation['volunteer_id'], 'SHIFT_COMPLETED', $pointableType, $participation['shift_id']]
+    );
+
+    $totalPoints = (int)($pointSums['total_points'] ?? 0);
+    $monthlyPoints = (int)($pointSums['monthly_points'] ?? 0);
+
+    if ($totalPoints > 0 || $monthlyPoints > 0) {
+        dbExecute(
+            "UPDATE users
+             SET total_points = GREATEST(total_points - ?, 0),
+                 monthly_points = GREATEST(monthly_points - ?, 0),
+                 updated_at = NOW()
+             WHERE id = ?",
+            [$totalPoints, $monthlyPoints, $participation['volunteer_id']]
+        );
+    }
+
+    dbExecute(
+        "DELETE FROM volunteer_points
+         WHERE user_id = ?
+           AND reason = ?
+           AND pointable_type = ?
+           AND pointable_id = ?",
+        [$participation['volunteer_id'], 'SHIFT_COMPLETED', $pointableType, $participation['shift_id']]
+    );
+
+    dbExecute("UPDATE participation_requests SET points_awarded = 0, updated_at = NOW() WHERE id = ?", [$participation['id']]);
+}
+
 // Get all shifts with approved participants
 $shifts = dbFetchAll(
     "SELECT s.*, 
@@ -59,24 +103,52 @@ if (isPost()) {
     if ($action === 'update_attendance') {
         $participationId = post('participation_id');
         $attended = post('attended') ? 1 : 0;
-        $actualHours = $attended ? post('actual_hours') : null;
-        $actualStartTime = $attended ? (post('actual_start_time') ?: null) : null;
-        $actualEndTime = $attended ? (post('actual_end_time') ?: null) : null;
-        $adminNotes = post('admin_notes');
-        
-        dbExecute(
-            "UPDATE participation_requests SET 
-                attended = ?, 
-                actual_hours = ?, 
-                actual_start_time = ?, 
-                actual_end_time = ?,
-                admin_notes = ?,
-                attendance_confirmed_at = NOW(),
-                attendance_confirmed_by = ?,
-                updated_at = NOW()
-             WHERE id = ?",
-            [$attended, $actualHours, $actualStartTime, $actualEndTime, $adminNotes, $user['id'], $participationId]
+        $participation = dbFetchOne(
+            "SELECT pr.*, s.id AS shift_id, s.start_time, s.end_time
+             FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             WHERE pr.id = ?",
+            [$participationId]
         );
+        if (!$participation) {
+            setFlash('error', 'Η συμμετοχή δεν βρέθηκε.');
+            redirect('attendance.php?mission_id=' . $missionId);
+        }
+
+        $shiftHours = max(0, round((strtotime($participation['end_time']) - strtotime($participation['start_time'])) / 3600, 2));
+        $postedHours = post('actual_hours');
+        $actualHours = $attended ? ((float)$postedHours > 0 ? $postedHours : $shiftHours) : null;
+        $actualStartTime = $attended ? (post('actual_start_time') ?: date('H:i:s', strtotime($participation['start_time']))) : null;
+        $actualEndTime = $attended ? (post('actual_end_time') ?: date('H:i:s', strtotime($participation['end_time']))) : null;
+        $adminNotes = post('admin_notes');
+
+        $pdo = db();
+        $pdo->beginTransaction();
+        try {
+            if (!$attended) {
+                reverseShiftPointsForParticipation($participation);
+            }
+
+            dbExecute(
+                "UPDATE participation_requests SET
+                    attended = ?,
+                    actual_hours = ?,
+                    actual_start_time = ?,
+                    actual_end_time = ?,
+                    admin_notes = ?,
+                    points_awarded = IF(? = 0, 0, points_awarded),
+                    attendance_confirmed_at = NOW(),
+                    attendance_confirmed_by = ?,
+                    updated_at = NOW()
+                 WHERE id = ?",
+                [$attended, $actualHours, $actualStartTime, $actualEndTime, $adminNotes, $attended, $user['id'], $participationId]
+            );
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            setFlash('error', 'Σφάλμα κατά την ενημέρωση παρουσίας.');
+            redirect('attendance.php?mission_id=' . $missionId);
+        }
         
         logAudit('update_attendance', 'participation_requests', $participationId);
         setFlash('success', 'Η παρουσία ενημερώθηκε.');
@@ -89,36 +161,55 @@ if (isPost()) {
         
         // Get all approved for this shift
         $approvedIds = dbFetchAll(
-            "SELECT id FROM participation_requests WHERE shift_id = ? AND status = ?",
+            "SELECT pr.*, s.id AS shift_id, s.start_time, s.end_time
+             FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             WHERE pr.shift_id = ? AND pr.status = ?",
             [$shiftId, PARTICIPATION_APPROVED]
         );
-        
-        foreach ($approvedIds as $row) {
-            $attended = in_array($row['id'], $attendedIds) ? 1 : 0;
-            if ($attended) {
-                dbExecute(
-                    "UPDATE participation_requests
-                     SET attended = 1,
-                         attendance_confirmed_at = NOW(),
-                         attendance_confirmed_by = ?,
-                         updated_at = NOW()
-                     WHERE id = ?",
-                    [$user['id'], $row['id']]
-                );
-            } else {
-                dbExecute(
-                    "UPDATE participation_requests
-                     SET attended = 0,
-                         actual_hours = NULL,
-                         actual_start_time = NULL,
-                         actual_end_time = NULL,
-                         attendance_confirmed_at = NOW(),
-                         attendance_confirmed_by = ?,
-                         updated_at = NOW()
-                     WHERE id = ?",
-                    [$user['id'], $row['id']]
-                );
+
+        $attendedIdSet = array_flip(array_map('strval', $attendedIds));
+        $pdo = db();
+        $pdo->beginTransaction();
+        try {
+            foreach ($approvedIds as $row) {
+                $attended = isset($attendedIdSet[(string)$row['id']]) ? 1 : 0;
+                if ($attended) {
+                    dbExecute(
+                        "UPDATE participation_requests pr
+                         JOIN shifts s ON s.id = pr.shift_id
+                         SET pr.attended = 1,
+                             pr.actual_hours = COALESCE(NULLIF(pr.actual_hours, 0), ROUND(TIMESTAMPDIFF(MINUTE, s.start_time, s.end_time) / 60, 2)),
+                             pr.actual_start_time = COALESCE(pr.actual_start_time, TIME(s.start_time)),
+                             pr.actual_end_time = COALESCE(pr.actual_end_time, TIME(s.end_time)),
+                             pr.attendance_confirmed_at = NOW(),
+                             pr.attendance_confirmed_by = ?,
+                             pr.updated_at = NOW()
+                         WHERE pr.id = ?",
+                        [$user['id'], $row['id']]
+                    );
+                } else {
+                    reverseShiftPointsForParticipation($row);
+                    dbExecute(
+                        "UPDATE participation_requests
+                         SET attended = 0,
+                             actual_hours = NULL,
+                             actual_start_time = NULL,
+                             actual_end_time = NULL,
+                             points_awarded = 0,
+                             attendance_confirmed_at = NOW(),
+                             attendance_confirmed_by = ?,
+                             updated_at = NOW()
+                         WHERE id = ?",
+                        [$user['id'], $row['id']]
+                    );
+                }
             }
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            setFlash('error', 'Σφάλμα κατά τη μαζική ενημέρωση παρουσιών.');
+            redirect('attendance.php?mission_id=' . $missionId);
         }
         
         logAudit('bulk_attendance', 'shifts', $shiftId);

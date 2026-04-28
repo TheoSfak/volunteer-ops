@@ -3725,6 +3725,72 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 57,
+            'description' => 'Normalize attendance hours and remove points from absences',
+            'up' => function () {
+                dbExecute(
+                    "UPDATE participation_requests pr
+                     JOIN shifts s ON s.id = pr.shift_id
+                     SET pr.actual_hours = COALESCE(NULLIF(pr.actual_hours, 0), ROUND(TIMESTAMPDIFF(MINUTE, s.start_time, s.end_time) / 60, 2)),
+                         pr.actual_start_time = COALESCE(pr.actual_start_time, TIME(s.start_time)),
+                         pr.actual_end_time = COALESCE(pr.actual_end_time, TIME(s.end_time)),
+                         pr.updated_at = NOW()
+                     WHERE pr.status = ?
+                       AND pr.attended = 1
+                       AND (pr.actual_hours IS NULL OR pr.actual_hours <= 0 OR pr.actual_start_time IS NULL OR pr.actual_end_time IS NULL)",
+                    [PARTICIPATION_APPROVED]
+                );
+
+                $pointableType = 'App\\Models\\Shift';
+                dbExecute(
+                    "UPDATE users u
+                     JOIN (
+                         SELECT pr.volunteer_id,
+                                COALESCE(SUM(vp.points), 0) AS total_points,
+                                COALESCE(SUM(CASE WHEN vp.created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01') THEN vp.points ELSE 0 END), 0) AS monthly_points
+                         FROM participation_requests pr
+                         JOIN shifts s ON s.id = pr.shift_id
+                         JOIN volunteer_points vp
+                           ON vp.user_id = pr.volunteer_id
+                          AND vp.reason = ?
+                          AND vp.pointable_type = ?
+                          AND vp.pointable_id = s.id
+                         WHERE pr.attended = 0
+                           AND pr.points_awarded = 1
+                         GROUP BY pr.volunteer_id
+                     ) x ON x.volunteer_id = u.id
+                     SET u.total_points = GREATEST(u.total_points - x.total_points, 0),
+                         u.monthly_points = GREATEST(u.monthly_points - x.monthly_points, 0),
+                         u.updated_at = NOW()",
+                    ['SHIFT_COMPLETED', $pointableType]
+                );
+
+                dbExecute(
+                    "DELETE vp
+                     FROM volunteer_points vp
+                     JOIN participation_requests pr ON pr.volunteer_id = vp.user_id
+                     JOIN shifts s ON s.id = pr.shift_id AND s.id = vp.pointable_id
+                     WHERE pr.attended = 0
+                       AND pr.points_awarded = 1
+                       AND vp.reason = ?
+                       AND vp.pointable_type = ?",
+                    ['SHIFT_COMPLETED', $pointableType]
+                );
+
+                dbExecute(
+                    "UPDATE participation_requests
+                     SET points_awarded = 0,
+                         actual_hours = NULL,
+                         actual_start_time = NULL,
+                         actual_end_time = NULL,
+                         updated_at = NOW()
+                     WHERE attended = 0
+                       AND (points_awarded = 1 OR actual_hours IS NOT NULL OR actual_start_time IS NOT NULL OR actual_end_time IS NOT NULL)"
+                );
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

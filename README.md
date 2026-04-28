@@ -258,7 +258,10 @@ Run via CLI: `php /path/to/volunteerops/cron_shift_reminders.php`
 
 ## Changelog
 
-### v3.63.24 - 2026-04-28 (Latest)
+### v3.63.25 - 2026-04-28 (Latest)
+- Harden attendance and hour counting across QR check-in, bulk attendance, and point reversal
+
+### v3.63.24 - 2026-04-28
 - Add AFM field to volunteer personal details, import, and export
 
 ### v3.63.23 - 2026-04-28
