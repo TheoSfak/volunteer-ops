@@ -1628,6 +1628,7 @@ CREATE TABLE IF NOT EXISTS `citizens` (
     `last_name_gr` VARCHAR(100) NOT NULL COMMENT 'Επίθετο (Ελληνικά)',
     `first_name_lat` VARCHAR(100) NULL COMMENT 'Όνομα (Λατινικά)',
     `last_name_lat` VARCHAR(100) NULL COMMENT 'Επίθετο (Λατινικά)',
+    `seminar_type` VARCHAR(30) NULL COMMENT 'Είδος σεμιναρίου',
     `birth_date` DATE NULL COMMENT 'Ημερομηνία γέννησης',
     `email` VARCHAR(255) NULL,
     `phone` VARCHAR(30) NULL,

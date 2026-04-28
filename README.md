@@ -258,7 +258,10 @@ Run via CLI: `php /path/to/volunteerops/cron_shift_reminders.php`
 
 ## Changelog
 
-### v3.63.21 - 2026-04-28 (Latest)
+### v3.63.22 - 2026-04-28 (Latest)
+- Add seminar type dropdown to citizen registration, list, search, and CSV export
+
+### v3.63.21 - 2026-04-28
 - Keep bulk attendance no-shows as absent instead of showing them as QR check-ins
 
 ### v3.63.20 - 2026-04-28
