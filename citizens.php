@@ -8,6 +8,7 @@ requireLogin();
 requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
 
 $pageTitle = 'Λίστα Πολιτών';
+$seminarTypes = ['BLS ADULT', 'BLS PEDIATRIC', 'TRAUMA', 'FIRST AID'];
 
 // Check if timestamp columns exist — if not, create them directly
 $_hasTsCols = !empty(dbFetchAll("SHOW COLUMNS FROM citizens LIKE 'contact_done_at'"));
@@ -40,11 +41,17 @@ if (isPost()) {
         case 'create':
         case 'update':
             $id = (int) post('citizen_id');
+            $seminarType = trim(post('seminar_type'));
+            if ($seminarType !== '' && !in_array($seminarType, $seminarTypes, true)) {
+                setFlash('error', 'Μη έγκυρο είδος σεμιναρίου.');
+                redirect('citizens.php');
+            }
             $data = [
                 trim(post('first_name_gr')),
                 trim(post('last_name_gr')),
                 trim(post('first_name_lat')),
                 trim(post('last_name_lat')),
+                $seminarType !== '' ? $seminarType : null,
                 post('birth_date') ?: null,
                 trim(post('email')) ?: null,
                 trim(post('phone')) ?: null,
@@ -64,7 +71,7 @@ if (isPost()) {
                 if ($_hasTsCols) {
                     $old = dbFetchOne("SELECT contact_done, payment_done, completed FROM citizens WHERE id = ?", [$id]);
                     if ($old) {
-                        $newContact = $data[7]; $newPayment = $data[8]; $newCompleted = $data[9];
+                        $newContact = $data[8]; $newPayment = $data[9]; $newCompleted = $data[10];
                         if ($newContact && !$old['contact_done']) $tsUpdates .= ', contact_done_at=NOW()';
                         if (!$newContact && $old['contact_done']) $tsUpdates .= ', contact_done_at=NULL';
                         if ($newPayment && !$old['payment_done']) $tsUpdates .= ', payment_done_at=NOW()';
@@ -75,7 +82,7 @@ if (isPost()) {
                 }
                 dbExecute(
                     "UPDATE citizens SET first_name_gr=?, last_name_gr=?, first_name_lat=?, last_name_lat=?,
-                     birth_date=?, email=?, phone=?, contact_done=?, payment_done=?, completed=?, notes=?
+                     seminar_type=?, birth_date=?, email=?, phone=?, contact_done=?, payment_done=?, completed=?, notes=?
                      {$tsUpdates}, updated_at=NOW() WHERE id=?",
                     array_merge($data, [$id])
                 );
@@ -83,9 +90,9 @@ if (isPost()) {
                 setFlash('success', 'Ο πολίτης ενημερώθηκε επιτυχώς.');
             } else {
                 if ($_hasTsCols) {
-                    $contactAt = $data[7] ? date('Y-m-d H:i:s') : null;
-                    $paymentAt = $data[8] ? date('Y-m-d H:i:s') : null;
-                    $completedAt = $data[9] ? date('Y-m-d H:i:s') : null;
+                    $contactAt = $data[8] ? date('Y-m-d H:i:s') : null;
+                    $paymentAt = $data[9] ? date('Y-m-d H:i:s') : null;
+                    $completedAt = $data[10] ? date('Y-m-d H:i:s') : null;
                     $data[] = $contactAt;
                     $data[] = $paymentAt;
                     $data[] = $completedAt;
@@ -94,16 +101,16 @@ if (isPost()) {
                 if ($_hasTsCols) {
                     $newId = dbInsert(
                         "INSERT INTO citizens (first_name_gr, last_name_gr, first_name_lat, last_name_lat,
-                         birth_date, email, phone, contact_done, payment_done, completed, notes,
+                         seminar_type, birth_date, email, phone, contact_done, payment_done, completed, notes,
                          contact_done_at, payment_done_at, completed_at, created_by)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         $data
                     );
                 } else {
                     $newId = dbInsert(
                         "INSERT INTO citizens (first_name_gr, last_name_gr, first_name_lat, last_name_lat,
-                         birth_date, email, phone, contact_done, payment_done, completed, notes, created_by)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         seminar_type, birth_date, email, phone, contact_done, payment_done, completed, notes, created_by)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         $data
                     );
                 }
@@ -228,8 +235,8 @@ if (get('export') === 'csv') {
     $expParams = [];
     $expSearch = get('search', '');
     if ($expSearch) {
-        $expWhere[] = "(first_name_gr LIKE ? OR last_name_gr LIKE ? OR first_name_lat LIKE ? OR last_name_lat LIKE ? OR email LIKE ? OR phone LIKE ?)";
-        $expParams = array_merge($expParams, array_fill(0, 6, '%' . dbEscape($expSearch) . '%'));
+        $expWhere[] = "(first_name_gr LIKE ? OR last_name_gr LIKE ? OR first_name_lat LIKE ? OR last_name_lat LIKE ? OR seminar_type LIKE ? OR email LIKE ? OR phone LIKE ?)";
+        $expParams = array_merge($expParams, array_fill(0, 7, '%' . dbEscape($expSearch) . '%'));
     }
     if (get('contact', '') !== '') { $expWhere[] = "contact_done = ?"; $expParams[] = (int) get('contact'); }
     if (get('payment', '') !== '') { $expWhere[] = "payment_done = ?"; $expParams[] = (int) get('payment'); }
@@ -241,7 +248,7 @@ if (get('export') === 'csv') {
     header('Content-Disposition: attachment; filename="citizens_' . date('Y-m-d_His') . '.csv"');
     $out = fopen('php://output', 'w');
     fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // UTF-8 BOM for Excel
-    fputcsv($out, ['#', 'Επίθετο (GR)', 'Όνομα (GR)', 'Επίθετο (LAT)', 'Όνομα (LAT)', 'Ημ. Γέννησης', 'Email', 'Τηλέφωνο', 'Επικοινωνία', 'Ημ/νία Επικοινωνίας', 'Πληρωμή', 'Ημ/νία Πληρωμής', 'Ολοκλήρωση', 'Ημ/νία Ολοκλήρωσης', 'Σημειώσεις'], ';', '"', '\\');
+    fputcsv($out, ['#', 'Επίθετο (GR)', 'Όνομα (GR)', 'Επίθετο (LAT)', 'Όνομα (LAT)', 'Είδος Σεμιναρίου', 'Ημ. Γέννησης', 'Email', 'Τηλέφωνο', 'Επικοινωνία', 'Ημ/νία Επικοινωνίας', 'Πληρωμή', 'Ημ/νία Πληρωμής', 'Ολοκλήρωση', 'Ημ/νία Ολοκλήρωσης', 'Σημειώσεις'], ';', '"', '\\');
     foreach ($rows as $i => $r) {
         fputcsv($out, [
             $i + 1,
@@ -249,6 +256,7 @@ if (get('export') === 'csv') {
             $r['first_name_gr'],
             $r['last_name_lat'] ?? '',
             $r['first_name_lat'] ?? '',
+            $r['seminar_type'] ?? '',
             $r['birth_date'] ? formatDate($r['birth_date']) : '',
             $r['email'] ?? '',
             $r['phone'] ?? '',
@@ -277,8 +285,8 @@ $where = ['1=1'];
 $params = [];
 
 if ($search) {
-    $where[] = "(first_name_gr LIKE ? OR last_name_gr LIKE ? OR first_name_lat LIKE ? OR last_name_lat LIKE ? OR email LIKE ? OR phone LIKE ?)";
-    $params = array_merge($params, array_fill(0, 6, '%' . dbEscape($search) . '%'));
+    $where[] = "(first_name_gr LIKE ? OR last_name_gr LIKE ? OR first_name_lat LIKE ? OR last_name_lat LIKE ? OR seminar_type LIKE ? OR email LIKE ? OR phone LIKE ?)";
+    $params = array_merge($params, array_fill(0, 7, '%' . dbEscape($search) . '%'));
 }
 if ($filterContact !== '') {
     $where[] = "contact_done = ?";
@@ -381,6 +389,7 @@ include __DIR__ . '/includes/header.php';
                         <th>Επίθετο (GR)</th>
                         <th>Όνομα (LAT)</th>
                         <th>Επίθετο (LAT)</th>
+                        <th>Είδος Σεμιναρίου</th>
                         <th>Ημ. Γέν.</th>
                         <th>Email</th>
                         <th>Τηλέφωνο</th>
@@ -392,7 +401,7 @@ include __DIR__ . '/includes/header.php';
                 </thead>
                 <tbody>
                     <?php if (empty($citizens)): ?>
-                    <tr><td colspan="12" class="text-center text-muted py-4">Δεν βρέθηκαν πολίτες.</td></tr>
+                    <tr><td colspan="13" class="text-center text-muted py-4">Δεν βρέθηκαν πολίτες.</td></tr>
                     <?php else: ?>
                     <?php foreach ($citizens as $i => $c): ?>
                     <tr>
@@ -401,6 +410,7 @@ include __DIR__ . '/includes/header.php';
                         <td><?= h($c['last_name_gr']) ?></td>
                         <td><?= h($c['first_name_lat'] ?? '') ?></td>
                         <td><?= h($c['last_name_lat'] ?? '') ?></td>
+                        <td><?= !empty($c['seminar_type']) ? '<span class="badge bg-info text-dark">' . h($c['seminar_type']) . '</span>' : '<span class="text-muted">-</span>' ?></td>
                         <td class="text-nowrap"><?= $c['birth_date'] ? formatDate($c['birth_date']) : '-' ?></td>
                         <td><?= h($c['email'] ?? '-') ?></td>
                         <td class="text-nowrap"><?= h($c['phone'] ?? '-') ?></td>
@@ -577,6 +587,15 @@ include __DIR__ . '/includes/header.php';
                             <label class="form-label">Επίθετο (Λατινικά)</label>
                             <input type="text" name="last_name_lat" id="last_name_lat" class="form-control">
                         </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Είδος σεμιναρίου</label>
+                            <select name="seminar_type" id="seminar_type" class="form-select">
+                                <option value="">-- Επιλέξτε --</option>
+                                <?php foreach ($seminarTypes as $type): ?>
+                                <option value="<?= h($type) ?>"><?= h($type) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
                         <div class="col-md-4">
                             <label class="form-label">Ημερομηνία Γέννησης</label>
                             <input type="date" name="birth_date" id="birth_date" class="form-control">
@@ -641,6 +660,7 @@ function editCitizen(c) {
     document.getElementById('last_name_gr').value = c.last_name_gr || '';
     document.getElementById('first_name_lat').value = c.first_name_lat || '';
     document.getElementById('last_name_lat').value = c.last_name_lat || '';
+    document.getElementById('seminar_type').value = c.seminar_type || '';
     document.getElementById('birth_date').value = c.birth_date || '';
     document.getElementById('citizen_email').value = c.email || '';
     document.getElementById('citizen_phone').value = c.phone || '';

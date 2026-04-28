@@ -3702,6 +3702,17 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 55,
+            'description' => 'Add seminar type to citizens',
+            'up' => function () {
+                $cols = dbFetchAll("SHOW COLUMNS FROM citizens LIKE 'seminar_type'");
+                if (empty($cols)) {
+                    dbExecute("ALTER TABLE citizens ADD COLUMN seminar_type VARCHAR(30) NULL AFTER last_name_lat");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
