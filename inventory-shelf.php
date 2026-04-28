@@ -223,7 +223,7 @@ include __DIR__ . '/includes/header.php';
                         <tr>
                             <th style="width: 30px">#</th>
                             <th>Όνομα</th>
-                            <th style="width: 90px" class="text-center">Ποσότητα</th>
+                            <th style="width: 130px" class="text-center">Αριθμός είδους</th>
                             <th style="width: 150px">Ράφι</th>
                             <th style="width: 160px">Ημερομηνία Λήξης</th>
                             <th style="width: 40px" class="text-center">Κατάσταση</th>
@@ -254,7 +254,7 @@ include __DIR__ . '/includes/header.php';
                                                     <input type="text" name="name" class="form-control form-control-sm" value="<?= h($item['name']) ?>" required>
                                                 </div>
                                                 <div class="col-md-1">
-                                                    <label class="form-label small mb-0">Ποσότ.</label>
+                                                    <label class="form-label small mb-0 text-nowrap">Αριθμός είδους</label>
                                                     <input type="number" name="quantity" class="form-control form-control-sm" value="<?= $item['quantity'] ?>" min="0" required>
                                                 </div>
                                                 <div class="col-md-2">
@@ -351,7 +351,7 @@ include __DIR__ . '/includes/header.php';
                         <input type="text" name="name" class="form-control" required placeholder="π.χ. Γάζες αποστειρωμένες">
                     </div>
                     <div class="col-md-1">
-                        <label class="form-label">Ποσότητα</label>
+                        <label class="form-label">Αριθμός είδους</label>
                         <input type="number" name="quantity" class="form-control" value="1" min="0">
                     </div>
                     <div class="col-md-2">
