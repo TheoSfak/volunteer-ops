@@ -92,7 +92,7 @@ $missionRows = dbFetchAll(
        AND m.deleted_at IS NULL
        AND (m.status = '" . STATUS_OPEN . "' OR (m.status = '" . STATUS_COMPLETED . "' AND m.end_datetime >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)))
      GROUP BY s.id
-     ORDER BY m.is_urgent DESC, m.start_datetime ASC, s.start_time ASC",
+     ORDER BY m.is_urgent DESC, m.start_datetime DESC, s.start_time DESC",
     []
 );
 
