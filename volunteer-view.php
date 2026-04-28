@@ -877,6 +877,8 @@ include __DIR__ . '/includes/header.php';
                     <div class="col-md-6">
                         <div class="vp-info-label"><i class="bi bi-card-text me-1"></i>Ταυτότητα</div>
                         <div class="vp-info-value"><?= h($volunteer['id_card'] ?: '-') ?></div>
+                        <div class="vp-info-label"><i class="bi bi-receipt me-1"></i>ΑΦΜ</div>
+                        <div class="vp-info-value"><?= h($volunteer['afm'] ?: '-') ?></div>
                         <?php if (!empty($volunteer['position_name'])): ?>
                         <div class="vp-info-label"><i class="bi bi-person-gear me-1"></i>Θέση / Ρόλος</div>
                         <div class="vp-info-value">

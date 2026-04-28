@@ -3713,6 +3713,18 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 56,
+            'description' => 'Add AFM field to volunteer users',
+            'up' => function () {
+                $cols = dbFetchAll("SHOW COLUMNS FROM users LIKE 'afm'");
+                if (empty($cols)) {
+                    $afterColumn = dbFetchAll("SHOW COLUMNS FROM users LIKE 'id_card'") ? 'id_card' : 'phone';
+                    dbExecute("ALTER TABLE users ADD COLUMN afm VARCHAR(20) NULL AFTER {$afterColumn}");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

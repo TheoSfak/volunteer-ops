@@ -165,6 +165,7 @@ function importVolunteersFromCsv(array $rows, bool $dryRun = false): array {
         $rawType          = _col($row, 'Τύπος Εθελοντή');
         $volunteerType    = ($rawType && $rawType !== '0') ? $rawType : 'VOLUNTEER';
         $idCard           = _col($row, 'Ταυτότητα');
+        $afm              = _col($row, 'ΑΦΜ');
         $amka             = _col($row, 'ΑΜΚΑ');
         $drivingLicense   = _col($row, 'Δίπλωμα Οδήγησης');
         $vehiclePlate     = _col($row, 'Πινακίδα Οχήματος');
@@ -194,13 +195,13 @@ function importVolunteersFromCsv(array $rows, bool $dryRun = false): array {
             $userId = dbInsert(
                 "INSERT INTO users
                     (name, email, phone, password, role, volunteer_type, department_id,
-                     id_card, amka, driving_license, vehicle_plate,
+                     id_card, afm, amka, driving_license, vehicle_plate,
                      pants_size, shirt_size, blouse_size, fleece_size,
                      registry_epidrasis, registry_ggpp,
                      is_active, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())",
                 [$name, $email, $phone, $hashedPassword, $role, $volunteerType, $deptId,
-                 $idCard, $amka, $drivingLicense, $vehiclePlate,
+                 $idCard, $afm, $amka, $drivingLicense, $vehiclePlate,
                  $pantsSize, $shirtSize, $blouseSize, $fleeceSize,
                  $regEpidrasis, $regGgpp]
             );
