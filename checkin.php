@@ -124,9 +124,16 @@ if (isPost()) {
     }
 
     dbExecute(
-        "UPDATE participation_requests
-         SET attendance_confirmed_at = NOW(), attendance_confirmed_by = ?, updated_at = NOW()
-         WHERE id = ?",
+        "UPDATE participation_requests pr
+         JOIN shifts s ON s.id = pr.shift_id
+         SET pr.attended = 1,
+             pr.actual_hours = COALESCE(pr.actual_hours, ROUND(TIMESTAMPDIFF(MINUTE, s.start_time, s.end_time) / 60, 2)),
+             pr.actual_start_time = COALESCE(pr.actual_start_time, TIME(s.start_time)),
+             pr.actual_end_time = COALESCE(pr.actual_end_time, TIME(s.end_time)),
+             pr.attendance_confirmed_at = NOW(),
+             pr.attendance_confirmed_by = ?,
+             pr.updated_at = NOW()
+         WHERE pr.id = ?",
         [$userId, $pr['id']]
     );
 
