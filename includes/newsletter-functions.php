@@ -114,6 +114,23 @@ function getNewsletterLogoHtml(): string {
 }
 
 /**
+ * Return the single deterministic default newsletter template id.
+ *
+ * Some older production databases may temporarily contain more than one
+ * is_default=1 row. Always choosing the lowest id keeps preview/send/form
+ * behavior stable until migrations normalize the data.
+ */
+function getDefaultNewsletterTemplateId(): ?int {
+    $id = (int)dbFetchValue("SELECT id FROM newsletter_templates WHERE is_default = 1 ORDER BY id ASC LIMIT 1");
+    if ($id > 0) {
+        return $id;
+    }
+
+    $fallbackId = (int)dbFetchValue("SELECT id FROM newsletter_templates ORDER BY id ASC LIMIT 1");
+    return $fallbackId > 0 ? $fallbackId : null;
+}
+
+/**
  * Wrap newsletter content in the selected visual email template.
  *
  * This is intentionally shared by preview, test-send, real-send and resend so
@@ -127,7 +144,7 @@ function wrapNewsletterBody(string $body, string $title, ?int $templateId = null
         $tpl = dbFetchOne("SELECT body_html FROM newsletter_templates WHERE id = ?", [$templateId]);
     }
     if (!$tpl) {
-        $tpl = dbFetchOne("SELECT body_html FROM newsletter_templates WHERE is_default = 1 LIMIT 1");
+        $tpl = dbFetchOne("SELECT body_html FROM newsletter_templates ORDER BY is_default DESC, id ASC LIMIT 1");
     }
 
     $templateBody = $tpl ? (string)$tpl['body_html'] : '{content}';
