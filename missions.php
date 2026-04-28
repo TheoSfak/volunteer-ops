@@ -113,6 +113,10 @@ if ($user['role'] === ROLE_DEPARTMENT_ADMIN && $user['department_id']) {
 }
 
 $whereClause = implode(' AND ', $where);
+$orderBy = 'm.start_datetime DESC, m.id DESC';
+if ($status === STATUS_OPEN) {
+    $orderBy = 'CASE WHEN m.end_datetime < NOW() THEN 1 ELSE 0 END ASC, m.start_datetime ASC, m.id ASC';
+}
 
 // Count total
 $total = dbFetchValue("SELECT COUNT(*) FROM missions m WHERE $whereClause", $params);
@@ -134,7 +138,7 @@ $missions = dbFetchAll(
      LEFT JOIN participation_requests pr ON pr.shift_id = sh.id
      WHERE $whereClause
      GROUP BY m.id
-     ORDER BY m.start_datetime DESC
+     ORDER BY $orderBy
      LIMIT {$pagination['per_page']} OFFSET {$pagination['offset']}",
     $params
 );
