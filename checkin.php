@@ -119,7 +119,9 @@ if (isPost()) {
     }
 
     if (!empty($pr['attendance_confirmed_at'])) {
-        // Already checked in — just redirect back to show the state
+        if (empty($pr['attended'])) {
+            setFlash('warning', 'Η παρουσία σας έχει ήδη σημειωθεί ως απουσία από διαχειριστή. Παρακαλώ επικοινωνήστε με υπεύθυνο για έλεγχο.');
+        }
         redirect('checkin.php?token=' . urlencode($token));
     }
 
@@ -173,13 +175,23 @@ include __DIR__ . '/includes/header.php';
                         <p class="mb-0 mt-1 small">Δεν έχετε εγκεκριμένη αίτηση για αυτή τη βάρδια. Επικοινωνήστε με τον υπεύθυνο βάρδιας.</p>
                     </div>
 
-                <?php elseif (!empty($pr['attendance_confirmed_at'])): ?>
+                <?php elseif (!empty($pr['attendance_confirmed_at']) && !empty($pr['attended'])): ?>
                     <!-- Already checked in -->
                     <div class="text-center py-3">
                         <div class="text-success mb-3" style="font-size:4rem;"><i class="bi bi-check-circle-fill"></i></div>
                         <h4 class="text-success fw-bold">Check-in ολοκληρώθηκε!</h4>
                         <p class="text-muted mb-1">Η παρουσία σας καταγράφηκε με επιτυχία.</p>
                         <small class="text-muted"><i class="bi bi-clock me-1"></i><?= formatDateTime($pr['attendance_confirmed_at']) ?></small>
+                    </div>
+
+                <?php elseif (!empty($pr['attendance_confirmed_at']) && empty($pr['attended'])): ?>
+                    <!-- Admin-confirmed absence: do not let QR override it -->
+                    <div class="alert alert-warning mb-0">
+                        <i class="bi bi-person-exclamation me-2"></i>
+                        <strong>Απαιτείται παρέμβαση διαχειριστή</strong>
+                        <p class="mb-0 mt-1 small">
+                            Η παρουσία σας έχει ήδη σημειωθεί ως απουσία. Επικοινωνήστε με τον υπεύθυνο βάρδιας ή διαχειριστή για έλεγχο.
+                        </p>
                     </div>
 
                 <?php else: ?>
