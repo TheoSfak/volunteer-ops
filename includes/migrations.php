@@ -3669,7 +3669,34 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                          pr.updated_at = NOW()
                      WHERE pr.status = ?
                        AND pr.attendance_confirmed_at IS NOT NULL
-                       AND pr.attended = 0",
+                       AND pr.attended = 0
+                       AND pr.attendance_confirmed_by = pr.volunteer_id",
+                    [PARTICIPATION_APPROVED]
+                );
+            },
+        ],
+
+        [
+            'version'     => 54,
+            'description' => 'Repair admin-confirmed absences after QR attendance backfill',
+            'up' => function () {
+                dbExecute(
+                    "UPDATE participation_requests pr
+                     JOIN shifts s ON s.id = pr.shift_id
+                     SET pr.attended = 0,
+                         pr.actual_hours = NULL,
+                         pr.actual_start_time = NULL,
+                         pr.actual_end_time = NULL,
+                         pr.updated_at = NOW()
+                     WHERE pr.status = ?
+                       AND pr.attendance_confirmed_at IS NOT NULL
+                       AND pr.attendance_confirmed_by IS NOT NULL
+                       AND pr.attendance_confirmed_by != pr.volunteer_id
+                       AND pr.points_awarded = 0
+                       AND pr.updated_at > pr.attendance_confirmed_at
+                       AND pr.actual_hours = ROUND(TIMESTAMPDIFF(MINUTE, s.start_time, s.end_time) / 60, 2)
+                       AND pr.actual_start_time = TIME(s.start_time)
+                       AND pr.actual_end_time = TIME(s.end_time)",
                     [PARTICIPATION_APPROVED]
                 );
             },

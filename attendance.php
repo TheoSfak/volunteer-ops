@@ -59,9 +59,9 @@ if (isPost()) {
     if ($action === 'update_attendance') {
         $participationId = post('participation_id');
         $attended = post('attended') ? 1 : 0;
-        $actualHours = post('actual_hours');
-        $actualStartTime = post('actual_start_time') ?: null;
-        $actualEndTime = post('actual_end_time') ?: null;
+        $actualHours = $attended ? post('actual_hours') : null;
+        $actualStartTime = $attended ? (post('actual_start_time') ?: null) : null;
+        $actualEndTime = $attended ? (post('actual_end_time') ?: null) : null;
         $adminNotes = post('admin_notes');
         
         dbExecute(
@@ -95,10 +95,30 @@ if (isPost()) {
         
         foreach ($approvedIds as $row) {
             $attended = in_array($row['id'], $attendedIds) ? 1 : 0;
-            dbExecute(
-                "UPDATE participation_requests SET attended = ?, attendance_confirmed_at = NOW(), attendance_confirmed_by = ? WHERE id = ?",
-                [$attended, $user['id'], $row['id']]
-            );
+            if ($attended) {
+                dbExecute(
+                    "UPDATE participation_requests
+                     SET attended = 1,
+                         attendance_confirmed_at = NOW(),
+                         attendance_confirmed_by = ?,
+                         updated_at = NOW()
+                     WHERE id = ?",
+                    [$user['id'], $row['id']]
+                );
+            } else {
+                dbExecute(
+                    "UPDATE participation_requests
+                     SET attended = 0,
+                         actual_hours = NULL,
+                         actual_start_time = NULL,
+                         actual_end_time = NULL,
+                         attendance_confirmed_at = NOW(),
+                         attendance_confirmed_by = ?,
+                         updated_at = NOW()
+                     WHERE id = ?",
+                    [$user['id'], $row['id']]
+                );
+            }
         }
         
         logAudit('bulk_attendance', 'shifts', $shiftId);
@@ -315,6 +335,9 @@ include __DIR__ . '/includes/header.php';
                                                     <?php if ($p['actual_hours']): ?>
                                                         <br><small class="text-muted"><?= $p['actual_hours'] ?> ώρες</small>
                                                     <?php endif; ?>
+                                                <?php elseif (!empty($p['attendance_confirmed_at'])): ?>
+                                                    <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Απών</span>
+                                                    <br><small class="text-muted">Ελέγχθηκε: <?= formatDateTime($p['attendance_confirmed_at']) ?></small>
                                                 <?php else: ?>
                                                     <span class="badge bg-secondary">Εκκρεμεί</span>
                                                 <?php endif; ?>
