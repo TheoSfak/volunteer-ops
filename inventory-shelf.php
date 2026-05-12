@@ -159,6 +159,7 @@ foreach ($items as &$item) {
         $expiry = new DateTime($item['expiry_date']);
         $diff = $today->diff($expiry);
         $totalDays = (int) $diff->format('%r%a'); // negative if expired
+        $item['expiry_days'] = $totalDays;
         
         if ($totalDays < 0) {
             $item['expiry_class'] = 'danger';
@@ -233,6 +234,7 @@ include __DIR__ . '/includes/header.php';
                             <th style="width: 130px" class="text-center">Αριθμός είδους</th>
                             <th style="width: 150px">Ράφι</th>
                             <th style="width: 160px">Ημερομηνία Λήξης</th>
+                            <th style="width: 110px" class="text-center">Ημέρες για Λήξη</th>
                             <th style="width: 40px" class="text-center">Κατάσταση</th>
                             <th style="width: 130px" class="text-center">Ενέργειες</th>
                         </tr>
@@ -240,7 +242,7 @@ include __DIR__ . '/includes/header.php';
                     <tbody>
                         <?php if (empty($items)): ?>
                             <tr>
-                                <td colspan="7" class="text-center text-muted py-4">
+                                <td colspan="8" class="text-center text-muted py-4">
                                     <i class="bi bi-inbox fs-2 d-block mb-2"></i>
                                     Δεν υπάρχουν υλικά ραφιού. Προσθέστε το πρώτο παρακάτω.
                                 </td>
@@ -251,7 +253,7 @@ include __DIR__ . '/includes/header.php';
                                     <!-- EDIT ROW -->
                                     <tr class="table-info" id="row-<?= $item['id'] ?>">
                                         <td class="text-muted"><?= $row ?></td>
-                                        <td colspan="6">
+                                        <td colspan="7">
                                             <form method="post" class="row g-2 align-items-end">
                                                 <?= csrfField() ?>
                                                 <input type="hidden" name="action" value="edit">
@@ -307,6 +309,22 @@ include __DIR__ . '/includes/header.php';
                                         <td>
                                             <?php if (!empty($item['expiry_date'])): ?>
                                                 <?= formatDate($item['expiry_date']) ?>
+                                            <?php else: ?>
+                                                <span class="text-muted">—</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="text-center">
+                                            <?php if (isset($item['expiry_days'])): ?>
+                                                <?php if ($item['expiry_days'] < 0): ?>
+                                                    <span class="badge bg-danger">
+                                                        <i class="bi bi-exclamation-triangle-fill me-1"></i>Έληξε <?= abs($item['expiry_days']) ?>η
+                                                    </span>
+                                                <?php else: ?>
+                                                    <span class="fw-bold text-<?= $item['expiry_class'] ?>">
+                                                        <?= $item['expiry_days'] ?>
+                                                    </span>
+                                                    <small class="text-muted"> ημ.</small>
+                                                <?php endif; ?>
                                             <?php else: ?>
                                                 <span class="text-muted">—</span>
                                             <?php endif; ?>
