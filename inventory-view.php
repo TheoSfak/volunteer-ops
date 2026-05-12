@@ -132,6 +132,9 @@ include __DIR__ . '/includes/header.php';
             <a href="inventory-label.php?id=<?= $item['id'] ?>" class="btn btn-outline-primary" target="_blank" title="Εκτύπωση QR ετικέτας">
                 <i class="bi bi-qr-code me-1"></i>Ετικέτα
             </a>
+            <a href="inventory-form.php?clone_id=<?= $item['id'] ?>" class="btn btn-outline-info" title="Κλωνοποίηση υλικού">
+                <i class="bi bi-copy me-1"></i>Κλώνος
+            </a>
             <a href="inventory-form.php?id=<?= $item['id'] ?>" class="btn btn-outline-secondary">
                 <i class="bi bi-pencil me-1"></i>Επεξεργασία
             </a>

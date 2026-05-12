@@ -299,6 +299,9 @@ include __DIR__ . '/includes/header.php';
                                             </a>
                                         <?php endif; ?>
                                         <?php if (canManageInventory()): ?>
+                                            <a href="inventory-form.php?clone_id=<?= $item['id'] ?>" class="btn btn-outline-info" title="Κλωνοποίηση">
+                                                <i class="bi bi-copy"></i>
+                                            </a>
                                             <a href="inventory-form.php?id=<?= $item['id'] ?>" class="btn btn-outline-secondary" title="Επεξεργασία">
                                                 <i class="bi bi-pencil"></i>
                                             </a>
