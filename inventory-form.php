@@ -18,13 +18,15 @@ if (!canManageInventory()) {
     redirect('inventory.php');
 }
 
-$id     = get('id');
-$isEdit = !empty($id);
-$pageTitle = $isEdit ? 'Επεξεργασία Υλικού' : 'Νέο Υλικό';
+$id      = get('id');
+$cloneId = get('clone_id');
+$isEdit  = !empty($id) && empty($cloneId);
+$isClone = !empty($cloneId);
+$pageTitle = $isEdit ? 'Επεξεργασία Υλικού' : ($isClone ? 'Κλωνοποίηση Υλικού' : 'Νέο Υλικό');
 
 $user = getCurrentUser();
 
-// Fetch item for editing
+// Fetch item for editing or cloning
 $item = null;
 if ($isEdit) {
     $item = getInventoryItem($id);
@@ -37,6 +39,16 @@ if ($isEdit) {
         setFlash('error', 'Δεν έχετε δικαίωμα επεξεργασίας αυτού του υλικού.');
         redirect('inventory.php');
     }
+} elseif ($isClone) {
+    $sourceItem = getInventoryItem($cloneId);
+    if (!$sourceItem) {
+        setFlash('error', 'Το υλικό προς κλωνοποίηση δεν βρέθηκε.');
+        redirect('inventory.php');
+    }
+    // Pre-fill $item with source data but clear barcode/booking fields
+    $item = $sourceItem;
+    $item['barcode'] = '';
+    $item['status']  = 'available';
 }
 
 // Data for dropdowns
@@ -150,15 +162,22 @@ $suggestedBarcode = '';
 if (!$isEdit) {
     $suggestedBarcode = generateInventoryBarcode();
 }
+// For clone: override the suggested barcode in the item array
+if ($isClone) {
+    $item['barcode'] = $suggestedBarcode;
+}
 
 include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0">
-        <i class="bi bi-box-seam me-2"></i><?= h($pageTitle) ?>
+        <i class="bi bi-<?= $isClone ? 'copy' : 'box-seam' ?> me-2"></i><?= h($pageTitle) ?>
+        <?php if ($isClone): ?>
+            <small class="text-muted fs-6 fw-normal ms-2">από: <?= h($sourceItem['name']) ?></small>
+        <?php endif; ?>
     </h1>
-    <a href="<?= $isEdit ? 'inventory-view.php?id=' . $id : 'inventory.php' ?>" class="btn btn-outline-secondary">
+    <a href="<?= $isEdit ? 'inventory-view.php?id=' . $id : ($isClone ? 'inventory-view.php?id=' . $cloneId : 'inventory.php') ?>" class="btn btn-outline-secondary">
         <i class="bi bi-arrow-left me-1"></i>Πίσω
     </a>
 </div>
@@ -324,7 +343,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card-body d-grid gap-2">
                     <button type="submit" class="btn btn-primary btn-lg">
                         <i class="bi bi-check-lg me-1"></i>
-                        <?= $isEdit ? 'Αποθήκευση Αλλαγών' : 'Δημιουργία Υλικού' ?>
+                        <?= $isEdit ? 'Αποθήκευση Αλλαγών' : ($isClone ? 'Δημιουργία Κλώνου' : 'Δημιουργία Υλικού') ?>
                     </button>
                     <a href="<?= $isEdit ? 'inventory-view.php?id=' . $id : 'inventory.php' ?>" class="btn btn-outline-secondary">
                         Ακύρωση
