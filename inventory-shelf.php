@@ -207,9 +207,9 @@ include __DIR__ . '/includes/header.php';
             <?php if ($warningCount > 0): ?>
                 <span class="badge bg-warning text-dark me-2"><?= $warningCount ?> κοντά σε λήξη</span>
             <?php endif; ?>
-            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="window.print()" title="Εκτύπωση λίστας ραφιού">
+            <a href="inventory-shelf-print.php" target="_blank" class="btn btn-outline-secondary btn-sm" title="Εκτύπωση λίστας ραφιού">
                 <i class="bi bi-printer me-1"></i>Εκτύπωση
-            </button>
+            </a>
         </div>
     </div>
     
@@ -453,27 +453,5 @@ document.getElementById('deleteModal')?.addEventListener('show.bs.modal', functi
 // Initialize tooltips
 document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => new bootstrap.Tooltip(el));
 </script>
-
-<style>
-@media print {
-    .no-print, .sidebar, .navbar, .btn-group, .card-header.bg-primary,
-    [data-bs-toggle="modal"], .modal { display: none !important; }
-    body { background: #fff !important; font-size: 11pt; }
-    .container-fluid { padding: 0 !important; }
-    .card { border: none !important; box-shadow: none !important; }
-    .card-body { padding: 0 !important; }
-    .card.shadow-sm.mt-4 { display: none !important; }
-    .table { font-size: 10pt; border-collapse: collapse; }
-    .table th, .table td { padding: 4px 8px !important; border: 1px solid #ccc !important; }
-    h1.h3 { font-size: 14pt !important; }
-    .badge { border: 1px solid #999 !important; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-    .btn { display: none !important; }
-    .d-flex.gap-3.align-items-center.small.text-muted { margin-bottom: 8px !important; }
-    @page { size: A4 portrait; margin: 10mm; }
-    .print-footer { display: block !important; text-align: right; font-size: 9pt; color: #999; margin-top: 10px; }
-}
-.print-footer { display: none; }
-</style>
-<div class="print-footer">Εκτυπώθηκε: <script>document.write(new Date().toLocaleDateString('el-GR') + ' ' + new Date().toLocaleTimeString('el-GR', {hour:'2-digit',minute:'2-digit'}))</script></div>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
