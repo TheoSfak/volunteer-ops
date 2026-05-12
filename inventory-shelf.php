@@ -233,6 +233,7 @@ include __DIR__ . '/includes/header.php';
                             <th>Όνομα</th>
                             <th style="width: 130px" class="text-center">Αριθμός είδους</th>
                             <th style="width: 150px">Ράφι</th>
+                            <th>Σημειώσεις</th>
                             <th style="width: 160px">Ημερομηνία Λήξης</th>
                             <th style="width: 110px" class="text-center">Ημέρες για Λήξη</th>
                             <th style="width: 40px" class="text-center">Κατάσταση</th>
@@ -242,7 +243,7 @@ include __DIR__ . '/includes/header.php';
                     <tbody>
                         <?php if (empty($items)): ?>
                             <tr>
-                                <td colspan="8" class="text-center text-muted py-4">
+                                <td colspan="9" class="text-center text-muted py-4">
                                     <i class="bi bi-inbox fs-2 d-block mb-2"></i>
                                     Δεν υπάρχουν υλικά ραφιού. Προσθέστε το πρώτο παρακάτω.
                                 </td>
@@ -253,7 +254,7 @@ include __DIR__ . '/includes/header.php';
                                     <!-- EDIT ROW -->
                                     <tr class="table-info" id="row-<?= $item['id'] ?>">
                                         <td class="text-muted"><?= $row ?></td>
-                                        <td colspan="7">
+                                        <td colspan="8">
                                             <form method="post" class="row g-2 align-items-end">
                                                 <?= csrfField() ?>
                                                 <input type="hidden" name="action" value="edit">
@@ -292,9 +293,6 @@ include __DIR__ . '/includes/header.php';
                                         <td class="text-muted small"><?= $row ?></td>
                                         <td>
                                             <strong><?= h($item['name']) ?></strong>
-                                            <?php if (!empty($item['notes'])): ?>
-                                                <small class="text-muted d-block"><?= h($item['notes']) ?></small>
-                                            <?php endif; ?>
                                         </td>
                                         <td class="text-center">
                                             <span class="badge bg-secondary rounded-pill"><?= $item['quantity'] ?></span>
@@ -302,6 +300,13 @@ include __DIR__ . '/includes/header.php';
                                         <td>
                                             <?php if (!empty($item['shelf'])): ?>
                                                 <i class="bi bi-bookshelf me-1"></i><?= h($item['shelf']) ?>
+                                            <?php else: ?>
+                                                <span class="text-muted">—</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <?php if (!empty($item['notes'])): ?>
+                                                <span class="text-muted small"><?= h($item['notes']) ?></span>
                                             <?php else: ?>
                                                 <span class="text-muted">—</span>
                                             <?php endif; ?>
