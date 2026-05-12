@@ -294,6 +294,17 @@ if (isPost()) {
     }
 }
 
+// Active inventory bookings for this user
+$activeBookings = [];
+if (function_exists('inventoryTablesExist') && inventoryTablesExist()) {
+    $activeBookings = getUserActiveBookings($user['id']);
+} elseif (file_exists(__DIR__ . '/includes/inventory-functions.php')) {
+    require_once __DIR__ . '/includes/inventory-functions.php';
+    if (inventoryTablesExist()) {
+        $activeBookings = getUserActiveBookings($user['id']);
+    }
+}
+
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -868,6 +879,64 @@ $myRequiredMissing = dbFetchAll(
                 </form>
             </div>
         </div>
+
+        <?php if (!empty($activeBookings)): ?>
+        <!-- Χρεωμένα Υλικά -->
+        <div class="card pp-card accent-primary mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-box-seam text-primary me-2"></i>Χρεωμένα Υλικά</h5>
+                <span class="badge bg-primary rounded-pill"><?= count($activeBookings) ?></span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Barcode</th>
+                                <th>Υλικό</th>
+                                <th>Ημ. Χρέωσης</th>
+                                <th>Αναμ. Επιστροφή</th>
+                                <th>Κατάσταση</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($activeBookings as $bk):
+                                $overdue = $bk['status'] === 'overdue';
+                                $expectedReturn = $bk['expected_return_date'] ?? null;
+                                $daysOverdue = $overdue ? (int)((time() - strtotime($bk['created_at'])) / 86400) : 0;
+                            ?>
+                            <tr class="<?= $overdue ? 'table-danger' : '' ?>">
+                                <td><code class="text-primary"><?= h($bk['barcode']) ?></code></td>
+                                <td>
+                                    <a href="inventory-view.php?id=<?= $bk['item_id'] ?>" class="text-decoration-none fw-medium">
+                                        <?= h($bk['item_name']) ?>
+                                    </a>
+                                </td>
+                                <td><small><?= formatDate($bk['created_at']) ?></small></td>
+                                <td>
+                                    <?php if ($expectedReturn): ?>
+                                        <small class="<?= $overdue ? 'text-danger fw-bold' : '' ?>">
+                                            <?= formatDate($expectedReturn) ?>
+                                        </small>
+                                    <?php else: ?>
+                                        <span class="text-muted">-</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ($overdue): ?>
+                                        <span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>Εκπρόθεσμη</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-primary">Ενεργή</span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
     
     <div class="col-lg-4">
