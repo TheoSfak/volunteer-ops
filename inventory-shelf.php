@@ -164,14 +164,17 @@ foreach ($items as &$item) {
             $item['expiry_class'] = 'danger';
             $item['expiry_label'] = 'Έληξε';
         } elseif ($totalDays <= 90) {
-            $item['expiry_class'] = 'warning';
+            // < 3 μήνες → κόκκινο (επείγον)
+            $item['expiry_class'] = 'danger';
             $months = round($totalDays / 30);
             $item['expiry_label'] = $months <= 1 ? 'Λιγότερο από 1 μήνα' : "{$months} μήνες";
         } elseif ($totalDays <= 180) {
-            $item['expiry_class'] = 'success';
+            // 3-6 μήνες → κίτρινο (προσοχή)
+            $item['expiry_class'] = 'warning';
             $months = round($totalDays / 30);
             $item['expiry_label'] = "{$months} μήνες";
         } else {
+            // > 6 μήνες → πράσινο (OK)
             $item['expiry_class'] = 'success';
             $months = round($totalDays / 30);
             $item['expiry_label'] = "{$months} μήνες";
@@ -181,8 +184,9 @@ foreach ($items as &$item) {
 unset($item);
 
 // Stats
-$totalItems = count($items);
-$expiredCount = count(array_filter($items, fn($i) => $i['expiry_class'] === 'danger'));
+$totalItems   = count($items);
+$expiredCount = count(array_filter($items, fn($i) => !empty($i['expiry_date']) && $i['expiry_class'] === 'danger' && (new DateTime($i['expiry_date'])) < new DateTime()));
+$soonCount    = count(array_filter($items, fn($i) => !empty($i['expiry_date']) && $i['expiry_class'] === 'danger' && (new DateTime($i['expiry_date'])) >= new DateTime()));
 $warningCount = count(array_filter($items, fn($i) => $i['expiry_class'] === 'warning'));
 
 include __DIR__ . '/includes/header.php';
@@ -195,6 +199,9 @@ include __DIR__ . '/includes/header.php';
             <span class="badge bg-secondary me-1"><?= $totalItems ?> υλικά</span>
             <?php if ($expiredCount > 0): ?>
                 <span class="badge bg-danger me-1"><?= $expiredCount ?> ληγμένα</span>
+            <?php endif; ?>
+            <?php if ($soonCount > 0): ?>
+                <span class="badge bg-danger me-1"><?= $soonCount ?> < 3 μήνες</span>
             <?php endif; ?>
             <?php if ($warningCount > 0): ?>
                 <span class="badge bg-warning text-dark me-2"><?= $warningCount ?> κοντά σε λήξη</span>
@@ -249,12 +256,12 @@ include __DIR__ . '/includes/header.php';
                                                 <?= csrfField() ?>
                                                 <input type="hidden" name="action" value="edit">
                                                 <input type="hidden" name="id" value="<?= $item['id'] ?>">
-                                                <div class="col-md-3">
+                                                <div class="col-md-2">
                                                     <label class="form-label small mb-0">Όνομα</label>
                                                     <input type="text" name="name" class="form-control form-control-sm" value="<?= h($item['name']) ?>" required>
                                                 </div>
-                                                <div class="col-md-1">
-                                                    <label class="form-label small mb-0 text-nowrap">Αριθμός είδους</label>
+                                                <div class="col-md-2">
+                                                    <label class="form-label small mb-0">Αριθμός είδους</label>
                                                     <input type="number" name="quantity" class="form-control form-control-sm" value="<?= $item['quantity'] ?>" min="0" required>
                                                 </div>
                                                 <div class="col-md-2">
@@ -346,11 +353,11 @@ include __DIR__ . '/includes/header.php';
                 <?= csrfField() ?>
                 <input type="hidden" name="action" value="add">
                 <div class="row g-3">
-                    <div class="col-md-3">
+                    <div class="col-md-2">
                         <label class="form-label">Όνομα <span class="text-danger">*</span></label>
                         <input type="text" name="name" class="form-control" required placeholder="π.χ. Γάζες αποστειρωμένες">
                     </div>
-                    <div class="col-md-1">
+                    <div class="col-md-2">
                         <label class="form-label">Αριθμός είδους</label>
                         <input type="number" name="quantity" class="form-control" value="1" min="0">
                     </div>
