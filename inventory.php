@@ -57,7 +57,7 @@ $stats       = getInventoryStats();
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0">
         <i class="bi bi-box-seam me-2"></i><?= h($pageTitle) ?>
     </h1>
@@ -79,52 +79,52 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <!-- Stats Cards -->
-<div class="row g-3 mb-4 no-print">
+<div class="row g-2 mb-3 no-print">
     <div class="col-6 col-md-3 col-xl">
         <div class="card border-0 shadow-sm h-100">
-            <div class="card-body text-center py-3">
-                <div class="fs-2 fw-bold text-dark"><?= $stats['total'] ?></div>
-                <small class="text-muted">Σύνολο</small>
+            <div class="card-body text-center py-2">
+                <div class="fs-5 fw-bold text-dark"><?= $stats['total'] ?></div>
+                <small class="text-muted" style="font-size:0.75rem;">Σύνολο</small>
             </div>
         </div>
     </div>
     <div class="col-6 col-md-3 col-xl">
         <div class="card border-0 shadow-sm h-100">
-            <div class="card-body text-center py-3">
-                <div class="fs-2 fw-bold text-success"><?= $stats['available'] ?></div>
-                <small class="text-muted">Διαθέσιμα</small>
+            <div class="card-body text-center py-2">
+                <div class="fs-5 fw-bold text-success"><?= $stats['available'] ?></div>
+                <small class="text-muted" style="font-size:0.75rem;">Διαθέσιμα</small>
             </div>
         </div>
     </div>
     <div class="col-6 col-md-3 col-xl">
         <div class="card border-0 shadow-sm h-100">
-            <div class="card-body text-center py-3">
-                <div class="fs-2 fw-bold text-primary"><?= $stats['booked'] ?></div>
-                <small class="text-muted">Χρεωμένα</small>
+            <div class="card-body text-center py-2">
+                <div class="fs-5 fw-bold text-primary"><?= $stats['booked'] ?></div>
+                <small class="text-muted" style="font-size:0.75rem;">Χρεωμένα</small>
             </div>
         </div>
     </div>
     <div class="col-6 col-md-3 col-xl">
         <div class="card border-0 shadow-sm h-100">
-            <div class="card-body text-center py-3">
-                <div class="fs-2 fw-bold text-warning"><?= $stats['maintenance'] ?></div>
-                <small class="text-muted">Συντήρηση</small>
+            <div class="card-body text-center py-2">
+                <div class="fs-5 fw-bold text-warning"><?= $stats['maintenance'] ?></div>
+                <small class="text-muted" style="font-size:0.75rem;">Συντήρηση</small>
             </div>
         </div>
     </div>
     <div class="col-6 col-md-3 col-xl">
         <div class="card border-0 shadow-sm h-100">
-            <div class="card-body text-center py-3">
-                <div class="fs-2 fw-bold text-danger"><?= $stats['damaged'] ?></div>
-                <small class="text-muted">Χαλασμένα</small>
+            <div class="card-body text-center py-2">
+                <div class="fs-5 fw-bold text-danger"><?= $stats['damaged'] ?></div>
+                <small class="text-muted" style="font-size:0.75rem;">Χαλασμένα</small>
             </div>
         </div>
     </div>
 </div>
 
 <!-- Filters -->
-<div class="card mb-4 no-print">
-    <div class="card-body">
+<div class="card mb-3 no-print">
+    <div class="card-body py-2">
         <form method="get" class="row g-3">
             <div class="col-md-3">
                 <input type="text" class="form-control" name="search" placeholder="Αναζήτηση (barcode, όνομα)..." 
@@ -164,7 +164,7 @@ include __DIR__ . '/includes/header.php';
 
 <?php if (isAdmin() && count($departments) > 0): ?>
 <!-- Warehouse filter -->
-<div class="card mb-4 no-print">
+<div class="card mb-3 no-print">
     <div class="card-body py-2">
         <form method="post" class="d-flex align-items-center gap-3">
             <?= csrfField() ?>
@@ -213,8 +213,8 @@ include __DIR__ . '/includes/header.php';
                             <?php endif; ?>
                             <th>Barcode</th>
                             <th>Όνομα</th>
-                            <th>Εγγραφή</th>
-                            <th>Α.Μ</th>
+                            <th class="d-none d-xxl-table-cell">Εγγραφή</th>
+                            <th class="d-none d-xxl-table-cell">Α.Μ</th>
                             <th>Κατηγορία</th>
                             <th>Τοποθεσία</th>
                             <?php if (isSystemAdmin()): ?>
@@ -249,8 +249,8 @@ include __DIR__ . '/includes/header.php';
                                         </a>
                                     <?php endif; ?>
                                 </td>
-                                <td><small><?= !empty($item['registration_date'] ?? null) ? formatDate($item['registration_date']) : '<span class="text-muted">-</span>' ?></small></td>
-                                <td><small><?= h($item['registration_number'] ?? '-') ?></small></td>
+                                <td class="d-none d-xxl-table-cell"><small><?= !empty($item['registration_date'] ?? null) ? formatDate($item['registration_date']) : '<span class="text-muted">-</span>' ?></small></td>
+                                <td class="d-none d-xxl-table-cell"><small><?= h($item['registration_number'] ?? '-') ?></small></td>
                                 <td>
                                     <?php if ($item['category_name']): ?>
                                         <span class="badge" style="background-color: <?= h($item['category_color']) ?>">
@@ -274,15 +274,14 @@ include __DIR__ . '/includes/header.php';
                                         );
                                         ?>
                                         <small>
-                                            <i class="bi bi-person<?= $overdueInfo['is_overdue'] ? '-fill' : '' ?>"></i>
-                                            <span class="<?= $overdueInfo['is_overdue'] ? 'text-danger fw-bold' : '' ?>">
+                                            <i class="bi bi-person<?= $overdueInfo['is_overdue'] ? '-fill text-danger' : '' ?>"></i>
+                                            <span class="<?= $overdueInfo['is_overdue'] ? 'text-danger fw-bold' : '' ?>"
+                                                  title="<?= formatDate($item['booking_date']) ?><?= !empty($item['expected_return_date']) ? ' · επ. ' . formatDate($item['expected_return_date']) : '' ?>" data-bs-toggle="tooltip">
                                                 <?= h($item['booked_by_name']) ?>
                                             </span>
-                                            <br>
-                                            <span class="text-muted"><?= formatDate($item['booking_date']) ?></span>
-                                            <span class="badge bg-<?= $overdueInfo['status_class'] ?> ms-1" style="font-size: 0.65em;">
-                                                <?= h($overdueInfo['status_label']) ?>
-                                            </span>
+                                            <?php if ($overdueInfo['is_overdue']): ?>
+                                                <span class="badge bg-danger" style="font-size:0.65em;">Εκπρόθ.</span>
+                                            <?php endif; ?>
                                         </small>
                                     <?php else: ?>
                                         <span class="text-muted">-</span>
@@ -293,19 +292,16 @@ include __DIR__ . '/includes/header.php';
                                         <a href="inventory-view.php?id=<?= $item['id'] ?>" class="btn btn-outline-primary" title="Προβολή">
                                             <i class="bi bi-eye"></i>
                                         </a>
-                                        <?php if ($item['status'] === 'available'): ?>
-                                            <a href="inventory-book.php?item_id=<?= $item['id'] ?>" class="btn btn-outline-success" title="Χρέωση">
-                                                <i class="bi bi-box-arrow-right"></i>
-                                            </a>
-                                        <?php endif; ?>
-                                        <?php if (canManageInventory()): ?>
-                                            <a href="inventory-form.php?clone_id=<?= $item['id'] ?>" class="btn btn-outline-info" title="Κλωνοποίηση">
-                                                <i class="bi bi-copy"></i>
-                                            </a>
-                                            <a href="inventory-form.php?id=<?= $item['id'] ?>" class="btn btn-outline-secondary" title="Επεξεργασία">
-                                                <i class="bi bi-pencil"></i>
-                                            </a>
-                                        <?php endif; ?>
+                                        <button type="button" class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split px-1" data-bs-toggle="dropdown" aria-expanded="false"></button>
+                                        <ul class="dropdown-menu dropdown-menu-end">
+                                            <?php if ($item['status'] === 'available'): ?>
+                                                <li><a class="dropdown-item" href="inventory-book.php?item_id=<?= $item['id'] ?>"><i class="bi bi-box-arrow-right me-2"></i>Χρέωση</a></li>
+                                            <?php endif; ?>
+                                            <?php if (canManageInventory()): ?>
+                                                <li><a class="dropdown-item" href="inventory-form.php?id=<?= $item['id'] ?>"><i class="bi bi-pencil me-2"></i>Επεξεργασία</a></li>
+                                                <li><a class="dropdown-item" href="inventory-form.php?clone_id=<?= $item['id'] ?>"><i class="bi bi-copy me-2"></i>Κλωνοποίηση</a></li>
+                                            <?php endif; ?>
+                                        </ul>
                                     </div>
                                 </td>
                             </tr>
