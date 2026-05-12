@@ -350,7 +350,16 @@ include __DIR__ . '/includes/header.php';
 
 <script>
 function printInventoryList() {
-    window.print();
+    // Collect current filter values from the filter form
+    var params = new URLSearchParams();
+    var search = document.querySelector('input[name="search"]');
+    var status = document.querySelector('select[name="status"]');
+    var cat    = document.querySelector('select[name="category_id"]');
+    if (search && search.value) params.set('search',      search.value);
+    if (status && status.value) params.set('status',      status.value);
+    if (cat    && cat.value)    params.set('category_id', cat.value);
+    var qs = params.toString();
+    window.open('inventory-print.php' + (qs ? '?' + qs : ''), '_blank');
 }
 </script>
 
