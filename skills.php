@@ -4,8 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requireLogin();
-requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+requirePermission('skills');
 
 $pageTitle = 'Διαχείριση Δεξιοτήτων';
 $user = getCurrentUser();

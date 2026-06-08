@@ -4,8 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requireLogin();
-requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+requirePermission('volunteers_manage');
 
 $id = (int) get('id');
 $volunteer = null;
@@ -39,6 +38,14 @@ $warehouses = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory =
 // Get volunteer positions
 $volunteerPositions = dbFetchAll("SELECT id, name, color, icon FROM volunteer_positions WHERE is_active = 1 ORDER BY sort_order ASC, name ASC");
 
+// Get custom roles for assignment dropdown
+$customRoles = [];
+try {
+    $customRoles = dbFetchAll("SELECT id, name, color FROM custom_roles ORDER BY name ASC");
+} catch (Exception $e) {
+    // Table not yet created (migration pending)
+}
+
 $errors = [];
 
 if (isPost()) {
@@ -64,7 +71,20 @@ if (isPost()) {
         'fleece_size' => post('fleece_size') ?: null,
         'registry_epidrasis' => post('registry_epidrasis') ?: null,
         'registry_ggpp' => post('registry_ggpp') ?: null,
+        'custom_role_id' => post('custom_role_id') ?: null,
     ];
+
+    // Validate custom_role_id — only allowed for VOLUNTEER role
+    if ($data['custom_role_id'] !== null) {
+        if ($data['role'] === ROLE_SYSTEM_ADMIN) {
+            $data['custom_role_id'] = null; // system admins never have a custom role
+        } else {
+            $validRole = dbFetchValue("SELECT id FROM custom_roles WHERE id = ?", [(int)$data['custom_role_id']]);
+            if (!$validRole) {
+                $data['custom_role_id'] = null;
+            }
+        }
+    }
     
     // Validation
     if (empty($data['name'])) {
@@ -116,7 +136,7 @@ if (isPost()) {
             // Update
             dbExecute(
                 "UPDATE users SET 
-                 name = ?, email = ?, phone = ?, role = ?, department_id = ?, warehouse_id = ?, is_active = ?,
+                 name = ?, email = ?, phone = ?, role = ?, custom_role_id = ?, department_id = ?, warehouse_id = ?, is_active = ?,
                  volunteer_type = ?, cohort_year = ?, position_id = ?,
                  id_card = ?, afm = ?, amka = ?, driving_license = ?, vehicle_plate = ?,
                  pants_size = ?, shirt_size = ?, blouse_size = ?, fleece_size = ?,
@@ -124,7 +144,7 @@ if (isPost()) {
                  WHERE id = ?",
                 [
                     $data['name'], $data['email'], $data['phone'],
-                    $data['role'], $data['department_id'], $data['warehouse_id'], $data['is_active'],
+                    $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'],
                     $volunteerType, $cohortYear, $data['position_id'],
                     $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
@@ -146,13 +166,13 @@ if (isPost()) {
             // Create
             $id = dbInsert(
                 "INSERT INTO users 
-                 (name, email, password, phone, role, department_id, warehouse_id, is_active, volunteer_type, cohort_year, position_id,
+                 (name, email, password, phone, role, custom_role_id, department_id, warehouse_id, is_active, volunteer_type, cohort_year, position_id,
                   id_card, afm, amka, driving_license, vehicle_plate, pants_size, shirt_size, blouse_size, fleece_size,
                   registry_epidrasis, registry_ggpp, total_points, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                 [
                     $data['name'], $data['email'], password_hash($password, PASSWORD_DEFAULT),
-                    $data['phone'], $data['role'], $data['department_id'], $data['warehouse_id'], $data['is_active'],
+                    $data['phone'], $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'],
                     $volunteerType, $cohortYear, $data['position_id'],
                     $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
@@ -231,6 +251,7 @@ $form = $volunteer ?: [
     'fleece_size' => '',
     'registry_epidrasis' => '',
     'registry_ggpp' => '',
+    'custom_role_id' => null,
 ];
 
 include __DIR__ . '/includes/header.php';
@@ -283,11 +304,13 @@ include __DIR__ . '/includes/header.php';
             <div class="row">
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Ρόλος *</label>
-                    <select class="form-select" name="role" required>
+                    <select class="form-select" name="role" id="roleSelect" required>
                         <?php foreach (ROLE_LABELS as $r => $label): ?>
                             <?php 
                             // Dept admins can't create system admins
                             if ($r === ROLE_SYSTEM_ADMIN && $currentUser['role'] !== ROLE_SYSTEM_ADMIN) continue;
+                            // Legacy roles hidden — replaced by custom roles
+                            if (in_array($r, [ROLE_DEPARTMENT_ADMIN, ROLE_SHIFT_LEADER])) continue;
                             ?>
                             <option value="<?= $r ?>" <?= $form['role'] === $r ? 'selected' : '' ?>>
                                 <?= $label ?>
@@ -306,6 +329,32 @@ include __DIR__ . '/includes/header.php';
                     </select>
                 </div>
             </div>
+
+            <?php if (!empty($customRoles) && ($form['role'] ?? ROLE_VOLUNTEER) !== ROLE_SYSTEM_ADMIN): ?>
+            <div class="row" id="customRoleRow">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">
+                        <i class="bi bi-shield-lock me-1"></i>Προσαρμοσμένος Ρόλος
+                    </label>
+                    <select class="form-select" name="custom_role_id">
+                        <option value="">— Χωρίς ειδικά δικαιώματα —</option>
+                        <?php foreach ($customRoles as $cr): ?>
+                            <option value="<?= $cr['id'] ?>"
+                                    data-color="<?= h($cr['color']) ?>"
+                                    <?= ($form['custom_role_id'] ?? null) == $cr['id'] ? 'selected' : '' ?>>
+                                <?= h($cr['name']) ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                    <small class="text-muted">
+                        Ορίζει ποιες σελίδες βλέπει ο χρήστης. <a href="roles.php" target="_blank">Διαχείριση ρόλων</a>
+                    </small>
+                </div>
+                <div class="col-md-6 mb-3 d-flex align-items-center pt-4">
+                    <span id="customRoleBadge" class="badge rounded-pill px-3 py-2 d-none" style="font-size:0.95rem;"></span>
+                </div>
+            </div>
+            <?php endif; ?>
 
             <div class="row">
                 <div class="col-md-6 mb-3">
@@ -531,5 +580,46 @@ include __DIR__ . '/includes/header.php';
         </form>
     </div>
 </div>
+
+<?php if (!empty($customRoles)): ?>
+<script>
+(function () {
+    const roleSelect       = document.getElementById('roleSelect');
+    const customRoleRow    = document.getElementById('customRoleRow');
+    const customRoleSelect = customRoleRow ? customRoleRow.querySelector('select[name="custom_role_id"]') : null;
+    const badge            = document.getElementById('customRoleBadge');
+
+    function updateBadge() {
+        if (!customRoleSelect || !badge) return;
+        const selected = customRoleSelect.options[customRoleSelect.selectedIndex];
+        if (selected && selected.value) {
+            badge.textContent    = selected.text;
+            badge.style.backgroundColor = selected.dataset.color || '#6c757d';
+            badge.style.color    = '#fff';
+            badge.classList.remove('d-none');
+        } else {
+            badge.classList.add('d-none');
+        }
+    }
+
+    function toggleCustomRoleRow() {
+        if (!customRoleRow || !roleSelect) return;
+        const isSysAdmin = roleSelect.value === '<?= ROLE_SYSTEM_ADMIN ?>';
+        customRoleRow.style.display = isSysAdmin ? 'none' : '';
+        if (isSysAdmin && customRoleSelect) {
+            customRoleSelect.value = '';
+            badge.classList.add('d-none');
+        }
+    }
+
+    if (roleSelect)       roleSelect.addEventListener('change', toggleCustomRoleRow);
+    if (customRoleSelect) customRoleSelect.addEventListener('change', updateBadge);
+
+    // Init on page load
+    toggleCustomRoleRow();
+    updateBadge();
+})();
+</script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

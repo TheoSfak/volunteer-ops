@@ -4,8 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requireLogin();
-requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+requirePermission('volunteers_manage');
 
 $pageTitle = 'Εθελοντές';
 $user = getCurrentUser();
@@ -73,6 +72,7 @@ $pagination = paginate($total, $page, $perPage);
 $volunteers = dbFetchAll(
     "SELECT u.*, d.name as department_name, wh.name as warehouse_name,
             vp.name as position_name,
+            cr.name as custom_role_name, cr.color as custom_role_color,
             COALESCE(pr_stats.shifts_count, 0) as shifts_count,
             COALESCE(pr_stats.total_hours, 0) as total_hours
      FROM users u
@@ -80,6 +80,7 @@ $volunteers = dbFetchAll(
      LEFT JOIN departments d ON u.department_id = d.id
      LEFT JOIN departments wh ON u.warehouse_id = wh.id
      LEFT JOIN volunteer_positions vp ON u.position_id = vp.id
+     LEFT JOIN custom_roles cr ON u.custom_role_id = cr.id
      LEFT JOIN (
          SELECT volunteer_id, 
                 COUNT(*) as shifts_count,
@@ -353,6 +354,7 @@ include __DIR__ . '/includes/header.php';
                 <select name="role" class="form-select">
                     <option value="">Όλοι</option>
                     <?php foreach (ROLE_LABELS as $r => $label): ?>
+                        <?php if (in_array($r, [ROLE_DEPARTMENT_ADMIN, ROLE_SHIFT_LEADER])) continue; ?>
                         <option value="<?= $r ?>" <?= $role === $r ? 'selected' : '' ?>><?= $label ?></option>
                     <?php endforeach; ?>
                 </select>
@@ -462,7 +464,15 @@ include __DIR__ . '/includes/header.php';
                             </a><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_RESCUER) ?><?= positionBadge($v['position_name'] ?? '') ?>
                             <br><small class="text-muted"><?= h($v['email']) ?><?= $v['phone'] ? ' · ' . h($v['phone']) : '' ?></small>
                         </td>
-                        <td><?= roleBadge($v['role']) ?></td>
+                        <td>
+                            <?= roleBadge($v['role']) ?>
+                            <?php if (!empty($v['custom_role_name'])): ?>
+                                <span class="badge rounded-pill ms-1"
+                                      style="background-color:<?= h($v['custom_role_color']) ?>;color:#fff;font-size:0.75rem;">
+                                    <?= h($v['custom_role_name']) ?>
+                                </span>
+                            <?php endif; ?>
+                        </td>
                         <td><?= h($v['department_name'] ?? '-') ?></td>
                         <td>
                             <?php if ($v['warehouse_name']): ?>
@@ -567,6 +577,7 @@ include __DIR__ . '/includes/header.php';
                                                 <select class="form-select" name="new_role" required>
                                                     <?php foreach (ROLE_LABELS as $r => $label): ?>
                                                         <?php if ($r !== ROLE_SYSTEM_ADMIN || $user['role'] === ROLE_SYSTEM_ADMIN): ?>
+                                                        <?php if (in_array($r, [ROLE_DEPARTMENT_ADMIN, ROLE_SHIFT_LEADER])) continue; ?>
                                                             <option value="<?= $r ?>" <?= $v['role'] === $r ? 'selected' : '' ?>>
                                                                 <?= $label ?>
                                                             </option>

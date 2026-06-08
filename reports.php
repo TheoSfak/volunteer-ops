@@ -4,8 +4,7 @@
  * All statistics consolidated into one page with 8 tabs and Chart.js visualizations.
  */
 require_once __DIR__ . '/bootstrap.php';
-requireLogin();
-requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+requirePermission('reports');
 
 $pageTitle = 'Αναφορές & Στατιστικά';
 $currentPage = 'reports';

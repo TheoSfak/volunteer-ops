@@ -108,11 +108,16 @@ function requireRole($roles) {
 }
 
 /**
- * Check if current user is admin
+ * Check if current user is admin.
+ * Returns true for SYSTEM_ADMIN, DEPARTMENT_ADMIN (legacy), or any user
+ * with a custom_role_id (elevated volunteer). Page-level requirePermission()
+ * already controls which pages they can reach; this controls management UI within pages.
  */
 function isAdmin() {
     $user = getCurrentUser();
-    return $user && in_array($user['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+    if (!$user) return false;
+    if (in_array($user['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN])) return true;
+    return !empty($user['custom_role_id']);
 }
 
 /**
@@ -342,4 +347,58 @@ function updatePassword($userId, $currentPassword, $newPassword) {
     logAudit('password_change', 'users', $userId);
     
     return ['success' => true];
+}
+
+/**
+ * Check if the current user has permission to access a page/section.
+ *
+ * Rules:
+ *  - SYSTEM_ADMIN → always true (full access)
+ *  - Any user with no custom_role_id → false (plain volunteer, no elevated access)
+ *  - User with custom_role_id → check custom_role_permissions table
+ *
+ * Pages restricted to SYSTEM_ADMIN only (audit, settings, branches, etc.)
+ * never call this function — they use requireRole([ROLE_SYSTEM_ADMIN]) directly.
+ */
+function hasPagePermission(string $slug): bool {
+    $user = getCurrentUser();
+    if (!$user) {
+        return false;
+    }
+    if ($user['role'] === ROLE_SYSTEM_ADMIN) {
+        return true;
+    }
+    if (empty($user['custom_role_id'])) {
+        return false;
+    }
+
+    static $permCache = [];
+    $roleId = (int) $user['custom_role_id'];
+
+    if (!isset($permCache[$roleId])) {
+        try {
+            $rows = dbFetchAll(
+                "SELECT page_slug FROM custom_role_permissions WHERE role_id = ?",
+                [$roleId]
+            );
+            $permCache[$roleId] = array_column($rows, 'page_slug');
+        } catch (Exception $e) {
+            // custom_role_permissions table may not exist yet during migration
+            $permCache[$roleId] = [];
+        }
+    }
+
+    return in_array($slug, $permCache[$roleId], true);
+}
+
+/**
+ * Require a page permission — redirect to dashboard if not authorised.
+ * Internally calls requireLogin(), so no need to call it separately.
+ */
+function requirePermission(string $slug): void {
+    requireLogin();
+    if (!hasPagePermission($slug)) {
+        setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης σε αυτή τη σελίδα.');
+        redirect('dashboard.php');
+    }
 }

@@ -1,7 +1,6 @@
 ﻿<?php
 require_once __DIR__ . '/bootstrap.php';
-requireLogin();
-requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+requirePermission('tasks_manage');
 
 $pageTitle = 'Φόρμα Εργασίας';
 $user = getCurrentUser();

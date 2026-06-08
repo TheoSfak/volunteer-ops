@@ -75,7 +75,7 @@ function _col(array $row, string $key): ?string {
  */
 function validateVolunteerData(array $row, int $rowNumber): array {
     $errors = [];
-    $validRoles = [ROLE_VOLUNTEER, ROLE_SHIFT_LEADER, ROLE_DEPARTMENT_ADMIN, ROLE_SYSTEM_ADMIN];
+    $validRoles = [ROLE_VOLUNTEER, ROLE_SYSTEM_ADMIN];
     $validTypes = ['VOLUNTEER', 'TRAINEE_RESCUER', 'RESCUER'];
 
     if (empty($row['Όνομα'])) {

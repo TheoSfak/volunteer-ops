@@ -4,8 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requireLogin();
-requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+requirePermission('citizens');
 
 $pageTitle = 'Λίστα Πολιτών';
 $seminarTypes = ['BLS ADULT', 'BLS PEDIATRIC', 'TRAUMA', 'FIRST AID'];

@@ -5,8 +5,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requireLogin();
-requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+requirePermission('inactive_volunteers');
 
 $pageTitle = 'Ανενεργοί Εθελοντές';
 $user = getCurrentUser();
@@ -147,6 +146,7 @@ include __DIR__ . '/includes/header.php';
                 <select name="role" class="form-select">
                     <option value="">Όλοι</option>
                     <?php foreach (ROLE_LABELS as $r => $label): ?>
+                        <?php if (in_array($r, [ROLE_DEPARTMENT_ADMIN, ROLE_SHIFT_LEADER])) continue; ?>
                         <option value="<?= $r ?>" <?= $role === $r ? 'selected' : '' ?>><?= $label ?></option>
                     <?php endforeach; ?>
                 </select>
