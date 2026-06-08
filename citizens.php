@@ -310,6 +310,16 @@ $filterCompleted = get('completed', '');
 $page = max(1, (int) get('page', 1));
 $perPage = 20;
 
+// Sorting
+$allowedSorts = [
+    'first_name_gr'  => 'first_name_gr',
+    'last_name_gr'   => 'last_name_gr',
+    'registered_at'  => 'registered_at',
+    'seminar_type'   => 'seminar_type',
+];
+$sortCol = isset($allowedSorts[get('sort')]) ? $allowedSorts[get('sort')] : 'registered_at';
+$sortDir = strtolower(get('dir', '')) === 'asc' ? 'ASC' : 'DESC';
+
 $where = ['1=1'];
 $params = [];
 
@@ -334,8 +344,11 @@ $whereClause = implode(' AND ', $where);
 $total = dbFetchValue("SELECT COUNT(*) FROM citizens WHERE $whereClause", $params);
 $pagination = paginate($total, $page, $perPage);
 
+// Secondary sort for stable ordering
+$secondarySort = ($sortCol === 'last_name_gr') ? ', first_name_gr ASC' : ', last_name_gr ASC, first_name_gr ASC';
+
 $citizens = dbFetchAll(
-    "SELECT * FROM citizens WHERE $whereClause ORDER BY last_name_gr ASC, first_name_gr ASC, id ASC LIMIT ? OFFSET ?",
+    "SELECT * FROM citizens WHERE $whereClause ORDER BY $sortCol $sortDir $secondarySort, id ASC LIMIT ? OFFSET ?",
     array_merge($params, [$pagination['per_page'], $pagination['offset']])
 );
 
@@ -355,7 +368,7 @@ include __DIR__ . '/includes/header.php';
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-person-vcard"></i> Λίστα Πολιτών</h2>
     <div>
-        <a href="citizens.php?export=csv&search=<?= urlencode($search) ?>&contact=<?= urlencode($filterContact) ?>&payment=<?= urlencode($filterPayment) ?>&completed=<?= urlencode($filterCompleted) ?>" class="btn btn-success me-2">
+        <a href="citizens.php?export=csv&search=<?= urlencode($search) ?>&contact=<?= urlencode($filterContact) ?>&payment=<?= urlencode($filterPayment) ?>&completed=<?= urlencode($filterCompleted) ?>&sort=<?= urlencode($sortCol) ?>&dir=<?= urlencode(strtolower($sortDir)) ?>" class="btn btn-success me-2">
             <i class="bi bi-filetype-csv"></i> Εξαγωγή CSV
         </a>
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#citizenModal" onclick="resetForm()">
@@ -368,6 +381,8 @@ include __DIR__ . '/includes/header.php';
 <div class="card mb-4">
     <div class="card-body">
         <form method="get" class="row g-3 align-items-end">
+            <input type="hidden" name="sort" value="<?= h($sortCol) ?>">
+            <input type="hidden" name="dir" value="<?= h(strtolower($sortDir)) ?>">
             <div class="col-md-4">
                 <label class="form-label">Αναζήτηση</label>
                 <input type="text" name="search" class="form-control" placeholder="Όνομα, email, τηλέφωνο..." value="<?= h($search) ?>">
@@ -411,15 +426,30 @@ include __DIR__ . '/includes/header.php';
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover table-striped table-sm mb-0 align-middle" style="font-size:.82rem">
+<?php
+// Sort helper: builds href toggling direction, preserving all filters
+function sortLink(string $col, string $label, string $currentCol, string $currentDir, array $filters): string {
+    $isActive = ($col === $currentCol);
+    $newDir   = ($isActive && $currentDir === 'DESC') ? 'asc' : ($isActive ? 'desc' : 'desc');
+    $indicator = '';
+    if ($isActive) {
+        $indicator = ' ' . ($currentDir === 'ASC' ? '&#9650;' : '&#9660;');
+    }
+    $qs = http_build_query(array_merge($filters, ['sort' => $col, 'dir' => $newDir]));
+    return '<a href="citizens.php?' . h($qs) . '" class="text-dark text-decoration-none d-block" style="white-space:nowrap">'
+         . $label . $indicator . '</a>';
+}
+$__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPayment, 'completed' => $filterCompleted];
+?>
                 <thead class="table-light">
                     <tr>
-                        <th>Όνομα</th>
-                        <th>Επίθετο</th>
+                        <th><?= sortLink('first_name_gr',  'Όνομα',      $sortCol, $sortDir, $__f) ?></th>
+                        <th><?= sortLink('last_name_gr',   'Επίθετο',    $sortCol, $sortDir, $__f) ?></th>
                         <th>Email / Τηλ.</th>
-                        <th>Σεμινάριο</th>
+                        <th><?= sortLink('seminar_type',   'Σεμινάριο',  $sortCol, $sortDir, $__f) ?></th>
                         <th>Γέννηση</th>
                         <th class="text-center" style="white-space:nowrap">Επαφή&nbsp;/&nbsp;Πληρ.&nbsp;/&nbsp;Ολοκλ.</th>
-                        <th>Εγγραφή</th>
+                        <th><?= sortLink('registered_at',  'Εγγραφή',    $sortCol, $sortDir, $__f) ?></th>
                         <th style="font-size:.95rem;font-weight:700;letter-spacing:.04em;">ΠΗΓΗ</th>
                         <th class="text-center">Ενέργειες</th>
                     </tr>
