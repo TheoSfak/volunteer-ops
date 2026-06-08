@@ -17,7 +17,7 @@ $previousMonth = date('Y-m', strtotime('-1 month'));
 
 if (isPost() && post('action') === 'bulk_complete_overdue') {
     verifyCsrf();
-    requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+    requirePermission('missions_manage');
 
     $selectedMissionIds = array_values(array_unique(array_map('intval', post('mission_ids', []))));
     $selectedMissionIds = array_values(array_filter($selectedMissionIds, fn($mid) => $mid > 0));

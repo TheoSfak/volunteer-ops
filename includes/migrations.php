@@ -3791,6 +3791,79 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 58,
+            'description' => 'Create custom_roles and custom_role_permissions tables, add custom_role_id to users',
+            'up' => function () {
+                // custom_roles table
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'custom_roles'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE custom_roles (
+                            id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            name        VARCHAR(100) NOT NULL,
+                            description TEXT NULL,
+                            color       VARCHAR(7) NOT NULL DEFAULT '#6c757d',
+                            is_default  TINYINT(1) NOT NULL DEFAULT 0,
+                            created_by  INT UNSIGNED NULL,
+                            created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                            updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            UNIQUE KEY uq_custom_roles_name (name)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                // custom_role_permissions table
+                $table2 = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'custom_role_permissions'"
+                );
+                if (!$table2) {
+                    dbExecute(
+                        "CREATE TABLE custom_role_permissions (
+                            role_id   INT UNSIGNED NOT NULL,
+                            page_slug VARCHAR(100) NOT NULL,
+                            PRIMARY KEY (role_id, page_slug),
+                            CONSTRAINT fk_crp_role FOREIGN KEY (role_id)
+                                REFERENCES custom_roles(id) ON DELETE CASCADE
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                // custom_role_id column on users
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'users'
+                       AND COLUMN_NAME  = 'custom_role_id'"
+                );
+                if (!$col) {
+                    dbExecute(
+                        "ALTER TABLE users
+                         ADD COLUMN custom_role_id INT UNSIGNED NULL DEFAULT NULL
+                         AFTER role,
+                         ADD CONSTRAINT fk_users_custom_role
+                             FOREIGN KEY (custom_role_id) REFERENCES custom_roles(id) ON DELETE SET NULL"
+                    );
+                }
+            },
+        ],
+
+        [
+            'version'     => 59,
+            'description' => 'Downgrade legacy DEPARTMENT_ADMIN and SHIFT_LEADER users to VOLUNTEER role',
+            'up' => function () {
+                dbExecute(
+                    "UPDATE users
+                     SET role = 'VOLUNTEER', updated_at = NOW()
+                     WHERE role IN ('DEPARTMENT_ADMIN', 'SHIFT_LEADER')"
+                );
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

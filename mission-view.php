@@ -56,10 +56,7 @@ if (isTepMission((int)($mission['mission_type_id'] ?? 0)) && !canSeeTep($mission
 
 // Non-admins can only view OPEN missions, except shift leaders can also see CLOSED
 // (needed for attendance management) and responsible user can always see their own mission
-$allowedStatuses = [STATUS_OPEN];
-if (hasRole(ROLE_SHIFT_LEADER)) {
-    $allowedStatuses[] = STATUS_CLOSED;
-}
+$allowedStatuses = [STATUS_OPEN, STATUS_CLOSED];
 $isResponsible = !empty($mission['responsible_user_id']) && $mission['responsible_user_id'] == $user['id'];
 if (!isAdmin() && !$isResponsible && !in_array($mission['status'], $allowedStatuses)) {
     setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή την αποστολή.');

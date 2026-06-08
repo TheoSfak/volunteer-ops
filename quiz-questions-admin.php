@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/bootstrap.php';
-requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+requirePermission('training_admin');
 
 $quizId = get('quiz_id');
 if (empty($quizId)) {

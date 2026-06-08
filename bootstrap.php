@@ -13,6 +13,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/permissions.php';
 require_once __DIR__ . '/includes/email.php';
 require_once __DIR__ . '/includes/webpush.php';
 require_once __DIR__ . '/includes/newsletter-functions.php';
@@ -56,7 +57,7 @@ $__maintenanceExcluded = ['login.php', 'logout.php', 'install.php', 'cron_daily.
 if (getSetting('maintenance_mode', '0') && !in_array($__currentScript, $__maintenanceExcluded)) {
     if (isLoggedIn()) {
         $__mUser = getCurrentUser();
-        if ($__mUser && !in_array($__mUser['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN])) {
+        if ($__mUser && $__mUser['role'] !== ROLE_SYSTEM_ADMIN) {
             setFlash('warning', 'Το σύστημα βρίσκεται σε συντήρηση. Παρακαλώ δοκιμάστε αργότερα.');
             logout();
             redirect('login.php');

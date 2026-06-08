@@ -6,7 +6,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+requirePermission('volunteers_manage');
 
 if (!isPost()) {
     setFlash('error', 'Μη έγκυρη ενέργεια.');

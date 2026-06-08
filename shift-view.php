@@ -37,7 +37,7 @@ if (isTepMission($missionTypeId) && !canSeeTep($missionResponsible)) {
     setFlash('error', 'Δεν έχετε πρόσβαση σε βάρδιες αποστολών Τ.Ε.Π.');
     redirect('missions.php');
 }
-$canManage = (isAdmin() || hasRole(ROLE_SHIFT_LEADER)) && !$missionCompleted;
+$canManage = isAdmin() && !$missionCompleted;
 
 // Get participants
 $participants = dbFetchAll(
@@ -287,7 +287,7 @@ if (isPost()) {
 
         case 'self_checkin':
             // Shift leader or admin self check-in via the "Είμαι Παρών" button
-            if ($qrEnabled && (isAdmin() || hasRole(ROLE_SHIFT_LEADER))) {
+            if ($qrEnabled && isAdmin()) {
                 $selfPr = dbFetchOne(
                     "SELECT * FROM participation_requests WHERE shift_id = ? AND volunteer_id = ? AND status = ?",
                     [$id, $user['id'], PARTICIPATION_APPROVED]
@@ -745,7 +745,7 @@ include __DIR__ . '/includes/header.php';
 
 <?= showFlash() ?>
 
-<?php if ($missionCompleted && (isAdmin() || hasRole(ROLE_SHIFT_LEADER))): ?>
+<?php if ($missionCompleted && isAdmin()): ?>
 <div class="alert alert-warning d-flex align-items-center gap-2 mb-4">
     <i class="bi bi-lock-fill fs-5"></i>
     <div>
@@ -1010,7 +1010,7 @@ include __DIR__ . '/includes/header.php';
                                     <i class="bi bi-qr-code me-1"></i>
                                     Check-in: <strong><?= formatDateTime($myParticipation['attendance_confirmed_at']) ?></strong>
                                 </div>
-                            <?php elseif ($qrEnabled && hasRole(ROLE_SHIFT_LEADER)): ?>
+                            <?php elseif ($qrEnabled && isAdmin()): ?>
                                 <div class="alert alert-success mb-2">
                                     <i class="bi bi-check-circle me-1"></i>
                                     Η συμμετοχή σας έχει εγκριθεί!
