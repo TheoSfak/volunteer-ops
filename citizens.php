@@ -31,6 +31,20 @@ if (!$_hasTsCols) {
     }
 }
 
+// Check if registered_at / referral_source columns exist (added in migration 61)
+$_hasNewCols = !empty(dbFetchAll("SHOW COLUMNS FROM citizens LIKE 'registered_at'"));
+if (!$_hasNewCols) {
+    try {
+        dbExecute("ALTER TABLE citizens
+            ADD COLUMN registered_at DATE NULL AFTER notes,
+            ADD COLUMN referral_source VARCHAR(255) NULL AFTER registered_at");
+        dbExecute("UPDATE citizens SET registered_at = DATE(created_at) WHERE registered_at IS NULL");
+        $_hasNewCols = true;
+    } catch (Exception $e) {
+        // Continue gracefully
+    }
+}
+
 // Handle POST actions
 if (isPost()) {
     verifyCsrf();
@@ -63,7 +77,14 @@ if (isPost()) {
                 post('payment_done') ? 1 : 0,
                 post('completed') ? 1 : 0,
                 trim(post('notes')) ?: null,
+                $_hasNewCols ? (post('registered_at') ?: date('Y-m-d')) : null, // 12
+                $_hasNewCols ? (trim(post('referral_source')) ?: null) : null,  // 13
             ];
+
+            // Strip the two new-col values from $data if columns don't exist yet
+            if (!$_hasNewCols) {
+                array_splice($data, 12, 2);
+            }
 
             if (empty($data[0]) || empty($data[1])) {
                 setFlash('error', 'Τα πεδία Όνομα και Επίθετο (Ελληνικά) είναι υποχρεωτικά.');
@@ -86,8 +107,9 @@ if (isPost()) {
                 }
                 dbExecute(
                     "UPDATE citizens SET first_name_gr=?, last_name_gr=?, first_name_lat=?, last_name_lat=?,
-                     seminar_type=?, birth_date=?, email=?, phone=?, contact_done=?, payment_done=?, completed=?, notes=?
-                     {$tsUpdates}, updated_at=NOW() WHERE id=?",
+                     seminar_type=?, birth_date=?, email=?, phone=?, contact_done=?, payment_done=?, completed=?, notes=?"
+                     . ($_hasNewCols ? ', registered_at=?, referral_source=?' : '')
+                     . "{$tsUpdates}, updated_at=NOW() WHERE id=?",
                     array_merge($data, [$id])
                 );
                 logAudit('update', 'citizens', $id);
@@ -103,18 +125,19 @@ if (isPost()) {
                 }
                 $data[] = getCurrentUserId();
                 if ($_hasTsCols) {
+                    $colList = $_hasNewCols
+                        ? 'first_name_gr, last_name_gr, first_name_lat, last_name_lat, seminar_type, birth_date, email, phone, contact_done, payment_done, completed, notes, registered_at, referral_source, contact_done_at, payment_done_at, completed_at, created_by'
+                        : 'first_name_gr, last_name_gr, first_name_lat, last_name_lat, seminar_type, birth_date, email, phone, contact_done, payment_done, completed, notes, contact_done_at, payment_done_at, completed_at, created_by';
                     $newId = dbInsert(
-                        "INSERT INTO citizens (first_name_gr, last_name_gr, first_name_lat, last_name_lat,
-                         seminar_type, birth_date, email, phone, contact_done, payment_done, completed, notes,
-                         contact_done_at, payment_done_at, completed_at, created_by)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO citizens ($colList) VALUES (" . implode(',', array_fill(0, count($data), '?')) . ")",
                         $data
                     );
                 } else {
+                    $colList = $_hasNewCols
+                        ? 'first_name_gr, last_name_gr, first_name_lat, last_name_lat, seminar_type, birth_date, email, phone, contact_done, payment_done, completed, notes, registered_at, referral_source, created_by'
+                        : 'first_name_gr, last_name_gr, first_name_lat, last_name_lat, seminar_type, birth_date, email, phone, contact_done, payment_done, completed, notes, created_by';
                     $newId = dbInsert(
-                        "INSERT INTO citizens (first_name_gr, last_name_gr, first_name_lat, last_name_lat,
-                         seminar_type, birth_date, email, phone, contact_done, payment_done, completed, notes, created_by)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        "INSERT INTO citizens ($colList) VALUES (" . implode(',', array_fill(0, count($data), '?')) . ")",
                         $data
                     );
                 }
@@ -252,7 +275,7 @@ if (get('export') === 'csv') {
     header('Content-Disposition: attachment; filename="citizens_' . date('Y-m-d_His') . '.csv"');
     $out = fopen('php://output', 'w');
     fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // UTF-8 BOM for Excel
-    fputcsv($out, ['#', 'Επίθετο (GR)', 'Όνομα (GR)', 'Επίθετο (LAT)', 'Όνομα (LAT)', 'Είδος Σεμιναρίου', 'Ημ. Γέννησης', 'Email', 'Τηλέφωνο', 'Επικοινωνία', 'Ημ/νία Επικοινωνίας', 'Πληρωμή', 'Ημ/νία Πληρωμής', 'Ολοκλήρωση', 'Ημ/νία Ολοκλήρωσης', 'Σημειώσεις'], ';', '"', '\\');
+    fputcsv($out, ['#', 'Επίθετο (GR)', 'Όνομα (GR)', 'Επίθετο (LAT)', 'Όνομα (LAT)', 'Είδος Σεμιναρίου', 'Ημ. Γέννησης', 'Email', 'Τηλέφωνο', 'Επικοινωνία', 'Ημ/νία Επικοινωνίας', 'Πληρωμή', 'Ημ/νία Πληρωμής', 'Ολοκλήρωση', 'Ημ/νία Ολοκλήρωσης', 'Ημ. Εγγραφής', 'Πηγή', 'Σημειώσεις'], ';', '"', '\\');
     foreach ($rows as $i => $r) {
         fputcsv($out, [
             $i + 1,
@@ -270,6 +293,8 @@ if (get('export') === 'csv') {
             ($r['payment_done_at'] ?? null) ? formatDateTime($r['payment_done_at']) : '',
             $r['completed'] ? 'Ναι' : 'Όχι',
             ($r['completed_at'] ?? null) ? formatDateTime($r['completed_at']) : '',
+            !empty($r['registered_at']) ? formatDate($r['registered_at']) : '',
+            $r['referral_source'] ?? '',
             $r['notes'] ?? '',
         ], ';', '"', '\\');
     }
@@ -385,73 +410,67 @@ include __DIR__ . '/includes/header.php';
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover table-striped table-sm mb-0" style="font-size:.85rem">
+            <table class="table table-hover table-striped table-sm mb-0 align-middle" style="font-size:.82rem">
                 <thead class="table-light">
                     <tr>
-                        <th>#</th>
-                        <th>Όνομα (GR)</th>
-                        <th>Επίθετο (GR)</th>
-                        <th>Όνομα (LAT)</th>
-                        <th>Επίθετο (LAT)</th>
-                        <th>Είδος Σεμιναρίου</th>
-                        <th>Ημ. Γέν.</th>
-                        <th>Email</th>
-                        <th>Τηλέφωνο</th>
-                        <th class="text-center">Επικ.</th>
-                        <th class="text-center">Πληρ.</th>
-                        <th class="text-center">Ολοκλ.</th>
+                        <th>Ονοματεπώνυμο</th>
+                        <th>Email / Τηλ.</th>
+                        <th>Σεμινάριο</th>
+                        <th>Γέννηση</th>
+                        <th class="text-center" style="white-space:nowrap">Επαφή&nbsp;/&nbsp;Πληρ.&nbsp;/&nbsp;Ολοκλ.</th>
+                        <th>Εγγραφή</th>
+                        <th style="font-size:.95rem;font-weight:700;letter-spacing:.04em;">ΠΗΓΗ</th>
                         <th class="text-center">Ενέργειες</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($citizens)): ?>
-                    <tr><td colspan="13" class="text-center text-muted py-4">Δεν βρέθηκαν πολίτες.</td></tr>
+                    <tr><td colspan="8" class="text-center text-muted py-4">Δεν βρέθηκαν πολίτες.</td></tr>
                     <?php else: ?>
                     <?php foreach ($citizens as $i => $c): ?>
                     <tr>
-                        <td><?= $pagination['offset'] + $i + 1 ?></td>
-                        <td><?= h($c['first_name_gr']) ?></td>
-                        <td><?= h($c['last_name_gr']) ?></td>
-                        <td><?= h($c['first_name_lat'] ?? '') ?></td>
-                        <td><?= h($c['last_name_lat'] ?? '') ?></td>
-                        <td><?= !empty($c['seminar_type']) ? '<span class="badge bg-info text-dark">' . h($c['seminar_type']) . '</span>' : '<span class="text-muted">-</span>' ?></td>
-                        <td class="text-nowrap"><?= $c['birth_date'] ? formatDate($c['birth_date']) : '-' ?></td>
-                        <td><?= h($c['email'] ?? '-') ?></td>
-                        <td class="text-nowrap"><?= h($c['phone'] ?? '-') ?></td>
-                        <td class="text-center">
+                        <td>
+                            <div class="fw-semibold"><?= h($c['last_name_gr']) ?> <?= h($c['first_name_gr']) ?></div>
+                            <?php if (!empty($c['last_name_lat']) || !empty($c['first_name_lat'])): ?>
+                            <small class="text-muted"><?= h(trim(($c['last_name_lat'] ?? '') . ' ' . ($c['first_name_lat'] ?? ''))) ?></small>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php if (!empty($c['email'])): ?><div class="text-nowrap"><i class="bi bi-envelope text-muted me-1"></i><?= h($c['email']) ?></div><?php endif; ?>
+                            <?php if (!empty($c['phone'])): ?><div class="text-nowrap"><i class="bi bi-telephone text-muted me-1"></i><?= h($c['phone']) ?></div><?php endif; ?>
+                            <?php if (empty($c['email']) && empty($c['phone'])): ?><span class="text-muted">—</span><?php endif; ?>
+                        </td>
+                        <td><?= !empty($c['seminar_type']) ? '<span class="badge bg-info text-dark">' . h($c['seminar_type']) . '</span>' : '<span class="text-muted">—</span>' ?></td>
+                        <td class="text-nowrap"><?= $c['birth_date'] ? formatDate($c['birth_date']) : '<span class="text-muted">—</span>' ?></td>
+                        <td class="text-center text-nowrap">
                             <form method="post" class="d-inline">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="toggle_contact">
                                 <input type="hidden" name="citizen_id" value="<?= $c['id'] ?>">
-                                <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['contact_done'] && ($c['contact_done_at'] ?? null) ? 'Επικοινωνία: ' . formatDateTime($c['contact_done_at']) : 'Εναλλαγή' ?>">
-                                    <i class="bi <?= $c['contact_done'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?>"></i>
+                                <button type="submit" class="btn btn-sm btn-link p-0 me-1" title="Επαφή<?= $c['contact_done'] && !empty($c['contact_done_at']) ? ': ' . formatDateTime($c['contact_done_at']) : ': Δεν έγινε' ?>">
+                                    <i class="bi <?= $c['contact_done'] ? 'bi-telephone-fill text-success' : 'bi-telephone text-secondary' ?>" style="font-size:1.05rem;"></i>
                                 </button>
                             </form>
-                            <?php if ($c['contact_done'] && ($c['contact_done_at'] ?? null)): ?>
-                                <br><small class="text-muted" style="font-size:0.7rem;"><?= formatDateTime($c['contact_done_at']) ?></small>
-                            <?php endif; ?>
-                        </td>
-                        <td class="text-center">
                             <form method="post" class="d-inline">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="toggle_payment">
                                 <input type="hidden" name="citizen_id" value="<?= $c['id'] ?>">
-                                <button type="submit" class="btn btn-sm btn-link p-0" title="<?= $c['payment_done'] && ($c['payment_done_at'] ?? null) ? 'Πληρωμή: ' . formatDateTime($c['payment_done_at']) : 'Εναλλαγή' ?>">
-                                    <i class="bi <?= $c['payment_done'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?>"></i>
+                                <button type="submit" class="btn btn-sm btn-link p-0 me-1" title="Πληρωμή<?= $c['payment_done'] && !empty($c['payment_done_at']) ? ': ' . formatDateTime($c['payment_done_at']) : ': Δεν έγινε' ?>">
+                                    <i class="bi <?= $c['payment_done'] ? 'bi-cash-coin text-success' : 'bi-cash-coin text-secondary' ?>" style="font-size:1.05rem;"></i>
                                 </button>
                             </form>
-                            <?php if ($c['payment_done'] && ($c['payment_done_at'] ?? null)): ?>
-                                <br><small class="text-muted" style="font-size:0.7rem;"><?= formatDateTime($c['payment_done_at']) ?></small>
-                            <?php endif; ?>
-                        </td>
-                        <td class="text-center">
                             <button type="button" class="btn btn-sm btn-link p-0"
-                                title="<?= $c['completed'] && ($c['completed_at'] ?? null) ? 'Ολοκλήρωση: ' . formatDateTime($c['completed_at']) : 'Εναλλαγή' ?>"
+                                title="Ολοκλήρωση<?= $c['completed'] && !empty($c['completed_at']) ? ': ' . formatDateTime($c['completed_at']) : ': Δεν έγινε' ?>"
                                 onclick="clickToggleCompleted(<?= $c['id'] ?>, <?= (int)$c['completed'] ?>, '<?= h(addslashes($c['last_name_gr'] . ' ' . $c['first_name_gr'])) ?>')">
-                                <i class="bi <?= $c['completed'] ? 'bi-check-circle-fill text-success' : 'bi-circle text-secondary' ?>"></i>
+                                <i class="bi <?= $c['completed'] ? 'bi-award-fill text-success' : 'bi-award text-secondary' ?>" style="font-size:1.05rem;"></i>
                             </button>
-                            <?php if ($c['completed'] && ($c['completed_at'] ?? null)): ?>
-                                <br><small class="text-muted" style="font-size:0.7rem;"><?= formatDateTime($c['completed_at']) ?></small>
+                        </td>
+                        <td class="text-nowrap"><?= !empty($c['registered_at']) ? formatDate($c['registered_at']) : '<span class="text-muted">—</span>' ?></td>
+                        <td>
+                            <?php if (!empty($c['referral_source'])): ?>
+                                <span class="fw-bold" style="font-size:1rem;"><?= h($c['referral_source']) ?></span>
+                            <?php else: ?>
+                                <span class="text-muted">—</span>
                             <?php endif; ?>
                         </td>
                         <td class="text-center text-nowrap">
@@ -612,6 +631,14 @@ include __DIR__ . '/includes/header.php';
                             <label class="form-label">Τηλέφωνο</label>
                             <input type="text" name="phone" id="citizen_phone" class="form-control">
                         </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Ημερομηνία Εγγραφής</label>
+                            <input type="date" name="registered_at" id="registered_at" class="form-control" value="<?= date('Y-m-d') ?>">
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label">Από πού μας έμαθες</label>
+                            <input type="text" name="referral_source" id="referral_source" class="form-control" placeholder="π.χ. Φίλος, Google, Facebook, Εκδήλωση...">
+                        </div>
                         <div class="col-md-12">
                             <label class="form-label">Σημειώσεις</label>
                             <textarea name="notes" id="citizen_notes" class="form-control" rows="2"></textarea>
@@ -654,6 +681,7 @@ function resetForm() {
     document.getElementById('formCitizenId').value = '0';
     document.getElementById('modalTitle').textContent = 'Νέος Πολίτης';
     document.getElementById('citizenForm').reset();
+    document.getElementById('registered_at').value = new Date().toISOString().split('T')[0];
 }
 
 function editCitizen(c) {
@@ -668,6 +696,8 @@ function editCitizen(c) {
     document.getElementById('birth_date').value = c.birth_date || '';
     document.getElementById('citizen_email').value = c.email || '';
     document.getElementById('citizen_phone').value = c.phone || '';
+    document.getElementById('registered_at').value = c.registered_at || new Date().toISOString().split('T')[0];
+    document.getElementById('referral_source').value = c.referral_source || '';
     document.getElementById('citizen_notes').value = c.notes || '';
     document.getElementById('contact_done').checked = c.contact_done == 1;
     document.getElementById('payment_done').checked = c.payment_done == 1;
