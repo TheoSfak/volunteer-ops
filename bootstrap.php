@@ -68,3 +68,9 @@ if (getSetting('maintenance_mode', '0') && !in_array($__currentScript, $__mainte
     }
 }
 unset($__currentScript, $__maintenanceExcluded);
+
+// Role preview mode: handle exit request
+if (isLoggedIn() && isset($_GET['exit_preview'])) {
+    unset($_SESSION['preview_role_id']);
+    redirect('roles.php');
+}

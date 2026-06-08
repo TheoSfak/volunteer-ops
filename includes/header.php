@@ -696,6 +696,37 @@ if (isLoggedIn()) {
     </style>
 </head>
 <body>
+<?php if (isPreviewMode()):
+    $__pr = getPreviewRole();
+    $__prName  = $__pr ? h($__pr['name'])  : 'Άγνωστος Ρόλος';
+    $__prColor = $__pr ? h($__pr['color']) : '#6c757d';
+?>
+<div id="previewBanner" style="position:fixed;top:0;left:0;right:0;z-index:10000;background:#fff3cd;border-bottom:2px solid #ffc107;padding:8px 20px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 6px rgba(0,0,0,.1);">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <i class="bi bi-eye-fill text-warning fs-5"></i>
+        <strong>Προεπισκόπηση Ρόλου:</strong>
+        <span class="badge px-2 py-1" style="background-color:<?= $__prColor ?>;color:#fff;font-size:.85rem;"><?= $__prName ?></span>
+        <small class="text-muted d-none d-sm-inline">— Όλες οι αλλαγές είναι αποκλεισμένες</small>
+    </div>
+    <a href="?exit_preview=1" class="btn btn-warning btn-sm ms-3 flex-shrink-0">
+        <i class="bi bi-x-circle me-1"></i>Έξοδος Προεπισκόπησης
+    </a>
+</div>
+<div id="previewSpacer" style="height:48px"></div>
+<script>
+(function(){
+    var b=document.getElementById('previewBanner');
+    var s=document.getElementById('previewSpacer');
+    if(!b)return;
+    var h=b.offsetHeight;
+    if(s)s.style.height=h+'px';
+    var sidebar=document.querySelector('.sidebar');
+    if(sidebar)sidebar.style.marginTop=h+'px';
+    var topnav=document.querySelector('.top-navbar');
+    if(topnav){topnav.style.position='sticky';topnav.style.top='0';}
+})();
+</script>
+<?php unset($__pr,$__prName,$__prColor); endif; ?>
     <!-- Sidebar Overlay (mobile) -->
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
     
@@ -1141,6 +1172,9 @@ if (isLoggedIn()) {
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i>Το Προφίλ μου</a></li>
                         <li><a class="dropdown-item" href="my-participations.php"><i class="bi bi-list-check me-2"></i>Οι Αιτήσεις μου</a></li>
+                        <?php if (!empty($currentUser['custom_role_id'])): ?>
+                        <li><a class="dropdown-item" href="my-permissions.php"><i class="bi bi-shield-check me-2"></i>Τα Δικαιώματά μου</a></li>
+                        <?php endif; ?>
                         <?php if (getSetting('points_enabled', '1') === '1'): ?>
                         <li><a class="dropdown-item" href="my-points.php"><i class="bi bi-star me-2"></i>Οι Πόντοι μου</a></li>
                         <?php endif; ?>

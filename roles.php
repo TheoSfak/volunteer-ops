@@ -39,6 +39,16 @@ if (isPost()) {
         setFlash('success', 'Ο προεπιλεγμένος ρόλος ενημερώθηκε.');
         redirect('roles.php');
     }
+
+    if ($action === 'start_preview' && $roleId) {
+        $role = dbFetchOne("SELECT id FROM custom_roles WHERE id = ?", [$roleId]);
+        if ($role) {
+            $_SESSION['preview_role_id'] = $roleId;
+            redirect('dashboard.php');
+        }
+        setFlash('error', 'Ο ρόλος δεν βρέθηκε.');
+        redirect('roles.php');
+    }
 }
 
 $roles = dbFetchAll(
@@ -148,6 +158,17 @@ include __DIR__ . '/includes/header.php';
                                             </form>
                                         </li>
                                         <?php endif; ?>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li>
+                                            <form method="post" class="d-inline">
+                                                <?= csrfField() ?>
+                                                <input type="hidden" name="action" value="start_preview">
+                                                <input type="hidden" name="role_id" value="<?= $role['id'] ?>">
+                                                <button type="submit" class="dropdown-item text-info">
+                                                    <i class="bi bi-eye me-2"></i>Προεπισκόπηση Ρόλου
+                                                </button>
+                                            </form>
+                                        </li>
                                         <li><hr class="dropdown-divider"></li>
                                         <li>
                                             <button class="dropdown-item text-danger"
