@@ -514,7 +514,7 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                         <th>Γέννηση</th>
                         <th class="text-center" style="white-space:nowrap">Επαφή&nbsp;/&nbsp;Πληρ.&nbsp;/&nbsp;Ολοκλ.</th>
                         <th><?= sortLink('registered_at',  'Εγγραφή',    $sortCol, $sortDir, $__f) ?></th>
-                        <th style="font-size:.95rem;font-weight:700;letter-spacing:.04em;">ΠΗΓΗ</th>
+                        <th style="font-size:.95rem;font-weight:700;letter-spacing:.04em;max-width:130px;">ΠΗΓΗ</th>
                         <th class="text-center">Ιστορικό</th>
                         <th class="text-center">Ενέργειες</th>
                     </tr>
@@ -538,7 +538,7 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                             <?php endif; ?>
                         </td>
                         <td>
-                            <?php if (!empty($c['email'])): ?><div class="text-nowrap"><i class="bi bi-envelope text-muted me-1"></i><?= h($c['email']) ?></div><?php endif; ?>
+                            <?php if (!empty($c['email'])): ?><div style="word-break:break-all;"><i class="bi bi-envelope text-muted me-1"></i><?= h($c['email']) ?></div><?php endif; ?>
                             <?php if (!empty($c['phone'])): ?><div class="text-nowrap"><i class="bi bi-telephone text-muted me-1"></i><?= h($c['phone']) ?></div><?php endif; ?>
                             <?php if (empty($c['email']) && empty($c['phone'])): ?><span class="text-muted">—</span><?php endif; ?>
                         </td>
@@ -568,9 +568,9 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                             </button>
                         </td>
                         <td class="text-nowrap"><?= !empty($c['registered_at']) ? formatDate($c['registered_at']) : '<span class="text-muted">—</span>' ?></td>
-                        <td>
+                        <td style="max-width:130px;">
                             <?php if (!empty($c['referral_source'])): ?>
-                                <span class="fw-bold" style="font-size:1rem;"><?= h($c['referral_source']) ?></span>
+                                <span class="fw-bold" style="font-size:.85rem;word-break:break-word;"><?= h($c['referral_source']) ?></span>
                             <?php else: ?>
                                 <span class="text-muted">—</span>
                             <?php endif; ?>
