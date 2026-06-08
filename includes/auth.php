@@ -141,9 +141,11 @@ function isAdmin() {
 }
 
 /**
- * Check if current user is system admin
+ * Check if current user is system admin.
+ * Returns false during role preview so the sidebar renders as the previewed role.
  */
 function isSystemAdmin() {
+    if (isPreviewMode()) return false;
     $user = getCurrentUser();
     return $user && $user['role'] === ROLE_SYSTEM_ADMIN;
 }
