@@ -108,12 +108,32 @@ function requireRole($roles) {
 }
 
 /**
+ * Check if current system admin is in role preview mode.
+ */
+function isPreviewMode(): bool {
+    if (empty($_SESSION['preview_role_id'])) return false;
+    $user = getCurrentUser();
+    return $user && $user['role'] === ROLE_SYSTEM_ADMIN;
+}
+
+/**
+ * Get the role being previewed (null if not in preview mode or role deleted).
+ */
+function getPreviewRole(): ?array {
+    if (!isPreviewMode()) return null;
+    static $cache = null;
+    if ($cache === null) {
+        $cache = dbFetchOne("SELECT * FROM custom_roles WHERE id = ?", [(int)$_SESSION['preview_role_id']]) ?: false;
+    }
+    return $cache ?: null;
+}
+
+/**
  * Check if current user is admin.
- * Returns true for SYSTEM_ADMIN, DEPARTMENT_ADMIN (legacy), or any user
- * with a custom_role_id (elevated volunteer). Page-level requirePermission()
- * already controls which pages they can reach; this controls management UI within pages.
+ * Returns false during role preview so the UI renders as the previewed role.
  */
 function isAdmin() {
+    if (isPreviewMode()) return false;
     $user = getCurrentUser();
     if (!$user) return false;
     if (in_array($user['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN])) return true;
@@ -362,19 +382,20 @@ function updatePassword($userId, $currentPassword, $newPassword) {
  */
 function hasPagePermission(string $slug): bool {
     $user = getCurrentUser();
-    if (!$user) {
-        return false;
-    }
-    if ($user['role'] === ROLE_SYSTEM_ADMIN) {
-        return true;
-    }
-    if (empty($user['custom_role_id'])) {
-        return false;
+    if (!$user) return false;
+
+    // Normal mode: SYSTEM_ADMIN can access everything (bypass skipped during preview)
+    if (!isPreviewMode() && $user['role'] === ROLE_SYSTEM_ADMIN) return true;
+
+    // Determine which role ID to load permissions from
+    if (isPreviewMode()) {
+        $roleId = (int) $_SESSION['preview_role_id'];
+    } else {
+        if (empty($user['custom_role_id'])) return false;
+        $roleId = (int) $user['custom_role_id'];
     }
 
     static $permCache = [];
-    $roleId = (int) $user['custom_role_id'];
-
     if (!isset($permCache[$roleId])) {
         try {
             $rows = dbFetchAll(
@@ -388,9 +409,7 @@ function hasPagePermission(string $slug): bool {
     }
 
     // Direct grant
-    if (in_array($slug, $permCache[$roleId], true)) {
-        return true;
-    }
+    if (in_array($slug, $permCache[$roleId], true)) return true;
 
     // Implication rules: manage → implies view
     $implications = [
@@ -404,9 +423,7 @@ function hasPagePermission(string $slug): bool {
 
     if (isset($implications[$slug])) {
         foreach ($implications[$slug] as $grantingSlug) {
-            if (in_array($grantingSlug, $permCache[$roleId], true)) {
-                return true;
-            }
+            if (in_array($grantingSlug, $permCache[$roleId], true)) return true;
         }
     }
 

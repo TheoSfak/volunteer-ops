@@ -222,6 +222,11 @@ function csrfField() {
  * Verify CSRF token.
  */
 function verifyCsrf() {
+    // Block all writes during role preview mode
+    if (function_exists('isPreviewMode') && isPreviewMode()) {
+        setFlash('error', 'Δεν μπορείτε να κάνετε αλλαγές κατά τη διάρκεια προεπισκόπησης ρόλου.');
+        redirect('dashboard.php');
+    }
     if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
         setFlash('error', 'Μη έγκυρο αίτημα. Παρακαλώ δοκιμάστε ξανά.');
         // Do NOT use HTTP_REFERER — it is attacker-controlled and enables open redirect
