@@ -3887,6 +3887,21 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 61,
+            'description' => 'Add registered_at and referral_source columns to citizens table',
+            'up' => function () {
+                $hasRegistered = !empty(dbFetchAll("SHOW COLUMNS FROM citizens LIKE 'registered_at'"));
+                if (!$hasRegistered) {
+                    dbExecute("ALTER TABLE citizens
+                        ADD COLUMN registered_at DATE NULL AFTER notes,
+                        ADD COLUMN referral_source VARCHAR(255) NULL AFTER registered_at");
+                    // Backfill registered_at from created_at for existing rows
+                    dbExecute("UPDATE citizens SET registered_at = DATE(created_at) WHERE registered_at IS NULL");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
