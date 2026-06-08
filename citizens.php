@@ -595,6 +595,11 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                                     title="Ιστορικό Επικοινωνιών">
                                 <i class="bi bi-chat-text"></i>
                             </button>
+                            <?php if (hasPagePermission('citizens_manage')): ?>
+                            <button class="btn btn-sm btn-outline-success py-0 px-1" onclick="cloneCitizen(<?= h(json_encode($c)) ?>)" title="Κλωνοποίηση">
+                                <i class="bi bi-copy"></i>
+                            </button>
+                            <?php endif; ?>
                             <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="editCitizen(<?= h(json_encode($c)) ?>)" title="Επεξεργασία">
                                 <i class="bi bi-pencil"></i>
                             </button>
@@ -803,6 +808,28 @@ function resetForm() {
     document.getElementById('modalTitle').textContent = 'Νέος Πολίτης';
     document.getElementById('citizenForm').reset();
     document.getElementById('registered_at').value = new Date().toISOString().split('T')[0];
+}
+
+function cloneCitizen(c) {
+    document.getElementById('formAction').value = 'create';
+    document.getElementById('formCitizenId').value = '0';
+    document.getElementById('modalTitle').textContent = 'Κλωνοποίηση Πολίτη';
+    document.getElementById('first_name_gr').value = c.first_name_gr || '';
+    document.getElementById('last_name_gr').value = c.last_name_gr || '';
+    document.getElementById('first_name_lat').value = c.first_name_lat || '';
+    document.getElementById('last_name_lat').value = c.last_name_lat || '';
+    document.getElementById('seminar_type').value = c.seminar_type || '';
+    document.getElementById('birth_date').value = c.birth_date || '';
+    document.getElementById('citizen_email').value = c.email || '';
+    document.getElementById('citizen_phone').value = c.phone || '';
+    document.getElementById('registered_at').value = new Date().toISOString().split('T')[0];
+    document.getElementById('referral_source').value = c.referral_source || '';
+    document.getElementById('citizen_notes').value = c.notes || '';
+    document.getElementById('contact_done').checked = false;
+    document.getElementById('payment_done').checked = false;
+    document.getElementById('completed_cb').checked = false;
+    var modal = new bootstrap.Modal(document.getElementById('citizenModal'));
+    modal.show();
 }
 
 function editCitizen(c) {
