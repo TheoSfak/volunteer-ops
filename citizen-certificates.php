@@ -77,9 +77,11 @@ if (isPost()) {
 }
 
 // Filters
-$search      = get('search', '');
-$filterType  = get('type', '');
+$search       = get('search', '');
+$filterType   = get('type', '');
 $expiryFilter = get('expiry', ''); // expired | 1m | 3m | 6m
+$sortCol      = in_array(get('sort'), ['expiry_date', 'last_name', 'issue_date']) ? get('sort') : 'last_name';
+$sortDir      = get('dir') === 'asc' ? 'ASC' : 'DESC';
 $page    = max(1, (int) get('page', 1));
 $perPage = 20;
 
@@ -96,13 +98,13 @@ if ($filterType !== '') {
 }
 $baseWhereClause = implode(' AND ', $baseWhere);
 
-// Expiry counts (using base filter only, no expiry condition)
+// Expiry counts — each bucket is an EXCLUSIVE range
 $countExpired = (int) dbFetchValue("SELECT COUNT(*) FROM citizen_certificates cc WHERE $baseWhereClause AND cc.expiry_date IS NOT NULL AND cc.expiry_date < CURDATE()", $baseParams);
 $count1m      = (int) dbFetchValue("SELECT COUNT(*) FROM citizen_certificates cc WHERE $baseWhereClause AND cc.expiry_date IS NOT NULL AND cc.expiry_date >= CURDATE() AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 1 MONTH)", $baseParams);
-$count3m      = (int) dbFetchValue("SELECT COUNT(*) FROM citizen_certificates cc WHERE $baseWhereClause AND cc.expiry_date IS NOT NULL AND cc.expiry_date >= CURDATE() AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 3 MONTH)", $baseParams);
-$count6m      = (int) dbFetchValue("SELECT COUNT(*) FROM citizen_certificates cc WHERE $baseWhereClause AND cc.expiry_date IS NOT NULL AND cc.expiry_date >= CURDATE() AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 6 MONTH)", $baseParams);
+$count3m      = (int) dbFetchValue("SELECT COUNT(*) FROM citizen_certificates cc WHERE $baseWhereClause AND cc.expiry_date IS NOT NULL AND cc.expiry_date > DATE_ADD(CURDATE(), INTERVAL 1 MONTH) AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 3 MONTH)", $baseParams);
+$count6m      = (int) dbFetchValue("SELECT COUNT(*) FROM citizen_certificates cc WHERE $baseWhereClause AND cc.expiry_date IS NOT NULL AND cc.expiry_date > DATE_ADD(CURDATE(), INTERVAL 3 MONTH) AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 6 MONTH)", $baseParams);
 
-// Full WHERE (includes expiry filter)
+// Full WHERE (includes expiry filter) — same exclusive ranges
 $where  = $baseWhere;
 $params = $baseParams;
 if ($expiryFilter === 'expired') {
@@ -110,20 +112,25 @@ if ($expiryFilter === 'expired') {
 } elseif ($expiryFilter === '1m') {
     $where[] = "cc.expiry_date IS NOT NULL AND cc.expiry_date >= CURDATE() AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 1 MONTH)";
 } elseif ($expiryFilter === '3m') {
-    $where[] = "cc.expiry_date IS NOT NULL AND cc.expiry_date >= CURDATE() AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 3 MONTH)";
+    $where[] = "cc.expiry_date IS NOT NULL AND cc.expiry_date > DATE_ADD(CURDATE(), INTERVAL 1 MONTH) AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 3 MONTH)";
 } elseif ($expiryFilter === '6m') {
-    $where[] = "cc.expiry_date IS NOT NULL AND cc.expiry_date >= CURDATE() AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 6 MONTH)";
+    $where[] = "cc.expiry_date IS NOT NULL AND cc.expiry_date > DATE_ADD(CURDATE(), INTERVAL 3 MONTH) AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 6 MONTH)";
 }
 
 $whereClause = implode(' AND ', $where);
 $total = dbFetchValue("SELECT COUNT(*) FROM citizen_certificates cc WHERE $whereClause", $params);
 $pagination = paginate($total, $page, $perPage);
 
+// Sort: if expiry_date, NULLs last
+$orderBy = $sortCol === 'expiry_date'
+    ? "cc.expiry_date IS NULL, cc.expiry_date $sortDir"
+    : "cc.$sortCol $sortDir";
+
 $certs = dbFetchAll(
     "SELECT cc.*, cct.name as type_name
      FROM citizen_certificates cc
      LEFT JOIN citizen_certificate_types cct ON cc.certificate_type_id = cct.id
-     WHERE $whereClause ORDER BY cc.last_name, cc.first_name LIMIT ? OFFSET ?",
+     WHERE $whereClause ORDER BY $orderBy LIMIT ? OFFSET ?",
     array_merge($params, [$pagination['per_page'], $pagination['offset']])
 );
 
@@ -212,9 +219,9 @@ $_eq = function($val) use ($expiryFilter, $search, $filterType) {
     <?php
     $btns = [
         ['val' => 'expired', 'label' => 'Ληγμένα',          'count' => $countExpired, 'active' => 'btn-danger',           'inactive' => 'btn-outline-danger'],
-        ['val' => '1m',      'label' => 'Λήγουν σε 1 μήνα', 'count' => $count1m,      'active' => 'btn-warning text-dark', 'inactive' => 'btn-outline-warning'],
-        ['val' => '3m',      'label' => 'Λήγουν σε 3 μήνες','count' => $count3m,      'active' => 'btn-warning text-dark', 'inactive' => 'btn-outline-warning'],
-        ['val' => '6m',      'label' => 'Λήγουν σε 6 μήνες','count' => $count6m,      'active' => 'btn-info text-dark',    'inactive' => 'btn-outline-info'],
+        ['val' => '1m',      'label' => 'Λήγουν σε 1 μήνα',  'count' => $count1m, 'active' => 'btn-danger fw-bold',             'inactive' => 'btn-outline-danger fw-bold'],
+        ['val' => '3m',      'label' => 'Λήγουν σε 3 μήνες', 'count' => $count3m, 'active' => 'btn-warning text-dark fw-bold',   'inactive' => 'btn-outline-warning text-warning fw-bold'],
+        ['val' => '6m',      'label' => 'Λήγουν σε 6 μήνες', 'count' => $count6m, 'active' => 'btn-info text-dark fw-bold',      'inactive' => 'btn-outline-info fw-bold'],
     ];
     foreach ($btns as $b):
         $cls = $expiryFilter === $b['val'] ? $b['active'] : $b['inactive'];
@@ -248,7 +255,11 @@ $_eq = function($val) use ($expiryFilter, $search, $filterType) {
                         <th>Τηλ.</th>
                         <th>Email</th>
                         <th>Έκδοση</th>
-                        <th>Λήξη</th>
+                        <th><?php
+                            $_sd = ($sortCol === 'expiry_date' && $sortDir === 'DESC') ? 'asc' : 'desc';
+                            $_sp = array_filter(['search' => $search, 'type' => $filterType, 'expiry' => $expiryFilter, 'sort' => 'expiry_date', 'dir' => $_sd], fn($v) => $v !== '');
+                            $arrow = $sortCol === 'expiry_date' ? ($sortDir === 'DESC' ? ' ▼' : ' ▲') : '';
+                        ?><a href="?<?= http_build_query($_sp) ?>" class="text-decoration-none text-dark fw-semibold">Λήξη<?= $arrow ?></a></th>
                         <th class="text-center">Ενέργ.</th>
                     </tr>
                 </thead>
