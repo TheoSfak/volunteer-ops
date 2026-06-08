@@ -678,11 +678,11 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                     </div>
                     <div class="col-6">
                         <label class="form-label fw-semibold">Ημερομηνία έκδοσης</label>
-                        <input type="date" class="form-control" id="certModalIssueDate" value="<?= date('Y-m-d') ?>">
+                        <input type="date" class="form-control" id="certModalIssueDate" lang="el-GR" value="<?= date('Y-m-d') ?>">
                     </div>
                     <div class="col-6">
                         <label class="form-label fw-semibold">Ημερομηνία λήξης</label>
-                        <input type="date" class="form-control" id="certModalExpiryDate" value="<?= date('Y-m-d', strtotime('+3 years')) ?>">
+                        <input type="date" class="form-control" id="certModalExpiryDate" lang="el-GR" value="<?= date('Y-m-d', strtotime('+3 years')) ?>">
                     </div>
                 </div>
             </div>
@@ -739,7 +739,7 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Ημερομηνία Γέννησης</label>
-                            <input type="date" name="birth_date" id="birth_date" class="form-control">
+                            <input type="date" name="birth_date" id="birth_date" class="form-control" lang="el-GR">
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Email</label>
@@ -751,7 +751,7 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Ημερομηνία Εγγραφής</label>
-                            <input type="date" name="registered_at" id="registered_at" class="form-control" value="<?= date('Y-m-d') ?>">
+                            <input type="date" name="registered_at" id="registered_at" class="form-control" lang="el-GR" value="<?= date('Y-m-d') ?>">
                         </div>
                         <div class="col-md-8">
                             <label class="form-label">Από πού μας έμαθες</label>
@@ -883,7 +883,7 @@ function submitWithCert() {
                     <div class="row g-2 align-items-end">
                         <div class="col-md-3">
                             <label class="form-label small fw-semibold mb-1">Ημερομηνία</label>
-                            <input type="date" id="chDate" class="form-control form-control-sm" value="<?= date('Y-m-d') ?>">
+                            <input type="date" id="chDate" class="form-control form-control-sm" lang="el-GR" value="<?= date('Y-m-d') ?>">
                         </div>
                         <div class="col-md-4">
                             <label class="form-label small fw-semibold mb-1">Γρήγορο Σχόλιο</label>
