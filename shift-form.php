@@ -4,7 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('shift_manage');
+requirePermission('shifts_manage');
 
 $id = (int) get('id');
 $missionId = get('mission_id');

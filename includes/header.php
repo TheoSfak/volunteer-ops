@@ -740,7 +740,7 @@ if (isLoggedIn()) {
                     <i class="bi bi-calendar3"></i> Ημερολόγιο Βάρδιων
                 </a>
             </li>
-            <?php if (isSystemAdmin() || hasPagePermission('missions_manage')): ?>
+            <?php if (isSystemAdmin() || hasPagePermission('missions_view') || hasPagePermission('missions_manage')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= ($currentPage === 'missions' && get('status') === 'DRAFT') ? 'active' : '' ?>" href="missions.php?status=DRAFT">
                     <i class="bi bi-file-earmark-text text-secondary"></i> Πρόχειρες Αποστολές
@@ -752,7 +752,7 @@ if (isLoggedIn()) {
                     <i class="bi bi-flag-fill text-success"></i> Ενεργές Αποστολές
                 </a>
             </li>
-            <?php if (isSystemAdmin() || hasPagePermission('missions_manage')): ?>
+            <?php if (isSystemAdmin() || hasPagePermission('missions_view') || hasPagePermission('missions_manage')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= ($currentPage === 'missions' && get('status') === 'CLOSED') ? 'active' : '' ?>" href="missions.php?status=CLOSED">
                     <i class="bi bi-flag text-warning"></i> Κλειστές Αποστολές
@@ -838,10 +838,10 @@ if (isLoggedIn()) {
             </li>
             <?php endif; ?>
             
-            <?php if (isSystemAdmin() || hasPagePermission('volunteers_manage') || hasPagePermission('inactive_volunteers') || hasPagePermission('positions') || hasPagePermission('skills') || hasPagePermission('certificates') || hasPagePermission('reports') || hasPagePermission('complaints')): ?>
+            <?php if (isSystemAdmin() || hasPagePermission('volunteers_manage') || hasPagePermission('volunteers_view') || hasPagePermission('inactive_volunteers') || hasPagePermission('positions_manage') || hasPagePermission('skills_manage') || hasPagePermission('certificates_manage') || hasPagePermission('reports') || hasPagePermission('complaints_view') || hasPagePermission('complaints_manage')): ?>
             <div class="sidebar-section">Διοίκηση</div>
             
-            <?php if (isSystemAdmin() || hasPagePermission('volunteers_manage')): ?>
+            <?php if (isSystemAdmin() || hasPagePermission('volunteers_manage') || hasPagePermission('volunteers_view')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'volunteers' ? 'active' : '' ?>" href="volunteers.php">
                     <i class="bi bi-people"></i> Εθελοντές
@@ -867,7 +867,7 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
-            <?php if (isSystemAdmin() || hasPagePermission('positions')): ?>
+            <?php if (isSystemAdmin() || hasPagePermission('positions_manage')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'volunteer-positions' ? 'active' : '' ?>" href="volunteer-positions.php">
                     <i class="bi bi-person-badge"></i> Θέσεις Εθελοντών
@@ -881,14 +881,14 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
-            <?php if (isSystemAdmin() || hasPagePermission('skills')): ?>
+            <?php if (isSystemAdmin() || hasPagePermission('skills_manage')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'skills' ? 'active' : '' ?>" href="skills.php">
                     <i class="bi bi-stars"></i> Δεξιότητες
                 </a>
             </li>
             <?php endif; ?>
-            <?php if (isSystemAdmin() || hasPagePermission('certificates')): ?>
+            <?php if (isSystemAdmin() || hasPagePermission('certificates_manage')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'certificates' ? 'active' : '' ?>" href="certificates.php">
                     <i class="bi bi-award"></i> Πιστοποιητικά
@@ -909,7 +909,7 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
-            <?php if (isSystemAdmin() || hasPagePermission('complaints')): ?>
+            <?php if (isSystemAdmin() || hasPagePermission('complaints_view') || hasPagePermission('complaints_manage')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'complaints' ? 'active' : '' ?>" href="complaints.php">
                     <i class="bi bi-chat-left-dots"></i> Παράπονα
@@ -936,17 +936,19 @@ if (isLoggedIn()) {
                     <i class="bi bi-upc-scan"></i> Χρέωση / Επιστροφή
                 </a>
             </li>
-            <?php if (isSystemAdmin() || hasPagePermission('inventory_admin')): ?>
+            <?php if (isSystemAdmin() || hasPagePermission('inventory_manage') || hasPagePermission('inventory_view')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'inventory-shelf' ? 'active' : '' ?>" href="inventory-shelf.php">
                     <i class="bi bi-grid-3x3"></i> Υλικά Ραφιού
                 </a>
             </li>
+            <?php if (isSystemAdmin() || hasPagePermission('inventory_manage')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'inventory-notes' ? 'active' : '' ?>" href="inventory-notes.php">
                     <i class="bi bi-sticky"></i> Σημειώσεις Υλικών
                 </a>
             </li>
+            <?php endif; ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'inventory-categories' ? 'active' : '' ?>" href="inventory-categories.php">
                     <i class="bi bi-tags"></i> Κατηγορίες Υλικών
@@ -985,7 +987,7 @@ if (isLoggedIn()) {
             </li>
             <?php endif; ?>
             
-            <?php if (isSystemAdmin() || hasPagePermission('citizens')): ?>
+            <?php if (isSystemAdmin() || hasPagePermission('citizens_view') || hasPagePermission('citizens_manage')): ?>
             <div class="sidebar-section">Πολίτες</div>
             
             <li class="nav-item">
@@ -993,6 +995,7 @@ if (isLoggedIn()) {
                     <i class="bi bi-person-vcard"></i> Λίστα πολιτών
                 </a>
             </li>
+            <?php if (isSystemAdmin() || hasPagePermission('citizens_manage')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'citizen-certificates' ? 'active' : '' ?>" href="citizen-certificates.php">
                     <i class="bi bi-file-earmark-medical"></i> Πιστοποιητικά Πολιτών
@@ -1003,6 +1006,7 @@ if (isLoggedIn()) {
                     <i class="bi bi-tags"></i> Τύποι Πιστοποιητικών
                 </a>
             </li>
+            <?php endif; ?>
             <?php endif; ?>
 
             <?php if (isSystemAdmin()): ?>

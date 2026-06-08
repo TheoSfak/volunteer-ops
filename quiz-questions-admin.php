@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('training_admin');
+requirePermission('questions_manage');
 
 $quizId = get('quiz_id');
 if (empty($quizId)) {

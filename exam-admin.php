@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('training_admin');
+requirePermission('training_view');
 
 $pageTitle = 'Διαχείριση Διαγωνισμάτων & Κουίζ';
 
@@ -8,7 +8,12 @@ $pageTitle = 'Διαχείριση Διαγωνισμάτων & Κουίζ';
 if (isPost()) {
     verifyCsrf();
     $action = post('action');
-    
+
+    if (!hasPagePermission('training_manage')) {
+        setFlash('error', 'Δεν έχετε δικαίωμα διαχείρισης διαγωνισμάτων.');
+        redirect('exam-admin.php');
+    }
+
     if ($action === 'delete_exam') {
         $id = post('id');
         dbExecute("DELETE FROM training_exams WHERE id = ?", [$id]);

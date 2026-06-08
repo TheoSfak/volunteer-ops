@@ -4,7 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('certificates');
+requirePermission('certificates_manage');
 
 $pageTitle = 'Πιστοποιητικά Εθελοντών';
 

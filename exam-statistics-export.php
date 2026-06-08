@@ -5,7 +5,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('training_admin');
+requirePermission('training_view');
 
 // Get same filters as statistics page
 $filterYear = get('year', 'all');

@@ -13,7 +13,7 @@ if (isTraineeRescuer()) {
     setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή τη σελίδα.');
     redirect('dashboard.php');
 }
-requirePermission('inventory_admin');
+requirePermission('inventory_manage');
 
 $user = getCurrentUser();
 $pageTitle = 'Σημειώσεις Υλικών';

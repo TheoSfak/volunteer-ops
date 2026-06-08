@@ -5,7 +5,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('positions');
+requirePermission('positions_manage');
 
 $pageTitle = 'Θέσεις Εθελοντών';
 

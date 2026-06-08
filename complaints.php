@@ -5,7 +5,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('complaints');
+requirePermission('complaints_view');
 
 $pageTitle = 'Διαχείριση Παραπόνων';
 

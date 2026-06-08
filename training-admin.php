@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('training_admin');
+requirePermission('training_view');
 
 $pageTitle = 'Διαχείριση Εκπαίδευσης';
 $user = getCurrentUser();
@@ -9,7 +9,12 @@ $user = getCurrentUser();
 if (isPost()) {
     verifyCsrf();
     $action = post('action');
-    
+
+    if (!hasPagePermission('training_manage')) {
+        setFlash('error', 'Δεν έχετε δικαίωμα τροποποίησης εκπαίδευσης.');
+        redirect('training-admin.php');
+    }
+
     if ($action === 'add_category') {
         $name = post('name');
         $description = post('description');
