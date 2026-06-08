@@ -77,28 +77,42 @@ if (isPost()) {
 }
 
 // Filters
-$search = get('search', '');
-$filterExpired = get('expired', '');
-$page = max(1, (int) get('page', 1));
+$search      = get('search', '');
+$filterType  = get('type', '');
+$expiryFilter = get('expiry', ''); // expired | 1m | 3m | 6m
+$page    = max(1, (int) get('page', 1));
 $perPage = 20;
 
-$where = ['1=1'];
-$params = [];
-
+// Base WHERE (search + type) — used for expiry counts
+$baseWhere  = ['1=1'];
+$baseParams = [];
 if ($search) {
-    $where[] = "(cc.first_name LIKE ? OR cc.last_name LIKE ? OR cc.phone LIKE ?)";
-    $params = array_merge($params, array_fill(0, 3, '%' . dbEscape($search) . '%'));
+    $baseWhere[] = "(cc.first_name LIKE ? OR cc.last_name LIKE ? OR cc.phone LIKE ?)";
+    $baseParams  = array_merge($baseParams, array_fill(0, 3, '%' . dbEscape($search) . '%'));
 }
-if ($filterExpired === '1') {
-    $where[] = "cc.expiry_date IS NOT NULL AND cc.expiry_date < CURDATE()";
-} elseif ($filterExpired === '0') {
-    $where[] = "(cc.expiry_date IS NULL OR cc.expiry_date >= CURDATE())";
-}
-
-$filterType = get('type', '');
 if ($filterType !== '') {
-    $where[] = "cc.certificate_type_id = ?";
-    $params[] = (int) $filterType;
+    $baseWhere[]  = "cc.certificate_type_id = ?";
+    $baseParams[] = (int) $filterType;
+}
+$baseWhereClause = implode(' AND ', $baseWhere);
+
+// Expiry counts (using base filter only, no expiry condition)
+$countExpired = (int) dbFetchValue("SELECT COUNT(*) FROM citizen_certificates cc WHERE $baseWhereClause AND cc.expiry_date IS NOT NULL AND cc.expiry_date < CURDATE()", $baseParams);
+$count1m      = (int) dbFetchValue("SELECT COUNT(*) FROM citizen_certificates cc WHERE $baseWhereClause AND cc.expiry_date IS NOT NULL AND cc.expiry_date >= CURDATE() AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 1 MONTH)", $baseParams);
+$count3m      = (int) dbFetchValue("SELECT COUNT(*) FROM citizen_certificates cc WHERE $baseWhereClause AND cc.expiry_date IS NOT NULL AND cc.expiry_date >= CURDATE() AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 3 MONTH)", $baseParams);
+$count6m      = (int) dbFetchValue("SELECT COUNT(*) FROM citizen_certificates cc WHERE $baseWhereClause AND cc.expiry_date IS NOT NULL AND cc.expiry_date >= CURDATE() AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 6 MONTH)", $baseParams);
+
+// Full WHERE (includes expiry filter)
+$where  = $baseWhere;
+$params = $baseParams;
+if ($expiryFilter === 'expired') {
+    $where[] = "cc.expiry_date IS NOT NULL AND cc.expiry_date < CURDATE()";
+} elseif ($expiryFilter === '1m') {
+    $where[] = "cc.expiry_date IS NOT NULL AND cc.expiry_date >= CURDATE() AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 1 MONTH)";
+} elseif ($expiryFilter === '3m') {
+    $where[] = "cc.expiry_date IS NOT NULL AND cc.expiry_date >= CURDATE() AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 3 MONTH)";
+} elseif ($expiryFilter === '6m') {
+    $where[] = "cc.expiry_date IS NOT NULL AND cc.expiry_date >= CURDATE() AND cc.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 6 MONTH)";
 }
 
 $whereClause = implode(' AND ', $where);
@@ -181,18 +195,40 @@ include __DIR__ . '/includes/header.php';
                 </select>
             </div>
             <div class="col-md-2">
-                <label class="form-label">Κατάσταση Λήξης</label>
-                <select name="expired" class="form-select">
-                    <option value="">Όλα</option>
-                    <option value="1" <?= $filterExpired === '1' ? 'selected' : '' ?>>Ληγμένα</option>
-                    <option value="0" <?= $filterExpired === '0' ? 'selected' : '' ?>>Ενεργά</option>
-                </select>
-            </div>
-            <div class="col-md-1">
-                <button type="submit" class="btn btn-outline-primary w-100"><i class="bi bi-search"></i> Φίλτρο</button>
+                <button type="submit" class="btn btn-outline-primary w-100 mt-4"><i class="bi bi-search"></i> Φίλτρο</button>
             </div>
         </form>
     </div>
+</div>
+
+<!-- Expiry Quick-filters -->
+<?php
+$_eq = function($val) use ($expiryFilter, $search, $filterType) {
+    $p = array_filter(['search' => $search, 'type' => $filterType, 'expiry' => ($expiryFilter === $val ? '' : $val)], fn($v) => $v !== '');
+    return '?' . http_build_query($p);
+};
+?>
+<div class="d-flex flex-wrap gap-2 mb-4">
+    <?php
+    $btns = [
+        ['val' => 'expired', 'label' => 'Ληγμένα',          'count' => $countExpired, 'active' => 'btn-danger',           'inactive' => 'btn-outline-danger'],
+        ['val' => '1m',      'label' => 'Λήγουν σε 1 μήνα', 'count' => $count1m,      'active' => 'btn-warning text-dark', 'inactive' => 'btn-outline-warning'],
+        ['val' => '3m',      'label' => 'Λήγουν σε 3 μήνες','count' => $count3m,      'active' => 'btn-warning text-dark', 'inactive' => 'btn-outline-warning'],
+        ['val' => '6m',      'label' => 'Λήγουν σε 6 μήνες','count' => $count6m,      'active' => 'btn-info text-dark',    'inactive' => 'btn-outline-info'],
+    ];
+    foreach ($btns as $b):
+        $cls = $expiryFilter === $b['val'] ? $b['active'] : $b['inactive'];
+    ?>
+    <a href="<?= h($_eq($b['val'])) ?>" class="btn btn-sm <?= $cls ?>">
+        <?= $b['label'] ?>
+        <span class="badge <?= $expiryFilter === $b['val'] ? 'bg-white text-dark' : 'bg-secondary' ?> ms-1"><?= $b['count'] ?></span>
+    </a>
+    <?php endforeach; ?>
+    <?php if ($expiryFilter !== ''): ?>
+    <a href="<?= h($_eq($expiryFilter)) ?>" class="btn btn-sm btn-outline-secondary ms-2">
+        <i class="bi bi-x-circle"></i> Καθαρισμός φίλτρου λήξης
+    </a>
+    <?php endif; ?>
 </div>
 
 <!-- Results -->
