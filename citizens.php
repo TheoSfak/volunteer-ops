@@ -585,6 +585,7 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                                 <span class="text-muted">—</span>
                             <?php endif; ?>
                         </td>
+                        <td class="text-center text-nowrap">
                             <button class="btn btn-sm btn-outline-info py-0 px-1"
                                     onclick="openContactHistory(<?= $c['id'] ?>, '<?= h(addslashes($c['first_name_gr'] . ' ' . $c['last_name_gr'])) ?>')"
                                     data-citizen-id="<?= $c['id'] ?>"
