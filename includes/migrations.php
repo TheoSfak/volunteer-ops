@@ -3902,6 +3902,24 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 62,
+            'description' => 'Create citizen_contacts table for communication history',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS citizen_contacts (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    citizen_id INT UNSIGNED NOT NULL,
+                    contact_date DATE NOT NULL,
+                    quick_note VARCHAR(255) NULL,
+                    notes TEXT NULL,
+                    created_by INT UNSIGNED NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_cc_citizen (citizen_id),
+                    CONSTRAINT fk_cc_citizen FOREIGN KEY (citizen_id) REFERENCES citizens(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

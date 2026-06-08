@@ -45,10 +45,71 @@ if (!$_hasNewCols) {
     }
 }
 
+// JSON endpoint: return contact history for a citizen (AJAX GET)
+if (!isPost() && get('json') === 'contacts') {
+    header('Content-Type: application/json; charset=UTF-8');
+    $cid = (int) get('citizen_id');
+    $contacts = [];
+    if ($cid > 0) {
+        try {
+            $contacts = dbFetchAll(
+                "SELECT cc.id, cc.contact_date, cc.quick_note, cc.notes, cc.created_at,
+                        u.name as created_by_name
+                 FROM citizen_contacts cc
+                 LEFT JOIN users u ON cc.created_by = u.id
+                 WHERE cc.citizen_id = ?
+                 ORDER BY cc.contact_date DESC, cc.created_at DESC",
+                [$cid]
+            );
+        } catch (Exception $e) {
+            $contacts = [];
+        }
+    }
+    echo json_encode($contacts);
+    exit;
+}
+
 // Handle POST actions
 if (isPost()) {
     verifyCsrf();
     $action = post('action');
+
+    // Contact history: any user with citizens_view (or manage) can add/delete entries
+    if (in_array($action, ['add_contact', 'delete_contact'], true)) {
+        header('Content-Type: application/json; charset=UTF-8');
+        try {
+            if ($action === 'add_contact') {
+                $cid = (int) post('citizen_id');
+                $date = post('contact_date') ?: date('Y-m-d');
+                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = date('Y-m-d');
+                $quickNote = trim(post('quick_note')) ?: null;
+                $notes     = trim(post('contact_notes')) ?: null;
+                if ($cid > 0) {
+                    $newId = dbInsert(
+                        "INSERT INTO citizen_contacts (citizen_id, contact_date, quick_note, notes, created_by, created_at)
+                         VALUES (?, ?, ?, ?, ?, NOW())",
+                        [$cid, $date, $quickNote, $notes, getCurrentUserId()]
+                    );
+                    logAudit('add_contact', 'citizen_contacts', $newId);
+                    echo json_encode(['ok' => true, 'id' => $newId]);
+                } else {
+                    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρος πολίτης.']);
+                }
+            } elseif ($action === 'delete_contact') {
+                $contactId = (int) post('contact_id');
+                if ($contactId > 0) {
+                    dbExecute("DELETE FROM citizen_contacts WHERE id = ?", [$contactId]);
+                    logAudit('delete_contact', 'citizen_contacts', $contactId);
+                    echo json_encode(['ok' => true]);
+                } else {
+                    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρη εγγραφή.']);
+                }
+            }
+        } catch (Exception $e) {
+            echo json_encode(['ok' => false, 'error' => 'Σφάλμα βάσης δεδομένων.']);
+        }
+        exit;
+    }
 
     if (!hasPagePermission('citizens_manage')) {
         setFlash('error', 'Δεν έχετε δικαίωμα τροποποίησης πολιτών.');
@@ -348,7 +409,8 @@ $pagination = paginate($total, $page, $perPage);
 $secondarySort = ($sortCol === 'last_name_gr') ? ', first_name_gr ASC' : ', last_name_gr ASC, first_name_gr ASC';
 
 $citizens = dbFetchAll(
-    "SELECT * FROM citizens WHERE $whereClause ORDER BY $sortCol $sortDir $secondarySort, id ASC LIMIT ? OFFSET ?",
+    "SELECT *, (SELECT COUNT(*) FROM citizen_contacts WHERE citizen_id = citizens.id) as contact_count
+     FROM citizens WHERE $whereClause ORDER BY $sortCol $sortDir $secondarySort, id ASC LIMIT ? OFFSET ?",
     array_merge($params, [$pagination['per_page'], $pagination['offset']])
 );
 
@@ -451,17 +513,18 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                         <th class="text-center" style="white-space:nowrap">Επαφή&nbsp;/&nbsp;Πληρ.&nbsp;/&nbsp;Ολοκλ.</th>
                         <th><?= sortLink('registered_at',  'Εγγραφή',    $sortCol, $sortDir, $__f) ?></th>
                         <th style="font-size:.95rem;font-weight:700;letter-spacing:.04em;">ΠΗΓΗ</th>
+                        <th class="text-center">Ιστορικό</th>
                         <th class="text-center">Ενέργειες</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($citizens)): ?>
-                    <tr><td colspan="9" class="text-center text-muted py-4">Δεν βρέθηκαν πολίτες.</td></tr>
+                    <tr><td colspan="10" class="text-center text-muted py-4">Δεν βρέθηκαν πολίτες.</td></tr>
                     <?php else: ?>
                     <?php foreach ($citizens as $i => $c): ?>
                     <tr>
-                        <td>
-                            <div class="fw-semibold"><?= h($c['first_name_gr']) ?></div>
+                        <td class="ch-name-cell">
+                            <div class="fw-semibold"><?= h($c['first_name_gr']) ?><?php if (($c['contact_count'] ?? 0) > 0): ?> <i class="bi bi-chat-dots-fill text-info" style="font-size:.75rem;" title="Υπάρχει ιστορικό επικοινωνιών"></i><?php endif; ?></div>
                             <?php if (!empty($c['first_name_lat'])): ?>
                             <small class="text-muted"><?= h($c['first_name_lat']) ?></small>
                             <?php endif; ?>
@@ -510,7 +573,24 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                                 <span class="text-muted">—</span>
                             <?php endif; ?>
                         </td>
-                        <td class="text-center text-nowrap">
+                        <td class="text-center">
+                            <?php if (($c['contact_count'] ?? 0) > 0): ?>
+                                <button class="btn btn-sm btn-info py-0 px-2" style="font-size:.8rem;"
+                                    onclick="openContactHistory(<?= $c['id'] ?>, '<?= h(addslashes($c['first_name_gr'] . ' ' . $c['last_name_gr'])) ?>')"
+                                    data-citizen-id="<?= $c['id'] ?>"
+                                    title="Ιστορικό Επικοινωνιών">
+                                    💬 <?= $c['contact_count'] ?>
+                                </button>
+                            <?php else: ?>
+                                <span class="text-muted">—</span>
+                            <?php endif; ?>
+                        </td>
+                            <button class="btn btn-sm btn-outline-info py-0 px-1"
+                                    onclick="openContactHistory(<?= $c['id'] ?>, '<?= h(addslashes($c['first_name_gr'] . ' ' . $c['last_name_gr'])) ?>')"
+                                    data-citizen-id="<?= $c['id'] ?>"
+                                    title="Ιστορικό Επικοινωνιών">
+                                <i class="bi bi-chat-text"></i>
+                            </button>
                             <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="editCitizen(<?= h(json_encode($c)) ?>)" title="Επεξεργασία">
                                 <i class="bi bi-pencil"></i>
                             </button>
@@ -776,6 +856,201 @@ function submitWithCert() {
     document.getElementById('certExpiryDateFromModal').value = document.getElementById('certModalExpiryDate').value || _certDefaultExpiry;
     bootstrap.Modal.getInstance(document.getElementById('completedCertModal')).hide();
     document.getElementById('certCreationForm').submit();
+}
+</script>
+
+<!-- Contact History Modal -->
+<input type="hidden" id="chCsrfToken" value="<?= h($_SESSION['csrf_token'] ?? '') ?>">
+<div class="modal fade" id="contactHistoryModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header" style="background:#0dcaf0;color:#000;">
+                <h5 class="modal-title fw-semibold">
+                    <i class="bi bi-chat-text me-2"></i>Ιστορικό Επικοινωνιών
+                    <span id="chModalName" class="ms-1 fw-normal"></span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- History list -->
+                <div id="chHistoryList" class="mb-3">
+                    <div class="text-center text-muted py-3"><i class="bi bi-hourglass-split me-1"></i>Φόρτωση...</div>
+                </div>
+                <!-- Add new entry -->
+                <div class="border-top pt-3">
+                    <h6 class="mb-2"><i class="bi bi-plus-circle me-1 text-success"></i>Νέα Εγγραφή</h6>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold mb-1">Ημερομηνία</label>
+                            <input type="date" id="chDate" class="form-control form-control-sm" value="<?= date('Y-m-d') ?>">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold mb-1">Γρήγορο Σχόλιο</label>
+                            <select id="chQuickNote" class="form-select form-select-sm">
+                                <option value="">— Επιλέξτε —</option>
+                                <option value="Δεν το σήκωσε">Δεν το σήκωσε</option>
+                                <option value="Μου είπε να ξανακαλέσω">Μου είπε να ξανακαλέσω</option>
+                                <option value="Δεν επιθυμεί πλέον">Δεν επιθυμεί πλέον</option>
+                                <option value="Να τον καλέσουμε στο επόμενο σεμινάριο">Να τον καλέσουμε στο επόμενο σεμινάριο</option>
+                                <option value="Επιβεβαίωσε συμμετοχή">Επιβεβαίωσε συμμετοχή</option>
+                                <option value="Ζήτησε πληροφορίες">Ζήτησε πληροφορίες</option>
+                            </select>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label small fw-semibold mb-1">Σχόλια (προαιρετικά)</label>
+                            <textarea id="chNotes" class="form-control form-control-sm" rows="2" placeholder="Λεπτομέρειες επικοινωνίας..."></textarea>
+                        </div>
+                    </div>
+                    <button class="btn btn-sm btn-success mt-2" onclick="chAddContact()">
+                        <i class="bi bi-plus-lg me-1"></i>Αποθήκευση
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+var _chCitizenId = 0;
+
+function openContactHistory(citizenId, name) {
+    _chCitizenId = citizenId;
+    document.getElementById('chModalName').textContent = '— ' + name;
+    document.getElementById('chHistoryList').innerHTML = '<div class="text-center text-muted py-3"><i class="bi bi-hourglass-split me-1"></i>Φόρτωση...</div>';
+    document.getElementById('chDate').value = new Date().toISOString().split('T')[0];
+    document.getElementById('chQuickNote').value = '';
+    document.getElementById('chNotes').value = '';
+    new bootstrap.Modal(document.getElementById('contactHistoryModal')).show();
+    chLoadHistory();
+}
+
+function chLoadHistory() {
+    fetch('citizens.php?json=contacts&citizen_id=' + _chCitizenId)
+        .then(function(r){ return r.json(); })
+        .then(function(data) {
+            var list = document.getElementById('chHistoryList');
+            if (!data || data.length === 0) {
+                list.innerHTML = '<p class="text-muted text-center py-2 mb-0"><i class="bi bi-chat-text me-1"></i>Δεν υπάρχουν εγγραφές επικοινωνίας ακόμα.</p>';
+                return;
+            }
+            var html = '<div class="list-group list-group-flush">';
+            data.forEach(function(c) {
+                html += '<div class="list-group-item px-0 py-2 d-flex align-items-start gap-2">';
+                html += '<div class="flex-shrink-0 fw-semibold text-muted" style="min-width:80px;font-size:.82rem;">' + chFmtDate(c.contact_date) + '</div>';
+                html += '<div class="flex-grow-1">';
+                if (c.quick_note) {
+                    html += '<span class="badge bg-info text-dark me-1 mb-1" style="font-size:.8rem;">' + chEsc(c.quick_note) + '</span>';
+                }
+                if (c.notes) {
+                    html += '<div style="font-size:.85rem;">' + chEsc(c.notes) + '</div>';
+                }
+                if (!c.quick_note && !c.notes) {
+                    html += '<span class="text-muted fst-italic" style="font-size:.82rem;">Χωρίς σχόλια</span>';
+                }
+                html += '<small class="text-muted d-block mt-1" style="font-size:.75rem;"><i class="bi bi-person me-1"></i>' + chEsc(c.created_by_name || 'Άγνωστος') + '</small>';
+                html += '</div>';
+                html += '<button class="btn btn-sm btn-link text-danger p-0 flex-shrink-0 ms-1" onclick="chDeleteContact(' + c.id + ')" title="Διαγραφή"><i class="bi bi-trash"></i></button>';
+                html += '</div>';
+            });
+            html += '</div>';
+            list.innerHTML = html;
+        })
+        .catch(function() {
+            document.getElementById('chHistoryList').innerHTML = '<div class="alert alert-danger py-2">Σφάλμα φόρτωσης.</div>';
+        });
+}
+
+function chAddContact() {
+    var date      = document.getElementById('chDate').value;
+    var quickNote = document.getElementById('chQuickNote').value;
+    var notes     = document.getElementById('chNotes').value.trim();
+    var csrf      = document.getElementById('chCsrfToken').value;
+
+    if (!date) { alert('Επιλέξτε ημερομηνία.'); return; }
+    if (!quickNote && !notes) { alert('Επιλέξτε γρήγορο σχόλιο ή προσθέστε σχόλια.'); return; }
+
+    var fd = new FormData();
+    fd.append('csrf_token', csrf);
+    fd.append('action', 'add_contact');
+    fd.append('citizen_id', _chCitizenId);
+    fd.append('contact_date', date);
+    fd.append('quick_note', quickNote);
+    fd.append('contact_notes', notes);
+
+    fetch('citizens.php', { method: 'POST', body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                document.getElementById('chQuickNote').value = '';
+                document.getElementById('chNotes').value = '';
+                chLoadHistory();
+                chUpdateRowIndicator(_chCitizenId, 1);
+            } else {
+                alert(data.error || 'Σφάλμα αποθήκευσης.');
+            }
+        })
+        .catch(function() { alert('Σφάλμα σύνδεσης.'); });
+}
+
+function chDeleteContact(contactId) {
+    if (!confirm('Διαγραφή αυτής της εγγραφής;')) return;
+    var csrf = document.getElementById('chCsrfToken').value;
+    var fd = new FormData();
+    fd.append('csrf_token', csrf);
+    fd.append('action', 'delete_contact');
+    fd.append('contact_id', contactId);
+
+    fetch('citizens.php', { method: 'POST', body: fd })
+        .then(function(r){ return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                chLoadHistory();
+                chUpdateRowIndicator(_chCitizenId, -1);
+            } else {
+                alert(data.error || 'Σφάλμα διαγραφής.');
+            }
+        })
+        .catch(function() { alert('Σφάλμα σύνδεσης.'); });
+}
+
+function chUpdateRowIndicator(citizenId, delta) {
+    // Update the Ιστορικό column cell and the chat icon in the name cell
+    var btn = document.querySelector('[data-citizen-id="' + citizenId + '"][title="Ιστορικό Επικοινωνιών"]');
+    if (!btn) return;
+    var row = btn.closest('tr');
+    // Update count badge in Ιστορικό cell
+    var histCell = row.cells[row.cells.length - 2]; // second-to-last
+    var countBadge = histCell.querySelector('button');
+    var curCount = countBadge ? (parseInt(countBadge.textContent.trim()) || 0) : 0;
+    var newCount = curCount + delta;
+    if (newCount <= 0) {
+        histCell.innerHTML = '<span class="text-muted">—</span>';
+        // Remove icon from name cell
+        var icon = row.querySelector('.bi-chat-dots-fill');
+        if (icon) icon.remove();
+    } else {
+        histCell.innerHTML = '<button class="btn btn-sm btn-info py-0 px-2" style="font-size:.8rem;" onclick="openContactHistory(' + citizenId + ', \'\')" data-citizen-id="' + citizenId + '" title="Ιστορικό Επικοινωνιών">💬 ' + newCount + '</button>';
+        // Add icon to name cell if not already there
+        var nameCell = row.querySelector('.ch-name-cell .fw-semibold');
+        if (nameCell && !nameCell.querySelector('.bi-chat-dots-fill')) {
+            var icon = document.createElement('i');
+            icon.className = 'bi bi-chat-dots-fill text-info ms-1';
+            icon.style.fontSize = '.75rem';
+            icon.title = 'Υπάρχει ιστορικό επικοινωνιών';
+            nameCell.appendChild(icon);
+        }
+    }
+}
+
+function chEsc(str) {
+    if (!str) return '';
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+function chFmtDate(d) {
+    if (!d) return '';
+    var p = d.split('-');
+    return p.length === 3 ? p[2]+'/'+p[1]+'/'+p[0] : d;
 }
 </script>
 
