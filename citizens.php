@@ -47,6 +47,7 @@ if (!$_hasNewCols) {
 
 // JSON endpoint: return contact history for a citizen (AJAX GET)
 if (!isPost() && get('json') === 'contacts') {
+    session_write_close(); // release session lock early for fast AJAX response
     header('Content-Type: application/json; charset=UTF-8');
     $cid = (int) get('citizen_id');
     $contacts = [];
@@ -76,6 +77,7 @@ if (isPost()) {
 
     // Contact history: any user with citizens_view (or manage) can add/delete entries
     if (in_array($action, ['add_contact', 'delete_contact'], true)) {
+        session_write_close(); // release session lock early for fast AJAX response
         header('Content-Type: application/json; charset=UTF-8');
         try {
             if ($action === 'add_contact') {
