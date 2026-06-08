@@ -523,8 +523,8 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                     <?php else: ?>
                     <?php foreach ($citizens as $i => $c): ?>
                     <tr>
-                        <td class="ch-name-cell">
-                            <div class="fw-semibold"><?= h($c['first_name_gr']) ?><?php if (($c['contact_count'] ?? 0) > 0): ?> <i class="bi bi-chat-dots-fill text-info" style="font-size:.75rem;" title="Υπάρχει ιστορικό επικοινωνιών"></i><?php endif; ?></div>
+                        <td>
+                            <div class="fw-semibold"><?= h($c['first_name_gr']) ?></div>
                             <?php if (!empty($c['first_name_lat'])): ?>
                             <small class="text-muted"><?= h($c['first_name_lat']) ?></small>
                             <?php endif; ?>
@@ -1015,31 +1015,17 @@ function chDeleteContact(contactId) {
 }
 
 function chUpdateRowIndicator(citizenId, delta) {
-    // Update the Ιστορικό column cell and the chat icon in the name cell
     var btn = document.querySelector('[data-citizen-id="' + citizenId + '"][title="Ιστορικό Επικοινωνιών"]');
     if (!btn) return;
     var row = btn.closest('tr');
-    // Update count badge in Ιστορικό cell
-    var histCell = row.cells[row.cells.length - 2]; // second-to-last
+    var histCell = row.cells[row.cells.length - 2]; // second-to-last (Ιστορικό)
     var countBadge = histCell.querySelector('button');
     var curCount = countBadge ? (parseInt(countBadge.textContent.trim()) || 0) : 0;
     var newCount = curCount + delta;
     if (newCount <= 0) {
         histCell.innerHTML = '<span class="text-muted">—</span>';
-        // Remove icon from name cell
-        var icon = row.querySelector('.bi-chat-dots-fill');
-        if (icon) icon.remove();
     } else {
         histCell.innerHTML = '<button class="btn btn-sm btn-info py-0 px-2" style="font-size:.8rem;" onclick="openContactHistory(' + citizenId + ', \'\')" data-citizen-id="' + citizenId + '" title="Ιστορικό Επικοινωνιών">💬 ' + newCount + '</button>';
-        // Add icon to name cell if not already there
-        var nameCell = row.querySelector('.ch-name-cell .fw-semibold');
-        if (nameCell && !nameCell.querySelector('.bi-chat-dots-fill')) {
-            var icon = document.createElement('i');
-            icon.className = 'bi bi-chat-dots-fill text-info ms-1';
-            icon.style.fontSize = '.75rem';
-            icon.title = 'Υπάρχει ιστορικό επικοινωνιών';
-            nameCell.appendChild(icon);
-        }
     }
 }
 
