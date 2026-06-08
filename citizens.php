@@ -413,7 +413,8 @@ include __DIR__ . '/includes/header.php';
             <table class="table table-hover table-striped table-sm mb-0 align-middle" style="font-size:.82rem">
                 <thead class="table-light">
                     <tr>
-                        <th>Ονοματεπώνυμο</th>
+                        <th>Όνομα</th>
+                        <th>Επίθετο</th>
                         <th>Email / Τηλ.</th>
                         <th>Σεμινάριο</th>
                         <th>Γέννηση</th>
@@ -425,14 +426,20 @@ include __DIR__ . '/includes/header.php';
                 </thead>
                 <tbody>
                     <?php if (empty($citizens)): ?>
-                    <tr><td colspan="8" class="text-center text-muted py-4">Δεν βρέθηκαν πολίτες.</td></tr>
+                    <tr><td colspan="9" class="text-center text-muted py-4">Δεν βρέθηκαν πολίτες.</td></tr>
                     <?php else: ?>
                     <?php foreach ($citizens as $i => $c): ?>
                     <tr>
                         <td>
-                            <div class="fw-semibold"><?= h($c['last_name_gr']) ?> <?= h($c['first_name_gr']) ?></div>
-                            <?php if (!empty($c['last_name_lat']) || !empty($c['first_name_lat'])): ?>
-                            <small class="text-muted"><?= h(trim(($c['last_name_lat'] ?? '') . ' ' . ($c['first_name_lat'] ?? ''))) ?></small>
+                            <div class="fw-semibold"><?= h($c['first_name_gr']) ?></div>
+                            <?php if (!empty($c['first_name_lat'])): ?>
+                            <small class="text-muted"><?= h($c['first_name_lat']) ?></small>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <div class="fw-semibold"><?= h($c['last_name_gr']) ?></div>
+                            <?php if (!empty($c['last_name_lat'])): ?>
+                            <small class="text-muted"><?= h($c['last_name_lat']) ?></small>
                             <?php endif; ?>
                         </td>
                         <td>
