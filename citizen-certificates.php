@@ -4,7 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('citizens');
+requirePermission('citizens_manage');
 
 // Self-healing: rename father_name → phone if migration hasn't run yet
 try {

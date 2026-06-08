@@ -4,7 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('citizens');
+requirePermission('citizens_view');
 
 $pageTitle = 'Λίστα Πολιτών';
 $seminarTypes = ['BLS ADULT', 'BLS PEDIATRIC', 'TRAUMA', 'FIRST AID'];
@@ -35,6 +35,11 @@ if (!$_hasTsCols) {
 if (isPost()) {
     verifyCsrf();
     $action = post('action');
+
+    if (!hasPagePermission('citizens_manage')) {
+        setFlash('error', 'Δεν έχετε δικαίωμα τροποποίησης πολιτών.');
+        redirect('citizens.php');
+    }
 
     switch ($action) {
         case 'create':

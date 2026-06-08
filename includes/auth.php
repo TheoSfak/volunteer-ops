@@ -383,12 +383,34 @@ function hasPagePermission(string $slug): bool {
             );
             $permCache[$roleId] = array_column($rows, 'page_slug');
         } catch (Exception $e) {
-            // custom_role_permissions table may not exist yet during migration
             $permCache[$roleId] = [];
         }
     }
 
-    return in_array($slug, $permCache[$roleId], true);
+    // Direct grant
+    if (in_array($slug, $permCache[$roleId], true)) {
+        return true;
+    }
+
+    // Implication rules: manage → implies view
+    $implications = [
+        'missions_view'   => ['missions_manage'],
+        'complaints_view' => ['complaints_manage'],
+        'training_view'   => ['training_manage', 'questions_manage'],
+        'citizens_view'   => ['citizens_manage'],
+        'inventory_view'  => ['inventory_manage'],
+        'volunteers_view' => ['volunteers_manage'],
+    ];
+
+    if (isset($implications[$slug])) {
+        foreach ($implications[$slug] as $grantingSlug) {
+            if (in_array($grantingSlug, $permCache[$roleId], true)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 /**

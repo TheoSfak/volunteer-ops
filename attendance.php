@@ -4,7 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('attendance');
+requirePermission('attendance_manage');
 
 $missionId = get('mission_id');
 if (!$missionId) {

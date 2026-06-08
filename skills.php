@@ -4,7 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('skills');
+requirePermission('skills_manage');
 
 $pageTitle = 'Διαχείριση Δεξιοτήτων';
 $user = getCurrentUser();

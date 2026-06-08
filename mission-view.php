@@ -54,11 +54,15 @@ if (isTepMission((int)($mission['mission_type_id'] ?? 0)) && !canSeeTep($mission
     redirect('missions.php');
 }
 
-// Non-admins can only view OPEN missions, except shift leaders can also see CLOSED
-// (needed for attendance management) and responsible user can always see their own mission
+// Permission flags for this page
+$canViewAllMissions = hasPagePermission('missions_view');   // see draft/closed/completed
+$canManageMissions  = hasPagePermission('missions_manage'); // edit/status/delete
+$canManageShifts    = hasPagePermission('shifts_manage');   // approve/reject participants
+
+// Non-admins can only view OPEN missions; users with missions_view see all statuses
 $allowedStatuses = [STATUS_OPEN, STATUS_CLOSED];
 $isResponsible = !empty($mission['responsible_user_id']) && $mission['responsible_user_id'] == $user['id'];
-if (!isAdmin() && !$isResponsible && !in_array($mission['status'], $allowedStatuses)) {
+if (!$canViewAllMissions && !$isResponsible && !in_array($mission['status'], $allowedStatuses)) {
     setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή την αποστολή.');
     redirect('missions.php');
 }
@@ -76,7 +80,7 @@ $shifts = dbFetchAll(
 
 // Check if current user has applied to any shift
 $userParticipations = [];
-if (!isAdmin()) {
+if (!$canViewAllMissions) {
     $rawParts = dbFetchAll(
         "SELECT id, shift_id, status FROM participation_requests WHERE volunteer_id = ? AND shift_id IN (SELECT id FROM shifts WHERE mission_id = ?)",
         [$user['id'], $id]
@@ -89,7 +93,7 @@ if (!isAdmin()) {
 
 // Check if user has approved participation (for chat access)
 $isApprovedParticipant = false;
-if (!isAdmin()) {
+if (!$canViewAllMissions) {
     $isApprovedParticipant = dbFetchValue(
         "SELECT COUNT(*) FROM participation_requests pr
          INNER JOIN shifts s ON pr.shift_id = s.id
@@ -97,7 +101,7 @@ if (!isAdmin()) {
         [$id, $user['id'], PARTICIPATION_APPROVED]
     ) > 0;
 }
-$canAccessChat = isAdmin() || $isApprovedParticipant;
+$canAccessChat = $canViewAllMissions || $isApprovedParticipant;
 
 // Get chat messages if user has access
 $chatMessages = [];
@@ -114,7 +118,7 @@ if ($canAccessChat) {
 
 // Get available volunteers for admin manual add
 $availableVolunteers = [];
-if (isAdmin()) {
+if ($canManageMissions) {
     $availableVolunteers = dbFetchAll(
         "SELECT id, name, email, role FROM users 
          WHERE is_active = 1
@@ -147,7 +151,7 @@ if (isPost()) {
     
     switch ($action) {
         case 'delete_chat_message':
-            if (isAdmin() && $canAccessChat) {
+            if ($canManageMissions && $canAccessChat) {
                 $messageId = post('message_id');
                 if ($messageId) {
                     dbExecute("DELETE FROM mission_chat_messages WHERE id = ? AND mission_id = ?", [$messageId, $id]);
@@ -172,7 +176,7 @@ if (isPost()) {
             break;
             
         case 'resend_email':
-            if (isAdmin() && $mission['status'] === STATUS_OPEN) {
+            if ($canManageMissions && $mission['status'] === STATUS_OPEN) {
                 $allUsers = dbFetchAll(
                     "SELECT id, name, email FROM users WHERE is_active = 1 AND deleted_at IS NULL"
                 );
@@ -207,7 +211,7 @@ if (isPost()) {
             break;
 
         case 'publish':
-            if (isAdmin() && $mission['status'] === STATUS_DRAFT) {
+            if ($canManageMissions && $mission['status'] === STATUS_DRAFT) {
                 dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_OPEN, $id]);
                 logAudit('publish', 'missions', $id);
 
@@ -322,7 +326,7 @@ if (isPost()) {
             break;
             
         case 'close':
-            if (isAdmin() && $mission['status'] === STATUS_OPEN) {
+            if ($canManageMissions && $mission['status'] === STATUS_OPEN) {
                 dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_CLOSED, $id]);
                 logAudit('close', 'missions', $id);
                 setFlash('success', 'Η αποστολή έκλεισε.');
@@ -331,14 +335,14 @@ if (isPost()) {
             break;
             
         case 'complete':
-            if (isAdmin() && $mission['status'] === STATUS_CLOSED) {
+            if ($canManageMissions && $mission['status'] === STATUS_CLOSED) {
                 // Redirect to debrief form instead of completing immediately
                 redirect('mission-debrief.php?id=' . $id);
             }
             break;
             
         case 'complete_only':
-            if (isAdmin() && $mission['status'] === STATUS_CLOSED) {
+            if ($canManageMissions && $mission['status'] === STATUS_CLOSED) {
                 dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_COMPLETED, $id]);
                 logAudit('complete_only', 'missions', $id);
                 setFlash('success', 'Η αποστολή ολοκληρώθηκε (χωρίς αλλαγή στην αναφορά).');
@@ -347,7 +351,7 @@ if (isPost()) {
             break;
             
         case 'reopen_to_closed':
-            if (isAdmin() && $mission['status'] === STATUS_COMPLETED) {
+            if ($canManageMissions && $mission['status'] === STATUS_COMPLETED) {
                 dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_CLOSED, $id]);
                 logAudit('reopen_to_closed', 'missions', $id);
                 setFlash('success', 'Η αποστολή επέστρεψε σε «Κλειστή». Μπορείτε να αλλάξετε παρουσίες και εθελοντές.');
@@ -356,7 +360,7 @@ if (isPost()) {
             break;
             
         case 'cancel':
-            if (isAdmin() && in_array($mission['status'], [STATUS_DRAFT, STATUS_OPEN])) {
+            if ($canManageMissions && in_array($mission['status'], [STATUS_DRAFT, STATUS_OPEN])) {
                 $reason = post('cancellation_reason');
                 
                 db()->beginTransaction();
@@ -420,7 +424,7 @@ if (isPost()) {
             break;
             
         case 'delete':
-            if (isAdmin()) {
+            if ($canManageMissions) {
                 // Get all shifts for this mission
                 $missionShifts = dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$id]);
                 $shiftIds = array_column($missionShifts, 'id');
@@ -491,11 +495,11 @@ if (isPost()) {
             $volunteerNotes = post('volunteer_notes');
             // Block volunteer apply if mission has expired
             $missionExpired = in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED]) && strtotime($mission['end_datetime']) < time();
-            if ($missionExpired && !isAdmin()) {
+            if ($missionExpired && !$canManageMissions) {
                 setFlash('error', 'Η αποστολή είναι ακόμα ανοιχτή αλλά ο χρόνος διεξαγωγής έχει παρέλθει. Δεν μπορείτε να υποβάλετε αίτηση.');
                 redirect('mission-view.php?id=' . $id);
             }
-            if ($shiftId && !isAdmin()) {
+            if ($shiftId && !$canManageMissions) {
                 // Check if already applied
                 $existing = dbFetchValue(
                     "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND shift_id = ?",
@@ -517,7 +521,7 @@ if (isPost()) {
             break;
             
         case 'manual_add_volunteer':
-            if (isAdmin() && $mission['status'] !== STATUS_COMPLETED) {
+            if ($canManageMissions && $mission['status'] !== STATUS_COMPLETED) {
                 $shiftIds = post('shift_ids', []); // Array of shift IDs
                 $volunteerId = post('volunteer_id');
                 $adminNotes = post('admin_notes');
@@ -644,7 +648,7 @@ include __DIR__ . '/includes/header.php';
         </nav>
     </div>
     <div>
-        <?php if (isAdmin()): ?>
+        <?php if ($canManageMissions): ?>
             <a href="mission-form.php?id=<?= $mission['id'] ?>" class="btn btn-outline-primary">
                 <i class="bi bi-pencil me-1"></i>Επεξεργασία
             </a>
@@ -652,7 +656,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<?php if ($isOverdue && !isAdmin()): ?>
+<?php if ($isOverdue && !$canManageMissions): ?>
 <div class="alert alert-warning d-flex align-items-center gap-2 mb-4">
     <i class="bi bi-clock-history fs-4 text-warning"></i>
     <div>
@@ -662,7 +666,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 <?php endif; ?>
 
-<?php if ($isOverdue && isAdmin()):
+<?php if ($isOverdue && $canManageMissions):
     $elapsed = time() - strtotime($mission['end_datetime']);
     $days = floor($elapsed / 86400);
     $hours = floor(($elapsed % 86400) / 3600);
@@ -685,7 +689,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 <?php endif; ?>
 
-<?php if ($mission['status'] === STATUS_COMPLETED && isAdmin()): ?>
+<?php if ($mission['status'] === STATUS_COMPLETED && $canManageMissions): ?>
 <div class="alert alert-info d-flex align-items-center gap-2 mb-4">
     <i class="bi bi-lock-fill fs-5"></i>
     <div>
@@ -904,7 +908,7 @@ include __DIR__ . '/includes/header.php';
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-calendar3 me-1"></i>Βάρδιες</h5>
-                <?php if (isAdmin() && $mission['status'] !== STATUS_COMPLETED): ?>
+                <?php if ($canManageMissions && $mission['status'] !== STATUS_COMPLETED): ?>
                     <a href="shift-form.php?mission_id=<?= $mission['id'] ?>" class="btn btn-sm btn-primary">
                         <i class="bi bi-plus-lg"></i> Νέα Βάρδια
                     </a>
@@ -955,7 +959,7 @@ include __DIR__ . '/includes/header.php';
                                             ?>
                                         </td>
                                         <td class="text-end">
-                                            <?php if (!isAdmin()): ?>
+                                            <?php if (!$canManageMissions): ?>
                                                 <div class="d-flex gap-1 justify-content-end flex-wrap align-items-center">
                                                     <a href="shift-view.php?id=<?= $shift['id'] ?>" class="btn btn-sm btn-outline-primary" title="Προβολή βάρδιας">
                                                         <i class="bi bi-eye"></i>
@@ -1031,7 +1035,7 @@ include __DIR__ . '/includes/header.php';
                                     </div>
                                     
                                     <div class="mobile-card-actions">
-                                        <?php if (!isAdmin()): ?>
+                                        <?php if (!$canManageMissions): ?>
                                             <a href="shift-view.php?id=<?= $shift['id'] ?>" class="btn btn-sm btn-outline-primary">
                                                 <i class="bi bi-eye me-1"></i>Προβολή
                                             </a>
@@ -1074,7 +1078,7 @@ include __DIR__ . '/includes/header.php';
     
     <div class="col-lg-4">
         <!-- Actions -->
-        <?php if (isAdmin()): ?>
+        <?php if ($canManageMissions): ?>
             <div class="card mb-4">
                 <div class="card-header">
                     <h5 class="mb-0">Ενέργειες</h5>
@@ -1349,7 +1353,7 @@ include __DIR__ . '/includes/header.php';
                     <i class="bi bi-calendar3 me-1"></i>Πρόβλεψη διαθέσιμη από <strong><?= h($weather['available_from']) ?></strong>
                 </p>
             </div>
-            <?php elseif (isAdmin() && $weather['status'] === 'api_error'): ?>
+            <?php elseif ($canManageMissions && $weather['status'] === 'api_error'): ?>
             <div class="card-header py-2 bg-light">
                 <h6 class="mb-0"><i class="bi bi-cloud-slash me-1 text-muted"></i>Καιρός Αποστολής</h6>
             </div>
@@ -1533,7 +1537,7 @@ if (!empty($shiftIds)) {
 </div>
 
 <!-- Apply Modal (for volunteers) -->
-<?php if (!isAdmin()): ?>
+<?php if (!$canManageMissions): ?>
 <div class="modal fade" id="applyModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -1578,7 +1582,7 @@ document.querySelectorAll('.apply-btn').forEach(function(btn) {
 <?php endif; ?>
 
 <!-- Add Volunteer Modal (for admins) -->
-<?php if (isAdmin()): ?>
+<?php if ($canManageMissions): ?>
 <div class="modal fade" id="addVolunteerModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -1659,7 +1663,7 @@ document.querySelectorAll('.apply-btn').forEach(function(btn) {
     <div class="card-header bg-primary text-white">
         <h5 class="mb-0">
             <i class="bi bi-chat-dots me-2"></i>Συζήτηση Αποστολής
-            <?php if (!isAdmin()): ?>
+            <?php if (!$canViewAllMissions): ?>
                 <small class="ms-2">(Μόνο εγκεκριμένοι εθελοντές)</small>
             <?php endif; ?>
         </h5>
@@ -1675,7 +1679,7 @@ document.querySelectorAll('.apply-btn').forEach(function(btn) {
                     <div class="chat-message mb-3 <?= $msg['user_id'] == $user['id'] ? 'text-end' : '' ?>">
                         <div class="d-inline-block position-relative <?= $msg['user_id'] == $user['id'] ? 'bg-primary text-white' : 'bg-white border' ?>" 
                              style="max-width: 70%; padding: 10px 15px; border-radius: 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                            <?php if (isAdmin()): ?>
+                            <?php if ($canManageMissions): ?>
                                 <form method="post" class="position-absolute" style="top: 5px; right: 5px;" onsubmit="return confirm('Θέλετε να διαγράψετε αυτό το μήνυμα;');">
                                     <?= csrfField() ?>
                                     <input type="hidden" name="action" value="delete_chat_message">

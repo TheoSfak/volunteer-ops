@@ -1,6 +1,6 @@
 ﻿<?php
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('training_admin');
+requirePermission('training_manage');
 
 $id = (int) get('id');
 $isEdit = !empty($id);

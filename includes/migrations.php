@@ -3864,6 +3864,29 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 60,
+            'description' => 'Clear stale permission slugs from custom_role_permissions (old 13-slug system replaced by 21-slug system)',
+            'up' => function () {
+                $validSlugs = [
+                    'ops_dashboard', 'attendance_manage',
+                    'missions_view', 'missions_manage', 'shifts_manage', 'tasks_manage',
+                    'volunteers_view', 'volunteers_manage', 'inactive_volunteers',
+                    'reports',
+                    'complaints_view', 'complaints_manage',
+                    'training_view', 'training_manage', 'questions_manage',
+                    'inventory_view', 'inventory_manage',
+                    'citizens_view', 'citizens_manage',
+                    'positions_manage', 'skills_manage', 'certificates_manage',
+                ];
+                $placeholders = implode(',', array_fill(0, count($validSlugs), '?'));
+                dbExecute(
+                    "DELETE FROM custom_role_permissions WHERE page_slug NOT IN ($placeholders)",
+                    $validSlugs
+                );
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

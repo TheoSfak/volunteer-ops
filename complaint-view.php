@@ -31,9 +31,9 @@ if (!$complaint) {
     redirect('my-complaints.php');
 }
 
-// Access control: owner or admin
+// Access control: owner or anyone with complaints_view
 $isOwner = ($complaint['user_id'] == getCurrentUserId());
-if (!$isOwner && !isAdmin()) {
+if (!$isOwner && !hasPagePermission('complaints_view')) {
     setFlash('error', 'Δεν έχετε πρόσβαση σε αυτό το παράπονο.');
     redirect('my-complaints.php');
 }
@@ -41,7 +41,7 @@ if (!$isOwner && !isAdmin()) {
 $pageTitle = 'Παράπονο #' . $id;
 
 // Handle admin response
-if (isPost() && isAdmin()) {
+if (isPost() && hasPagePermission('complaints_manage')) {
     verifyCsrf();
     $action = post('action');
     
@@ -111,7 +111,7 @@ if (isPost() && isAdmin()) {
 }
 
 // Back URL depending on role
-$backUrl = $isOwner && !isAdmin() ? 'my-complaints.php' : 'complaints.php';
+$backUrl = $isOwner && !hasPagePermission('complaints_view') ? 'my-complaints.php' : 'complaints.php';
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -200,7 +200,7 @@ include __DIR__ . '/includes/header.php';
             <?php endif; ?>
             
             <!-- Admin Actions -->
-            <?php if (isAdmin()): ?>
+            <?php if (hasPagePermission('complaints_manage')): ?>
                 <div class="card shadow-sm mb-4">
                     <div class="card-header bg-warning bg-opacity-25">
                         <h5 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Ενέργειες Διαχειριστή</h5>

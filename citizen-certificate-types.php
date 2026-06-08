@@ -4,7 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('citizens');
+requirePermission('citizens_manage');
 
 $pageTitle = 'Τύποι Πιστοποιητικών';
 
