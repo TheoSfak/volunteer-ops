@@ -580,6 +580,7 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                                 <button class="btn btn-sm btn-info py-0 px-2" style="font-size:.8rem;"
                                     onclick="openContactHistory(<?= $c['id'] ?>, '<?= h(addslashes($c['first_name_gr'] . ' ' . $c['last_name_gr'])) ?>')"
                                     data-citizen-id="<?= $c['id'] ?>"
+                                    data-count="<?= (int)$c['contact_count'] ?>"
                                     title="Ιστορικό Επικοινωνιών">
                                     💬 <?= $c['contact_count'] ?>
                                 </button>
@@ -1018,16 +1019,17 @@ function chDeleteContact(contactId) {
 
 function chUpdateRowIndicator(citizenId, delta) {
     var btn = document.querySelector('[data-citizen-id="' + citizenId + '"][title="Ιστορικό Επικοινωνιών"]');
-    if (!btn) return;
-    var row = btn.closest('tr');
+    // btn may be in the Ιστορικό cell or the actions cell — find the row via either
+    var row = btn ? btn.closest('tr') : null;
+    if (!row) return;
     var histCell = row.cells[row.cells.length - 2]; // second-to-last (Ιστορικό)
-    var countBadge = histCell.querySelector('button');
-    var curCount = countBadge ? (parseInt(countBadge.textContent.trim()) || 0) : 0;
+    var countBadge = histCell.querySelector('button[data-count]');
+    var curCount = countBadge ? (parseInt(countBadge.getAttribute('data-count')) || 0) : 0;
     var newCount = curCount + delta;
     if (newCount <= 0) {
         histCell.innerHTML = '<span class="text-muted">—</span>';
     } else {
-        histCell.innerHTML = '<button class="btn btn-sm btn-info py-0 px-2" style="font-size:.8rem;" onclick="openContactHistory(' + citizenId + ', \'\')" data-citizen-id="' + citizenId + '" title="Ιστορικό Επικοινωνιών">💬 ' + newCount + '</button>';
+        histCell.innerHTML = '<button class="btn btn-sm btn-info py-0 px-2" style="font-size:.8rem;" onclick="openContactHistory(' + citizenId + ', \'\')" data-citizen-id="' + citizenId + '" data-count="' + newCount + '" title="Ιστορικό Επικοινωνιών">💬 ' + newCount + '</button>';
     }
 }
 
