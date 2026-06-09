@@ -81,7 +81,7 @@ function formatDate($date, $format = 'd/m/Y') {
 function formatDayShort($date) {
     if (empty($date)) return '';
     $dt = is_string($date) ? new DateTime($date) : $date;
-    $days = ['Κυρ', 'Δευ', 'Τρι', 'Τετ', 'Πεμ', 'Παρ', 'Σαβ'];
+    $days = ['Κυριακή', 'Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο'];
     return $days[(int)$dt->format('w')];
 }
 
