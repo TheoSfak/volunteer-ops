@@ -329,9 +329,10 @@ include __DIR__ . '/includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td><?= h($mission['department_name'] ?? '-') ?></td>
-                                <td class="text-nowrap">
+                                <td class="text-nowrap" style="font-size:.82rem;">
+                                    <span class="text-muted"><?= formatDayShort($mission['start_datetime']) ?></span>
                                     <?= formatDate($mission['start_datetime']) ?>
-                                    <span class="text-muted"> · <?= formatDateTime($mission['start_datetime'], 'H:i') ?></span>
+                                    <br><span class="text-muted"><?= formatDateTime($mission['start_datetime'], 'H:i') ?></span>
                                 </td>
                                 <td><span class="badge bg-secondary"><?= $mission['shift_count'] ?></span></td>
                                 <td><span class="badge bg-info"><?= $mission['volunteer_count'] ?></span></td>
