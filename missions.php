@@ -452,7 +452,7 @@ include __DIR__ . '/includes/header.php';
                             </div>
                             <div class="mobile-card-row">
                                 <small>
-                                    <i class="bi bi-calendar me-1 text-muted"></i><?= formatDate($mission['start_datetime']) ?>
+                                    <i class="bi bi-calendar me-1 text-muted"></i><span class="text-muted"><?= formatDayShort($mission['start_datetime']) ?></span> <?= formatDate($mission['start_datetime']) ?>
                                     <span class="text-muted ms-1"><?= formatDateTime($mission['start_datetime'], 'H:i') ?></span>
                                 </small>
                             </div>
