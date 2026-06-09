@@ -76,6 +76,16 @@ function formatDate($date, $format = 'd/m/Y') {
 }
 
 /**
+ * Return short Greek day name (Δευ, Τρι, Τετ, Πεμ, Παρ, Σαβ, Κυρ)
+ */
+function formatDayShort($date) {
+    if (empty($date)) return '';
+    $dt = is_string($date) ? new DateTime($date) : $date;
+    $days = ['Κυρ', 'Δευ', 'Τρι', 'Τετ', 'Πεμ', 'Παρ', 'Σαβ'];
+    return $days[(int)$dt->format('w')];
+}
+
+/**
  * Format datetime in Greek
  */
 function formatDateTime($date, $format = 'd/m/Y H:i') {
