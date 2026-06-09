@@ -371,8 +371,8 @@ include __DIR__ . '/includes/header.php';
                                         if (!$elapsedText) $elapsedText = 'Μόλις τώρα';
                                     ?>
                                         <br>
-                                        <span class="badge bg-danger mt-1" title="Έληξε πριν <?= h($elapsedText) ?>" data-bs-toggle="tooltip">
-                                            <i class="bi bi-clock-history me-1"></i>ΕΛΗΞΕ
+                                        <span class="badge bg-danger mt-1 d-block mx-auto" style="font-size:.7rem;width:fit-content;" title="Έληξε πριν <?= h($elapsedText) ?>" data-bs-toggle="tooltip">
+                                            <i class="bi bi-clock-history"></i> ΕΛΗΞΕ
                                         </span>
                                     <?php endif; ?>
                                 </td>
@@ -426,8 +426,8 @@ include __DIR__ . '/includes/header.php';
                                         if ($hours > 0) $elapsedText .= ($days > 0 ? ' και ' : '') . $hours . ' ώρ' . ($hours == 1 ? 'α' : 'ες');
                                         if (!$elapsedText) $elapsedText = 'Μόλις τώρα';
                                     ?>
-                                        <span class="badge bg-danger" title="Έληξε πριν <?= h($elapsedText) ?>">
-                                            <i class="bi bi-clock-history me-1"></i>ΕΛΗΞΕ
+                                        <span class="badge bg-danger d-block mx-auto" style="font-size:.7rem;width:fit-content;" title="Έληξε πριν <?= h($elapsedText) ?>">
+                                            <i class="bi bi-clock-history"></i> ΕΛΗΞΕ
                                         </span>
                                     <?php endif; ?>
                                 </div>
