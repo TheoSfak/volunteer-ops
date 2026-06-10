@@ -854,11 +854,11 @@ include __DIR__ . '/includes/header.php';
                                 <div class="card-body pb-2">
                                     <!-- Name row -->
                                     <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
-                                        <div class="min-w-0">
+                                        <div style="min-width:0;overflow:hidden;">
                                             <strong class="fs-6"><?= h($p['name']) ?></strong>
                                             <?= volunteerTypeBadge($p['volunteer_type'] ?? VTYPE_RESCUER) ?>
                                         </div>
-                                        <div class="d-flex flex-column align-items-end gap-1 flex-shrink-0">
+                                        <div class="d-flex flex-column align-items-end gap-1" style="flex-shrink:0;min-width:max-content;">
                                             <?= statusBadge($p['status'], 'participation') ?>
                                             <?php if ($p['attended']): ?>
                                                 <span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>Παρών</span>
