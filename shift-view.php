@@ -854,9 +854,9 @@ include __DIR__ . '/includes/header.php';
                                 <div class="card-body pb-2">
                                     <!-- Name row -->
                                     <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
-                                        <div style="min-width:0;overflow:hidden;">
-                                            <strong class="fs-6"><?= h($p['name']) ?></strong>
-                                            <?= volunteerTypeBadge($p['volunteer_type'] ?? VTYPE_RESCUER) ?>
+                                        <div style="min-width:0;">
+                                            <div class="fw-bold fs-6"><?= h($p['name']) ?></div>
+                                            <div><?= volunteerTypeBadge($p['volunteer_type'] ?? VTYPE_RESCUER) ?></div>
                                         </div>
                                         <div class="d-flex flex-column align-items-end gap-1" style="flex-shrink:0;min-width:max-content;">
                                             <?= statusBadge($p['status'], 'participation') ?>
