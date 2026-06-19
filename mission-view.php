@@ -326,7 +326,7 @@ if (isPost()) {
             break;
             
         case 'close':
-            if ($canManageMissions && $mission['status'] === STATUS_OPEN) {
+            if (($canManageMissions || $isResponsible) && $mission['status'] === STATUS_OPEN) {
                 dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_CLOSED, $id]);
                 logAudit('close', 'missions', $id);
                 setFlash('success', 'Η αποστολή έκλεισε.');
@@ -1078,19 +1078,19 @@ include __DIR__ . '/includes/header.php';
     
     <div class="col-lg-4">
         <!-- Actions -->
-        <?php if ($canManageMissions): ?>
+        <?php if ($canManageMissions || $isResponsible): ?>
             <div class="card mb-4">
                 <div class="card-header">
                     <h5 class="mb-0">Ενέργειες</h5>
                 </div>
                 <div class="card-body d-grid gap-2">
-                    <?php if ($mission['status'] !== STATUS_COMPLETED): ?>
+                    <?php if ($canManageMissions && $mission['status'] !== STATUS_COMPLETED): ?>
                     <button type="button" class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#addVolunteerModal">
                         <i class="bi bi-person-plus me-1"></i>Προσθήκη Εθελοντή
                     </button>
                     <?php endif; ?>
-                    
-                    <?php if ($mission['status'] === STATUS_DRAFT): ?>
+
+                    <?php if ($canManageMissions && $mission['status'] === STATUS_DRAFT): ?>
                         <form method="post" id="publishForm">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="publish">
@@ -1219,6 +1219,7 @@ include __DIR__ . '/includes/header.php';
                                 <i class="bi bi-lock me-1"></i>Κλείσιμο Αιτήσεων
                             </button>
                         </form>
+                        <?php if ($canManageMissions): ?>
                         <form method="post">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="resend_email">
@@ -1226,41 +1227,49 @@ include __DIR__ . '/includes/header.php';
                                 <i class="bi bi-envelope-arrow-up me-1"></i>Επαναποστολή Email
                             </button>
                         </form>
+                        <?php endif; ?>
                     <?php endif; ?>
-                    
+
                     <?php if ($mission['status'] === STATUS_CLOSED): ?>
                         <a href="attendance.php?mission_id=<?= $mission['id'] ?>" class="btn btn-info w-100">
                             <i class="bi bi-clipboard-check me-1"></i>Διαχείριση Παρουσιών
                         </a>
-                        <?php if ($debrief): ?>
-                            <button type="button" class="btn btn-primary w-100" onclick="confirmDebriefEdit()">
-                                <i class="bi bi-check-circle me-1"></i>Ολοκλήρωση & Αναφορά
-                            </button>
-                            <script>
-                            function confirmDebriefEdit() {
-                                if (confirm('Υπάρχει ήδη αναφορά (debrief) για αυτή την αποστολή.\n\nΘέλετε να την επεξεργαστείτε;\n\nΠατήστε "OK" για επεξεργασία, ή "Ακύρωση" για απλή ολοκλήρωση της αποστολής χωρίς αλλαγή στην αναφορά.')) {
-                                    window.location.href = 'mission-debrief.php?id=<?= $mission['id'] ?>';
-                                } else {
-                                    document.getElementById('completeOnlyForm').submit();
-                                }
-                            }
-                            </script>
-                            <form id="completeOnlyForm" method="post" style="display:none;">
-                                <?= csrfField() ?>
-                                <input type="hidden" name="action" value="complete_only">
-                            </form>
-                        <?php else: ?>
-                            <form method="post">
-                                <?= csrfField() ?>
-                                <input type="hidden" name="action" value="complete">
-                                <button type="submit" class="btn btn-primary w-100">
+                        <?php if ($canManageMissions): ?>
+                            <?php if ($debrief): ?>
+                                <button type="button" class="btn btn-primary w-100" onclick="confirmDebriefEdit()">
                                     <i class="bi bi-check-circle me-1"></i>Ολοκλήρωση & Αναφορά
                                 </button>
-                            </form>
+                                <script>
+                                function confirmDebriefEdit() {
+                                    if (confirm('Υπάρχει ήδη αναφορά (debrief) για αυτή την αποστολή.\n\nΘέλετε να την επεξεργαστείτε;\n\nΠατήστε "OK" για επεξεργασία, ή "Ακύρωση" για απλή ολοκλήρωση της αποστολής χωρίς αλλαγή στην αναφορά.')) {
+                                        window.location.href = 'mission-debrief.php?id=<?= $mission['id'] ?>';
+                                    } else {
+                                        document.getElementById('completeOnlyForm').submit();
+                                    }
+                                }
+                                </script>
+                                <form id="completeOnlyForm" method="post" style="display:none;">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="complete_only">
+                                </form>
+                            <?php else: ?>
+                                <form method="post">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="complete">
+                                    <button type="submit" class="btn btn-primary w-100">
+                                        <i class="bi bi-check-circle me-1"></i>Ολοκλήρωση & Αναφορά
+                                    </button>
+                                </form>
+                            <?php endif; ?>
+                        <?php elseif ($isResponsible): ?>
+                            <a href="mission-debrief.php?id=<?= $mission['id'] ?>" class="btn btn-primary w-100">
+                                <i class="bi bi-journal-text me-1"></i>Συμπλήρωση Αναφοράς
+                            </a>
                         <?php endif; ?>
                     <?php endif; ?>
-                    
+
                     <?php if ($mission['status'] === STATUS_COMPLETED): ?>
+                        <?php if ($canManageMissions): ?>
                         <form method="post">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="reopen_to_closed">
@@ -1268,18 +1277,25 @@ include __DIR__ . '/includes/header.php';
                                 <i class="bi bi-unlock me-1"></i>Επαναφορά σε «Κλειστή»
                             </button>
                         </form>
+                        <?php endif; ?>
+                        <?php if ($isResponsible && !$canManageMissions): ?>
+                            <a href="mission-debrief.php?id=<?= $mission['id'] ?>" class="btn btn-outline-primary w-100">
+                                <i class="bi bi-journal-text me-1"></i>Επεξεργασία Αναφοράς
+                            </a>
+                        <?php endif; ?>
                     <?php endif; ?>
-                    
+
+                    <?php if ($canManageMissions): ?>
                     <?php if (in_array($mission['status'], [STATUS_DRAFT, STATUS_OPEN])): ?>
                         <hr>
                         <button type="button" class="btn btn-outline-danger w-100 mb-2" data-bs-toggle="modal" data-bs-target="#cancelModal">
                             <i class="bi bi-x-circle me-1"></i>Ακύρωση Αποστολής
                         </button>
                     <?php endif; ?>
-                    
                     <button type="button" class="btn btn-danger w-100" data-bs-toggle="modal" data-bs-target="#deleteMissionModal">
                         <i class="bi bi-trash me-1"></i>Διαγραφή Αποστολής
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
         <?php endif; ?>

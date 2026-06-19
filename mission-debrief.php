@@ -2,11 +2,6 @@
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 
-if (!isAdmin()) {
-    setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης.');
-    redirect('missions.php');
-}
-
 $id = (int) get('id');
 if (!$id) {
     redirect('missions.php');
@@ -15,6 +10,13 @@ if (!$id) {
 $mission = dbFetchOne("SELECT * FROM missions WHERE id = ? AND deleted_at IS NULL", [$id]);
 if (!$mission) {
     setFlash('error', 'Η αποστολή δεν βρέθηκε.');
+    redirect('missions.php');
+}
+
+$currentUser = getCurrentUser();
+$isResponsibleForMission = !empty($mission['responsible_user_id']) && $mission['responsible_user_id'] == $currentUser['id'];
+if (!isAdmin() && !$isResponsibleForMission) {
+    setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης.');
     redirect('missions.php');
 }
 
