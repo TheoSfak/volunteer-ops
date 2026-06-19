@@ -343,7 +343,7 @@ include __DIR__ . '/includes/header.php';
             $shiftStart = new DateTime($shift['start_time']);
             $shiftEnd = new DateTime($shift['end_time']);
             $shiftHours = round(($shiftEnd->getTimestamp() - $shiftStart->getTimestamp()) / 3600, 1);
-            $isPast = $shiftEnd < new DateTime();
+            $isPast = $shiftEnd < new DateTime() || in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED]);
             ?>
             <div class="accordion-item">
                 <h2 class="accordion-header">
