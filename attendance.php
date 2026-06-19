@@ -4,7 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
-requirePermission('attendance_manage');
+requireLogin();
 
 $missionId = get('mission_id');
 if (!$missionId) {
@@ -27,6 +27,12 @@ if (!$mission) {
 
 $pageTitle = 'Διαχείριση Παρουσιών - ' . $mission['title'];
 $user = getCurrentUser();
+
+$isResponsibleForMission = !empty($mission['responsible_user_id']) && $mission['responsible_user_id'] == $user['id'];
+if (!hasPagePermission('attendance_manage') && !$isResponsibleForMission) {
+    setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης.');
+    redirect('missions.php');
+}
 
 function reverseShiftPointsForParticipation(array $participation): void {
     if (empty($participation['points_awarded'])) {
