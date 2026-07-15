@@ -195,12 +195,28 @@ include __DIR__ . '/includes/header.php';
     <?php endforeach; ?>
 </div>
 <div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
-<thead><tr><th>Εθελοντής</th><th>Πληρωμή</th><th>Λήξη</th><th>Έτη</th><th>Ποσό</th><th>Τρόπος</th><th>Αρ. απόδειξης</th><th>Απόδειξη</th><th>Κατάσταση</th><th></th></tr></thead><tbody>
+<thead><tr><th>Εθελοντής</th><th>Πληρωμή</th><th>Λήξη</th><th>Έτη</th><th style="min-width:130px">Ποσό</th><th>Τρόπος</th><th>Αρ. απόδειξης</th><th style="max-width:150px">Απόδειξη</th><th>Κατάσταση</th><th></th></tr></thead><tbody>
 <?php foreach ($rows as $row): $days = (int)floor((strtotime($row['expiry_date']) - strtotime(date('Y-m-d'))) / 86400); $badge = $days < 0 ? 'danger' : ($days <= 7 ? 'danger' : ($days <= 30 ? 'warning text-dark' : ($days <= 90 ? 'info text-dark' : 'success'))); $label = $days < 0 ? 'Ληγμένη' : ($days === 0 ? 'Λήγει σήμερα' : 'Ενεργή (' . $days . ' ημ.)'); $hasReceiptFile = !empty($row['receipt_stored_name']) && is_file(__DIR__ . '/uploads/subscription-receipts/' . basename($row['receipt_stored_name'])); ?>
-<tr><td><a href="volunteer-view.php?id=<?= $row['user_id'] ?>"><?= h($row['volunteer_name']) ?></a></td><td><?= formatDate($row['payment_date']) ?></td><td><?= formatDate($row['expiry_date']) ?></td><td><?= (int)($row['coverage_years'] ?? 1) ?></td><td><?= $row['amount'] !== null ? number_format((float)$row['amount'], 2, ',', '.') . ' €' : '—' ?></td><td><?= h($row['payment_method'] ?: '—') ?></td><td><?= h($row['receipt_number'] ?: '—') ?></td><td><?php if ($hasReceiptFile): ?><a class="btn btn-sm btn-outline-secondary" href="subscription-receipt.php?id=<?= $row['id'] ?>"><i class="bi bi-file-earmark-text"></i> <?= h($row['receipt_original_name']) ?></a><?php elseif (!empty($row['receipt_stored_name'])): ?><span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Μη διαθέσιμη</span><?php else: ?>—<?php endif; ?></td><td><span class="badge bg-<?= $badge ?>"><?= $label ?></span></td><td><a class="btn btn-sm btn-outline-primary" href="subscriptions.php?filter=<?= h($filter) ?>&edit=<?= $row['id'] ?>"><i class="bi bi-pencil"></i></a></td></tr>
+<?php $isReceiptImage = $hasReceiptFile && in_array(strtolower(pathinfo($row['receipt_stored_name'], PATHINFO_EXTENSION)), ['jpg', 'jpeg', 'png'], true); ?>
+<tr><td><a href="volunteer-view.php?id=<?= $row['user_id'] ?>"><?= h($row['volunteer_name']) ?></a></td><td><?= formatDate($row['payment_date']) ?></td><td><?= formatDate($row['expiry_date']) ?></td><td><?= (int)($row['coverage_years'] ?? 1) ?></td><td class="text-nowrap" style="min-width:130px"><?= $row['amount'] !== null ? number_format((float)$row['amount'], 2, ',', '.') . ' €' : '—' ?></td><td><?= h($row['payment_method'] ?: '—') ?></td><td><?= h($row['receipt_number'] ?: '—') ?></td><td style="max-width:150px"><?php if ($isReceiptImage): ?><button type="button" class="btn btn-sm btn-outline-secondary receipt-preview-btn text-truncate mw-100" data-bs-toggle="modal" data-bs-target="#receiptPreviewModal" data-preview-url="subscription-receipt.php?id=<?= $row['id'] ?>" data-preview-name="<?= h($row['receipt_original_name']) ?>"><i class="bi bi-eye"></i> Προβολή</button><?php elseif ($hasReceiptFile): ?><a class="btn btn-sm btn-outline-secondary text-truncate mw-100" href="subscription-receipt.php?id=<?= $row['id'] ?>" target="_blank" rel="noopener"><i class="bi bi-file-earmark-text"></i> <?= h($row['receipt_original_name']) ?></a><?php elseif (!empty($row['receipt_stored_name'])): ?><span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Μη διαθέσιμη</span><?php else: ?>—<?php endif; ?></td><td><span class="badge bg-<?= $badge ?>"><?= $label ?></span></td><td><a class="btn btn-sm btn-outline-primary" href="subscriptions.php?filter=<?= h($filter) ?>&edit=<?= $row['id'] ?>"><i class="bi bi-pencil"></i></a></td></tr>
 <?php endforeach; ?>
 <?php if (!$rows): ?><tr><td colspan="10" class="text-center text-muted py-4">Δεν υπάρχουν καταχωρημένες συνδρομές.</td></tr><?php endif; ?>
 </tbody></table></div></div>
+
+<div class="modal fade" id="receiptPreviewModal" tabindex="-1" aria-labelledby="receiptPreviewModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-truncate" id="receiptPreviewModalTitle">Προεπισκόπηση απόδειξης</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Κλείσιμο"></button>
+            </div>
+            <div class="modal-body text-center">
+                <img id="receiptPreviewImage" src="" alt="Προεπισκόπηση απόδειξης" class="img-fluid rounded border" style="max-width:320px;max-height:65vh;object-fit:contain;">
+                <div id="receiptPreviewError" class="alert alert-danger mt-3 d-none mb-0">Δεν ήταν δυνατή η προβολή της εικόνας. Δοκιμάστε να την ανοίξετε ξανά.</div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div class="modal fade" id="paymentModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><form method="post" enctype="multipart/form-data">
 <?= csrfField() ?><input type="hidden" name="action" value="record_payment"><div class="modal-header"><h5 class="modal-title">Καταχώρηση ετήσιας συνδρομής</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
@@ -209,6 +225,21 @@ include __DIR__ . '/includes/header.php';
 <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button><button class="btn btn-primary">Αποθήκευση</button></div></form></div></div></div>
 <script>
 (() => {
+    const receiptPreviewModal = document.getElementById('receiptPreviewModal');
+    if (receiptPreviewModal) {
+        const previewImage = document.getElementById('receiptPreviewImage');
+        const previewTitle = document.getElementById('receiptPreviewModalTitle');
+        const previewError = document.getElementById('receiptPreviewError');
+        receiptPreviewModal.addEventListener('show.bs.modal', (event) => {
+            const button = event.relatedTarget;
+            previewTitle.textContent = button.dataset.previewName || 'Προεπισκόπηση απόδειξης';
+            previewError.classList.add('d-none');
+            previewImage.src = button.dataset.previewUrl;
+        });
+        previewImage.addEventListener('error', () => previewError.classList.remove('d-none'));
+        receiptPreviewModal.addEventListener('hidden.bs.modal', () => { previewImage.removeAttribute('src'); });
+    }
+
     const latestExpiryByVolunteer = <?= json_encode($latestSubscriptionExpiryMap, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
     const reactivationDays = <?= (int)$subscriptionReactivationDays ?>;
     const volunteer = document.getElementById('subscriptionVolunteer');
