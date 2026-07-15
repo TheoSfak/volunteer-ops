@@ -60,6 +60,7 @@ function getPermissionMap(): array {
             ['slug' => 'positions_manage',   'label' => 'Θέσεις Εθελοντών',                   'icon' => 'bi-person-badge',     'description' => 'Διαχείριση θέσεων/ρόλων εντός του σώματος'],
             ['slug' => 'skills_manage',      'label' => 'Δεξιότητες',                         'icon' => 'bi-stars',            'description' => 'Διαχείριση δεξιοτήτων εθελοντών'],
             ['slug' => 'certificates_manage','label' => 'Πιστοποιητικά Εθελοντών',            'icon' => 'bi-award',            'description' => 'Διαχείριση πιστοποιητικών & ειδικοτήτων'],
+            ['slug' => 'subscriptions_manage','label' => 'Ετήσιες Συνδρομές',                 'icon' => 'bi-cash-coin',        'description' => 'Καταχώρηση πληρωμών, αποδείξεων και λήξεων συνδρομών'],
         ],
     ];
 }

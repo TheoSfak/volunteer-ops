@@ -11,6 +11,7 @@ $user = getCurrentUser();
 
 // Get volunteer profile
 $profile = dbFetchOne("SELECT * FROM volunteer_profiles WHERE user_id = ?", [$user['id']]);
+$mySubscription = dbFetchOne("SELECT * FROM volunteer_subscriptions WHERE user_id = ? ORDER BY expiry_date DESC, id DESC LIMIT 1", [$user['id']]);
 
 // Get user skills
 $userSkills = dbFetchAll(
@@ -668,6 +669,21 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 <?php endif; ?>
+
+<!-- Annual Subscription -->
+<?php $subscriptionDays = $mySubscription ? (int)floor((strtotime($mySubscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400) : null; $subscriptionColor = $subscriptionDays === null ? 'secondary' : ($subscriptionDays < 0 ? 'danger' : ($subscriptionDays <= 7 ? 'danger' : ($subscriptionDays <= 30 ? 'warning' : ($subscriptionDays <= 90 ? 'info' : 'success')))); ?>
+<div class="card pp-card accent-<?= $subscriptionColor ?> mb-4">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-cash-coin text-<?= $subscriptionColor ?> me-2"></i>Η Ετήσια Συνδρομή μου</h5></div>
+    <div class="card-body">
+        <?php if (!$mySubscription): ?>
+            <div class="alert alert-warning mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Δεν υπάρχει καταχωρημένη ετήσια συνδρομή. Επικοινωνήστε με τη διοίκηση.</div>
+        <?php else: ?>
+            <div class="d-flex justify-content-between align-items-center mb-2"><strong>Λήξη: <?= formatDate($mySubscription['expiry_date']) ?></strong><span class="badge bg-<?= $subscriptionColor ?>"><?= $subscriptionDays < 0 ? 'Ληγμένη' : ($subscriptionDays === 0 ? 'Λήγει σήμερα' : 'Ενεργή για ' . $subscriptionDays . ' ημέρες') ?></span></div>
+            <div class="progress" style="height:8px"><div class="progress-bar bg-<?= $subscriptionColor ?>" style="width:<?= $subscriptionDays < 0 ? 100 : min(100, max(8, round($subscriptionDays / 365 * 100))) ?>%"></div></div>
+            <div class="small text-muted mt-2">Τελευταία πληρωμή: <?= formatDate($mySubscription['payment_date']) ?></div>
+        <?php endif; ?>
+    </div>
+</div>
 
 <!-- My Certificates -->
 <?php

@@ -203,7 +203,7 @@ include __DIR__ . '/includes/header.php';
     <div class="row">
         <?php foreach ($tasks as $task): ?>
             <div class="col-md-6 col-lg-4 mb-4">
-                <div class="card h-100 shadow-sm hover-shadow">
+                <a href="task-view.php?id=<?= $task['id'] ?>" class="card h-100 shadow-sm hover-shadow task-card-link text-decoration-none text-dark">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <span class="badge bg-<?= $priorityColors[$task['priority']] ?>">
@@ -214,11 +214,7 @@ include __DIR__ . '/includes/header.php';
                             </span>
                         </div>
                         
-                        <h5 class="card-title">
-                            <a href="task-view.php?id=<?= $task['id'] ?>" class="text-decoration-none text-dark">
-                                <?= h($task['title']) ?>
-                            </a>
-                        </h5>
+                        <h5 class="card-title"><?= h($task['title']) ?></h5>
                         
                         <?php if ($task['description']): ?>
                             <p class="card-text text-muted small">
@@ -291,7 +287,7 @@ include __DIR__ . '/includes/header.php';
                             </small>
                         <?php endif; ?>
                     </div>
-                </div>
+                </a>
             </div>
         <?php endforeach; ?>
     </div>
@@ -318,6 +314,13 @@ include __DIR__ . '/includes/header.php';
 }
 .hover-shadow:hover {
     box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+}
+.task-card-link {
+    cursor: pointer;
+}
+.task-card-link:focus-visible {
+    outline: 3px solid rgba(13, 110, 253, 0.5);
+    outline-offset: 2px;
 }
 </style>
 
