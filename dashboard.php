@@ -337,6 +337,10 @@ if (isAdmin()) {
     );
 } else {
     // Volunteer statistics
+    $dashboardSubscription = dbFetchOne(
+        "SELECT * FROM volunteer_subscriptions WHERE user_id = ? ORDER BY expiry_date DESC, id DESC LIMIT 1",
+        [$user['id']]
+    );
     $stats = [
         'my_shifts' => dbFetchValue(
             "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = ?",
@@ -798,6 +802,27 @@ $randomQuote = $quotes[array_rand($quotes)];
         </div>
     </div>
 </div>
+
+<?php if (!isAdmin()): ?>
+    <?php $dashboardSubscriptionDays = $dashboardSubscription ? (int)floor((strtotime($dashboardSubscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400) : null; $dashboardSubscriptionColor = $dashboardSubscriptionDays === null ? 'secondary' : ($dashboardSubscriptionDays < 0 ? 'danger' : ($dashboardSubscriptionDays <= 7 ? 'danger' : ($dashboardSubscriptionDays <= 30 ? 'warning' : ($dashboardSubscriptionDays <= 90 ? 'info' : 'success')))); ?>
+    <div class="card ds-widget accent-<?= $dashboardSubscriptionColor ?> mb-4" id="dashboardSubscription">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5><i class="bi bi-cash-coin text-<?= $dashboardSubscriptionColor ?> me-2"></i>Η Ετήσια Συνδρομή μου</h5>
+            <a href="profile.php" class="btn btn-sm btn-outline-primary">Προφίλ</a>
+        </div>
+        <div class="card-body py-3">
+            <?php if (!$dashboardSubscription): ?>
+                <div class="alert alert-warning mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Δεν υπάρχει καταχωρημένη ετήσια συνδρομή. Επικοινωνήστε με τη διοίκηση.</div>
+            <?php else: ?>
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                    <div><strong>Λήξη: <?= formatDate($dashboardSubscription['expiry_date']) ?></strong><div class="small text-muted">Τελευταία πληρωμή: <?= formatDate($dashboardSubscription['payment_date']) ?></div></div>
+                    <span class="badge bg-<?= $dashboardSubscriptionColor ?>"><?= $dashboardSubscriptionDays < 0 ? 'Ληγμένη' : ($dashboardSubscriptionDays === 0 ? 'Λήγει σήμερα' : 'Ενεργή για ' . $dashboardSubscriptionDays . ' ημέρες') ?></span>
+                </div>
+                <div class="progress" style="height:8px"><div class="progress-bar bg-<?= $dashboardSubscriptionColor ?>" style="width:<?= $dashboardSubscriptionDays < 0 ? 100 : min(100, max(8, round($dashboardSubscriptionDays / 365 * 100))) ?>%"></div></div>
+            <?php endif; ?>
+        </div>
+    </div>
+<?php endif; ?>
 
 <?= showFlash() ?>
 
