@@ -4,6 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/subscription-iris.php';
 requireLogin();
 
 $pageTitle = 'Πίνακας Ελέγχου';
@@ -14,6 +15,26 @@ $yearStart = $year . '-01-01';
 $yearEnd   = ($year + 1) . '-01-01';
 $currentMonth = date('Y-m');
 $previousMonth = date('Y-m', strtotime('-1 month'));
+
+if (isPost() && in_array(post('action'), ['prepare_iris_renewal', 'report_iris_payment'], true)) {
+    verifyCsrf();
+    $subscription = dbFetchOne("SELECT * FROM volunteer_subscriptions WHERE user_id = ? ORDER BY expiry_date DESC, id DESC LIMIT 1", [$user['id']]);
+    try {
+        if (post('action') === 'prepare_iris_renewal') {
+            $request = subscriptionIrisPrepare((int)$user['id'], $subscription ?: [], (int)post('coverage_years', 1));
+            logAudit('prepare_subscription_iris_renewal', 'subscription_iris_requests', (int)$request['id']);
+            $_SESSION['open_iris_renewal_modal'] = 1;
+            setFlash('success', 'Εμφανίστηκαν οι οδηγίες πληρωμής IRIS για ' . (int)$request['coverage_years'] . ' έτη.');
+        } else {
+            $request = subscriptionIrisReportPayment((int)$user['id'], $subscription ?: []);
+            logAudit('report_subscription_iris_payment', 'subscription_iris_requests', (int)$request['id']);
+            setFlash('success', 'Η ενημέρωση πληρωμής IRIS στάλθηκε στη διοίκηση.');
+        }
+    } catch (RuntimeException $e) {
+        setFlash('error', $e->getMessage());
+    }
+    redirect('dashboard.php');
+}
 
 if (isPost() && post('action') === 'bulk_complete_overdue') {
     verifyCsrf();
@@ -805,10 +826,11 @@ $randomQuote = $quotes[array_rand($quotes)];
 
 <?php if (!isAdmin()): ?>
     <?php $dashboardSubscriptionDays = $dashboardSubscription ? (int)floor((strtotime($dashboardSubscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400) : null; $dashboardSubscriptionColor = $dashboardSubscriptionDays === null ? 'secondary' : ($dashboardSubscriptionDays < 0 ? 'danger' : ($dashboardSubscriptionDays <= 7 ? 'danger' : ($dashboardSubscriptionDays <= 30 ? 'warning' : ($dashboardSubscriptionDays <= 90 ? 'info' : 'success')))); ?>
+    <?php $dashboardIrisRequest = subscriptionIrisLatestRequest((int)$user['id']); $canDashboardIrisRenew = subscriptionIrisIsEligible($dashboardSubscription); $openDashboardIrisModal = !empty($_SESSION['open_iris_renewal_modal']); unset($_SESSION['open_iris_renewal_modal']); ?>
     <div class="card ds-widget accent-<?= $dashboardSubscriptionColor ?> mb-4" id="dashboardSubscription">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h5><i class="bi bi-cash-coin text-<?= $dashboardSubscriptionColor ?> me-2"></i>Η Ετήσια Συνδρομή μου</h5>
-            <a href="profile.php" class="btn btn-sm btn-outline-primary">Προφίλ</a>
+            <div class="d-flex gap-2 flex-wrap justify-content-end"><?php if ($canDashboardIrisRenew): ?><button type="button" class="btn btn-primary btn-sm fw-bold" data-bs-toggle="modal" data-bs-target="#dashboardIrisRenewalModal"><i class="bi bi-arrow-repeat me-1"></i>Ανανέωση συνδρομής</button><form method="post" class="d-inline"><?= csrfField() ?><input type="hidden" name="action" value="report_iris_payment"><button class="btn btn-success btn-sm fw-bold" <?= !$dashboardIrisRequest || $dashboardIrisRequest['status'] !== 'PREPARED' ? 'disabled title="Επιλέξτε πρώτα τη διάρκεια ανανέωσης"' : '' ?>><i class="bi bi-check2-circle me-1"></i>Ενημέρωση πληρωμής</button></form><?php endif; ?><a href="profile.php" class="btn btn-sm btn-outline-primary">Προφίλ</a></div>
         </div>
         <div class="card-body py-3">
             <?php if (!$dashboardSubscription): ?>
@@ -822,6 +844,13 @@ $randomQuote = $quotes[array_rand($quotes)];
             <?php endif; ?>
         </div>
     </div>
+    <?php if ($canDashboardIrisRenew): ?>
+    <div class="modal fade" id="dashboardIrisRenewalModal" tabindex="-1" aria-labelledby="dashboardIrisRenewalModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form method="post">
+    <?= csrfField() ?><input type="hidden" name="action" value="prepare_iris_renewal"><div class="modal-header"><h5 class="modal-title" id="dashboardIrisRenewalModalTitle"><i class="bi bi-phone-vibrate me-2"></i>Ανανέωση με IRIS</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Κλείσιμο"></button></div>
+    <div class="modal-body"><p class="mb-2">Η ανανέωση είναι διαθέσιμη έως <strong><?= subscriptionIrisRenewalDays() ?> ημέρες πριν από τη λήξη</strong> της συνδρομής, όχι νωρίτερα.</p><div class="alert alert-info"><strong>Πληρωμή IRIS στο ΑΦΜ:</strong> <span class="fs-5"><?= h(subscriptionIrisTaxId()) ?></span></div><label class="form-label fw-semibold" for="dashboardIrisCoverageYears">Διάρκεια ανανέωσης</label><select class="form-select" id="dashboardIrisCoverageYears" name="coverage_years"><?php for ($dashboardIrisYear = 1; $dashboardIrisYear <= 5; $dashboardIrisYear++): ?><option value="<?= $dashboardIrisYear ?>" <?= (int)($dashboardIrisRequest['coverage_years'] ?? 1) === $dashboardIrisYear ? 'selected' : '' ?>><?= $dashboardIrisYear ?> <?= $dashboardIrisYear === 1 ? 'έτος' : 'έτη' ?></option><?php endfor; ?></select><div class="alert alert-success mt-3 mb-0"><strong>Ποσό προς πληρωμή: <span id="dashboardIrisRenewalAmount"></span></strong><div class="small mt-1"><?= number_format(subscriptionIrisAnnualAmount(), 2, ',', '.') ?> € ανά έτος.</div></div></div>
+    <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Ακύρωση</button><button class="btn btn-primary fw-bold">Εμφάνιση οδηγιών IRIS</button></div></form></div></div></div>
+    <script>document.addEventListener('DOMContentLoaded', () => { const years = document.getElementById('dashboardIrisCoverageYears'); const amount = document.getElementById('dashboardIrisRenewalAmount'); const annual = <?= json_encode(subscriptionIrisAnnualAmount()) ?>; const update = () => amount.textContent = (Number(years.value) * annual).toLocaleString('el-GR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €'; years.addEventListener('change', update); update(); <?php if ($openDashboardIrisModal): ?>bootstrap.Modal.getOrCreateInstance(document.getElementById('dashboardIrisRenewalModal')).show();<?php endif; ?> });</script>
+    <?php endif; ?>
 <?php endif; ?>
 
 <?= showFlash() ?>

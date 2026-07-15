@@ -58,6 +58,9 @@ $defaults = [
     'citizen_cert_notify_1week' => '1',
     'citizen_cert_notify_expired' => '1',
     'subscription_reactivation_days' => '90',
+    'subscription_iris_renewal_days' => '90',
+    'subscription_iris_annual_amount' => '30',
+    'subscription_iris_tax_id' => '996695642',
     // Prerequisites
     'prereq_attendance_enabled' => '1',
     'prereq_attendance_goal' => '10',
@@ -646,10 +649,17 @@ if (isPost()) {
         redirect('settings.php?tab=citizens');
 
     } elseif ($action === 'save_subscriptions') {
-        $value = max(0, min(3650, (int)post('subscription_reactivation_days', 90)));
-        dbExecute("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES ('subscription_reactivation_days', ?, NOW(), NOW()) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()", [(string)$value]);
+        $values = [
+            'subscription_reactivation_days' => (string)max(0, min(3650, (int)post('subscription_reactivation_days', 90))),
+            'subscription_iris_renewal_days' => (string)max(0, min(3650, (int)post('subscription_iris_renewal_days', 90))),
+            'subscription_iris_annual_amount' => (string)max(0, (float)str_replace(',', '.', post('subscription_iris_annual_amount', '30'))),
+            'subscription_iris_tax_id' => preg_replace('/\D+/', '', post('subscription_iris_tax_id', '996695642')),
+        ];
+        foreach ($values as $key => $value) {
+            dbExecute("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW()) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()", [$key, $value]);
+        }
         clearSettingsCache();
-        setFlash('success', 'Το όριο επανενεργοποίησης συνδρομής αποθηκεύτηκε.');
+        setFlash('success', 'Οι ρυθμίσεις ετήσιας συνδρομής και IRIS αποθηκεύτηκαν.');
         redirect('settings.php?tab=subscriptions');
         
     } elseif ($action === 'save_notifications') {
@@ -2037,6 +2047,10 @@ $citizenStats = [
 <label class="form-label fw-semibold" for="subscriptionReactivationDays">Όριο επανενεργοποίησης (ημέρες)</label>
 <input type="number" class="form-control" style="max-width:220px" id="subscriptionReactivationDays" name="subscription_reactivation_days" min="0" max="3650" value="<?= h($settings['subscription_reactivation_days']) ?>" required>
 <div class="form-text">Προτεινόμενη τιμή: 90 ημέρες. Το 0 κάνει κάθε καθυστερημένη πληρωμή επανενεργοποίηση.</div>
+</div></div>
+<div class="card mt-3"><div class="card-header"><h5 class="mb-0"><i class="bi bi-phone-vibrate me-1"></i>Ανανέωση συνδρομής με IRIS</h5></div><div class="card-body">
+<p class="text-muted">Ο εθελοντής ενημερώνεται για την πληρωμή IRIS και ο admin επιβεβαιώνει την πραγματική είσπραξη πριν ενεργοποιηθεί η συνδρομή.</p>
+<div class="row g-3"><div class="col-md-4"><label class="form-label fw-semibold" for="subscriptionIrisAnnualAmount">Ετήσιο ποσό (€)</label><input type="number" class="form-control" id="subscriptionIrisAnnualAmount" name="subscription_iris_annual_amount" min="0" step="0.01" value="<?= h($settings['subscription_iris_annual_amount']) ?>" required></div><div class="col-md-4"><label class="form-label fw-semibold" for="subscriptionIrisRenewalDays">Διαθέσιμη ανανέωση πριν από (ημέρες)</label><input type="number" class="form-control" id="subscriptionIrisRenewalDays" name="subscription_iris_renewal_days" min="0" max="3650" value="<?= h($settings['subscription_iris_renewal_days']) ?>" required><div class="form-text">Προεπιλογή: 90 ημέρες.</div></div><div class="col-md-4"><label class="form-label fw-semibold" for="subscriptionIrisTaxId">ΑΦΜ πληρωμής IRIS</label><input type="text" class="form-control" id="subscriptionIrisTaxId" name="subscription_iris_tax_id" inputmode="numeric" maxlength="20" value="<?= h($settings['subscription_iris_tax_id']) ?>" required></div></div>
 </div><div class="card-footer"><button class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Αποθήκευση</button></div></div>
 </form></div></div>
 <?php endif; ?>
