@@ -4005,6 +4005,16 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 68,
+            'description' => 'Add receipt number to annual subscriptions',
+            'up' => function () {
+                if (empty(dbFetchAll("SHOW COLUMNS FROM volunteer_subscriptions LIKE 'receipt_number'"))) {
+                    dbExecute("ALTER TABLE volunteer_subscriptions ADD COLUMN receipt_number VARCHAR(100) NULL AFTER payment_method");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
