@@ -31,6 +31,10 @@ $selectedTypes = array_map('intval', (array)(get('types') ?: []));
 $period = get('period', '');
 $customStart = get('start_date', '');
 $customEnd = get('end_date', '');
+$volunteerListMode = get('volunteer_list', 'top10');
+if (!in_array($volunteerListMode, ['top10', 'all'], true)) {
+    $volunteerListMode = 'top10';
+}
 // Section visibility (default: all enabled when nothing selected)
 $allSections = ['sec_summary', 'sec_status', 'sec_types', 'sec_trend', 'sec_funnel', 'sec_top10', 'sec_depts', 'sec_debrief', 'sec_incidents'];
 $rawSections = isset($_GET['sections']) ? (array)$_GET['sections'] : [];
@@ -204,7 +208,8 @@ if ($generate) {
         $baseParams
     );
 
-    // --- Top 10 volunteers ---
+    // --- Volunteer ranking / full participant list ---
+    $volunteerListLimit = $volunteerListMode === 'all' ? '' : ' LIMIT 10';
     $topVolunteers = safeAll(
         "SELECT u.name, d.name as dept_name,
                 SUM(pr.actual_hours) as total_hours,
@@ -217,7 +222,7 @@ if ($generate) {
          LEFT JOIN departments d ON u.department_id = d.id
          WHERE pr.attended = 1 AND $baseWhere
          GROUP BY u.id, u.name, d.name, u.total_points
-         ORDER BY total_hours DESC LIMIT 10",
+         ORDER BY total_hours DESC, u.name ASC{$volunteerListLimit}",
         $baseParams
     );
 
@@ -350,6 +355,14 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
             <div class="mb-4">
+                <label class="form-label fw-bold" for="volunteer_list"><i class="bi bi-people me-1"></i>Εμφάνιση εθελοντών</label>
+                <select class="form-select" id="volunteer_list" name="volunteer_list">
+                    <option value="top10" <?= $volunteerListMode === 'top10' ? 'selected' : '' ?>>Κορυφαίοι 10 εθελοντές</option>
+                    <option value="all" <?= $volunteerListMode === 'all' ? 'selected' : '' ?>>Όλοι οι εθελοντές</option>
+                </select>
+                <div class="form-text">Η επιλογή εφαρμόζεται στην ενότητα εθελοντών της αναφοράς.</div>
+            </div>
+            <div class="mb-4">
                 <label class="form-label fw-bold"><i class="bi bi-layout-text-window me-1"></i>Ενότητες Αναφοράς</label>
                 <div class="mb-2">
                     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAllSections(true)">
@@ -367,7 +380,7 @@ include __DIR__ . '/includes/header.php';
                         'sec_types'     => ['Ανάλυση ανά Τύπο',       'bi-bar-chart',            'info'],
                         'sec_trend'     => ['Μηνιαία Εξέλιξη',        'bi-graph-up',             'success'],
                         'sec_funnel'    => ['Χωνί Συμμετοχής',        'bi-funnel',               'warning'],
-                        'sec_top10'     => ['Κορυφαίοι 10 Εθελοντές', 'bi-trophy',               'warning'],
+                        'sec_top10'     => ['Εθελοντές',               'bi-trophy',               'warning'],
                         'sec_depts'     => ['Ανάλυση ανά Τμήμα',      'bi-building',             'secondary'],
                         'sec_debrief'   => ['Αξιολόγηση / Debrief',   'bi-clipboard-data',       'dark'],
                         'sec_incidents' => ['Αναφορά Συμβάντων',      'bi-exclamation-triangle', 'danger'],
@@ -687,11 +700,11 @@ include __DIR__ . '/includes/header.php';
     </div>
     <?php endif; // sec_funnel ?>
 
-    <!-- ===== TOP 10 VOLUNTEERS ===== -->
+    <!-- ===== VOLUNTEERS ===== -->
     <?php if (in_array('sec_top10', $selectedSections) && !empty($reportData['topVolunteers'])): ?>
     <div class="section-title">
         <i class="bi bi-trophy"></i>
-        <span>Κορυφαίοι 10 Εθελοντές</span>
+        <span><?= $volunteerListMode === 'all' ? 'Όλοι οι Εθελοντές' : 'Κορυφαίοι 10 Εθελοντές' ?></span>
     </div>
     <div class="report-table-wrap mb-5">
         <table class="report-table">
