@@ -57,6 +57,7 @@ $defaults = [
     'citizen_cert_notify_1month' => '1',
     'citizen_cert_notify_1week' => '1',
     'citizen_cert_notify_expired' => '1',
+    'subscription_reactivation_days' => '90',
     // Prerequisites
     'prereq_attendance_enabled' => '1',
     'prereq_attendance_goal' => '10',
@@ -643,6 +644,13 @@ if (isPost()) {
         logAudit('update_settings', 'settings', null, 'Ρυθμίσεις Πολιτών');
         setFlash('success', 'Οι ρυθμίσεις πολιτών αποθηκεύτηκαν.');
         redirect('settings.php?tab=citizens');
+
+    } elseif ($action === 'save_subscriptions') {
+        $value = max(0, min(3650, (int)post('subscription_reactivation_days', 90)));
+        dbExecute("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES ('subscription_reactivation_days', ?, NOW(), NOW()) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()", [(string)$value]);
+        clearSettingsCache();
+        setFlash('success', 'Το όριο επανενεργοποίησης συνδρομής αποθηκεύτηκε.');
+        redirect('settings.php?tab=subscriptions');
         
     } elseif ($action === 'save_notifications') {
         // Save notification settings
@@ -955,6 +963,9 @@ include __DIR__ . '/includes/header.php';
     <li class="nav-item">
         <a class="nav-link <?= $activeTab === 'citizens' ? 'active' : '' ?>" href="settings.php?tab=citizens">
             <i class="bi bi-person-vcard me-1"></i>Πολίτες
+        </a>
+        <a class="nav-link <?= $activeTab === 'subscriptions' ? 'active' : '' ?>" href="settings.php?tab=subscriptions">
+            <i class="bi bi-cash-coin me-1"></i> Συνδρομές
         </a>
     </li>
     <li class="nav-item">
@@ -2016,6 +2027,18 @@ $citizenStats = [
         </div>
     </div>
 </div>
+<?php endif; ?>
+
+<?php if ($activeTab === 'subscriptions'): ?>
+<div class="row"><div class="col-lg-7"><form method="post">
+<?= csrfField() ?><input type="hidden" name="action" value="save_subscriptions">
+<div class="card"><div class="card-header"><h5 class="mb-0"><i class="bi bi-arrow-repeat me-1"></i>Επανενεργοποίηση ετήσιας συνδρομής</h5></div><div class="card-body">
+<p class="text-muted">Μετά από αυτό το διάστημα από τη λήξη, η νέα πληρωμή ξεκινά νέα ετήσια συνδρομή από την ημερομηνία πληρωμής. Πριν από το όριο, η συνδρομή ανανεώνεται από την προηγούμενη λήξη.</p>
+<label class="form-label fw-semibold" for="subscriptionReactivationDays">Όριο επανενεργοποίησης (ημέρες)</label>
+<input type="number" class="form-control" style="max-width:220px" id="subscriptionReactivationDays" name="subscription_reactivation_days" min="0" max="3650" value="<?= h($settings['subscription_reactivation_days']) ?>" required>
+<div class="form-text">Προτεινόμενη τιμή: 90 ημέρες. Το 0 κάνει κάθε καθυστερημένη πληρωμή επανενεργοποίηση.</div>
+</div><div class="card-footer"><button class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Αποθήκευση</button></div></div>
+</form></div></div>
 <?php endif; ?>
 
 <?php if ($activeTab === 'health'): ?>

@@ -347,6 +347,7 @@ if (isPost()) {
 
 // Get profile
 $profile = dbFetchOne("SELECT * FROM volunteer_profiles WHERE user_id = ?", [$id]);
+$latestSubscription = dbFetchOne("SELECT * FROM volunteer_subscriptions WHERE user_id = ? ORDER BY expiry_date DESC, id DESC LIMIT 1", [$id]);
 
 // Get documents
 $documents = dbFetchAll(
@@ -978,6 +979,16 @@ include __DIR__ . '/includes/header.php';
                     </div>
                 </div>
                 <?php endif; ?>
+            </div>
+        </div>
+
+        <!-- Annual Subscription -->
+        <?php $subscriptionDays = $latestSubscription ? (int)floor((strtotime($latestSubscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400) : null; $subscriptionColor = $subscriptionDays === null ? 'secondary' : ($subscriptionDays < 0 ? 'danger' : ($subscriptionDays <= 7 ? 'danger' : ($subscriptionDays <= 30 ? 'warning' : ($subscriptionDays <= 90 ? 'info' : 'success')))); ?>
+        <div class="card vp-card border-accent-<?= $subscriptionColor ?> mb-4" id="subscription">
+            <div class="card-header d-flex justify-content-between align-items-center"><h5 class="mb-0"><i class="bi bi-cash-coin text-<?= $subscriptionColor ?> me-2"></i>Ετήσια Συνδρομή</h5><?php if (hasPagePermission('subscriptions_manage')): ?><a class="btn btn-sm btn-outline-primary" href="subscriptions.php"><i class="bi bi-clock-history me-1"></i>Ιστορικό / Πληρωμή</a><?php endif; ?></div>
+            <div class="card-body">
+                <?php if (!$latestSubscription): ?><div class="alert alert-warning mb-0">Δεν υπάρχει καταχωρημένη συνδρομή.</div>
+                <?php else: ?><div class="d-flex justify-content-between align-items-center"><div><strong>Λήξη: <?= formatDate($latestSubscription['expiry_date']) ?></strong><div class="small text-muted">Πληρωμή: <?= formatDate($latestSubscription['payment_date']) ?></div></div><span class="badge bg-<?= $subscriptionColor ?>"><?= $subscriptionDays < 0 ? 'Ληγμένη' : ($subscriptionDays === 0 ? 'Λήγει σήμερα' : $subscriptionDays . ' ημέρες') ?></span></div><div class="progress mt-3" style="height:8px"><div class="progress-bar bg-<?= $subscriptionColor ?>" style="width:<?= $subscriptionDays < 0 ? 100 : min(100, max(8, round($subscriptionDays / 365 * 100))) ?>%"></div></div><?php endif; ?>
             </div>
         </div>
 

@@ -926,6 +926,13 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
+            <?php if (isSystemAdmin() || hasPagePermission('subscriptions_manage')): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'subscriptions' ? 'active' : '' ?>" href="subscriptions.php">
+                    <i class="bi bi-cash-coin"></i> Ετήσιες Συνδρομές
+                </a>
+            </li>
+            <?php endif; ?>
             <?php if (isSystemAdmin()): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'certificate-types' ? 'active' : '' ?>" href="certificate-types.php">

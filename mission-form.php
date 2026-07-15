@@ -86,21 +86,54 @@ if (isPost()) {
     if (empty($errors)) {
         try {
             if ($isEdit) {
-                $sql = "UPDATE missions SET 
-                        title = ?, description = ?, mission_type_id = ?, department_id = ?,
-                        location = ?, location_details = ?, latitude = ?, longitude = ?,
-                        start_datetime = ?, end_datetime = ?, requirements = ?, notes = ?,
-                        is_urgent = ?, status = ?, responsible_user_id = ?, updated_at = NOW()
-                        WHERE id = ?";
-                dbExecute($sql, [
-                    $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
-                    $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
-                    $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
-                    $data['is_urgent'], $data['status'], $data['responsible_user_id'], $id
-                ]);
+                // Move all related shifts by the same number of calendar days as the mission.
+                // This preserves each shift's start/end time and duration.
+                $oldMissionDate = (new DateTime($mission['start_datetime']))->setTime(0, 0, 0);
+                $newMissionDate = (new DateTime($data['start_datetime']))->setTime(0, 0, 0);
+                $shiftDateOffsetDays = (int)$oldMissionDate->diff($newMissionDate)->format('%r%a');
+
+                db()->beginTransaction();
+                try {
+                    $sql = "UPDATE missions SET
+                            title = ?, description = ?, mission_type_id = ?, department_id = ?,
+                            location = ?, location_details = ?, latitude = ?, longitude = ?,
+                            start_datetime = ?, end_datetime = ?, requirements = ?, notes = ?,
+                            is_urgent = ?, status = ?, responsible_user_id = ?, updated_at = NOW()
+                            WHERE id = ?";
+                    dbExecute($sql, [
+                        $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
+                        $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
+                        $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
+                        $data['is_urgent'], $data['status'], $data['responsible_user_id'], $id
+                    ]);
+
+                    $updatedShifts = 0;
+                    if ($shiftDateOffsetDays !== 0) {
+                        $updatedShifts = dbExecute(
+                            "UPDATE shifts
+                             SET start_time = DATE_ADD(start_time, INTERVAL ? DAY),
+                                 end_time = DATE_ADD(end_time, INTERVAL ? DAY),
+                                 updated_at = NOW()
+                             WHERE mission_id = ?",
+                            [$shiftDateOffsetDays, $shiftDateOffsetDays, $id]
+                        );
+                    }
+
+                    db()->commit();
+                } catch (Throwable $e) {
+                    if (db()->inTransaction()) {
+                        db()->rollBack();
+                    }
+                    throw $e;
+                }
                 
                 logAudit('update', 'missions', $id, $mission, $data);
-                setFlash('success', 'Η αποστολή ενημερώθηκε επιτυχώς.');
+                $message = 'Η αποστολή ενημερώθηκε επιτυχώς.';
+                if ($updatedShifts > 0) {
+                    $shiftLabel = $updatedShifts === 1 ? 'βάρδιας' : 'βαρδιών';
+                    $message .= ' Ενημερώθηκε αυτόματα η ημερομηνία ' . $updatedShifts . ' ' . $shiftLabel . '.';
+                }
+                setFlash('success', $message);
             } else {
                 if ($isRecurring) {
                     // ── RECURRING MISSIONS ──────────────────────────────────────────

@@ -3920,6 +3920,45 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 63,
+            'description' => 'Create volunteer subscription payment history and reminder tracking',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS volunteer_subscriptions (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT UNSIGNED NOT NULL,
+                    payment_date DATE NOT NULL,
+                    expiry_date DATE NOT NULL,
+                    amount DECIMAL(10,2) NULL,
+                    payment_method VARCHAR(50) NULL,
+                    receipt_original_name VARCHAR(255) NULL,
+                    receipt_stored_name VARCHAR(255) NULL,
+                    notes TEXT NULL,
+                    reminder_sent_3m TINYINT(1) NOT NULL DEFAULT 0,
+                    reminder_sent_1m TINYINT(1) NOT NULL DEFAULT 0,
+                    reminder_sent_1w TINYINT(1) NOT NULL DEFAULT 0,
+                    reminder_sent_expired TINYINT(1) NOT NULL DEFAULT 0,
+                    created_by INT UNSIGNED NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_vs_user_expiry (user_id, expiry_date),
+                    INDEX idx_vs_reminders (expiry_date, reminder_sent_3m, reminder_sent_1m, reminder_sent_1w, reminder_sent_expired),
+                    CONSTRAINT fk_vs_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_vs_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
+        [
+            'version'     => 64,
+            'description' => 'Track subscription renewals and reactivations',
+            'up' => function () {
+                $hasColumn = !empty(dbFetchAll("SHOW COLUMNS FROM volunteer_subscriptions LIKE 'renewal_kind'"));
+                if (!$hasColumn) {
+                    dbExecute("ALTER TABLE volunteer_subscriptions ADD COLUMN renewal_kind ENUM('RENEWAL','REACTIVATION') NOT NULL DEFAULT 'RENEWAL' AFTER expiry_date");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
