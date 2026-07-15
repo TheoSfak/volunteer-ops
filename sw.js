@@ -3,7 +3,7 @@
  * Handles caching, offline fallback, and push notifications
  */
 
-const CACHE_VERSION = 'vo-v3.63.25';
+const CACHE_VERSION = 'vo-v3.71.1';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime';
 
@@ -107,7 +107,7 @@ self.addEventListener('push', event => {
         data: {
             url: data.url || './dashboard.php'
         },
-        vibrate: [100, 50, 100],
+        vibrate: data.vibrate || [100, 50, 100],
         actions: data.actions || []
     };
 
