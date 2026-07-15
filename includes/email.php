@@ -535,7 +535,7 @@ function sendNotificationEmail(string $notificationCode, string $to, array $vari
  * Simple notification wrapper - creates a notification record in database.
  * Pass $notificationCode to check per-user in-app preference.
  */
-function sendNotification(int $userId, string $title, string $message, string $type = 'info', string $notificationCode = ''): void {
+function sendNotification(int $userId, string $title, string $message, string $type = 'info', string $notificationCode = '', array $pushData = []): void {
     $isMandatory = ($notificationCode === '' || in_array($notificationCode, NON_CONFIGURABLE_NOTIFICATIONS));
 
     // In-app notification
@@ -551,7 +551,7 @@ function sendNotification(int $userId, string $title, string $message, string $t
     $sendPush = $isMandatory || isUserNotifEnabled($userId, $notificationCode, 'push');
     if ($sendPush) {
         try {
-            sendPushToUser($userId, $title, $message);
+            sendPushToUser($userId, $title, $message, $pushData);
         } catch (\Throwable $e) {
             // Push failure should never block the main flow
         }

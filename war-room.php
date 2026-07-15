@@ -56,6 +56,43 @@ if (isPost()) {
             setFlash('success', 'Η αποστολή έκλεισε και αφαιρέθηκε από το Επιχειρησιακό.');
             redirect('ops-dashboard.php');
         }
+    } elseif (post('action') === 'request_location') {
+        if (!$canManageWarRoom) {
+            setFlash('error', 'Δεν έχετε δικαίωμα να ζητήσετε στίγματα.');
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $activeRecipients = dbFetchAll(
+            "SELECT DISTINCT pr.volunteer_id, u.name
+             FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             JOIN users u ON u.id = pr.volunteer_id
+             WHERE s.mission_id = ? AND pr.status = ?
+               AND s.start_time <= NOW() AND s.end_time > NOW()",
+            [$missionId, PARTICIPATION_APPROVED]
+        );
+        $activeIds = array_map('intval', array_column($activeRecipients, 'volunteer_id'));
+        $requestedIds = post('request_scope') === 'all'
+            ? $activeIds
+            : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
+
+        if (empty($requestedIds)) {
+            setFlash('warning', 'Επιλέξτε τουλάχιστον έναν εθελοντή με ενεργή βάρδια.');
+        } else {
+            $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+            $title = '📍 Ζητείται στίγμα GPS';
+            $message = 'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε το τρέχον στίγμα σας.';
+            foreach ($requestedIds as $recipientId) {
+                sendNotification($recipientId, $title, $message, 'warning', '', [
+                    'url' => $warRoomUrl,
+                    'tag' => 'location-request-mission-' . $missionId,
+                    'vibrate' => [300, 100, 300, 100, 500],
+                ]);
+            }
+            logAudit('request_mission_location', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
+            setFlash('success', 'Στάλθηκε αίτημα στίγματος σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
+        }
+        redirect('war-room.php?id=' . $missionId);
     }
 }
 
@@ -66,7 +103,8 @@ $hasFieldStatus = (bool)dbFetchValue(
 $fieldStatusColumns = $hasFieldStatus ? ', pr.field_status, pr.field_status_updated_at' : ', NULL AS field_status, NULL AS field_status_updated_at';
 $participants = dbFetchAll(
     "SELECT pr.id AS pr_id, pr.volunteer_id, pr.attended{$fieldStatusColumns},
-            u.name, u.phone, s.id AS shift_id, s.start_time, s.end_time
+            u.name, u.phone, s.id AS shift_id, s.start_time, s.end_time,
+            (SELECT MAX(vp.created_at) FROM volunteer_pings vp WHERE vp.user_id = pr.volunteer_id AND vp.shift_id = pr.shift_id) AS last_ping_at
      FROM participation_requests pr
      JOIN users u ON u.id = pr.volunteer_id
      JOIN shifts s ON s.id = pr.shift_id
@@ -126,6 +164,9 @@ $firstShift = $shifts[0]['start_time'] ?? $mission['start_datetime'];
 $lastShift = !empty($shifts) ? end($shifts)['end_time'] : $mission['end_datetime'];
 $now = time();
 $timeState = strtotime($firstShift) > $now ? 'upcoming' : (strtotime($lastShift) < $now ? 'overdue' : 'active');
+$activeParticipants = array_values(array_filter($participants, fn($participant) =>
+    strtotime($participant['start_time']) <= $now && strtotime($participant['end_time']) > $now
+));
 $pageTitle = 'War Room — ' . $mission['title'];
 $currentPage = 'war-room';
 include __DIR__ . '/includes/header.php';
@@ -173,7 +214,7 @@ include __DIR__ . '/includes/header.php';
                 <?php foreach ($participants as $participant): ?>
                 <?php $status = $participant['field_status'] ?? ''; ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                    <div><strong><?= h($participant['name']) ?></strong><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?></small></div>
+                    <div><strong><?= h($participant['name']) ?></strong><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? ' · Τελευταίο στίγμα: ' . date('H:i', strtotime($participant['last_ping_at'])) : ' · Δεν υπάρχει στίγμα' ?></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>">
                         <?= $status === 'needs_help' ? 'Χρειάζεται βοήθεια' : ($status === 'on_site' ? 'Επί τόπου' : ($status === 'on_way' ? 'Σε κίνηση' : 'Χωρίς κατάσταση')) ?>
                     </span>
@@ -212,6 +253,36 @@ include __DIR__ . '/includes/header.php';
         </div>
 
         <?php if ($canManageWarRoom): ?>
+        <div class="card shadow-sm mb-4 border-warning">
+            <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-bell-fill me-1"></i>Ζήτηση στίγματος</h5></div>
+            <div class="card-body">
+                <?php if (empty($activeParticipants)): ?>
+                    <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
+                <?php else: ?>
+                    <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση. Ο ήχος εξαρτάται από τις ρυθμίσεις της συσκευής του εθελοντή.</p>
+                    <form method="post">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="request_location">
+                        <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
+                            <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
+                        </button>
+                        <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
+                        <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
+                            <?php foreach ($activeParticipants as $participant): ?>
+                            <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
+                                <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
+                                <small class="text-muted"><?= $participant['last_ping_at'] ? date('H:i', strtotime($participant['last_ping_at'])) : 'χωρίς στίγμα' ?></small>
+                            </label>
+                            <?php endforeach; ?>
+                        </div>
+                        <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
+                            <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
+                        </button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <div class="card border-danger shadow-sm">
             <div class="card-body"><h6><i class="bi bi-shield-exclamation text-danger me-1"></i>Διαχείριση αποστολής</h6>
                 <p class="small text-muted">Το κλείσιμο αφαιρεί την αποστολή από το Επιχειρησιακό και σταματά τη λήψη νέων στιγμάτων.</p>
