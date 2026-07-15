@@ -9,6 +9,7 @@ requirePermission('ops_dashboard');
 
 $pageTitle = 'Επιχειρησιακό Dashboard';
 $currentUser = getCurrentUser();
+$canCloseOperationalMissions = hasPagePermission('missions_manage');
 
 // ── Handle quick attendance POST & broadcast ─────────────────────────────────
 if (isPost()) {
@@ -67,6 +68,23 @@ if (isPost()) {
             logAudit('dismiss_help', 'participation_requests', $prId);
             setFlash('success', 'Η ειδοποίηση βοήθειας απορρίφθηκε.');
         }
+    } elseif ($action === 'close_operational_mission') {
+        $missionId = (int) post('mission_id');
+        if (!$canCloseOperationalMissions) {
+            setFlash('error', 'Δεν έχετε δικαίωμα να κλείσετε αποστολές.');
+        } else {
+            $mission = dbFetchOne(
+                "SELECT id, title, status FROM missions WHERE id = ? AND deleted_at IS NULL",
+                [$missionId]
+            );
+            if (!$mission || $mission['status'] !== STATUS_OPEN) {
+                setFlash('warning', 'Η αποστολή δεν είναι πλέον ανοιχτή στο Επιχειρησιακό.');
+            } else {
+                dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_CLOSED, $missionId]);
+                logAudit('close_from_ops_dashboard', 'missions', $missionId, null, ['old_status' => STATUS_OPEN]);
+                setFlash('success', 'Η αποστολή «' . $mission['title'] . '» έκλεισε και αφαιρέθηκε από το Επιχειρησιακό.');
+            }
+        }
     }
 
     redirect('ops-dashboard.php');
@@ -87,9 +105,8 @@ $missionRows = dbFetchAll(
      JOIN shifts s ON s.mission_id = m.id
      LEFT JOIN departments d ON m.department_id = d.id
      LEFT JOIN participation_requests pr ON pr.shift_id = s.id
-     WHERE m.status IN ('" . STATUS_OPEN . "', '" . STATUS_COMPLETED . "') 
+     WHERE m.status = '" . STATUS_OPEN . "'
        AND m.deleted_at IS NULL
-       AND (m.status = '" . STATUS_OPEN . "' OR (m.status = '" . STATUS_COMPLETED . "' AND m.end_datetime >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)))
      GROUP BY s.id
      ORDER BY m.is_urgent DESC, m.start_datetime ASC, s.start_time ASC",
     []
@@ -133,34 +150,10 @@ $shiftIds = !empty($missions)
     ? array_merge(...array_map(fn($m) => array_column($m['shifts'], 'shift_id'), array_values($missions)))
     : [];
 
-// ── Split missions into "in progress" vs "upcoming" ──────────────────────────
-$now = time();
-$activeMissions  = [];
+// Every OPEN mission remains operational regardless of its scheduled end time.
+// It leaves this dashboard only when an authorised mission manager closes it.
+$activeMissions = $missions;
 $upcomingMissions = [];
-foreach ($missions as $mid => $m) {
-    $hasActiveShift = false;
-    foreach ($m['shifts'] as $s) {
-        $sStart = strtotime($s['start_time']);
-        $sEnd   = strtotime($s['end_time']);
-        if ($sStart <= $now && $sEnd > $now) {
-            $hasActiveShift = true;
-            break;
-        }
-    }
-    // Also consider mission-level: if any shift hasn't ended yet but at least one started
-    if (!$hasActiveShift) {
-        $mStart = strtotime($m['start_datetime']);
-        $mEnd   = strtotime($m['end_datetime']);
-        if ($mStart <= $now && $mEnd > $now) {
-            $hasActiveShift = true;
-        }
-    }
-    if ($hasActiveShift) {
-        $activeMissions[$mid] = $m;
-    } else {
-        $upcomingMissions[$mid] = $m;
-    }
-}
 
 // Detect if new columns / tables exist on this DB server
 $hasFieldStatus = !empty($shiftIds) && (bool) dbFetchValue(
@@ -469,7 +462,7 @@ include __DIR__ . '/includes/header.php';
 
         <?php if (empty($activeMissions)): ?>
             <div class="alert alert-info mb-4">
-                <i class="bi bi-info-circle me-2"></i>Δεν υπάρχουν αποστολές σε εξέλιξη αυτή τη στιγμή.
+                <i class="bi bi-info-circle me-2"></i>Δεν υπάρχουν ανοιχτές επιχειρησιακές αποστολές αυτή τη στιγμή.
             </div>
         <?php endif; ?>
 
@@ -496,6 +489,13 @@ include __DIR__ . '/includes/header.php';
                             title="Broadcast σε εθελοντές">
                         <i class="bi bi-megaphone-fill"></i>
                     </button>
+                    <?php if ($canCloseOperationalMissions): ?>
+                    <button type="button" class="btn btn-sm btn-outline-danger"
+                            data-bs-toggle="modal" data-bs-target="#closeMissionModal-<?= $m['id'] ?>"
+                            title="Κλείσιμο αποστολής">
+                        <i class="bi bi-x-octagon-fill"></i>
+                    </button>
+                    <?php endif; ?>
                     <a href="mission-view.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-primary">
                         <i class="bi bi-arrow-right"></i>
                     </a>
@@ -519,6 +519,7 @@ include __DIR__ . '/includes/header.php';
                     $nowTs    = time();
                     $isActive = $startTs <= $nowTs && $endTs > $nowTs;
                     $isEnded  = $endTs <= $nowTs;
+                    $hasStarted = $startTs <= $nowTs;
                     $pct      = $s['max_volunteers'] > 0 ? round(($s['approved'] / $s['max_volunteers']) * 100) : 0;
                     $barColor = $s['approved'] < $s['min_volunteers'] ? 'danger' : ($pct < 60 ? 'warning' : 'success');
                     $shiftVols = $approvedVolunteers[$s['shift_id']] ?? [];
@@ -583,7 +584,7 @@ include __DIR__ . '/includes/header.php';
                                 <?= $fsIcon[$fs] ?? '' ?>
                             <?php endif; ?>
                             <?= h($v['name']) ?>
-                            <?php if (!$v['attended'] && $isActive): ?>
+                            <?php if (!$v['attended'] && $hasStarted): ?>
                                 <form method="post" class="d-inline ms-1"
                                       onsubmit="return confirm('Σήμανση παρουσίας για <?= h(addslashes($v['name'])) ?>;')">
                                     <?= csrfField() ?>
@@ -742,6 +743,38 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 <?php endforeach; ?>
+
+<?php if ($canCloseOperationalMissions): ?>
+<!-- Explicit closure confirmation: an OPEN mission remains operational until this action. -->
+<?php foreach ($missions as $m): ?>
+<div class="modal fade" id="closeMissionModal-<?= $m['id'] ?>" tabindex="-1" aria-labelledby="closeMissionModalLabel-<?= $m['id'] ?>" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-danger">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title" id="closeMissionModalLabel-<?= $m['id'] ?>"><i class="bi bi-exclamation-octagon-fill me-2"></i>Κλείσιμο επιχειρησιακής αποστολής</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Κλείσιμο"></button>
+            </div>
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="close_operational_mission">
+                <input type="hidden" name="mission_id" value="<?= $m['id'] ?>">
+                <div class="modal-body">
+                    <p class="fw-bold mb-2">Είστε σίγουρος/η ότι θέλετε να βγάλετε την αποστολή «<?= h($m['title']) ?>» από το Επιχειρησιακό;</p>
+                    <div class="alert alert-danger mb-0">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                        Με την επιβεβαίωση η αποστολή θα κλείσει άμεσα και δεν θα εμφανίζεται πλέον στο Επιχειρησιακό. Οι λειτουργίες ζωντανής διαχείρισης, όπως στίγματα και ανακοινώσεις, παύουν για αυτή την αποστολή.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Άκυρο — διατήρηση ανοιχτή</button>
+                    <button type="submit" class="btn btn-danger"><i class="bi bi-x-octagon-fill me-1"></i>Ναι, κλείσιμο αποστολής</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endforeach; ?>
+<?php endif; ?>
 
 <!-- Leaflet CSS -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />

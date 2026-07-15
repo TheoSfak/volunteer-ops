@@ -36,12 +36,14 @@ if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180 || ($lat == 0 && $lng =
 $pr = dbFetchOne(
     "SELECT pr.id FROM participation_requests pr
      JOIN shifts s ON pr.shift_id = s.id
-     WHERE pr.shift_id = ? AND pr.volunteer_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "'",
+     JOIN missions m ON s.mission_id = m.id
+     WHERE pr.shift_id = ? AND pr.volunteer_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "'
+       AND m.status = '" . STATUS_OPEN . "' AND m.deleted_at IS NULL",
     [$shiftId, $userId]
 );
 
 if (!$pr) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν έχετε εγκεκριμένη συμμετοχή σε αυτή τη βάρδια']);
+    echo json_encode(['ok' => false, 'error' => 'Η αποστολή δεν είναι ανοιχτή στο Επιχειρησιακό ή δεν έχετε εγκεκριμένη συμμετοχή']);
     exit;
 }
 

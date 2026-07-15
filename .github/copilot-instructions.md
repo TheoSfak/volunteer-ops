@@ -219,9 +219,9 @@ To add new: INSERT into `notification_settings` + `email_templates` in `sql/sche
 **3-Folder Sync:** Source is `volunteer-ops-github/`. After editing, sync to the other two:
 ```powershell
 # Sync to desktop copy
-robocopy "volunteer-ops-github" "volunteerops" /MIR /XD .git node_modules /XF .gitignore .gitattributes /NFL /NDL /NJH /NJS /NC /NS /NP
+robocopy "volunteer-ops-github" "volunteerops" /MIR /XD .git node_modules uploads /XF .gitignore .gitattributes /NFL /NDL /NJH /NJS /NC /NS /NP
 # Sync to XAMPP live
-robocopy "volunteer-ops-github" "C:\xampp\htdocs\volunteerops" /MIR /XD .git node_modules /XF .gitignore .gitattributes /NFL /NDL /NJH /NJS /NC /NS /NP
+robocopy "volunteer-ops-github" "C:\xampp\htdocs\volunteerops" /MIR /XD .git node_modules uploads /XF .gitignore .gitattributes /NFL /NDL /NJH /NJS /NC /NS /NP
 ```
 Robocopy exit code 1 = files copied (success). Exit code 0 = nothing to copy.
 
