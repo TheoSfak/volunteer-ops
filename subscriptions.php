@@ -234,7 +234,14 @@ include __DIR__ . '/includes/header.php';
         <a href="subscriptions.php?filter=<?= $key ?>" class="btn btn-sm <?= $filter === $key ? 'btn-' . $color : 'btn-outline-' . $color ?>"><?= $label ?><?php if ($count !== null): ?> <span class="badge text-bg-light ms-1"><?= $count ?></span><?php endif; ?></a>
     <?php endforeach; ?>
 </div>
-<div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
+<style>
+.subscription-list-table td:nth-child(9) { min-width: 205px; text-align: center; }
+.subscription-list-table td:nth-child(9) .d-flex { justify-content: center !important; align-items: center; flex-wrap: nowrap; gap: .5rem !important; }
+.subscription-list-table td:nth-child(9) form { margin: 0; flex: 0 0 auto; }
+.subscription-list-table td:nth-child(9) .btn { white-space: nowrap; }
+@media (max-width: 576px) { .subscription-list-table td:nth-child(9) { min-width: 215px; } }
+</style>
+<div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0 subscription-list-table">
 <thead><tr><th>Εθελοντής</th><th>Πληρωμή</th><th>Λήξη</th><th>Έτη</th><th style="min-width:130px">Ποσό</th><th>Τρόπος</th><th>Αρ. απόδειξης</th><th style="max-width:150px">Απόδειξη</th><th>Πληρωμή με IRIS</th><th>Κατάσταση</th><th></th></tr></thead><tbody>
 <?php foreach ($rows as $row): $days = (int)floor((strtotime($row['expiry_date']) - strtotime(date('Y-m-d'))) / 86400); $badge = $days < 0 ? 'danger' : ($days <= 7 ? 'danger' : ($days <= 30 ? 'warning text-dark' : ($days <= 90 ? 'info text-dark' : 'success'))); $label = $days < 0 ? 'Ληγμένη' : ($days === 0 ? 'Λήγει σήμερα' : 'Ενεργή (' . $days . ' ημ.)'); $hasReceiptFile = !empty($row['receipt_stored_name']) && is_file(__DIR__ . '/uploads/subscription-receipts/' . basename($row['receipt_stored_name'])); ?>
 <?php $isReceiptImage = $hasReceiptFile && in_array(strtolower(pathinfo($row['receipt_stored_name'], PATHINFO_EXTENSION)), ['jpg', 'jpeg', 'png'], true); ?>
