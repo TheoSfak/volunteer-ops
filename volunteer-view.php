@@ -4,6 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/subscription-iris.php';
 requirePermission('volunteers_view');
 
 $id = (int) get('id');
@@ -348,6 +349,9 @@ if (isPost()) {
 // Get profile
 $profile = dbFetchOne("SELECT * FROM volunteer_profiles WHERE user_id = ?", [$id]);
 $latestSubscription = dbFetchOne("SELECT * FROM volunteer_subscriptions WHERE user_id = ? ORDER BY expiry_date DESC, id DESC LIMIT 1", [$id]);
+$irisRequestHistory = dbFetchAll("SELECT sir.*, seen_by_user.name AS seen_by_name
+    FROM subscription_iris_requests sir LEFT JOIN users seen_by_user ON seen_by_user.id = sir.seen_by
+    WHERE sir.user_id = ? ORDER BY sir.id DESC LIMIT 5", [$id]);
 
 // Get documents
 $documents = dbFetchAll(
@@ -723,6 +727,7 @@ include __DIR__ . '/includes/header.php';
     <div class="card-body">
         <?php if (!$latestSubscription): ?><div class="alert alert-warning mb-0">Δεν υπάρχει καταχωρημένη συνδρομή.</div>
         <?php else: ?><div class="d-flex justify-content-between align-items-center"><div><strong>Λήξη: <?= formatDate($latestSubscription['expiry_date']) ?></strong><div class="small text-muted">Πληρωμή: <?= formatDate($latestSubscription['payment_date']) ?></div></div><span class="badge bg-<?= $subscriptionColor ?>"><?= $subscriptionDays < 0 ? 'Ληγμένη' : ($subscriptionDays === 0 ? 'Λήγει σήμερα' : $subscriptionDays . ' ημέρες') ?></span></div><div class="progress mt-3" style="height:8px"><div class="progress-bar bg-<?= $subscriptionColor ?>" style="width:<?= $subscriptionDays < 0 ? 100 : min(100, max(8, round($subscriptionDays / 365 * 100))) ?>%"></div></div><?php endif; ?>
+        <?php if ($irisRequestHistory): ?><hr><h6 class="mb-2"><i class="bi bi-phone-vibrate me-1"></i>Ιστορικό αιτημάτων IRIS</h6><div class="small"><?php foreach ($irisRequestHistory as $irisRequest): ?><div class="d-flex justify-content-between align-items-center py-1 <?= $irisRequest['status'] === 'SEEN' ? 'text-decoration-line-through text-muted' : '' ?>"><span><?= formatDateTime($irisRequest['payment_reported_at'] ?: $irisRequest['created_at']) ?> · <?= (int)$irisRequest['coverage_years'] ?> έτη · <?= number_format((float)$irisRequest['total_amount'], 2, ',', '.') ?> €</span><span class="badge bg-<?= $irisRequest['status'] === 'REPORTED' ? 'warning text-dark' : ($irisRequest['status'] === 'SEEN' ? 'secondary' : ($irisRequest['status'] === 'COMPLETED' ? 'success' : 'light text-dark')) ?>"><?= $irisRequest['status'] === 'REPORTED' ? 'Αίτημα πληρωμής' : ($irisRequest['status'] === 'SEEN' ? 'Ελήφθη γνώση' : ($irisRequest['status'] === 'COMPLETED' ? 'Ολοκληρώθηκε' : 'Προετοιμασία')) ?></span></div><?php endforeach; ?></div><?php endif; ?>
     </div>
 </div>
 

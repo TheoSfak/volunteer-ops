@@ -4,6 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/subscription-iris.php';
 requireLogin();
 
 $pageTitle = 'Το Προφίλ μου';
@@ -121,6 +122,7 @@ $examAttempts = dbFetchAll("
 
 $errors = [];
 $success = '';
+$openIrisModal = false;
 
 if (isPost()) {
     verifyCsrf();
@@ -233,6 +235,27 @@ if (isPost()) {
                  WHERE us.user_id = ?",
                 [$user['id']]
             );
+            break;
+
+        case 'prepare_iris_renewal':
+            try {
+                $request = subscriptionIrisPrepare((int)$user['id'], $mySubscription ?: [], (int)post('coverage_years', 1));
+                logAudit('prepare_subscription_iris_renewal', 'subscription_iris_requests', (int)$request['id']);
+                $success = 'Εμφανίστηκαν οι οδηγίες πληρωμής IRIS για ' . (int)$request['coverage_years'] . ' έτη.';
+                $openIrisModal = true;
+            } catch (RuntimeException $e) {
+                $errors[] = $e->getMessage();
+            }
+            break;
+
+        case 'report_iris_payment':
+            try {
+                $request = subscriptionIrisReportPayment((int)$user['id'], $mySubscription ?: []);
+                logAudit('report_subscription_iris_payment', 'subscription_iris_requests', (int)$request['id']);
+                $success = 'Η ενημέρωση πληρωμής IRIS στάλθηκε στη διοίκηση.';
+            } catch (RuntimeException $e) {
+                $errors[] = $e->getMessage();
+            }
             break;
 
         case 'update_photo':
@@ -435,8 +458,9 @@ include __DIR__ . '/includes/header.php';
 
 <!-- Annual Subscription -->
 <?php $subscriptionDays = $mySubscription ? (int)floor((strtotime($mySubscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400) : null; $subscriptionColor = $subscriptionDays === null ? 'secondary' : ($subscriptionDays < 0 ? 'danger' : ($subscriptionDays <= 7 ? 'danger' : ($subscriptionDays <= 30 ? 'warning' : ($subscriptionDays <= 90 ? 'info' : 'success')))); ?>
+<?php $myIrisRequest = subscriptionIrisLatestRequest((int)$user['id']); $canIrisRenew = subscriptionIrisIsEligible($mySubscription); ?>
 <div class="card pp-card accent-<?= $subscriptionColor ?> mb-4">
-    <div class="card-header"><h5 class="mb-0"><i class="bi bi-cash-coin text-<?= $subscriptionColor ?> me-2"></i>Η Ετήσια Συνδρομή μου</h5></div>
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"><h5 class="mb-0"><i class="bi bi-cash-coin text-<?= $subscriptionColor ?> me-2"></i>Η Ετήσια Συνδρομή μου</h5><?php if ($canIrisRenew): ?><div class="d-flex gap-2"><button type="button" class="btn btn-primary fw-bold" data-bs-toggle="modal" data-bs-target="#irisRenewalModal"><i class="bi bi-arrow-repeat me-1"></i>Ανανέωση συνδρομής</button><form method="post" class="d-inline"><?= csrfField() ?><input type="hidden" name="action" value="report_iris_payment"><button class="btn btn-success fw-bold" <?= !$myIrisRequest || $myIrisRequest['status'] !== 'PREPARED' ? 'disabled title="Επιλέξτε πρώτα τη διάρκεια ανανέωσης"' : '' ?>><i class="bi bi-check2-circle me-1"></i>Ενημέρωση πληρωμής</button></form></div><?php endif; ?></div>
     <div class="card-body">
         <?php if (!$mySubscription): ?>
             <div class="alert alert-warning mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Δεν υπάρχει καταχωρημένη ετήσια συνδρομή. Επικοινωνήστε με τη διοίκηση.</div>
@@ -454,6 +478,14 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?php if ($canIrisRenew): ?>
+<div class="modal fade" id="irisRenewalModal" tabindex="-1" aria-labelledby="irisRenewalModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form method="post">
+<?= csrfField() ?><input type="hidden" name="action" value="prepare_iris_renewal"><div class="modal-header"><h5 class="modal-title" id="irisRenewalModalTitle"><i class="bi bi-phone-vibrate me-2"></i>Ανανέωση με IRIS</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Κλείσιμο"></button></div>
+<div class="modal-body"><p class="mb-2">Η ανανέωση είναι διαθέσιμη έως <strong><?= subscriptionIrisRenewalDays() ?> ημέρες πριν από τη λήξη</strong> της συνδρομής, όχι νωρίτερα.</p><div class="alert alert-info"><strong>Πληρωμή IRIS στο ΑΦΜ:</strong> <span class="fs-5"><?= h(subscriptionIrisTaxId()) ?></span></div><label class="form-label fw-semibold" for="irisCoverageYears">Διάρκεια ανανέωσης</label><select class="form-select" id="irisCoverageYears" name="coverage_years"><?php for ($irisYear = 1; $irisYear <= 5; $irisYear++): ?><option value="<?= $irisYear ?>" <?= (int)($myIrisRequest['coverage_years'] ?? 1) === $irisYear ? 'selected' : '' ?>><?= $irisYear ?> <?= $irisYear === 1 ? 'έτος' : 'έτη' ?></option><?php endfor; ?></select><div class="alert alert-success mt-3 mb-0"><strong>Ποσό προς πληρωμή: <span id="irisRenewalAmount"></span></strong><div class="small mt-1"><?= number_format(subscriptionIrisAnnualAmount(), 2, ',', '.') ?> € ανά έτος.</div></div><?php if ($myIrisRequest && $myIrisRequest['status'] === 'PREPARED'): ?><div class="small text-muted mt-3">Αφού ολοκληρώσετε την πληρωμή, πατήστε «Ενημέρωση πληρωμής» στην κάρτα συνδρομής.</div><?php endif; ?></div>
+<div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Ακύρωση</button><button class="btn btn-primary fw-bold">Εμφάνιση οδηγιών IRIS</button></div></form></div></div></div>
+<script>document.addEventListener('DOMContentLoaded', () => { const years = document.getElementById('irisCoverageYears'); const amount = document.getElementById('irisRenewalAmount'); const annual = <?= json_encode(subscriptionIrisAnnualAmount()) ?>; const update = () => amount.textContent = (Number(years.value) * annual).toLocaleString('el-GR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' €'; years.addEventListener('change', update); update(); <?php if ($openIrisModal): ?>bootstrap.Modal.getOrCreateInstance(document.getElementById('irisRenewalModal')).show();<?php endif; ?> });</script>
+<?php endif; ?>
 
 <?php if (!empty($errors)): ?>
     <div class="alert alert-danger">

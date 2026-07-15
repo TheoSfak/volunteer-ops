@@ -4015,6 +4015,59 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 69,
+            'description' => 'Add member-reported IRIS subscription payment requests',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS subscription_iris_requests (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT UNSIGNED NOT NULL,
+                    subscription_id INT UNSIGNED NOT NULL,
+                    coverage_years TINYINT UNSIGNED NOT NULL,
+                    annual_amount DECIMAL(10,2) NOT NULL,
+                    total_amount DECIMAL(10,2) NOT NULL,
+                    status ENUM('PREPARED','REPORTED','SEEN','COMPLETED','CANCELLED') NOT NULL DEFAULT 'PREPARED',
+                    payment_reported_at DATETIME NULL,
+                    seen_at DATETIME NULL,
+                    seen_by INT UNSIGNED NULL,
+                    completed_at DATETIME NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_sir_user_status (user_id, status, id),
+                    INDEX idx_sir_subscription_status (subscription_id, status, id),
+                    CONSTRAINT fk_sir_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_sir_subscription FOREIGN KEY (subscription_id) REFERENCES volunteer_subscriptions(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_sir_seen_by FOREIGN KEY (seen_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                foreach ([
+                    'subscription_iris_renewal_days' => '90',
+                    'subscription_iris_annual_amount' => '30',
+                    'subscription_iris_tax_id' => '996695642',
+                ] as $key => $value) {
+                    dbExecute("INSERT INTO settings (setting_key, setting_value, created_at, updated_at)
+                        VALUES (?, ?, NOW(), NOW()) ON DUPLICATE KEY UPDATE setting_key = setting_key", [$key, $value]);
+                }
+
+                $templateCode = 'subscription_iris_request_seen';
+                dbExecute("INSERT INTO email_templates (code, name, subject, body_html, description, available_variables, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, 1)
+                    ON DUPLICATE KEY UPDATE name = VALUES(name), subject = VALUES(subject), body_html = VALUES(body_html), description = VALUES(description), available_variables = VALUES(available_variables)", [
+                    $templateCode,
+                    'IRIS: λήψη αιτήματος πληρωμής',
+                    'Λήψη αιτήματος πληρωμής IRIS',
+                    '<div style="font-family:Arial,sans-serif;background:#f4f7fb;padding:28px"><div style="max-width:600px;margin:auto;background:#fff;border-radius:12px;overflow:hidden"><div style="background:#2563eb;color:#fff;padding:26px 32px"><h1 style="margin:0;font-size:22px">Λήψη αιτήματος πληρωμής IRIS</h1></div><div style="padding:30px 32px;color:#334155;line-height:1.6"><p>Αγαπητέ/ή {{user_name}},</p><p>Η διοίκηση έλαβε γνώση του αιτήματος πληρωμής IRIS για την ετήσια συνδρομή σας.</p><div style="background:#eff6ff;border-left:4px solid #2563eb;padding:14px 16px"><strong>Διάρκεια:</strong> {{coverage_years}} έτη<br><strong>Ποσό:</strong> {{total_amount}}</div><p>Η ενεργοποίηση της συνδρομής θα γίνει μετά την επιβεβαίωση της πληρωμής.</p><p>Με εκτίμηση,<br>{{app_name}}</p></div></div></div>',
+                    'Ενημέρωση εθελοντή όταν admin λάβει γνώση αιτήματος IRIS',
+                    '{{user_name}}, {{volunteer_name}}, {{coverage_years}}, {{total_amount}}, {{app_name}}, {{login_url}}',
+                ]);
+                dbExecute("INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                    VALUES (?, ?, ?, 1, (SELECT id FROM email_templates WHERE code = ?))
+                    ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), email_template_id = VALUES(email_template_id)", [
+                    $templateCode, 'IRIS: λήψη αιτήματος πληρωμής', 'Ενημέρωση όταν ο admin λάβει γνώση αιτήματος IRIS', $templateCode
+                ]);
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
