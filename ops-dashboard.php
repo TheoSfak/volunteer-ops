@@ -91,6 +91,11 @@ if (isPost()) {
 }
 
 // ── Core data query ───────────────────────────────────────────────────────────
+// T.E.P. missions are intentionally kept out of the operational dashboard,
+// including while they are still open.
+$tepMissionTypeId = getTepMissionTypeId();
+$excludeTepMissionSql = $tepMissionTypeId > 0 ? ' AND m.mission_type_id != ?' : '';
+$excludeTepMissionParams = $tepMissionTypeId > 0 ? [$tepMissionTypeId] : [];
 $missionRows = dbFetchAll(
     "SELECT m.id as mission_id, m.title, m.is_urgent, m.status as mission_status,
             m.start_datetime, m.end_datetime, m.location, m.location_details,
@@ -107,9 +112,10 @@ $missionRows = dbFetchAll(
      LEFT JOIN participation_requests pr ON pr.shift_id = s.id
      WHERE m.status = '" . STATUS_OPEN . "'
        AND m.deleted_at IS NULL
+       {$excludeTepMissionSql}
      GROUP BY s.id
      ORDER BY m.is_urgent DESC, m.start_datetime ASC, s.start_time ASC",
-    []
+    $excludeTepMissionParams
 );
 
 // ── Group rows by mission ─────────────────────────────────────────────────────

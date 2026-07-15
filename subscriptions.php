@@ -295,6 +295,29 @@ include __DIR__ . '/includes/header.php';
     const years = document.getElementById('subscriptionCoverageYears');
     const reactivation = document.getElementById('forceReactivation');
     const expiry = document.getElementById('subscriptionExpiryDate');
+    if (volunteer) {
+        const volunteerSearch = document.createElement('input');
+        volunteerSearch.type = 'search';
+        volunteerSearch.id = 'subscriptionVolunteerSearch';
+        volunteerSearch.className = 'form-control mb-2';
+        volunteerSearch.placeholder = 'Αναζήτηση με όνομα ή επώνυμο…';
+        volunteerSearch.autocomplete = 'off';
+        volunteer.parentElement.insertBefore(volunteerSearch, volunteer);
+        volunteerSearch.addEventListener('input', () => {
+            const query = volunteerSearch.value.trim().toLocaleLowerCase('el-GR');
+            Array.from(volunteer.options).forEach(option => {
+                option.hidden = option.value !== '' && query !== '' && !option.text.toLocaleLowerCase('el-GR').includes(query);
+            });
+        });
+        volunteerSearch.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            const match = Array.from(volunteer.options).find(option => option.value && !option.hidden);
+            if (!match) return;
+            event.preventDefault();
+            volunteer.value = match.value;
+            volunteer.dispatchEvent(new Event('change'));
+        });
+    }
     const hint = document.getElementById('subscriptionExpiryHint');
     const warning = document.getElementById('subscriptionExpiryWarning');
     const confirmed = document.getElementById('subscriptionExpiryOverrideConfirmed');
