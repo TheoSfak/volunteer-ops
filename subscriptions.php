@@ -187,7 +187,25 @@ include __DIR__ . '/includes/header.php';
     <div class="d-flex gap-2"><a class="btn btn-outline-success" href="subscriptions.php?filter=<?= h($filter) ?>&export=excel"><i class="bi bi-file-earmark-excel me-1"></i>Εξαγωγή Excel</a><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button></div>
 </div>
 <?php if ($editing): ?>
-<div class="card border-primary mb-3"><div class="card-header"><strong>Επεξεργασία συνδρομής: <?= h($editing['volunteer_name']) ?></strong></div><form id="editSubscriptionForm" method="post" enctype="multipart/form-data"><div class="card-body row g-3"><?= csrfField() ?><input type="hidden" name="action" value="edit_subscription"><input type="hidden" name="subscription_id" value="<?= $editing['id'] ?>"><div class="col-md-3"><label class="form-label">Πληρωμή</label><input class="form-control subscription-datepicker" type="text" name="payment_date" value="<?= h($editing['payment_date']) ?>" required></div><div class="col-md-3"><label class="form-label">Λήξη</label><input class="form-control subscription-datepicker" type="text" name="expiry_date" value="<?= h($editing['expiry_date']) ?>" required></div><div class="col-md-2"><label class="form-label">Ποσό</label><input class="form-control" type="number" step="0.01" name="amount" value="<?= h($editing['amount']) ?>"></div><div class="col-md-2"><label class="form-label">Τύπος</label><select class="form-select" name="renewal_kind"><option value="RENEWAL" <?= $editing['renewal_kind'] === 'RENEWAL' ? 'selected' : '' ?>>Ανανέωση</option><option value="REACTIVATION" <?= $editing['renewal_kind'] === 'REACTIVATION' ? 'selected' : '' ?>>Επανενεργοποίηση</option></select></div><div class="col-md-2"><label class="form-label">Τρόπος</label><input class="form-control" name="payment_method" value="<?= h($editing['payment_method']) ?>"></div><div class="col-md-3"><label class="form-label">Αριθμός απόδειξης</label><input class="form-control" name="receipt_number" maxlength="100" value="<?= h($editing['receipt_number'] ?? '') ?>"></div><div class="col-12"><label class="form-label">Σημειώσεις</label><textarea class="form-control" name="notes" rows="2"><?= h($editing['notes']) ?></textarea></div></div><div class="card-footer"><button class="btn btn-primary">Αποθήκευση αλλαγών</button> <a href="subscriptions.php" class="btn btn-outline-secondary">Ακύρωση</a></div></form></div>
+<div class="card border-primary mb-3">
+    <div class="card-header"><strong>Επεξεργασία συνδρομής: <?= h($editing['volunteer_name']) ?></strong></div>
+    <form id="editSubscriptionForm" method="post" enctype="multipart/form-data">
+        <div class="card-body row g-3">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="edit_subscription">
+            <input type="hidden" name="subscription_id" value="<?= $editing['id'] ?>">
+            <div class="col-md-3"><label class="form-label">Πληρωμή</label><input class="form-control subscription-datepicker" type="text" name="payment_date" value="<?= h($editing['payment_date']) ?>" required></div>
+            <div class="col-md-3"><label class="form-label">Λήξη</label><input class="form-control subscription-datepicker" type="text" name="expiry_date" value="<?= h($editing['expiry_date']) ?>" required></div>
+            <div class="col-md-2"><label class="form-label">Ποσό</label><input class="form-control" type="number" step="0.01" name="amount" value="<?= h($editing['amount']) ?>"></div>
+            <div class="col-md-2"><label class="form-label">Τύπος</label><select class="form-select" name="renewal_kind"><option value="RENEWAL" <?= $editing['renewal_kind'] === 'RENEWAL' ? 'selected' : '' ?>>Ανανέωση</option><option value="REACTIVATION" <?= $editing['renewal_kind'] === 'REACTIVATION' ? 'selected' : '' ?>>Επανενεργοποίηση</option></select></div>
+            <div class="col-md-2"><label class="form-label">Τρόπος</label><input class="form-control" name="payment_method" value="<?= h($editing['payment_method']) ?>"></div>
+            <div class="col-md-3"><label class="form-label">Αριθμός απόδειξης</label><input class="form-control" name="receipt_number" maxlength="100" value="<?= h($editing['receipt_number'] ?? '') ?>"></div>
+            <div class="col-md-6" id="editReceiptUpload"><label class="form-label">Αντικατάσταση απόδειξης</label><input type="file" class="form-control" name="receipt" accept=".pdf,.jpg,.jpeg,.png"><div class="form-text">PDF, JPG ή PNG έως 10MB. Η νέα απόδειξη αντικαθιστά την καταχωρημένη.</div></div>
+            <div class="col-12"><label class="form-label">Σημειώσεις</label><textarea class="form-control" name="notes" rows="2"><?= h($editing['notes']) ?></textarea></div>
+        </div>
+        <div class="card-footer"><button class="btn btn-primary">Αποθήκευση αλλαγών</button> <a href="subscriptions.php" class="btn btn-outline-secondary">Ακύρωση</a></div>
+    </form>
+</div>
 <?php endif; ?>
 <div class="d-flex flex-wrap gap-2 mb-3">
     <?php foreach (['all' => ['Όλες', null, 'secondary'], 'week' => ['Λήγουν σε 1 εβδομάδα', $counts['week'], 'danger'], 'month' => ['Λήγουν σε 1 μήνα', $counts['month'], 'warning'], 'quarter' => ['Λήγουν σε 3 μήνες', $counts['quarter'], 'info'], 'expired' => ['Ληγμένες', $counts['expired'], 'dark']] as $key => [$label, $count, $color]): ?>
@@ -334,14 +352,8 @@ include __DIR__ . '/includes/header.php';
     const newReceiptInput = document.querySelector('#paymentModal input[name="receipt"]');
     if (newReceiptInput) addCameraInput(newReceiptInput, null, newReceiptInput.parentElement, 'subscriptionCameraNew');
 
-    const editForm = document.getElementById('editSubscriptionForm');
-    if (editForm) {
-        const editReceiptPanel = document.createElement('div');
-        editReceiptPanel.className = 'card border-secondary mb-3';
-        editReceiptPanel.innerHTML = '<div class="card-body"><label class="form-label fw-semibold">Αντικατάσταση απόδειξης</label><input type="file" class="form-control" name="receipt" form="editSubscriptionForm" accept=".pdf,.jpg,.jpeg,.png"><div class="form-text">Η νέα απόδειξη αντικαθιστά την καταχωρημένη όταν αποθηκεύσετε τις αλλαγές.</div></div>';
-        editForm.closest('.card').insertAdjacentElement('afterend', editReceiptPanel);
-        addCameraInput(editReceiptPanel.querySelector('input[name="receipt"]'), 'editSubscriptionForm', editReceiptPanel.querySelector('.card-body'), 'subscriptionCameraEdit');
-    }
+    const editReceiptInput = document.querySelector('#editSubscriptionForm input[name="receipt"]');
+    if (editReceiptInput) addCameraInput(editReceiptInput, null, document.getElementById('editReceiptUpload'), 'subscriptionCameraEdit');
     refreshExpiry();
     document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.subscription-datepicker').forEach((field) => {
