@@ -59,17 +59,35 @@ if (isPost()) {
 }
 
 $volunteers = dbFetchAll("SELECT id, name, email FROM users WHERE is_active = 1 ORDER BY name");
+$filter = get('filter', 'all');
+$validFilters = ['all', 'week', 'month', 'quarter', 'expired'];
+if (!in_array($filter, $validFilters, true)) $filter = 'all';
+$latestOnly = "vs.id = (SELECT vs2.id FROM volunteer_subscriptions vs2 WHERE vs2.user_id = vs.user_id ORDER BY vs2.expiry_date DESC, vs2.id DESC LIMIT 1)";
+$filterSql = [
+    'all' => '1=1',
+    'week' => 'vs.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)',
+    'month' => 'vs.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)',
+    'quarter' => 'vs.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 90 DAY)',
+    'expired' => 'vs.expiry_date < CURDATE()',
+];
+$counts = [];
+foreach (['week', 'month', 'quarter', 'expired'] as $key) {
+    $counts[$key] = (int)dbFetchValue("SELECT COUNT(*) FROM volunteer_subscriptions vs WHERE {$latestOnly} AND {$filterSql[$key]}");
+}
 $rows = dbFetchAll("SELECT vs.*, u.name AS volunteer_name, u.email, creator.name AS created_by_name
-    FROM volunteer_subscriptions vs
-    JOIN users u ON u.id = vs.user_id
-    LEFT JOIN users creator ON creator.id = vs.created_by
-    ORDER BY vs.expiry_date ASC, vs.id DESC");
+    FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id LEFT JOIN users creator ON creator.id = vs.created_by
+    WHERE {$latestOnly} AND {$filterSql[$filter]} ORDER BY vs.expiry_date ASC, vs.id DESC");
 
 include __DIR__ . '/includes/header.php';
 ?>
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0"><i class="bi bi-cash-coin me-2"></i>Ετήσιες Συνδρομές</h1>
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button>
+</div>
+<div class="d-flex flex-wrap gap-2 mb-3">
+    <?php foreach (['all' => ['Όλες', null, 'secondary'], 'week' => ['Λήγουν σε 1 εβδομάδα', $counts['week'], 'danger'], 'month' => ['Λήγουν σε 1 μήνα', $counts['month'], 'warning'], 'quarter' => ['Λήγουν σε 3 μήνες', $counts['quarter'], 'info'], 'expired' => ['Ληγμένες', $counts['expired'], 'dark']] as $key => [$label, $count, $color]): ?>
+        <a href="subscriptions.php?filter=<?= $key ?>" class="btn btn-sm <?= $filter === $key ? 'btn-' . $color : 'btn-outline-' . $color ?>"><?= $label ?><?php if ($count !== null): ?> <span class="badge text-bg-light ms-1"><?= $count ?></span><?php endif; ?></a>
+    <?php endforeach; ?>
 </div>
 <div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
 <thead><tr><th>Εθελοντής</th><th>Πληρωμή</th><th>Λήξη</th><th>Ποσό</th><th>Τρόπος</th><th>Απόδειξη</th><th>Κατάσταση</th></tr></thead><tbody>

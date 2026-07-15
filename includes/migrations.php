@@ -3959,6 +3959,23 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 65,
+            'description' => 'Add annual subscription email templates and notification settings',
+            'up' => function () {
+                $templates = [
+                    ['subscription_expiry_3months', 'Συνδρομή Εθελοντή (3 μήνες)', 'Υπενθύμιση: Η συνδρομή λήγει σε 3 μήνες'],
+                    ['subscription_expiry_1month', 'Συνδρομή Εθελοντή (1 μήνας)', 'Υπενθύμιση: Η συνδρομή λήγει σε 1 μήνα'],
+                    ['subscription_expiry_1week', 'Συνδρομή Εθελοντή (1 εβδομάδα)', 'Επείγον: Η συνδρομή λήγει σε 1 εβδομάδα'],
+                    ['subscription_expiry_expired', 'Συνδρομή Εθελοντή (ληγμένη)', 'Η ετήσια συνδρομή έχει λήξει'],
+                ];
+                foreach ($templates as [$code, $name, $subject]) {
+                    dbExecute("INSERT IGNORE INTO email_templates (code, name, subject, body_html, is_active) VALUES (?, ?, ?, ?, 1)", [$code, $name, $subject, '<p>Αγαπητέ/ή {{user_name}},</p><p>Η ετήσια συνδρομή του/της <strong>{{volunteer_name}}</strong> λήγει στις <strong>{{expiry_date}}</strong>.</p><p>Υπόλοιπο: {{days_remaining}} ημέρες.</p><p>Παρακαλούμε φροντίστε για την ανανέωσή της.</p>']);
+                    dbExecute("INSERT IGNORE INTO notification_settings (code, name, description, email_enabled, email_template_id) VALUES (?, ?, ?, 1, (SELECT id FROM email_templates WHERE code = ?))", [$code, $name, 'Υπενθύμιση λήξης ετήσιας συνδρομής', $code]);
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
