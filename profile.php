@@ -433,6 +433,28 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<!-- Annual Subscription -->
+<?php $subscriptionDays = $mySubscription ? (int)floor((strtotime($mySubscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400) : null; $subscriptionColor = $subscriptionDays === null ? 'secondary' : ($subscriptionDays < 0 ? 'danger' : ($subscriptionDays <= 7 ? 'danger' : ($subscriptionDays <= 30 ? 'warning' : ($subscriptionDays <= 90 ? 'info' : 'success')))); ?>
+<div class="card pp-card accent-<?= $subscriptionColor ?> mb-4">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-cash-coin text-<?= $subscriptionColor ?> me-2"></i>Η Ετήσια Συνδρομή μου</h5></div>
+    <div class="card-body">
+        <?php if (!$mySubscription): ?>
+            <div class="alert alert-warning mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Δεν υπάρχει καταχωρημένη ετήσια συνδρομή. Επικοινωνήστε με τη διοίκηση.</div>
+        <?php else: ?>
+            <div class="d-flex justify-content-between align-items-center mb-2"><strong>Λήξη: <?= formatDate($mySubscription['expiry_date']) ?></strong><span class="badge bg-<?= $subscriptionColor ?>"><?= $subscriptionDays < 0 ? 'Ληγμένη' : ($subscriptionDays === 0 ? 'Λήγει σήμερα' : 'Ενεργή για ' . $subscriptionDays . ' ημέρες') ?></span></div>
+            <div class="progress" style="height:8px"><div class="progress-bar bg-<?= $subscriptionColor ?>" style="width:<?= $subscriptionDays < 0 ? 100 : min(100, max(8, round($subscriptionDays / 365 * 100))) ?>%"></div></div>
+            <div class="small text-muted mt-2">Τελευταία πληρωμή: <?= formatDate($mySubscription['payment_date']) ?></div>
+            <?php if (!empty($mySubscription['receipt_stored_name']) && is_file(__DIR__ . '/uploads/subscription-receipts/' . basename($mySubscription['receipt_stored_name']))): ?>
+                <a class="btn btn-sm btn-outline-secondary mt-3" href="subscription-receipt.php?id=<?= $mySubscription['id'] ?>">
+                    <i class="bi bi-file-earmark-text me-1"></i>Προβολή απόδειξης
+                </a>
+            <?php elseif (!empty($mySubscription['receipt_stored_name'])): ?>
+                <div class="small text-danger mt-3"><i class="bi bi-exclamation-triangle me-1"></i>Το αρχείο της απόδειξης δεν είναι διαθέσιμο. Επικοινωνήστε με τη διοίκηση.</div>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+</div>
+
 <?php if (!empty($errors)): ?>
     <div class="alert alert-danger">
         <ul class="mb-0">
@@ -669,28 +691,6 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 <?php endif; ?>
-
-<!-- Annual Subscription -->
-<?php $subscriptionDays = $mySubscription ? (int)floor((strtotime($mySubscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400) : null; $subscriptionColor = $subscriptionDays === null ? 'secondary' : ($subscriptionDays < 0 ? 'danger' : ($subscriptionDays <= 7 ? 'danger' : ($subscriptionDays <= 30 ? 'warning' : ($subscriptionDays <= 90 ? 'info' : 'success')))); ?>
-<div class="card pp-card accent-<?= $subscriptionColor ?> mb-4">
-    <div class="card-header"><h5 class="mb-0"><i class="bi bi-cash-coin text-<?= $subscriptionColor ?> me-2"></i>Η Ετήσια Συνδρομή μου</h5></div>
-    <div class="card-body">
-        <?php if (!$mySubscription): ?>
-            <div class="alert alert-warning mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Δεν υπάρχει καταχωρημένη ετήσια συνδρομή. Επικοινωνήστε με τη διοίκηση.</div>
-        <?php else: ?>
-            <div class="d-flex justify-content-between align-items-center mb-2"><strong>Λήξη: <?= formatDate($mySubscription['expiry_date']) ?></strong><span class="badge bg-<?= $subscriptionColor ?>"><?= $subscriptionDays < 0 ? 'Ληγμένη' : ($subscriptionDays === 0 ? 'Λήγει σήμερα' : 'Ενεργή για ' . $subscriptionDays . ' ημέρες') ?></span></div>
-            <div class="progress" style="height:8px"><div class="progress-bar bg-<?= $subscriptionColor ?>" style="width:<?= $subscriptionDays < 0 ? 100 : min(100, max(8, round($subscriptionDays / 365 * 100))) ?>%"></div></div>
-            <div class="small text-muted mt-2">Τελευταία πληρωμή: <?= formatDate($mySubscription['payment_date']) ?></div>
-            <?php if (!empty($mySubscription['receipt_stored_name']) && is_file(__DIR__ . '/uploads/subscription-receipts/' . basename($mySubscription['receipt_stored_name']))): ?>
-                <a class="btn btn-sm btn-outline-secondary mt-3" href="subscription-receipt.php?id=<?= $mySubscription['id'] ?>">
-                    <i class="bi bi-file-earmark-text me-1"></i>Προβολή απόδειξης
-                </a>
-            <?php elseif (!empty($mySubscription['receipt_stored_name'])): ?>
-                <div class="small text-danger mt-3"><i class="bi bi-exclamation-triangle me-1"></i>Το αρχείο της απόδειξης δεν είναι διαθέσιμο. Επικοινωνήστε με τη διοίκηση.</div>
-            <?php endif; ?>
-        <?php endif; ?>
-    </div>
-</div>
 
 <!-- My Certificates -->
 <?php
