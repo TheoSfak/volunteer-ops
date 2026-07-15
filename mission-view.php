@@ -648,6 +648,11 @@ include __DIR__ . '/includes/header.php';
         </nav>
     </div>
     <div>
+        <?php if (!empty($mission['show_in_ops']) && $mission['status'] === STATUS_OPEN && ($canManageMissions || $isResponsible || $isApprovedParticipant)): ?>
+            <a href="war-room.php?id=<?= $mission['id'] ?>" class="btn btn-danger">
+                <i class="bi bi-broadcast-pin me-1"></i>War Room
+            </a>
+        <?php endif; ?>
         <?php if ($canManageMissions): ?>
             <a href="mission-form.php?id=<?= $mission['id'] ?>" class="btn btn-outline-primary">
                 <i class="bi bi-pencil me-1"></i>Επεξεργασία

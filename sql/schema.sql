@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS `missions` (
     `description` TEXT NULL,
     `type` ENUM('VOLUNTEER', 'MEDICAL') DEFAULT 'VOLUNTEER',
     `mission_type_id` INT UNSIGNED DEFAULT 1,
+    `show_in_ops` TINYINT(1) NOT NULL DEFAULT 0,
     `location` VARCHAR(255) NOT NULL,
     `location_details` VARCHAR(255) NULL,
     `latitude` DECIMAL(10, 8) NULL,
