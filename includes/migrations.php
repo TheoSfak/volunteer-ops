@@ -4068,6 +4068,22 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 70,
+            'description' => 'Add per-mission operational dashboard visibility',
+            'up' => function () {
+                if (empty(dbFetchAll("SHOW COLUMNS FROM missions LIKE 'show_in_ops'"))) {
+                    dbExecute("ALTER TABLE missions ADD COLUMN show_in_ops TINYINT(1) NOT NULL DEFAULT 0 AFTER mission_type_id");
+                }
+
+                // Health and rescue missions are operational by default, including existing records.
+                dbExecute("UPDATE missions m
+                    JOIN mission_types mt ON mt.id = m.mission_type_id
+                    SET m.show_in_ops = 1
+                    WHERE mt.name IN ('Υγειονομική', 'Διασωστική')");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

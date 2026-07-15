@@ -14,7 +14,7 @@ $user = getCurrentUser();
 $participations = dbFetchAll(
     "SELECT pr.*, 
             s.start_time, s.end_time, s.max_volunteers,
-            m.title as mission_title, m.location, m.status as mission_status,
+            m.id as mission_id, m.title as mission_title, m.location, m.status as mission_status, m.show_in_ops,
             d.name as department_name,
             decider.name as decided_by_name
      FROM participation_requests pr
@@ -213,6 +213,9 @@ include __DIR__ . '/includes/header.php';
                 <strong><?= h($p['mission_title']) ?></strong>
                 <span class="ms-2 text-white-50 small"><?= date('H:i', strtotime($p['start_time'])) ?> – <?= date('H:i', strtotime($p['end_time'])) ?></span>
             </div>
+            <?php if (!empty($p['show_in_ops']) && $p['mission_status'] === STATUS_OPEN): ?>
+            <a href="war-room.php?id=<?= $p['mission_id'] ?>" class="btn btn-sm btn-light text-danger fw-semibold"><i class="bi bi-broadcast-pin me-1"></i>War Room</a>
+            <?php endif; ?>
             <?php if ($fieldStatus): ?>
                 <span class="badge bg-light text-dark" id="statusBadge-<?= $p['id'] ?>"><?= $statusLabels[$fieldStatus] ?? '' ?></span>
             <?php else: ?>
@@ -375,6 +378,9 @@ include __DIR__ . '/includes/header.php';
                         <tr>
                             <td>
                                 <strong><?= h($p['mission_title']) ?></strong>
+                                <?php if (!empty($p['show_in_ops']) && $p['mission_status'] === STATUS_OPEN): ?>
+                                    <br><a href="war-room.php?id=<?= $p['mission_id'] ?>" class="btn btn-xs btn-outline-danger mt-1" style="font-size:.75rem;padding:1px 6px"><i class="bi bi-broadcast-pin me-1"></i>War Room</a>
+                                <?php endif; ?>
                                 <?php if ($p['notes']): ?>
                                     <br><small class="text-muted"><i class="bi bi-quote me-1"></i><?= h($p['notes']) ?></small>
                                 <?php endif; ?>
@@ -406,7 +412,10 @@ include __DIR__ . '/includes/header.php';
                 <div class="card mobile-card border-warning">
                     <div class="card-body">
                         <div class="mobile-card-header">
-                            <strong><?= h($p['mission_title']) ?></strong>
+                            <div><strong><?= h($p['mission_title']) ?></strong>
+                            <?php if (!empty($p['show_in_ops']) && $p['mission_status'] === STATUS_OPEN): ?>
+                                <div><a href="war-room.php?id=<?= $p['mission_id'] ?>" class="btn btn-xs btn-outline-danger mt-1" style="font-size:.75rem;padding:1px 6px"><i class="bi bi-broadcast-pin me-1"></i>War Room</a></div>
+                            <?php endif; ?></div>
                             <span class="badge bg-warning text-dark">Εκκρεμεί</span>
                         </div>
                         <?php if ($p['notes']): ?>

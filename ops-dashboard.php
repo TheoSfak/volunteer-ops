@@ -112,6 +112,7 @@ $missionRows = dbFetchAll(
      LEFT JOIN participation_requests pr ON pr.shift_id = s.id
      WHERE m.status = '" . STATUS_OPEN . "'
        AND m.deleted_at IS NULL
+       AND m.show_in_ops = 1
        {$excludeTepMissionSql}
      GROUP BY s.id
      ORDER BY m.is_urgent DESC, m.start_datetime ASC, s.start_time ASC",
@@ -152,14 +153,33 @@ foreach ($missionRows as $row) {
 }
 
 // ── Pre-compute shiftIds, approvedVolunteers (needed by ajax + alerts) ─────────
-$shiftIds = !empty($missions)
-    ? array_merge(...array_map(fn($m) => array_column($m['shifts'], 'shift_id'), array_values($missions)))
-    : [];
-
-// Every OPEN mission remains operational regardless of its scheduled end time.
-// It leaves this dashboard only when an authorised mission manager closes it.
-$activeMissions = $missions;
+// Split OPEN operational missions using the first and last shift, not mission dates.
+$activeMissions = [];
 $upcomingMissions = [];
+$overdueMissions = [];
+$opsNow = time();
+foreach ($missions as $missionId => &$mission) {
+    $shiftStarts = array_map(fn($shift) => strtotime($shift['start_time']), $mission['shifts']);
+    $shiftEnds = array_map(fn($shift) => strtotime($shift['end_time']), $mission['shifts']);
+    $mission['operational_start'] = min($shiftStarts);
+    $mission['operational_end'] = max($shiftEnds);
+
+    if ($mission['operational_start'] > $opsNow) {
+        $upcomingMissions[$missionId] = $mission;
+    } elseif ($mission['operational_end'] < $opsNow) {
+        $overdueMissions[$missionId] = $mission;
+    } else {
+        $activeMissions[$missionId] = $mission;
+    }
+}
+unset($mission);
+
+// The general Operations map and live counters cover only genuinely active missions.
+$allOperationalMissions = $missions;
+$missions = $activeMissions;
+$shiftIds = !empty($activeMissions)
+    ? array_merge(...array_map(fn($m) => array_column($m['shifts'], 'shift_id'), array_values($activeMissions)))
+    : [];
 
 // Detect if new columns / tables exist on this DB server
 $hasFieldStatus = !empty($shiftIds) && (bool) dbFetchValue(
@@ -456,7 +476,7 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 </div>
 
-<?php if (empty($missions)): ?>
+<?php if (empty($allOperationalMissions)): ?>
     <div class="alert alert-info">
         <i class="bi bi-info-circle me-2"></i>Δεν υπάρχουν ανοιχτές αποστολές αυτή τη στιγμή.
     </div>
@@ -465,6 +485,18 @@ include __DIR__ . '/includes/header.php';
 <div class="row g-4">
     <!-- ── Left: mission cards ── -->
     <div class="col-lg-7">
+        <div class="nav nav-pills nav-fill mb-3" id="operationsTabs">
+            <button type="button" class="nav-link active" data-ops-tab="active" onclick="showOperationsTab('active')">
+                <i class="bi bi-broadcast-pin me-1"></i>Ενεργές <span class="badge text-bg-light ms-1"><?= count($activeMissions) ?></span>
+            </button>
+            <button type="button" class="nav-link" data-ops-tab="upcoming" onclick="showOperationsTab('upcoming')">
+                <i class="bi bi-calendar-event me-1"></i>Προσεχώς <span class="badge text-bg-light ms-1"><?= count($upcomingMissions) ?></span>
+            </button>
+            <button type="button" class="nav-link" data-ops-tab="overdue" onclick="showOperationsTab('overdue')">
+                <i class="bi bi-clock-history me-1"></i>Εκκρεμεί κλείσιμο <span class="badge text-bg-light ms-1"><?= count($overdueMissions) ?></span>
+            </button>
+        </div>
+        <div id="activeOperations">
 
         <?php if (empty($activeMissions)): ?>
             <div class="alert alert-info mb-4">
@@ -502,6 +534,9 @@ include __DIR__ . '/includes/header.php';
                         <i class="bi bi-x-octagon-fill"></i>
                     </button>
                     <?php endif; ?>
+                    <a href="war-room.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-danger fw-semibold">
+                        <i class="bi bi-broadcast-pin me-1"></i>War Room
+                    </a>
                     <a href="mission-view.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-primary">
                         <i class="bi bi-arrow-right"></i>
                     </a>
@@ -612,14 +647,15 @@ include __DIR__ . '/includes/header.php';
         <?php endforeach; ?>
 
         <!-- ── Upcoming missions (collapsible) ── -->
+        </div>
         <?php if (!empty($upcomingMissions)): ?>
-        <div class="text-center my-3">
+        <div class="text-center my-3 d-none">
             <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#upcomingSection" aria-expanded="false">
                 <i class="bi bi-calendar-event me-1"></i>Δείτε τις επερχόμενες αποστολές
                 <span class="badge bg-secondary ms-1"><?= count($upcomingMissions) ?></span>
             </button>
         </div>
-        <div class="collapse" id="upcomingSection">
+        <div class="d-none" id="upcomingSection">
         <?php foreach ($upcomingMissions as $m): ?>
         <?php
             $isUrgent = (bool)$m['is_urgent'];
@@ -639,6 +675,7 @@ include __DIR__ . '/includes/header.php';
                     <?php if ($m['department_name']): ?>
                         <span class="badge bg-secondary"><?= h($m['department_name']) ?></span>
                     <?php endif; ?>
+                    <a href="war-room.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-danger fw-semibold"><i class="bi bi-broadcast-pin me-1"></i>War Room</a>
                     <a href="mission-view.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-primary">
                         <i class="bi bi-arrow-right"></i>
                     </a>
@@ -683,6 +720,25 @@ include __DIR__ . '/includes/header.php';
         <?php endforeach; ?>
         </div>
         <?php endif; ?>
+
+        <div class="d-none" id="overdueSection">
+            <?php if (empty($overdueMissions)): ?>
+            <div class="alert alert-light border text-muted mb-0"><i class="bi bi-check2-circle me-1 text-success"></i>Δεν υπάρχουν αποστολές που εκκρεμούν για κλείσιμο.</div>
+            <?php else: ?>
+                <?php foreach ($overdueMissions as $m): ?>
+                <div class="card mb-3 border-warning ops-mission-card">
+                    <div class="card-body d-flex align-items-center justify-content-between gap-3 flex-wrap">
+                        <div>
+                            <span class="badge bg-warning text-dark me-2"><i class="bi bi-clock-history"></i> ΕΚΚΡΕΜΕΙ ΚΛΕΙΣΙΜΟ</span>
+                            <strong><?= h($m['title']) ?></strong>
+                            <div class="small text-muted mt-1">Τελευταία βάρδια: <?= formatDateTime(date('Y-m-d H:i:s', $m['operational_end'])) ?></div>
+                        </div>
+                        <a href="war-room.php?id=<?= $m['id'] ?>" class="btn btn-danger fw-semibold"><i class="bi bi-broadcast-pin me-1"></i>Άνοιγμα War Room</a>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
     </div>
 
     <!-- ── Right: map (always visible) ── -->
@@ -904,6 +960,20 @@ let volunteerLayerGroup = null;
 })();
 
 // ── Countdown timers ──────────────────────────────────────────────────────────
+function showOperationsTab(tab) {
+    const panels = {
+        active: document.getElementById('activeOperations'),
+        upcoming: document.getElementById('upcomingSection'),
+        overdue: document.getElementById('overdueSection')
+    };
+    Object.entries(panels).forEach(([key, panel]) => {
+        if (panel) panel.classList.toggle('d-none', key !== tab);
+    });
+    document.querySelectorAll('[data-ops-tab]').forEach(button => {
+        button.classList.toggle('active', button.dataset.opsTab === tab);
+    });
+}
+
 function updateCountdowns() {
     document.querySelectorAll('.countdown[data-start]').forEach(el => {
         const start = parseInt(el.dataset.start) * 1000;

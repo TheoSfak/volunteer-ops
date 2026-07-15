@@ -38,7 +38,7 @@ $pr = dbFetchOne(
      JOIN shifts s ON pr.shift_id = s.id
      JOIN missions m ON s.mission_id = m.id
      WHERE pr.shift_id = ? AND pr.volunteer_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "'
-       AND m.status = '" . STATUS_OPEN . "' AND m.deleted_at IS NULL",
+       AND m.status = '" . STATUS_OPEN . "' AND m.show_in_ops = 1 AND m.deleted_at IS NULL",
     [$shiftId, $userId]
 );
 
