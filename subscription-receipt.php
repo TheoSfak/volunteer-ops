@@ -8,5 +8,14 @@ if (!$subscription || (getCurrentUserId() !== (int)$subscription['user_id'] && !
 $path = __DIR__ . '/uploads/subscription-receipts/' . basename((string)$subscription['receipt_stored_name']);
 if (!$subscription['receipt_stored_name'] || !is_file($path)) { http_response_code(404); exit('Η απόδειξη δεν βρέθηκε.'); }
 $mime = (new finfo(FILEINFO_MIME_TYPE))->file($path) ?: 'application/octet-stream';
-header('Content-Type: ' . $mime); header('Content-Length: ' . filesize($path)); header('Content-Disposition: inline; filename="' . rawurlencode($subscription['receipt_original_name'] ?: 'receipt') . '"');
+$allowedMimes = ['application/pdf', 'image/jpeg', 'image/png'];
+if (!in_array($mime, $allowedMimes, true)) { http_response_code(415); exit('Μη υποστηριζόμενος τύπος αρχείου.'); }
+$downloadName = basename((string)($subscription['receipt_original_name'] ?: 'receipt'));
+$asciiName = preg_replace('/[^A-Za-z0-9._-]/', '_', $downloadName) ?: 'receipt';
+// A binary response must not contain any buffered whitespace/BOM from included PHP files.
+if (ob_get_level() > 0) ob_clean();
+header('Content-Type: ' . $mime);
+header('Content-Length: ' . filesize($path));
+header('X-Content-Type-Options: nosniff');
+header("Content-Disposition: inline; filename=\"" . $asciiName . "\"; filename*=UTF-8''" . rawurlencode($downloadName));
 readfile($path); exit;
