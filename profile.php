@@ -681,6 +681,11 @@ include __DIR__ . '/includes/header.php';
             <div class="d-flex justify-content-between align-items-center mb-2"><strong>Λήξη: <?= formatDate($mySubscription['expiry_date']) ?></strong><span class="badge bg-<?= $subscriptionColor ?>"><?= $subscriptionDays < 0 ? 'Ληγμένη' : ($subscriptionDays === 0 ? 'Λήγει σήμερα' : 'Ενεργή για ' . $subscriptionDays . ' ημέρες') ?></span></div>
             <div class="progress" style="height:8px"><div class="progress-bar bg-<?= $subscriptionColor ?>" style="width:<?= $subscriptionDays < 0 ? 100 : min(100, max(8, round($subscriptionDays / 365 * 100))) ?>%"></div></div>
             <div class="small text-muted mt-2">Τελευταία πληρωμή: <?= formatDate($mySubscription['payment_date']) ?></div>
+            <?php if (!empty($mySubscription['receipt_stored_name'])): ?>
+                <a class="btn btn-sm btn-outline-secondary mt-3" href="subscription-receipt.php?id=<?= $mySubscription['id'] ?>">
+                    <i class="bi bi-file-earmark-text me-1"></i>Προβολή απόδειξης
+                </a>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
 </div>

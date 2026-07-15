@@ -3976,6 +3976,35 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 66,
+            'description' => 'Upgrade annual subscription emails to branded templates',
+            'up' => function () {
+                $makeTemplate = function ($color, $icon, $heading, $intro, $urgent = '') {
+                    return '<div style="background:#eef2f7;padding:28px 0 40px;font-family:Helvetica Neue,Arial,sans-serif;"><div style="max-width:600px;margin:0 auto;"><div style="background:'.$color.';padding:30px 40px 26px;border-radius:12px 12px 0 0;text-align:center;">{{logo_html}}<p style="color:rgba(255,255,255,.72);font-size:11px;letter-spacing:2px;text-transform:uppercase;margin:0 0 8px;">{{app_name}}</p><div style="font-size:34px;margin:0 0 8px;">'.$icon.'</div><h1 style="color:#fff;margin:0;font-size:23px;">'.$heading.'</h1></div><div style="background:#fff;padding:36px 40px 40px;border-radius:0 0 12px 12px;"><h2 style="color:#1f2937;font-size:18px;margin:0 0 14px;">Αγαπητέ/ή {{user_name}},</h2><p style="color:#4b5563;line-height:1.65;font-size:15px;">'.$intro.'</p><div style="background:#f9fafb;border-left:4px solid '.$color.';padding:16px 20px;border-radius:0 8px 8px 0;margin:20px 0;"><p style="margin:0 0 8px;color:#6b7280;font-size:13px;">ΕΘΕΛΟΝΤΗΣ</p><p style="margin:0 0 12px;color:#111827;font-weight:700;">{{volunteer_name}}</p><p style="margin:0 0 8px;color:#6b7280;font-size:13px;">ΗΜΕΡΟΜΗΝΙΑ ΛΗΞΗΣ</p><p style="margin:0;color:#111827;font-weight:700;">{{expiry_date}} · {{days_remaining}} ημέρες</p></div>'.$urgent.'<p style="color:#4b5563;line-height:1.65;font-size:15px;">Συνδεθείτε στο σύστημα για να δείτε ή να ενημερώσετε τη συνδρομή.</p><div style="text-align:center;margin:28px 0 4px;"><a href="{{login_url}}" style="background:'.$color.';color:#fff;text-decoration:none;padding:13px 34px;border-radius:8px;font-weight:700;display:inline-block;">Προβολή Συνδρομής</a></div></div></div></div>';
+                };
+                $templates = [
+                    ['subscription_expiry_3months', '#0ea5e9', '&#128203;', 'Υπενθύμιση Ετήσιας Συνδρομής', 'Η ετήσια συνδρομή πλησιάζει στη λήξη της. Υπάρχει ακόμη χρόνος για έγκαιρη ανανέωση.', ''],
+                    ['subscription_expiry_1month', '#eab308', '&#9888;', 'Η Συνδρομή Λήγει Σύντομα', 'Η ετήσια συνδρομή λήγει σε λιγότερο από έναν μήνα. Παρακαλούμε προγραμματίστε την ανανέωση.', ''],
+                    ['subscription_expiry_1week', '#f97316', '&#9888;', 'Επείγουσα Υπενθύμιση', 'Η ετήσια συνδρομή λήγει σε μία εβδομάδα. Απαιτείται άμεση ενέργεια.', ''],
+                    ['subscription_expiry_expired', '#dc2626', '&#10060;', 'Η Συνδρομή Έληξε', 'Η ετήσια συνδρομή έχει λήξει. Παρακαλούμε προχωρήστε άμεσα σε ανανέωση.', '<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:14px 16px;border-radius:8px;font-weight:600;">Η συνδρομή δεν είναι πλέον ενεργή.</div>'],
+                ];
+                foreach ($templates as [$code, $color, $icon, $heading, $intro, $urgent]) {
+                    dbExecute("UPDATE email_templates SET body_html = ? WHERE code = ?", [$makeTemplate($color, $icon, $heading, $intro, $urgent), $code]);
+                }
+            },
+        ],
+
+        [
+            'version'     => 67,
+            'description' => 'Track annual subscription coverage duration',
+            'up' => function () {
+                if (empty(dbFetchAll("SHOW COLUMNS FROM volunteer_subscriptions LIKE 'coverage_years'"))) {
+                    dbExecute("ALTER TABLE volunteer_subscriptions ADD COLUMN coverage_years TINYINT UNSIGNED NOT NULL DEFAULT 1 AFTER renewal_kind");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
