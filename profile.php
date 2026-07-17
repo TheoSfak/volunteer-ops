@@ -471,15 +471,50 @@ include __DIR__ . '/includes/header.php';
             <div class="progress" style="height:8px"><div class="progress-bar bg-<?= $subscriptionColor ?>" style="width:<?= $subscriptionDays < 0 ? 100 : min(100, max(8, round($subscriptionDays / 365 * 100))) ?>%"></div></div>
             <div class="small text-muted mt-2">Τελευταία πληρωμή: <?= formatDate($mySubscription['payment_date']) ?></div>
             <?php if (!empty($mySubscription['receipt_stored_name']) && is_file(__DIR__ . '/uploads/subscription-receipts/' . basename($mySubscription['receipt_stored_name']))): ?>
-                <a class="btn btn-sm btn-outline-secondary mt-3" href="subscription-receipt.php?id=<?= $mySubscription['id'] ?>">
+                <?php $myReceiptIsImage = in_array(strtolower(pathinfo($mySubscription['receipt_stored_name'], PATHINFO_EXTENSION)), ['jpg', 'jpeg', 'png'], true); ?>
+                <button type="button" class="btn btn-sm btn-outline-secondary mt-3" data-bs-toggle="modal" data-bs-target="#myReceiptPreviewModal">
                     <i class="bi bi-file-earmark-text me-1"></i>Προβολή απόδειξης
-                </a>
+                </button>
             <?php elseif (!empty($mySubscription['receipt_stored_name'])): ?>
                 <div class="small text-danger mt-3"><i class="bi bi-exclamation-triangle me-1"></i>Το αρχείο της απόδειξης δεν είναι διαθέσιμο. Επικοινωνήστε με τη διοίκηση.</div>
             <?php endif; ?>
         <?php endif; ?>
     </div>
 </div>
+
+<?php if (!empty($myReceiptIsImage)): ?>
+<?php $myReceiptPreviewType = 'image'; ?>
+<?php elseif (!empty($mySubscription['receipt_stored_name']) && is_file(__DIR__ . '/uploads/subscription-receipts/' . basename($mySubscription['receipt_stored_name']))): ?>
+<?php $myReceiptPreviewType = 'pdf'; ?>
+<?php endif; ?>
+<?php if (!empty($myReceiptPreviewType)): ?>
+<div class="modal fade" id="myReceiptPreviewModal" tabindex="-1" aria-labelledby="myReceiptPreviewModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-truncate" id="myReceiptPreviewModalTitle">Η απόδειξή μου</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Κλείσιμο"></button>
+            </div>
+            <div class="modal-body text-center">
+                <?php if ($myReceiptPreviewType === 'image'): ?>
+                    <img src="" data-receipt-url="subscription-receipt.php?id=<?= (int)$mySubscription['id'] ?>" alt="Προεπισκόπηση απόδειξης" class="img-fluid rounded border" style="max-width:100%;max-height:70vh;object-fit:contain;">
+                <?php else: ?>
+                    <iframe src="" data-receipt-url="subscription-receipt.php?id=<?= (int)$mySubscription['id'] ?>" title="Προεπισκόπηση απόδειξης PDF" class="w-100 border rounded" style="height:70vh;"></iframe>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const receiptModal = document.getElementById('myReceiptPreviewModal');
+    const receiptViewer = receiptModal?.querySelector('[data-receipt-url]');
+    if (!receiptModal || !receiptViewer) return;
+    receiptModal.addEventListener('show.bs.modal', () => { receiptViewer.src = receiptViewer.dataset.receiptUrl; });
+    receiptModal.addEventListener('hidden.bs.modal', () => { receiptViewer.removeAttribute('src'); });
+});
+</script>
+<?php endif; ?>
 
 <?php if ($canIrisRenew): ?>
 <div class="modal fade" id="irisRenewalModal" tabindex="-1" aria-labelledby="irisRenewalModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form method="post">
