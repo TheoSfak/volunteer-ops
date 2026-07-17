@@ -186,7 +186,67 @@ if (isPost() && ($isAdmin || $isShiftLeader)) {
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<style>
+@media (max-width: 767.98px) {
+    .participations-page-header {
+        flex-direction: column;
+        align-items: stretch !important;
+        gap: .75rem;
+    }
+    .participations-page-header > .btn { width: 100%; }
+    .participation-filter-actions > .btn { flex: 1 1 auto; }
+    .participations-results-header {
+        flex-direction: column;
+        align-items: stretch !important;
+        gap: .75rem;
+    }
+    .participations-bulk-actions { display: grid !important; grid-template-columns: 1fr; }
+    .participations-bulk-actions .btn { width: 100%; }
+    .participations-table,
+    .participations-table tbody { display: block; width: 100%; }
+    .participations-table thead { display: none; }
+    .participations-table tbody { display: grid; gap: .75rem; padding: .75rem; }
+    .participations-table tr {
+        display: block;
+        border: 1px solid var(--bs-border-color);
+        border-radius: .75rem;
+        background: var(--bs-body-bg);
+        padding: .25rem .85rem;
+        box-shadow: 0 .125rem .25rem rgba(0, 0, 0, .04);
+    }
+    .participations-table td {
+        display: block;
+        position: relative;
+        width: 100%;
+        min-height: 2.6rem;
+        padding: .65rem 0 .65rem 38% !important;
+        text-align: right !important;
+        border-bottom: 1px solid var(--bs-border-color);
+        overflow-wrap: anywhere;
+    }
+    .participations-table td:last-child { border-bottom: 0; }
+    .participations-table td::before {
+        content: attr(data-label);
+        position: absolute;
+        top: .65rem;
+        left: 0;
+        width: 34%;
+        color: var(--bs-secondary-color);
+        font-weight: 600;
+        text-align: left;
+    }
+    .participations-table .mobile-card-empty {
+        display: block;
+        min-height: 0;
+        padding: 1rem 0 !important;
+        text-align: center !important;
+        border: 0;
+    }
+    .participations-table .mobile-card-empty::before { display: none; }
+}
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4 participations-page-header">
     <h1 class="h3 mb-0">
         <i class="bi bi-people me-2"></i>Συμμετοχές
     </h1>
@@ -238,7 +298,7 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-md-3 d-flex align-items-end gap-2">
+            <div class="col-md-3 d-flex align-items-end gap-2 participation-filter-actions">
                 <button type="submit" class="btn btn-primary">
                     <i class="bi bi-search me-1"></i>Αναζήτηση
                 </button>
@@ -252,10 +312,13 @@ include __DIR__ . '/includes/header.php';
 
 <!-- Results -->
 <div class="card">
-    <div class="card-header d-flex justify-content-between align-items-center">
+    <div class="card-header d-flex justify-content-between align-items-center participations-results-header">
         <span>Βρέθηκαν <?= $total ?> συμμετοχές</span>
         <?php if (($isAdmin || $isShiftLeader) && $total > 0): ?>
-            <div class="d-flex gap-2">
+            <div class="d-flex gap-2 participations-bulk-actions">
+                <label class="btn btn-sm btn-outline-secondary d-md-none mb-0 text-start">
+                    <input type="checkbox" id="selectAllMobile" class="form-check-input me-1"> Επιλογή όλων
+                </label>
                 <button type="button" class="btn btn-sm btn-success" onclick="showBulkApproveModal()">
                     <i class="bi bi-check-all me-1"></i>Μαζική Έγκριση
                 </button>
@@ -266,7 +329,7 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
     <div class="table-responsive">
-        <table class="table table-hover mb-0">
+        <table class="table table-hover mb-0 participations-table">
             <thead class="table-light">
                 <tr>
                     <?php if ($isAdmin || $isShiftLeader): ?>
@@ -288,7 +351,7 @@ include __DIR__ . '/includes/header.php';
             <tbody>
                 <?php if (empty($participations)): ?>
                     <tr>
-                        <td colspan="<?= ($isAdmin || $isShiftLeader) ? 8 : 6 ?>" class="text-center py-4 text-muted">
+                        <td colspan="<?= ($isAdmin || $isShiftLeader) ? 8 : 6 ?>" class="text-center py-4 text-muted mobile-card-empty">
                             Δεν βρέθηκαν συμμετοχές
                         </td>
                     </tr>
@@ -296,7 +359,7 @@ include __DIR__ . '/includes/header.php';
                     <?php foreach ($participations as $p): ?>
                         <tr>
                             <?php if ($isAdmin || $isShiftLeader): ?>
-                                <td>
+                                <td data-label="Επιλογή">
                                     <?php if ($p['status'] === 'PENDING'): ?>
                                         <input type="checkbox" class="form-check-input participation-checkbox" 
                                                value="<?= $p['id'] ?>" data-volunteer="<?= h($p['volunteer_name']) ?>">
@@ -304,27 +367,27 @@ include __DIR__ . '/includes/header.php';
                                 </td>
                             <?php endif; ?>
                             <?php if ($isAdmin || $isShiftLeader): ?>
-                                <td>
+                                <td data-label="Εθελοντής">
                                     <a href="volunteer-view.php?id=<?= $p['volunteer_id'] ?>">
                                         <?= h($p['volunteer_name']) ?>
                                     </a>
                                     <br><small class="text-muted"><?= h($p['volunteer_email']) ?></small>
                                 </td>
                             <?php endif; ?>
-                            <td>
+                            <td data-label="Αποστολή">
                                 <a href="mission-view.php?id=<?= $p['mission_id'] ?>">
                                     <?= h($p['mission_title']) ?>
                                 </a>
                             </td>
-                            <td>
+                            <td data-label="Βάρδια">
                                 <a href="shift-view.php?id=<?= $p['shift_id'] ?>">
                                     <?= formatDate($p['shift_date']) ?>
                                     <br><small class="text-muted"><?= substr($p['shift_start_time'], 0, 5) ?> - <?= substr($p['shift_end_time'], 0, 5) ?></small>
                                 </a>
                             </td>
-                            <td><?= statusBadge($p['status'], 'participation') ?></td>
-                            <td><?= formatDateTime($p['created_at']) ?></td>
-                            <td>
+                            <td data-label="Κατάσταση"><?= statusBadge($p['status'], 'participation') ?></td>
+                            <td data-label="Ημ/νία Αίτησης"><?= formatDateTime($p['created_at']) ?></td>
+                            <td data-label="Απόφαση">
                                 <?php if ($p['decided_at']): ?>
                                     <?= h($p['decided_by_name']) ?>
                                     <br><small class="text-muted"><?= formatDateTime($p['decided_at']) ?></small>
@@ -332,7 +395,7 @@ include __DIR__ . '/includes/header.php';
                                     <span class="text-muted">-</span>
                                 <?php endif; ?>
                             </td>
-                            <td class="text-end">
+                            <td class="text-end mobile-card-actions" data-label="Ενέργειες">
                                 <?php if ($p['status'] === 'PENDING' && ($isAdmin || $isShiftLeader)): ?>
                                     <form method="post" class="d-inline" onsubmit="return confirm('Έγκριση συμμετοχής;')">
                                         <?= csrfField() ?>
@@ -468,10 +531,15 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script>
-// Select all checkbox
-document.getElementById('selectAll')?.addEventListener('change', function() {
-    document.querySelectorAll('.participation-checkbox').forEach(cb => {
-        cb.checked = this.checked;
+// Select all checkbox (desktop table header and mobile card controls)
+document.querySelectorAll('#selectAll, #selectAllMobile').forEach(selectAll => {
+    selectAll.addEventListener('change', function() {
+        document.querySelectorAll('.participation-checkbox').forEach(cb => {
+            cb.checked = this.checked;
+        });
+        document.querySelectorAll('#selectAll, #selectAllMobile').forEach(peer => {
+            if (peer !== this) peer.checked = this.checked;
+        });
     });
 });
 

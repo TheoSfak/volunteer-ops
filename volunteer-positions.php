@@ -94,7 +94,61 @@ $colorOptions = [
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<style>
+@media (max-width: 767.98px) {
+    .volunteer-positions-header {
+        flex-direction: column;
+        align-items: stretch !important;
+        gap: .75rem;
+    }
+    .volunteer-positions-header .btn { width: 100%; }
+    .volunteer-positions-list .card-body { padding: .75rem !important; }
+    .volunteer-positions-table,
+    .volunteer-positions-table tbody { display: block; width: 100%; }
+    .volunteer-positions-table thead { display: none; }
+    .volunteer-positions-table tbody { display: grid; gap: .75rem; }
+    .volunteer-positions-table tr {
+        display: block;
+        border: 1px solid var(--bs-border-color);
+        border-radius: .75rem;
+        background: var(--bs-body-bg);
+        padding: .25rem .85rem;
+        box-shadow: 0 .125rem .25rem rgba(0, 0, 0, .04);
+    }
+    .volunteer-positions-table td {
+        display: block;
+        position: relative;
+        width: 100% !important;
+        min-height: 2.6rem;
+        padding: .65rem 0 .65rem 42% !important;
+        text-align: right !important;
+        border-bottom: 1px solid var(--bs-border-color);
+        overflow-wrap: anywhere;
+    }
+    .volunteer-positions-table td:last-child { border-bottom: 0; }
+    .volunteer-positions-table td::before {
+        content: attr(data-label);
+        position: absolute;
+        top: .65rem;
+        left: 0;
+        width: 38%;
+        color: var(--bs-secondary-color);
+        font-weight: 600;
+        text-align: left;
+    }
+    .volunteer-positions-table td .badge { white-space: normal; }
+    .volunteer-positions-table .mobile-card-empty {
+        display: block;
+        min-height: 0;
+        padding: 1rem 0 !important;
+        text-align: center !important;
+        border: 0;
+    }
+    .volunteer-positions-table .mobile-card-empty::before { display: none; }
+}
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4 volunteer-positions-header">
     <h1 class="h3 mb-0"><i class="bi bi-person-badge me-2"></i><?= h($pageTitle) ?></h1>
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
         <i class="bi bi-plus-circle me-1"></i>Νέα Θέση
@@ -103,9 +157,9 @@ include __DIR__ . '/includes/header.php';
 
 <?php displayFlash(); ?>
 
-<div class="card shadow-sm">
+<div class="card shadow-sm volunteer-positions-list">
     <div class="card-body p-0">
-        <table class="table table-hover mb-0 align-middle">
+        <table class="table table-hover mb-0 align-middle volunteer-positions-table">
             <thead class="table-light">
                 <tr>
                     <th style="width: 40px">#</th>
@@ -120,7 +174,7 @@ include __DIR__ . '/includes/header.php';
             <tbody>
                 <?php if (empty($positions)): ?>
                     <tr>
-                        <td colspan="7" class="text-center text-muted py-4">
+                        <td colspan="7" class="text-center text-muted py-4 mobile-card-empty">
                             <i class="bi bi-inbox fs-2 d-block mb-2"></i>
                             Δεν υπάρχουν θέσεις. Προσθέστε την πρώτη.
                         </td>
@@ -128,8 +182,8 @@ include __DIR__ . '/includes/header.php';
                 <?php else: ?>
                     <?php foreach ($positions as $i => $pos): ?>
                         <tr>
-                            <td class="text-muted"><?= $pos['sort_order'] ?: $i + 1 ?></td>
-                            <td>
+                            <td class="text-muted" data-label="Σειρά"><?= $pos['sort_order'] ?: $i + 1 ?></td>
+                            <td data-label="Θέση / Ρόλος">
                                 <span class="badge bg-<?= h($pos['color']) ?> fs-6 me-2">
                                     <?php if ($pos['icon']): ?><i class="<?= h($pos['icon']) ?> me-1"></i><?php endif; ?>
                                     <?= h($pos['name']) ?>
@@ -138,10 +192,10 @@ include __DIR__ . '/includes/header.php';
                                     <small class="text-muted d-block mt-1"><?= h($pos['description']) ?></small>
                                 <?php endif; ?>
                             </td>
-                            <td class="text-center">
+                            <td class="text-center" data-label="Χρώμα">
                                 <span class="badge bg-<?= h($pos['color']) ?> px-3"><?= h($colorOptions[$pos['color']] ?? $pos['color']) ?></span>
                             </td>
-                            <td>
+                            <td data-label="Εικονίδιο">
                                 <?php if ($pos['icon']): ?>
                                     <i class="<?= h($pos['icon']) ?> fs-5"></i>
                                     <small class="text-muted ms-1"><?= h($pos['icon']) ?></small>
@@ -149,17 +203,17 @@ include __DIR__ . '/includes/header.php';
                                     <span class="text-muted">—</span>
                                 <?php endif; ?>
                             </td>
-                            <td class="text-center">
+                            <td class="text-center" data-label="Εθελοντές">
                                 <span class="badge bg-secondary rounded-pill"><?= $pos['volunteer_count'] ?></span>
                             </td>
-                            <td class="text-center">
+                            <td class="text-center" data-label="Κατάσταση">
                                 <?php if ($pos['is_active']): ?>
                                     <span class="badge bg-success">Ενεργή</span>
                                 <?php else: ?>
                                     <span class="badge bg-secondary">Ανενεργή</span>
                                 <?php endif; ?>
                             </td>
-                            <td class="text-center">
+                            <td class="text-center mobile-card-actions" data-label="Ενέργειες">
                                 <a href="volunteer-positions.php?edit=<?= $pos['id'] ?>"
                                    class="btn btn-outline-primary btn-sm" title="Επεξεργασία">
                                     <i class="bi bi-pencil"></i>

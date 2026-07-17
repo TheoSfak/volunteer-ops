@@ -660,9 +660,18 @@ $liveExams = dbFetchAll("
 @media (max-width: 768px) {
     .dash-hero { padding: 1rem; text-align: center; }
     .dash-hero .d-flex { flex-direction: column; gap: .5rem; }
-    .dash-hero .hero-controls { justify-content: center !important; }
+    .dash-hero .hero-controls { flex-direction: row; flex-wrap: wrap; justify-content: center !important; width: 100%; }
     .ds-stat .stat-number { font-size: 1.35rem; }
     .ds-stat .stat-icon-box { width: 40px; height: 40px; font-size: 1.1rem; }
+    .ds-widget .card-header { flex-wrap: wrap; gap: .5rem; }
+    #dashboardSubscription .card-header > .d-flex { width: 100%; justify-content: stretch !important; }
+    #dashboardSubscription .card-header > .d-flex form,
+    #dashboardSubscription .card-header > .d-flex .iris-renewal-disabled,
+    #dashboardSubscription .card-header > .d-flex .btn { width: 100%; }
+    .dashboard-progress-header { align-items: flex-start !important; flex-direction: column; gap: .75rem; }
+    .dashboard-progress-header > .d-flex { width: 100%; flex-wrap: wrap; }
+    .volunteer-shift-card > .d-flex { flex-direction: column; gap: .5rem; }
+    .volunteer-shift-card .text-end { text-align: left !important; }
 }
 </style>
 
@@ -1836,7 +1845,7 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
     <div class="col-12">
         <div class="card ds-widget" style="border-left: 4px solid var(--bs-<?= $attendanceColor ?>);">
             <div class="card-body py-3">
-                <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="dashboard-progress-header d-flex justify-content-between align-items-center mb-2">
                     <div>
                         <i class="bi bi-calendar-check text-<?= $attendanceColor ?> me-1"></i>
                         <strong>Παρουσίες Αποστολών <?= $currentYear ?></strong>
@@ -1871,7 +1880,7 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
     <div class="col-12">
         <div class="card ds-widget" style="border-left: 4px solid var(--bs-<?= $tepColor ?>);">
             <div class="card-body py-3">
-                <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="dashboard-progress-header d-flex justify-content-between align-items-center mb-2">
                     <div>
                         <i class="bi bi-hospital text-<?= $tepColor ?> me-1"></i>
                         <strong>Ώρες Τ.Ε.Π.</strong>

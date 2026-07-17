@@ -172,7 +172,34 @@ if (get('export') === 'csv') {
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<style>
+@media (max-width: 767.98px) {
+    .certificates-page-header { align-items: stretch !important; }
+    .certificates-page-header > div { display: grid; gap: .5rem; width: 100%; }
+    .certificates-page-header .btn { width: 100%; margin: 0 !important; }
+    .certificates-table-wrap { overflow: visible; }
+    .certificates-table thead { display: none; }
+    .certificates-table, .certificates-table tbody, .certificates-table tr, .certificates-table td { display: block; width: 100%; }
+    .certificates-table tbody { padding: .75rem; }
+    .certificates-table tr { margin-bottom: .75rem; padding: .35rem .8rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .certificates-table td { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border: 0; border-bottom: 1px solid var(--bs-border-color-translucent); text-align: right !important; overflow-wrap: anywhere; }
+    .certificates-table td:last-child { border: 0; }
+    .certificates-table td::before { flex: 0 0 36%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .certificates-table td:nth-child(1)::before { content: "#"; }
+    .certificates-table td:nth-child(2)::before { content: "Τύπος"; }
+    .certificates-table td:nth-child(3)::before { content: "Όνομα"; }
+    .certificates-table td:nth-child(4)::before { content: "Επίθετο"; }
+    .certificates-table td:nth-child(5)::before { content: "Τηλέφωνο"; }
+    .certificates-table td:nth-child(6)::before { content: "Email"; }
+    .certificates-table td:nth-child(7)::before { content: "Έκδοση"; }
+    .certificates-table td:nth-child(8)::before { content: "Λήξη"; }
+    .certificates-table td:nth-child(9)::before { content: "Ενέργειες"; }
+    .certificates-table td[colspan]::before { display: none; }
+    .certificates-table td[colspan] { display: block; text-align: center !important; }
+}
+</style>
+
+<div class="certificates-page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <h2><i class="bi bi-file-earmark-medical"></i> Πιστοποιητικά Πολιτών</h2>
     <div>
         <a href="?<?= http_build_query(array_merge($_GET, ['export' => 'csv'])) ?>" class="btn btn-success me-2">
@@ -244,8 +271,8 @@ $_eq = function($val) use ($expiryFilter, $search, $filterType) {
         <i class="bi bi-list"></i> Σύνολο: <strong><?= $total ?></strong> πιστοποιητικά
     </div>
     <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-hover table-striped table-sm mb-0" style="font-size:.85rem">
+        <div class="table-responsive certificates-table-wrap">
+            <table class="table table-hover table-striped table-sm mb-0 certificates-table table-mobile-opt-out" style="font-size:.85rem">
                 <thead class="table-light">
                     <tr>
                         <th>#</th>

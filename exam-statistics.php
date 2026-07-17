@@ -240,7 +240,7 @@ $goldenEagles = dbFetchAll($goldenEagleQuery, $params);
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
     <h1 class="h3 mb-0">
         <i class="bi bi-bar-chart-line me-2"></i><?= h($pageTitle) ?>
     </h1>
@@ -470,7 +470,7 @@ include __DIR__ . '/includes/header.php';
             <p class="text-muted text-center py-4">Δεν βρέθηκαν αποτελέσματα με τα επιλεγμένα φίλτρα.</p>
         <?php else: ?>
             <div class="table-responsive">
-                <table class="table table-hover align-middle">
+                <table class="table table-hover align-middle admin-mobile-cards">
                     <thead>
                         <tr>
                             <th>Εθελοντής</th>
@@ -488,39 +488,39 @@ include __DIR__ . '/includes/header.php';
                     <tbody>
                         <?php foreach ($results as $result): ?>
                             <tr>
-                                <td>
+                                <td data-label="Εθελοντής">
                                     <a href="volunteer-view.php?id=<?= $result['user_id'] ?>">
                                         <?= h($result['user_name']) ?>
                                     </a>
                                 </td>
-                                <td><?= $result['cohort_year'] ? h($result['cohort_year']) : '<span class="text-muted">-</span>' ?></td>
-                                <td>
+                                <td data-label="Χρονιά"><?= $result['cohort_year'] ? h($result['cohort_year']) : '<span class="text-muted">-</span>' ?></td>
+                                <td data-label="Τύπος">
                                     <?php if ($result['attempt_type'] === 'EXAM'): ?>
                                         <span class="badge bg-warning">Διαγώνισμα</span>
                                     <?php else: ?>
                                         <span class="badge bg-info">Κουίζ</span>
                                     <?php endif; ?>
                                 </td>
-                                <td><?= h($result['exam_title'] ?? $result['quiz_title']) ?></td>
-                                <td><small class="text-muted"><?= h($result['category_name']) ?></small></td>
-                                <td><small><?= formatDateTime($result['completed_at']) ?></small></td>
-                                <td>
+                                <td data-label="Τίτλος"><?= h($result['exam_title'] ?? $result['quiz_title']) ?></td>
+                                <td data-label="Κατηγορία"><small class="text-muted"><?= h($result['category_name']) ?></small></td>
+                                <td data-label="Ημερομηνία"><small><?= formatDateTime($result['completed_at']) ?></small></td>
+                                <td data-label="Βαθμός">
                                     <strong><?= $result['score'] ?>/<?= $result['total_questions'] ?></strong>
                                     <small class="text-muted">(<?= $result['percentage'] ?>%)</small>
                                 </td>
-                                <td>
+                                <td data-label="Κατάσταση">
                                     <?php if ($result['passed']): ?>
                                         <span class="badge bg-success">Επιτυχία</span>
                                     <?php else: ?>
                                         <span class="badge bg-danger">Αποτυχία</span>
                                     <?php endif; ?>
                                 </td>
-                                <td>
+                                <td data-label="Χρόνος">
                                     <small>
                                         <?= floor($result['time_taken_seconds'] / 60) ?>:<?= str_pad($result['time_taken_seconds'] % 60, 2, '0', STR_PAD_LEFT) ?>
                                     </small>
                                 </td>
-                                <td>
+                                <td data-label="Ενέργεια" class="mobile-card-actions">
                                     <?php 
                                     $resultsUrl = $result['attempt_type'] === 'EXAM' 
                                         ? 'exam-results.php?attempt_id=' . $result['attempt_id']
@@ -553,5 +553,17 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<style>
+@media (max-width: 767.98px) {
+    .admin-mobile-cards thead { display: none; }
+    .admin-mobile-cards, .admin-mobile-cards tbody, .admin-mobile-cards tr, .admin-mobile-cards td { display: block; width: 100%; }
+    .admin-mobile-cards tr { margin-bottom: .85rem; padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .admin-mobile-cards td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; text-align: right !important; overflow-wrap: anywhere; }
+    .admin-mobile-cards td::before { content: attr(data-label); flex: 0 0 36%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .admin-mobile-cards .mobile-card-actions { align-items: center; padding-top: .75rem; border-top: 1px solid var(--bs-border-color); }
+    .list-group-item { flex-wrap: wrap; gap: .5rem; }
+}
+</style>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

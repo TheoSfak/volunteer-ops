@@ -204,14 +204,19 @@ include __DIR__ . '/includes/header.php';
     align-items: center;
     gap: 3px;
 }
+@media (max-width: 767.98px) {
+    .missions-page-header { align-items: stretch !important; }
+    .missions-page-header > .d-flex { display: grid !important; grid-template-columns: 1fr; width: 100%; }
+    .missions-page-header .btn { width: 100%; white-space: normal; }
+}
 </style>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="missions-page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <h1 class="h3 mb-0">
         <i class="bi bi-flag me-2"></i>Αποστολές
     </h1>
     <?php if (isAdmin()): ?>
-        <div class="d-flex gap-2">
+        <div class="d-flex flex-wrap gap-2">
             <a href="exports/export-missions.php?status=<?= h($status) ?>&department_id=<?= h($department) ?>&search=<?= h($search) ?>&mission_type=<?= h($missionType) ?>" 
                class="btn btn-outline-success">
                 <i class="bi bi-download me-1"></i>Εξαγωγή CSV

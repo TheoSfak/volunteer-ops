@@ -194,9 +194,9 @@ include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
         <h1 class="h3 mb-0"><i class="bi bi-grid-3x3 me-2"></i>Υλικά Ραφιού</h1>
-        <div class="d-flex align-items-center gap-2">
+        <div class="d-flex align-items-center flex-wrap gap-2">
             <span class="badge bg-secondary me-1"><?= $totalItems ?> υλικά</span>
             <?php if ($expiredCount > 0): ?>
                 <span class="badge bg-danger me-1"><?= $expiredCount ?> ληγμένα</span>
@@ -216,7 +216,7 @@ include __DIR__ . '/includes/header.php';
     <?php displayFlash(); ?>
     
     <!-- Legend -->
-    <div class="mb-3 d-flex gap-3 align-items-center small text-muted">
+    <div class="mb-3 d-flex flex-wrap gap-3 align-items-center small text-muted">
         <span><i class="bi bi-circle-fill text-success"></i> > 6 μήνες</span>
         <span><i class="bi bi-circle-fill text-warning"></i> 3-6 μήνες</span>
         <span><i class="bi bi-circle-fill text-danger"></i> Έληξε / < 3 μήνες</span>
@@ -226,7 +226,7 @@ include __DIR__ . '/includes/header.php';
     <div class="card shadow-sm">
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-hover table-bordered mb-0 align-middle" id="shelfTable">
+                <table class="table table-hover table-bordered mb-0 align-middle shelf-mobile-cards" id="shelfTable">
                     <thead class="table-light">
                         <tr>
                             <th style="width: 30px">#</th>
@@ -252,7 +252,7 @@ include __DIR__ . '/includes/header.php';
                             <?php $row = 0; foreach ($items as $item): $row++; ?>
                                 <?php if ($editId === (int)$item['id']): ?>
                                     <!-- EDIT ROW -->
-                                    <tr class="table-info" id="row-<?= $item['id'] ?>">
+                                    <tr class="table-info shelf-edit-row" id="row-<?= $item['id'] ?>">
                                         <td class="text-muted"><?= $row ?></td>
                                         <td colspan="8">
                                             <form method="post" class="row g-2 align-items-end">
@@ -290,35 +290,35 @@ include __DIR__ . '/includes/header.php';
                                 <?php else: ?>
                                     <!-- VIEW ROW -->
                                     <tr id="row-<?= $item['id'] ?>">
-                                        <td class="text-muted small"><?= $row ?></td>
-                                        <td>
+                                        <td data-label="#" class="text-muted small"><?= $row ?></td>
+                                        <td data-label="Όνομα">
                                             <strong><?= h($item['name']) ?></strong>
                                         </td>
-                                        <td class="text-center">
+                                        <td data-label="Αριθμός είδους" class="text-center">
                                             <span class="badge bg-secondary rounded-pill"><?= $item['quantity'] ?></span>
                                         </td>
-                                        <td>
+                                        <td data-label="Ράφι">
                                             <?php if (!empty($item['shelf'])): ?>
                                                 <i class="bi bi-bookshelf me-1"></i><?= h($item['shelf']) ?>
                                             <?php else: ?>
                                                 <span class="text-muted">—</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td>
+                                        <td data-label="Σημειώσεις">
                                             <?php if (!empty($item['notes'])): ?>
                                                 <span class="text-muted small"><?= h($item['notes']) ?></span>
                                             <?php else: ?>
                                                 <span class="text-muted">—</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td>
+                                        <td data-label="Ημερομηνία Λήξης">
                                             <?php if (!empty($item['expiry_date'])): ?>
                                                 <?= formatDate($item['expiry_date']) ?>
                                             <?php else: ?>
                                                 <span class="text-muted">—</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td class="text-center">
+                                        <td data-label="Ημέρες για Λήξη" class="text-center">
                                             <?php if (isset($item['expiry_days'])): ?>
                                                 <?php if ($item['expiry_days'] < 0): ?>
                                                     <span class="badge bg-danger">
@@ -334,7 +334,7 @@ include __DIR__ . '/includes/header.php';
                                                 <span class="text-muted">—</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td class="text-center">
+                                        <td data-label="Κατάσταση" class="text-center">
                                             <?php if (!empty($item['expiry_class'])): ?>
                                                 <i class="bi bi-circle-fill text-<?= $item['expiry_class'] ?>" 
                                                    title="<?= h($item['expiry_label']) ?>"
@@ -343,7 +343,7 @@ include __DIR__ . '/includes/header.php';
                                                 <span class="text-muted">—</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td class="text-center">
+                                        <td data-label="Ενέργειες" class="text-center mobile-card-actions">
                                             <div class="btn-group btn-group-sm">
                                                 <a href="inventory-shelf.php?edit=<?= $item['id'] ?>#row-<?= $item['id'] ?>" 
                                                    class="btn btn-outline-primary" title="Επεξεργασία">
@@ -441,6 +441,19 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<style>
+@media (max-width: 767.98px) {
+    .shelf-mobile-cards thead { display: none; }
+    .shelf-mobile-cards, .shelf-mobile-cards tbody, .shelf-mobile-cards tr, .shelf-mobile-cards td { display: block; width: 100%; }
+    .shelf-mobile-cards tr:not(.shelf-edit-row):not(:has(td[colspan])) { margin-bottom: .85rem; padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .shelf-mobile-cards tr:not(.shelf-edit-row):not(:has(td[colspan])) td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; text-align: right !important; overflow-wrap: anywhere; }
+    .shelf-mobile-cards tr:not(.shelf-edit-row):not(:has(td[colspan])) td::before { content: attr(data-label); flex: 0 0 42%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .shelf-mobile-cards .mobile-card-actions { align-items: center !important; padding-top: .75rem !important; border-top: 1px solid var(--bs-border-color) !important; }
+    .shelf-mobile-cards .shelf-edit-row > td:first-child { display: none; }
+    .shelf-mobile-cards .shelf-edit-row > td[colspan] { padding: 1rem; border: 0; }
+}
+</style>
 
 <script>
 // Delete modal - populate data

@@ -426,6 +426,39 @@ include __DIR__ . '/includes/header.php';
     .profile-hero .d-flex { flex-direction: column; gap: .75rem; }
     .pp-stat-card .card-body { padding: .65rem !important; }
     .pp-stat-card .stat-value { font-size: 1.15rem; }
+    .pp-card .card-header { flex-wrap: wrap; gap: .5rem; }
+    .pp-card .card-header > .d-flex { flex-wrap: wrap; width: 100%; }
+    .pp-card .card-header > .d-flex .btn,
+    .pp-card .card-header > .d-flex form,
+    .pp-card .card-header > .d-flex .iris-renewal-disabled { width: 100%; }
+    .pp-card .card-header > .d-flex .btn { white-space: normal; }
+    .pp-mobile-table-wrap { overflow: visible; }
+    .pp-mobile-table thead { display: none; }
+    .pp-mobile-table, .pp-mobile-table tbody, .pp-mobile-table tr, .pp-mobile-table td { display: block; width: 100%; }
+    .pp-mobile-table tbody { padding: .75rem; }
+    .pp-mobile-table tr { margin-bottom: .75rem; padding: .35rem .8rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .pp-mobile-table td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; border-bottom: 1px solid var(--bs-border-color-translucent); text-align: right !important; white-space: normal !important; overflow-wrap: anywhere; }
+    .pp-mobile-table td:last-child { border: 0; }
+    .pp-mobile-table td::before { flex: 0 0 38%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .pp-subscription-table td:nth-child(1)::before { content: "Πληρωμή"; }
+    .pp-subscription-table td:nth-child(2)::before { content: "Λήξη κάλυψης"; }
+    .pp-subscription-table td:nth-child(3)::before { content: "Έτη"; }
+    .pp-subscription-table td:nth-child(4)::before { content: "Ποσό"; }
+    .pp-subscription-table td:nth-child(5)::before { content: "Τρόπος"; }
+    .pp-subscription-table td:nth-child(6)::before { content: "Αρ. απόδειξης"; }
+    .pp-subscription-table td:nth-child(7)::before { content: "Απόδειξη"; }
+    .pp-exams-table td:nth-child(1)::before { content: "Διαγώνισμα"; }
+    .pp-exams-table td:nth-child(2)::before { content: "Κατηγορία"; }
+    .pp-exams-table td:nth-child(3)::before { content: "Βαθμός"; }
+    .pp-exams-table td:nth-child(4)::before { content: "Ποσοστό"; }
+    .pp-exams-table td:nth-child(5)::before { content: "Αποτέλεσμα"; }
+    .pp-exams-table td:nth-child(6)::before { content: "Ημερομηνία"; }
+    .pp-exams-table td:nth-child(7)::before { content: "Ενέργειες"; }
+    .pp-bookings-table td:nth-child(1)::before { content: "Barcode"; }
+    .pp-bookings-table td:nth-child(2)::before { content: "Υλικό"; }
+    .pp-bookings-table td:nth-child(3)::before { content: "Ημ. χρέωσης"; }
+    .pp-bookings-table td:nth-child(4)::before { content: "Αναμ. επιστροφή"; }
+    .pp-bookings-table td:nth-child(5)::before { content: "Κατάσταση"; }
 }
 </style>
 
@@ -489,8 +522,8 @@ include __DIR__ . '/includes/header.php';
         <h5 class="mb-0"><i class="bi bi-clock-history text-primary me-2"></i>Ιστορικό πληρωμών συνδρομής</h5>
         <span class="badge bg-primary"><?= count($subscriptionHistory) ?></span>
     </div>
-    <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
+    <div class="table-responsive pp-mobile-table-wrap">
+        <table class="table table-hover align-middle mb-0 pp-mobile-table pp-subscription-table table-mobile-opt-out">
             <thead><tr><th>Πληρωμή</th><th>Λήξη κάλυψης</th><th>Έτη</th><th>Ποσό</th><th>Τρόπος</th><th>Αρ. απόδειξης</th><th>Απόδειξη</th></tr></thead>
             <tbody>
             <?php foreach ($subscriptionHistory as $historyPayment): ?>
@@ -744,8 +777,8 @@ document.addEventListener('DOMContentLoaded', () => {
         </a>
     </div>
     <div class="card-body">
-        <div class="table-responsive">
-            <table class="table table-hover">
+        <div class="table-responsive pp-mobile-table-wrap">
+            <table class="table table-hover pp-mobile-table pp-exams-table table-mobile-opt-out">
                 <thead>
                     <tr>
                         <th>Διαγώνισμα</th>
@@ -1027,8 +1060,8 @@ $myRequiredMissing = dbFetchAll(
                 <span class="badge bg-primary rounded-pill"><?= count($activeBookings) ?></span>
             </div>
             <div class="card-body p-0">
-                <div class="table-responsive">
-                    <table class="table table-sm table-hover align-middle mb-0">
+                <div class="table-responsive pp-mobile-table-wrap">
+                    <table class="table table-sm table-hover align-middle mb-0 pp-mobile-table pp-bookings-table table-mobile-opt-out">
                         <thead class="table-light">
                             <tr>
                                 <th>Barcode</th>

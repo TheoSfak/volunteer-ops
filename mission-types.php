@@ -106,7 +106,7 @@ $iconOptions = [
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
     <h1 class="h3 mb-0">
         <i class="bi bi-tags me-2"></i>Τύποι Αποστολών
     </h1>
@@ -120,7 +120,7 @@ include __DIR__ . '/includes/header.php';
 
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-hover mb-0 align-middle">
+        <table class="table table-hover mb-0 align-middle admin-mobile-cards">
             <thead class="table-light">
                 <tr>
                     <th width="50">Σειρά</th>
@@ -143,26 +143,26 @@ include __DIR__ . '/includes/header.php';
                 <?php else: ?>
                     <?php foreach ($missionTypes as $mt): ?>
                         <tr class="<?= !$mt['is_active'] ? 'table-secondary' : '' ?>">
-                            <td class="text-center"><?= $mt['sort_order'] ?></td>
-                            <td>
+                            <td data-label="Σειρά" class="text-center"><?= $mt['sort_order'] ?></td>
+                            <td data-label="Εικονίδιο">
                                 <i class="bi <?= h($mt['icon'] ?: 'bi-flag') ?> fs-5 text-<?= h($mt['color']) ?>"></i>
                             </td>
-                            <td><strong><?= h($mt['name']) ?></strong></td>
-                            <td><small class="text-muted"><?= h($mt['description'] ?: '-') ?></small></td>
-                            <td>
+                            <td data-label="Όνομα"><strong><?= h($mt['name']) ?></strong></td>
+                            <td data-label="Περιγραφή"><small class="text-muted"><?= h($mt['description'] ?: '-') ?></small></td>
+                            <td data-label="Χρώμα">
                                 <span class="badge bg-<?= h($mt['color']) ?>"><?= h($mt['color']) ?></span>
                             </td>
-                            <td class="text-center">
+                            <td data-label="Αποστολές" class="text-center">
                                 <span class="badge bg-secondary"><?= $mt['missions_count'] ?></span>
                             </td>
-                            <td>
+                            <td data-label="Κατάσταση">
                                 <?php if ($mt['is_active']): ?>
                                     <span class="badge bg-success">Ενεργό</span>
                                 <?php else: ?>
                                     <span class="badge bg-secondary">Ανενεργό</span>
                                 <?php endif; ?>
                             </td>
-                            <td class="text-end">
+                            <td data-label="Ενέργειες" class="text-end mobile-card-actions">
                                 <button type="button" class="btn btn-sm btn-outline-primary" 
                                         onclick="editType(<?= htmlspecialchars(json_encode($mt), ENT_QUOTES) ?>)">
                                     <i class="bi bi-pencil"></i>
@@ -185,6 +185,17 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
+
+<style>
+@media (max-width: 767.98px) {
+    .admin-mobile-cards thead { display: none; }
+    .admin-mobile-cards, .admin-mobile-cards tbody, .admin-mobile-cards tr, .admin-mobile-cards td { display: block; width: 100%; }
+    .admin-mobile-cards tr:not(:has(td[colspan])) { margin: .75rem; width: calc(100% - 1.5rem); padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .admin-mobile-cards tr:not(:has(td[colspan])) td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; text-align: right !important; }
+    .admin-mobile-cards tr:not(:has(td[colspan])) td::before { content: attr(data-label); flex: 0 0 38%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .admin-mobile-cards .mobile-card-actions { align-items: center; padding-top: .75rem !important; border-top: 1px solid var(--bs-border-color) !important; }
+}
+</style>
 
 <!-- Create/Edit Modal -->
 <div class="modal fade" id="typeModal" tabindex="-1">

@@ -263,13 +263,82 @@ include __DIR__ . '/includes/header.php';
 .badge { font-size: 0.72rem; }
 .btn-sm { font-size: 0.75rem; padding: 2px 8px; }
 .dropdown-menu { font-size: 0.82rem; }
+@media (max-width: 767.98px) {
+    .volunteers-page-header {
+        flex-direction: column;
+        align-items: stretch !important;
+        gap: .75rem;
+    }
+    .volunteers-page-actions {
+        display: grid !important;
+        grid-template-columns: 1fr;
+    }
+    .volunteers-page-actions .btn { width: 100%; }
+    .pending-registrations-header {
+        flex-wrap: wrap;
+        align-items: flex-start !important;
+    }
+    .pending-registrations-header small {
+        flex-basis: 100%;
+        margin-left: 0 !important;
+    }
+    .volunteers-table,
+    .volunteers-table tbody,
+    .pending-registrations-table,
+    .pending-registrations-table tbody { display: block; width: 100%; }
+    .volunteers-table thead,
+    .pending-registrations-table thead { display: none; }
+    .volunteers-table tbody,
+    .pending-registrations-table tbody {
+        display: grid;
+        gap: .75rem;
+        padding: .75rem;
+    }
+    .volunteers-table tr,
+    .pending-registrations-table tr {
+        display: block;
+        border: 1px solid var(--bs-border-color);
+        border-radius: .75rem;
+        background: var(--bs-body-bg);
+        padding: .25rem .85rem;
+        box-shadow: 0 .125rem .25rem rgba(0, 0, 0, .04);
+    }
+    .volunteers-table tr.table-secondary { background: var(--bs-secondary-bg); }
+    .volunteers-table td,
+    .pending-registrations-table td {
+        display: block;
+        position: relative;
+        width: 100%;
+        min-height: 2.6rem;
+        padding: .65rem 0 .65rem 38% !important;
+        text-align: right !important;
+        border-bottom: 1px solid var(--bs-border-color);
+        overflow-wrap: anywhere;
+    }
+    .volunteers-table td:last-child,
+    .pending-registrations-table td:last-child { border-bottom: 0; }
+    .volunteers-table td::before,
+    .pending-registrations-table td::before {
+        content: attr(data-label);
+        position: absolute;
+        top: .65rem;
+        left: 0;
+        width: 34%;
+        color: var(--bs-secondary-color);
+        font-weight: 600;
+        text-align: left;
+    }
+    .volunteers-table .badge,
+    .pending-registrations-table .badge { white-space: normal; }
+    .volunteers-table .mobile-card-actions > .dropdown { display: inline-block; }
+}
 </style>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-4 volunteers-page-header">
     <h1 class="h3 mb-0">
         <i class="bi bi-people me-2"></i>Εθελοντές
     </h1>
-    <div class="d-flex gap-2">
+    <div class="d-flex gap-2 volunteers-page-actions">
         <a href="import-volunteers.php" class="btn btn-outline-primary">
             <i class="bi bi-upload me-1"></i>Εισαγωγή CSV
         </a>
@@ -286,14 +355,14 @@ include __DIR__ . '/includes/header.php';
 <?php if (!empty($pendingUsers)): ?>
 <!-- Pending Registration Approvals -->
 <div class="card border-warning mb-4">
-    <div class="card-header bg-warning text-dark d-flex align-items-center gap-2">
+    <div class="card-header bg-warning text-dark d-flex align-items-center gap-2 pending-registrations-header">
         <i class="bi bi-hourglass-split"></i>
         <strong>Αναμονή Έγκρισης Εγγραφής</strong>
         <span class="badge bg-dark ms-1"><?= count($pendingUsers) ?></span>
         <small class="ms-auto">Οι παρακάτω χρήστες επιβεβαίωσαν το email τους και αναμένουν έγκριση</small>
     </div>
     <div class="card-body p-0">
-        <table class="table table-sm table-hover mb-0">
+        <table class="table table-sm table-hover mb-0 pending-registrations-table">
             <thead class="table-light">
                 <tr>
                     <th>Όνομα / Email</th>
@@ -306,14 +375,14 @@ include __DIR__ . '/includes/header.php';
             <tbody>
             <?php foreach ($pendingUsers as $pu): ?>
                 <tr>
-                    <td>
+                    <td data-label="Όνομα / Email">
                         <strong><?= h($pu['name']) ?></strong><br>
                         <small class="text-muted"><?= h($pu['email']) ?></small>
                     </td>
-                    <td><?= $pu['phone'] ? h($pu['phone']) : '<span class="text-muted">-</span>' ?></td>
-                    <td><?= $pu['department_name'] ? h($pu['department_name']) : '<span class="text-muted">-</span>' ?></td>
-                    <td><small class="text-muted"><?= formatDateTime($pu['created_at']) ?></small></td>
-                    <td class="text-end">
+                    <td data-label="Τηλέφωνο"><?= $pu['phone'] ? h($pu['phone']) : '<span class="text-muted">-</span>' ?></td>
+                    <td data-label="Τμήμα"><?= $pu['department_name'] ? h($pu['department_name']) : '<span class="text-muted">-</span>' ?></td>
+                    <td data-label="Εγγραφή"><small class="text-muted"><?= formatDateTime($pu['created_at']) ?></small></td>
+                    <td class="text-end mobile-card-actions" data-label="Ενέργειες">
                         <form method="post" class="d-inline">
                             <?= csrfField() ?>
                             <input type="hidden" name="user_id" value="<?= $pu['id'] ?>">
@@ -439,7 +508,7 @@ include __DIR__ . '/includes/header.php';
         <span>Σελίδα <?= $pagination['current_page'] ?> από <?= $pagination['total_pages'] ?></span>
     </div>
     <div class="table-responsive">
-        <table class="table table-sm table-hover align-middle">
+        <table class="table table-sm table-hover align-middle volunteers-table">
             <thead class="table-light">
                 <tr>
                     <th>Εθελοντής</th>
@@ -458,13 +527,13 @@ include __DIR__ . '/includes/header.php';
             <tbody>
                 <?php foreach ($volunteers as $v): ?>
                     <tr class="<?= !$v['is_active'] ? 'table-secondary text-muted' : '' ?>">
-                        <td>
+                        <td data-label="Εθελοντής">
                             <a href="volunteer-view.php?id=<?= $v['id'] ?>" class="text-decoration-none fw-semibold">
                                 <?= h($v['name']) ?>
                             </a><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_RESCUER) ?><?= positionBadge($v['position_name'] ?? '') ?>
                             <br><small class="text-muted"><?= h($v['email']) ?><?= $v['phone'] ? ' · ' . h($v['phone']) : '' ?></small>
                         </td>
-                        <td>
+                        <td data-label="Ρόλος">
                             <?= roleBadge($v['role']) ?>
                             <?php if (!empty($v['custom_role_name'])): ?>
                                 <span class="badge rounded-pill ms-1"
@@ -473,40 +542,40 @@ include __DIR__ . '/includes/header.php';
                                 </span>
                             <?php endif; ?>
                         </td>
-                        <td><?= h($v['department_name'] ?? '-') ?></td>
-                        <td>
+                        <td data-label="Σώμα"><?= h($v['department_name'] ?? '-') ?></td>
+                        <td data-label="Παράρτημα">
                             <?php if ($v['warehouse_name']): ?>
                                 <span class="badge bg-info"><i class="bi bi-building me-1"></i><?= h($v['warehouse_name']) ?></span>
                             <?php else: ?>
                                 <span class="text-muted">-</span>
                             <?php endif; ?>
                         </td>
-                        <td class="text-center">
+                        <td class="text-center" data-label="Χρονιά">
                             <?php if ($v['cohort_year']): ?>
                                 <span class="badge bg-secondary"><?= (int)$v['cohort_year'] ?></span>
                             <?php else: ?>
                                 <span class="text-muted">—</span>
                             <?php endif; ?>
                         </td>
-                        <td class="text-center">
+                        <td class="text-center" data-label="Βάρδιες">
                             <?= $v['shifts_count'] ?>
                             <?php if ($v['total_hours'] > 0): ?>
                                 <br><small class="text-muted"><?= number_format($v['total_hours'], 1) ?> ώρ.</small>
                             <?php endif; ?>
                         </td>
                         <?php if (getSetting('points_enabled', '1') === '1'): ?>
-                        <td class="text-center">
+                        <td class="text-center" data-label="Πόντοι">
                             <span class="badge bg-warning text-dark"><?= number_format($v['total_points']) ?></span>
                         </td>
                         <?php endif; ?>
-                        <td>
+                        <td data-label="Κατάσταση">
                             <?php if ($v['is_active']): ?>
                                 <span class="badge bg-success">Ενεργός</span>
                             <?php else: ?>
                                 <span class="badge bg-secondary">Ανενεργός</span>
                             <?php endif; ?>
                         </td>
-                        <td>
+                        <td class="mobile-card-actions" data-label="Ενέργειες">
                             <div class="dropdown">
                                 <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
                                     <i class="bi bi-three-dots"></i>

@@ -172,6 +172,31 @@ $greekMonths = [
             align-items: center;
         }
 
+        @media (max-width: 767.98px) {
+            .toolbar { padding: 12px; flex-wrap: wrap; }
+            .toolbar .btn { flex: 1 1 100%; white-space: normal; }
+            .toolbar .text-muted { width: 100%; margin-left: 0 !important; }
+            .report-wrapper { margin: 0; border-radius: 0; box-shadow: none; }
+            .report-header { padding: 24px 18px; }
+            .report-header > .d-flex { flex-direction: column; gap: 1rem; }
+            .report-header .text-end { text-align: left !important; min-width: 0 !important; }
+            .report-table thead { display: none; }
+            .report-table, .report-table tbody, .report-table tr, .report-table td { display: block; width: 100%; }
+            .report-table tr { margin-bottom: .75rem; padding: .35rem .7rem; border: 1px solid #e5e7eb; border-radius: .65rem; background: #fff; }
+            .report-table td { display: flex; justify-content: space-between; gap: 1rem; padding: .4rem 0; border: 0; border-bottom: 1px solid #e5e7eb; text-align: right !important; white-space: normal !important; overflow-wrap: anywhere; }
+            .report-table td:last-child { border: 0; }
+            .report-table td::before { flex: 0 0 38%; color: #6b7280; font-weight: 600; text-align: left; }
+            .monthly-report-table td:nth-child(1)::before { content: "Μήνας"; }
+            .monthly-report-table td:nth-child(2)::before { content: "Βάρδιες"; }
+            .monthly-report-table td:nth-child(3)::before { content: "Ώρες"; }
+            .shift-report-table td:nth-child(1)::before { content: "Αποστολή"; }
+            .shift-report-table td:nth-child(2)::before { content: "Ημερομηνία"; }
+            .shift-report-table td:nth-child(3)::before { content: "Ώρες βάρδιας"; }
+            .shift-report-table td:nth-child(4)::before { content: "Πραγμ. ώρες"; }
+            .shift-report-table td:nth-child(5)::before { content: "Τοποθεσία"; }
+            .report-table tfoot { display: none; }
+        }
+
         /* ── Print styles ── */
         @media print {
             body { background: #fff; }
@@ -274,7 +299,7 @@ $greekMonths = [
         <?php if (!empty($monthlyBreakdown)): ?>
         <!-- ── Monthly breakdown ── -->
         <div class="section-title"><i class="bi bi-bar-chart me-1"></i>Ανάλυση ανά Μήνα</div>
-        <table class="table table-sm table-hover report-table">
+        <table class="table table-sm table-hover report-table monthly-report-table table-mobile-opt-out">
             <thead>
                 <tr>
                     <th>Μήνας</th>
@@ -304,7 +329,7 @@ $greekMonths = [
         <?php if (!empty($attendedShifts)): ?>
         <!-- ── Detailed shift history ── -->
         <div class="section-title page-break"><i class="bi bi-list-check me-1"></i>Αναλυτικό Ιστορικό Βαρδιών</div>
-        <table class="table table-sm table-hover report-table">
+        <table class="table table-sm table-hover report-table shift-report-table table-mobile-opt-out">
             <thead>
                 <tr>
                     <th>Αποστολή</th>

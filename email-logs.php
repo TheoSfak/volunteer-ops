@@ -167,7 +167,44 @@ $logs = dbFetchAll(
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<style>
+@media (max-width: 767.98px) {
+    .email-logs-page-header { align-items: stretch !important; }
+    .email-logs-page-header > div, .email-logs-page-header .btn { width: 100%; }
+    .email-mini-table { min-width: 0; }
+    .email-mini-table thead { display: none; }
+    .email-mini-table, .email-mini-table tbody, .email-mini-table tr, .email-mini-table td { display: block; width: 100%; }
+    .email-mini-table tr { margin-bottom: .5rem; padding: .25rem .6rem; border: 1px solid var(--bs-border-color); border-radius: .6rem; }
+    .email-mini-table td { display: flex; justify-content: space-between; gap: .75rem; padding: .35rem 0; border: 0; border-bottom: 1px solid var(--bs-border-color-translucent); text-align: right !important; overflow-wrap: anywhere; }
+    .email-mini-table td:last-child { border: 0; }
+    .email-mini-table td::before { flex: 0 0 34%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .domain-stats-table td:nth-child(1)::before { content: "Domain"; }
+    .domain-stats-table td:nth-child(2)::before { content: "OK"; }
+    .domain-stats-table td:nth-child(3)::before { content: "Fail"; }
+    .domain-stats-table td:nth-child(4)::before { content: "%"; }
+    .code-stats-table td:nth-child(1)::before { content: "Κωδικός"; }
+    .code-stats-table td:nth-child(2)::before { content: "Σύνολο"; }
+    .code-stats-table td:nth-child(3)::before { content: "OK"; }
+    .code-stats-table td:nth-child(4)::before { content: "Fail"; }
+    .email-log-table-wrap { overflow: visible; }
+    .email-log-table thead { display: none; }
+    .email-log-table, .email-log-table tbody, .email-log-table tr, .email-log-table td { display: block; width: 100%; }
+    .email-log-table tbody { padding: .75rem; }
+    .email-log-table tr { margin-bottom: .75rem; padding: .35rem .8rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .email-log-table td { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border: 0; border-bottom: 1px solid var(--bs-border-color-translucent); text-align: right !important; overflow-wrap: anywhere; }
+    .email-log-table td:last-child { border: 0; }
+    .email-log-table td::before { flex: 0 0 34%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .email-log-table td:nth-child(1)::before { content: "Ημερομηνία"; }
+    .email-log-table td:nth-child(2)::before { content: "Παραλήπτης"; }
+    .email-log-table td:nth-child(3)::before { content: "Θέμα"; }
+    .email-log-table td:nth-child(4)::before { content: "Τύπος"; }
+    .email-log-table td:nth-child(5)::before { content: "Κατάσταση"; }
+    .email-log-table td:nth-child(6)::before { content: "Σφάλμα"; }
+    .email-log-table td:nth-child(7)::before { content: "Ενέργειες"; }
+}
+</style>
+
+<div class="email-logs-page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <h2><i class="bi bi-envelope-check me-2"></i>Email Logs & Αναφορές</h2>
     <div>
         <button class="btn btn-outline-danger btn-sm" data-bs-toggle="modal" data-bs-target="#purgeModal">
@@ -234,7 +271,7 @@ include __DIR__ . '/includes/header.php';
                 <?php if (empty($domainStats)): ?>
                     <p class="text-muted text-center">Δεν υπάρχουν δεδομένα</p>
                 <?php else: ?>
-                    <table class="table table-sm mb-0">
+                    <table class="table table-sm mb-0 email-mini-table domain-stats-table table-mobile-opt-out">
                         <thead><tr><th>Domain</th><th class="text-center">OK</th><th class="text-center">Fail</th><th class="text-center">%</th></tr></thead>
                         <tbody>
                         <?php foreach ($domainStats as $ds): 
@@ -268,7 +305,7 @@ include __DIR__ . '/includes/header.php';
                 <?php if (empty($codeStats)): ?>
                     <p class="text-muted text-center">Δεν υπάρχουν δεδομένα</p>
                 <?php else: ?>
-                    <table class="table table-sm mb-0">
+                    <table class="table table-sm mb-0 email-mini-table code-stats-table table-mobile-opt-out">
                         <thead><tr><th>Κωδικός</th><th class="text-center">Σύνολο</th><th class="text-center">OK</th><th class="text-center">Fail</th></tr></thead>
                         <tbody>
                         <?php foreach ($codeStats as $cs): ?>
@@ -346,7 +383,7 @@ include __DIR__ . '/includes/header.php';
 
 <!-- Log Table -->
 <div class="card border-0 shadow-sm">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
         <span><i class="bi bi-list-ul me-1"></i>Αρχείο αποστολών (<?= number_format($total) ?>)</span>
     </div>
     <div class="card-body p-0">
@@ -356,8 +393,8 @@ include __DIR__ . '/includes/header.php';
                 <p class="mt-2">Δεν βρέθηκαν εγγραφές</p>
             </div>
         <?php else: ?>
-            <div class="table-responsive">
-                <table class="table table-hover table-sm mb-0">
+            <div class="table-responsive email-log-table-wrap">
+                <table class="table table-hover table-sm mb-0 email-log-table table-mobile-opt-out">
                     <thead class="table-light">
                         <tr>
                             <th style="width:140px">Ημερομηνία</th>

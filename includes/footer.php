@@ -192,6 +192,40 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
         tooltipTriggerList.map(function (el) {
             return new bootstrap.Tooltip(el);
         });
+
+        // Progressive mobile cards for regular data tables. Pages with a bespoke
+        // mobile view can opt out with .table-mobile-opt-out.
+        (function enhanceMobileDataTables() {
+            document.querySelectorAll('.main-content table.table').forEach(function(table) {
+                if (table.classList.contains('table-mobile-opt-out') ||
+                    table.closest('.mobile-cards-container, .note-editor, .fc, .table-mobile-opt-out') ||
+                    table.querySelector('tbody [data-label], tbody [data-vo-label]') ||
+                    !table.tHead || !table.tBodies.length) {
+                    return;
+                }
+
+                var headerRow = Array.from(table.tHead.rows).reverse().find(function(row) {
+                    return row.cells.length > 0;
+                });
+                if (!headerRow) return;
+
+                var labels = Array.from(headerRow.cells).map(function(cell) {
+                    return (cell.innerText || cell.textContent || '').replace(/\s+/g, ' ').trim();
+                });
+                if (labels.length < 2) return;
+
+                table.classList.add('vo-mobile-card-table');
+                Array.from(table.tBodies).forEach(function(tbody) {
+                    Array.from(tbody.rows).forEach(function(row) {
+                        Array.from(row.cells).forEach(function(cell, index) {
+                            var span = parseInt(cell.getAttribute('colspan') || '1', 10);
+                            cell.setAttribute('data-vo-label', span > 1 ? '' : (labels[index] || ''));
+                            if (span > 1) cell.setAttribute('data-vo-span', 'true');
+                        });
+                    });
+                });
+            });
+        })();
     </script>
     
     <?php if (isset($pageScripts)): ?>

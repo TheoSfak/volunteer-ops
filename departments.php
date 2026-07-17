@@ -81,7 +81,7 @@ if (isPost()) {
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
     <div>
         <h1 class="h3 mb-0">
             <i class="bi bi-shield me-2"></i>Σώματα
@@ -101,7 +101,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 <?php else: ?>
     <div class="table-responsive">
-        <table class="table table-hover align-middle">
+        <table class="table table-hover align-middle admin-mobile-cards">
             <thead>
                 <tr>
                     <th>Όνομα</th>
@@ -115,22 +115,22 @@ include __DIR__ . '/includes/header.php';
             <tbody>
                 <?php foreach ($departments as $d): ?>
                     <tr class="<?= !$d['is_active'] ? 'table-secondary' : '' ?>">
-                        <td><strong><?= h($d['name']) ?></strong></td>
-                        <td><?= h($d['description'] ?: '-') ?></td>
-                        <td class="text-center">
+                        <td data-label="Όνομα"><strong><?= h($d['name']) ?></strong></td>
+                        <td data-label="Περιγραφή"><?= h($d['description'] ?: '-') ?></td>
+                        <td data-label="Χρήστες" class="text-center">
                             <span class="badge bg-secondary"><?= $d['users_count'] ?></span>
                         </td>
-                        <td class="text-center">
+                        <td data-label="Αποστολές" class="text-center">
                             <span class="badge bg-primary"><?= $d['missions_count'] ?></span>
                         </td>
-                        <td>
+                        <td data-label="Κατάσταση">
                             <?php if ($d['is_active']): ?>
                                 <span class="badge bg-success">Ενεργό</span>
                             <?php else: ?>
                                 <span class="badge bg-secondary">Ανενεργό</span>
                             <?php endif; ?>
                         </td>
-                        <td>
+                        <td data-label="Ενέργειες" class="mobile-card-actions">
                             <button type="button" class="btn btn-sm btn-outline-primary" 
                                     onclick="editDept(<?= htmlspecialchars(json_encode($d)) ?>)">
                                 <i class="bi bi-pencil"></i>
@@ -152,6 +152,17 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 <?php endif; ?>
+
+<style>
+@media (max-width: 767.98px) {
+    .admin-mobile-cards thead { display: none; }
+    .admin-mobile-cards, .admin-mobile-cards tbody, .admin-mobile-cards tr, .admin-mobile-cards td { display: block; width: 100%; }
+    .admin-mobile-cards tr { margin: .75rem; width: calc(100% - 1.5rem); padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .admin-mobile-cards td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; text-align: right !important; }
+    .admin-mobile-cards td::before { content: attr(data-label); flex: 0 0 38%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .admin-mobile-cards .mobile-card-actions { align-items: center; padding-top: .75rem; border-top: 1px solid var(--bs-border-color); }
+}
+</style>
 
 <!-- Department Modal -->
 <div class="modal fade" id="deptModal">

@@ -137,7 +137,7 @@ if ($editId) {
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
     <h1 class="h3 mb-0">
         <i class="bi bi-geo-alt me-2"></i><?= h($pageTitle) ?>
     </h1>
@@ -162,7 +162,7 @@ include __DIR__ . '/includes/header.php';
             <div class="card">
                 <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-hover align-middle mb-0">
+                        <table class="table table-hover align-middle mb-0 admin-mobile-cards">
                             <thead>
                                 <tr>
                                     <th>Τοποθεσία</th>
@@ -176,7 +176,7 @@ include __DIR__ . '/includes/header.php';
                             <tbody>
                                 <?php foreach ($locations as $loc): ?>
                                     <tr class="<?= !$loc['is_active'] ? 'table-secondary' : '' ?>">
-                                        <td>
+                                        <td data-label="Τοποθεσία">
                                             <strong><?= h($loc['name']) ?></strong>
                                             <?php if ($loc['address']): ?>
                                                 <br><small class="text-muted"><i class="bi bi-pin-map me-1"></i><?= h($loc['address']) ?></small>
@@ -185,7 +185,7 @@ include __DIR__ . '/includes/header.php';
                                                 <br><small class="text-muted"><?= h($loc['notes']) ?></small>
                                             <?php endif; ?>
                                         </td>
-                                        <td>
+                                        <td data-label="Τύπος">
                                             <?php
                                             $typeIcons = ['warehouse' => 'bi-building', 'vehicle' => 'bi-truck', 'room' => 'bi-door-open', 'other' => 'bi-pin-map'];
                                             $typeIcon = $typeIcons[$loc['location_type']] ?? 'bi-pin-map';
@@ -194,24 +194,24 @@ include __DIR__ . '/includes/header.php';
                                                 <i class="bi <?= $typeIcon ?> me-1"></i><?= h($locationTypes[$loc['location_type']] ?? $loc['location_type']) ?>
                                             </span>
                                         </td>
-                                        <td>
+                                        <td data-label="Αποθήκη">
                                             <?php if ($loc['warehouse_name']): ?>
                                                 <span class="badge bg-info"><?= h($loc['warehouse_name']) ?></span>
                                             <?php else: ?>
                                                 <span class="text-muted">-</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td class="text-center">
+                                        <td data-label="Υλικά" class="text-center">
                                             <span class="badge bg-primary"><?= $loc['item_count'] ?></span>
                                         </td>
-                                        <td>
+                                        <td data-label="Κατάσταση">
                                             <?php if ($loc['is_active']): ?>
                                                 <span class="badge bg-success">Ενεργή</span>
                                             <?php else: ?>
                                                 <span class="badge bg-secondary">Ανενεργή</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td class="text-end">
+                                        <td data-label="Ενέργειες" class="text-end mobile-card-actions">
                                             <div class="btn-group btn-group-sm">
                                                 <a href="?edit=<?= $loc['id'] ?>" class="btn btn-outline-secondary" title="Επεξεργασία">
                                                     <i class="bi bi-pencil"></i>
@@ -330,5 +330,16 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<style>
+@media (max-width: 767.98px) {
+    .admin-mobile-cards thead { display: none; }
+    .admin-mobile-cards, .admin-mobile-cards tbody, .admin-mobile-cards tr, .admin-mobile-cards td { display: block; width: 100%; }
+    .admin-mobile-cards tr { margin: .75rem; width: calc(100% - 1.5rem); padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .admin-mobile-cards td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; text-align: right !important; }
+    .admin-mobile-cards td::before { content: attr(data-label); flex: 0 0 38%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .admin-mobile-cards .mobile-card-actions { align-items: center; padding-top: .75rem; border-top: 1px solid var(--bs-border-color); }
+}
+</style>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
