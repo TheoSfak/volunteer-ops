@@ -236,6 +236,9 @@ $sortColumns = [
 ];
 if (!isset($sortColumns[$sort])) $sort = 'expiry';
 if (!in_array($sortDirection, ['asc', 'desc'], true)) $sortDirection = 'asc';
+$allowedPerPage = [25, 50, 100];
+$perPage = (int)get('per_page', 25);
+if (!in_array($perPage, $allowedPerPage, true)) $perPage = 25;
 $sortDirectionSql = strtoupper($sortDirection);
 $sortOrderSql = $sortColumns[$sort] . ' ' . $sortDirectionSql;
 if ($sort === 'surname') $sortOrderSql .= ', u.name ' . $sortDirectionSql;
@@ -247,6 +250,7 @@ foreach (array_keys($sortColumns) as $sortKey) {
         'filter' => $filter,
         'sort' => $sortKey,
         'dir' => $nextDirection,
+        'per_page' => $perPage,
     ]);
 }
 $sortIcon = static function (string $sortKey) use ($sort, $sortDirection): string {
@@ -266,16 +270,30 @@ $counts = [];
 foreach (['week', 'month', 'quarter', 'expired'] as $key) {
     $counts[$key] = (int)dbFetchValue("SELECT COUNT(*) FROM volunteer_subscriptions vs WHERE {$latestOnly} AND {$filterSql[$key]}");
 }
-$rows = dbFetchAll("SELECT vs.*, u.name AS volunteer_name, u.email, creator.name AS created_by_name,
+$isExcelExport = get('export') === 'excel';
+$filteredTotal = (int)dbFetchValue("SELECT COUNT(*) FROM volunteer_subscriptions vs WHERE {$latestOnly} AND {$filterSql[$filter]}");
+$totalPages = max(1, (int)ceil($filteredTotal / $perPage));
+$currentPage = max(1, (int)get('page', 1));
+if ($currentPage > $totalPages) $currentPage = $totalPages;
+$offset = ($currentPage - 1) * $perPage;
+$rowsSql = "SELECT vs.*, u.name AS volunteer_name, u.email, creator.name AS created_by_name,
         iris.id AS iris_request_id, iris.coverage_years AS iris_coverage_years, iris.total_amount AS iris_total_amount,
         iris.payment_reported_at AS iris_payment_reported_at, iris.status AS iris_status, iris.seen_at AS iris_seen_at
     FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id LEFT JOIN users creator ON creator.id = vs.created_by
     LEFT JOIN subscription_iris_requests iris ON iris.id = (SELECT sir.id FROM subscription_iris_requests sir WHERE sir.user_id = vs.user_id AND sir.status IN ('REPORTED', 'SEEN') ORDER BY sir.id DESC LIMIT 1)
-    WHERE {$latestOnly} AND {$filterSql[$filter]} ORDER BY {$sortOrderSql}");
+    WHERE {$latestOnly} AND {$filterSql[$filter]} ORDER BY {$sortOrderSql}";
+if (!$isExcelExport) $rowsSql .= " LIMIT {$perPage} OFFSET {$offset}";
+$rows = dbFetchAll($rowsSql);
+$paginationPages = [1, $totalPages];
+for ($pageNumber = $currentPage - 2; $pageNumber <= $currentPage + 2; $pageNumber++) {
+    if ($pageNumber >= 1 && $pageNumber <= $totalPages) $paginationPages[] = $pageNumber;
+}
+$paginationPages = array_values(array_unique($paginationPages));
+sort($paginationPages);
 $editing = get('edit') ? dbFetchOne("SELECT vs.*, u.name AS volunteer_name FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id WHERE vs.id = ?", [(int)get('edit')]) : null;
 $irisRequestForPayment = get('iris_request') ? dbFetchOne("SELECT sir.*, u.name AS volunteer_name FROM subscription_iris_requests sir JOIN users u ON u.id = sir.user_id WHERE sir.id = ? AND sir.status IN ('REPORTED', 'SEEN')", [(int)get('iris_request')]) : null;
 
-if (get('export') === 'excel') {
+if ($isExcelExport) {
     $filterLabels = ['all' => 'oles', 'week' => '1-evdomada', 'month' => '1-minas', 'quarter' => '3-mines', 'expired' => 'ligmenes'];
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="subscriptions-' . $filterLabels[$filter] . '-' . date('Y-m-d') . '.csv"');
@@ -295,11 +313,17 @@ if (get('export') === 'excel') {
     exit;
 }
 
+$historyRows = dbFetchAll("SELECT vs.*, u.name AS volunteer_name, u.email, creator.name AS created_by_name
+    FROM volunteer_subscriptions vs
+    JOIN users u ON u.id = vs.user_id
+    LEFT JOIN users creator ON creator.id = vs.created_by
+    ORDER BY vs.payment_date DESC, vs.id DESC");
+
 include __DIR__ . '/includes/header.php';
 ?>
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0"><i class="bi bi-cash-coin me-2"></i>Ετήσιες Συνδρομές</h1>
-    <div class="d-flex gap-2"><a class="btn btn-outline-success" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'export' => 'excel'])) ?>"><i class="bi bi-file-earmark-excel me-1"></i>Εξαγωγή Excel</a><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button></div>
+    <div class="d-flex flex-wrap gap-2"><button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#subscriptionPaymentHistory" aria-expanded="false" aria-controls="subscriptionPaymentHistory"><i class="bi bi-clock-history me-1"></i>Ιστορικό πληρωμών <span class="badge text-bg-secondary ms-1"><?= count($historyRows) ?></span></button><a class="btn btn-outline-success" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'export' => 'excel'])) ?>"><i class="bi bi-file-earmark-excel me-1"></i>Εξαγωγή Excel</a><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button></div>
 </div>
 <?php if ($editing): ?>
 <div class="card border-primary mb-3">
@@ -324,7 +348,7 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 <div class="d-flex flex-wrap gap-2 mb-3">
     <?php foreach (['all' => ['Όλες', null, 'secondary'], 'week' => ['Λήγουν σε 1 εβδομάδα', $counts['week'], 'danger'], 'month' => ['Λήγουν σε 1 μήνα', $counts['month'], 'warning'], 'quarter' => ['Λήγουν σε 3 μήνες', $counts['quarter'], 'info'], 'expired' => ['Ληγμένες', $counts['expired'], 'dark']] as $key => [$label, $count, $color]): ?>
-        <a href="subscriptions.php?<?= h(http_build_query(['filter' => $key, 'sort' => $sort, 'dir' => $sortDirection])) ?>" class="btn btn-sm <?= $filter === $key ? 'btn-' . $color : 'btn-outline-' . $color ?>"><?= $label ?><?php if ($count !== null): ?> <span class="badge text-bg-light ms-1"><?= $count ?></span><?php endif; ?></a>
+        <a href="subscriptions.php?<?= h(http_build_query(['filter' => $key, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage])) ?>" class="btn btn-sm <?= $filter === $key ? 'btn-' . $color : 'btn-outline-' . $color ?>"><?= $label ?><?php if ($count !== null): ?> <span class="badge text-bg-light ms-1"><?= $count ?></span><?php endif; ?></a>
     <?php endforeach; ?>
 </div>
 <style>
@@ -342,6 +366,79 @@ include __DIR__ . '/includes/header.php';
 <?php endforeach; ?>
 <?php if (!$rows): ?><tr><td colspan="11" class="text-center text-muted py-4">Δεν υπάρχουν καταχωρημένες συνδρομές.</td></tr><?php endif; ?>
 </tbody></table></div></div>
+
+<?php if ($filteredTotal > 0): ?>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
+    <div class="d-flex flex-wrap align-items-center gap-3">
+        <div class="small text-muted">Εμφάνιση <?= $offset + 1 ?>–<?= min($offset + $perPage, $filteredTotal) ?> από <?= $filteredTotal ?> συνδρομές</div>
+        <form method="get" class="d-flex align-items-center gap-2">
+            <input type="hidden" name="filter" value="<?= h($filter) ?>">
+            <input type="hidden" name="sort" value="<?= h($sort) ?>">
+            <input type="hidden" name="dir" value="<?= h($sortDirection) ?>">
+            <label for="subscriptionsPerPage" class="small text-muted text-nowrap">Ανά σελίδα</label>
+            <select class="form-select form-select-sm" id="subscriptionsPerPage" name="per_page" onchange="this.form.submit()" style="width:auto">
+                <?php foreach ($allowedPerPage as $perPageOption): ?><option value="<?= $perPageOption ?>" <?= $perPage === $perPageOption ? 'selected' : '' ?>><?= $perPageOption ?></option><?php endforeach; ?>
+            </select>
+        </form>
+    </div>
+    <?php if ($totalPages > 1): ?>
+    <nav aria-label="Σελιδοποίηση συνδρομών">
+        <ul class="pagination pagination-sm mb-0">
+            <li class="page-item <?= $currentPage <= 1 ? 'disabled' : '' ?>">
+                <?php if ($currentPage <= 1): ?><span class="page-link" aria-hidden="true">&laquo;</span><?php else: ?><a class="page-link" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $currentPage - 1])) ?>" aria-label="Προηγούμενη σελίδα">&laquo;</a><?php endif; ?>
+            </li>
+            <?php $previousPaginationPage = null; ?>
+            <?php foreach ($paginationPages as $paginationPage): ?>
+                <?php if ($previousPaginationPage !== null && $paginationPage > $previousPaginationPage + 1): ?><li class="page-item disabled"><span class="page-link">…</span></li><?php endif; ?>
+                <li class="page-item <?= $paginationPage === $currentPage ? 'active' : '' ?>" <?= $paginationPage === $currentPage ? 'aria-current="page"' : '' ?>>
+                    <?php if ($paginationPage === $currentPage): ?><span class="page-link"><?= $paginationPage ?></span><?php else: ?><a class="page-link" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $paginationPage])) ?>"><?= $paginationPage ?></a><?php endif; ?>
+                </li>
+                <?php $previousPaginationPage = $paginationPage; ?>
+            <?php endforeach; ?>
+            <li class="page-item <?= $currentPage >= $totalPages ? 'disabled' : '' ?>">
+                <?php if ($currentPage >= $totalPages): ?><span class="page-link" aria-hidden="true">&raquo;</span><?php else: ?><a class="page-link" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $currentPage + 1])) ?>" aria-label="Επόμενη σελίδα">&raquo;</a><?php endif; ?>
+            </li>
+        </ul>
+    </nav>
+    <?php endif; ?>
+</div>
+<?php endif; ?>
+
+<div class="collapse mt-3" id="subscriptionPaymentHistory">
+    <div class="card shadow-sm border-secondary">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>Ιστορικό πληρωμών συνδρομών</h5>
+            <input type="search" class="form-control form-control-sm" id="subscriptionHistorySearch" style="max-width:320px" placeholder="Αναζήτηση εθελοντή ή απόδειξης…" autocomplete="off">
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead><tr><th>Εθελοντής</th><th>Πληρωμή</th><th>Λήξη</th><th>Έτη</th><th>Ποσό</th><th>Τρόπος</th><th>Αρ. απόδειξης</th><th>Απόδειξη</th><th>Καταχώρηση από</th></tr></thead>
+                <tbody>
+                <?php foreach ($historyRows as $historyRow): ?>
+                    <?php
+                    $historyReceiptPath = __DIR__ . '/uploads/subscription-receipts/' . basename((string)$historyRow['receipt_stored_name']);
+                    $historyHasReceipt = !empty($historyRow['receipt_stored_name']) && is_file($historyReceiptPath);
+                    $historyReceiptIsImage = $historyHasReceipt && in_array(strtolower(pathinfo($historyRow['receipt_stored_name'], PATHINFO_EXTENSION)), ['jpg', 'jpeg', 'png'], true);
+                    $historySearchText = $historyRow['volunteer_name'] . ' ' . $historyRow['email'] . ' ' . ($historyRow['receipt_number'] ?? '');
+                    ?>
+                    <tr class="subscription-history-row" data-history-search="<?= h($historySearchText) ?>">
+                        <td><a href="volunteer-view.php?id=<?= (int)$historyRow['user_id'] ?>"><?= h($historyRow['volunteer_name']) ?></a><div class="small text-muted"><?= h($historyRow['email']) ?></div></td>
+                        <td class="text-nowrap"><?= formatDate($historyRow['payment_date']) ?></td>
+                        <td class="text-nowrap"><?= formatDate($historyRow['expiry_date']) ?></td>
+                        <td><?= (int)($historyRow['coverage_years'] ?? 1) ?></td>
+                        <td class="text-nowrap"><?= $historyRow['amount'] !== null ? number_format((float)$historyRow['amount'], 2, ',', '.') . ' €' : '—' ?></td>
+                        <td><?= h($historyRow['payment_method'] ?: '—') ?></td>
+                        <td><?= h($historyRow['receipt_number'] ?: '—') ?></td>
+                        <td><?php if ($historyHasReceipt): ?><button type="button" class="btn btn-sm btn-outline-secondary receipt-preview-btn" data-bs-toggle="modal" data-bs-target="#receiptPreviewModal" data-preview-url="subscription-receipt.php?id=<?= (int)$historyRow['id'] ?>" data-preview-name="<?= h($historyRow['receipt_original_name'] ?: 'Απόδειξη ' . formatDate($historyRow['payment_date'])) ?>" data-preview-type="<?= $historyReceiptIsImage ? 'image' : 'pdf' ?>"><i class="bi <?= $historyReceiptIsImage ? 'bi-image' : 'bi-file-earmark-pdf' ?>"></i> Προβολή</button><?php elseif (!empty($historyRow['receipt_stored_name'])): ?><span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Μη διαθέσιμη</span><?php else: ?>—<?php endif; ?></td>
+                        <td><?= h($historyRow['created_by_name'] ?: '—') ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                <?php if (!$historyRows): ?><tr><td colspan="9" class="text-center text-muted py-4">Δεν υπάρχει ιστορικό πληρωμών.</td></tr><?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
 
 <div class="modal fade" id="receiptPreviewModal" tabindex="-1" aria-labelledby="receiptPreviewModalTitle" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -387,6 +484,16 @@ include __DIR__ . '/includes/header.php';
         receiptPreviewModal.addEventListener('hidden.bs.modal', () => {
             previewImage.removeAttribute('src');
             previewPdf.removeAttribute('src');
+        });
+    }
+
+    const historySearch = document.getElementById('subscriptionHistorySearch');
+    if (historySearch) {
+        historySearch.addEventListener('input', () => {
+            const query = historySearch.value.trim().toLocaleLowerCase('el-GR');
+            document.querySelectorAll('.subscription-history-row').forEach(row => {
+                row.hidden = query !== '' && !row.dataset.historySearch.toLocaleLowerCase('el-GR').includes(query);
+            });
         });
     }
 
