@@ -672,6 +672,15 @@ $liveExams = dbFetchAll("
     .dashboard-progress-header > .d-flex { width: 100%; flex-wrap: wrap; }
     .volunteer-shift-card > .d-flex { flex-direction: column; gap: .5rem; }
     .volunteer-shift-card .text-end { text-align: left !important; }
+    .overdue-mission-row { flex-wrap: wrap; }
+    .overdue-mission-row > .flex-grow-1 { min-width: 0; }
+    .overdue-mission-actions {
+        flex: 1 0 100%;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+        min-width: 0 !important;
+    }
+    .overdue-mission-actions .btn { min-width: 0; white-space: normal; }
 }
 </style>
 
@@ -1132,7 +1141,7 @@ $randomQuote = $quotes[array_rand($quotes)];
             $fullyCovered = $capacity > 0 && $approved >= $capacity;
         ?>
         <div class="list-group-item list-group-item-danger">
-            <div class="d-flex align-items-start gap-3">
+            <div class="d-flex align-items-start gap-3 overdue-mission-row">
                 <div class="pt-1">
                     <input class="form-check-input overdue-mission-check" type="checkbox"
                            name="mission_ids[]" value="<?= $om['id'] ?>"
@@ -1181,7 +1190,7 @@ $randomQuote = $quotes[array_rand($quotes)];
                         </div>
                     </div>
             </div>
-                <div class="d-grid gap-1" style="min-width:160px;">
+                <div class="d-grid gap-1 overdue-mission-actions" style="min-width:160px;">
                     <a href="attendance.php?mission_id=<?= $om['id'] ?>" class="btn btn-sm btn-info">
                         <i class="bi bi-clipboard-check me-1"></i>Παρουσίες
                     </a>
