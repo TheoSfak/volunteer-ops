@@ -124,7 +124,7 @@ if (isPost()) {
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
     <h1 class="h3 mb-0">
         <i class="bi bi-person-x me-2 text-secondary"></i>Ανενεργοί Εθελοντές
     </h1>
@@ -180,7 +180,7 @@ include __DIR__ . '/includes/header.php';
 <?php else: ?>
     <p class="text-muted">Σύνολο: <strong><?= $total ?></strong> ανενεργοί εθελοντές</p>
     <div class="table-responsive">
-        <table class="table table-hover align-middle">
+        <table class="table table-hover align-middle admin-mobile-cards">
             <thead>
                 <tr>
                     <th>Εθελοντής</th>
@@ -196,7 +196,7 @@ include __DIR__ . '/includes/header.php';
             <tbody>
                 <?php foreach ($volunteers as $v): ?>
                     <tr class="table-secondary">
-                        <td>
+                        <td data-label="Εθελοντής">
                             <a href="volunteer-view.php?id=<?= $v['id'] ?>" class="text-decoration-none text-dark">
                                 <strong><?= h($v['name']) ?></strong>
                                 <?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_VOLUNTEER) ?>
@@ -206,20 +206,20 @@ include __DIR__ . '/includes/header.php';
                                 <br><small class="text-muted"><i class="bi bi-telephone"></i> <?= h($v['phone']) ?></small>
                             <?php endif; ?>
                         </td>
-                        <td><?= roleBadge($v['role']) ?></td>
-                        <td><?= h($v['department_name'] ?? '-') ?></td>
-                        <td class="text-center">
+                        <td data-label="Ρόλος"><?= roleBadge($v['role']) ?></td>
+                        <td data-label="Σώμα"><?= h($v['department_name'] ?? '-') ?></td>
+                        <td data-label="Βάρδιες" class="text-center">
                             <?= $v['shifts_count'] ?>
                             <?php if ($v['total_hours'] > 0): ?>
                                 <br><small class="text-muted"><?= number_format($v['total_hours'], 1) ?> ώρες</small>
                             <?php endif; ?>
                         </td>
                         <?php if (getSetting('points_enabled', '1') === '1'): ?>
-                        <td class="text-center">
+                        <td data-label="Πόντοι" class="text-center">
                             <span class="badge bg-warning text-dark"><?= number_format($v['total_points']) ?></span>
                         </td>
                         <?php endif; ?>
-                        <td>
+                        <td data-label="Ενέργειες" class="mobile-card-actions">
                             <div class="dropdown">
                                 <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
                                     <i class="bi bi-three-dots"></i>
@@ -303,5 +303,18 @@ include __DIR__ . '/includes/header.php';
 
     <?= paginationLinks($pagination) ?>
 <?php endif; ?>
+
+<style>
+@media (max-width: 767.98px) {
+    .admin-mobile-cards thead { display: none; }
+    .admin-mobile-cards, .admin-mobile-cards tbody, .admin-mobile-cards tr, .admin-mobile-cards td { display: block; width: 100%; }
+    .admin-mobile-cards tr { margin: .75rem; width: calc(100% - 1.5rem); padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .admin-mobile-cards td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; text-align: right !important; }
+    .admin-mobile-cards td::before { content: attr(data-label); flex: 0 0 34%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .admin-mobile-cards td[data-label="Εθελοντής"] { display: block; text-align: left !important; }
+    .admin-mobile-cards td[data-label="Εθελοντής"]::before { display: none; }
+    .admin-mobile-cards .mobile-card-actions { align-items: center; padding-top: .75rem; border-top: 1px solid var(--bs-border-color); }
+}
+</style>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

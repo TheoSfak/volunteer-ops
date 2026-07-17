@@ -277,7 +277,7 @@ include __DIR__ . '/includes/header.php';
 <div class="container-fluid">
     <?php displayFlash(); ?>
     
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
         <h1 class="h3 mb-0">
             <i class="bi bi-collection me-2"></i>Pool Ερωτήσεων
         </h1>
@@ -398,7 +398,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
             <?php else: ?>
                 <div class="table-responsive">
-                    <table class="table table-hover">
+                    <table class="table table-hover admin-mobile-cards">
                         <thead>
                             <tr>
                                 <th style="width: 40px;">
@@ -415,14 +415,14 @@ include __DIR__ . '/includes/header.php';
                         <tbody>
                             <?php foreach ($questions as $q): ?>
                                 <tr>
-                                    <td>
+                                    <td data-label="Επιλογή">
                                         <input type="checkbox" class="form-check-input question-checkbox" value="<?= $q['id'] ?>">
                                     </td>
-                                    <td><?= $q['id'] ?></td>
-                                    <td>
+                                    <td data-label="ID"><?= $q['id'] ?></td>
+                                    <td data-label="Ερώτηση">
                                         <?= h(mb_substr($q['question_text'], 0, 100)) ?><?= mb_strlen($q['question_text']) > 100 ? '...' : '' ?>
                                     </td>
-                                    <td>
+                                    <td data-label="Τύπος">
                                         <?php
                                         $typeLabels = [
                                             'MULTIPLE_CHOICE' => 'Πολλαπλής',
@@ -432,15 +432,15 @@ include __DIR__ . '/includes/header.php';
                                         echo '<span class="badge bg-secondary">' . h($typeLabels[$q['question_type']] ?? $q['question_type']) . '</span>';
                                         ?>
                                     </td>
-                                    <td><span class="badge bg-warning"><?= h($q['category_name']) ?></span></td>
-                                    <td>
+                                    <td data-label="Κατηγορία"><span class="badge bg-warning"><?= h($q['category_name']) ?></span></td>
+                                    <td data-label="Ανάθεση">
                                         <?php if (empty($q['assigned_to'])): ?>
                                             <span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>Μη Ανατεθειμένη</span>
                                         <?php else: ?>
                                             <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i><?= h($q['assigned_to']) ?></span>
                                         <?php endif; ?>
                                     </td>
-                                    <td>
+                                    <td data-label="Ενέργειες" class="mobile-card-actions">
                                         <div class="btn-group btn-group-sm">
                                             <button class="btn btn-info" onclick="viewQuestion(<?= $q['id'] ?>)" title="Προβολή">
                                                 <i class="bi bi-eye"></i>
@@ -958,5 +958,21 @@ function editQuestion(id) {
     .catch(err => alert('Σφάλμα φόρτωσης ερώτησης'));
 }
 </script>
+
+<style>
+@media (max-width: 767.98px) {
+    .nav-tabs { flex-wrap: nowrap; overflow-x: auto; }
+    .nav-tabs .nav-link { white-space: nowrap; }
+    .admin-mobile-cards thead { display: none; }
+    .admin-mobile-cards, .admin-mobile-cards tbody, .admin-mobile-cards tr, .admin-mobile-cards td { display: block; width: 100%; }
+    .admin-mobile-cards tr { margin-bottom: .85rem; padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .admin-mobile-cards td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; text-align: right !important; overflow-wrap: anywhere; }
+    .admin-mobile-cards td::before { content: attr(data-label); flex: 0 0 32%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .admin-mobile-cards td[data-label="Ερώτηση"] { display: block; text-align: left !important; }
+    .admin-mobile-cards td[data-label="Ερώτηση"]::before { display: block; margin-bottom: .25rem; }
+    .admin-mobile-cards .mobile-card-actions { align-items: center; padding-top: .75rem; border-top: 1px solid var(--bs-border-color); }
+    .admin-mobile-cards .btn-group { flex-wrap: wrap; }
+}
+</style>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

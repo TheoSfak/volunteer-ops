@@ -46,7 +46,7 @@ $kits = dbFetchAll("
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
     <h1 class="h3 mb-0">
         <i class="bi bi-briefcase me-2"></i><?= h($pageTitle) ?>
     </h1>
@@ -60,7 +60,7 @@ include __DIR__ . '/includes/header.php';
 <div class="card">
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
+            <table class="table table-hover align-middle mb-0 admin-mobile-cards">
                 <thead class="table-light">
                     <tr>
                         <th>Όνομα Σετ</th>
@@ -81,19 +81,19 @@ include __DIR__ . '/includes/header.php';
                     <?php else: ?>
                         <?php foreach ($kits as $k): ?>
                         <tr>
-                            <td>
+                            <td data-label="Όνομα Σετ">
                                 <strong><?= h($k['name']) ?></strong>
                                 <?php if ($k['description']): ?>
                                     <br><small class="text-muted"><?= h($k['description']) ?></small>
                                 <?php endif; ?>
                             </td>
-                            <td><span class="badge bg-secondary font-monospace"><?= h($k['barcode']) ?></span></td>
-                            <td><?= h($k['department_name'] ?: 'Όλα τα Τμήματα') ?></td>
-                            <td>
+                            <td data-label="Barcode"><span class="badge bg-secondary font-monospace"><?= h($k['barcode']) ?></span></td>
+                            <td data-label="Τμήμα"><?= h($k['department_name'] ?: 'Όλα τα Τμήματα') ?></td>
+                            <td data-label="Πλήθος Υλικών">
                                 <span class="badge bg-info text-dark"><?= $k['item_count'] ?> υλικά</span>
                             </td>
-                            <td><small class="text-muted"><?= h($k['creator_name']) ?></small></td>
-                            <td class="text-end">
+                            <td data-label="Δημιουργός"><small class="text-muted"><?= h($k['creator_name']) ?></small></td>
+                            <td data-label="Ενέργειες" class="text-end mobile-card-actions">
                                 <a href="inventory-book.php?kit_id=<?= $k['id'] ?>" class="btn btn-sm btn-success" title="Χρέωση Σετ">
                                     <i class="bi bi-upc-scan"></i>
                                 </a>
@@ -147,5 +147,16 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<style>
+@media (max-width: 767.98px) {
+    .admin-mobile-cards thead { display: none; }
+    .admin-mobile-cards, .admin-mobile-cards tbody, .admin-mobile-cards tr, .admin-mobile-cards td { display: block; width: 100%; }
+    .admin-mobile-cards tr:not(:has(td[colspan])) { margin: .75rem; width: calc(100% - 1.5rem); padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .admin-mobile-cards tr:not(:has(td[colspan])) td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; text-align: right !important; }
+    .admin-mobile-cards tr:not(:has(td[colspan])) td::before { content: attr(data-label); flex: 0 0 38%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .admin-mobile-cards .mobile-card-actions { align-items: center; flex-wrap: wrap; padding-top: .75rem !important; border-top: 1px solid var(--bs-border-color) !important; }
+}
+</style>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

@@ -94,7 +94,7 @@ include __DIR__ . '/includes/header.php';
 ?>
 
 <!-- Page Header -->
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
     <div>
         <h1 class="h3 mb-1"><i class="bi bi-award me-2"></i>Τύποι Πιστοποιητικών</h1>
         <p class="text-muted mb-0">Διαχείριση τύπων πιστοποιητικών εθελοντών</p>
@@ -107,7 +107,7 @@ include __DIR__ . '/includes/header.php';
 <?= showFlash() ?>
 
 <!-- Stats -->
-<div class="d-flex gap-3 mb-3">
+<div class="d-flex flex-wrap gap-3 mb-3">
     <div class="card border-0 bg-primary bg-opacity-10 px-3 py-2">
         <small class="text-muted">Σύνολο Τύπων</small>
         <div class="fw-bold fs-5"><?= count($types) ?></div>
@@ -125,7 +125,7 @@ include __DIR__ . '/includes/header.php';
 <!-- Types Table -->
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
+        <table class="table table-hover align-middle mb-0 admin-mobile-cards">
             <thead class="table-light">
                 <tr>
                     <th>Τύπος</th>
@@ -143,33 +143,33 @@ include __DIR__ . '/includes/header.php';
                 <?php else: ?>
                     <?php foreach ($types as $t): ?>
                     <tr class="<?= !$t['is_active'] ? 'table-secondary' : '' ?>">
-                        <td class="fw-semibold">
+                        <td data-label="Τύπος" class="fw-semibold">
                             <i class="bi bi-award me-1 <?= $t['is_required'] ? 'text-danger' : 'text-primary' ?>"></i>
                             <?= h($t['name']) ?>
                         </td>
-                        <td class="text-muted small"><?= h($t['description'] ?? '—') ?></td>
-                        <td class="text-center">
+                        <td data-label="Περιγραφή" class="text-muted small"><?= h($t['description'] ?? '—') ?></td>
+                        <td data-label="Ισχύς" class="text-center">
                             <?php if ($t['default_validity_months']): ?>
                                 <span class="badge bg-info"><?= $t['default_validity_months'] ?> μήνες</span>
                             <?php else: ?>
                                 <span class="text-muted">Αόριστη</span>
                             <?php endif; ?>
                         </td>
-                        <td class="text-center">
+                        <td data-label="Υποχρεωτικό" class="text-center">
                             <?php if ($t['is_required']): ?>
                                 <span class="badge bg-danger">Ναι</span>
                             <?php else: ?>
                                 <span class="text-muted">Όχι</span>
                             <?php endif; ?>
                         </td>
-                        <td class="text-center">
+                        <td data-label="Κατάσταση" class="text-center">
                             <?php if ($t['is_active']): ?>
                                 <span class="badge bg-success">Ενεργός</span>
                             <?php else: ?>
                                 <span class="badge bg-secondary">Ανενεργός</span>
                             <?php endif; ?>
                         </td>
-                        <td class="text-center">
+                        <td data-label="Πιστοποιητικά" class="text-center">
                             <?php if ($t['cert_count'] > 0): ?>
                                 <span class="badge bg-primary"><?= $t['cert_count'] ?></span>
                                 <?php if ($t['expired_count'] > 0): ?>
@@ -179,7 +179,7 @@ include __DIR__ . '/includes/header.php';
                                 <span class="text-muted small">—</span>
                             <?php endif; ?>
                         </td>
-                        <td class="text-end pe-3">
+                        <td data-label="Ενέργειες" class="text-end pe-3 mobile-card-actions">
                             <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal"
                                     data-bs-target="#editModal<?= $t['id'] ?>" title="Επεξεργασία">
                                 <i class="bi bi-pencil"></i>
@@ -196,6 +196,17 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
+
+<style>
+@media (max-width: 767.98px) {
+    .admin-mobile-cards thead { display: none; }
+    .admin-mobile-cards, .admin-mobile-cards tbody, .admin-mobile-cards tr, .admin-mobile-cards td { display: block; width: 100%; }
+    .admin-mobile-cards tr:not(:has(td[colspan])) { margin: .75rem; width: calc(100% - 1.5rem); padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .admin-mobile-cards tr:not(:has(td[colspan])) td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; text-align: right !important; }
+    .admin-mobile-cards tr:not(:has(td[colspan])) td::before { content: attr(data-label); flex: 0 0 38%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .admin-mobile-cards .mobile-card-actions { align-items: center; padding-top: .75rem !important; border-top: 1px solid var(--bs-border-color) !important; }
+}
+</style>
 
 <!-- ════ CREATE MODAL ═══════════════════════════════════════════════════════ -->
 <div class="modal fade" id="createModal" tabindex="-1">

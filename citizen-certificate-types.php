@@ -67,7 +67,28 @@ $types = dbFetchAll("SELECT cct.*, (SELECT COUNT(*) FROM citizen_certificates cc
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<style>
+@media (max-width: 767.98px) {
+    .certificate-types-table-wrap { overflow: visible; }
+    .certificate-types-table thead { display: none; }
+    .certificate-types-table, .certificate-types-table tbody, .certificate-types-table tr, .certificate-types-table td { display: block; width: 100%; }
+    .certificate-types-table tbody { padding: .75rem; }
+    .certificate-types-table tr { margin-bottom: .75rem; padding: .35rem .8rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .certificate-types-table td { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border: 0; border-bottom: 1px solid var(--bs-border-color-translucent); text-align: right !important; }
+    .certificate-types-table td:last-child { border: 0; }
+    .certificate-types-table td::before { flex: 0 0 36%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .certificate-types-table td:nth-child(1)::before { content: "#"; }
+    .certificate-types-table td:nth-child(2)::before { content: "Όνομα"; }
+    .certificate-types-table td:nth-child(3)::before { content: "Περιγραφή"; }
+    .certificate-types-table td:nth-child(4)::before { content: "Κατάσταση"; }
+    .certificate-types-table td:nth-child(5)::before { content: "Χρήσεις"; }
+    .certificate-types-table td:nth-child(6)::before { content: "Ενέργειες"; }
+    .certificate-types-table td[colspan]::before { display: none; }
+    .certificate-types-table td[colspan] { display: block; text-align: center !important; }
+}
+</style>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <h2><i class="bi bi-tags"></i> Τύποι Πιστοποιητικών</h2>
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#typeModal" onclick="resetForm()">
         <i class="bi bi-plus-lg"></i> Νέος Τύπος
@@ -79,8 +100,8 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-list"></i> Σύνολο: <strong><?= count($types) ?></strong> τύποι
     </div>
     <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-hover table-striped mb-0">
+        <div class="table-responsive certificate-types-table-wrap">
+            <table class="table table-hover table-striped mb-0 certificate-types-table table-mobile-opt-out">
                 <thead class="table-light">
                     <tr>
                         <th>#</th>

@@ -425,9 +425,19 @@ include __DIR__ . '/includes/header.php';
 .refresh-badge     { font-size:.75rem; }
 .countdown         { font-size:.8rem; font-weight:600; }
 #alertBanner .alert { margin-bottom: 6px; }
+@media (max-width: 767.98px) {
+    .ops-page-header { align-items: stretch !important; }
+    .ops-page-header > .d-flex { flex-wrap: wrap; width: 100%; gap: .5rem !important; }
+    .ops-page-header .btn { width: 100%; }
+    .ops-mission-card .card-header { align-items: flex-start !important; flex-direction: column; gap: .75rem; }
+    .ops-mission-card .card-header > .d-flex { width: 100%; flex-wrap: wrap; }
+    .ops-mission-card .card-header > .d-flex:last-child { justify-content: flex-start; }
+    .shift-row { padding: .75rem; }
+    #alertBanner .alert { align-items: flex-start !important; overflow-wrap: anywhere; }
+}
 </style>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="ops-page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
     <h1 class="h3 mb-0">
         <i class="bi bi-broadcast text-danger me-2"></i>Επιχειρησιακό Dashboard
     </h1>

@@ -46,7 +46,30 @@ $userPrefs = getUserNotificationPrefs($userId);
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<style>
+@media (max-width: 767.98px) {
+    .notification-table-wrap { overflow: visible; }
+    .notification-table thead { display: none; }
+    .notification-table, .notification-table tbody, .notification-table tr, .notification-table td { display: block; width: 100%; }
+    .notification-table tbody { padding: 0; }
+    .notification-table tr { margin-bottom: .75rem; padding: .35rem .8rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .notification-table td { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .55rem 0; border: 0; border-bottom: 1px solid var(--bs-border-color-translucent); text-align: right !important; }
+    .notification-table td:first-child { display: block; text-align: left !important; }
+    .notification-table td:last-child { border: 0; }
+    .notification-table td:not(:first-child)::before { flex: 0 0 42%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .notification-table td:nth-child(2)::before { content: "Email"; }
+    .notification-table td:nth-child(3)::before { content: "Εντός εφαρμογής"; }
+    .notification-table td:nth-child(4)::before { content: "Push"; }
+    .notification-table td:nth-child(5)::before { content: "Κατάσταση"; }
+    .notification-table .form-check { margin: 0; }
+    .notification-actions, .notification-actions > div { width: 100%; }
+    .notification-actions > div { display: grid; gap: .5rem; }
+    .notification-actions .btn { width: 100%; margin: 0; }
+    #vo-push-test { margin-left: 0 !important; margin-top: .5rem; }
+}
+</style>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <h2><i class="bi bi-bell"></i> <?= h($pageTitle) ?></h2>
 </div>
 
@@ -125,8 +148,8 @@ include __DIR__ . '/includes/header.php';
         <form method="post">
             <?= csrfField() ?>
 
-            <div class="table-responsive">
-                <table class="table table-hover align-middle">
+            <div class="table-responsive notification-table-wrap">
+                <table class="table table-hover align-middle notification-table table-mobile-opt-out">
                     <thead class="table-light">
                         <tr>
                             <th style="width: 30%;">Ειδοποίηση</th>
@@ -218,7 +241,7 @@ include __DIR__ . '/includes/header.php';
                 </table>
             </div>
 
-            <div class="d-flex justify-content-between align-items-center mt-3">
+            <div class="notification-actions d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
                 <div>
                     <button type="button" class="btn btn-outline-success btn-sm" onclick="toggleAll(true)">
                         <i class="bi bi-check-all"></i> Ενεργοποίηση Όλων

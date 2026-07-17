@@ -85,7 +85,27 @@ $tables = dbFetchAll("SELECT DISTINCT table_name FROM audit_logs WHERE table_nam
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<style>
+@media (max-width: 767.98px) {
+    .audit-table-wrap { overflow: visible; }
+    .audit-table thead { display: none; }
+    .audit-table, .audit-table tbody, .audit-table tr, .audit-table td { display: block; width: 100%; }
+    .audit-table tbody { padding: .75rem; }
+    .audit-table tr { margin-bottom: .75rem; padding: .35rem .8rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .audit-table td { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border: 0; border-bottom: 1px solid var(--bs-border-color-translucent); text-align: right !important; overflow-wrap: anywhere; white-space: normal !important; }
+    .audit-table td:last-child { border: 0; }
+    .audit-table td::before { flex: 0 0 34%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .audit-table td:nth-child(1)::before { content: "Ημερομηνία"; }
+    .audit-table td:nth-child(2)::before { content: "Χρήστης"; }
+    .audit-table td:nth-child(3)::before { content: "Ενέργεια"; }
+    .audit-table td:nth-child(4)::before { content: "Πίνακας"; }
+    .audit-table td:nth-child(5)::before { content: "ID"; }
+    .audit-table td:nth-child(6)::before { content: "Σημειώσεις"; }
+    .audit-table td:nth-child(7)::before { content: "IP"; }
+}
+</style>
+
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <h1 class="h3 mb-0">
         <i class="bi bi-journal-text me-2"></i>Ιστορικό Ενεργειών
     </h1>
@@ -181,8 +201,8 @@ include __DIR__ . '/includes/header.php';
     </div>
 <?php else: ?>
     <div class="card">
-        <div class="table-responsive">
-            <table class="table table-hover table-sm mb-0">
+        <div class="table-responsive audit-table-wrap">
+            <table class="table table-hover table-sm mb-0 audit-table table-mobile-opt-out">
                 <thead class="table-light">
                     <tr>
                         <th>Ημ/ώρα</th>

@@ -150,12 +150,12 @@ include __DIR__ . '/includes/header.php';
 ?>
 
 <!-- Page Header -->
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
     <div>
         <h1 class="h3 mb-1"><i class="bi bi-award me-2"></i>Πιστοποιητικά Εθελοντών</h1>
         <p class="text-muted mb-0">Επισκόπηση & παρακολούθηση πιστοποιητικών</p>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex flex-wrap gap-2">
         <a href="certificates.php?export=csv" class="btn btn-outline-success">
             <i class="bi bi-file-earmark-spreadsheet me-1"></i>Εξαγωγή CSV
         </a>
@@ -255,13 +255,13 @@ include __DIR__ . '/includes/header.php';
 
     <?php foreach ($missingData as $md): ?>
     <div class="card mb-3">
-        <div class="card-header d-flex align-items-center gap-2">
+        <div class="card-header d-flex align-items-center flex-wrap gap-2">
             <i class="bi bi-exclamation-circle text-danger"></i>
             <strong><?= h($md['type']['name']) ?></strong>
             <span class="badge bg-danger"><?= count($md['volunteers']) ?> ελλείποντα</span>
         </div>
         <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle mb-0">
+            <table class="table table-sm table-hover align-middle mb-0 admin-mobile-cards">
                 <thead class="table-light">
                     <tr>
                         <th>Εθελοντής</th>
@@ -273,12 +273,12 @@ include __DIR__ . '/includes/header.php';
                 <tbody>
                     <?php foreach ($md['volunteers'] as $v): ?>
                     <tr>
-                        <td>
+                        <td data-label="Εθελοντής">
                             <a href="volunteer-view.php?id=<?= $v['id'] ?>#certificates"><?= h($v['name']) ?></a>
                         </td>
-                        <td class="text-muted small"><?= h($v['email']) ?></td>
-                        <td class="text-muted small"><?= h($v['department_name'] ?? '—') ?></td>
-                        <td class="text-end pe-3">
+                        <td data-label="Email" class="text-muted small"><?= h($v['email']) ?></td>
+                        <td data-label="Σώμα" class="text-muted small"><?= h($v['department_name'] ?? '—') ?></td>
+                        <td data-label="Ενέργεια" class="text-end pe-3 mobile-card-actions">
                             <a href="volunteer-view.php?id=<?= $v['id'] ?>#certificates" class="btn btn-sm btn-outline-primary">
                                 <i class="bi bi-plus-circle me-1"></i>Προσθήκη
                             </a>
@@ -335,7 +335,7 @@ include __DIR__ . '/includes/header.php';
 <!-- Results Table -->
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
+        <table class="table table-hover align-middle mb-0 admin-mobile-cards">
             <thead class="table-light">
                 <tr>
                     <th>Εθελοντής</th>
@@ -368,21 +368,21 @@ include __DIR__ . '/includes/header.php';
                         }
                     ?>
                     <tr class="<?= $rowClass ?>">
-                        <td>
+                        <td data-label="Εθελοντής">
                             <a href="volunteer-view.php?id=<?= $cert['user_id'] ?>"><?= h($cert['volunteer_name']) ?></a>
                             <br><small class="text-muted"><?= h($cert['department_name'] ?? '') ?></small>
                         </td>
-                        <td class="fw-semibold">
+                        <td data-label="Τύπος" class="fw-semibold">
                             <?php if ($cert['is_required']): ?>
                                 <i class="bi bi-exclamation-circle text-danger me-1" title="Υποχρεωτικό"></i>
                             <?php endif; ?>
                             <?= h($cert['type_name']) ?>
                         </td>
-                        <td><?= formatDate($cert['issue_date']) ?></td>
-                        <td><?= $cert['expiry_date'] ? formatDate($cert['expiry_date']) : '—' ?></td>
-                        <td><?= $certBadge ?></td>
-                        <td class="text-muted small"><?= h($cert['issuing_body'] ?? '—') ?></td>
-                        <td class="text-end pe-3">
+                        <td data-label="Ημ. Έκδοσης"><?= formatDate($cert['issue_date']) ?></td>
+                        <td data-label="Ημ. Λήξης"><?= $cert['expiry_date'] ? formatDate($cert['expiry_date']) : '—' ?></td>
+                        <td data-label="Κατάσταση"><?= $certBadge ?></td>
+                        <td data-label="Φορέας" class="text-muted small"><?= h($cert['issuing_body'] ?? '—') ?></td>
+                        <td data-label="Ενέργεια" class="text-end pe-3 mobile-card-actions">
                             <a href="volunteer-view.php?id=<?= $cert['user_id'] ?>#certificates" class="btn btn-sm btn-outline-primary me-1" title="Προβολή">
                                 <i class="bi bi-eye"></i>
                             </a>
@@ -413,5 +413,18 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 
 <?php endif; // tab ?>
+
+<style>
+@media (max-width: 767.98px) {
+    .nav-tabs { flex-wrap: nowrap; overflow-x: auto; }
+    .nav-tabs .nav-link { white-space: nowrap; }
+    .admin-mobile-cards thead { display: none; }
+    .admin-mobile-cards, .admin-mobile-cards tbody, .admin-mobile-cards tr, .admin-mobile-cards td { display: block; width: 100%; }
+    .admin-mobile-cards tr:not(:has(td[colspan])) { margin: .75rem; width: calc(100% - 1.5rem); padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .admin-mobile-cards tr:not(:has(td[colspan])) td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; text-align: right !important; overflow-wrap: anywhere; }
+    .admin-mobile-cards tr:not(:has(td[colspan])) td::before { content: attr(data-label); flex: 0 0 36%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .admin-mobile-cards .mobile-card-actions { align-items: center; flex-wrap: wrap; padding-top: .75rem !important; border-top: 1px solid var(--bs-border-color) !important; }
+}
+</style>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

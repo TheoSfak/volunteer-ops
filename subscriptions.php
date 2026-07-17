@@ -321,7 +321,7 @@ $historyRows = dbFetchAll("SELECT vs.*, u.name AS volunteer_name, u.email, creat
 
 include __DIR__ . '/includes/header.php';
 ?>
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-4 subscriptions-page-header">
     <h1 class="h3 mb-0"><i class="bi bi-cash-coin me-2"></i>Ετήσιες Συνδρομές</h1>
     <div class="d-flex flex-wrap gap-2"><button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#subscriptionPaymentHistory" aria-expanded="false" aria-controls="subscriptionPaymentHistory"><i class="bi bi-clock-history me-1"></i>Ιστορικό πληρωμών <span class="badge text-bg-secondary ms-1"><?= count($historyRows) ?></span></button><a class="btn btn-outline-success" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'export' => 'excel'])) ?>"><i class="bi bi-file-earmark-excel me-1"></i>Εξαγωγή Excel</a><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button></div>
 </div>
@@ -356,19 +356,108 @@ include __DIR__ . '/includes/header.php';
 .subscription-list-table td:nth-child(9) .d-flex { justify-content: center !important; align-items: center; flex-wrap: nowrap; gap: .5rem !important; }
 .subscription-list-table td:nth-child(9) form { margin: 0; flex: 0 0 auto; }
 .subscription-list-table td:nth-child(9) .btn { white-space: nowrap; }
-@media (max-width: 576px) { .subscription-list-table td:nth-child(9) { min-width: 215px; } }
+@media (max-width: 767.98px) {
+    .subscriptions-page-header {
+        flex-direction: column;
+        align-items: stretch !important;
+        gap: .75rem;
+    }
+    .subscriptions-page-header > div { display: grid !important; grid-template-columns: 1fr; }
+    .subscriptions-page-header .btn { width: 100%; }
+    .subscriptions-mobile-sort { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .subscription-list-table,
+    .subscription-list-table tbody,
+    .subscription-history-table,
+    .subscription-history-table tbody { display: block; width: 100%; }
+    .subscription-list-table thead,
+    .subscription-history-table thead { display: none; }
+    .subscription-list-table tbody,
+    .subscription-history-table tbody { display: grid; gap: .75rem; padding: .75rem; }
+    .subscription-list-table tr,
+    .subscription-history-table tr {
+        display: block;
+        border: 1px solid var(--bs-border-color);
+        border-radius: .75rem;
+        background: var(--bs-body-bg);
+        padding: .25rem .85rem;
+        box-shadow: 0 .125rem .25rem rgba(0, 0, 0, .04);
+    }
+    .subscription-list-table td,
+    .subscription-history-table td {
+        display: block;
+        position: relative;
+        width: 100%;
+        min-width: 0 !important;
+        max-width: none !important;
+        min-height: 2.6rem;
+        padding: .65rem 0 .65rem 40% !important;
+        text-align: right !important;
+        border-bottom: 1px solid var(--bs-border-color);
+        overflow-wrap: anywhere;
+    }
+    .subscription-list-table td:last-child,
+    .subscription-history-table td:last-child { border-bottom: 0; }
+    .subscription-list-table td::before,
+    .subscription-history-table td::before {
+        content: attr(data-label);
+        position: absolute;
+        top: .65rem;
+        left: 0;
+        width: 36%;
+        color: var(--bs-secondary-color);
+        font-weight: 600;
+        text-align: left;
+    }
+    .subscription-list-table td:nth-child(9) .d-flex {
+        justify-content: flex-end !important;
+        flex-wrap: wrap;
+    }
+    .subscription-list-table .badge { white-space: normal; }
+    .subscription-list-table .mobile-card-actions { justify-content: flex-end; }
+    .subscription-list-table .mobile-card-actions .btn { margin-left: auto; }
+    .subscription-list-table .mobile-card-empty,
+    .subscription-history-table .mobile-card-empty {
+        display: block;
+        min-height: 0;
+        padding: 1rem 0 !important;
+        text-align: center !important;
+        border: 0;
+    }
+    .subscription-list-table .mobile-card-empty::before,
+    .subscription-history-table .mobile-card-empty::before { display: none; }
+    .subscriptions-pagination nav { max-width: 100%; overflow-x: auto; }
+    #subscriptionHistorySearch { width: 100%; max-width: none !important; }
+}
 </style>
+<div class="d-md-none gap-2 mb-3 subscriptions-mobile-sort" aria-label="Ταξινόμηση συνδρομών">
+    <a class="btn btn-sm btn-outline-secondary" href="<?= h($sortUrls['surname']) ?>">Εθελοντής<?= $sortIcon('surname') ?></a>
+    <a class="btn btn-sm btn-outline-secondary" href="<?= h($sortUrls['payment']) ?>">Πληρωμή<?= $sortIcon('payment') ?></a>
+    <a class="btn btn-sm btn-outline-secondary" href="<?= h($sortUrls['expiry']) ?>">Λήξη<?= $sortIcon('expiry') ?></a>
+    <a class="btn btn-sm btn-outline-secondary" href="<?= h($sortUrls['receipt']) ?>">Αρ. απόδειξης<?= $sortIcon('receipt') ?></a>
+</div>
 <div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0 subscription-list-table">
 <thead><tr><th><a href="<?= h($sortUrls['surname']) ?>" class="text-decoration-none text-reset" title="Ταξινόμηση κατά επώνυμο">Εθελοντής<?= $sortIcon('surname') ?></a></th><th><a href="<?= h($sortUrls['payment']) ?>" class="text-decoration-none text-reset" title="Ταξινόμηση κατά ημερομηνία πληρωμής">Πληρωμή<?= $sortIcon('payment') ?></a></th><th><a href="<?= h($sortUrls['expiry']) ?>" class="text-decoration-none text-reset" title="Ταξινόμηση κατά ημερομηνία λήξης">Λήξη<?= $sortIcon('expiry') ?></a></th><th>Έτη</th><th style="min-width:130px">Ποσό</th><th>Τρόπος</th><th><a href="<?= h($sortUrls['receipt']) ?>" class="text-decoration-none text-reset" title="Ταξινόμηση κατά αριθμό απόδειξης">Αρ. απόδειξης<?= $sortIcon('receipt') ?></a></th><th style="max-width:150px">Απόδειξη</th><th>Πληρωμή με IRIS</th><th>Κατάσταση</th><th></th></tr></thead><tbody>
 <?php foreach ($rows as $row): $days = (int)floor((strtotime($row['expiry_date']) - strtotime(date('Y-m-d'))) / 86400); $badge = $days < 0 ? 'danger' : ($days <= 7 ? 'danger' : ($days <= 30 ? 'warning text-dark' : ($days <= 90 ? 'info text-dark' : 'success'))); $label = $days < 0 ? 'Ληγμένη' : ($days === 0 ? 'Λήγει σήμερα' : 'Ενεργή (' . $days . ' ημ.)'); $hasReceiptFile = !empty($row['receipt_stored_name']) && is_file(__DIR__ . '/uploads/subscription-receipts/' . basename($row['receipt_stored_name'])); ?>
 <?php $isReceiptImage = $hasReceiptFile && in_array(strtolower(pathinfo($row['receipt_stored_name'], PATHINFO_EXTENSION)), ['jpg', 'jpeg', 'png'], true); ?>
-<tr><td><a href="volunteer-view.php?id=<?= $row['user_id'] ?>"><?= h($row['volunteer_name']) ?></a></td><td><?= formatDate($row['payment_date']) ?></td><td><?= formatDate($row['expiry_date']) ?></td><td><?= (int)($row['coverage_years'] ?? 1) ?></td><td class="text-nowrap" style="min-width:130px"><?= $row['amount'] !== null ? number_format((float)$row['amount'], 2, ',', '.') . ' €' : '—' ?></td><td><?= h($row['payment_method'] ?: '—') ?></td><td><?= h($row['receipt_number'] ?: '—') ?></td><td style="max-width:150px"><?php if ($hasReceiptFile): ?><button type="button" class="btn btn-sm btn-outline-secondary receipt-preview-btn text-truncate mw-100" data-bs-toggle="modal" data-bs-target="#receiptPreviewModal" data-preview-url="subscription-receipt.php?id=<?= $row['id'] ?>" data-preview-name="<?= h($row['receipt_original_name']) ?>" data-preview-type="<?= $isReceiptImage ? 'image' : 'pdf' ?>"><i class="bi <?= $isReceiptImage ? 'bi-eye' : 'bi-file-earmark-pdf' ?>"></i> Προβολή</button><?php elseif (!empty($row['receipt_stored_name'])): ?><span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Μη διαθέσιμη</span><?php else: ?>—<?php endif; ?></td><td><?php if ($row['iris_request_id']): ?><div class="small <?= $row['iris_status'] === 'SEEN' ? 'text-decoration-line-through text-muted' : '' ?>"><strong><?= formatDateTime($row['iris_payment_reported_at']) ?></strong><br><?= (int)$row['iris_coverage_years'] ?> έτη · <?= number_format((float)$row['iris_total_amount'], 2, ',', '.') ?> €</div><?php if ($row['iris_status'] === 'REPORTED'): ?><div class="d-flex gap-1 mt-1"><form method="post"><?= csrfField() ?><input type="hidden" name="action" value="mark_iris_seen"><input type="hidden" name="iris_request_id" value="<?= (int)$row['iris_request_id'] ?>"><button class="btn btn-sm btn-outline-secondary">Το είδα</button></form><a class="btn btn-sm btn-outline-success" href="subscriptions.php?filter=<?= h($filter) ?>&iris_request=<?= (int)$row['iris_request_id'] ?>">Καταχώρηση</a></div><?php endif; ?><?php else: ?>—<?php endif; ?></td><td><span class="badge bg-<?= $badge ?>"><?= $label ?></span></td><td><a class="btn btn-sm btn-outline-primary" href="subscriptions.php?filter=<?= h($filter) ?>&edit=<?= $row['id'] ?>"><i class="bi bi-pencil"></i></a></td></tr>
+<tr>
+    <td data-label="Εθελοντής"><a href="volunteer-view.php?id=<?= $row['user_id'] ?>"><?= h($row['volunteer_name']) ?></a></td>
+    <td data-label="Πληρωμή"><?= formatDate($row['payment_date']) ?></td>
+    <td data-label="Λήξη"><?= formatDate($row['expiry_date']) ?></td>
+    <td data-label="Έτη"><?= (int)($row['coverage_years'] ?? 1) ?></td>
+    <td data-label="Ποσό" class="text-nowrap" style="min-width:130px"><?= $row['amount'] !== null ? number_format((float)$row['amount'], 2, ',', '.') . ' €' : '—' ?></td>
+    <td data-label="Τρόπος"><?= h($row['payment_method'] ?: '—') ?></td>
+    <td data-label="Αρ. απόδειξης"><?= h($row['receipt_number'] ?: '—') ?></td>
+    <td data-label="Απόδειξη" style="max-width:150px"><?php if ($hasReceiptFile): ?><button type="button" class="btn btn-sm btn-outline-secondary receipt-preview-btn text-truncate mw-100" data-bs-toggle="modal" data-bs-target="#receiptPreviewModal" data-preview-url="subscription-receipt.php?id=<?= $row['id'] ?>" data-preview-name="<?= h($row['receipt_original_name']) ?>" data-preview-type="<?= $isReceiptImage ? 'image' : 'pdf' ?>"><i class="bi <?= $isReceiptImage ? 'bi-eye' : 'bi-file-earmark-pdf' ?>"></i> Προβολή</button><?php elseif (!empty($row['receipt_stored_name'])): ?><span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Μη διαθέσιμη</span><?php else: ?>—<?php endif; ?></td>
+    <td data-label="Πληρωμή με IRIS"><?php if ($row['iris_request_id']): ?><div><div class="small <?= $row['iris_status'] === 'SEEN' ? 'text-decoration-line-through text-muted' : '' ?>"><strong><?= formatDateTime($row['iris_payment_reported_at']) ?></strong><br><?= (int)$row['iris_coverage_years'] ?> έτη · <?= number_format((float)$row['iris_total_amount'], 2, ',', '.') ?> €</div><?php if ($row['iris_status'] === 'REPORTED'): ?><div class="d-flex gap-1 mt-1"><form method="post"><?= csrfField() ?><input type="hidden" name="action" value="mark_iris_seen"><input type="hidden" name="iris_request_id" value="<?= (int)$row['iris_request_id'] ?>"><button class="btn btn-sm btn-outline-secondary">Το είδα</button></form><a class="btn btn-sm btn-outline-success" href="subscriptions.php?filter=<?= h($filter) ?>&iris_request=<?= (int)$row['iris_request_id'] ?>">Καταχώρηση</a></div><?php endif; ?></div><?php else: ?>—<?php endif; ?></td>
+    <td data-label="Κατάσταση"><span class="badge bg-<?= $badge ?>"><?= $label ?></span></td>
+    <td data-label="Ενέργειες" class="mobile-card-actions"><a class="btn btn-sm btn-outline-primary" href="subscriptions.php?filter=<?= h($filter) ?>&edit=<?= $row['id'] ?>" aria-label="Επεξεργασία συνδρομής"><i class="bi bi-pencil"></i></a></td>
+</tr>
 <?php endforeach; ?>
-<?php if (!$rows): ?><tr><td colspan="11" class="text-center text-muted py-4">Δεν υπάρχουν καταχωρημένες συνδρομές.</td></tr><?php endif; ?>
+<?php if (!$rows): ?><tr><td colspan="11" class="text-center text-muted py-4 mobile-card-empty">Δεν υπάρχουν καταχωρημένες συνδρομές.</td></tr><?php endif; ?>
 </tbody></table></div></div>
 
 <?php if ($filteredTotal > 0): ?>
-<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3 subscriptions-pagination">
     <div class="d-flex flex-wrap align-items-center gap-3">
         <div class="small text-muted">Εμφάνιση <?= $offset + 1 ?>–<?= min($offset + $perPage, $filteredTotal) ?> από <?= $filteredTotal ?> συνδρομές</div>
         <form method="get" class="d-flex align-items-center gap-2">
@@ -411,7 +500,7 @@ include __DIR__ . '/includes/header.php';
             <input type="search" class="form-control form-control-sm" id="subscriptionHistorySearch" style="max-width:320px" placeholder="Αναζήτηση εθελοντή ή απόδειξης…" autocomplete="off">
         </div>
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
+            <table class="table table-hover align-middle mb-0 subscription-history-table">
                 <thead><tr><th>Εθελοντής</th><th>Πληρωμή</th><th>Λήξη</th><th>Έτη</th><th>Ποσό</th><th>Τρόπος</th><th>Αρ. απόδειξης</th><th>Απόδειξη</th><th>Καταχώρηση από</th></tr></thead>
                 <tbody>
                 <?php foreach ($historyRows as $historyRow): ?>
@@ -422,18 +511,18 @@ include __DIR__ . '/includes/header.php';
                     $historySearchText = $historyRow['volunteer_name'] . ' ' . $historyRow['email'] . ' ' . ($historyRow['receipt_number'] ?? '');
                     ?>
                     <tr class="subscription-history-row" data-history-search="<?= h($historySearchText) ?>">
-                        <td><a href="volunteer-view.php?id=<?= (int)$historyRow['user_id'] ?>"><?= h($historyRow['volunteer_name']) ?></a><div class="small text-muted"><?= h($historyRow['email']) ?></div></td>
-                        <td class="text-nowrap"><?= formatDate($historyRow['payment_date']) ?></td>
-                        <td class="text-nowrap"><?= formatDate($historyRow['expiry_date']) ?></td>
-                        <td><?= (int)($historyRow['coverage_years'] ?? 1) ?></td>
-                        <td class="text-nowrap"><?= $historyRow['amount'] !== null ? number_format((float)$historyRow['amount'], 2, ',', '.') . ' €' : '—' ?></td>
-                        <td><?= h($historyRow['payment_method'] ?: '—') ?></td>
-                        <td><?= h($historyRow['receipt_number'] ?: '—') ?></td>
-                        <td><?php if ($historyHasReceipt): ?><button type="button" class="btn btn-sm btn-outline-secondary receipt-preview-btn" data-bs-toggle="modal" data-bs-target="#receiptPreviewModal" data-preview-url="subscription-receipt.php?id=<?= (int)$historyRow['id'] ?>" data-preview-name="<?= h($historyRow['receipt_original_name'] ?: 'Απόδειξη ' . formatDate($historyRow['payment_date'])) ?>" data-preview-type="<?= $historyReceiptIsImage ? 'image' : 'pdf' ?>"><i class="bi <?= $historyReceiptIsImage ? 'bi-image' : 'bi-file-earmark-pdf' ?>"></i> Προβολή</button><?php elseif (!empty($historyRow['receipt_stored_name'])): ?><span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Μη διαθέσιμη</span><?php else: ?>—<?php endif; ?></td>
-                        <td><?= h($historyRow['created_by_name'] ?: '—') ?></td>
+                        <td data-label="Εθελοντής"><div><a href="volunteer-view.php?id=<?= (int)$historyRow['user_id'] ?>"><?= h($historyRow['volunteer_name']) ?></a><div class="small text-muted"><?= h($historyRow['email']) ?></div></div></td>
+                        <td data-label="Πληρωμή" class="text-nowrap"><?= formatDate($historyRow['payment_date']) ?></td>
+                        <td data-label="Λήξη" class="text-nowrap"><?= formatDate($historyRow['expiry_date']) ?></td>
+                        <td data-label="Έτη"><?= (int)($historyRow['coverage_years'] ?? 1) ?></td>
+                        <td data-label="Ποσό" class="text-nowrap"><?= $historyRow['amount'] !== null ? number_format((float)$historyRow['amount'], 2, ',', '.') . ' €' : '—' ?></td>
+                        <td data-label="Τρόπος"><?= h($historyRow['payment_method'] ?: '—') ?></td>
+                        <td data-label="Αρ. απόδειξης"><?= h($historyRow['receipt_number'] ?: '—') ?></td>
+                        <td data-label="Απόδειξη"><?php if ($historyHasReceipt): ?><button type="button" class="btn btn-sm btn-outline-secondary receipt-preview-btn" data-bs-toggle="modal" data-bs-target="#receiptPreviewModal" data-preview-url="subscription-receipt.php?id=<?= (int)$historyRow['id'] ?>" data-preview-name="<?= h($historyRow['receipt_original_name'] ?: 'Απόδειξη ' . formatDate($historyRow['payment_date'])) ?>" data-preview-type="<?= $historyReceiptIsImage ? 'image' : 'pdf' ?>"><i class="bi <?= $historyReceiptIsImage ? 'bi-image' : 'bi-file-earmark-pdf' ?>"></i> Προβολή</button><?php elseif (!empty($historyRow['receipt_stored_name'])): ?><span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Μη διαθέσιμη</span><?php else: ?>—<?php endif; ?></td>
+                        <td data-label="Καταχώρηση από"><?= h($historyRow['created_by_name'] ?: '—') ?></td>
                     </tr>
                 <?php endforeach; ?>
-                <?php if (!$historyRows): ?><tr><td colspan="9" class="text-center text-muted py-4">Δεν υπάρχει ιστορικό πληρωμών.</td></tr><?php endif; ?>
+                <?php if (!$historyRows): ?><tr><td colspan="9" class="text-center text-muted py-4 mobile-card-empty">Δεν υπάρχει ιστορικό πληρωμών.</td></tr><?php endif; ?>
                 </tbody>
             </table>
         </div>

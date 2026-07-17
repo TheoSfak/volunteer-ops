@@ -108,7 +108,7 @@ if ($editId) {
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
     <h1 class="h3 mb-0">
         <i class="bi bi-tags me-2"></i><?= h($pageTitle) ?>
     </h1>
@@ -187,7 +187,7 @@ include __DIR__ . '/includes/header.php';
                     <p class="text-muted text-center py-4">Δεν υπάρχουν κατηγορίες.</p>
                 <?php else: ?>
                     <div class="table-responsive">
-                        <table class="table table-hover align-middle mb-0">
+                        <table class="table table-hover align-middle mb-0 admin-mobile-cards">
                             <thead class="table-light">
                                 <tr>
                                     <th style="width: 50px;">#</th>
@@ -200,8 +200,8 @@ include __DIR__ . '/includes/header.php';
                             <tbody>
                                 <?php foreach ($categories as $cat): ?>
                                     <tr class="<?= !$cat['is_active'] ? 'table-secondary' : '' ?>">
-                                        <td><?= (int)$cat['sort_order'] ?></td>
-                                        <td>
+                                        <td data-label="Σειρά"><?= (int)$cat['sort_order'] ?></td>
+                                        <td data-label="Κατηγορία">
                                             <span class="badge me-1" style="background-color: <?= h($cat['color']) ?>; font-size: 1.1em;">
                                                 <?= $cat['icon'] ?>
                                             </span>
@@ -210,17 +210,17 @@ include __DIR__ . '/includes/header.php';
                                                 <br><small class="text-muted"><?= h($cat['description']) ?></small>
                                             <?php endif; ?>
                                         </td>
-                                        <td class="text-center">
+                                        <td data-label="Υλικά" class="text-center">
                                             <span class="badge bg-secondary"><?= (int)$cat['item_count'] ?></span>
                                         </td>
-                                        <td class="text-center">
+                                        <td data-label="Κατάσταση" class="text-center">
                                             <?php if ($cat['is_active']): ?>
                                                 <span class="badge bg-success">Ενεργή</span>
                                             <?php else: ?>
                                                 <span class="badge bg-secondary">Ανενεργή</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td class="text-end">
+                                        <td data-label="Ενέργειες" class="text-end mobile-card-actions">
                                             <div class="btn-group btn-group-sm">
                                                 <a href="inventory-categories.php?edit=<?= $cat['id'] ?>" 
                                                    class="btn btn-outline-secondary" title="Επεξεργασία">
@@ -248,5 +248,16 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<style>
+@media (max-width: 767.98px) {
+    .admin-mobile-cards thead { display: none; }
+    .admin-mobile-cards, .admin-mobile-cards tbody, .admin-mobile-cards tr, .admin-mobile-cards td { display: block; width: 100%; }
+    .admin-mobile-cards tr { margin: .75rem; width: calc(100% - 1.5rem); padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .admin-mobile-cards td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; text-align: right !important; }
+    .admin-mobile-cards td::before { content: attr(data-label); flex: 0 0 38%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .admin-mobile-cards .mobile-card-actions { align-items: center; padding-top: .75rem; border-top: 1px solid var(--bs-border-color); }
+}
+</style>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

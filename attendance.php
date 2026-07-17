@@ -288,7 +288,66 @@ if (isPost()) {
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<style>
+@media (max-width: 767.98px) {
+    .attendance-page-header {
+        flex-direction: column;
+        align-items: stretch !important;
+        gap: .75rem;
+    }
+    .attendance-page-header > .btn { width: 100%; }
+    .attendance-mission-meta { margin-top: .75rem; text-align: left !important; }
+    .attendance-shift-summary {
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: .5rem;
+    }
+    .attendance-shift-summary > div { width: 100%; }
+    .attendance-shift-summary .badge,
+    .attendance-shift-summary .text-muted { margin-left: 0 !important; margin-right: .25rem; }
+    .accordion-button { align-items: flex-start; }
+    .accordion-body { padding: .85rem; }
+    .attendance-table,
+    .attendance-table tbody { display: block; width: 100%; }
+    .attendance-table thead { display: none; }
+    .attendance-table tbody { display: grid; gap: .75rem; }
+    .attendance-table tr {
+        display: block;
+        border: 1px solid var(--bs-border-color);
+        border-radius: .75rem;
+        background: var(--bs-body-bg);
+        padding: .25rem .85rem;
+        box-shadow: 0 .125rem .25rem rgba(0, 0, 0, .04);
+    }
+    .attendance-table td {
+        display: block;
+        position: relative;
+        width: 100%;
+        min-height: 2.6rem;
+        padding: .65rem 0 .65rem 40% !important;
+        text-align: right;
+        border-bottom: 1px solid var(--bs-border-color);
+        overflow-wrap: anywhere;
+    }
+    .attendance-table td:last-child { border-bottom: 0; }
+    .attendance-table td::before {
+        content: attr(data-label);
+        position: absolute;
+        top: .65rem;
+        left: 0;
+        width: 36%;
+        color: var(--bs-secondary-color);
+        font-weight: 600;
+        text-align: left;
+    }
+    .attendance-table td small { text-align: right; }
+    .attendance-table .badge { white-space: normal; }
+    .attendance-save-actions,
+    .attendance-save-actions .btn { width: 100%; }
+}
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4 attendance-page-header">
     <div>
         <h1 class="h3 mb-0">
             <i class="bi bi-clipboard-check me-2"></i>Διαχείριση Παρουσιών
@@ -320,7 +379,7 @@ include __DIR__ . '/includes/header.php';
                     <i class="bi bi-geo-alt me-1"></i><?= h($mission['location']) ?>
                 </p>
             </div>
-            <div class="col-md-6 text-md-end">
+            <div class="col-md-6 text-md-end attendance-mission-meta">
                 <?= statusBadge($mission['status']) ?>
                 <span class="ms-2 text-muted">
                     <?= formatDateTime($mission['start_datetime']) ?> - <?= formatDateTime($mission['end_datetime']) ?>
@@ -349,7 +408,7 @@ include __DIR__ . '/includes/header.php';
                 <h2 class="accordion-header">
                     <button class="accordion-button <?= $index > 0 ? 'collapsed' : '' ?>" type="button" 
                             data-bs-toggle="collapse" data-bs-target="#shift<?= $shift['id'] ?>">
-                        <div class="d-flex justify-content-between align-items-center w-100 me-3">
+                        <div class="d-flex justify-content-between align-items-center w-100 me-3 attendance-shift-summary">
                             <div>
                                 <strong><?= formatDateGreek($shift['start_time']) ?></strong>
                                 <span class="text-muted ms-2">
@@ -391,8 +450,13 @@ include __DIR__ . '/includes/header.php';
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="bulk_attendance">
                                 <input type="hidden" name="shift_id" value="<?= $shift['id'] ?>">
+
+                                <label class="btn btn-sm btn-outline-secondary d-md-none mb-3 text-start w-100">
+                                    <input type="checkbox" class="form-check-input me-1"
+                                           onchange="toggleAll(this, <?= $shift['id'] ?>)"> Επιλογή όλων
+                                </label>
                                 
-                                <table class="table table-hover">
+                                <table class="table table-hover attendance-table">
                                     <thead>
                                         <tr>
                                             <th style="width: 50px;">
@@ -411,21 +475,21 @@ include __DIR__ . '/includes/header.php';
                                     <tbody>
                                         <?php foreach ($shiftParticipants as $p): ?>
                                         <tr>
-                                            <td>
+                                            <td data-label="Επιλογή">
                                                 <input type="checkbox" class="form-check-input shift-<?= $shift['id'] ?>" 
                                                        name="attended[]" value="<?= $p['id'] ?>" 
                                                        <?= $p['attended'] ? 'checked' : '' ?>>
                                             </td>
-                                            <td>
+                                            <td data-label="Εθελοντής">
                                                 <strong><?= h($p['name']) ?></strong>
                                             </td>
-                                            <td>
+                                            <td data-label="Επικοινωνία">
                                                 <small>
                                                     <i class="bi bi-envelope me-1"></i><?= h($p['email']) ?><br>
                                                     <i class="bi bi-phone me-1"></i><?php if ($p['phone']): ?><a href="tel:<?= h($p['phone']) ?>"><?= h($p['phone']) ?></a><?php else: ?>-<?php endif; ?>
                                                 </small>
                                             </td>
-                                            <td>
+                                            <td data-label="Παρουσία">
                                                 <?php if ($p['attended']): ?>
                                                     <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Παρών</span>
                                                     <?php if ($p['actual_hours']): ?>
@@ -439,7 +503,7 @@ include __DIR__ . '/includes/header.php';
                                                 <?php endif; ?>
                                             </td>
                                             <?php if (getSetting('points_enabled', '1') === '1'): ?>
-                                            <td>
+                                            <td data-label="Πόντοι">
                                                 <?php if ($p['points_awarded']): ?>
                                                     <span class="badge bg-warning text-dark"><i class="bi bi-star-fill me-1"></i>Απονεμήθηκαν</span>
                                                 <?php else: ?>
@@ -447,7 +511,7 @@ include __DIR__ . '/includes/header.php';
                                                 <?php endif; ?>
                                             </td>
                                             <?php endif; ?>
-                                            <td>
+                                            <td data-label="Ενέργειες">
                                                 <button type="button" class="btn btn-sm btn-outline-primary" 
                                                         data-bs-toggle="modal" data-bs-target="#editModal"
                                                         onclick="editAttendance(<?= htmlspecialchars(json_encode($p)) ?>, <?= $shiftHours ?>)">
@@ -460,7 +524,7 @@ include __DIR__ . '/includes/header.php';
                                 </table>
                                 
                                 <?php if ($isPast): ?>
-                                <div class="text-end">
+                                <div class="text-end attendance-save-actions">
                                     <button type="submit" class="btn btn-primary">
                                         <i class="bi bi-save me-1"></i>Αποθήκευση Παρουσιών
                                     </button>

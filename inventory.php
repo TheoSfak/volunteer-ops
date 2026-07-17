@@ -57,11 +57,11 @@ $stats       = getInventoryStats();
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-3">
     <h1 class="h3 mb-0">
         <i class="bi bi-box-seam me-2"></i><?= h($pageTitle) ?>
     </h1>
-    <div class="d-flex gap-2">
+    <div class="d-flex flex-wrap gap-2">
         <?php if (canManageInventory()): ?>
             <button type="button" class="btn btn-outline-primary" id="btnPrintSelected" style="display:none;" onclick="printSelected()" title="Εκτύπωση ετικετών για επιλεγμένα υλικά">
                 <i class="bi bi-qr-code me-1"></i>Εκτύπωση επιλεγμένων (<span id="selectedCount">0</span>)
@@ -166,7 +166,7 @@ include __DIR__ . '/includes/header.php';
 <!-- Warehouse filter -->
 <div class="card mb-3 no-print">
     <div class="card-body py-2">
-        <form method="post" class="d-flex align-items-center gap-3">
+        <form method="post" class="d-flex align-items-center flex-wrap gap-3">
             <?= csrfField() ?>
             <input type="hidden" name="action" value="set_department_filter">
             <label class="form-label mb-0 fw-bold"><i class="bi bi-building me-1"></i>Αποθήκη:</label>
@@ -203,7 +203,7 @@ include __DIR__ . '/includes/header.php';
             </div>
         <?php else: ?>
             <div class="table-responsive">
-                <table class="table table-hover table-sm align-middle mb-0" style="font-size:0.85rem;">
+                <table class="table table-hover table-sm align-middle mb-0 admin-mobile-cards" style="font-size:0.85rem;">
                     <thead class="table-light">
                         <tr>
                             <?php if (canManageInventory()): ?>
@@ -229,14 +229,14 @@ include __DIR__ . '/includes/header.php';
                         <?php foreach ($items as $item): ?>
                             <tr>
                                 <?php if (canManageInventory()): ?>
-                                <td>
+                                <td data-label="Επιλογή">
                                     <input type="checkbox" class="form-check-input item-chk" value="<?= $item['id'] ?>">
                                 </td>
                                 <?php endif; ?>
-                                <td>
+                                <td data-label="Barcode">
                                     <code class="text-primary"><?= h($item['barcode']) ?></code>
                                 </td>
-                                <td>
+                                <td data-label="Όνομα">
                                     <a href="inventory-view.php?id=<?= $item['id'] ?>" class="text-decoration-none fw-medium">
                                         <?= h($item['name']) ?>
                                     </a>
@@ -249,9 +249,9 @@ include __DIR__ . '/includes/header.php';
                                         </a>
                                     <?php endif; ?>
                                 </td>
-                                <td class="d-none d-xxl-table-cell"><small><?= !empty($item['registration_date'] ?? null) ? formatDate($item['registration_date']) : '<span class="text-muted">-</span>' ?></small></td>
-                                <td class="d-none d-xxl-table-cell"><small><?= h($item['registration_number'] ?? '-') ?></small></td>
-                                <td>
+                                <td data-label="Εγγραφή" class="d-none d-xxl-table-cell"><small><?= !empty($item['registration_date'] ?? null) ? formatDate($item['registration_date']) : '<span class="text-muted">-</span>' ?></small></td>
+                                <td data-label="Α.Μ." class="d-none d-xxl-table-cell"><small><?= h($item['registration_number'] ?? '-') ?></small></td>
+                                <td data-label="Κατηγορία">
                                     <?php if ($item['category_name']): ?>
                                         <span class="badge" style="background-color: <?= h($item['category_color']) ?>">
                                             <?= $item['category_icon'] ?> <?= h($item['category_name']) ?>
@@ -260,12 +260,12 @@ include __DIR__ . '/includes/header.php';
                                         <span class="text-muted">-</span>
                                     <?php endif; ?>
                                 </td>
-                                <td><?= h($item['location_name'] ?? '-') ?></td>
+                                <td data-label="Τοποθεσία"><?= h($item['location_name'] ?? '-') ?></td>
                                 <?php if (isSystemAdmin()): ?>
-                                    <td><?= h($item['dept_name'] ?? 'Γενικό') ?></td>
+                                    <td data-label="Τμήμα"><?= h($item['dept_name'] ?? 'Γενικό') ?></td>
                                 <?php endif; ?>
-                                <td><?= inventoryStatusBadge($item['status']) ?></td>
-                                <td>
+                                <td data-label="Κατάσταση"><?= inventoryStatusBadge($item['status']) ?></td>
+                                <td data-label="Χρεωμένο σε">
                                     <?php if ($item['booked_by_name']): ?>
                                         <?php
                                         $overdueInfo = calculateOverdueStatus(
@@ -287,7 +287,7 @@ include __DIR__ . '/includes/header.php';
                                         <span class="text-muted">-</span>
                                     <?php endif; ?>
                                 </td>
-                                <td class="text-end col-actions">
+                                <td data-label="Ενέργειες" class="text-end col-actions mobile-card-actions">
                                     <div class="btn-group btn-group-sm">
                                         <a href="inventory-view.php?id=<?= $item['id'] ?>" class="btn btn-outline-primary" title="Προβολή">
                                             <i class="bi bi-eye"></i>
@@ -324,6 +324,16 @@ include __DIR__ . '/includes/header.php';
     width: 1.4em !important;
     height: 1.4em !important;
     cursor: pointer;
+}
+@media (max-width: 767.98px) {
+    .admin-mobile-cards thead { display: none; }
+    .admin-mobile-cards, .admin-mobile-cards tbody, .admin-mobile-cards tr, .admin-mobile-cards td { display: block; width: 100%; }
+    .admin-mobile-cards tr { margin-bottom: .85rem; padding: .75rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .admin-mobile-cards td:not(.d-none) { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; text-align: right !important; overflow-wrap: anywhere; }
+    .admin-mobile-cards td:not(.d-none)::before { content: attr(data-label); flex: 0 0 36%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .admin-mobile-cards td[data-label="Όνομα"] { display: block; text-align: left !important; }
+    .admin-mobile-cards td[data-label="Όνομα"]::before { display: block; margin-bottom: .25rem; }
+    .admin-mobile-cards .mobile-card-actions { align-items: center; padding-top: .75rem !important; border-top: 1px solid var(--bs-border-color) !important; }
 }
 @media print {
     .no-print, .sidebar, .navbar, .card-footer, .btn-group,

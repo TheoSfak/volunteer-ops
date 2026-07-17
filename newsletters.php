@@ -43,7 +43,31 @@ $totalFailed      = dbFetchValue("SELECT COALESCE(SUM(failed_count),0) FROM news
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<style>
+@media (max-width: 767.98px) {
+    .newsletters-page-header { align-items: stretch !important; }
+    .newsletters-page-header > .d-flex { display: grid !important; grid-template-columns: 1fr; width: 100%; }
+    .newsletters-page-header .btn { width: 100%; }
+    .newsletters-table-wrap { overflow: visible; }
+    .newsletters-table thead { display: none; }
+    .newsletters-table, .newsletters-table tbody, .newsletters-table tr, .newsletters-table td { display: block; width: 100%; }
+    .newsletters-table tbody { padding: .75rem; }
+    .newsletters-table tr { margin-bottom: .75rem; padding: .35rem .8rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); }
+    .newsletters-table td { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border: 0; border-bottom: 1px solid var(--bs-border-color-translucent); text-align: right !important; overflow-wrap: anywhere; }
+    .newsletters-table td:last-child { border: 0; }
+    .newsletters-table td::before { flex: 0 0 34%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .newsletters-table td:nth-child(1)::before { content: "Τίτλος"; }
+    .newsletters-table td:nth-child(2)::before { content: "Θέμα"; }
+    .newsletters-table td:nth-child(3)::before { content: "Αποδέκτες"; }
+    .newsletters-table td:nth-child(4)::before { content: "Κατάσταση"; }
+    .newsletters-table td:nth-child(5)::before { content: "Ημερομηνία"; }
+    .newsletters-table td:nth-child(6)::before { content: "Ενέργειες"; }
+    .newsletters-table td[colspan]::before { display: none; }
+    .newsletters-table td[colspan] { display: block; text-align: center !important; }
+}
+</style>
+
+<div class="newsletters-page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <h1 class="h3 mb-0"><i class="bi bi-envelope-paper me-2"></i><?= h($pageTitle) ?></h1>
     <div class="d-flex gap-2">
         <a href="newsletter-templates.php" class="btn btn-outline-info">
@@ -91,8 +115,8 @@ include __DIR__ . '/includes/header.php';
 <!-- Campaign list -->
 <div class="card shadow-sm">
     <div class="card-header bg-white"><strong>Ιστορικό Εκστρατειών</strong></div>
-    <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
+    <div class="table-responsive newsletters-table-wrap">
+        <table class="table table-hover align-middle mb-0 newsletters-table table-mobile-opt-out">
             <thead class="table-light">
                 <tr>
                     <th>Τίτλος</th>

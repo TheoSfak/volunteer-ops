@@ -596,8 +596,8 @@ if (isLoggedIn()) {
             }
             
             .main-content {
-                overflow-x: hidden;
-                max-width: 100vw;
+                min-width: 0;
+                width: 100%;
             }
             
             .top-navbar {
@@ -631,8 +631,179 @@ if (isLoggedIn()) {
             }
         }
         
-        /* Mobile card view for tables - only on portrait phones (<576px) */
-        @media (max-width: 575.98px) {
+        /* Shared mobile layout: page actions stack and data tables become cards. */
+        @media (max-width: 767.98px) {
+            .content-wrapper {
+                min-width: 0;
+            }
+
+            .content-wrapper h1,
+            .content-wrapper h2,
+            .content-wrapper h3,
+            .content-wrapper h4,
+            .content-wrapper h5 {
+                min-width: 0;
+                overflow-wrap: anywhere;
+            }
+
+            .app-content-logo {
+                margin-bottom: 1rem !important;
+                padding: 0.5rem 0 !important;
+            }
+
+            .app-content-logo img {
+                max-width: 88px !important;
+                max-height: 88px !important;
+                border-radius: 0.65rem !important;
+            }
+
+            .content-wrapper > .d-flex.justify-content-between,
+            .content-wrapper > .d-flex.align-items-center.justify-content-between,
+            .vo-page-header {
+                align-items: stretch !important;
+                flex-direction: column;
+                flex-wrap: wrap;
+                gap: 0.75rem !important;
+            }
+
+            .content-wrapper > .d-flex.justify-content-between > *,
+            .vo-page-header > * {
+                min-width: 0;
+                max-width: 100%;
+            }
+
+            .content-wrapper > .d-flex.justify-content-between > .d-flex,
+            .vo-page-header > .d-flex,
+            .vo-page-actions {
+                display: flex;
+                flex-wrap: wrap;
+                width: 100%;
+                gap: 0.5rem !important;
+            }
+
+            .content-wrapper > .d-flex.justify-content-between > .d-flex > .btn,
+            .vo-page-header > .d-flex > .btn,
+            .vo-page-actions > .btn {
+                flex: 1 1 10rem;
+                min-width: 0;
+                white-space: normal;
+            }
+
+            .card-header.d-flex.justify-content-between,
+            .card-body > .d-flex.justify-content-between,
+            .list-group-item > .d-flex.justify-content-between {
+                align-items: flex-start !important;
+                flex-wrap: wrap;
+                gap: 0.5rem;
+            }
+
+            .breadcrumb {
+                flex-wrap: wrap;
+                overflow-wrap: anywhere;
+            }
+
+            .btn-group {
+                flex-wrap: wrap;
+            }
+
+            .badge,
+            .btn,
+            .form-control,
+            .form-select {
+                max-width: 100%;
+            }
+
+            .vo-mobile-card-table {
+                display: block;
+                width: 100% !important;
+                min-width: 0 !important;
+                margin: 0;
+                background: transparent !important;
+                border: 0 !important;
+            }
+
+            .vo-mobile-card-table > thead {
+                display: none;
+            }
+
+            .vo-mobile-card-table > tbody {
+                display: block;
+                width: 100%;
+            }
+
+            .vo-mobile-card-table > tbody > tr {
+                display: block;
+                width: 100%;
+                margin-bottom: 0.85rem;
+                overflow: hidden;
+                background: #fff;
+                border: 1px solid rgba(15, 23, 42, 0.12);
+                border-radius: 0.75rem;
+                box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+            }
+
+            .vo-mobile-card-table > tbody > tr > td,
+            .vo-mobile-card-table > tbody > tr > th {
+                display: grid;
+                grid-template-columns: minmax(6.5rem, 38%) minmax(0, 1fr);
+                align-items: start;
+                gap: 0.65rem;
+                width: 100% !important;
+                min-width: 0 !important;
+                max-width: 100% !important;
+                padding: 0.65rem 0.75rem !important;
+                overflow-wrap: anywhere;
+                white-space: normal !important;
+                text-align: left !important;
+                border: 0;
+                border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+            }
+
+            .vo-mobile-card-table > tbody > tr > :last-child {
+                border-bottom: 0;
+            }
+
+            .vo-mobile-card-table > tbody > tr > td::before,
+            .vo-mobile-card-table > tbody > tr > th::before {
+                content: attr(data-vo-label);
+                color: #64748b;
+                font-size: 0.7rem;
+                font-weight: 700;
+                letter-spacing: 0.035em;
+                line-height: 1.4;
+                text-transform: uppercase;
+            }
+
+            .vo-mobile-card-table > tbody > tr > [data-vo-span="true"],
+            .vo-mobile-card-table > tbody > tr > [data-vo-label=""] {
+                display: block;
+            }
+
+            .vo-mobile-card-table > tbody > tr > [data-vo-span="true"]::before,
+            .vo-mobile-card-table > tbody > tr > [data-vo-label=""]::before {
+                display: none;
+            }
+
+            .vo-mobile-card-table td .btn-group,
+            .vo-mobile-card-table td .d-flex,
+            .vo-mobile-card-table td form {
+                min-width: 0;
+                max-width: 100%;
+            }
+
+            .vo-mobile-card-table td .btn-group,
+            .vo-mobile-card-table td .d-flex {
+                flex-wrap: wrap;
+            }
+
+            .vo-mobile-card-table .badge {
+                white-space: normal !important;
+            }
+
+            .table-responsive:has(> .vo-mobile-card-table) {
+                overflow: visible;
+            }
+
             .mobile-cards-container .mobile-card {
                 border-radius: 0.5rem;
                 margin-bottom: 0.75rem;
@@ -1205,7 +1376,7 @@ if (isLoggedIn()) {
         <!-- Page Content -->
         <div class="content-wrapper">
             <?php if (!empty($appLogo) && file_exists(__DIR__ . '/../uploads/logos/' . $appLogo)): ?>
-                <div class="text-center mb-4" style="padding: 2rem 0;">
+                <div class="app-content-logo text-center mb-4" style="padding: 2rem 0;">
                     <img src="uploads/logos/<?= h($appLogo) ?>" alt="<?= h($appName) ?>" style="max-width: 200px; max-height: 150px; width: auto; height: auto; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.15);">
                 </div>
             <?php endif; ?>

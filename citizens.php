@@ -429,7 +429,36 @@ $certTypes = dbFetchAll("SELECT * FROM citizen_certificate_types WHERE is_active
 include __DIR__ . '/includes/header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
+<style>
+@media (max-width: 767.98px) {
+    .citizens-page-header { align-items: stretch !important; }
+    .citizens-page-header > div { display: grid; grid-template-columns: 1fr; gap: .5rem; width: 100%; }
+    .citizens-page-header .btn { width: 100%; margin: 0 !important; }
+    .citizens-table-wrap { overflow: visible; }
+    .citizens-table thead { display: none; }
+    .citizens-table, .citizens-table tbody, .citizens-table tr, .citizens-table td { display: block; width: 100%; }
+    .citizens-table tbody { padding: .75rem; }
+    .citizens-table tr { margin-bottom: .75rem; padding: .35rem .8rem; border: 1px solid var(--bs-border-color); border-radius: .75rem; background: var(--bs-body-bg); box-shadow: 0 .125rem .35rem rgba(0,0,0,.06); }
+    .citizens-table td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; border-bottom: 1px solid var(--bs-border-color-translucent); text-align: right !important; white-space: normal !important; max-width: none !important; }
+    .citizens-table td:last-child { border-bottom: 0; }
+    .citizens-table td::before { flex: 0 0 38%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
+    .citizens-table td:nth-child(1)::before { content: "Όνομα"; }
+    .citizens-table td:nth-child(2)::before { content: "Επίθετο"; }
+    .citizens-table td:nth-child(3)::before { content: "Email / Τηλέφωνο"; }
+    .citizens-table td:nth-child(4)::before { content: "Σεμινάριο"; }
+    .citizens-table td:nth-child(5)::before { content: "Γέννηση"; }
+    .citizens-table td:nth-child(6)::before { content: "Κατάσταση"; }
+    .citizens-table td:nth-child(7)::before { content: "Εγγραφή"; }
+    .citizens-table td:nth-child(8)::before { content: "Πηγή"; }
+    .citizens-table td:nth-child(9)::before { content: "Ιστορικό"; }
+    .citizens-table td:nth-child(10)::before { content: "Ενέργειες"; }
+    .citizens-table td[colspan]::before { display: none; }
+    .citizens-table td[colspan] { display: block; text-align: center !important; }
+    .citizens-table td > * { max-width: 62%; }
+}
+</style>
+
+<div class="citizens-page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <h2><i class="bi bi-person-vcard"></i> Λίστα Πολιτών</h2>
     <div>
         <a href="citizens.php?export=csv&search=<?= urlencode($search) ?>&contact=<?= urlencode($filterContact) ?>&payment=<?= urlencode($filterPayment) ?>&completed=<?= urlencode($filterCompleted) ?>&sort=<?= urlencode($sortCol) ?>&dir=<?= urlencode(strtolower($sortDir)) ?>" class="btn btn-success me-2">
@@ -488,8 +517,8 @@ include __DIR__ . '/includes/header.php';
         <span><i class="bi bi-list"></i> Σύνολο: <strong><?= $total ?></strong> πολίτες</span>
     </div>
     <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-hover table-striped table-sm mb-0 align-middle" style="font-size:.82rem">
+        <div class="table-responsive citizens-table-wrap">
+            <table class="table table-hover table-striped table-sm mb-0 align-middle citizens-table table-mobile-opt-out" style="font-size:.82rem">
 <?php
 // Sort helper: builds href toggling direction, preserving all filters
 function sortLink(string $col, string $label, string $currentCol, string $currentDir, array $filters): string {
