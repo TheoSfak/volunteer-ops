@@ -2,7 +2,7 @@
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 $subscription = dbFetchOne("SELECT * FROM volunteer_subscriptions WHERE id = ?", [(int)get('id')]);
-if (!$subscription || (getCurrentUserId() !== (int)$subscription['user_id'] && !hasPagePermission('subscriptions_manage'))) {
+if (!$subscription || ((int)getCurrentUserId() !== (int)$subscription['user_id'] && !hasPagePermission('subscriptions_manage'))) {
     http_response_code(403); exit('Δεν έχετε δικαίωμα πρόσβασης.');
 }
 $path = __DIR__ . '/uploads/subscription-receipts/' . basename((string)$subscription['receipt_stored_name']);

@@ -10,6 +10,69 @@ $pageTitle = 'Ετήσιες Συνδρομές';
  * Store either a normally selected receipt or a photo captured by the mobile camera.
  * Returns [originalName, storedName], or null when no file was submitted.
  */
+function storeResizedSubscriptionReceiptImage(string $sourcePath, string $destinationPath, string $mime): void {
+    $imageInfo = getimagesize($sourcePath);
+    if (!$imageInfo || empty($imageInfo[0]) || empty($imageInfo[1])) {
+        throw new RuntimeException('Η εικόνα της απόδειξης δεν είναι έγκυρη.');
+    }
+
+    [$sourceWidth, $sourceHeight] = $imageInfo;
+    $maxWidth = 1920;
+    $maxHeight = 1080;
+    if ($sourceWidth <= $maxWidth && $sourceHeight <= $maxHeight) {
+        if (!move_uploaded_file($sourcePath, $destinationPath)) {
+            throw new RuntimeException('Δεν ήταν δυνατή η αποθήκευση της εικόνας της απόδειξης.');
+        }
+        return;
+    }
+
+    $loader = $mime === 'image/jpeg' ? 'imagecreatefromjpeg' : 'imagecreatefrompng';
+    if (!function_exists('imagecreatetruecolor') || !function_exists($loader)) {
+        throw new RuntimeException('Η αλλαγή μεγέθους εικόνας δεν είναι διαθέσιμη στον διακομιστή.');
+    }
+
+    $scale = min($maxWidth / $sourceWidth, $maxHeight / $sourceHeight);
+    $targetWidth = max(1, (int)floor($sourceWidth * $scale));
+    $targetHeight = max(1, (int)floor($sourceHeight * $scale));
+    $sourceImage = $loader($sourcePath);
+    $targetImage = imagecreatetruecolor($targetWidth, $targetHeight);
+    if (!$sourceImage || !$targetImage) {
+        if ($sourceImage) imagedestroy($sourceImage);
+        if ($targetImage) imagedestroy($targetImage);
+        throw new RuntimeException('Δεν ήταν δυνατή η αλλαγή μεγέθους της εικόνας της απόδειξης.');
+    }
+
+    if ($mime === 'image/png') {
+        imagealphablending($targetImage, false);
+        imagesavealpha($targetImage, true);
+        $transparent = imagecolorallocatealpha($targetImage, 0, 0, 0, 127);
+        imagefilledrectangle($targetImage, 0, 0, $targetWidth, $targetHeight, $transparent);
+    }
+
+    $resampled = imagecopyresampled(
+        $targetImage,
+        $sourceImage,
+        0,
+        0,
+        0,
+        0,
+        $targetWidth,
+        $targetHeight,
+        $sourceWidth,
+        $sourceHeight
+    );
+    $saved = $resampled && ($mime === 'image/jpeg'
+        ? imagejpeg($targetImage, $destinationPath, 85)
+        : imagepng($targetImage, $destinationPath, 6));
+    imagedestroy($sourceImage);
+    imagedestroy($targetImage);
+
+    if (!$saved) {
+        if (is_file($destinationPath)) unlink($destinationPath);
+        throw new RuntimeException('Δεν ήταν δυνατή η αλλαγή μεγέθους και η αποθήκευση της εικόνας της απόδειξης.');
+    }
+}
+
 function storeSubscriptionReceipt(int $userId, string $volunteerName): ?array {
     $file = null;
     foreach (['receipt', 'receipt_camera'] as $field) {
@@ -45,7 +108,9 @@ function storeSubscriptionReceipt(int $userId, string $volunteerName): ?array {
     for ($suffix = 2; is_file($dir . $storedName); $suffix++) {
         $storedName = $safeBase . '-' . $suffix . '.' . $extension;
     }
-    if (!move_uploaded_file($file['tmp_name'], $dir . $storedName)) {
+    if ($mime === 'image/jpeg' || $mime === 'image/png') {
+        storeResizedSubscriptionReceiptImage($file['tmp_name'], $dir . $storedName, $mime);
+    } elseif (!move_uploaded_file($file['tmp_name'], $dir . $storedName)) {
         throw new RuntimeException('Δεν ήταν δυνατή η αποθήκευση της απόδειξης.');
     }
     return [$storedName, $storedName];
@@ -161,12 +226,40 @@ if (!in_array($subscriptionDateFormat, ['d/m/Y', 'Y-m-d', 'd.m.Y'], true)) $subs
 $filter = get('filter', 'all');
 $validFilters = ['all', 'week', 'month', 'quarter', 'expired'];
 if (!in_array($filter, $validFilters, true)) $filter = 'all';
+$sort = (string)get('sort', 'expiry');
+$sortDirection = strtolower((string)get('dir', 'asc'));
+$sortColumns = [
+    'surname' => "SUBSTRING_INDEX(TRIM(u.name), ' ', -1)",
+    'payment' => 'vs.payment_date',
+    'expiry' => 'vs.expiry_date',
+    'receipt' => "COALESCE(vs.receipt_number, '')",
+];
+if (!isset($sortColumns[$sort])) $sort = 'expiry';
+if (!in_array($sortDirection, ['asc', 'desc'], true)) $sortDirection = 'asc';
+$sortDirectionSql = strtoupper($sortDirection);
+$sortOrderSql = $sortColumns[$sort] . ' ' . $sortDirectionSql;
+if ($sort === 'surname') $sortOrderSql .= ', u.name ' . $sortDirectionSql;
+$sortOrderSql .= ', vs.id DESC';
+$sortUrls = [];
+foreach (array_keys($sortColumns) as $sortKey) {
+    $nextDirection = $sort === $sortKey && $sortDirection === 'asc' ? 'desc' : 'asc';
+    $sortUrls[$sortKey] = 'subscriptions.php?' . http_build_query([
+        'filter' => $filter,
+        'sort' => $sortKey,
+        'dir' => $nextDirection,
+    ]);
+}
+$sortIcon = static function (string $sortKey) use ($sort, $sortDirection): string {
+    if ($sort !== $sortKey) return '<i class="bi bi-arrow-down-up ms-1 text-muted" aria-hidden="true"></i>';
+    $icon = $sortDirection === 'asc' ? 'bi-arrow-up' : 'bi-arrow-down';
+    return '<i class="bi ' . $icon . ' ms-1" aria-hidden="true"></i>';
+};
 $latestOnly = "vs.id = (SELECT vs2.id FROM volunteer_subscriptions vs2 WHERE vs2.user_id = vs.user_id ORDER BY vs2.expiry_date DESC, vs2.id DESC LIMIT 1)";
 $filterSql = [
     'all' => '1=1',
     'week' => 'vs.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)',
-    'month' => 'vs.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)',
-    'quarter' => 'vs.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 90 DAY)',
+    'month' => 'vs.expiry_date > DATE_ADD(CURDATE(), INTERVAL 7 DAY) AND vs.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)',
+    'quarter' => 'vs.expiry_date > DATE_ADD(CURDATE(), INTERVAL 30 DAY) AND vs.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 90 DAY)',
     'expired' => 'vs.expiry_date < CURDATE()',
 ];
 $counts = [];
@@ -178,7 +271,7 @@ $rows = dbFetchAll("SELECT vs.*, u.name AS volunteer_name, u.email, creator.name
         iris.payment_reported_at AS iris_payment_reported_at, iris.status AS iris_status, iris.seen_at AS iris_seen_at
     FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id LEFT JOIN users creator ON creator.id = vs.created_by
     LEFT JOIN subscription_iris_requests iris ON iris.id = (SELECT sir.id FROM subscription_iris_requests sir WHERE sir.user_id = vs.user_id AND sir.status IN ('REPORTED', 'SEEN') ORDER BY sir.id DESC LIMIT 1)
-    WHERE {$latestOnly} AND {$filterSql[$filter]} ORDER BY vs.expiry_date ASC, vs.id DESC");
+    WHERE {$latestOnly} AND {$filterSql[$filter]} ORDER BY {$sortOrderSql}");
 $editing = get('edit') ? dbFetchOne("SELECT vs.*, u.name AS volunteer_name FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id WHERE vs.id = ?", [(int)get('edit')]) : null;
 $irisRequestForPayment = get('iris_request') ? dbFetchOne("SELECT sir.*, u.name AS volunteer_name FROM subscription_iris_requests sir JOIN users u ON u.id = sir.user_id WHERE sir.id = ? AND sir.status IN ('REPORTED', 'SEEN')", [(int)get('iris_request')]) : null;
 
@@ -206,7 +299,7 @@ include __DIR__ . '/includes/header.php';
 ?>
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0"><i class="bi bi-cash-coin me-2"></i>Ετήσιες Συνδρομές</h1>
-    <div class="d-flex gap-2"><a class="btn btn-outline-success" href="subscriptions.php?filter=<?= h($filter) ?>&export=excel"><i class="bi bi-file-earmark-excel me-1"></i>Εξαγωγή Excel</a><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button></div>
+    <div class="d-flex gap-2"><a class="btn btn-outline-success" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'export' => 'excel'])) ?>"><i class="bi bi-file-earmark-excel me-1"></i>Εξαγωγή Excel</a><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button></div>
 </div>
 <?php if ($editing): ?>
 <div class="card border-primary mb-3">
@@ -222,7 +315,7 @@ include __DIR__ . '/includes/header.php';
             <div class="col-md-2"><label class="form-label">Τύπος</label><select class="form-select" name="renewal_kind"><option value="RENEWAL" <?= $editing['renewal_kind'] === 'RENEWAL' ? 'selected' : '' ?>>Ανανέωση</option><option value="REACTIVATION" <?= $editing['renewal_kind'] === 'REACTIVATION' ? 'selected' : '' ?>>Επανενεργοποίηση</option></select></div>
             <div class="col-md-2"><label class="form-label">Τρόπος</label><input class="form-control" name="payment_method" value="<?= h($editing['payment_method']) ?>"></div>
             <div class="col-md-3"><label class="form-label">Αριθμός απόδειξης</label><input class="form-control" name="receipt_number" maxlength="100" value="<?= h($editing['receipt_number'] ?? '') ?>"></div>
-            <div class="col-md-6" id="editReceiptUpload"><label class="form-label">Αντικατάσταση απόδειξης</label><input type="file" class="form-control" name="receipt" accept=".pdf,.jpg,.jpeg,.png"><div class="form-text">PDF, JPG ή PNG έως 10MB. Η νέα απόδειξη αντικαθιστά την καταχωρημένη.</div></div>
+            <div class="col-md-6" id="editReceiptUpload"><label class="form-label">Αντικατάσταση απόδειξης</label><input type="file" class="form-control" name="receipt" accept=".pdf,.jpg,.jpeg,.png"><div class="form-text">PDF, JPG ή PNG έως 10MB. Οι εικόνες περιορίζονται αυτόματα έως 1920×1080. Η νέα απόδειξη αντικαθιστά την καταχωρημένη.</div></div>
             <div class="col-12"><label class="form-label">Σημειώσεις</label><textarea class="form-control" name="notes" rows="2"><?= h($editing['notes']) ?></textarea></div>
         </div>
         <div class="card-footer"><button class="btn btn-primary">Αποθήκευση αλλαγών</button> <a href="subscriptions.php" class="btn btn-outline-secondary">Ακύρωση</a></div>
@@ -231,7 +324,7 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 <div class="d-flex flex-wrap gap-2 mb-3">
     <?php foreach (['all' => ['Όλες', null, 'secondary'], 'week' => ['Λήγουν σε 1 εβδομάδα', $counts['week'], 'danger'], 'month' => ['Λήγουν σε 1 μήνα', $counts['month'], 'warning'], 'quarter' => ['Λήγουν σε 3 μήνες', $counts['quarter'], 'info'], 'expired' => ['Ληγμένες', $counts['expired'], 'dark']] as $key => [$label, $count, $color]): ?>
-        <a href="subscriptions.php?filter=<?= $key ?>" class="btn btn-sm <?= $filter === $key ? 'btn-' . $color : 'btn-outline-' . $color ?>"><?= $label ?><?php if ($count !== null): ?> <span class="badge text-bg-light ms-1"><?= $count ?></span><?php endif; ?></a>
+        <a href="subscriptions.php?<?= h(http_build_query(['filter' => $key, 'sort' => $sort, 'dir' => $sortDirection])) ?>" class="btn btn-sm <?= $filter === $key ? 'btn-' . $color : 'btn-outline-' . $color ?>"><?= $label ?><?php if ($count !== null): ?> <span class="badge text-bg-light ms-1"><?= $count ?></span><?php endif; ?></a>
     <?php endforeach; ?>
 </div>
 <style>
@@ -242,24 +335,25 @@ include __DIR__ . '/includes/header.php';
 @media (max-width: 576px) { .subscription-list-table td:nth-child(9) { min-width: 215px; } }
 </style>
 <div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0 subscription-list-table">
-<thead><tr><th>Εθελοντής</th><th>Πληρωμή</th><th>Λήξη</th><th>Έτη</th><th style="min-width:130px">Ποσό</th><th>Τρόπος</th><th>Αρ. απόδειξης</th><th style="max-width:150px">Απόδειξη</th><th>Πληρωμή με IRIS</th><th>Κατάσταση</th><th></th></tr></thead><tbody>
+<thead><tr><th><a href="<?= h($sortUrls['surname']) ?>" class="text-decoration-none text-reset" title="Ταξινόμηση κατά επώνυμο">Εθελοντής<?= $sortIcon('surname') ?></a></th><th><a href="<?= h($sortUrls['payment']) ?>" class="text-decoration-none text-reset" title="Ταξινόμηση κατά ημερομηνία πληρωμής">Πληρωμή<?= $sortIcon('payment') ?></a></th><th><a href="<?= h($sortUrls['expiry']) ?>" class="text-decoration-none text-reset" title="Ταξινόμηση κατά ημερομηνία λήξης">Λήξη<?= $sortIcon('expiry') ?></a></th><th>Έτη</th><th style="min-width:130px">Ποσό</th><th>Τρόπος</th><th><a href="<?= h($sortUrls['receipt']) ?>" class="text-decoration-none text-reset" title="Ταξινόμηση κατά αριθμό απόδειξης">Αρ. απόδειξης<?= $sortIcon('receipt') ?></a></th><th style="max-width:150px">Απόδειξη</th><th>Πληρωμή με IRIS</th><th>Κατάσταση</th><th></th></tr></thead><tbody>
 <?php foreach ($rows as $row): $days = (int)floor((strtotime($row['expiry_date']) - strtotime(date('Y-m-d'))) / 86400); $badge = $days < 0 ? 'danger' : ($days <= 7 ? 'danger' : ($days <= 30 ? 'warning text-dark' : ($days <= 90 ? 'info text-dark' : 'success'))); $label = $days < 0 ? 'Ληγμένη' : ($days === 0 ? 'Λήγει σήμερα' : 'Ενεργή (' . $days . ' ημ.)'); $hasReceiptFile = !empty($row['receipt_stored_name']) && is_file(__DIR__ . '/uploads/subscription-receipts/' . basename($row['receipt_stored_name'])); ?>
 <?php $isReceiptImage = $hasReceiptFile && in_array(strtolower(pathinfo($row['receipt_stored_name'], PATHINFO_EXTENSION)), ['jpg', 'jpeg', 'png'], true); ?>
-<tr><td><a href="volunteer-view.php?id=<?= $row['user_id'] ?>"><?= h($row['volunteer_name']) ?></a></td><td><?= formatDate($row['payment_date']) ?></td><td><?= formatDate($row['expiry_date']) ?></td><td><?= (int)($row['coverage_years'] ?? 1) ?></td><td class="text-nowrap" style="min-width:130px"><?= $row['amount'] !== null ? number_format((float)$row['amount'], 2, ',', '.') . ' €' : '—' ?></td><td><?= h($row['payment_method'] ?: '—') ?></td><td><?= h($row['receipt_number'] ?: '—') ?></td><td style="max-width:150px"><?php if ($isReceiptImage): ?><button type="button" class="btn btn-sm btn-outline-secondary receipt-preview-btn text-truncate mw-100" data-bs-toggle="modal" data-bs-target="#receiptPreviewModal" data-preview-url="subscription-receipt.php?id=<?= $row['id'] ?>" data-preview-name="<?= h($row['receipt_original_name']) ?>"><i class="bi bi-eye"></i> Προβολή</button><?php elseif ($hasReceiptFile): ?><a class="btn btn-sm btn-outline-secondary text-truncate mw-100" href="subscription-receipt.php?id=<?= $row['id'] ?>" target="_blank" rel="noopener"><i class="bi bi-file-earmark-text"></i> <?= h($row['receipt_original_name']) ?></a><?php elseif (!empty($row['receipt_stored_name'])): ?><span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Μη διαθέσιμη</span><?php else: ?>—<?php endif; ?></td><td><?php if ($row['iris_request_id']): ?><div class="small <?= $row['iris_status'] === 'SEEN' ? 'text-decoration-line-through text-muted' : '' ?>"><strong><?= formatDateTime($row['iris_payment_reported_at']) ?></strong><br><?= (int)$row['iris_coverage_years'] ?> έτη · <?= number_format((float)$row['iris_total_amount'], 2, ',', '.') ?> €</div><?php if ($row['iris_status'] === 'REPORTED'): ?><div class="d-flex gap-1 mt-1"><form method="post"><?= csrfField() ?><input type="hidden" name="action" value="mark_iris_seen"><input type="hidden" name="iris_request_id" value="<?= (int)$row['iris_request_id'] ?>"><button class="btn btn-sm btn-outline-secondary">Το είδα</button></form><a class="btn btn-sm btn-outline-success" href="subscriptions.php?filter=<?= h($filter) ?>&iris_request=<?= (int)$row['iris_request_id'] ?>">Καταχώρηση</a></div><?php endif; ?><?php else: ?>—<?php endif; ?></td><td><span class="badge bg-<?= $badge ?>"><?= $label ?></span></td><td><a class="btn btn-sm btn-outline-primary" href="subscriptions.php?filter=<?= h($filter) ?>&edit=<?= $row['id'] ?>"><i class="bi bi-pencil"></i></a></td></tr>
+<tr><td><a href="volunteer-view.php?id=<?= $row['user_id'] ?>"><?= h($row['volunteer_name']) ?></a></td><td><?= formatDate($row['payment_date']) ?></td><td><?= formatDate($row['expiry_date']) ?></td><td><?= (int)($row['coverage_years'] ?? 1) ?></td><td class="text-nowrap" style="min-width:130px"><?= $row['amount'] !== null ? number_format((float)$row['amount'], 2, ',', '.') . ' €' : '—' ?></td><td><?= h($row['payment_method'] ?: '—') ?></td><td><?= h($row['receipt_number'] ?: '—') ?></td><td style="max-width:150px"><?php if ($hasReceiptFile): ?><button type="button" class="btn btn-sm btn-outline-secondary receipt-preview-btn text-truncate mw-100" data-bs-toggle="modal" data-bs-target="#receiptPreviewModal" data-preview-url="subscription-receipt.php?id=<?= $row['id'] ?>" data-preview-name="<?= h($row['receipt_original_name']) ?>" data-preview-type="<?= $isReceiptImage ? 'image' : 'pdf' ?>"><i class="bi <?= $isReceiptImage ? 'bi-eye' : 'bi-file-earmark-pdf' ?>"></i> Προβολή</button><?php elseif (!empty($row['receipt_stored_name'])): ?><span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Μη διαθέσιμη</span><?php else: ?>—<?php endif; ?></td><td><?php if ($row['iris_request_id']): ?><div class="small <?= $row['iris_status'] === 'SEEN' ? 'text-decoration-line-through text-muted' : '' ?>"><strong><?= formatDateTime($row['iris_payment_reported_at']) ?></strong><br><?= (int)$row['iris_coverage_years'] ?> έτη · <?= number_format((float)$row['iris_total_amount'], 2, ',', '.') ?> €</div><?php if ($row['iris_status'] === 'REPORTED'): ?><div class="d-flex gap-1 mt-1"><form method="post"><?= csrfField() ?><input type="hidden" name="action" value="mark_iris_seen"><input type="hidden" name="iris_request_id" value="<?= (int)$row['iris_request_id'] ?>"><button class="btn btn-sm btn-outline-secondary">Το είδα</button></form><a class="btn btn-sm btn-outline-success" href="subscriptions.php?filter=<?= h($filter) ?>&iris_request=<?= (int)$row['iris_request_id'] ?>">Καταχώρηση</a></div><?php endif; ?><?php else: ?>—<?php endif; ?></td><td><span class="badge bg-<?= $badge ?>"><?= $label ?></span></td><td><a class="btn btn-sm btn-outline-primary" href="subscriptions.php?filter=<?= h($filter) ?>&edit=<?= $row['id'] ?>"><i class="bi bi-pencil"></i></a></td></tr>
 <?php endforeach; ?>
 <?php if (!$rows): ?><tr><td colspan="11" class="text-center text-muted py-4">Δεν υπάρχουν καταχωρημένες συνδρομές.</td></tr><?php endif; ?>
 </tbody></table></div></div>
 
 <div class="modal fade" id="receiptPreviewModal" tabindex="-1" aria-labelledby="receiptPreviewModalTitle" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title text-truncate" id="receiptPreviewModalTitle">Προεπισκόπηση απόδειξης</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Κλείσιμο"></button>
             </div>
             <div class="modal-body text-center">
-                <img id="receiptPreviewImage" src="" alt="Προεπισκόπηση απόδειξης" class="img-fluid rounded border" style="max-width:320px;max-height:65vh;object-fit:contain;">
-                <div id="receiptPreviewError" class="alert alert-danger mt-3 d-none mb-0">Δεν ήταν δυνατή η προβολή της εικόνας. Δοκιμάστε να την ανοίξετε ξανά.</div>
+                <img id="receiptPreviewImage" src="" alt="Προεπισκόπηση απόδειξης" class="img-fluid rounded border d-none" style="max-width:100%;max-height:70vh;object-fit:contain;">
+                <iframe id="receiptPreviewPdf" src="" title="Προεπισκόπηση απόδειξης PDF" class="w-100 border rounded d-none" style="height:70vh;"></iframe>
+                <div id="receiptPreviewError" class="alert alert-danger mt-3 d-none mb-0">Δεν ήταν δυνατή η προβολή της απόδειξης. Δοκιμάστε να την ανοίξετε ξανά.</div>
             </div>
         </div>
     </div>
@@ -268,7 +362,7 @@ include __DIR__ . '/includes/header.php';
 <div class="modal fade" id="paymentModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><form method="post" enctype="multipart/form-data">
 <input type="hidden" name="iris_request_id" value="<?= (int)($irisRequestForPayment['id'] ?? 0) ?>">
 <?= csrfField() ?><input type="hidden" name="action" value="record_payment"><div class="modal-header"><h5 class="modal-title">Καταχώρηση ετήσιας συνδρομής</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-<div class="modal-body"><div class="mb-3"><label class="form-label">Εθελοντής</label><select class="form-select" name="user_id" id="subscriptionVolunteer" required><option value="">Επιλέξτε…</option><?php foreach ($volunteers as $v): ?><option value="<?= $v['id'] ?>"><?= h($v['name']) ?> — <?= h($v['email']) ?></option><?php endforeach; ?></select></div><div class="row g-3"><div class="col-md-6"><label class="form-label">Ημερομηνία πληρωμής</label><input type="text" class="form-control subscription-datepicker" name="payment_date" id="subscriptionPaymentDate" value="<?= date('Y-m-d') ?>" required></div><div class="col-md-6"><label class="form-label">Διάρκεια κάλυψης</label><select class="form-select" name="coverage_years" id="subscriptionCoverageYears"><option value="1">1 έτος</option><option value="2">2 έτη</option><option value="3">3 έτη</option><option value="4">4 έτη</option><option value="5">5 έτη</option></select></div><div class="col-12"><label class="form-label">Ημερομηνία λήξης</label><input type="text" class="form-control subscription-datepicker" name="expiry_date" id="subscriptionExpiryDate" required><div class="form-text" id="subscriptionExpiryHint">Επιλέξτε εθελοντή για τον αυτόματο υπολογισμό.</div><div class="alert alert-warning mt-2 mb-0 d-none" id="subscriptionExpiryWarning"><i class="bi bi-exclamation-triangle me-1"></i>Η ημερομηνία λήξης άλλαξε από την προτεινόμενη. Ελέγξτε την πριν την αποθήκευση.</div><input type="hidden" name="expiry_override_confirmed" id="subscriptionExpiryOverrideConfirmed" value="0"></div></div><div class="row mt-1"><div class="col"><label class="form-label">Ποσό (€)</label><input type="number" step="0.01" min="0" class="form-control" name="amount"></div><div class="col"><label class="form-label">Τρόπος</label><select class="form-select" name="payment_method"><option value="">—</option><option>Μετρητά</option><option>Τραπεζική κατάθεση</option><option>Κάρτα</option><option>Άλλο</option></select></div></div><div class="mt-3"><label class="form-label">Αριθμός απόδειξης</label><input type="text" class="form-control" name="receipt_number" maxlength="100"></div><div class="mt-3"><label class="form-label">Απόδειξη</label><input type="file" class="form-control" name="receipt" accept=".pdf,.jpg,.jpeg,.png"><div class="form-text">PDF, JPG ή PNG έως 10MB.</div></div><div class="mt-3"><label class="form-label">Σημειώσεις</label><textarea class="form-control" name="notes" rows="2"></textarea></div></div>
+<div class="modal-body"><div class="mb-3"><label class="form-label">Εθελοντής</label><select class="form-select" name="user_id" id="subscriptionVolunteer" required><option value="">Επιλέξτε…</option><?php foreach ($volunteers as $v): ?><option value="<?= $v['id'] ?>"><?= h($v['name']) ?> — <?= h($v['email']) ?></option><?php endforeach; ?></select></div><div class="row g-3"><div class="col-md-6"><label class="form-label">Ημερομηνία πληρωμής</label><input type="text" class="form-control subscription-datepicker" name="payment_date" id="subscriptionPaymentDate" value="<?= date('Y-m-d') ?>" required></div><div class="col-md-6"><label class="form-label">Διάρκεια κάλυψης</label><select class="form-select" name="coverage_years" id="subscriptionCoverageYears"><option value="1">1 έτος</option><option value="2">2 έτη</option><option value="3">3 έτη</option><option value="4">4 έτη</option><option value="5">5 έτη</option></select></div><div class="col-12"><label class="form-label">Ημερομηνία λήξης</label><input type="text" class="form-control subscription-datepicker" name="expiry_date" id="subscriptionExpiryDate" required><div class="form-text" id="subscriptionExpiryHint">Επιλέξτε εθελοντή για τον αυτόματο υπολογισμό.</div><div class="alert alert-warning mt-2 mb-0 d-none" id="subscriptionExpiryWarning"><i class="bi bi-exclamation-triangle me-1"></i>Η ημερομηνία λήξης άλλαξε από την προτεινόμενη. Ελέγξτε την πριν την αποθήκευση.</div><input type="hidden" name="expiry_override_confirmed" id="subscriptionExpiryOverrideConfirmed" value="0"></div></div><div class="row mt-1"><div class="col"><label class="form-label">Ποσό (€)</label><input type="number" step="0.01" min="0" class="form-control" name="amount"></div><div class="col"><label class="form-label">Τρόπος</label><select class="form-select" name="payment_method"><option value="">—</option><option>Μετρητά</option><option>Τραπεζική κατάθεση</option><option>Κάρτα</option><option>Άλλο</option></select></div></div><div class="mt-3"><label class="form-label">Αριθμός απόδειξης</label><input type="text" class="form-control" name="receipt_number" maxlength="100"></div><div class="mt-3"><label class="form-label">Απόδειξη</label><input type="file" class="form-control" name="receipt" accept=".pdf,.jpg,.jpeg,.png"><div class="form-text">PDF, JPG ή PNG έως 10MB. Οι εικόνες περιορίζονται αυτόματα έως 1920×1080.</div></div><div class="mt-3"><label class="form-label">Σημειώσεις</label><textarea class="form-control" name="notes" rows="2"></textarea></div></div>
 <div class="px-3 pb-3"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" value="1" name="force_reactivation" id="forceReactivation"><label class="form-check-label" for="forceReactivation">Επανενεργοποίηση συνδρομής</label><div class="form-text">Ξεκινά νέα περίοδο από την ημερομηνία πληρωμής, ανεξάρτητα από την προηγούμενη λήξη.</div></div></div>
 <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button><button class="btn btn-primary">Αποθήκευση</button></div></form></div></div></div>
 <script>
@@ -276,16 +370,24 @@ include __DIR__ . '/includes/header.php';
     const receiptPreviewModal = document.getElementById('receiptPreviewModal');
     if (receiptPreviewModal) {
         const previewImage = document.getElementById('receiptPreviewImage');
+        const previewPdf = document.getElementById('receiptPreviewPdf');
         const previewTitle = document.getElementById('receiptPreviewModalTitle');
         const previewError = document.getElementById('receiptPreviewError');
         receiptPreviewModal.addEventListener('show.bs.modal', (event) => {
             const button = event.relatedTarget;
             previewTitle.textContent = button.dataset.previewName || 'Προεπισκόπηση απόδειξης';
             previewError.classList.add('d-none');
-            previewImage.src = button.dataset.previewUrl;
+            const isImage = button.dataset.previewType === 'image';
+            previewImage.classList.toggle('d-none', !isImage);
+            previewPdf.classList.toggle('d-none', isImage);
+            if (isImage) previewImage.src = button.dataset.previewUrl;
+            else previewPdf.src = button.dataset.previewUrl;
         });
         previewImage.addEventListener('error', () => previewError.classList.remove('d-none'));
-        receiptPreviewModal.addEventListener('hidden.bs.modal', () => { previewImage.removeAttribute('src'); });
+        receiptPreviewModal.addEventListener('hidden.bs.modal', () => {
+            previewImage.removeAttribute('src');
+            previewPdf.removeAttribute('src');
+        });
     }
 
     const latestExpiryByVolunteer = <?= json_encode($latestSubscriptionExpiryMap, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
