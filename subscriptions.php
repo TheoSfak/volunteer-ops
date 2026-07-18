@@ -279,9 +279,16 @@ foreach (['week', 'month', 'quarter', 'expired'] as $key) {
 $isExcelExport = get('export') === 'excel';
 $filteredTotal = (int)dbFetchValue("SELECT COUNT(*) FROM volunteer_subscriptions vs WHERE {$latestOnly} AND {$filterSql[$filter]}");
 $totalPages = max(1, (int)ceil($filteredTotal / $perPage));
-$currentPage = max(1, (int)get('page', 1));
-if ($currentPage > $totalPages) $currentPage = $totalPages;
-$offset = ($currentPage - 1) * $perPage;
+$subscriptionPage = max(1, (int)get('page', 1));
+if ($subscriptionPage > $totalPages) $subscriptionPage = $totalPages;
+$offset = ($subscriptionPage - 1) * $perPage;
+$paginationBaseParams = ['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage];
+$previousPageUrl = $subscriptionPage > 1
+    ? 'subscriptions.php?' . http_build_query($paginationBaseParams + ['page' => $subscriptionPage - 1])
+    : null;
+$nextPageUrl = $subscriptionPage < $totalPages
+    ? 'subscriptions.php?' . http_build_query($paginationBaseParams + ['page' => $subscriptionPage + 1])
+    : null;
 $rowsSql = "SELECT vs.*, u.name AS volunteer_name, u.email, creator.name AS created_by_name,
         iris.id AS iris_request_id, iris.coverage_years AS iris_coverage_years, iris.total_amount AS iris_total_amount,
         iris.payment_reported_at AS iris_payment_reported_at, iris.status AS iris_status, iris.seen_at AS iris_seen_at
@@ -290,12 +297,6 @@ $rowsSql = "SELECT vs.*, u.name AS volunteer_name, u.email, creator.name AS crea
     WHERE {$latestOnly} AND {$filterSql[$filter]} ORDER BY {$sortOrderSql}";
 if (!$isExcelExport) $rowsSql .= " LIMIT {$perPage} OFFSET {$offset}";
 $rows = dbFetchAll($rowsSql);
-$paginationPages = [1, $totalPages];
-for ($pageNumber = $currentPage - 2; $pageNumber <= $currentPage + 2; $pageNumber++) {
-    if ($pageNumber >= 1 && $pageNumber <= $totalPages) $paginationPages[] = $pageNumber;
-}
-$paginationPages = array_values(array_unique($paginationPages));
-sort($paginationPages);
 $editing = get('edit') ? dbFetchOne("SELECT vs.*, u.name AS volunteer_name FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id WHERE vs.id = ?", [(int)get('edit')]) : null;
 $irisRequestForPayment = get('iris_request') ? dbFetchOne("SELECT sir.*, u.name AS volunteer_name FROM subscription_iris_requests sir JOIN users u ON u.id = sir.user_id WHERE sir.id = ? AND sir.status IN ('REPORTED', 'SEEN')", [(int)get('iris_request')]) : null;
 
@@ -345,7 +346,7 @@ include __DIR__ . '/includes/header.php';
 ?>
 <div class="d-flex justify-content-between align-items-center mb-4 subscriptions-page-header">
     <h1 class="h3 mb-0"><i class="bi bi-cash-coin me-2"></i>Ετήσιες Συνδρομές</h1>
-    <div class="d-flex flex-wrap gap-2"><a class="btn btn-outline-secondary" href="subscriptions.php?<?= h(http_build_query(array_filter(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $currentPage, 'show_history' => $showPaymentHistory ? null : 1], static fn($value) => $value !== null))) ?><?= $showPaymentHistory ? '' : '#subscriptionPaymentHistory' ?>"><i class="bi bi-clock-history me-1"></i><?= $showPaymentHistory ? 'Απόκρυψη ιστορικού' : 'Ιστορικό πληρωμών' ?> <span class="badge text-bg-secondary ms-1"><?= $historyTotal ?></span></a><a class="btn btn-outline-success" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'export' => 'excel'])) ?>"><i class="bi bi-file-earmark-excel me-1"></i>Εξαγωγή Excel</a><button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button></div>
+    <div class="d-flex flex-wrap gap-2"><a class="btn btn-outline-secondary" href="subscriptions.php?<?= h(http_build_query(array_filter(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $subscriptionPage, 'show_history' => $showPaymentHistory ? null : 1], static fn($value) => $value !== null))) ?><?= $showPaymentHistory ? '' : '#subscriptionPaymentHistory' ?>"><i class="bi bi-clock-history me-1"></i><?= $showPaymentHistory ? 'Απόκρυψη ιστορικού' : 'Ιστορικό πληρωμών' ?> <span class="badge text-bg-secondary ms-1"><?= $historyTotal ?></span></a><a class="btn btn-outline-success" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'export' => 'excel'])) ?>"><i class="bi bi-file-earmark-excel me-1"></i>Εξαγωγή Excel</a><button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button></div>
 </div>
 <?php if ($editing): ?>
 <div class="card border-primary mb-3">
@@ -493,23 +494,10 @@ include __DIR__ . '/includes/header.php';
         </form>
     </div>
     <?php if ($totalPages > 1): ?>
-    <nav aria-label="Σελιδοποίηση συνδρομών">
-        <ul class="pagination pagination-sm mb-0">
-            <li class="page-item <?= $currentPage <= 1 ? 'disabled' : '' ?>">
-                <?php if ($currentPage <= 1): ?><span class="page-link" aria-hidden="true">&laquo;</span><?php else: ?><a class="page-link" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $currentPage - 1])) ?>" aria-label="Προηγούμενη σελίδα">&laquo;</a><?php endif; ?>
-            </li>
-            <?php $previousPaginationPage = null; ?>
-            <?php foreach ($paginationPages as $paginationPage): ?>
-                <?php if ($previousPaginationPage !== null && $paginationPage > $previousPaginationPage + 1): ?><li class="page-item disabled"><span class="page-link">…</span></li><?php endif; ?>
-                <li class="page-item <?= $paginationPage === $currentPage ? 'active' : '' ?>" <?= $paginationPage === $currentPage ? 'aria-current="page"' : '' ?>>
-                    <?php if ($paginationPage === $currentPage): ?><span class="page-link"><?= $paginationPage ?></span><?php else: ?><a class="page-link" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $paginationPage])) ?>"><?= $paginationPage ?></a><?php endif; ?>
-                </li>
-                <?php $previousPaginationPage = $paginationPage; ?>
-            <?php endforeach; ?>
-            <li class="page-item <?= $currentPage >= $totalPages ? 'disabled' : '' ?>">
-                <?php if ($currentPage >= $totalPages): ?><span class="page-link" aria-hidden="true">&raquo;</span><?php else: ?><a class="page-link" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $currentPage + 1])) ?>" aria-label="Επόμενη σελίδα">&raquo;</a><?php endif; ?>
-            </li>
-        </ul>
+    <nav class="btn-group btn-group-sm" aria-label="Σελιδοποίηση συνδρομών">
+        <?php if ($previousPageUrl): ?><a class="btn btn-outline-secondary" href="<?= h($previousPageUrl) ?>"><i class="bi bi-chevron-left me-1"></i>Προηγούμενη</a><?php else: ?><span class="btn btn-outline-secondary disabled" aria-disabled="true"><i class="bi bi-chevron-left me-1"></i>Προηγούμενη</span><?php endif; ?>
+        <span class="btn btn-outline-secondary disabled" aria-current="page">Σελίδα <?= $subscriptionPage ?> από <?= $totalPages ?></span>
+        <?php if ($nextPageUrl): ?><a class="btn btn-outline-secondary" href="<?= h($nextPageUrl) ?>">Επόμενη<i class="bi bi-chevron-right ms-1"></i></a><?php else: ?><span class="btn btn-outline-secondary disabled" aria-disabled="true">Επόμενη<i class="bi bi-chevron-right ms-1"></i></span><?php endif; ?>
     </nav>
     <?php endif; ?>
 </div>
@@ -556,7 +544,7 @@ include __DIR__ . '/includes/header.php';
         <div class="card-footer d-flex justify-content-center">
             <nav aria-label="Σελιδοποίηση ιστορικού πληρωμών">
                 <ul class="pagination pagination-sm mb-0">
-                    <?php $historyBaseParams = ['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $currentPage, 'show_history' => 1]; ?>
+                    <?php $historyBaseParams = ['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $subscriptionPage, 'show_history' => 1]; ?>
                     <li class="page-item <?= $historyCurrentPage <= 1 ? 'disabled' : '' ?>">
                         <?php if ($historyCurrentPage <= 1): ?><span class="page-link" aria-hidden="true">&laquo;</span><?php else: ?><a class="page-link" href="subscriptions.php?<?= h(http_build_query($historyBaseParams + ['history_page' => $historyCurrentPage - 1])) ?>#subscriptionPaymentHistory" aria-label="Προηγούμενη σελίδα ιστορικού">&laquo;</a><?php endif; ?>
                     </li>
