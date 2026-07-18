@@ -1244,11 +1244,13 @@ if (isLoggedIn()) {
                     <i class="bi bi-file-earmark-pdf"></i> Αναφορά <?= h(getSetting('app_name', APP_NAME)) ?>
                 </a>
             </li>
+            <?php if (canAccessAuditLog()): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'audit' ? 'active' : '' ?>" href="audit.php">
                     <i class="bi bi-journal-text"></i> Αρχείο Καταγραφής
                 </a>
             </li>
+            <?php endif; ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'email-logs' ? 'active' : '' ?>" href="email-logs.php">
                     <i class="bi bi-envelope-check"></i> Email Logs

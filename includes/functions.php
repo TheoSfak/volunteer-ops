@@ -291,15 +291,16 @@ function logAudit($action, $tableName = null, $recordId = null, $oldData = null,
     
     try {
         dbInsert(
-            "INSERT INTO audit_logs (user_id, action, table_name, record_id, notes, ip_address, created_at) 
-             VALUES (?, ?, ?, ?, ?, ?, NOW())",
+            "INSERT INTO audit_logs (user_id, action, table_name, record_id, notes, ip_address, user_agent, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
             [
                 $userId,
                 $action,
                 $tableName,
                 $recordId,
                 $notes,
-                $_SERVER['REMOTE_ADDR'] ?? null
+                $_SERVER['REMOTE_ADDR'] ?? null,
+                mb_substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 1000)
             ]
         );
     } catch (Exception $e) {

@@ -5,7 +5,10 @@
 
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
-requireRole([ROLE_SYSTEM_ADMIN]);
+if (!canAccessAuditLog()) {
+    setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης στο αρχείο καταγραφής.');
+    redirect('dashboard.php');
+}
 
 $pageTitle = 'Ιστορικό Ενεργειών';
 
@@ -64,7 +67,7 @@ $pagination = paginate($total, $page, $perPage);
 
 // Get logs
 $logs = dbFetchAll(
-    "SELECT al.*, u.name as user_name, u.email as user_email
+    "SELECT al.*, u.name as user_name, u.email as user_email, u.role as user_role
      FROM audit_logs al
      LEFT JOIN users u ON al.user_id = u.id
      WHERE $whereClause
@@ -95,14 +98,17 @@ include __DIR__ . '/includes/header.php';
     .audit-table td { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border: 0; border-bottom: 1px solid var(--bs-border-color-translucent); text-align: right !important; overflow-wrap: anywhere; white-space: normal !important; }
     .audit-table td:last-child { border: 0; }
     .audit-table td::before { flex: 0 0 34%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
-    .audit-table td:nth-child(1)::before { content: "Ημερομηνία"; }
-    .audit-table td:nth-child(2)::before { content: "Χρήστης"; }
-    .audit-table td:nth-child(3)::before { content: "Ενέργεια"; }
-    .audit-table td:nth-child(4)::before { content: "Πίνακας"; }
-    .audit-table td:nth-child(5)::before { content: "ID"; }
-    .audit-table td:nth-child(6)::before { content: "Σημειώσεις"; }
+    .audit-table td:nth-child(1)::before { content: "Log ID"; }
+    .audit-table td:nth-child(2)::before { content: "Ημερομηνία"; }
+    .audit-table td:nth-child(3)::before { content: "Χρήστης"; }
+    .audit-table td:nth-child(4)::before { content: "Ενέργεια"; }
+    .audit-table td:nth-child(5)::before { content: "Στόχος"; }
+    .audit-table td:nth-child(6)::before { content: "Λεπτομέρειες"; }
     .audit-table td:nth-child(7)::before { content: "IP"; }
+    .audit-table td:nth-child(8)::before { content: "Συσκευή"; }
 }
+.audit-details summary { cursor: pointer; color: var(--bs-primary); font-size: .82rem; }
+.audit-details pre { margin: .5rem 0 0; padding: .65rem; border-radius: .4rem; background: var(--bs-tertiary-bg); white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; max-height: 260px; overflow: auto; }
 </style>
 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
@@ -205,25 +211,28 @@ include __DIR__ . '/includes/header.php';
             <table class="table table-hover table-sm mb-0 audit-table table-mobile-opt-out">
                 <thead class="table-light">
                     <tr>
+                        <th>Log ID</th>
                         <th>Ημ/ώρα</th>
                         <th>Χρήστης</th>
                         <th>Ενέργεια</th>
-                        <th>Πίνακας</th>
-                        <th>ID</th>
-                        <th>Σημειώσεις</th>
+                        <th>Στόχος</th>
+                        <th>Λεπτομέρειες</th>
                         <th>IP</th>
+                        <th>Συσκευή / Browser</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($logs as $log): ?>
                         <tr>
-                            <td class="text-nowrap">
-                                <?= formatDateTime($log['created_at']) ?>
-                            </td>
+                            <td><code>#<?= (int)$log['id'] ?></code></td>
+                            <td class="text-nowrap"><?= h(date('d/m/Y H:i:s', strtotime($log['created_at']))) ?></td>
                             <td>
                                 <?php if ($log['user_name']): ?>
                                     <?= h($log['user_name']) ?>
                                     <br><small class="text-muted"><?= h($log['user_email']) ?></small>
+                                    <?php if (!empty($log['user_role'])): ?>
+                                        <br><span class="badge bg-light text-dark border mt-1"><?= h($log['user_role']) ?></span>
+                                    <?php endif; ?>
                                 <?php else: ?>
                                     <span class="text-muted">-</span>
                                 <?php endif; ?>
@@ -233,17 +242,36 @@ include __DIR__ . '/includes/header.php';
                                     <?= h($log['action']) ?>
                                 </span>
                             </td>
-                            <td><?= h($log['table_name'] ?: '-') ?></td>
-                            <td><?= $log['record_id'] ?: '-' ?></td>
                             <td>
+                                <?= h($log['table_name'] ?: '-') ?>
+                                <?php if ($log['record_id'] !== null): ?><br><code>#<?= (int)$log['record_id'] ?></code><?php endif; ?>
+                            </td>
+                            <td class="audit-details" style="min-width:220px">
                                 <?php if ($log['notes']): ?>
-                                    <small><?= h(mb_substr($log['notes'], 0, 50)) ?><?= mb_strlen($log['notes']) > 50 ? '...' : '' ?></small>
+                                    <?php
+                                    $decodedNotes = json_decode($log['notes'], true);
+                                    $displayNotes = json_last_error() === JSON_ERROR_NONE
+                                        ? json_encode($decodedNotes, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                                        : $log['notes'];
+                                    ?>
+                                    <details>
+                                        <summary>Πλήρη στοιχεία αλλαγής</summary>
+                                        <pre><?= h($displayNotes) ?></pre>
+                                    </details>
                                 <?php else: ?>
                                     <span class="text-muted">-</span>
                                 <?php endif; ?>
                             </td>
                             <td>
                                 <small class="text-muted"><?= h($log['ip_address'] ?: '-') ?></small>
+                            </td>
+                            <td class="audit-details" style="min-width:170px">
+                                <?php if (!empty($log['user_agent'])): ?>
+                                    <small><?= h(getAuditClientSummary($log['user_agent'])) ?></small>
+                                    <details><summary>Πλήρες user agent</summary><pre><?= h($log['user_agent']) ?></pre></details>
+                                <?php else: ?>
+                                    <span class="text-muted">Δεν καταγράφηκε</span>
+                                <?php endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -275,6 +303,36 @@ function getActionColor($action) {
         }
     }
     return 'secondary';
+}
+
+function getAuditClientSummary(string $userAgent): string {
+    $browser = 'Άγνωστος browser';
+    if (preg_match('/Edg\/([\d.]+)/', $userAgent, $match)) {
+        $browser = 'Edge ' . $match[1];
+    } elseif (preg_match('/Chrome\/([\d.]+)/', $userAgent, $match)) {
+        $browser = 'Chrome ' . $match[1];
+    } elseif (preg_match('/Firefox\/([\d.]+)/', $userAgent, $match)) {
+        $browser = 'Firefox ' . $match[1];
+    } elseif (preg_match('/Version\/([\d.]+).*Safari\//', $userAgent, $match)) {
+        $browser = 'Safari ' . $match[1];
+    }
+
+    $platform = 'Άγνωστη συσκευή';
+    if (stripos($userAgent, 'iPhone') !== false) {
+        $platform = 'iPhone';
+    } elseif (stripos($userAgent, 'iPad') !== false) {
+        $platform = 'iPad';
+    } elseif (stripos($userAgent, 'Android') !== false) {
+        $platform = 'Android';
+    } elseif (stripos($userAgent, 'Windows') !== false) {
+        $platform = 'Windows';
+    } elseif (stripos($userAgent, 'Macintosh') !== false) {
+        $platform = 'macOS';
+    } elseif (stripos($userAgent, 'Linux') !== false) {
+        $platform = 'Linux';
+    }
+
+    return $platform . ' · ' . $browser;
 }
 ?>
 

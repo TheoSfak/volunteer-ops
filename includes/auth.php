@@ -433,6 +433,17 @@ function hasPagePermission(string $slug): bool {
 }
 
 /**
+ * The audit log contains security-sensitive information and is intentionally
+ * restricted to one explicitly authorised account, regardless of role.
+ */
+function canAccessAuditLog(): bool {
+    $user = getCurrentUser();
+    return $user
+        && isset($user['email'])
+        && strcasecmp(trim((string)$user['email']), 'sfakianakis.theodore@gmail.com') === 0;
+}
+
+/**
  * Require a page permission — redirect to dashboard if not authorised.
  * Internally calls requireLogin(), so no need to call it separately.
  */
