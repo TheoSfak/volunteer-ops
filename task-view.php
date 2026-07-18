@@ -18,9 +18,12 @@ if (!$task) {
     redirect('tasks.php');
 }
 
-// Check if user has access (admins or assigned members)
+// Check if user has access (admins, assigned members, creator, or responsible user)
 $isAssigned = dbFetchValue("SELECT COUNT(*) FROM task_assignments WHERE task_id = ? AND user_id = ?", [$id, $user['id']]);
-$hasAccess = isAdmin() || $isAssigned;
+$hasAccess = isAdmin()
+    || $isAssigned
+    || (int)$task['created_by'] === (int)$user['id']
+    || (int)$task['responsible_user_id'] === (int)$user['id'];
 
 if (!$hasAccess) {
     setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης σε αυτή την εργασία.');
@@ -74,7 +77,7 @@ if (isPost()) {
                                 'subtask_title' => $subtask['title'],
                                 'completed_by' => $user['name']
                             ]);
-                            sendNotification($responsible['id'], 'Υποεργασία Ολοκληρώθηκε', "Ολοκληρώθηκε η υποεργασία '{$subtask['title']}' στην εργασία '{$task['title']}'");
+                            sendNotification($responsible['id'], 'Υποεργασία Ολοκληρώθηκε', "Ολοκληρώθηκε η υποεργασία '{$subtask['title']}' στην εργασία '{$task['title']}'", 'success', '', ['url' => 'task-view.php?id=' . $id]);
                         }
                     }
                     
@@ -92,7 +95,7 @@ if (isPost()) {
                                 'completed_by' => $user['name']
                             ]);
                         }
-                        sendNotification($assignedUser['id'], 'Υποεργασία Ολοκληρώθηκε', "Ολοκληρώθηκε η υποεργασία '{$subtask['title']}' στην εργασία '{$task['title']}'");
+                        sendNotification($assignedUser['id'], 'Υποεργασία Ολοκληρώθηκε', "Ολοκληρώθηκε η υποεργασία '{$subtask['title']}' στην εργασία '{$task['title']}'", 'success', '', ['url' => 'task-view.php?id=' . $id]);
                     }
                     
                     // Notify creator if not already notified
@@ -108,7 +111,7 @@ if (isPost()) {
                                 'completed_by' => $user['name']
                             ]);
                         }
-                        sendNotification($creator['id'], 'Υποεργασία Ολοκληρώθηκε', "Ολοκληρώθηκε η υποεργασία '{$subtask['title']}' στην εργασία '{$task['title']}'");
+                        sendNotification($creator['id'], 'Υποεργασία Ολοκληρώθηκε', "Ολοκληρώθηκε η υποεργασία '{$subtask['title']}' στην εργασία '{$task['title']}'", 'success', '', ['url' => 'task-view.php?id=' . $id]);
                     }
                 }
                 
@@ -144,7 +147,7 @@ if (isPost()) {
                                 'commented_by' => $user['name']
                             ]);
                         }
-                        sendNotification($assignedUser['id'], 'Νέο Σχόλιο', "Νέο σχόλιο στην εργασία: {$task['title']}");
+                        sendNotification($assignedUser['id'], 'Νέο Σχόλιο', "Νέο σχόλιο στην εργασία: {$task['title']}", 'info', '', ['url' => 'task-view.php?id=' . $id]);
                     }
                     
                     // Also notify responsible user if exists
@@ -157,7 +160,7 @@ if (isPost()) {
                                 'comment' => $comment,
                                 'commented_by' => $user['name']
                             ]);
-                            sendNotification($responsible['id'], 'Νέο Σχόλιο', "Νέο σχόλιο στην εργασία: {$task['title']}");
+                            sendNotification($responsible['id'], 'Νέο Σχόλιο', "Νέο σχόλιο στην εργασία: {$task['title']}", 'info', '', ['url' => 'task-view.php?id=' . $id]);
                         }
                     }
                     
@@ -174,7 +177,7 @@ if (isPost()) {
                                 'commented_by' => $user['name']
                             ]);
                         }
-                        sendNotification($creator['id'], 'Νέο Σχόλιο', "Νέο σχόλιο στην εργασία: {$task['title']}");
+                        sendNotification($creator['id'], 'Νέο Σχόλιο', "Νέο σχόλιο στην εργασία: {$task['title']}", 'info', '', ['url' => 'task-view.php?id=' . $id]);
                     }
                 }
                 

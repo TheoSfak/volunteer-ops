@@ -105,7 +105,10 @@ try {
                 $request['volunteer_id'],
                 'Η αίτησή σας εγκρίθηκε',
                 'Η αίτησή σας για τη βάρδια "' . $request['mission_title'] . '" στις ' . 
-                formatDateTime($request['start_time']) . ' εγκρίθηκε.'
+                formatDateTime($request['start_time']) . ' εγκρίθηκε.',
+                'success',
+                '',
+                ['url' => 'shift-view.php?id=' . $request['shift_id']]
             );
         }
         
@@ -134,7 +137,10 @@ try {
                 $request['volunteer_id'],
                 'Η αίτησή σας απορρίφθηκε',
                 'Η αίτησή σας για τη βάρδια "' . $request['mission_title'] . '" στις ' . 
-                formatDateTime($request['start_time']) . ' απορρίφθηκε. Λόγος: Η αίτηση απορρίφθηκε από τον διαχειριστή'
+                formatDateTime($request['start_time']) . ' απορρίφθηκε. Λόγος: Η αίτηση απορρίφθηκε από τον διαχειριστή',
+                'warning',
+                '',
+                ['url' => 'shift-view.php?id=' . $request['shift_id']]
             );
         }
         

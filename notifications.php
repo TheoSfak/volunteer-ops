@@ -9,6 +9,26 @@ requireLogin();
 $pageTitle = 'Ειδοποιήσεις';
 $userId = getCurrentUserId();
 
+// Mark the notification as read, then follow its safe internal deep link.
+$openId = (int) get('open', 0);
+if ($openId > 0) {
+    $notification = dbFetchOne(
+        "SELECT id, data FROM notifications WHERE id = ? AND user_id = ?",
+        [$openId, $userId]
+    );
+    if ($notification) {
+        dbExecute(
+            "UPDATE notifications SET read_at = NOW() WHERE id = ? AND user_id = ? AND read_at IS NULL",
+            [$openId, $userId]
+        );
+        $targetUrl = notificationTargetUrl($notification);
+        if ($targetUrl !== null) {
+            redirect($targetUrl);
+        }
+    }
+    redirect('notifications.php');
+}
+
 // ── Handle single mark-read via GET (from bell dropdown click) ───────────────
 $markId = (int) get('mark', 0);
 if ($markId > 0) {
@@ -142,6 +162,7 @@ include __DIR__ . '/includes/header.php';
 <?php else: ?>
     <div class="list-group">
         <?php foreach ($notifications as $n): ?>
+            <?php $targetUrl = notificationTargetUrl($n); ?>
             <div class="list-group-item <?= empty($n['read_at']) ? 'list-group-item-light border-start border-primary border-3' : '' ?>">
                 <div class="d-flex align-items-start">
                     <div class="me-3 mt-1">
@@ -158,12 +179,23 @@ include __DIR__ . '/includes/header.php';
                     <div class="flex-grow-1">
                         <div class="d-flex justify-content-between align-items-start">
                             <h6 class="mb-1 <?= empty($n['read_at']) ? 'fw-bold' : 'text-muted' ?>">
-                                <?= h($n['title']) ?>
+                                <?php if ($targetUrl !== null): ?>
+                                    <a href="notifications.php?open=<?= (int)$n['id'] ?>" class="text-reset text-decoration-none">
+                                        <?= h($n['title']) ?> <i class="bi bi-box-arrow-up-right ms-1 small"></i>
+                                    </a>
+                                <?php else: ?>
+                                    <?= h($n['title']) ?>
+                                <?php endif; ?>
                             </h6>
                             <small class="text-muted text-nowrap ms-2"><?= formatDateTime($n['created_at']) ?></small>
                         </div>
                         <p class="mb-1 <?= empty($n['read_at']) ? '' : 'text-muted' ?>"><?= h($n['message']) ?></p>
                         <div class="d-flex gap-1 mt-1">
+                            <?php if ($targetUrl !== null): ?>
+                                <a href="notifications.php?open=<?= (int)$n['id'] ?>" class="btn btn-primary btn-sm py-0 px-2" title="Άνοιγμα σχετικής σελίδας">
+                                    <i class="bi bi-arrow-right"></i> Προβολή
+                                </a>
+                            <?php endif; ?>
                             <?php if (empty($n['read_at'])): ?>
                                 <form method="post" class="d-inline">
                                     <?= csrfField() ?>

@@ -535,15 +535,69 @@ function sendNotificationEmail(string $notificationCode, string $to, array $vari
  * Simple notification wrapper - creates a notification record in database.
  * Pass $notificationCode to check per-user in-app preference.
  */
+function notificationTargetUrl(array $notification): ?string {
+    $data = $notification['data'] ?? null;
+    if (is_string($data) && $data !== '') {
+        $data = json_decode($data, true);
+    }
+
+    if (!is_array($data)) {
+        return null;
+    }
+
+    $rawUrl = $data['url'] ?? null;
+    if (!is_string($rawUrl) || trim($rawUrl) === '') {
+        if (!empty($data['task_id'])) {
+            $rawUrl = 'task-view.php?id=' . (int)$data['task_id'];
+        } elseif (!empty($data['shift_id'])) {
+            $rawUrl = 'shift-view.php?id=' . (int)$data['shift_id'];
+        } elseif (!empty($data['mission_id'])) {
+            $rawUrl = 'mission-view.php?id=' . (int)$data['mission_id'];
+        } else {
+            return null;
+        }
+    }
+
+    $url = trim($rawUrl);
+    if ($url === '' || preg_match('/[\x00-\x1F\x7F\\\\]/', $url) || str_starts_with($url, '//')) {
+        return null;
+    }
+
+    $parts = parse_url($url);
+    if ($parts === false || isset($parts['user']) || isset($parts['pass'])) {
+        return null;
+    }
+
+    // Absolute links are accepted only when they point back to this installation.
+    if (isset($parts['scheme']) || isset($parts['host'])) {
+        $base = parse_url(BASE_URL);
+        $urlPort = $parts['port'] ?? null;
+        $basePort = $base['port'] ?? null;
+        if (!isset($parts['scheme'], $parts['host'])
+            || strcasecmp($parts['scheme'], $base['scheme'] ?? '') !== 0
+            || strcasecmp($parts['host'], $base['host'] ?? '') !== 0
+            || $urlPort !== $basePort) {
+            return null;
+        }
+    } elseif (str_contains($parts['path'] ?? '', '..')) {
+        return null;
+    }
+
+    return $url;
+}
+
 function sendNotification(int $userId, string $title, string $message, string $type = 'info', string $notificationCode = '', array $pushData = []): void {
     $isMandatory = ($notificationCode === '' || in_array($notificationCode, NON_CONFIGURABLE_NOTIFICATIONS));
 
     // In-app notification
     $sendInApp = $isMandatory || isUserNotifEnabled($userId, $notificationCode, 'in_app');
     if ($sendInApp) {
+        $storedData = !empty($pushData)
+            ? json_encode($pushData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            : null;
         dbInsert(
-            "INSERT INTO notifications (user_id, type, title, message, created_at) VALUES (?, ?, ?, ?, NOW())",
-            [$userId, $type, $title, $message]
+            "INSERT INTO notifications (user_id, type, title, message, data, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
+            [$userId, $type, $title, $message, $storedData]
         );
     }
 
@@ -562,7 +616,7 @@ function sendNotification(int $userId, string $title, string $message, string $t
  * Bulk notification wrapper - creates multiple notification records in a single query.
  * Pass $notificationCode to respect per-user in-app preferences.
  */
-function sendBulkNotifications(array $userIds, string $title, string $message, string $type = 'info', string $notificationCode = ''): void {
+function sendBulkNotifications(array $userIds, string $title, string $message, string $type = 'info', string $notificationCode = '', array $pushData = []): void {
     if (empty($userIds)) return;
     
     $isMandatory = ($notificationCode === '' || in_array($notificationCode, NON_CONFIGURABLE_NOTIFICATIONS));
@@ -580,14 +634,18 @@ function sendBulkNotifications(array $userIds, string $title, string $message, s
     if (!empty($inAppIds)) {
         $values = [];
         $params = [];
+        $storedData = !empty($pushData)
+            ? json_encode($pushData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            : null;
         foreach ($inAppIds as $userId) {
-            $values[] = "(?, ?, ?, ?, NOW())";
+            $values[] = "(?, ?, ?, ?, ?, NOW())";
             $params[] = $userId;
             $params[] = $type;
             $params[] = $title;
             $params[] = $message;
+            $params[] = $storedData;
         }
-        $sql = "INSERT INTO notifications (user_id, type, title, message, created_at) VALUES " . implode(', ', $values);
+        $sql = "INSERT INTO notifications (user_id, type, title, message, data, created_at) VALUES " . implode(', ', $values);
         dbExecute($sql, $params);
     }
 
@@ -601,7 +659,7 @@ function sendBulkNotifications(array $userIds, string $title, string $message, s
     }
     foreach ($pushIds as $uid) {
         try {
-            sendPushToUser((int)$uid, $title, $message);
+            sendPushToUser((int)$uid, $title, $message, $pushData);
         } catch (\Throwable $e) {
             // Push failure should never block the main flow
         }

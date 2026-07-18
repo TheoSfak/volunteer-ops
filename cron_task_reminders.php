@@ -77,7 +77,10 @@ foreach ($tasks as $task) {
         sendNotification(
             $user['id'], 
             'Υπενθύμιση Προθεσμίας', 
-            "Η εργασία '{$task['title']}' λήγει σε λιγότερο από 24 ώρες!"
+            "Η εργασία '{$task['title']}' λήγει σε λιγότερο από 24 ώρες!",
+            'warning',
+            '',
+            ['url' => 'task-view.php?id=' . $task['id']]
         );
     }
     
@@ -101,7 +104,10 @@ foreach ($tasks as $task) {
         sendNotification(
             $task['responsible_user_id'], 
             'Υπενθύμιση Προθεσμίας', 
-            "Η εργασία '{$task['title']}' λήγει σε λιγότερο από 24 ώρες!"
+            "Η εργασία '{$task['title']}' λήγει σε λιγότερο από 24 ώρες!",
+            'warning',
+            '',
+            ['url' => 'task-view.php?id=' . $task['id']]
         );
     }
 }
