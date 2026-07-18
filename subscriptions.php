@@ -229,7 +229,8 @@ if (!in_array($filter, $validFilters, true)) $filter = 'all';
 $sort = (string)get('sort', 'expiry');
 $sortDirection = strtolower((string)get('dir', 'asc'));
 $sortColumns = [
-    'surname' => "SUBSTRING_INDEX(TRIM(u.name), ' ', -1)",
+    // Names are stored as "Surname Firstname", so the first token is the surname.
+    'surname' => "LOWER(TRIM(SUBSTRING_INDEX(TRIM(u.name), ' ', 1)))",
     'payment' => 'vs.payment_date',
     'expiry' => 'vs.expiry_date',
     'receipt' => "COALESCE(vs.receipt_number, '')",
@@ -241,7 +242,7 @@ $perPage = (int)get('per_page', 25);
 if (!in_array($perPage, $allowedPerPage, true)) $perPage = 25;
 $sortDirectionSql = strtoupper($sortDirection);
 $sortOrderSql = $sortColumns[$sort] . ' ' . $sortDirectionSql;
-if ($sort === 'surname') $sortOrderSql .= ', u.name ' . $sortDirectionSql;
+if ($sort === 'surname') $sortOrderSql .= ', LOWER(TRIM(u.name)) ' . $sortDirectionSql;
 $sortOrderSql .= ', vs.id DESC';
 $sortUrls = [];
 foreach (array_keys($sortColumns) as $sortKey) {
