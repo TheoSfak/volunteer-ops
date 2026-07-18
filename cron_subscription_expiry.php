@@ -4,25 +4,46 @@ if (php_sapi_name() !== 'cli' && !defined('CRON_MANUAL_RUN')) die('CLI only.');
 if (!defined('VOLUNTEEROPS')) require_once __DIR__ . '/bootstrap.php';
 
 $intervals = [
-    ['days' => 90, 'column' => 'reminder_sent_3m', 'template' => 'subscription_expiry_3months', 'label' => '3 μήνες'],
-    ['days' => 30, 'column' => 'reminder_sent_1m', 'template' => 'subscription_expiry_1month', 'label' => '1 μήνας'],
-    ['days' => 7,  'column' => 'reminder_sent_1w', 'template' => 'subscription_expiry_1week', 'label' => '1 εβδομάδα'],
-    ['days' => 0,  'column' => 'reminder_sent_expired', 'template' => 'subscription_expiry_expired', 'label' => 'λήξη'],
+    ['min_days' => 31, 'max_days' => 90, 'column' => 'reminder_sent_3m', 'template' => 'subscription_expiry_3months', 'label' => '3 μήνες'],
+    ['min_days' => 8,  'max_days' => 30, 'column' => 'reminder_sent_1m', 'template' => 'subscription_expiry_1month', 'label' => '1 μήνας'],
+    ['min_days' => 1,  'max_days' => 7,  'column' => 'reminder_sent_1w', 'template' => 'subscription_expiry_1week', 'label' => '1 εβδομάδα'],
+    ['min_days' => null, 'max_days' => 0, 'column' => 'reminder_sent_expired', 'template' => 'subscription_expiry_expired', 'label' => 'λήξη'],
 ];
 $admins = dbFetchAll("SELECT id, name, email FROM users WHERE is_active = 1 AND role IN (?, ?)", [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
 $processed = 0;
+$latestOnly = "vs.id = (
+    SELECT vs2.id
+    FROM volunteer_subscriptions vs2
+    WHERE vs2.user_id = vs.user_id
+    ORDER BY vs2.expiry_date DESC, vs2.id DESC
+    LIMIT 1
+)";
 
 foreach ($intervals as $interval) {
     $column = $interval['column'];
-    $subscriptions = dbFetchAll(
-        $interval['days'] > 0
-            ? "SELECT vs.*, u.name, u.email FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id WHERE vs.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL ? DAY) AND vs.{$column} = 0"
-            : "SELECT vs.*, u.name, u.email FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id WHERE vs.expiry_date <= CURDATE() AND vs.{$column} = 0",
-        $interval['days'] > 0 ? [$interval['days']] : []
-    );
+    $isExpired = $interval['max_days'] === 0;
+    if ($isExpired) {
+        $subscriptions = dbFetchAll(
+            "SELECT vs.*, u.name, u.email
+             FROM volunteer_subscriptions vs
+             JOIN users u ON u.id = vs.user_id
+             WHERE {$latestOnly} AND u.is_active = 1
+               AND vs.expiry_date <= CURDATE() AND vs.{$column} = 0"
+        );
+    } else {
+        $subscriptions = dbFetchAll(
+            "SELECT vs.*, u.name, u.email
+             FROM volunteer_subscriptions vs
+             JOIN users u ON u.id = vs.user_id
+             WHERE {$latestOnly} AND u.is_active = 1
+               AND DATEDIFF(vs.expiry_date, CURDATE()) BETWEEN ? AND ?
+               AND vs.{$column} = 0",
+            [$interval['min_days'], $interval['max_days']]
+        );
+    }
     foreach ($subscriptions as $subscription) {
         $daysLeft = max(0, (int)floor((strtotime($subscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400));
-        $expired = $interval['days'] === 0;
+        $expired = $isExpired;
         $title = $expired ? 'Η ετήσια συνδρομή έληξε' : 'Υπενθύμιση ετήσιας συνδρομής';
         $message = $expired
             ? 'Η ετήσια συνδρομή σας έληξε στις ' . formatDate($subscription['expiry_date']) . '.'
