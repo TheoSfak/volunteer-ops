@@ -226,7 +226,7 @@ if (!in_array($subscriptionDateFormat, ['d/m/Y', 'Y-m-d', 'd.m.Y'], true)) $subs
 $filter = get('filter', 'all');
 $validFilters = ['all', 'week', 'month', 'quarter', 'expired'];
 if (!in_array($filter, $validFilters, true)) $filter = 'all';
-$sort = (string)get('sort', 'expiry');
+$sort = (string)get('sort', 'surname');
 $sortDirection = strtolower((string)get('dir', 'asc'));
 $sortColumns = [
     // Names are stored as "Surname Firstname", so the first token is the surname.
@@ -235,7 +235,7 @@ $sortColumns = [
     'expiry' => 'vs.expiry_date',
     'receipt' => "COALESCE(vs.receipt_number, '')",
 ];
-if (!isset($sortColumns[$sort])) $sort = 'expiry';
+if (!isset($sortColumns[$sort])) $sort = 'surname';
 if (!in_array($sortDirection, ['asc', 'desc'], true)) $sortDirection = 'asc';
 $allowedPerPage = [25, 50, 100];
 $perPage = (int)get('per_page', 25);
