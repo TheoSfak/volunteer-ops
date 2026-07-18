@@ -184,6 +184,31 @@ if (isPost()) {
                 setFlash('success', 'Το σχόλιο προστέθηκε.');
             }
             break;
+
+        case 'delete_comment':
+            $commentId = (int) post('comment_id');
+            $commentToDelete = $commentId > 0
+                ? dbFetchOne(
+                    "SELECT id, user_id FROM task_comments WHERE id = ? AND task_id = ?",
+                    [$commentId, $id]
+                )
+                : null;
+
+            if (!$commentToDelete) {
+                setFlash('error', 'Το σχόλιο δεν βρέθηκε.');
+                break;
+            }
+
+            $ownsComment = (int)$commentToDelete['user_id'] === (int)$user['id'];
+            if (!isAdmin() && !$ownsComment) {
+                setFlash('error', 'Μπορείτε να διαγράψετε μόνο τα δικά σας σχόλια.');
+                break;
+            }
+
+            dbExecute("DELETE FROM task_comments WHERE id = ? AND task_id = ?", [$commentId, $id]);
+            logAudit('delete_task_comment', 'task_comments', $commentId, null, ['task_id' => $id]);
+            setFlash('success', 'Το σχόλιο διαγράφηκε.');
+            break;
             
         case 'delete_task':
             if (isAdmin()) {
@@ -374,7 +399,19 @@ include __DIR__ . '/includes/header.php';
                         <div class="mb-3 pb-3 border-bottom">
                             <div class="d-flex justify-content-between align-items-start">
                                 <strong><?= h($comment['user_name']) ?></strong>
-                                <small class="text-muted"><?= formatDateTime($comment['created_at']) ?></small>
+                                <div class="d-flex align-items-center gap-2">
+                                    <small class="text-muted"><?= formatDateTime($comment['created_at']) ?></small>
+                                    <?php if (isAdmin() || (int)$comment['user_id'] === (int)$user['id']): ?>
+                                        <form method="post" class="d-inline" onsubmit="return confirm('Σίγουρα θέλετε να διαγράψετε αυτό το σχόλιο;');">
+                                            <?= csrfField() ?>
+                                            <input type="hidden" name="action" value="delete_comment">
+                                            <input type="hidden" name="comment_id" value="<?= (int)$comment['id'] ?>">
+                                            <button type="submit" class="btn btn-sm btn-link text-danger p-0" title="Διαγραφή σχολίου" aria-label="Διαγραφή σχολίου">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    <?php endif; ?>
+                                </div>
                             </div>
                             <p class="mb-0 mt-2"><?= nl2br(h($comment['comment'])) ?></p>
                         </div>
