@@ -15,6 +15,15 @@ $profile = dbFetchOne("SELECT * FROM volunteer_profiles WHERE user_id = ?", [$us
 $mySubscription = dbFetchOne("SELECT * FROM volunteer_subscriptions WHERE user_id = ? ORDER BY expiry_date DESC, id DESC LIMIT 1", [$user['id']]);
 $subscriptionHistory = dbFetchAll("SELECT * FROM volunteer_subscriptions WHERE user_id = ? ORDER BY payment_date DESC, id DESC", [$user['id']]);
 
+// Personal documents uploaded by the administration for this volunteer.
+$myDocuments = dbFetchAll(
+    "SELECT id, label, original_name, stored_name, mime_type, file_size, created_at
+     FROM volunteer_documents
+     WHERE user_id = ?
+     ORDER BY created_at DESC, id DESC",
+    [$user['id']]
+);
+
 // Get user skills
 $userSkills = dbFetchAll(
     "SELECT s.*, us.level FROM skills s 
@@ -594,6 +603,63 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 <?php endif; ?>
+
+<!-- Personal Documents -->
+<div class="card pp-card accent-primary mb-4" id="documents">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-folder2-open text-primary me-2"></i>Τα Αρχεία &amp; Έγγραφά μου</h5>
+        <span class="badge bg-primary rounded-pill"><?= count($myDocuments) ?></span>
+    </div>
+    <div class="card-body p-0">
+        <?php if (empty($myDocuments)): ?>
+            <p class="text-muted p-3 mb-0">Δεν υπάρχουν καταχωρημένα αρχεία.</p>
+        <?php else: ?>
+            <ul class="list-group list-group-flush">
+                <?php foreach ($myDocuments as $document): ?>
+                    <?php
+                    $documentIsImage = str_starts_with((string)$document['mime_type'], 'image/');
+                    $documentIcon = $documentIsImage ? 'bi-file-image text-info' : 'bi-file-earmark-pdf text-danger';
+                    if (in_array($document['mime_type'], ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], true)) {
+                        $documentIcon = 'bi-file-earmark-word text-primary';
+                    }
+                    $documentExists = !empty($document['stored_name'])
+                        && is_file(__DIR__ . '/uploads/volunteer-docs/' . basename($document['stored_name']));
+                    ?>
+                    <li class="list-group-item py-3">
+                        <div class="d-flex align-items-center gap-3">
+                            <i class="bi <?= $documentIcon ?> fs-4 flex-shrink-0"></i>
+                            <div class="flex-grow-1 overflow-hidden">
+                                <?php if ($documentExists): ?>
+                                    <a href="volunteer-doc-download.php?id=<?= (int)$document['id'] ?>&amp;volunteer=<?= (int)$user['id'] ?>"
+                                       target="_blank" class="fw-semibold text-decoration-none text-break">
+                                        <?= h($document['original_name']) ?>
+                                    </a>
+                                <?php else: ?>
+                                    <span class="fw-semibold text-break"><?= h($document['original_name']) ?></span>
+                                <?php endif; ?>
+                                <?php if (!empty($document['label']) && $document['label'] !== $document['original_name']): ?>
+                                    <div class="small text-muted text-break"><?= h($document['label']) ?></div>
+                                <?php endif; ?>
+                                <div class="small text-muted">
+                                    <?= number_format(((int)$document['file_size']) / 1024, 0, ',', '.') ?> KB
+                                    &middot; <?= formatDate($document['created_at']) ?>
+                                </div>
+                            </div>
+                            <?php if ($documentExists): ?>
+                                <a href="volunteer-doc-download.php?id=<?= (int)$document['id'] ?>&amp;volunteer=<?= (int)$user['id'] ?>"
+                                   target="_blank" class="btn btn-sm btn-outline-primary flex-shrink-0" aria-label="Προβολή <?= h($document['original_name']) ?>">
+                                    <i class="bi bi-eye me-1"></i><span class="d-none d-sm-inline">Προβολή</span>
+                                </a>
+                            <?php else: ?>
+                                <span class="badge bg-danger flex-shrink-0">Μη διαθέσιμο</span>
+                            <?php endif; ?>
+                        </div>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        <?php endif; ?>
+    </div>
+</div>
 
 <?php if ($canIrisRenew): ?>
 <div class="modal fade" id="irisRenewalModal" tabindex="-1" aria-labelledby="irisRenewalModalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form method="post">
