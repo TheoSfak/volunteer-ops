@@ -47,8 +47,8 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     
     <!-- jQuery (required for Summernote) -->
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
-    <!-- Bootstrap 5 JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Bootstrap 5 JS (served locally so modals/dropdowns also work when the CDN is unavailable) -->
+    <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/bootstrap.bundle.min.js?v=5.3.2"></script>
 
     <!-- Global Summernote + Bootstrap 5 compatibility fix -->
     <script>
