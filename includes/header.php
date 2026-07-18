@@ -24,7 +24,7 @@ if (isLoggedIn()) {
         "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL", [$uid]
     );
     $latestNotifications = dbFetchAll(
-        "SELECT id, type, title, message, created_at, read_at
+        "SELECT id, type, title, message, data, created_at, read_at
          FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 5", [$uid]
     );
 }
@@ -1308,7 +1308,8 @@ if (isLoggedIn()) {
                             </div>
                         <?php else: ?>
                             <?php foreach ($latestNotifications as $notif): ?>
-                                <a href="notifications.php?mark=<?= $notif['id'] ?>" class="dropdown-item py-2 px-3 border-bottom <?= empty($notif['read_at']) ? 'bg-light' : '' ?>" style="white-space:normal;">
+                                <?php $targetUrl = notificationTargetUrl($notif); ?>
+                                <a href="notifications.php?<?= $targetUrl !== null ? 'open' : 'mark' ?>=<?= (int)$notif['id'] ?>" class="dropdown-item py-2 px-3 border-bottom <?= empty($notif['read_at']) ? 'bg-light' : '' ?>" style="white-space:normal;">
                                     <div class="d-flex align-items-start">
                                         <div class="me-2 mt-1">
                                             <?php

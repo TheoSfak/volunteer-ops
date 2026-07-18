@@ -89,7 +89,10 @@ foreach ($incompleteShifts as $shift) {
         sendNotification(
             $user['id'], 
             'Αποστολή Χρειάζεται Εθελοντές', 
-            "Η αποστολή '{$shift['mission_title']}' χρειάζεται {$shift['available_spots']} ακόμα εθελοντές! Ημερομηνία: " . formatDate($shift['start_time'])
+            "Η αποστολή '{$shift['mission_title']}' χρειάζεται {$shift['available_spots']} ακόμα εθελοντές! Ημερομηνία: " . formatDate($shift['start_time']),
+            'warning',
+            '',
+            ['url' => 'mission-view.php?id=' . $shift['mission_id']]
         );
     }
 }

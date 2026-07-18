@@ -105,7 +105,7 @@ if (isPost()) {
                             'changed_by' => $user['name']
                         ]);
                     }
-                    sendNotification($assignedUser['id'], 'Αλλαγή Κατάστασης', "Η εργασία '{$title}' άλλαξε σε: {$statusLabels[$status]}");
+                    sendNotification($assignedUser['id'], 'Αλλαγή Κατάστασης', "Η εργασία '{$title}' άλλαξε σε: {$statusLabels[$status]}", 'info', '', ['url' => 'task-view.php?id=' . $id]);
                 }
                 
                 // Notify creator if not already assigned to the task
@@ -121,7 +121,7 @@ if (isPost()) {
                             'changed_by' => $user['name']
                         ]);
                     }
-                    sendNotification($creator['id'], 'Αλλαγή Κατάστασης', "Η εργασία '{$title}' άλλαξε σε: {$statusLabels[$status]}");
+                    sendNotification($creator['id'], 'Αλλαγή Κατάστασης', "Η εργασία '{$title}' άλλαξε σε: {$statusLabels[$status]}", 'info', '', ['url' => 'task-view.php?id=' . $id]);
                 }
             }
             
@@ -150,7 +150,7 @@ if (isPost()) {
                             'assigned_by' => $user['name']
                         ]);
                     }
-                    sendNotification($userId, 'Νέα Εργασία', "Σας ανατέθηκε η εργασία: {$title}");
+                    sendNotification($userId, 'Νέα Εργασία', "Σας ανατέθηκε η εργασία: {$title}", 'info', '', ['url' => 'task-view.php?id=' . $id]);
                 }
             }
             
@@ -185,7 +185,7 @@ if (isPost()) {
                             'assigned_by' => $user['name']
                         ]);
                     }
-                    sendNotification($userId, 'Νέα Εργασία', "Σας ανατέθηκε η εργασία: {$title}");
+                    sendNotification($userId, 'Νέα Εργασία', "Σας ανατέθηκε η εργασία: {$title}", 'info', '', ['url' => 'task-view.php?id=' . $taskId]);
                 }
             }
             
@@ -201,7 +201,7 @@ if (isPost()) {
                         'assigned_by' => $user['name']
                     ]);
                 }
-                sendNotification($user['id'], 'Εργασία Δημιουργήθηκε', "Δημιουργήσατε νέα εργασία: {$title}");
+                sendNotification($user['id'], 'Εργασία Δημιουργήθηκε', "Δημιουργήσατε νέα εργασία: {$title}", 'success', '', ['url' => 'task-view.php?id=' . $taskId]);
             }
             
             logAudit('create_task', 'tasks', $taskId);

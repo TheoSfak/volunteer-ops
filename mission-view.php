@@ -189,7 +189,10 @@ if (isPost()) {
                     sendBulkNotifications(
                         $userIds,
                         'Υπενθύμιση Αποστολής: ' . $mission['title'],
-                        'Η αποστολή είναι ακόμα ανοιχτή και αναζητά εθελοντές. Δείτε τις διαθέσιμες βάρδιες.'
+                        'Η αποστολή είναι ακόμα ανοιχτή και αναζητά εθελοντές. Δείτε τις διαθέσιμες βάρδιες.',
+                        'info',
+                        '',
+                        ['url' => 'mission-view.php?id=' . $id]
                     );
                 }
                 
@@ -286,7 +289,10 @@ if (isPost()) {
                         sendBulkNotifications(
                             $userIds,
                             'Νέα Αποστολή: ' . $mission['title'],
-                            'Μια νέα αποστολή δημοσιεύτηκε και αναζητά εθελοντές. Δείτε τις διαθέσιμες βάρδιες.'
+                            'Μια νέα αποστολή δημοσιεύτηκε και αναζητά εθελοντές. Δείτε τις διαθέσιμες βάρδιες.',
+                            'info',
+                            '',
+                            ['url' => 'mission-view.php?id=' . $id]
                         );
                     }
                     
@@ -390,7 +396,10 @@ if (isPost()) {
                             sendBulkNotifications(
                                 $userIds,
                                 'Ακύρωση Αποστολής: ' . $mission['title'],
-                                'Η αποστολή ακυρώθηκε' . ($reason ? '. Λόγος: ' . $reason : '') . '. Οι αιτήσεις σας ακυρώθηκαν αυτόματα.'
+                                'Η αποστολή ακυρώθηκε' . ($reason ? '. Λόγος: ' . $reason : '') . '. Οι αιτήσεις σας ακυρώθηκαν αυτόματα.',
+                                'warning',
+                                '',
+                                ['url' => 'mission-view.php?id=' . $id]
                             );
                         }
                         
@@ -595,7 +604,10 @@ if (isPost()) {
                             sendNotification(
                                 $volunteerId,
                                 'Τοποθετήθηκατε σε βάρδια',
-                                'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time'])
+                                'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time']),
+                                'success',
+                                '',
+                                ['url' => 'mission-view.php?id=' . $id]
                             );
                             
                             logAudit('manual_add_volunteer', 'participation_requests', $prId);

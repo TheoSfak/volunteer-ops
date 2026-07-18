@@ -128,7 +128,7 @@ if (isPost() && ($isAdmin || $isShiftLeader)) {
                         if ($rejectionReason) {
                             $message .= ' Αιτιολογία: ' . $rejectionReason;
                         }
-                        sendNotification($participation['volunteer_id'], 'Ενημέρωση Συμμετοχής', $message);
+                        sendNotification($participation['volunteer_id'], 'Ενημέρωση Συμμετοχής', $message, 'info', '', ['url' => 'shift-view.php?id=' . $participation['shift_id']]);
                     }
                     
                     logAudit($bulkAction, 'participation_requests', $participationId, $participation['status'] . ' -> ' . $newStatus);
@@ -171,7 +171,7 @@ if (isPost() && ($isAdmin || $isShiftLeader)) {
                 if ($rejectionReason) {
                     $message .= ' Αιτιολογία: ' . $rejectionReason;
                 }
-                sendNotification($participation['volunteer_id'], 'Ενημέρωση Συμμετοχής', $message);
+                sendNotification($participation['volunteer_id'], 'Ενημέρωση Συμμετοχής', $message, 'info', '', ['url' => 'shift-view.php?id=' . $participation['shift_id']]);
             }
             
             logAudit($action, 'participation_requests', $participationId, $participation['status'] . ' -> ' . $newStatus);

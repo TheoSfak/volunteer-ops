@@ -73,7 +73,10 @@ foreach ($shifts as $shift) {
         sendNotification(
             $user['id'], 
             'Υπενθύμιση Βάρδιας', 
-            "Σε {$reminderHours} ώρες έχετε βάρδια στην αποστολή '{$shift['mission_title']}' στις " . date('H:i', strtotime($shift['start_time']))
+            "Σε {$reminderHours} ώρες έχετε βάρδια στην αποστολή '{$shift['mission_title']}' στις " . date('H:i', strtotime($shift['start_time'])),
+            'warning',
+            '',
+            ['url' => 'shift-view.php?id=' . $shift['id']]
         );
     }
 }

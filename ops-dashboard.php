@@ -51,7 +51,7 @@ if (isPost()) {
                 
                 $userIds = array_column($vols, 'volunteer_id');
                 if (!empty($userIds)) {
-                    sendBulkNotifications($userIds, '📢 ' . h($mission['title']), $broadcastMsg, 'info');
+                    sendBulkNotifications($userIds, '📢 ' . h($mission['title']), $broadcastMsg, 'info', '', ['url' => 'mission-view.php?id=' . $missionId]);
                 }
                 
                 logAudit('broadcast', 'missions', $missionId);

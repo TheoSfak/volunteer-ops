@@ -140,7 +140,10 @@ if (isPost()) {
                         $prInfo['volunteer_id'],
                         'Η αίτησή σας εγκρίθηκε',
                         'Η αίτησή σας για τη βάρδια "' . $shift['mission_title'] . '" στις ' . 
-                        formatDateTime($shift['start_time']) . ' εγκρίθηκε.'
+                        formatDateTime($shift['start_time']) . ' εγκρίθηκε.',
+                        'success',
+                        '',
+                        ['url' => 'shift-view.php?id=' . $id]
                     );
                 }
                 
@@ -230,7 +233,10 @@ if (isPost()) {
                     sendNotification(
                         (int) $pr['volunteer_id'],
                         'Επανενεργοποίηση Συμμετοχής',
-                        'Η συμμετοχή σας στη βάρδια "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') επανενεργοποιήθηκε και είναι πλέον εγκεκριμένη.'
+                        'Η συμμετοχή σας στη βάρδια "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') επανενεργοποιήθηκε και είναι πλέον εγκεκριμένη.',
+                        'success',
+                        '',
+                        ['url' => 'shift-view.php?id=' . $id]
                     );
 
                     logAudit('reactivate', 'participation_requests', $prId, "Volunteer: {$pr['volunteer_id']}");
@@ -417,7 +423,10 @@ if (isPost()) {
                     sendNotification(
                         (int) $volunteerId,
                         'Τοποθετήθηκατε σε βάρδια',
-                        'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time'])
+                        'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time']),
+                        'success',
+                        '',
+                        ['url' => 'shift-view.php?id=' . $id]
                     );
                     
                     logAudit('add_volunteer', 'participation_requests', null, "Shift $id, User $volunteerId");
@@ -501,7 +510,10 @@ if (isPost()) {
                     sendNotification(
                         (int) $volunteerId,
                         'Τοποθετήθηκατε σε βάρδια',
-                        'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time'])
+                        'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time']),
+                        'success',
+                        '',
+                        ['url' => 'shift-view.php?id=' . $id]
                     );
                 }
                 
@@ -591,9 +603,9 @@ if (isPost()) {
                                 array_merge($vars, ['user_name' => $swap['to_name'], 'replacement_name' => $swap['to_name']]));
                         }
                         sendNotification($swap['from_volunteer_id'], 'Αντικατάσταση Εγκρίθηκε',
-                            'Η αντικατάστασή σας από τον/την ' . $swap['to_name'] . ' εγκρίθηκε από τον διαχειριστή.');
+                            'Η αντικατάστασή σας από τον/την ' . $swap['to_name'] . ' εγκρίθηκε από τον διαχειριστή.', 'success', '', ['url' => 'shift-view.php?id=' . $id]);
                         sendNotification($swap['to_volunteer_id'], 'Εγκρίθηκε η Συμμετοχή σας',
-                            'Εγκριθήκατε ως αντικατάσταση για τη βάρδια της αποστολής: ' . $missionTitle . '.');
+                            'Εγκριθήκατε ως αντικατάσταση για τη βάρδια της αποστολής: ' . $missionTitle . '.', 'success', '', ['url' => 'shift-view.php?id=' . $id]);
 
                         setFlash('success', 'Η αντικατάσταση εγκρίθηκε επιτυχώς.');
                     } catch (Exception $e) {
@@ -625,9 +637,9 @@ if (isPost()) {
                     logAudit('reject_swap', 'shift_swap_requests', $swapId);
                     // Notify both
                     sendNotification($swap['from_volunteer_id'], 'Αίτημα Αντικατάστασης Απορρίφθηκε',
-                        'Ο διαχειριστής απέρριψε το αίτημα αντικατάστασης σας.');
+                        'Ο διαχειριστής απέρριψε το αίτημα αντικατάστασης σας.', 'warning', '', ['url' => 'shift-view.php?id=' . $id]);
                     sendNotification($swap['to_volunteer_id'], 'Αίτημα Αντικατάστασης Απορρίφθηκε',
-                        'Ο διαχειριστής απέρριψε το αίτημα αντικατάστασης.');
+                        'Ο διαχειριστής απέρριψε το αίτημα αντικατάστασης.', 'warning', '', ['url' => 'shift-view.php?id=' . $id]);
                     setFlash('warning', 'Το αίτημα αντικατάστασης απορρίφθηκε.');
                 }
             }
