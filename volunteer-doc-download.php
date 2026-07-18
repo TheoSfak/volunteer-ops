@@ -33,19 +33,42 @@ if (!$doc) {
 
 $filePath = __DIR__ . '/uploads/volunteer-docs/' . basename($doc['stored_name']);
 
-if (!file_exists($filePath)) {
+if (!is_file($filePath) || !is_readable($filePath)) {
     setFlash('error', 'Το αρχείο δεν βρέθηκε στο σύστημα.');
     redirect($isOwner ? 'profile.php#documents' : 'volunteer-view.php?id=' . $volunteerId . '#documents');
+}
+
+// Trust the actual file contents rather than the MIME value stored in the DB.
+$finfo = new finfo(FILEINFO_MIME_TYPE);
+$mime = $finfo->file($filePath) ?: 'application/octet-stream';
+$allowedMimes = [
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+];
+if (!in_array($mime, $allowedMimes, true)) {
+    http_response_code(415);
+    exit('Μη υποστηριζόμενος τύπος αρχείου.');
 }
 
 // Log the access
 logAudit('download_document', 'volunteer_documents', $docId, $doc['label']);
 
-// Serve the file
-$safeName = preg_replace('/[^\w\s\-.]/', '', $doc['original_name']);
-header('Content-Type: ' . $doc['mime_type']);
-header('Content-Disposition: inline; filename="' . $safeName . '"');
+// Serve a clean binary response. Even one buffered whitespace/BOM byte before a
+// JPEG can make the browser display it as a broken image.
+$downloadName = basename((string)($doc['original_name'] ?: $doc['stored_name']));
+$asciiName = preg_replace('/[^A-Za-z0-9._-]/', '_', $downloadName) ?: 'document';
+while (ob_get_level() > 0) {
+    ob_end_clean();
+}
+header('Content-Type: ' . $mime);
+header('X-Content-Type-Options: nosniff');
+header("Content-Disposition: inline; filename=\"" . $asciiName . "\"; filename*=UTF-8''" . rawurlencode($downloadName));
 header('Content-Length: ' . filesize($filePath));
-header('Cache-Control: private, max-age=3600');
+header('Cache-Control: private, no-store, max-age=0');
 readfile($filePath);
 exit;
