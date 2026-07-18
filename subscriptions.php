@@ -329,7 +329,7 @@ include __DIR__ . '/includes/header.php';
 ?>
 <div class="d-flex justify-content-between align-items-center mb-4 subscriptions-page-header">
     <h1 class="h3 mb-0"><i class="bi bi-cash-coin me-2"></i>Ετήσιες Συνδρομές</h1>
-    <div class="d-flex flex-wrap gap-2"><button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#subscriptionPaymentHistory" aria-expanded="false" aria-controls="subscriptionPaymentHistory"><i class="bi bi-clock-history me-1"></i>Ιστορικό πληρωμών <span class="badge text-bg-secondary ms-1"><?= count($historyRows) ?></span></button><a class="btn btn-outline-success" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'export' => 'excel'])) ?>"><i class="bi bi-file-earmark-excel me-1"></i>Εξαγωγή Excel</a><button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button></div>
+    <div class="d-flex flex-wrap gap-2"><button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#subscriptionPaymentHistory" aria-expanded="false" aria-controls="subscriptionPaymentHistory"><i class="bi bi-clock-history me-1"></i>Ιστορικό πληρωμών <span class="badge text-bg-secondary ms-1"><?= count($historyRows) ?></span></button><a class="btn btn-outline-success" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'export' => 'excel'])) ?>"><i class="bi bi-file-earmark-excel me-1"></i>Εξαγωγή Excel</a><button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button></div>
 </div>
 <?php if ($editing): ?>
 <div class="card border-primary mb-3">
@@ -559,6 +559,15 @@ include __DIR__ . '/includes/header.php';
 <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button><button class="btn btn-primary">Αποθήκευση</button></div></form></div></div></div>
 <script>
 (() => {
+    // Keep Bootstrap modals directly under <body>. This prevents a hidden or
+    // stacking parent from leaving only the backdrop visible and blocking the page.
+    ['receiptPreviewModal', 'paymentModal'].forEach((modalId) => {
+        const modalElement = document.getElementById(modalId);
+        if (modalElement && modalElement.parentElement !== document.body) {
+            document.body.appendChild(modalElement);
+        }
+    });
+
     const receiptPreviewModal = document.getElementById('receiptPreviewModal');
     if (receiptPreviewModal) {
         const previewImage = document.getElementById('receiptPreviewImage');
