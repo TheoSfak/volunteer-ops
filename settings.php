@@ -705,6 +705,7 @@ if (isPost()) {
             'certificate_expiry'  => ['file' => 'cron_certificate_expiry.php',  'label' => 'Λήξη Πιστοποιητικών'],
             'citizen_cert_expiry' => ['file' => 'cron_citizen_cert_expiry.php', 'label' => 'Λήξη Πιστ/κών Πολιτών'],
             'shelf_expiry'        => ['file' => 'cron_shelf_expiry.php',        'label' => 'Λήξη Υλικών Ραφιού'],
+            'subscription_expiry' => ['file' => 'cron_subscription_expiry.php', 'label' => 'Λήξη Ετήσιων Συνδρομών'],
         ];
         
         $jobsToRun = ($cronJob === 'all') ? array_keys($cronJobs) : [$cronJob];
@@ -1759,6 +1760,7 @@ $cronJobs = [
     'certificate_expiry'  => ['label' => 'Λήξη Πιστοποιητικών',     'icon' => 'bi-award',              'desc' => 'Στέλνει υπενθυμίσεις 30 & 7 ημερών πριν τη λήξη πιστοποιητικών.', 'color' => 'success'],
     'citizen_cert_expiry' => ['label' => 'Λήξη Πιστ/κών Πολιτών',   'icon' => 'bi-person-vcard',       'desc' => 'Στέλνει ειδοποιήσεις λήξης πιστοποιητικών πολιτών (3μ, 1μ, 1εβδ, ληγμένα).', 'color' => 'secondary'],
     'shelf_expiry'        => ['label' => 'Λήξη Υλικών Ραφιού',      'icon' => 'bi-box-seam',           'desc' => 'Ελέγχει για ληγμένα ή υπό λήξη υλικά ραφιού (εντός ' . h($settings['shelf_expiry_reminder_days'] ?? '30') . ' ημερών).', 'color' => 'danger'],
+    'subscription_expiry' => ['label' => 'Λήξη Ετήσιων Συνδρομών',  'icon' => 'bi-cash-coin',          'desc' => 'Στέλνει ειδοποιήσεις για την τελευταία συνδρομή κάθε εθελοντή (3μ, 1μ, 1εβδ, ληγμένη).', 'color' => 'primary'],
 ];
 $lastManualRun = getSetting('cron_last_manual_run', '');
 $cronResults = $_SESSION['cron_results'] ?? null;
