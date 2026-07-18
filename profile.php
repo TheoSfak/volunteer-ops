@@ -505,7 +505,20 @@ include __DIR__ . '/includes/header.php';
 <?php $subscriptionDays = $mySubscription ? (int)floor((strtotime($mySubscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400) : null; $subscriptionColor = $subscriptionDays === null ? 'secondary' : ($subscriptionDays < 0 ? 'danger' : ($subscriptionDays <= 7 ? 'danger' : ($subscriptionDays <= 30 ? 'warning' : ($subscriptionDays <= 90 ? 'info' : 'success')))); ?>
 <?php $myIrisRequest = subscriptionIrisLatestRequest((int)$user['id']); $canIrisRenew = subscriptionIrisIsEligible($mySubscription); ?>
 <div class="card pp-card accent-<?= $subscriptionColor ?> mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2"><h5 class="mb-0"><i class="bi bi-cash-coin text-<?= $subscriptionColor ?> me-2"></i>Η Ετήσια Συνδρομή μου</h5><div class="d-flex gap-2"><?php if ($canIrisRenew): ?><button type="button" class="btn btn-primary fw-bold" data-bs-toggle="modal" data-bs-target="#irisRenewalModal"><i class="bi bi-arrow-repeat me-1"></i>Ανανέωση συνδρομής</button><form method="post" class="d-inline"><?= csrfField() ?><input type="hidden" name="action" value="report_iris_payment"><button class="btn btn-success fw-bold" <?= !$myIrisRequest || $myIrisRequest['status'] !== 'PREPARED' ? 'disabled title="Επιλέξτε πρώτα τη διάρκεια ανανέωσης"' : '' ?>><i class="bi bi-check2-circle me-1"></i>Ενημέρωση πληρωμής</button></form><?php else: ?><span class="d-inline-block iris-renewal-disabled" tabindex="0" data-tooltip="Η ανανέωση ενεργοποιείται 3 μήνες πριν από τη λήξη της συνδρομής."><button type="button" class="btn btn-outline-secondary fw-bold" disabled><i class="bi bi-arrow-repeat me-1"></i>Ανανέωση συνδρομής</button></span><?php endif; ?></div></div>
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h5 class="mb-0"><i class="bi bi-cash-coin text-<?= $subscriptionColor ?> me-2"></i>Η Ετήσια Συνδρομή μου</h5>
+        <div class="d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-outline-primary fw-bold" data-bs-toggle="modal" data-bs-target="#myPaymentHistoryModal">
+                <i class="bi bi-clock-history me-1"></i>Πληρωμές <span class="badge text-bg-primary ms-1"><?= count($subscriptionHistory) ?></span>
+            </button>
+            <?php if ($canIrisRenew): ?>
+                <button type="button" class="btn btn-primary fw-bold" data-bs-toggle="modal" data-bs-target="#irisRenewalModal"><i class="bi bi-arrow-repeat me-1"></i>Ανανέωση συνδρομής</button>
+                <form method="post" class="d-inline"><?= csrfField() ?><input type="hidden" name="action" value="report_iris_payment"><button class="btn btn-success fw-bold" <?= !$myIrisRequest || $myIrisRequest['status'] !== 'PREPARED' ? 'disabled title="Επιλέξτε πρώτα τη διάρκεια ανανέωσης"' : '' ?>><i class="bi bi-check2-circle me-1"></i>Ενημέρωση πληρωμής</button></form>
+            <?php else: ?>
+                <span class="d-inline-block iris-renewal-disabled" tabindex="0" data-tooltip="Η ανανέωση ενεργοποιείται 3 μήνες πριν από τη λήξη της συνδρομής."><button type="button" class="btn btn-outline-secondary fw-bold" disabled><i class="bi bi-arrow-repeat me-1"></i>Ανανέωση συνδρομής</button></span>
+            <?php endif; ?>
+        </div>
+    </div>
     <div class="card-body">
         <?php if (!$mySubscription): ?>
             <div class="alert alert-warning mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Δεν υπάρχει καταχωρημένη ετήσια συνδρομή. Επικοινωνήστε με τη διοίκηση.</div>
@@ -515,7 +528,7 @@ include __DIR__ . '/includes/header.php';
             <div class="small text-muted mt-2">Τελευταία πληρωμή: <?= formatDate($mySubscription['payment_date']) ?></div>
             <?php if (!empty($mySubscription['receipt_stored_name']) && is_file(__DIR__ . '/uploads/subscription-receipts/' . basename($mySubscription['receipt_stored_name']))): ?>
                 <?php $myReceiptIsImage = in_array(strtolower(pathinfo($mySubscription['receipt_stored_name'], PATHINFO_EXTENSION)), ['jpg', 'jpeg', 'png'], true); ?>
-                <button type="button" class="btn btn-sm btn-outline-secondary mt-3 my-receipt-preview-btn" data-bs-toggle="modal" data-bs-target="#myReceiptPreviewModal" data-preview-url="subscription-receipt.php?id=<?= (int)$mySubscription['id'] ?>" data-preview-type="<?= $myReceiptIsImage ? 'image' : 'pdf' ?>" data-preview-name="<?= h($mySubscription['receipt_original_name'] ?: 'Η απόδειξή μου') ?>">
+                <button type="button" class="btn btn-sm btn-outline-secondary mt-3 subscription-history-receipt-btn" data-receipt-modal="myPaymentReceiptModal" data-preview-url="subscription-receipt.php?id=<?= (int)$mySubscription['id'] ?>" data-preview-type="<?= $myReceiptIsImage ? 'image' : 'pdf' ?>" data-preview-name="<?= h($mySubscription['receipt_original_name'] ?: 'Η απόδειξή μου') ?>">
                     <i class="bi bi-file-earmark-text me-1"></i>Προβολή απόδειξης
                 </button>
             <?php elseif (!empty($mySubscription['receipt_stored_name'])): ?>
@@ -525,84 +538,13 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
-<?php if ($subscriptionHistory): ?>
-<div class="card pp-card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0"><i class="bi bi-clock-history text-primary me-2"></i>Ιστορικό πληρωμών συνδρομής</h5>
-        <span class="badge bg-primary"><?= count($subscriptionHistory) ?></span>
-    </div>
-    <div class="table-responsive pp-mobile-table-wrap">
-        <table class="table table-hover align-middle mb-0 pp-mobile-table pp-subscription-table table-mobile-opt-out">
-            <thead><tr><th>Πληρωμή</th><th>Λήξη κάλυψης</th><th>Έτη</th><th>Ποσό</th><th>Τρόπος</th><th>Αρ. απόδειξης</th><th>Απόδειξη</th></tr></thead>
-            <tbody>
-            <?php foreach ($subscriptionHistory as $historyPayment): ?>
-                <?php
-                $historyReceiptPath = __DIR__ . '/uploads/subscription-receipts/' . basename((string)$historyPayment['receipt_stored_name']);
-                $historyHasReceipt = !empty($historyPayment['receipt_stored_name']) && is_file($historyReceiptPath);
-                $historyReceiptIsImage = $historyHasReceipt && in_array(strtolower(pathinfo($historyPayment['receipt_stored_name'], PATHINFO_EXTENSION)), ['jpg', 'jpeg', 'png'], true);
-                ?>
-                <tr>
-                    <td class="text-nowrap"><?= formatDate($historyPayment['payment_date']) ?></td>
-                    <td class="text-nowrap"><?= formatDate($historyPayment['expiry_date']) ?></td>
-                    <td><?= (int)($historyPayment['coverage_years'] ?? 1) ?></td>
-                    <td class="text-nowrap"><?= $historyPayment['amount'] !== null ? number_format((float)$historyPayment['amount'], 2, ',', '.') . ' €' : '—' ?></td>
-                    <td><?= h($historyPayment['payment_method'] ?: '—') ?></td>
-                    <td><?= h($historyPayment['receipt_number'] ?: '—') ?></td>
-                    <td>
-                        <?php if ($historyHasReceipt): ?>
-                            <button type="button" class="btn btn-sm btn-outline-secondary my-receipt-preview-btn" data-bs-toggle="modal" data-bs-target="#myReceiptPreviewModal" data-preview-url="subscription-receipt.php?id=<?= (int)$historyPayment['id'] ?>" data-preview-type="<?= $historyReceiptIsImage ? 'image' : 'pdf' ?>" data-preview-name="<?= h($historyPayment['receipt_original_name'] ?: 'Απόδειξη ' . formatDate($historyPayment['payment_date'])) ?>"><i class="bi <?= $historyReceiptIsImage ? 'bi-image' : 'bi-file-earmark-pdf' ?>"></i> Προβολή</button>
-                        <?php elseif (!empty($historyPayment['receipt_stored_name'])): ?>
-                            <span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Μη διαθέσιμη</span>
-                        <?php else: ?>—<?php endif; ?>
-                    </td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
-</div>
-
-<div class="modal fade" id="myReceiptPreviewModal" tabindex="-1" aria-labelledby="myReceiptPreviewModalTitle" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title text-truncate" id="myReceiptPreviewModalTitle">Προεπισκόπηση απόδειξης</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Κλείσιμο"></button>
-            </div>
-            <div class="modal-body text-center">
-                <img id="myReceiptPreviewImage" src="" alt="Προεπισκόπηση απόδειξης" class="img-fluid rounded border d-none" style="max-width:100%;max-height:70vh;object-fit:contain;">
-                <iframe id="myReceiptPreviewPdf" src="" title="Προεπισκόπηση απόδειξης PDF" class="w-100 border rounded d-none" style="height:70vh;"></iframe>
-                <div id="myReceiptPreviewError" class="alert alert-danger mt-3 d-none mb-0">Δεν ήταν δυνατή η προβολή της απόδειξης.</div>
-            </div>
-        </div>
-    </div>
-</div>
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    const receiptModal = document.getElementById('myReceiptPreviewModal');
-    if (!receiptModal) return;
-    const previewImage = document.getElementById('myReceiptPreviewImage');
-    const previewPdf = document.getElementById('myReceiptPreviewPdf');
-    const previewTitle = document.getElementById('myReceiptPreviewModalTitle');
-    const previewError = document.getElementById('myReceiptPreviewError');
-    receiptModal.addEventListener('show.bs.modal', event => {
-        const button = event.relatedTarget;
-        const isImage = button.dataset.previewType === 'image';
-        previewTitle.textContent = button.dataset.previewName || 'Προεπισκόπηση απόδειξης';
-        previewError.classList.add('d-none');
-        previewImage.classList.toggle('d-none', !isImage);
-        previewPdf.classList.toggle('d-none', isImage);
-        if (isImage) previewImage.src = button.dataset.previewUrl;
-        else previewPdf.src = button.dataset.previewUrl;
-    });
-    previewImage.addEventListener('error', () => previewError.classList.remove('d-none'));
-    receiptModal.addEventListener('hidden.bs.modal', () => {
-        previewImage.removeAttribute('src');
-        previewPdf.removeAttribute('src');
-    });
-});
-</script>
-<?php endif; ?>
+<?php
+$paymentHistoryRows = $subscriptionHistory;
+$paymentHistoryModalId = 'myPaymentHistoryModal';
+$paymentReceiptModalId = 'myPaymentReceiptModal';
+$paymentHistoryTitle = 'Οι πληρωμές συνδρομής μου';
+include __DIR__ . '/includes/subscription-payment-history-modal.php';
+?>
 
 <!-- Personal Documents -->
 <div class="card pp-card accent-primary mb-4" id="documents">
