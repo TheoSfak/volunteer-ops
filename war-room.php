@@ -62,6 +62,38 @@ function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $
     }
 }
 
+/**
+ * War Room: persist a trackable order (mission_orders + one mission_order_recipients
+ * row per recipient, snapshotting each recipient's team) then notify them, threading
+ * orderId into the pushData so the alert banner can offer an "Ελήφθη" button. Shared
+ * by request_location/request_photo/request_video — the only difference between them
+ * is order_type + notification copy.
+ */
+function createMissionOrderAndNotify(int $missionId, string $missionTitle, string $orderType, int $createdBy, array $recipientIds, string $title, string $message): int {
+    $orderId = dbInsert(
+        "INSERT INTO mission_orders (mission_id, order_type, created_by, created_at) VALUES (?, ?, ?, NOW())",
+        [$missionId, $orderType, $createdBy]
+    );
+
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    foreach ($recipientIds as $recipientId) {
+        $teamId = getUserTeamIdForMission($missionId, $recipientId);
+        dbInsert(
+            "INSERT INTO mission_order_recipients (order_id, user_id, team_id) VALUES (?, ?, ?)",
+            [$orderId, $recipientId, $teamId]
+        );
+        sendNotification($recipientId, $title, $message, 'warning', '', [
+            'url' => $warRoomUrl,
+            'tag' => $orderType . '-request-mission-' . $missionId,
+            'vibrate' => [300, 100, 300, 100, 500],
+            'bannerMission' => $missionId,
+            'orderId' => (int) $orderId,
+        ]);
+    }
+
+    return (int) $orderId;
+}
+
 $canManageWarRoom = hasPagePermission('missions_manage') || (int)$mission['responsible_user_id'] === (int)$user['id'];
 $isApprovedParticipant = (bool)dbFetchValue(
     "SELECT COUNT(*) FROM participation_requests pr
@@ -112,17 +144,11 @@ if (isPost()) {
         if (empty($requestedIds)) {
             setFlash('warning', 'Επιλέξτε τουλάχιστον έναν εθελοντή με ενεργή βάρδια.');
         } else {
-            $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-            $title = '📍 Ζητείται στίγμα GPS';
-            $message = 'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε το τρέχον στίγμα σας.';
-            foreach ($requestedIds as $recipientId) {
-                sendNotification($recipientId, $title, $message, 'warning', '', [
-                    'url' => $warRoomUrl,
-                    'tag' => 'location-request-mission-' . $missionId,
-                    'vibrate' => [300, 100, 300, 100, 500],
-                    'bannerMission' => $missionId,
-                ]);
-            }
+            createMissionOrderAndNotify(
+                $missionId, $mission['title'], 'location', $user['id'], $requestedIds,
+                '📍 Ζητείται στίγμα GPS',
+                'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε το τρέχον στίγμα σας.'
+            );
             logAudit('request_mission_location', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
             setFlash('success', 'Στάλθηκε αίτημα στίγματος σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
         }
@@ -150,17 +176,11 @@ if (isPost()) {
         if (empty($requestedIds)) {
             setFlash('warning', 'Επιλέξτε τουλάχιστον έναν εθελοντή με ενεργή βάρδια.');
         } else {
-            $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-            $title = '📷 Ζητείται φωτογραφία';
-            $message = 'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε φωτογραφία από το πεδίο.';
-            foreach ($requestedIds as $recipientId) {
-                sendNotification($recipientId, $title, $message, 'warning', '', [
-                    'url' => $warRoomUrl,
-                    'tag' => 'photo-request-mission-' . $missionId,
-                    'vibrate' => [300, 100, 300, 100, 500],
-                    'bannerMission' => $missionId,
-                ]);
-            }
+            createMissionOrderAndNotify(
+                $missionId, $mission['title'], 'photo', $user['id'], $requestedIds,
+                '📷 Ζητείται φωτογραφία',
+                'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε φωτογραφία από το πεδίο.'
+            );
             logAudit('request_mission_photo', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
             setFlash('success', 'Στάλθηκε αίτημα φωτογραφίας σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
         }
@@ -188,17 +208,11 @@ if (isPost()) {
         if (empty($requestedIds)) {
             setFlash('warning', 'Επιλέξτε τουλάχιστον έναν εθελοντή με ενεργή βάρδια.');
         } else {
-            $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-            $title = '🎥 Ζητείται βίντεο';
-            $message = 'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε βίντεο από το πεδίο.';
-            foreach ($requestedIds as $recipientId) {
-                sendNotification($recipientId, $title, $message, 'warning', '', [
-                    'url' => $warRoomUrl,
-                    'tag' => 'video-request-mission-' . $missionId,
-                    'vibrate' => [300, 100, 300, 100, 500],
-                    'bannerMission' => $missionId,
-                ]);
-            }
+            createMissionOrderAndNotify(
+                $missionId, $mission['title'], 'video', $user['id'], $requestedIds,
+                '🎥 Ζητείται βίντεο',
+                'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε βίντεο από το πεδίο.'
+            );
             logAudit('request_mission_video', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
             setFlash('success', 'Στάλθηκε αίτημα βίντεο σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
         }
@@ -456,9 +470,23 @@ if (get('ajax') === '1') {
 
     $bannerAfterId = (int) get('banner_after');
     $bannerRow = dbFetchOne(
-        "SELECT id, message FROM notifications WHERE user_id = ? AND id > ? AND JSON_EXTRACT(data, '$.bannerMission') = ? ORDER BY id DESC LIMIT 1",
+        "SELECT id, message, data FROM notifications WHERE user_id = ? AND id > ? AND JSON_EXTRACT(data, '$.bannerMission') = ? ORDER BY id DESC LIMIT 1",
         [$user['id'], $bannerAfterId, $missionId]
     );
+    $bannerOrderId = null;
+    if ($bannerRow) {
+        $bannerData = json_decode((string) $bannerRow['data'], true);
+        $rawOrderId = $bannerData['orderId'] ?? null;
+        if ($rawOrderId) {
+            $acked = (bool) dbFetchValue(
+                "SELECT acknowledged_at FROM mission_order_recipients WHERE order_id = ? AND user_id = ?",
+                [$rawOrderId, $user['id']]
+            );
+            if (!$acked) {
+                $bannerOrderId = (int) $rawOrderId;
+            }
+        }
+    }
 
     $dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
     $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRoom);
@@ -466,7 +494,7 @@ if (get('ajax') === '1') {
     echo json_encode([
         'pins' => $pins,
         'time' => date('H:i:s'),
-        'banner' => $bannerRow ? ['id' => (int)$bannerRow['id'], 'message' => $bannerRow['message']] : null,
+        'banner' => $bannerRow ? ['id' => (int)$bannerRow['id'], 'message' => $bannerRow['message'], 'orderId' => $bannerOrderId] : null,
         'dispatches' => $dispatches,
         'media' => $photos,
     ]);
@@ -594,6 +622,9 @@ include __DIR__ . '/includes/header.php';
                 <?= $timeState === 'active' ? 'ΣΕ ΕΞΕΛΙΞΗ' : ($timeState === 'upcoming' ? 'ΠΡΟΣΕΧΩΣ' : 'ΕΚΚΡΕΜΕΙ ΚΛΕΙΣΙΜΟ') ?>
             </span>
             <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#historyModal"><i class="bi bi-clock-history me-1"></i>Ιστορικό</button>
+            <?php if ($canManageWarRoom): ?>
+            <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i>Αναφορά Χρόνων</button>
+            <?php endif; ?>
             <a href="ops-dashboard.php" class="btn btn-light"><i class="bi bi-arrow-left me-1"></i>Επιχειρησιακό</a>
         </div>
     </div>
@@ -612,6 +643,7 @@ include __DIR__ . '/includes/header.php';
                 <div id="warRoomBanner" class="war-room-banner">
                     <i class="bi bi-broadcast"></i>
                     <div class="war-room-banner-track"><span id="warRoomBannerText"></span></div>
+                    <button type="button" id="warRoomBannerAckBtn" class="btn btn-sm btn-light fw-semibold d-none" style="flex-shrink:0;">Ελήφθη</button>
                     <button type="button" id="warRoomBannerClose" class="war-room-banner-close" aria-label="Κλείσιμο">&times;</button>
                 </div>
                 <div id="warRoomMap"></div>
@@ -993,6 +1025,39 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?php if ($canManageWarRoom): ?>
+<div class="modal fade" id="reportModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-stopwatch me-1"></i>Αναφορά Χρόνων Απόκρισης</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <h6 class="text-muted small text-uppercase fw-semibold mb-2">Ανά ομάδα</h6>
+                <div class="table-responsive mb-4">
+                    <table class="table table-sm table-bordered align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Ομάδα</th>
+                                <th class="text-end">Εντολές</th>
+                                <th class="text-end">Ελήφθη</th>
+                                <th class="text-end">Ολοκληρώθηκε</th>
+                                <th class="text-end">Μέσος χρόνος αποδοχής</th>
+                                <th class="text-end">Μέσος χρόνος ολοκλήρωσης</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reportSummaryBody">
+                            <tr><td colspan="6" class="text-muted small">Φόρτωση…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <h6 class="text-muted small text-uppercase fw-semibold mb-2">Λεπτομέρειες</h6>
+                <div id="reportDetailList" class="list-group list-group-flush"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="dispatchMapModal" tabindex="-1">
     <div class="modal-dialog modal-fullscreen">
         <div class="modal-content">
@@ -1037,10 +1102,13 @@ function renderDispatches(items) {
         const acksHtml = item.acks.length
             ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? a.team_label + ' — ' : ''}${a.user_name} (${a.time})`).join('<br>') + '</div>'
             : '';
+        const receiveHtml = item.can_receive
+            ? `<br><button type="button" class="btn btn-sm btn-warning mt-1 dispatch-receive-btn" data-id="${item.id}"><i class="bi bi-flag me-1"></i>Ελήφθη</button>`
+            : (item.my_receipt ? `<div class="small text-muted mt-1">✓ Ελήφθη στις ${item.my_receipt}</div>` : '');
         const ackHtml = item.can_ack
             ? `<br><button type="button" class="btn btn-sm btn-success mt-1 dispatch-ack-btn" data-id="${item.id}"><i class="bi bi-check-lg me-1"></i>Άφιξη</button>`
             : (item.my_ack ? `<div class="small text-success mt-1">✓ Αφίξατε στις ${item.my_ack}</div>` : '');
-        const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + item.label : ''}` + acksHtml + ackHtml +
+        const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + item.label : ''}` + acksHtml + receiveHtml + ackHtml +
             (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">Διαγραφή</button>` : '');
         if (item.type === 'point') {
             const icon = L.divIcon({className:'', html:'<i class="bi bi-geo-alt-fill" style="font-size:28px;color:#7c3aed;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[28,28], iconAnchor:[14,26]});
@@ -1070,6 +1138,17 @@ dispatchLayer.on('popupopen', event => {
             fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
                 if (result.ok) { map.closePopup(); if (result.dispatches) renderDispatches(dispatches = result.dispatches); }
                 else { alert(result.error || 'Αποτυχία αποστολής.'); ackBtn.disabled = false; }
+            });
+        });
+    }
+    const receiveBtn = popupEl.querySelector('.dispatch-receive-btn');
+    if (receiveBtn) {
+        receiveBtn.addEventListener('click', () => {
+            receiveBtn.disabled = true;
+            const data = new URLSearchParams({csrf_token: csrfToken, action: 'receive', mission_id: <?= $missionId ?>, id: receiveBtn.dataset.id});
+            fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+                if (result.ok) { map.closePopup(); if (result.dispatches) renderDispatches(dispatches = result.dispatches); }
+                else { alert(result.error || 'Αποτυχία αποστολής.'); receiveBtn.disabled = false; }
             });
         });
     }
@@ -1181,12 +1260,30 @@ setTimeout(() => { renderPins(pins); renderDispatches(dispatches); renderMedia(m
 
 let bannerAfterId = <?= $bannerSinceId ?>;
 let bannerHideTimer = null;
-function showWarRoomBanner(text) {
+function showWarRoomBanner(text, orderId) {
     const el = document.getElementById('warRoomBanner');
     document.getElementById('warRoomBannerText').textContent = text;
     el.style.display = 'flex';
     if (bannerHideTimer) clearTimeout(bannerHideTimer);
     bannerHideTimer = setTimeout(hideWarRoomBanner, 60000);
+
+    const ackBtn = document.getElementById('warRoomBannerAckBtn');
+    if (orderId) {
+        ackBtn.classList.remove('d-none');
+        ackBtn.disabled = false;
+        ackBtn.textContent = 'Ελήφθη';
+        ackBtn.onclick = () => {
+            ackBtn.disabled = true;
+            const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge', order_id: orderId});
+            fetch('mission-order.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+                if (result.ok) { ackBtn.textContent = '✓ Ελήφθη'; }
+                else { ackBtn.disabled = false; alert(result.error || 'Αποτυχία.'); }
+            }).catch(() => { ackBtn.disabled = false; });
+        };
+    } else {
+        ackBtn.classList.add('d-none');
+        ackBtn.onclick = null;
+    }
 }
 function hideWarRoomBanner() {
     document.getElementById('warRoomBanner').style.display = 'none';
@@ -1218,6 +1315,47 @@ historyModalEl.addEventListener('show.bs.modal', () => {
 historyModalEl.addEventListener('hidden.bs.modal', () => {
     if (historyPoll) { clearInterval(historyPoll); historyPoll = null; }
 });
+
+const reportModalEl = document.getElementById('reportModal');
+if (reportModalEl) {
+    reportModalEl.addEventListener('show.bs.modal', () => {
+        const summaryBody = document.getElementById('reportSummaryBody');
+        const detailList = document.getElementById('reportDetailList');
+        summaryBody.innerHTML = '<tr><td colspan="6" class="text-muted small">Φόρτωση…</td></tr>';
+        detailList.innerHTML = '';
+        fetch('mission-response-report.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(data => {
+            if (!data.ok) { summaryBody.innerHTML = `<tr><td colspan="6" class="text-danger small">${data.error}</td></tr>`; return; }
+
+            summaryBody.innerHTML = data.summary.length ? data.summary.map(s => `
+                <tr>
+                    <td>${s.team_label}</td>
+                    <td class="text-end">${s.order_count}</td>
+                    <td class="text-end">${s.ack_rate}%</td>
+                    <td class="text-end">${s.fulfill_rate}%</td>
+                    <td class="text-end">${s.avg_ack_minutes !== null ? s.avg_ack_minutes + ' λεπ.' : '—'}</td>
+                    <td class="text-end">${s.avg_fulfill_minutes !== null ? s.avg_fulfill_minutes + ' λεπ.' : '—'}</td>
+                </tr>
+            `).join('') : '<tr><td colspan="6" class="text-muted small">Δεν έχουν σταλεί εντολές ακόμη.</td></tr>';
+
+            detailList.innerHTML = data.detail.length ? data.detail.map(d => `
+                <div class="list-group-item d-flex justify-content-between align-items-start gap-3">
+                    <div>
+                        <span class="me-1">${d.type_label}</span>
+                        <strong>${d.team_label}</strong> — ${d.user_name}
+                        ${d.label ? ' («' + d.label + '»)' : ''}
+                        <div class="small text-muted">
+                            Στάλθηκε ${d.sent_at}
+                            · Ελήφθη ${d.ack_at ? d.ack_at + ' (' + d.ack_minutes + ' λεπ.)' : '—'}
+                            · Ολοκληρώθηκε ${d.fulfill_at ? d.fulfill_at + ' (' + d.fulfill_minutes + ' λεπ.)' : '—'}
+                        </div>
+                    </div>
+                </div>
+            `).join('') : '<div class="text-muted small">Δεν υπάρχουν λεπτομέρειες.</div>';
+        }).catch(() => {
+            summaryBody.innerHTML = '<tr><td colspan="6" class="text-danger small">Αποτυχία φόρτωσης.</td></tr>';
+        });
+    });
+}
 
 document.querySelectorAll('.send-ping').forEach(button => button.addEventListener('click', () => {
     const status = document.getElementById('pingStatus-' + button.dataset.prId);
@@ -1266,7 +1404,7 @@ setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after='
     document.getElementById('mapRefresh').textContent = data.time || '';
     if (data.banner && data.banner.id > bannerAfterId) {
         bannerAfterId = data.banner.id;
-        showWarRoomBanner(data.banner.message);
+        showWarRoomBanner(data.banner.message, data.banner.orderId);
     }
 }).catch(() => {}), 15000);
 

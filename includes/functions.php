@@ -595,9 +595,24 @@ function canSeeTep(?int $responsibleUserId = null): bool {
 }
 
 /**
+ * War Room: the caller's team for a mission, or null if unassigned. Used to
+ * snapshot team_id at order/receipt/ack creation time (mission_dispatch_acks,
+ * mission_dispatch_receipts, mission_order_recipients) so later team
+ * reassignment doesn't retroactively change historical reports.
+ */
+function getUserTeamIdForMission(int $missionId, int $userId): ?int {
+    $teamId = dbFetchValue(
+        "SELECT team_id FROM mission_team_members WHERE mission_id = ? AND user_id = ? LIMIT 1",
+        [$missionId, $userId]
+    );
+    return $teamId ? (int) $teamId : null;
+}
+
+/**
  * War Room: load dispatch points/areas visible to $userId, each augmented with
- * its arrival acknowledgements (mission_dispatch_acks) — shared by war-room.php
- * (live map, twice) and mission-dispatch.php (AJAX poll) so all three stay in sync.
+ * its receipt (mission_dispatch_receipts, "Ελήφθη") and arrival (mission_dispatch_acks,
+ * "Άφιξη") acknowledgements — shared by war-room.php (live map, twice) and
+ * mission-dispatch.php (AJAX poll) so all three stay in sync.
  */
 function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
     $rows = dbFetchAll(
@@ -636,15 +651,24 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
         ];
     }
 
-    $myTeamId = (int) dbFetchValue(
-        "SELECT team_id FROM mission_team_members WHERE mission_id = ? AND user_id = ? LIMIT 1",
-        [$missionId, $userId]
-    ) ?: null;
+    $receiptRows = dbFetchAll(
+        "SELECT r.dispatch_id, r.user_id, r.created_at
+         FROM mission_dispatch_receipts r
+         WHERE r.dispatch_id IN ($placeholders)",
+        $dispatchIds
+    );
+    $receiptsByDispatch = [];
+    foreach ($receiptRows as $receipt) {
+        $receiptsByDispatch[(int) $receipt['dispatch_id']][(int) $receipt['user_id']] = date('H:i', strtotime($receipt['created_at']));
+    }
 
-    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch) {
+    $myTeamId = getUserTeamIdForMission($missionId, $userId);
+
+    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch, $receiptsByDispatch) {
         $dispatchId = (int) $row['id'];
         $teamId = $row['team_id'] ? (int) $row['team_id'] : null;
         $acks = $acksByDispatch[$dispatchId] ?? [];
+        $eligible = $teamId === null || $teamId === $myTeamId;
 
         $myAck = null;
         foreach ($acks as $ack) {
@@ -653,17 +677,20 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
                 break;
             }
         }
+        $myReceipt = $receiptsByDispatch[$dispatchId][$userId] ?? null;
 
         return [
-            'id'         => $dispatchId,
-            'type'       => $row['type'],
-            'geo'        => json_decode($row['geo'], true),
-            'label'      => $row['label'],
-            'team_label' => $teamId ? ($row['codename'] . ' ' . $row['team_number']) : 'Όλες οι ομάδες',
-            'can_delete' => $canManageWarRoom,
-            'acks'       => array_map(fn($a) => ['team_label' => $a['team_label'] ?? '—', 'user_name' => $a['user_name'], 'time' => $a['time']], $acks),
-            'my_ack'     => $myAck,
-            'can_ack'    => $isApprovedParticipant && !$myAck && ($teamId === null || $teamId === $myTeamId),
+            'id'          => $dispatchId,
+            'type'        => $row['type'],
+            'geo'         => json_decode($row['geo'], true),
+            'label'       => $row['label'],
+            'team_label'  => $teamId ? ($row['codename'] . ' ' . $row['team_number']) : 'Όλες οι ομάδες',
+            'can_delete'  => $canManageWarRoom,
+            'acks'        => array_map(fn($a) => ['team_label' => $a['team_label'] ?? '—', 'user_name' => $a['user_name'], 'time' => $a['time']], $acks),
+            'my_ack'      => $myAck,
+            'can_ack'     => $isApprovedParticipant && !$myAck && $eligible,
+            'my_receipt'  => $myReceipt,
+            'can_receive' => $isApprovedParticipant && !$myReceipt && $eligible,
         ];
     }, $rows);
 }

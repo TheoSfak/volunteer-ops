@@ -34,7 +34,7 @@ if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180 || ($lat == 0 && $lng =
 
 // Verify user has an APPROVED participation for this shift
 $pr = dbFetchOne(
-    "SELECT pr.id FROM participation_requests pr
+    "SELECT pr.id, s.mission_id FROM participation_requests pr
      JOIN shifts s ON pr.shift_id = s.id
      JOIN missions m ON s.mission_id = m.id
      WHERE pr.shift_id = ? AND pr.volunteer_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "'
@@ -56,6 +56,19 @@ try {
 } catch (Exception $e) {
     echo json_encode(['ok' => false, 'error' => 'Η λειτουργία GPS δεν είναι διαθέσιμη ακόμη (χρειάζεται migration βάσης).']);
     exit;
+}
+
+// Auto-fulfill any outstanding War Room "send your location" orders for this user.
+try {
+    dbExecute(
+        "UPDATE mission_order_recipients r
+         JOIN mission_orders o ON o.id = r.order_id
+         SET r.fulfilled_at = NOW()
+         WHERE r.user_id = ? AND o.mission_id = ? AND o.order_type = 'location' AND r.fulfilled_at IS NULL",
+        [$userId, $pr['mission_id']]
+    );
+} catch (Exception $e) {
+    // Non-critical — the ping itself already succeeded.
 }
 
 echo json_encode(['ok' => true, 'ts' => date('H:i:s')]);
