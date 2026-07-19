@@ -337,7 +337,19 @@ if (get('ajax') === '1') {
         'lat' => (float)$pin['lat'], 'lng' => (float)$pin['lng'], 'name' => $pin['name'],
         'status' => $pin['field_status'], 'time' => date('H:i', strtotime($pin['created_at']))
     ], $loadPins());
-    echo json_encode(['pins' => $pins, 'time' => date('H:i:s')]);
+
+    $bannerAfterId = (int) get('banner_after');
+    $bannerTag = 'location-request-mission-' . $missionId;
+    $bannerRow = dbFetchOne(
+        "SELECT id, message FROM notifications WHERE user_id = ? AND id > ? AND data LIKE ? ORDER BY id DESC LIMIT 1",
+        [$user['id'], $bannerAfterId, '%"tag":"' . $bannerTag . '"%']
+    );
+
+    echo json_encode([
+        'pins' => $pins,
+        'time' => date('H:i:s'),
+        'banner' => $bannerRow ? ['id' => (int)$bannerRow['id'], 'message' => $bannerRow['message']] : null,
+    ]);
     exit;
 }
 
@@ -345,6 +357,13 @@ $pins = array_map(fn($pin) => [
     'lat' => (float)$pin['lat'], 'lng' => (float)$pin['lng'], 'name' => $pin['name'],
     'status' => $pin['field_status'], 'time' => date('H:i', strtotime($pin['created_at']))
 ], $loadPins());
+
+// Baseline for the live request banner: ignore anything sent before this page load,
+// only pop the banner for location requests that arrive from now on.
+$bannerSinceId = (int) dbFetchValue(
+    "SELECT COALESCE(MAX(id), 0) FROM notifications WHERE user_id = ? AND data LIKE ?",
+    [$user['id'], '%"tag":"location-request-mission-' . $missionId . '"%']
+);
 
 $firstShift = $shifts[0]['start_time'] ?? $mission['start_datetime'];
 $lastShift = !empty($shifts) ? end($shifts)['end_time'] : $mission['end_datetime'];
@@ -428,6 +447,11 @@ include __DIR__ . '/includes/header.php';
     .war-room-hero { background: linear-gradient(135deg, #172554, #b91c1c); color: #fff; border-radius: 14px; }
     .participant-row { border-left: 4px solid #e2e8f0; }
     .participant-row.needs-help { border-left-color: #dc2626; }
+    .war-room-banner { display: none; align-items: center; gap: 10px; background: linear-gradient(90deg, #b45309, #d97706); color: #fff; padding: 8px 12px; }
+    .war-room-banner-track { flex: 1; overflow: hidden; white-space: nowrap; position: relative; height: 1.4em; }
+    .war-room-banner-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; animation: warRoomBannerScroll 14s linear infinite; }
+    @keyframes warRoomBannerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+    .war-room-banner-close { background: transparent; border: none; color: #fff; font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0 4px; flex-shrink: 0; }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
@@ -455,7 +479,14 @@ include __DIR__ . '/includes/header.php';
                 <h5 class="mb-0"><i class="bi bi-map me-1"></i>Ζωντανός χάρτης αποστολής</h5>
                 <small class="text-muted">Ενημέρωση: <span id="mapRefresh"><?= date('H:i:s') ?></span></small>
             </div>
-            <div class="card-body p-0"><div id="warRoomMap"></div></div>
+            <div class="card-body p-0">
+                <div id="warRoomBanner" class="war-room-banner">
+                    <i class="bi bi-broadcast"></i>
+                    <div class="war-room-banner-track"><span id="warRoomBannerText"></span></div>
+                    <button type="button" id="warRoomBannerClose" class="war-room-banner-close" aria-label="Κλείσιμο">&times;</button>
+                </div>
+                <div id="warRoomMap"></div>
+            </div>
         </div>
 
         <div class="card shadow-sm mb-4">
@@ -702,6 +733,7 @@ const map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.l
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
 const pinLayer = L.layerGroup().addTo(map);
 if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup('<strong>Σημείο αποστολής</strong><br><?= h(addslashes($mission['title'])) ?>');
+let hasFitPins = false;
 function renderPins(items) {
     pinLayer.clearLayers();
     const colors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
@@ -710,8 +742,35 @@ function renderPins(items) {
         const icon = L.divIcon({className:'', html:`<span style="display:block;width:16px;height:16px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 4px #0008"></span>`, iconSize:[16,16], iconAnchor:[8,8]});
         L.marker([pin.lat, pin.lng], {icon}).addTo(pinLayer).bindPopup(`<strong>${pin.name}</strong><br>${pin.time}`);
     });
+    if (!hasFitPins && items.length) {
+        hasFitPins = true;
+        map.invalidateSize();
+        const coords = items.map(pin => [pin.lat, pin.lng]);
+        if (missionLocation.lat) coords.push([missionLocation.lat, missionLocation.lng]);
+        if (coords.length > 1) {
+            map.fitBounds(L.latLngBounds(coords), {padding: [40, 40]});
+        } else {
+            map.setView(coords[0], 15);
+        }
+    }
 }
-renderPins(pins);
+setTimeout(() => renderPins(pins), 200);
+
+let bannerAfterId = <?= $bannerSinceId ?>;
+let bannerHideTimer = null;
+function showWarRoomBanner(text) {
+    const el = document.getElementById('warRoomBanner');
+    document.getElementById('warRoomBannerText').textContent = text;
+    el.style.display = 'flex';
+    if (bannerHideTimer) clearTimeout(bannerHideTimer);
+    bannerHideTimer = setTimeout(hideWarRoomBanner, 25000);
+}
+function hideWarRoomBanner() {
+    document.getElementById('warRoomBanner').style.display = 'none';
+    if (bannerHideTimer) { clearTimeout(bannerHideTimer); bannerHideTimer = null; }
+}
+document.getElementById('warRoomBannerClose').addEventListener('click', hideWarRoomBanner);
+
 document.querySelectorAll('.send-ping').forEach(button => button.addEventListener('click', () => {
     const status = document.getElementById('pingStatus-' + button.dataset.prId);
     if (!navigator.geolocation) { status.textContent = 'Το GPS δεν υποστηρίζεται από τη συσκευή.'; return; }
@@ -724,7 +783,14 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
         }).catch(() => { status.textContent = 'Αποτυχία αποστολής στίγματος.'; status.className = 'small mb-2 text-danger'; }).finally(() => button.disabled = false);
     }, () => { status.textContent = 'Δεν δόθηκε άδεια πρόσβασης στο GPS.'; status.className = 'small mb-2 text-danger'; button.disabled = false; }, {enableHighAccuracy:true, timeout:10000});
 }));
-setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1').then(response => response.json()).then(data => { renderPins(data.pins || []); document.getElementById('mapRefresh').textContent = data.time || ''; }).catch(() => {}), 15000);
+setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => response.json()).then(data => {
+    renderPins(data.pins || []);
+    document.getElementById('mapRefresh').textContent = data.time || '';
+    if (data.banner && data.banner.id > bannerAfterId) {
+        bannerAfterId = data.banner.id;
+        showWarRoomBanner(data.banner.message);
+    }
+}).catch(() => {}), 15000);
 
 document.querySelectorAll('.team-form').forEach(form => {
     const leaderSelect = form.querySelector(form.dataset.leaderSelect);
