@@ -1815,4 +1815,23 @@ CREATE TABLE IF NOT EXISTS `mission_dispatch_acks` (
     INDEX `idx_dispatch_ack` (`dispatch_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- MISSION PHOTOS (War Room field photo requests/uploads)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_photos` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `stored_name` VARCHAR(255) NOT NULL,
+    `original_name` VARCHAR(255) NULL,
+    `mime_type` VARCHAR(100) NOT NULL,
+    `file_size` INT UNSIGNED NOT NULL,
+    `lat` DECIMAL(10,7) NULL,
+    `lng` DECIMAL(10,7) NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    INDEX `idx_photo_mission` (`mission_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

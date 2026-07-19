@@ -4279,6 +4279,62 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 75,
+            'description' => 'Create mission_photos table (War Room field photo requests/uploads)',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_photos'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE mission_photos (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            user_id INT UNSIGNED NOT NULL,
+                            stored_name VARCHAR(255) NOT NULL,
+                            original_name VARCHAR(255) NULL,
+                            mime_type VARCHAR(100) NOT NULL,
+                            file_size INT UNSIGNED NOT NULL,
+                            lat DECIMAL(10,7) NULL,
+                            lng DECIMAL(10,7) NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            INDEX idx_photo_mission (mission_id, created_at)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $ns1 = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_photo_request'");
+                if (!$ns1) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_photo_request',
+                            'Ζήτηση Φωτογραφίας War Room',
+                            'Ο υπεύθυνος σας ζήτησε να στείλετε φωτογραφία από το πεδίο (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+
+                $ns2 = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_photo_received'");
+                if (!$ns2) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_photo_received',
+                            'Λήψη Φωτογραφίας War Room',
+                            'Ένας εθελοντής έστειλε φωτογραφία από το πεδίο (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
