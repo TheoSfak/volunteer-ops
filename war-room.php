@@ -127,6 +127,44 @@ if (isPost()) {
             setFlash('success', 'Στάλθηκε αίτημα στίγματος σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
         }
         redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'request_photo') {
+        if (!$canManageWarRoom) {
+            setFlash('error', 'Δεν έχετε δικαίωμα να ζητήσετε φωτογραφία.');
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $activeRecipients = dbFetchAll(
+            "SELECT DISTINCT pr.volunteer_id, u.name
+             FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             JOIN users u ON u.id = pr.volunteer_id
+             WHERE s.mission_id = ? AND pr.status = ?
+               AND s.start_time <= NOW() AND s.end_time > NOW()",
+            [$missionId, PARTICIPATION_APPROVED]
+        );
+        $activeIds = array_map('intval', array_column($activeRecipients, 'volunteer_id'));
+        $requestedIds = post('request_scope') === 'all'
+            ? $activeIds
+            : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
+
+        if (empty($requestedIds)) {
+            setFlash('warning', 'Επιλέξτε τουλάχιστον έναν εθελοντή με ενεργή βάρδια.');
+        } else {
+            $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+            $title = '📷 Ζητείται φωτογραφία';
+            $message = 'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε φωτογραφία από το πεδίο.';
+            foreach ($requestedIds as $recipientId) {
+                sendNotification($recipientId, $title, $message, 'warning', '', [
+                    'url' => $warRoomUrl,
+                    'tag' => 'photo-request-mission-' . $missionId,
+                    'vibrate' => [300, 100, 300, 100, 500],
+                    'bannerMission' => $missionId,
+                ]);
+            }
+            logAudit('request_mission_photo', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
+            setFlash('success', 'Στάλθηκε αίτημα φωτογραφίας σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
+        }
+        redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'global_message') {
         if (!$canManageWarRoom) {
             setFlash('error', 'Δεν έχετε δικαίωμα να στείλετε καθολικό μήνυμα.');
@@ -385,12 +423,14 @@ if (get('ajax') === '1') {
     );
 
     $dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
+    $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRoom);
 
     echo json_encode([
         'pins' => $pins,
         'time' => date('H:i:s'),
         'banner' => $bannerRow ? ['id' => (int)$bannerRow['id'], 'message' => $bannerRow['message']] : null,
         'dispatches' => $dispatches,
+        'photos' => $photos,
     ]);
     exit;
 }
@@ -410,6 +450,7 @@ $bannerSinceId = (int) dbFetchValue(
 );
 
 $dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
+$photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRoom);
 
 $firstShift = $shifts[0]['start_time'] ?? $mission['start_datetime'];
 $lastShift = !empty($shifts) ? end($shifts)['end_time'] : $mission['end_datetime'];
@@ -521,9 +562,9 @@ include __DIR__ . '/includes/header.php';
 
 <?= showFlash() ?>
 
-<div class="row g-4">
+<div class="row g-4 mb-4">
     <div class="col-lg-8">
-        <div class="card shadow-sm mb-4">
+        <div class="card shadow-sm h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-map me-1"></i>Ζωντανός χάρτης αποστολής</h5>
                 <small class="text-muted">Ενημέρωση: <span id="mapRefresh"><?= date('H:i:s') ?></span></small>
@@ -537,7 +578,27 @@ include __DIR__ . '/includes/header.php';
                 <div id="warRoomMap"></div>
             </div>
         </div>
+    </div>
 
+    <div class="col-lg-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i>Φωτογραφίες Πεδίου</h5></div>
+            <div class="card-body d-flex flex-column" style="height:520px;">
+                <?php if ($isApprovedParticipant): ?>
+                <label class="btn btn-primary w-100 mb-2 mb-0">
+                    <i class="bi bi-camera-fill me-1"></i>Αποστολή φωτογραφίας
+                    <input type="file" id="photoInput" accept="image/*" class="d-none">
+                </label>
+                <div class="small mb-2" id="photoUploadStatus"></div>
+                <?php endif; ?>
+                <div id="photoList" class="flex-grow-1 overflow-auto"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-8">
         <div class="card shadow-sm mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-diagram-3 me-1"></i>Ομάδες Αποστολής</h5>
@@ -668,6 +729,35 @@ include __DIR__ . '/includes/header.php';
                             <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
                                 <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
                                 <small class="text-muted"><?= $participant['last_ping_at'] ? date('H:i', strtotime($participant['last_ping_at'])) : 'χωρίς στίγμα' ?></small>
+                            </label>
+                            <?php endforeach; ?>
+                        </div>
+                        <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
+                            <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
+                        </button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4 border-warning">
+            <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i>Ζήτηση φωτογραφίας</h5></div>
+            <div class="card-body">
+                <?php if (empty($activeParticipants)): ?>
+                    <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
+                <?php else: ?>
+                    <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση. Ο ήχος εξαρτάται από τις ρυθμίσεις της συσκευής του εθελοντή.</p>
+                    <form method="post">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="request_photo">
+                        <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
+                            <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
+                        </button>
+                        <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
+                        <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
+                            <?php foreach ($activeParticipants as $participant): ?>
+                            <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
+                                <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
                             </label>
                             <?php endforeach; ?>
                         </div>
@@ -862,6 +952,7 @@ const csrfToken = '<?= csrfToken() ?>';
 const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>;
 let pins = <?= json_encode($pins) ?>;
 let dispatches = <?= json_encode($dispatches) ?>;
+let photos = <?= json_encode($photos) ?>;
 const map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
 const pinLayer = L.layerGroup().addTo(map);
@@ -931,7 +1022,82 @@ function renderPins(items) {
         }
     }
 }
-setTimeout(() => { renderPins(pins); renderDispatches(dispatches); }, 200);
+
+function renderPhotos(items) {
+    const list = document.getElementById('photoList');
+    if (!items.length) {
+        list.innerHTML = '<div class="text-muted small">Δεν έχουν σταλεί φωτογραφίες ακόμη.</div>';
+        return;
+    }
+    list.innerHTML = items.map(p => `
+        <div class="card mb-2">
+            <img src="mission-photo-view.php?id=${p.id}" class="card-img-top" style="height:160px;object-fit:cover;cursor:pointer;" onclick="window.open('mission-photo-view.php?id=${p.id}', '_blank')">
+            <div class="card-body p-2 d-flex justify-content-between align-items-center">
+                <div class="small">
+                    <strong>${p.user_name}</strong><br>
+                    <span class="text-muted">${p.time}</span>
+                </div>
+                <div class="d-flex gap-1">
+                    ${p.lat !== null ? `<button type="button" class="btn btn-sm btn-outline-secondary photo-locate-btn" data-lat="${p.lat}" data-lng="${p.lng}" title="Εμφάνιση στον χάρτη"><i class="bi bi-geo-alt-fill"></i></button>` : ''}
+                    ${p.can_delete ? `<button type="button" class="btn btn-sm btn-outline-danger photo-delete-btn" data-id="${p.id}" title="Διαγραφή"><i class="bi bi-trash"></i></button>` : ''}
+                </div>
+            </div>
+        </div>
+    `).join('');
+    list.querySelectorAll('.photo-locate-btn').forEach(btn => btn.addEventListener('click', () => {
+        map.setView([parseFloat(btn.dataset.lat), parseFloat(btn.dataset.lng)], 16);
+    }));
+    list.querySelectorAll('.photo-delete-btn').forEach(btn => btn.addEventListener('click', () => {
+        if (!confirm('Διαγραφή αυτής της φωτογραφίας;')) return;
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: btn.dataset.id});
+        fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+            if (result.ok) renderPhotos(photos = photos.filter(p => String(p.id) !== btn.dataset.id));
+            else alert(result.error || 'Αποτυχία διαγραφής.');
+        });
+    }));
+}
+
+const photoInput = document.getElementById('photoInput');
+if (photoInput) {
+    photoInput.addEventListener('change', () => {
+        const file = photoInput.files[0];
+        if (!file) return;
+        const status = document.getElementById('photoUploadStatus');
+        status.textContent = 'Αποστολή…';
+        status.className = 'small mb-2';
+
+        const send = (lat, lng) => {
+            const data = new FormData();
+            data.append('csrf_token', csrfToken);
+            data.append('action', 'upload');
+            data.append('mission_id', '<?= $missionId ?>');
+            data.append('photo', file);
+            if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
+            fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+                if (result.ok) {
+                    status.textContent = '✓ Η φωτογραφία εστάλη.';
+                    status.className = 'small mb-2 text-success';
+                    renderPhotos(photos = [result.photo, ...photos]);
+                } else {
+                    status.textContent = result.error || 'Αποτυχία αποστολής.';
+                    status.className = 'small mb-2 text-danger';
+                }
+                photoInput.value = '';
+            }).catch(() => { status.textContent = 'Αποτυχία αποστολής.'; status.className = 'small mb-2 text-danger'; photoInput.value = ''; });
+        };
+
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                position => send(position.coords.latitude, position.coords.longitude),
+                () => send(null, null),
+                {enableHighAccuracy: true, timeout: 8000}
+            );
+        } else {
+            send(null, null);
+        }
+    });
+}
+setTimeout(() => { renderPins(pins); renderDispatches(dispatches); renderPhotos(photos); }, 200);
 
 let bannerAfterId = <?= $bannerSinceId ?>;
 let bannerHideTimer = null;
@@ -1016,6 +1182,7 @@ function setFieldStatus(btn, prId, status) {
 setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => response.json()).then(data => {
     renderPins(data.pins || []);
     if (data.dispatches) renderDispatches(dispatches = data.dispatches);
+    if (data.photos) renderPhotos(photos = data.photos);
     document.getElementById('mapRefresh').textContent = data.time || '';
     if (data.banner && data.banner.id > bannerAfterId) {
         bannerAfterId = data.banner.id;
