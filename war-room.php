@@ -120,6 +120,7 @@ if (isPost()) {
                     'url' => $warRoomUrl,
                     'tag' => 'location-request-mission-' . $missionId,
                     'vibrate' => [300, 100, 300, 100, 500],
+                    'bannerMission' => $missionId,
                 ]);
             }
             logAudit('request_mission_location', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
@@ -339,16 +340,33 @@ if (get('ajax') === '1') {
     ], $loadPins());
 
     $bannerAfterId = (int) get('banner_after');
-    $bannerTag = 'location-request-mission-' . $missionId;
     $bannerRow = dbFetchOne(
-        "SELECT id, message FROM notifications WHERE user_id = ? AND id > ? AND data LIKE ? ORDER BY id DESC LIMIT 1",
-        [$user['id'], $bannerAfterId, '%"tag":"' . $bannerTag . '"%']
+        "SELECT id, message FROM notifications WHERE user_id = ? AND id > ? AND JSON_EXTRACT(data, '$.bannerMission') = ? ORDER BY id DESC LIMIT 1",
+        [$user['id'], $bannerAfterId, $missionId]
     );
+
+    $dispatchRows = dbFetchAll(
+        "SELECT d.id, d.team_id, d.type, d.geo, d.label, mt.codename, mt.team_number
+         FROM mission_dispatch_points d
+         LEFT JOIN mission_teams mt ON mt.id = d.team_id
+         WHERE d.mission_id = ?
+           AND (d.team_id IS NULL OR ? = 1 OR d.team_id IN (
+                SELECT team_id FROM mission_team_members WHERE user_id = ?
+           ))
+         ORDER BY d.created_at",
+        [$missionId, $canManageWarRoom ? 1 : 0, $user['id']]
+    );
+    $dispatches = array_map(fn($row) => [
+        'id' => (int)$row['id'], 'type' => $row['type'], 'geo' => json_decode($row['geo'], true),
+        'label' => $row['label'], 'team_label' => $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'Όλες οι ομάδες',
+        'can_delete' => $canManageWarRoom,
+    ], $dispatchRows);
 
     echo json_encode([
         'pins' => $pins,
         'time' => date('H:i:s'),
         'banner' => $bannerRow ? ['id' => (int)$bannerRow['id'], 'message' => $bannerRow['message']] : null,
+        'dispatches' => $dispatches,
     ]);
     exit;
 }
@@ -359,11 +377,30 @@ $pins = array_map(fn($pin) => [
 ], $loadPins());
 
 // Baseline for the live request banner: ignore anything sent before this page load,
-// only pop the banner for location requests that arrive from now on.
+// only pop the banner for admin-initiated alerts (location requests, dispatch points, ...)
+// that arrive from now on. Any sendNotification() pushData with 'bannerMission' => $missionId
+// qualifies, so future request types (photo/video/relocate) plug in without changes here.
 $bannerSinceId = (int) dbFetchValue(
-    "SELECT COALESCE(MAX(id), 0) FROM notifications WHERE user_id = ? AND data LIKE ?",
-    [$user['id'], '%"tag":"location-request-mission-' . $missionId . '"%']
+    "SELECT COALESCE(MAX(id), 0) FROM notifications WHERE user_id = ? AND JSON_EXTRACT(data, '$.bannerMission') = ?",
+    [$user['id'], $missionId]
 );
+
+$dispatchRows = dbFetchAll(
+    "SELECT d.id, d.team_id, d.type, d.geo, d.label, mt.codename, mt.team_number
+     FROM mission_dispatch_points d
+     LEFT JOIN mission_teams mt ON mt.id = d.team_id
+     WHERE d.mission_id = ?
+       AND (d.team_id IS NULL OR ? = 1 OR d.team_id IN (
+            SELECT team_id FROM mission_team_members WHERE user_id = ?
+       ))
+     ORDER BY d.created_at",
+    [$missionId, $canManageWarRoom ? 1 : 0, $user['id']]
+);
+$dispatches = array_map(fn($row) => [
+    'id' => (int)$row['id'], 'type' => $row['type'], 'geo' => json_decode($row['geo'], true),
+    'label' => $row['label'], 'team_label' => $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'Όλες οι ομάδες',
+    'can_delete' => $canManageWarRoom,
+], $dispatchRows);
 
 $firstShift = $shifts[0]['start_time'] ?? $mission['start_datetime'];
 $lastShift = !empty($shifts) ? end($shifts)['end_time'] : $mission['end_datetime'];
@@ -608,6 +645,23 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
 
+        <div class="card shadow-sm mb-4 border-primary">
+            <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-geo-fill me-1"></i>Αποστολή Στίγματος/Περιοχής</h5></div>
+            <div class="card-body">
+                <p class="small text-muted">Στείλτε ένα σημείο ή μια περιοχή στον χάρτη — θα εμφανιστεί μόνιμα στον χάρτη των παραληπτών.</p>
+                <label class="form-label small fw-semibold">Παραλήπτες</label>
+                <select class="form-select mb-3" id="dispatchTeamSelect">
+                    <option value="">Όλες οι ομάδες</option>
+                    <?php foreach ($teams as $team): ?>
+                    <option value="<?= $team['id'] ?>"><?= h($team['codename'] . ' ' . $team['team_number']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <button type="button" class="btn btn-primary w-100 fw-semibold" data-bs-toggle="modal" data-bs-target="#dispatchMapModal">
+                    <i class="bi bi-pin-map-fill me-1"></i>Αποστολή Στίγματος
+                </button>
+            </div>
+        </div>
+
         <div class="card border-danger shadow-sm">
             <div class="card-body"><h6><i class="bi bi-shield-exclamation text-danger me-1"></i>Διαχείριση αποστολής</h6>
                 <p class="small text-muted">Το κλείσιμο αφαιρεί την αποστολή από το Επιχειρησιακό και σταματά τη λήψη νέων στιγμάτων.</p>
@@ -724,14 +778,68 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<?php if ($canManageWarRoom): ?>
+<div class="modal fade" id="dispatchMapModal" tabindex="-1">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h5 class="modal-title"><i class="bi bi-pin-map-fill me-1"></i>Αποστολή Στίγματος/Περιοχής</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0 d-flex flex-column">
+                <div class="p-2 border-bottom d-flex flex-wrap gap-2 align-items-center bg-light">
+                    <input type="text" id="dispatchAddressInput" class="form-control" style="max-width:320px;" placeholder="Διεύθυνση (προαιρετικό)…">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="dispatchAddressSearch"><i class="bi bi-search me-1"></i>Αναζήτηση</button>
+                    <span class="text-muted small" id="dispatchAddressStatus"></span>
+                    <div class="ms-auto d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="dispatchClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i>Καθαρισμός</button>
+                        <button type="button" class="btn btn-success btn-sm" id="dispatchSendBtn" disabled><i class="bi bi-send-fill me-1"></i>Αποστολή</button>
+                    </div>
+                </div>
+                <div class="small text-muted px-2 py-1 bg-light border-bottom">
+                    Κάντε click στον χάρτη για να τοποθετήσετε ένα σημείο. Για περιοχή, κάντε click σε πολλά σημεία και μετά ξανά στο 1ο σημείο για να κλείσει το σχήμα.
+                </div>
+                <div id="dispatchMap" style="flex:1;min-height:0;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const csrfToken = '<?= csrfToken() ?>';
 const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>;
 let pins = <?= json_encode($pins) ?>;
+let dispatches = <?= json_encode($dispatches) ?>;
 const map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
 const pinLayer = L.layerGroup().addTo(map);
+const dispatchLayer = L.layerGroup().addTo(map);
+function renderDispatches(items) {
+    dispatchLayer.clearLayers();
+    items.forEach(item => {
+        const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + item.label : ''}` +
+            (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">Διαγραφή</button>` : '');
+        if (item.type === 'point') {
+            const icon = L.divIcon({className:'', html:'<i class="bi bi-geo-alt-fill" style="font-size:28px;color:#7c3aed;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[28,28], iconAnchor:[14,26]});
+            L.marker([item.geo.lat, item.geo.lng], {icon}).addTo(dispatchLayer).bindPopup(popupHtml);
+        } else if (item.type === 'polygon') {
+            L.polygon(item.geo, {color:'#7c3aed', fillOpacity:0.15}).addTo(dispatchLayer).bindPopup(popupHtml);
+        }
+    });
+}
+dispatchLayer.on('popupopen', event => {
+    const btn = event.popup.getElement().querySelector('.dispatch-delete-btn');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        if (!confirm('Διαγραφή αυτού του σημείου/περιοχής;')) return;
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: btn.dataset.id});
+        fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+            if (result.ok) { map.closePopup(); renderDispatches(dispatches = dispatches.filter(d => String(d.id) !== btn.dataset.id)); }
+        });
+    });
+});
 if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup('<strong>Σημείο αποστολής</strong><br><?= h(addslashes($mission['title'])) ?>');
 let hasFitPins = false;
 function renderPins(items) {
@@ -754,7 +862,7 @@ function renderPins(items) {
         }
     }
 }
-setTimeout(() => renderPins(pins), 200);
+setTimeout(() => { renderPins(pins); renderDispatches(dispatches); }, 200);
 
 let bannerAfterId = <?= $bannerSinceId ?>;
 let bannerHideTimer = null;
@@ -785,6 +893,7 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
 }));
 setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => response.json()).then(data => {
     renderPins(data.pins || []);
+    if (data.dispatches) renderDispatches(dispatches = data.dispatches);
     document.getElementById('mapRefresh').textContent = data.time || '';
     if (data.banner && data.banner.id > bannerAfterId) {
         bannerAfterId = data.banner.id;
@@ -918,6 +1027,119 @@ document.querySelectorAll('.team-form').forEach(form => {
 
     loadRoom('');
     setInterval(pollRoom, 5000);
+})();
+
+(function() {
+    const modalEl = document.getElementById('dispatchMapModal');
+    if (!modalEl) return;
+
+    const teamSelect = document.getElementById('dispatchTeamSelect');
+    const addressInput = document.getElementById('dispatchAddressInput');
+    const addressSearchBtn = document.getElementById('dispatchAddressSearch');
+    const addressStatus = document.getElementById('dispatchAddressStatus');
+    const clearBtn = document.getElementById('dispatchClearBtn');
+    const sendBtn = document.getElementById('dispatchSendBtn');
+
+    let dispatchMap = null;
+    let drawPoints = [];
+    let vertexMarkers = [];
+    let shapeLayer = null;
+    let isClosed = false;
+    let lastAddressLabel = '';
+
+    function resetDrawing() {
+        drawPoints = [];
+        isClosed = false;
+        vertexMarkers.forEach(m => dispatchMap.removeLayer(m));
+        vertexMarkers = [];
+        if (shapeLayer) { dispatchMap.removeLayer(shapeLayer); shapeLayer = null; }
+        sendBtn.disabled = true;
+    }
+
+    function updateShapePreview() {
+        if (shapeLayer) { dispatchMap.removeLayer(shapeLayer); shapeLayer = null; }
+        if (drawPoints.length < 2) return;
+        shapeLayer = isClosed
+            ? L.polygon(drawPoints, {color:'#7c3aed', fillOpacity:0.15}).addTo(dispatchMap)
+            : L.polyline(drawPoints, {color:'#7c3aed'}).addTo(dispatchMap);
+    }
+
+    function updateSendState() {
+        sendBtn.disabled = !(drawPoints.length === 1 || (isClosed && drawPoints.length >= 3));
+    }
+
+    function onMapClick(e) {
+        if (isClosed) return;
+        if (drawPoints.length >= 3) {
+            const firstPoint = dispatchMap.latLngToContainerPoint(L.latLng(drawPoints[0]));
+            const clickPoint = dispatchMap.latLngToContainerPoint(e.latlng);
+            if (firstPoint.distanceTo(clickPoint) < 16) {
+                isClosed = true;
+                updateShapePreview();
+                updateSendState();
+                return;
+            }
+        }
+        drawPoints.push([e.latlng.lat, e.latlng.lng]);
+        vertexMarkers.push(L.circleMarker(e.latlng, {radius:7, color:'#7c3aed', fillColor:'#fff', fillOpacity:1, weight:2}).addTo(dispatchMap));
+        updateShapePreview();
+        updateSendState();
+    }
+
+    modalEl.addEventListener('shown.bs.modal', () => {
+        if (!dispatchMap) {
+            const center = missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73];
+            dispatchMap = L.map('dispatchMap').setView(center, missionLocation.lat ? 13 : 7);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(dispatchMap);
+            dispatchMap.on('click', onMapClick);
+        }
+        setTimeout(() => dispatchMap.invalidateSize(), 100);
+    });
+
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        resetDrawing();
+        addressInput.value = '';
+        addressStatus.textContent = '';
+        lastAddressLabel = '';
+    });
+
+    clearBtn.addEventListener('click', resetDrawing);
+
+    addressSearchBtn.addEventListener('click', () => {
+        const q = addressInput.value.trim();
+        if (!q) return;
+        addressStatus.textContent = 'Αναζήτηση…';
+        fetch('geocode-address.php?q=' + encodeURIComponent(q)).then(response => response.json()).then(result => {
+            if (result.ok) {
+                dispatchMap.setView([result.lat, result.lng], 16);
+                lastAddressLabel = result.display_name || q;
+                addressStatus.textContent = '✓ ' + lastAddressLabel;
+            } else {
+                addressStatus.textContent = result.error || 'Δεν βρέθηκε.';
+            }
+        }).catch(() => { addressStatus.textContent = 'Αποτυχία αναζήτησης.'; });
+    });
+
+    sendBtn.addEventListener('click', () => {
+        const type = isClosed ? 'polygon' : 'point';
+        const geo = type === 'point' ? {lat: drawPoints[0][0], lng: drawPoints[0][1]} : drawPoints;
+        const data = new URLSearchParams({
+            csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
+            team_id: teamSelect.value, type: type, geo: JSON.stringify(geo), label: lastAddressLabel,
+        });
+        sendBtn.disabled = true;
+        fetch('mission-dispatch.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
+            if (result.ok) {
+                bootstrap.Modal.getInstance(modalEl).hide();
+                fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId)
+                    .then(response => response.json())
+                    .then(d => { if (d.dispatches) renderDispatches(dispatches = d.dispatches); });
+            } else {
+                alert(result.error || 'Αποτυχία αποστολής.');
+                sendBtn.disabled = false;
+            }
+        }).catch(() => { alert('Αποτυχία αποστολής.'); sendBtn.disabled = false; });
+    });
 })();
 </script>
 

@@ -1782,19 +1782,21 @@ CREATE TABLE IF NOT EXISTS `mission_team_members` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
--- MISSION CHAT MESSAGES (War Room general + team chat)
+-- MISSION DISPATCH POINTS (War Room send point/area to teams)
 -- =============================================
-CREATE TABLE IF NOT EXISTS `mission_chat_messages` (
+CREATE TABLE IF NOT EXISTS `mission_dispatch_points` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `mission_id` INT UNSIGNED NOT NULL,
     `team_id` INT UNSIGNED NULL,
-    `user_id` INT UNSIGNED NOT NULL,
-    `message` TEXT NOT NULL,
+    `type` ENUM('point','polygon') NOT NULL,
+    `geo` TEXT NOT NULL,
+    `label` VARCHAR(255) NULL,
+    `created_by` INT UNSIGNED NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE CASCADE,
-    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
-    INDEX `idx_chat_room` (`mission_id`, `team_id`, `id`)
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    INDEX `idx_dispatch_mission` (`mission_id`, `team_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;
