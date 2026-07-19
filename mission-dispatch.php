@@ -89,6 +89,41 @@ if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_to
 
 $action = post('action');
 
+if ($action === 'receive') {
+    if (!$isApprovedParticipant) {
+        echo json_encode(['ok' => false, 'error' => 'Μόνο εγκεκριμένοι εθελοντές μπορούν να επιβεβαιώσουν λήψη.']);
+        exit;
+    }
+
+    $dispatchId = (int) post('id');
+    $dispatch = dbFetchOne("SELECT id, team_id FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
+    if (!$dispatch) {
+        echo json_encode(['ok' => false, 'error' => 'Δεν βρέθηκε.']);
+        exit;
+    }
+
+    $myTeamId = getUserTeamIdForMission($missionId, $userId);
+    if ($dispatch['team_id'] && (int) $dispatch['team_id'] !== $myTeamId) {
+        echo json_encode(['ok' => false, 'error' => 'Αυτή η εντολή δεν αφορά την ομάδα σας.']);
+        exit;
+    }
+
+    $existing = dbFetchOne("SELECT id FROM mission_dispatch_receipts WHERE dispatch_id = ? AND user_id = ?", [$dispatchId, $userId]);
+    if (!$existing) {
+        dbInsert(
+            "INSERT INTO mission_dispatch_receipts (dispatch_id, team_id, user_id, created_at) VALUES (?, ?, ?, NOW())",
+            [$dispatchId, $myTeamId, $userId]
+        );
+        logAudit('team_received_dispatch', 'mission_dispatch_points', $dispatchId, null, [
+            'mission_id' => $missionId, 'team_id' => $myTeamId, 'user_id' => $userId,
+        ]);
+    }
+
+    $dispatches = loadMissionDispatchesForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
+    echo json_encode(['ok' => true, 'dispatches' => $dispatches]);
+    exit;
+}
+
 if ($action === 'ack') {
     if (!$isApprovedParticipant) {
         echo json_encode(['ok' => false, 'error' => 'Μόνο εγκεκριμένοι εθελοντές μπορούν να αναφέρουν άφιξη.']);
@@ -102,10 +137,7 @@ if ($action === 'ack') {
         exit;
     }
 
-    $myTeamId = (int) dbFetchValue(
-        "SELECT team_id FROM mission_team_members WHERE mission_id = ? AND user_id = ? LIMIT 1",
-        [$missionId, $userId]
-    ) ?: null;
+    $myTeamId = getUserTeamIdForMission($missionId, $userId);
 
     if ($dispatch['team_id'] && (int) $dispatch['team_id'] !== $myTeamId) {
         echo json_encode(['ok' => false, 'error' => 'Αυτή η εντολή δεν αφορά την ομάδα σας.']);

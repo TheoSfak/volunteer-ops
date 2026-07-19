@@ -4375,6 +4375,72 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 77,
+            'description' => 'War Room order acknowledgment + response-time tracking (mission_orders, mission_order_recipients, mission_dispatch_receipts)',
+            'up' => function () {
+                $t1 = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_orders'"
+                );
+                if (!$t1) {
+                    dbExecute(
+                        "CREATE TABLE mission_orders (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            order_type ENUM('location','photo','video') NOT NULL,
+                            created_by INT UNSIGNED NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+                            INDEX idx_order_mission (mission_id, order_type)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $t2 = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_order_recipients'"
+                );
+                if (!$t2) {
+                    dbExecute(
+                        "CREATE TABLE mission_order_recipients (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            order_id INT UNSIGNED NOT NULL,
+                            user_id INT UNSIGNED NOT NULL,
+                            team_id INT UNSIGNED NULL,
+                            acknowledged_at TIMESTAMP NULL,
+                            fulfilled_at TIMESTAMP NULL,
+                            UNIQUE KEY uniq_order_user (order_id, user_id),
+                            FOREIGN KEY (order_id) REFERENCES mission_orders(id) ON DELETE CASCADE,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $t3 = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_dispatch_receipts'"
+                );
+                if (!$t3) {
+                    dbExecute(
+                        "CREATE TABLE mission_dispatch_receipts (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            dispatch_id INT UNSIGNED NOT NULL,
+                            team_id INT UNSIGNED NULL,
+                            user_id INT UNSIGNED NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            UNIQUE KEY uniq_dispatch_user (dispatch_id, user_id),
+                            FOREIGN KEY (dispatch_id) REFERENCES mission_dispatch_points(id) ON DELETE CASCADE,
+                            FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

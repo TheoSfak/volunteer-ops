@@ -138,6 +138,15 @@ if ($action === 'upload') {
     );
     logAudit('upload_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId, 'media_type' => $mediaType]);
 
+    // Auto-fulfill any outstanding War Room "send a photo/video" orders of this type for this user.
+    dbExecute(
+        "UPDATE mission_order_recipients r
+         JOIN mission_orders o ON o.id = r.order_id
+         SET r.fulfilled_at = NOW()
+         WHERE r.user_id = ? AND o.mission_id = ? AND o.order_type = ? AND r.fulfilled_at IS NULL",
+        [$userId, $missionId, $mediaType]
+    );
+
     notifyPhotoReceived($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $user['name'], $userId, $mediaType);
 
     echo json_encode(['ok' => true, 'media' => [
