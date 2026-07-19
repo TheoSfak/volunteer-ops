@@ -127,6 +127,45 @@ if (isPost()) {
             setFlash('success', 'Στάλθηκε αίτημα στίγματος σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
         }
         redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'global_message') {
+        if (!$canManageWarRoom) {
+            setFlash('error', 'Δεν έχετε δικαίωμα να στείλετε καθολικό μήνυμα.');
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $broadcastText = trim((string) post('global_message_text'));
+        $broadcastText = mb_substr($broadcastText, 0, 500);
+
+        if ($broadcastText === '') {
+            setFlash('warning', 'Γράψτε ένα μήνυμα πριν την αποστολή.');
+        } else {
+            $recipients = dbFetchAll(
+                "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
+                 JOIN shifts s ON s.id = pr.shift_id
+                 WHERE s.mission_id = ? AND pr.status = ?",
+                [$missionId, PARTICIPATION_APPROVED]
+            );
+
+            $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+            $title = '📢 Καθολικό μήνυμα — ' . $mission['title'];
+            $sentCount = 0;
+            foreach ($recipients as $recipient) {
+                $recipientId = (int) $recipient['volunteer_id'];
+                if ($recipientId === (int) $user['id']) {
+                    continue;
+                }
+                sendNotification($recipientId, $title, $broadcastText, 'warning', '', [
+                    'url' => $warRoomUrl,
+                    'tag' => 'global-message-mission-' . $missionId,
+                    'vibrate' => [300, 100, 300, 100, 500],
+                    'bannerMission' => $missionId,
+                ]);
+                $sentCount++;
+            }
+            logAudit('global_message_war_room', 'missions', $missionId, null, ['message' => $broadcastText]);
+            setFlash('success', 'Το καθολικό μήνυμα εστάλη σε ' . $sentCount . ' εθελοντές.');
+        }
+        redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'create_team') {
         if (!$canManageWarRoom) {
             setFlash('error', 'Δεν έχετε δικαίωμα να δημιουργήσετε ομάδες.');
@@ -484,11 +523,12 @@ include __DIR__ . '/includes/header.php';
     .war-room-hero { background: linear-gradient(135deg, #172554, #b91c1c); color: #fff; border-radius: 14px; }
     .participant-row { border-left: 4px solid #e2e8f0; }
     .participant-row.needs-help { border-left-color: #dc2626; }
-    .war-room-banner { display: none; align-items: center; gap: 10px; background: linear-gradient(90deg, #b45309, #d97706); color: #fff; padding: 8px 12px; }
-    .war-room-banner-track { flex: 1; overflow: hidden; white-space: nowrap; position: relative; height: 1.4em; }
-    .war-room-banner-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; animation: warRoomBannerScroll 14s linear infinite; }
+    .war-room-banner { display: none; align-items: center; gap: 10px; background: #000; border-bottom: 2px solid #dc2626; padding: 8px 12px; }
+    .war-room-banner-track { flex: 1; overflow: hidden; white-space: nowrap; position: relative; height: 1.6em; }
+    .war-room-banner-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #ff3b30; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; animation: warRoomBannerScroll 14s linear infinite; }
     @keyframes warRoomBannerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
-    .war-room-banner-close { background: transparent; border: none; color: #fff; font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0 4px; flex-shrink: 0; }
+    .war-room-banner .bi-broadcast { color: #ff3b30; }
+    .war-room-banner-close { background: transparent; border: none; color: #ff3b30; font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0 4px; flex-shrink: 0; }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
@@ -615,6 +655,19 @@ include __DIR__ . '/includes/header.php';
         </div>
 
         <?php if ($canManageWarRoom): ?>
+        <div class="card shadow-sm mb-4 border-danger">
+            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-megaphone-fill me-1 text-danger"></i>Καθολικό Μήνυμα</h5></div>
+            <div class="card-body">
+                <p class="small text-muted">Εμφανίζεται ως κυλιόμενο μήνυμα (60 δευτ.) σε όσους έχουν ανοιχτό το War Room και στέλνεται ως ειδοποίηση σε όλους τους εγκεκριμένους εθελοντές της αποστολής.</p>
+                <form method="post">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="global_message">
+                    <textarea name="global_message_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="Γράψτε το μήνυμα προς όλους τους εθελοντές…" required></textarea>
+                    <button type="submit" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i>Αποστολή σε όλους (<?= count($participants) ?>)</button>
+                </form>
+            </div>
+        </div>
+
         <div class="card shadow-sm mb-4 border-warning">
             <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-bell-fill me-1"></i>Ζήτηση στίγματος</h5></div>
             <div class="card-body">
@@ -871,7 +924,7 @@ function showWarRoomBanner(text) {
     document.getElementById('warRoomBannerText').textContent = text;
     el.style.display = 'flex';
     if (bannerHideTimer) clearTimeout(bannerHideTimer);
-    bannerHideTimer = setTimeout(hideWarRoomBanner, 25000);
+    bannerHideTimer = setTimeout(hideWarRoomBanner, 60000);
 }
 function hideWarRoomBanner() {
     document.getElementById('warRoomBanner').style.display = 'none';
