@@ -4197,6 +4197,48 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 73,
+            'description' => 'Create mission_dispatch_points table (War Room send point/area to teams)',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_dispatch_points'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE mission_dispatch_points (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            team_id INT UNSIGNED NULL,
+                            type ENUM('point','polygon') NOT NULL,
+                            geo TEXT NOT NULL,
+                            label VARCHAR(255) NULL,
+                            created_by INT UNSIGNED NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE CASCADE,
+                            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+                            INDEX idx_dispatch_mission (mission_id, team_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_dispatch_point'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_dispatch_point',
+                            'Αποστολή Στίγματος/Περιοχής War Room',
+                            'Ο υπεύθυνος σας έστειλε ένα σημείο ή περιοχή στον χάρτη της αποστολής (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
