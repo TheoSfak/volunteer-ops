@@ -4239,6 +4239,46 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 74,
+            'description' => 'Create mission_dispatch_acks table (War Room team arrival reports)',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_dispatch_acks'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE mission_dispatch_acks (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            dispatch_id INT UNSIGNED NOT NULL,
+                            team_id INT UNSIGNED NULL,
+                            user_id INT UNSIGNED NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (dispatch_id) REFERENCES mission_dispatch_points(id) ON DELETE CASCADE,
+                            FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            UNIQUE KEY uniq_dispatch_user (dispatch_id, user_id),
+                            INDEX idx_dispatch_ack (dispatch_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_dispatch_ack'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_dispatch_ack',
+                            'Αναφορά Άφιξης Ομάδας War Room',
+                            'Μια ομάδα ανέφερε άφιξη σε σημείο/περιοχή που της στάλθηκε (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

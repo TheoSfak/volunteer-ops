@@ -593,3 +593,77 @@ function canSeeTep(?int $responsibleUserId = null): bool {
     if ($responsibleUserId && $responsibleUserId === getCurrentUserId()) return true;
     return false;
 }
+
+/**
+ * War Room: load dispatch points/areas visible to $userId, each augmented with
+ * its arrival acknowledgements (mission_dispatch_acks) — shared by war-room.php
+ * (live map, twice) and mission-dispatch.php (AJAX poll) so all three stay in sync.
+ */
+function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
+    $rows = dbFetchAll(
+        "SELECT d.id, d.team_id, d.type, d.geo, d.label, mt.codename, mt.team_number
+         FROM mission_dispatch_points d
+         LEFT JOIN mission_teams mt ON mt.id = d.team_id
+         WHERE d.mission_id = ?
+           AND (d.team_id IS NULL OR ? = 1 OR d.team_id IN (
+                SELECT team_id FROM mission_team_members WHERE user_id = ?
+           ))
+         ORDER BY d.created_at",
+        [$missionId, $canManageWarRoom ? 1 : 0, $userId]
+    );
+    if (empty($rows)) {
+        return [];
+    }
+
+    $dispatchIds = array_map('intval', array_column($rows, 'id'));
+    $placeholders = implode(',', array_fill(0, count($dispatchIds), '?'));
+    $ackRows = dbFetchAll(
+        "SELECT a.dispatch_id, a.team_id, a.user_id, a.created_at, u.name AS user_name, mt.codename, mt.team_number
+         FROM mission_dispatch_acks a
+         JOIN users u ON u.id = a.user_id
+         LEFT JOIN mission_teams mt ON mt.id = a.team_id
+         WHERE a.dispatch_id IN ($placeholders)
+         ORDER BY a.created_at",
+        $dispatchIds
+    );
+    $acksByDispatch = [];
+    foreach ($ackRows as $ack) {
+        $acksByDispatch[(int) $ack['dispatch_id']][] = [
+            'team_label' => $ack['team_id'] ? ($ack['codename'] . ' ' . $ack['team_number']) : null,
+            'user_name'  => $ack['user_name'],
+            'user_id'    => (int) $ack['user_id'],
+            'time'       => date('H:i', strtotime($ack['created_at'])),
+        ];
+    }
+
+    $myTeamId = (int) dbFetchValue(
+        "SELECT team_id FROM mission_team_members WHERE mission_id = ? AND user_id = ? LIMIT 1",
+        [$missionId, $userId]
+    ) ?: null;
+
+    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch) {
+        $dispatchId = (int) $row['id'];
+        $teamId = $row['team_id'] ? (int) $row['team_id'] : null;
+        $acks = $acksByDispatch[$dispatchId] ?? [];
+
+        $myAck = null;
+        foreach ($acks as $ack) {
+            if ($ack['user_id'] === $userId) {
+                $myAck = $ack['time'];
+                break;
+            }
+        }
+
+        return [
+            'id'         => $dispatchId,
+            'type'       => $row['type'],
+            'geo'        => json_decode($row['geo'], true),
+            'label'      => $row['label'],
+            'team_label' => $teamId ? ($row['codename'] . ' ' . $row['team_number']) : 'Όλες οι ομάδες',
+            'can_delete' => $canManageWarRoom,
+            'acks'       => array_map(fn($a) => ['team_label' => $a['team_label'] ?? '—', 'user_name' => $a['user_name'], 'time' => $a['time']], $acks),
+            'my_ack'     => $myAck,
+            'can_ack'    => $isApprovedParticipant && !$myAck && ($teamId === null || $teamId === $myTeamId),
+        ];
+    }, $rows);
+}
