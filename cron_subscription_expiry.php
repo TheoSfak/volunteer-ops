@@ -28,7 +28,7 @@ foreach ($intervals as $interval) {
              FROM volunteer_subscriptions vs
              JOIN users u ON u.id = vs.user_id
              WHERE {$latestOnly} AND u.is_active = 1
-               AND vs.expiry_date <= CURDATE() AND vs.{$column} = 0"
+               AND vs.expiry_date < CURDATE() AND vs.{$column} = 0"
         );
     } else {
         $subscriptions = dbFetchAll(

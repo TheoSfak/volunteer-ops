@@ -116,6 +116,30 @@ function storeSubscriptionReceipt(int $userId, string $volunteerName): ?array {
     return [$storedName, $storedName];
 }
 
+/**
+ * Calculate an inclusive subscription period.
+ * A new period starting on 15/07/2024 ends on 14/07/2025. A continuous
+ * renewal instead extends the previous inclusive expiry by whole years.
+ */
+function calculateSubscriptionExpiry(string $paymentDate, int $coverageYears, ?array $previousSubscription, bool $isReactivation): string {
+    if ($isReactivation || !$previousSubscription) {
+        return (new DateTime($paymentDate))
+            ->modify('+' . $coverageYears . ' years')
+            ->modify('-1 day')
+            ->format('Y-m-d');
+    }
+
+    return (new DateTime($previousSubscription['expiry_date']))
+        ->modify('+' . $coverageYears . ' years')
+        ->format('Y-m-d');
+}
+
+function isValidSubscriptionDate(string $value): bool {
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) return false;
+    $date = DateTime::createFromFormat('!Y-m-d', $value);
+    return $date !== false && $date->format('Y-m-d') === $value;
+}
+
 if (isPost()) {
     verifyCsrf();
     if (post('action') === 'mark_iris_seen') {
@@ -140,13 +164,33 @@ if (isPost()) {
         $irisRequest = $irisRequestId ? dbFetchOne("SELECT * FROM subscription_iris_requests WHERE id = ? AND user_id = ? AND status IN ('REPORTED', 'SEEN')", [$irisRequestId, $userId]) : null;
         $volunteer = dbFetchOne("SELECT id, name FROM users WHERE id = ? AND is_active = 1", [$userId]);
 
-        if (!$volunteer || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $paymentDate) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestedExpiryDate)) {
+        if (!$volunteer || !isValidSubscriptionDate($paymentDate) || !isValidSubscriptionDate($requestedExpiryDate)) {
             setFlash('error', 'Επιλέξτε έγκυρο εθελοντή και ημερομηνία πληρωμής.');
         } else {
-            $latest = dbFetchOne("SELECT expiry_date FROM volunteer_subscriptions WHERE user_id = ? ORDER BY expiry_date DESC, id DESC LIMIT 1", [$userId]);
-            $activeSubscription = dbFetchOne("SELECT id, expiry_date FROM volunteer_subscriptions WHERE user_id = ? AND expiry_date >= CURDATE() ORDER BY expiry_date DESC, id DESC LIMIT 1", [$userId]);
-            if ($activeSubscription && !$irisRequest) {
-                setFlash('warning', 'Υπάρχει ήδη ενεργή συνδρομή έως ' . formatDate($activeSubscription['expiry_date']) . '. Επιλέξτε επεξεργασία ή επιβεβαιώστε ότι θέλετε νέα καταχώρηση.');
+            $previousSubscription = dbFetchOne("SELECT id, payment_date, expiry_date FROM volunteer_subscriptions WHERE user_id = ? AND payment_date < ? ORDER BY expiry_date DESC, id DESC LIMIT 1", [$userId, $paymentDate]);
+            $nextSubscription = dbFetchOne("SELECT id, payment_date, expiry_date FROM volunteer_subscriptions WHERE user_id = ? AND payment_date > ? ORDER BY payment_date ASC, id ASC LIMIT 1", [$userId, $paymentDate]);
+            $activeSubscription = dbFetchOne("SELECT id, payment_date, expiry_date FROM volunteer_subscriptions WHERE user_id = ? AND expiry_date >= CURDATE() ORDER BY expiry_date DESC, id DESC LIMIT 1", [$userId]);
+            $isHistorical = (bool)$nextSubscription;
+
+            if ($requestedExpiryDate < $paymentDate) {
+                setFlash('error', 'Η ημερομηνία λήξης δεν μπορεί να είναι πριν από την ημερομηνία πληρωμής/έναρξης.');
+                redirect('subscriptions.php');
+            }
+            $sameStartSubscription = dbFetchOne("SELECT id, expiry_date FROM volunteer_subscriptions WHERE user_id = ? AND payment_date = ? LIMIT 1", [$userId, $paymentDate]);
+            if ($sameStartSubscription) {
+                setFlash('warning', 'Υπάρχει ήδη συνδρομή με ημερομηνία πληρωμής/έναρξης ' . formatDate($paymentDate) . ' και λήξη ' . formatDate($sameStartSubscription['expiry_date']) . '.');
+                redirect('subscriptions.php?show_history=1&history_user_id=' . $userId . '#subscriptionPaymentHistory');
+            }
+            if ($isHistorical && $nextSubscription && $requestedExpiryDate >= $nextSubscription['payment_date']) {
+                setFlash('error', 'Η παλιά συνδρομή επικαλύπτεται με την επόμενη περίοδο που ξεκινά στις ' . formatDate($nextSubscription['payment_date']) . '. Η λήξη πρέπει να είναι το αργότερο την προηγούμενη ημέρα.');
+                redirect('subscriptions.php');
+            }
+            if ($isHistorical && $previousSubscription && $paymentDate <= $previousSubscription['expiry_date']) {
+                setFlash('error', 'Η παλιά συνδρομή επικαλύπτεται με προηγούμενη περίοδο που λήγει στις ' . formatDate($previousSubscription['expiry_date']) . '.');
+                redirect('subscriptions.php');
+            }
+            if ($activeSubscription && !$irisRequest && !$isHistorical) {
+                setFlash('warning', 'Υπάρχει ήδη ενεργή συνδρομή έως ' . formatDate($activeSubscription['expiry_date']) . '. Μπορείτε να την επεξεργαστείτε ή να καταχωρήσετε μόνο παλαιότερη, μη επικαλυπτόμενη περίοδο.');
                 redirect('subscriptions.php?edit=' . $activeSubscription['id']);
             }
             $reactivationLimit = max(0, (int)getSetting('subscription_reactivation_days', 90));
@@ -155,10 +199,9 @@ if (isPost()) {
                 $amount = number_format((float)$irisRequest['total_amount'], 2, '.', '');
                 $method = 'IRIS';
             }
-            $daysSinceExpiry = $latest ? (int)floor((strtotime($paymentDate) - strtotime($latest['expiry_date'])) / 86400) : 0;
-            $isReactivation = post('force_reactivation') === '1' || ($latest && $daysSinceExpiry > $reactivationLimit);
-            $baseDate = $isReactivation || !$latest ? $paymentDate : $latest['expiry_date'];
-            $calculatedExpiryDate = (new DateTime($baseDate))->modify('+' . $coverageYears . ' years')->format('Y-m-d');
+            $daysSinceExpiry = $previousSubscription ? (int)floor((strtotime($paymentDate) - strtotime($previousSubscription['expiry_date'])) / 86400) : 0;
+            $isReactivation = post('force_reactivation') === '1' || ($previousSubscription && $daysSinceExpiry > $reactivationLimit);
+            $calculatedExpiryDate = calculateSubscriptionExpiry($paymentDate, $coverageYears, $previousSubscription ?: null, $isReactivation);
             $expiryDate = $requestedExpiryDate;
             if ($expiryDate !== $calculatedExpiryDate && post('expiry_override_confirmed') !== '1') {
                 setFlash('warning', 'Η ημερομηνία λήξης διαφέρει από την προτεινόμενη (' . formatDate($calculatedExpiryDate) . '). Επιβεβαιώστε την αλλαγή πριν την αποθήκευση.');
@@ -174,15 +217,24 @@ if (isPost()) {
                 redirect('subscriptions.php');
             }
 
-            dbInsert("INSERT INTO volunteer_subscriptions
+            $subscriptionId = dbInsert("INSERT INTO volunteer_subscriptions
                 (user_id, payment_date, expiry_date, renewal_kind, coverage_years, amount, payment_method, receipt_number, receipt_original_name, receipt_stored_name, notes, created_by)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
                 $userId, $paymentDate, $expiryDate, $isReactivation ? 'REACTIVATION' : 'RENEWAL', $coverageYears, $amount === '' ? null : $amount,
                 $method ?: null, $receiptNumber ?: null, $receiptOriginal, $receiptStored, $notes ?: null, getCurrentUserId()
             ]);
             if ($irisRequest) subscriptionIrisCompleteLatestRequest($userId);
-            logAudit('record_subscription_payment', 'volunteer_subscriptions', $userId, null, ['expiry_date' => $expiryDate]);
-            setFlash('success', ($isReactivation ? 'Η συνδρομή επανενεργοποιήθηκε. ' : 'Η πληρωμή καταχωρήθηκε. ') . 'Η συνδρομή λήγει στις ' . formatDate($expiryDate) . '.');
+            logAudit('record_subscription_payment', 'volunteer_subscriptions', $subscriptionId, null, [
+                'user_id' => $userId,
+                'payment_date' => $paymentDate,
+                'expiry_date' => $expiryDate,
+                'renewal_kind' => $isReactivation ? 'REACTIVATION' : 'RENEWAL',
+                'historical' => $isHistorical,
+            ]);
+            setFlash('success', ($isHistorical ? 'Η παλιά πληρωμή καταχωρήθηκε στο ιστορικό. ' : ($isReactivation ? 'Η συνδρομή επανενεργοποιήθηκε. ' : 'Η πληρωμή καταχωρήθηκε. ')) . 'Η περίοδος λήγει στις ' . formatDate($expiryDate) . '.');
+            if ($isHistorical) {
+                redirect('subscriptions.php?show_history=1&history_user_id=' . $userId . '#subscriptionPaymentHistory');
+            }
         }
         redirect('subscriptions.php');
     }
@@ -190,11 +242,28 @@ if (isPost()) {
         $subscriptionId = (int)post('subscription_id');
         $paymentDate = post('payment_date');
         $expiryDate = post('expiry_date');
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $paymentDate) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $expiryDate)) {
+        if (!isValidSubscriptionDate($paymentDate) || !isValidSubscriptionDate($expiryDate)) {
             setFlash('error', 'Οι ημερομηνίες δεν είναι έγκυρες.');
+        } elseif ($expiryDate < $paymentDate) {
+            setFlash('error', 'Η ημερομηνία λήξης δεν μπορεί να είναι πριν από την ημερομηνία πληρωμής/έναρξης.');
         } else {
             $old = dbFetchOne("SELECT vs.*, u.name AS volunteer_name FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id WHERE vs.id = ?", [$subscriptionId]);
             if ($old) {
+                $previousSubscription = dbFetchOne("SELECT id, payment_date, expiry_date FROM volunteer_subscriptions WHERE user_id = ? AND id <> ? AND payment_date < ? ORDER BY expiry_date DESC, id DESC LIMIT 1", [$old['user_id'], $subscriptionId, $paymentDate]);
+                $nextSubscription = dbFetchOne("SELECT id, payment_date, expiry_date FROM volunteer_subscriptions WHERE user_id = ? AND id <> ? AND payment_date > ? ORDER BY payment_date ASC, id ASC LIMIT 1", [$old['user_id'], $subscriptionId, $paymentDate]);
+                $sameStartSubscription = dbFetchOne("SELECT id, expiry_date FROM volunteer_subscriptions WHERE user_id = ? AND id <> ? AND payment_date = ? LIMIT 1", [$old['user_id'], $subscriptionId, $paymentDate]);
+                if ($sameStartSubscription) {
+                    setFlash('warning', 'Υπάρχει ήδη άλλη συνδρομή με ημερομηνία πληρωμής/έναρξης ' . formatDate($paymentDate) . ' και λήξη ' . formatDate($sameStartSubscription['expiry_date']) . '.');
+                    redirect('subscriptions.php?show_history=1&history_user_id=' . (int)$old['user_id'] . '#subscriptionPaymentHistory');
+                }
+                if ($nextSubscription && $expiryDate >= $nextSubscription['payment_date']) {
+                    setFlash('error', 'Η περίοδος επικαλύπτεται με την επόμενη συνδρομή που ξεκινά στις ' . formatDate($nextSubscription['payment_date']) . '.');
+                    redirect('subscriptions.php?edit=' . $subscriptionId);
+                }
+                if ($nextSubscription && $previousSubscription && $paymentDate <= $previousSubscription['expiry_date']) {
+                    setFlash('error', 'Η περίοδος επικαλύπτεται με προηγούμενη συνδρομή που λήγει στις ' . formatDate($previousSubscription['expiry_date']) . '.');
+                    redirect('subscriptions.php?edit=' . $subscriptionId);
+                }
                 $amount = str_replace(',', '.', trim(post('amount')));
                 $receiptNumber = trim(post('receipt_number'));
                 $reset = $expiryDate !== $old['expiry_date'];
@@ -208,7 +277,21 @@ if (isPost()) {
                     redirect('subscriptions.php?edit=' . $subscriptionId);
                 }
                 dbExecute("UPDATE volunteer_subscriptions SET payment_date = ?, expiry_date = ?, amount = ?, payment_method = ?, receipt_number = ?, receipt_original_name = ?, receipt_stored_name = ?, notes = ?, renewal_kind = ?, reminder_sent_3m = ?, reminder_sent_1m = ?, reminder_sent_1w = ?, reminder_sent_expired = ? WHERE id = ?", [$paymentDate, $expiryDate, $amount === '' ? null : $amount, trim(post('payment_method')) ?: null, $receiptNumber ?: null, $receiptOriginal, $receiptStored, trim(post('notes')) ?: null, post('renewal_kind') === 'REACTIVATION' ? 'REACTIVATION' : 'RENEWAL', $reset ? 0 : $old['reminder_sent_3m'], $reset ? 0 : $old['reminder_sent_1m'], $reset ? 0 : $old['reminder_sent_1w'], $reset ? 0 : $old['reminder_sent_expired'], $subscriptionId]);
-                logAudit('edit_subscription', 'volunteer_subscriptions', $subscriptionId);
+                logAudit('edit_subscription', 'volunteer_subscriptions', $subscriptionId, [
+                    'payment_date' => $old['payment_date'],
+                    'expiry_date' => $old['expiry_date'],
+                    'amount' => $old['amount'],
+                    'payment_method' => $old['payment_method'],
+                    'receipt_number' => $old['receipt_number'],
+                    'renewal_kind' => $old['renewal_kind'],
+                ], [
+                    'payment_date' => $paymentDate,
+                    'expiry_date' => $expiryDate,
+                    'amount' => $amount === '' ? null : $amount,
+                    'payment_method' => trim(post('payment_method')) ?: null,
+                    'receipt_number' => $receiptNumber ?: null,
+                    'renewal_kind' => post('renewal_kind') === 'REACTIVATION' ? 'REACTIVATION' : 'RENEWAL',
+                ]);
                 setFlash('success', 'Η συνδρομή ενημερώθηκε.');
             }
         }
@@ -222,9 +305,14 @@ if ($preselectedPaymentUserId && !(int)dbFetchValue("SELECT COUNT(*) FROM users 
     $preselectedPaymentUserId = 0;
 }
 $openPaymentModal = get('open_payment') === '1' && $preselectedPaymentUserId > 0;
-$latestSubscriptions = dbFetchAll("SELECT vs.user_id, vs.expiry_date FROM volunteer_subscriptions vs WHERE vs.id = (SELECT vs2.id FROM volunteer_subscriptions vs2 WHERE vs2.user_id = vs.user_id ORDER BY vs2.expiry_date DESC, vs2.id DESC LIMIT 1)");
-$latestSubscriptionExpiryMap = [];
-foreach ($latestSubscriptions as $subscription) $latestSubscriptionExpiryMap[$subscription['user_id']] = $subscription['expiry_date'];
+$subscriptionPeriods = dbFetchAll("SELECT user_id, payment_date, expiry_date FROM volunteer_subscriptions ORDER BY payment_date ASC, id ASC");
+$subscriptionPeriodsByVolunteer = [];
+foreach ($subscriptionPeriods as $subscription) {
+    $subscriptionPeriodsByVolunteer[$subscription['user_id']][] = [
+        'payment_date' => $subscription['payment_date'],
+        'expiry_date' => $subscription['expiry_date'],
+    ];
+}
 $subscriptionReactivationDays = max(0, (int)getSetting('subscription_reactivation_days', 90));
 $subscriptionDateFormat = getSetting('date_format', 'd/m/Y');
 if (!in_array($subscriptionDateFormat, ['d/m/Y', 'Y-m-d', 'd.m.Y'], true)) $subscriptionDateFormat = 'd/m/Y';
@@ -322,7 +410,13 @@ if ($isExcelExport) {
 
 $showPaymentHistory = get('show_history') === '1';
 $historyPerPage = 50;
-$historyTotal = (int)dbFetchValue("SELECT COUNT(*) FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id");
+$historyUserId = max(0, (int)get('history_user_id', 0));
+if ($historyUserId && !(int)dbFetchValue("SELECT COUNT(*) FROM users WHERE id = ?", [$historyUserId])) {
+    $historyUserId = 0;
+}
+$historyWhereSql = $historyUserId ? "WHERE vs.user_id = {$historyUserId}" : '';
+$historyTotal = (int)dbFetchValue("SELECT COUNT(*) FROM volunteer_subscriptions vs {$historyWhereSql}");
+$historyVolunteers = dbFetchAll("SELECT DISTINCT u.id, u.name FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id ORDER BY u.name");
 $historyTotalPages = max(1, (int)ceil($historyTotal / $historyPerPage));
 $historyCurrentPage = max(1, (int)get('history_page', 1));
 if ($historyCurrentPage > $historyTotalPages) $historyCurrentPage = $historyTotalPages;
@@ -332,6 +426,7 @@ $historyRows = $showPaymentHistory
         FROM volunteer_subscriptions vs
         JOIN users u ON u.id = vs.user_id
         LEFT JOIN users creator ON creator.id = vs.created_by
+        {$historyWhereSql}
         ORDER BY vs.payment_date DESC, vs.id DESC
         LIMIT {$historyPerPage} OFFSET {$historyOffset}")
     : [];
@@ -511,7 +606,21 @@ include __DIR__ . '/includes/header.php';
                 <h5 class="mb-1"><i class="bi bi-clock-history me-2"></i>Ιστορικό πληρωμών συνδρομών</h5>
                 <div class="small text-muted">Εμφάνιση <?= $historyTotal ? $historyOffset + 1 : 0 ?>–<?= min($historyOffset + $historyPerPage, $historyTotal) ?> από <?= $historyTotal ?> πληρωμές</div>
             </div>
-            <input type="search" class="form-control form-control-sm" id="subscriptionHistorySearch" style="max-width:320px" placeholder="Αναζήτηση στην τρέχουσα σελίδα…" autocomplete="off">
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                <form method="get" action="subscriptions.php#subscriptionPaymentHistory" class="d-flex gap-2 align-items-center">
+                    <input type="hidden" name="filter" value="<?= h($filter) ?>">
+                    <input type="hidden" name="sort" value="<?= h($sort) ?>">
+                    <input type="hidden" name="dir" value="<?= h($sortDirection) ?>">
+                    <input type="hidden" name="per_page" value="<?= $perPage ?>">
+                    <input type="hidden" name="show_history" value="1">
+                    <label class="visually-hidden" for="subscriptionHistoryVolunteer">Εθελοντής ιστορικού</label>
+                    <select class="form-select form-select-sm" id="subscriptionHistoryVolunteer" name="history_user_id" onchange="this.form.submit()">
+                        <option value="0">Όλοι οι εθελοντές</option>
+                        <?php foreach ($historyVolunteers as $historyVolunteer): ?><option value="<?= (int)$historyVolunteer['id'] ?>" <?= $historyUserId === (int)$historyVolunteer['id'] ? 'selected' : '' ?>><?= h($historyVolunteer['name']) ?></option><?php endforeach; ?>
+                    </select>
+                </form>
+                <input type="search" class="form-control form-control-sm" id="subscriptionHistorySearch" style="max-width:320px" placeholder="Αναζήτηση στην τρέχουσα σελίδα…" autocomplete="off">
+            </div>
         </div>
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0 subscription-history-table">
@@ -522,7 +631,17 @@ include __DIR__ . '/includes/header.php';
                     $historyReceiptPath = __DIR__ . '/uploads/subscription-receipts/' . basename((string)$historyRow['receipt_stored_name']);
                     $historyHasReceipt = !empty($historyRow['receipt_stored_name']) && is_file($historyReceiptPath);
                     $historyReceiptIsImage = $historyHasReceipt && in_array(strtolower(pathinfo($historyRow['receipt_stored_name'], PATHINFO_EXTENSION)), ['jpg', 'jpeg', 'png'], true);
-                    $historySearchText = $historyRow['volunteer_name'] . ' ' . $historyRow['email'] . ' ' . ($historyRow['receipt_number'] ?? '');
+                    $historySearchText = implode(' ', [
+                        $historyRow['volunteer_name'],
+                        $historyRow['email'],
+                        $historyRow['payment_date'],
+                        $historyRow['expiry_date'],
+                        $historyRow['amount'] ?? '',
+                        $historyRow['payment_method'] ?? '',
+                        $historyRow['receipt_number'] ?? '',
+                        $historyRow['notes'] ?? '',
+                        $historyRow['created_by_name'] ?? '',
+                    ]);
                     ?>
                     <tr class="subscription-history-row" data-history-search="<?= h($historySearchText) ?>">
                         <td data-label="Εθελοντής"><div><a href="volunteer-view.php?id=<?= (int)$historyRow['user_id'] ?>"><?= h($historyRow['volunteer_name']) ?></a><div class="small text-muted"><?= h($historyRow['email']) ?></div></div></td>
@@ -544,7 +663,7 @@ include __DIR__ . '/includes/header.php';
         <div class="card-footer d-flex justify-content-center">
             <nav aria-label="Σελιδοποίηση ιστορικού πληρωμών">
                 <ul class="pagination pagination-sm mb-0">
-                    <?php $historyBaseParams = ['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $subscriptionPage, 'show_history' => 1]; ?>
+                    <?php $historyBaseParams = ['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $subscriptionPage, 'show_history' => 1, 'history_user_id' => $historyUserId ?: null]; ?>
                     <li class="page-item <?= $historyCurrentPage <= 1 ? 'disabled' : '' ?>">
                         <?php if ($historyCurrentPage <= 1): ?><span class="page-link" aria-hidden="true">&laquo;</span><?php else: ?><a class="page-link" href="subscriptions.php?<?= h(http_build_query($historyBaseParams + ['history_page' => $historyCurrentPage - 1])) ?>#subscriptionPaymentHistory" aria-label="Προηγούμενη σελίδα ιστορικού">&laquo;</a><?php endif; ?>
                     </li>
@@ -633,7 +752,7 @@ include __DIR__ . '/includes/header.php';
         });
     }
 
-    const latestExpiryByVolunteer = <?= json_encode($latestSubscriptionExpiryMap, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+    const periodsByVolunteer = <?= json_encode($subscriptionPeriodsByVolunteer, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
     const reactivationDays = <?= (int)$subscriptionReactivationDays ?>;
     const volunteer = document.getElementById('subscriptionVolunteer');
     const payment = document.getElementById('subscriptionPaymentDate');
@@ -683,6 +802,12 @@ include __DIR__ . '/includes/header.php';
         date.setFullYear(date.getFullYear() + Number(count));
         return isoDate(date);
     };
+    const addYearsMinusDay = (value, count) => {
+        const date = toDate(addYears(value, count));
+        if (!date) return '';
+        date.setDate(date.getDate() - 1);
+        return isoDate(date);
+    };
     const formatDate = (value) => {
         const date = toDate(value);
         return date ? date.toLocaleDateString('el-GR') : value;
@@ -690,18 +815,28 @@ include __DIR__ . '/includes/header.php';
     const refreshExpiry = () => {
         const paidOn = payment.value;
         if (!toDate(paidOn)) return;
-        const previousExpiry = latestExpiryByVolunteer[volunteer.value] || '';
+        const periods = periodsByVolunteer[volunteer.value] || [];
+        const previousPeriod = periods
+            .filter(period => period.payment_date < paidOn)
+            .sort((left, right) => right.expiry_date.localeCompare(left.expiry_date))[0] || null;
+        const nextPeriod = periods
+            .filter(period => period.payment_date > paidOn)
+            .sort((left, right) => left.payment_date.localeCompare(right.payment_date))[0] || null;
+        const previousExpiry = previousPeriod?.expiry_date || '';
         const expiredDays = previousExpiry ? Math.floor((toDate(paidOn) - toDate(previousExpiry)) / 86400000) : 0;
         const isReactivation = reactivation.checked || (previousExpiry && expiredDays > reactivationDays);
-        const baseDate = isReactivation || !previousExpiry ? paidOn : previousExpiry;
-        const expectedExpiry = addYears(baseDate, years.value);
+        const expectedExpiry = isReactivation || !previousExpiry
+            ? addYearsMinusDay(paidOn, years.value)
+            : addYears(previousExpiry, years.value);
         setDateValue(expiry, expectedExpiry);
         expiry.dataset.expectedExpiry = expectedExpiry;
         confirmed.value = '0';
         warning.classList.add('d-none');
-        hint.textContent = isReactivation || !previousExpiry
-            ? `Υπολογίστηκε από την πληρωμή: ${formatDate(baseDate)} + ${years.value} έτη.`
-            : `Υπολογίστηκε από την προηγούμενη λήξη: ${formatDate(baseDate)} + ${years.value} έτη.`;
+        hint.textContent = nextPeriod
+            ? `Παλιά περίοδος πριν από τη συνδρομή που ξεκινά ${formatDate(nextPeriod.payment_date)}. Η λήξη υπολογίστηκε συμπεριληπτικά.`
+            : (isReactivation || !previousExpiry
+                ? `Νέα περίοδος από ${formatDate(paidOn)} για ${years.value} έτη (συμπεριληπτικές ημερομηνίες).`
+                : `Συνεχής ανανέωση από την προηγούμενη λήξη ${formatDate(previousExpiry)} για ${years.value} έτη.`);
     };
     const checkManualExpiry = () => {
         const changed = expiry.value && expiry.dataset.expectedExpiry && expiry.value !== expiry.dataset.expectedExpiry;
