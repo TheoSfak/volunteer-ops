@@ -4335,6 +4335,46 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 76,
+            'description' => 'Add media_type to mission_photos (War Room video requests/uploads)',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_photos' AND COLUMN_NAME = 'media_type'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE mission_photos ADD COLUMN media_type ENUM('photo','video') NOT NULL DEFAULT 'photo' AFTER user_id");
+                }
+
+                $ns1 = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_video_request'");
+                if (!$ns1) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_video_request',
+                            'Ζήτηση Βίντεο War Room',
+                            'Ο υπεύθυνος σας ζήτησε να στείλετε βίντεο από το πεδίο (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+
+                $ns2 = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_video_received'");
+                if (!$ns2) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_video_received',
+                            'Λήψη Βίντεο War Room',
+                            'Ένας εθελοντής έστειλε βίντεο από το πεδίο (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

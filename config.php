@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.75.0');
-define('DB_SCHEMA_VERSION', 75);
+define('APP_VERSION', '3.76.0');
+define('DB_SCHEMA_VERSION', 76);
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
@@ -60,6 +60,7 @@ if (DEBUG_MODE) {
 
 // Upload settings
 define('UPLOAD_MAX_SIZE', 10 * 1024 * 1024); // 10MB
+define('VIDEO_MAX_SIZE', 25 * 1024 * 1024); // 25MB
 define('UPLOAD_PATH', __DIR__ . '/uploads/');
 define('ALLOWED_EXTENSIONS', ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png']);
 
