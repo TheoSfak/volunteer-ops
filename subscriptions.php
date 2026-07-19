@@ -297,6 +297,35 @@ if (isPost()) {
         }
         redirect('subscriptions.php');
     }
+    if (post('action') === 'delete_subscription') {
+        $subscriptionId = (int)post('subscription_id');
+        $old = dbFetchOne("SELECT vs.*, u.name AS volunteer_name FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id WHERE vs.id = ?", [$subscriptionId]);
+        if (!$old) {
+            setFlash('error', 'Η συνδρομή δεν βρέθηκε.');
+            redirect('subscriptions.php');
+        }
+        if (post('delete_confirmed') !== '1') {
+            setFlash('error', 'Η διαγραφή απαιτεί ρητή επιβεβαίωση.');
+            redirect('subscriptions.php?show_history=1&history_user_id=' . (int)$old['user_id'] . '#subscriptionPaymentHistory');
+        }
+        dbExecute("DELETE FROM volunteer_subscriptions WHERE id = ?", [$subscriptionId]);
+        if (!empty($old['receipt_stored_name'])) {
+            $receiptPath = __DIR__ . '/uploads/subscription-receipts/' . basename($old['receipt_stored_name']);
+            if (is_file($receiptPath)) @unlink($receiptPath);
+        }
+        logAudit('delete_subscription', 'volunteer_subscriptions', $subscriptionId, [
+            'user_id' => $old['user_id'],
+            'volunteer_name' => $old['volunteer_name'],
+            'payment_date' => $old['payment_date'],
+            'expiry_date' => $old['expiry_date'],
+            'amount' => $old['amount'],
+            'payment_method' => $old['payment_method'],
+            'receipt_number' => $old['receipt_number'],
+            'renewal_kind' => $old['renewal_kind'],
+        ], null);
+        setFlash('success', 'Η συνδρομή του/της ' . $old['volunteer_name'] . ' (' . formatDate($old['payment_date']) . ' – ' . formatDate($old['expiry_date']) . ') διαγράφηκε οριστικά.');
+        redirect('subscriptions.php?show_history=1&history_user_id=' . (int)$old['user_id'] . '#subscriptionPaymentHistory');
+    }
 }
 
 $volunteers = dbFetchAll("SELECT id, name, email FROM users WHERE is_active = 1 ORDER BY name");
@@ -568,7 +597,7 @@ include __DIR__ . '/includes/header.php';
     <td data-label="Απόδειξη" style="max-width:150px"><?php if ($hasReceiptFile): ?><button type="button" class="btn btn-sm btn-outline-secondary receipt-preview-btn text-truncate mw-100" data-bs-toggle="modal" data-bs-target="#receiptPreviewModal" data-preview-url="subscription-receipt.php?id=<?= $row['id'] ?>" data-preview-name="<?= h($row['receipt_original_name']) ?>" data-preview-type="<?= $isReceiptImage ? 'image' : 'pdf' ?>"><i class="bi <?= $isReceiptImage ? 'bi-eye' : 'bi-file-earmark-pdf' ?>"></i> Προβολή</button><?php elseif (!empty($row['receipt_stored_name'])): ?><span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Μη διαθέσιμη</span><?php else: ?>—<?php endif; ?></td>
     <td data-label="Πληρωμή με IRIS"><?php if ($row['iris_request_id']): ?><div><div class="small <?= $row['iris_status'] === 'SEEN' ? 'text-decoration-line-through text-muted' : '' ?>"><strong><?= formatDateTime($row['iris_payment_reported_at']) ?></strong><br><?= (int)$row['iris_coverage_years'] ?> έτη · <?= number_format((float)$row['iris_total_amount'], 2, ',', '.') ?> €</div><?php if ($row['iris_status'] === 'REPORTED'): ?><div class="d-flex gap-1 mt-1"><form method="post"><?= csrfField() ?><input type="hidden" name="action" value="mark_iris_seen"><input type="hidden" name="iris_request_id" value="<?= (int)$row['iris_request_id'] ?>"><button class="btn btn-sm btn-outline-secondary">Το είδα</button></form><a class="btn btn-sm btn-outline-success" href="subscriptions.php?filter=<?= h($filter) ?>&iris_request=<?= (int)$row['iris_request_id'] ?>">Καταχώρηση</a></div><?php endif; ?></div><?php else: ?>—<?php endif; ?></td>
     <td data-label="Κατάσταση"><span class="badge bg-<?= $badge ?>"><?= $label ?></span></td>
-    <td data-label="Ενέργειες" class="mobile-card-actions"><a class="btn btn-sm btn-outline-primary" href="subscriptions.php?filter=<?= h($filter) ?>&edit=<?= $row['id'] ?>" aria-label="Επεξεργασία συνδρομής"><i class="bi bi-pencil"></i></a></td>
+    <td data-label="Ενέργειες" class="mobile-card-actions"><div class="d-flex gap-1 justify-content-end"><a class="btn btn-sm btn-outline-primary" href="subscriptions.php?filter=<?= h($filter) ?>&edit=<?= $row['id'] ?>" aria-label="Επεξεργασία συνδρομής"><i class="bi bi-pencil"></i></a><button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteSubscriptionModal" data-subscription-id="<?= $row['id'] ?>" data-volunteer="<?= h($row['volunteer_name']) ?>" data-period="<?= formatDate($row['payment_date']) ?> – <?= formatDate($row['expiry_date']) ?>" data-amount="<?= $row['amount'] !== null ? number_format((float)$row['amount'], 2, ',', '.') . ' €' : '—' ?>" aria-label="Διαγραφή συνδρομής"><i class="bi bi-trash"></i></button></div></td>
 </tr>
 <?php endforeach; ?>
 <?php if (!$rows): ?><tr><td colspan="11" class="text-center text-muted py-4 mobile-card-empty">Δεν υπάρχουν καταχωρημένες συνδρομές.</td></tr><?php endif; ?>
@@ -624,7 +653,7 @@ include __DIR__ . '/includes/header.php';
         </div>
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0 subscription-history-table">
-                <thead><tr><th>Εθελοντής</th><th>Πληρωμή</th><th>Λήξη</th><th>Έτη</th><th>Ποσό</th><th>Τρόπος</th><th>Αρ. απόδειξης</th><th>Απόδειξη</th><th>Καταχώρηση από</th></tr></thead>
+                <thead><tr><th>Εθελοντής</th><th>Πληρωμή</th><th>Λήξη</th><th>Έτη</th><th>Ποσό</th><th>Τρόπος</th><th>Αρ. απόδειξης</th><th>Απόδειξη</th><th>Καταχώρηση από</th><th>Ενέργειες</th></tr></thead>
                 <tbody>
                 <?php foreach ($historyRows as $historyRow): ?>
                     <?php
@@ -653,9 +682,10 @@ include __DIR__ . '/includes/header.php';
                         <td data-label="Αρ. απόδειξης"><?= h($historyRow['receipt_number'] ?: '—') ?></td>
                         <td data-label="Απόδειξη"><?php if ($historyHasReceipt): ?><button type="button" class="btn btn-sm btn-outline-secondary receipt-preview-btn" data-bs-toggle="modal" data-bs-target="#receiptPreviewModal" data-preview-url="subscription-receipt.php?id=<?= (int)$historyRow['id'] ?>" data-preview-name="<?= h($historyRow['receipt_original_name'] ?: 'Απόδειξη ' . formatDate($historyRow['payment_date'])) ?>" data-preview-type="<?= $historyReceiptIsImage ? 'image' : 'pdf' ?>"><i class="bi <?= $historyReceiptIsImage ? 'bi-image' : 'bi-file-earmark-pdf' ?>"></i> Προβολή</button><?php elseif (!empty($historyRow['receipt_stored_name'])): ?><span class="text-danger small"><i class="bi bi-exclamation-triangle"></i> Μη διαθέσιμη</span><?php else: ?>—<?php endif; ?></td>
                         <td data-label="Καταχώρηση από"><?= h($historyRow['created_by_name'] ?: '—') ?></td>
+                        <td data-label="Ενέργειες" class="mobile-card-actions"><div class="d-flex gap-1"><a class="btn btn-sm btn-outline-primary" href="subscriptions.php?edit=<?= (int)$historyRow['id'] ?>" aria-label="Επεξεργασία συνδρομής"><i class="bi bi-pencil"></i></a><button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteSubscriptionModal" data-subscription-id="<?= (int)$historyRow['id'] ?>" data-volunteer="<?= h($historyRow['volunteer_name']) ?>" data-period="<?= formatDate($historyRow['payment_date']) ?> – <?= formatDate($historyRow['expiry_date']) ?>" data-amount="<?= $historyRow['amount'] !== null ? number_format((float)$historyRow['amount'], 2, ',', '.') . ' €' : '—' ?>" aria-label="Διαγραφή συνδρομής"><i class="bi bi-trash"></i></button></div></td>
                     </tr>
                 <?php endforeach; ?>
-                <?php if (!$historyRows): ?><tr><td colspan="9" class="text-center text-muted py-4 mobile-card-empty">Δεν υπάρχει ιστορικό πληρωμών.</td></tr><?php endif; ?>
+                <?php if (!$historyRows): ?><tr><td colspan="10" class="text-center text-muted py-4 mobile-card-empty">Δεν υπάρχει ιστορικό πληρωμών.</td></tr><?php endif; ?>
                 </tbody>
             </table>
         </div>
@@ -702,6 +732,39 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<div class="modal fade" id="deleteSubscriptionModal" tabindex="-1" aria-labelledby="deleteSubscriptionModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-danger">
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="delete_subscription">
+                <input type="hidden" name="subscription_id" id="deleteSubscriptionId" value="">
+                <div class="modal-header text-bg-danger">
+                    <h5 class="modal-title" id="deleteSubscriptionModalTitle"><i class="bi bi-exclamation-triangle-fill me-2"></i>Οριστική διαγραφή συνδρομής</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Κλείσιμο"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">Πρόκειται να διαγράψετε <strong>οριστικά</strong> την παρακάτω πληρωμή συνδρομής:</p>
+                    <ul class="mb-3">
+                        <li>Εθελοντής: <strong id="deleteSubscriptionVolunteer"></strong></li>
+                        <li>Περίοδος: <strong id="deleteSubscriptionPeriod"></strong></li>
+                        <li>Ποσό: <strong id="deleteSubscriptionAmount"></strong></li>
+                    </ul>
+                    <div class="alert alert-danger mb-3"><i class="bi bi-exclamation-octagon me-1"></i>Η ενέργεια δεν μπορεί να αναιρεθεί. Θα διαγραφεί και η αποθηκευμένη απόδειξη, και οι αυτόματοι υπολογισμοί λήξης για τον εθελοντή θα βασιστούν στις υπόλοιπες περιόδους.</div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" value="1" name="delete_confirmed" id="deleteSubscriptionConfirm">
+                        <label class="form-check-label" for="deleteSubscriptionConfirm">Κατανοώ ότι η διαγραφή είναι οριστική και θέλω να συνεχίσω.</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-danger" id="deleteSubscriptionSubmit" disabled><i class="bi bi-trash me-1"></i>Οριστική διαγραφή</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="paymentModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><form method="post" enctype="multipart/form-data">
 <input type="hidden" name="iris_request_id" value="<?= (int)($irisRequestForPayment['id'] ?? 0) ?>">
 <?= csrfField() ?><input type="hidden" name="action" value="record_payment"><div class="modal-header"><h5 class="modal-title">Καταχώρηση ετήσιας συνδρομής</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
@@ -712,7 +775,7 @@ include __DIR__ . '/includes/header.php';
 (() => {
     // Keep Bootstrap modals directly under <body>. This prevents a hidden or
     // stacking parent from leaving only the backdrop visible and blocking the page.
-    ['receiptPreviewModal', 'paymentModal'].forEach((modalId) => {
+    ['receiptPreviewModal', 'paymentModal', 'deleteSubscriptionModal'].forEach((modalId) => {
         const modalElement = document.getElementById(modalId);
         if (modalElement && modalElement.parentElement !== document.body) {
             document.body.appendChild(modalElement);
@@ -740,6 +803,23 @@ include __DIR__ . '/includes/header.php';
             previewImage.removeAttribute('src');
             previewPdf.removeAttribute('src');
         });
+    }
+
+    const deleteSubscriptionModal = document.getElementById('deleteSubscriptionModal');
+    if (deleteSubscriptionModal) {
+        const deleteConfirm = document.getElementById('deleteSubscriptionConfirm');
+        const deleteSubmit = document.getElementById('deleteSubscriptionSubmit');
+        deleteSubscriptionModal.addEventListener('show.bs.modal', (event) => {
+            const button = event.relatedTarget;
+            if (!button) return;
+            document.getElementById('deleteSubscriptionId').value = button.dataset.subscriptionId || '';
+            document.getElementById('deleteSubscriptionVolunteer').textContent = button.dataset.volunteer || '—';
+            document.getElementById('deleteSubscriptionPeriod').textContent = button.dataset.period || '—';
+            document.getElementById('deleteSubscriptionAmount').textContent = button.dataset.amount || '—';
+            deleteConfirm.checked = false;
+            deleteSubmit.disabled = true;
+        });
+        deleteConfirm.addEventListener('change', () => { deleteSubmit.disabled = !deleteConfirm.checked; });
     }
 
     const historySearch = document.getElementById('subscriptionHistorySearch');
