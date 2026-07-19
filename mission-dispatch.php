@@ -10,6 +10,44 @@ requireLogin();
 
 header('Content-Type: application/json');
 
+/**
+ * Notify command staff (system/department admins, this mission's shift leaders,
+ * and its responsible user) that a team reported arrival at a dispatch point/area.
+ * Mirrors the admin/shift-leader recipient resolution in mission-chat.php's
+ * notifyMissionTeamChat() for the non-admin-sender branch.
+ */
+function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $ackerName, int $ackerId): void {
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $kind = $dispatch['type'] === 'point' ? 'στο σημείο' : 'στην περιοχή';
+    $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
+    $who = $teamLabel ? 'Η ομάδα ' . $teamLabel : $ackerName;
+    $message = $who . ' ανέφερε άφιξη ' . $kind . $labelPart . ' της αποστολής «' . $missionTitle . '».';
+
+    $admins = dbFetchAll("SELECT id FROM users WHERE role IN (?, ?) AND is_active = 1", [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+    $leaders = dbFetchAll(
+        "SELECT DISTINCT u.id FROM users u
+         JOIN participation_requests pr ON pr.volunteer_id = u.id
+         JOIN shifts s ON pr.shift_id = s.id
+         WHERE s.mission_id = ? AND u.role = ? AND u.is_active = 1 AND pr.status = ?",
+        [$missionId, ROLE_SHIFT_LEADER, PARTICIPATION_APPROVED]
+    );
+    $recipientIds = array_merge(
+        array_map('intval', array_column($admins, 'id')),
+        array_map('intval', array_column($leaders, 'id'))
+    );
+    if ($responsibleUserId) {
+        $recipientIds[] = $responsibleUserId;
+    }
+    $recipientIds = array_values(array_unique(array_diff($recipientIds, [$ackerId])));
+
+    foreach ($recipientIds as $recipientId) {
+        sendNotification($recipientId, '✅ Αναφορά Άφιξης', $message, 'success', 'mission_dispatch_ack', [
+            'url' => $warRoomUrl,
+            'tag' => 'dispatch-ack-mission-' . $missionId,
+        ]);
+    }
+}
+
 $userId = getCurrentUserId();
 $user = getCurrentUser();
 
@@ -38,34 +76,64 @@ if (!$canManageWarRoom && !$isApprovedParticipant) {
 
 // ── GET: poll for active dispatch points visible to me ─────────────────────
 if (!isPost()) {
-    $rows = dbFetchAll(
-        "SELECT d.id, d.team_id, d.type, d.geo, d.label, mt.codename, mt.team_number
-         FROM mission_dispatch_points d
-         LEFT JOIN mission_teams mt ON mt.id = d.team_id
-         WHERE d.mission_id = ?
-           AND (d.team_id IS NULL OR ? = 1 OR d.team_id IN (
-                SELECT team_id FROM mission_team_members WHERE user_id = ?
-           ))
-         ORDER BY d.created_at",
-        [$missionId, $canManageWarRoom ? 1 : 0, $userId]
-    );
-
-    $dispatches = array_map(fn($row) => [
-        'id'         => (int) $row['id'],
-        'type'       => $row['type'],
-        'geo'        => json_decode($row['geo'], true),
-        'label'      => $row['label'],
-        'team_label' => $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'Όλες οι ομάδες',
-        'can_delete' => $canManageWarRoom,
-    ], $rows);
-
+    $dispatches = loadMissionDispatchesForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
     echo json_encode(['ok' => true, 'dispatches' => $dispatches]);
     exit;
 }
 
-// ── POST: create or delete ──────────────────────────────────────────────────
+// ── POST: create, delete, or ack ────────────────────────────────────────────
 if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
     echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
+    exit;
+}
+
+$action = post('action');
+
+if ($action === 'ack') {
+    if (!$isApprovedParticipant) {
+        echo json_encode(['ok' => false, 'error' => 'Μόνο εγκεκριμένοι εθελοντές μπορούν να αναφέρουν άφιξη.']);
+        exit;
+    }
+
+    $dispatchId = (int) post('id');
+    $dispatch = dbFetchOne("SELECT id, team_id, label, type FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
+    if (!$dispatch) {
+        echo json_encode(['ok' => false, 'error' => 'Δεν βρέθηκε.']);
+        exit;
+    }
+
+    $myTeamId = (int) dbFetchValue(
+        "SELECT team_id FROM mission_team_members WHERE mission_id = ? AND user_id = ? LIMIT 1",
+        [$missionId, $userId]
+    ) ?: null;
+
+    if ($dispatch['team_id'] && (int) $dispatch['team_id'] !== $myTeamId) {
+        echo json_encode(['ok' => false, 'error' => 'Αυτή η εντολή δεν αφορά την ομάδα σας.']);
+        exit;
+    }
+
+    $existing = dbFetchOne("SELECT id FROM mission_dispatch_acks WHERE dispatch_id = ? AND user_id = ?", [$dispatchId, $userId]);
+    if (!$existing) {
+        dbInsert(
+            "INSERT INTO mission_dispatch_acks (dispatch_id, team_id, user_id, created_at) VALUES (?, ?, ?, NOW())",
+            [$dispatchId, $myTeamId, $userId]
+        );
+        logAudit('team_arrived_dispatch', 'mission_dispatch_points', $dispatchId, null, [
+            'mission_id' => $missionId, 'team_id' => $myTeamId, 'user_id' => $userId,
+        ]);
+
+        $teamLabel = null;
+        if ($myTeamId) {
+            $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$myTeamId]);
+            if ($teamRow) {
+                $teamLabel = $teamRow['codename'] . ' ' . $teamRow['team_number'];
+            }
+        }
+        notifyDispatchArrival($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $dispatch, $teamLabel, $user['name'], $userId);
+    }
+
+    $dispatches = loadMissionDispatchesForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
+    echo json_encode(['ok' => true, 'dispatches' => $dispatches]);
     exit;
 }
 
@@ -73,8 +141,6 @@ if (!$canManageWarRoom) {
     echo json_encode(['ok' => false, 'error' => 'Δεν έχετε δικαίωμα διαχείρισης σημείων.']);
     exit;
 }
-
-$action = post('action');
 
 if ($action === 'create') {
     $teamIdRaw = post('team_id');

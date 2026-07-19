@@ -384,22 +384,7 @@ if (get('ajax') === '1') {
         [$user['id'], $bannerAfterId, $missionId]
     );
 
-    $dispatchRows = dbFetchAll(
-        "SELECT d.id, d.team_id, d.type, d.geo, d.label, mt.codename, mt.team_number
-         FROM mission_dispatch_points d
-         LEFT JOIN mission_teams mt ON mt.id = d.team_id
-         WHERE d.mission_id = ?
-           AND (d.team_id IS NULL OR ? = 1 OR d.team_id IN (
-                SELECT team_id FROM mission_team_members WHERE user_id = ?
-           ))
-         ORDER BY d.created_at",
-        [$missionId, $canManageWarRoom ? 1 : 0, $user['id']]
-    );
-    $dispatches = array_map(fn($row) => [
-        'id' => (int)$row['id'], 'type' => $row['type'], 'geo' => json_decode($row['geo'], true),
-        'label' => $row['label'], 'team_label' => $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'Όλες οι ομάδες',
-        'can_delete' => $canManageWarRoom,
-    ], $dispatchRows);
+    $dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
 
     echo json_encode([
         'pins' => $pins,
@@ -424,22 +409,7 @@ $bannerSinceId = (int) dbFetchValue(
     [$user['id'], $missionId]
 );
 
-$dispatchRows = dbFetchAll(
-    "SELECT d.id, d.team_id, d.type, d.geo, d.label, mt.codename, mt.team_number
-     FROM mission_dispatch_points d
-     LEFT JOIN mission_teams mt ON mt.id = d.team_id
-     WHERE d.mission_id = ?
-       AND (d.team_id IS NULL OR ? = 1 OR d.team_id IN (
-            SELECT team_id FROM mission_team_members WHERE user_id = ?
-       ))
-     ORDER BY d.created_at",
-    [$missionId, $canManageWarRoom ? 1 : 0, $user['id']]
-);
-$dispatches = array_map(fn($row) => [
-    'id' => (int)$row['id'], 'type' => $row['type'], 'geo' => json_decode($row['geo'], true),
-    'label' => $row['label'], 'team_label' => $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'Όλες οι ομάδες',
-    'can_delete' => $canManageWarRoom,
-], $dispatchRows);
+$dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
 
 $firstShift = $shifts[0]['start_time'] ?? $mission['start_datetime'];
 $lastShift = !empty($shifts) ? end($shifts)['end_time'] : $mission['end_datetime'];
@@ -542,6 +512,7 @@ include __DIR__ . '/includes/header.php';
             <span class="badge fs-6 <?= $timeState === 'active' ? 'bg-success' : ($timeState === 'upcoming' ? 'bg-info text-dark' : 'bg-warning text-dark') ?>">
                 <?= $timeState === 'active' ? 'ΣΕ ΕΞΕΛΙΞΗ' : ($timeState === 'upcoming' ? 'ΠΡΟΣΕΧΩΣ' : 'ΕΚΚΡΕΜΕΙ ΚΛΕΙΣΙΜΟ') ?>
             </span>
+            <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#historyModal"><i class="bi bi-clock-history me-1"></i>Ιστορικό</button>
             <a href="ops-dashboard.php" class="btn btn-light"><i class="bi bi-arrow-left me-1"></i>Επιχειρησιακό</a>
         </div>
     </div>
@@ -831,6 +802,22 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-clock-history me-1"></i>Ιστορικό Αποστολής</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="historyList" class="list-group list-group-flush">
+                    <div class="text-muted small">Φόρτωση…</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <?php if ($canManageWarRoom): ?>
 <div class="modal fade" id="dispatchMapModal" tabindex="-1">
     <div class="modal-dialog modal-fullscreen">
@@ -872,7 +859,13 @@ const dispatchLayer = L.layerGroup().addTo(map);
 function renderDispatches(items) {
     dispatchLayer.clearLayers();
     items.forEach(item => {
-        const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + item.label : ''}` +
+        const acksHtml = item.acks.length
+            ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? a.team_label + ' — ' : ''}${a.user_name} (${a.time})`).join('<br>') + '</div>'
+            : '';
+        const ackHtml = item.can_ack
+            ? `<br><button type="button" class="btn btn-sm btn-success mt-1 dispatch-ack-btn" data-id="${item.id}"><i class="bi bi-check-lg me-1"></i>Άφιξη</button>`
+            : (item.my_ack ? `<div class="small text-success mt-1">✓ Αφίξατε στις ${item.my_ack}</div>` : '');
+        const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + item.label : ''}` + acksHtml + ackHtml +
             (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">Διαγραφή</button>` : '');
         if (item.type === 'point') {
             const icon = L.divIcon({className:'', html:'<i class="bi bi-geo-alt-fill" style="font-size:28px;color:#7c3aed;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[28,28], iconAnchor:[14,26]});
@@ -883,15 +876,28 @@ function renderDispatches(items) {
     });
 }
 dispatchLayer.on('popupopen', event => {
-    const btn = event.popup.getElement().querySelector('.dispatch-delete-btn');
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-        if (!confirm('Διαγραφή αυτού του σημείου/περιοχής;')) return;
-        const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: btn.dataset.id});
-        fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
-            if (result.ok) { map.closePopup(); renderDispatches(dispatches = dispatches.filter(d => String(d.id) !== btn.dataset.id)); }
+    const popupEl = event.popup.getElement();
+    const delBtn = popupEl.querySelector('.dispatch-delete-btn');
+    if (delBtn) {
+        delBtn.addEventListener('click', () => {
+            if (!confirm('Διαγραφή αυτού του σημείου/περιοχής;')) return;
+            const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: delBtn.dataset.id});
+            fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+                if (result.ok) { map.closePopup(); renderDispatches(dispatches = dispatches.filter(d => String(d.id) !== delBtn.dataset.id)); }
+            });
         });
-    });
+    }
+    const ackBtn = popupEl.querySelector('.dispatch-ack-btn');
+    if (ackBtn) {
+        ackBtn.addEventListener('click', () => {
+            ackBtn.disabled = true;
+            const data = new URLSearchParams({csrf_token: csrfToken, action: 'ack', mission_id: <?= $missionId ?>, id: ackBtn.dataset.id});
+            fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+                if (result.ok) { map.closePopup(); if (result.dispatches) renderDispatches(dispatches = result.dispatches); }
+                else { alert(result.error || 'Αποτυχία αποστολής.'); ackBtn.disabled = false; }
+            });
+        });
+    }
 });
 if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup('<strong>Σημείο αποστολής</strong><br><?= h(addslashes($mission['title'])) ?>');
 let hasFitPins = false;
@@ -931,6 +937,31 @@ function hideWarRoomBanner() {
     if (bannerHideTimer) { clearTimeout(bannerHideTimer); bannerHideTimer = null; }
 }
 document.getElementById('warRoomBannerClose').addEventListener('click', hideWarRoomBanner);
+
+const historyModalEl = document.getElementById('historyModal');
+let historyPoll = null;
+function loadHistory() {
+    fetch('mission-history.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(data => {
+        const list = document.getElementById('historyList');
+        if (!data.ok || !data.events.length) {
+            list.innerHTML = '<div class="text-muted small">Δεν υπάρχουν καταγεγραμμένα γεγονότα ακόμη.</div>';
+            return;
+        }
+        list.innerHTML = data.events.map(e => `
+            <div class="list-group-item d-flex justify-content-between align-items-start gap-3">
+                <div><span class="me-1">${e.icon}</span>${e.text}</div>
+                <small class="text-muted text-nowrap">${e.time}</small>
+            </div>
+        `).join('');
+    }).catch(() => {});
+}
+historyModalEl.addEventListener('show.bs.modal', () => {
+    loadHistory();
+    historyPoll = setInterval(loadHistory, 10000);
+});
+historyModalEl.addEventListener('hidden.bs.modal', () => {
+    if (historyPoll) { clearInterval(historyPoll); historyPoll = null; }
+});
 
 document.querySelectorAll('.send-ping').forEach(button => button.addEventListener('click', () => {
     const status = document.getElementById('pingStatus-' + button.dataset.prId);

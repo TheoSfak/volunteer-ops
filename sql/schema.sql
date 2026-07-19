@@ -1799,4 +1799,20 @@ CREATE TABLE IF NOT EXISTS `mission_dispatch_points` (
     INDEX `idx_dispatch_mission` (`mission_id`, `team_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- MISSION DISPATCH ACKS (War Room team arrival reports)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_dispatch_acks` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `dispatch_id` INT UNSIGNED NOT NULL,
+    `team_id` INT UNSIGNED NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`dispatch_id`) REFERENCES `mission_dispatch_points`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY `uniq_dispatch_user` (`dispatch_id`, `user_id`),
+    INDEX `idx_dispatch_ack` (`dispatch_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
