@@ -499,6 +499,7 @@ include __DIR__ . '/includes/header.php';
     @keyframes warRoomBannerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
     .war-room-banner .bi-broadcast { color: #ff3b30; }
     .war-room-banner-close { background: transparent; border: none; color: #ff3b30; font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0 4px; flex-shrink: 0; }
+    @keyframes warRoomPulseRed { 0%, 100% { box-shadow: 0 0 0 0 rgba(220,53,69,0); } 50% { box-shadow: 0 0 0 10px rgba(220,53,69,0.4); } }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
@@ -611,6 +612,15 @@ include __DIR__ . '/includes/header.php';
                         <i class="bi bi-send-fill me-1"></i>Αποστολή στίγματος · <?= date('H:i', strtotime($assignment['start_time'])) ?>
                     </button>
                     <div class="small mb-2" id="pingStatus-<?= $assignment['pr_id'] ?>"></div>
+                    <?php $myFieldStatus = $assignment['field_status'] ?? null; ?>
+                    <div class="small mb-1" id="statusBadge-<?= $assignment['pr_id'] ?>">
+                        <?= $myFieldStatus ? h(['on_way' => '🚗 Σε Κίνηση', 'on_site' => '✅ Επί Τόπου', 'needs_help' => '🆘 SOS'][$myFieldStatus] ?? '') : '— Χωρίς κατάσταση' ?>
+                    </div>
+                    <div class="btn-group w-100 mb-3" role="group" id="statusBtns-<?= $assignment['pr_id'] ?>">
+                        <button type="button" class="btn btn-sm <?= $myFieldStatus === 'on_way' ? 'btn-warning' : 'btn-outline-warning' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_way')">🚗 Κίνηση</button>
+                        <button type="button" class="btn btn-sm <?= $myFieldStatus === 'on_site' ? 'btn-success' : 'btn-outline-success' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_site')">✅ Θέση μου</button>
+                        <button type="button" class="btn btn-sm <?= $myFieldStatus === 'needs_help' ? 'btn-danger' : 'btn-outline-danger' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'needs_help')">🆘 SOS</button>
+                    </div>
                     <?php endforeach; ?>
                 <?php endif; ?>
             </div>
@@ -975,6 +985,34 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
         }).catch(() => { status.textContent = 'Αποτυχία αποστολής στίγματος.'; status.className = 'small mb-2 text-danger'; }).finally(() => button.disabled = false);
     }, () => { status.textContent = 'Δεν δόθηκε άδεια πρόσβασης στο GPS.'; status.className = 'small mb-2 text-danger'; button.disabled = false; }, {enableHighAccuracy:true, timeout:10000});
 }));
+
+function setFieldStatus(btn, prId, status) {
+    const group = document.getElementById('statusBtns-' + prId);
+    if (group) group.querySelectorAll('button').forEach(b => b.disabled = true);
+    const data = new URLSearchParams({csrf_token: csrfToken, pr_id: prId, status: status});
+    fetch('volunteer-status.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+        if (result.ok) {
+            const badge = document.getElementById('statusBadge-' + prId);
+            if (badge) badge.textContent = result.label;
+            const colorMap = {on_way: 'warning', on_site: 'success', needs_help: 'danger'};
+            if (group) {
+                group.querySelectorAll('button').forEach(b => {
+                    const s = b.getAttribute('onclick').match(/'([^']+)'\)$/)?.[1];
+                    if (s) { b.className = 'btn btn-sm ' + (s === result.status ? 'btn-' + colorMap[s] : 'btn-outline-' + colorMap[s]); }
+                    b.disabled = false;
+                });
+            }
+            if (status === 'needs_help') {
+                const panel = btn.closest('.card');
+                if (panel) panel.style.animation = 'warRoomPulseRed 0.5s 3';
+            }
+        } else {
+            alert(result.error || 'Αποτυχία ενημέρωσης κατάστασης.');
+            if (group) group.querySelectorAll('button').forEach(b => b.disabled = false);
+        }
+    }).catch(() => { if (group) group.querySelectorAll('button').forEach(b => b.disabled = false); });
+}
+
 setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => response.json()).then(data => {
     renderPins(data.pins || []);
     if (data.dispatches) renderDispatches(dispatches = data.dispatches);
