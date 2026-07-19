@@ -29,6 +29,39 @@ if (!$mission) {
     redirect('dashboard.php');
 }
 
+if (!defined('MISSION_TEAM_CODENAMES')) {
+    define('MISSION_TEAM_CODENAMES', ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Golf','Hotel','India',
+        'Juliett','Kilo','Lima','Mike','November','Oscar','Papa','Quebec','Romeo',
+        'Sierra','Tango','Uniform','Victor','Whiskey','X-ray','Yankee','Zulu']);
+}
+
+/**
+ * Notify every team member (individually) about their team assignment.
+ * $namesByUserId must map user_id => name for all ids in $memberIds/$leaderId.
+ */
+function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $codename, int $teamNumber, array $memberIds, int $leaderId, array $namesByUserId): void {
+    $teamLabel = $codename . ' ' . $teamNumber;
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $leaderName = $namesByUserId[$leaderId] ?? '';
+    foreach ($memberIds as $memberId) {
+        $teammateNames = array_filter(array_map(
+            fn($id) => $namesByUserId[$id] ?? '',
+            array_values(array_diff($memberIds, [$memberId]))
+        ));
+        $message = 'Αποστολή «' . $missionTitle . '» — μπήκατε στην ομάδα «' . $teamLabel . '».';
+        if (!empty($teammateNames)) {
+            $message .= ' Μαζί σας: ' . implode(', ', $teammateNames) . '.';
+        }
+        $message .= $memberId === $leaderId
+            ? ' Είστε ο υπεύθυνος της ομάδας.'
+            : ' Υπεύθυνος: ' . $leaderName . '.';
+        sendNotification($memberId, '🔷 Ομάδα ' . $teamLabel, $message, 'info', '', [
+            'url' => $warRoomUrl,
+            'tag' => 'mission-team-' . $missionId,
+        ]);
+    }
+}
+
 $canManageWarRoom = hasPagePermission('missions_manage') || (int)$mission['responsible_user_id'] === (int)$user['id'];
 $isApprovedParticipant = (bool)dbFetchValue(
     "SELECT COUNT(*) FROM participation_requests pr
@@ -91,6 +124,159 @@ if (isPost()) {
             }
             logAudit('request_mission_location', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
             setFlash('success', 'Στάλθηκε αίτημα στίγματος σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
+        }
+        redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'create_team') {
+        if (!$canManageWarRoom) {
+            setFlash('error', 'Δεν έχετε δικαίωμα να δημιουργήσετε ομάδες.');
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $approvedVolunteers = dbFetchAll(
+            "SELECT DISTINCT pr.volunteer_id, u.name
+             FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             JOIN users u ON u.id = pr.volunteer_id
+             WHERE s.mission_id = ? AND pr.status = ?",
+            [$missionId, PARTICIPATION_APPROVED]
+        );
+        $namesByUserId = array_column($approvedVolunteers, 'name', 'volunteer_id');
+        $approvedIds = array_map('intval', array_column($approvedVolunteers, 'volunteer_id'));
+        $assignedIds = array_map('intval', array_column(
+            dbFetchAll("SELECT user_id FROM mission_team_members WHERE mission_id = ?", [$missionId]),
+            'user_id'
+        ));
+        $eligibleIds = array_diff($approvedIds, $assignedIds);
+
+        $memberIds = array_values(array_unique(array_intersect(
+            array_map('intval', (array)($_POST['member_ids'] ?? [])),
+            $eligibleIds
+        )));
+        $leaderId = (int) post('leader_id');
+
+        if (empty($memberIds)) {
+            setFlash('warning', 'Επιλέξτε τουλάχιστον έναν διαθέσιμο εθελοντή για την ομάδα.');
+        } elseif (!in_array($leaderId, $memberIds, true)) {
+            setFlash('warning', 'Ο υπεύθυνος πρέπει να είναι μέλος της ομάδας.');
+        } else {
+            $teamCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_teams WHERE mission_id = ?", [$missionId]);
+            $codename = MISSION_TEAM_CODENAMES[$teamCount % count(MISSION_TEAM_CODENAMES)];
+
+            $teamNumber = null;
+            for ($attempt = 0; $attempt < 50; $attempt++) {
+                $candidate = random_int(10, 99);
+                $exists = dbFetchValue(
+                    "SELECT COUNT(*) FROM mission_teams WHERE mission_id = ? AND team_number = ?",
+                    [$missionId, $candidate]
+                );
+                if (!$exists) { $teamNumber = $candidate; break; }
+            }
+
+            if ($teamNumber === null) {
+                setFlash('error', 'Δεν ήταν δυνατή η δημιουργία μοναδικού αριθμού ομάδας. Δοκιμάστε ξανά.');
+            } else {
+                $teamId = dbInsert(
+                    "INSERT INTO mission_teams (mission_id, codename, team_number, leader_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
+                    [$missionId, $codename, $teamNumber, $leaderId, $user['id']]
+                );
+                foreach ($memberIds as $memberId) {
+                    dbInsert(
+                        "INSERT INTO mission_team_members (team_id, mission_id, user_id, added_at) VALUES (?, ?, ?, NOW())",
+                        [$teamId, $missionId, $memberId]
+                    );
+                }
+                logAudit('create_mission_team', 'mission_teams', $teamId, null, ['mission_id' => $missionId, 'member_ids' => $memberIds, 'leader_id' => $leaderId]);
+                notifyMissionTeamMembers($missionId, $mission['title'], $codename, $teamNumber, $memberIds, $leaderId, $namesByUserId);
+                setFlash('success', 'Δημιουργήθηκε η ομάδα ' . $codename . ' ' . $teamNumber . '.');
+            }
+        }
+        redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'update_team') {
+        if (!$canManageWarRoom) {
+            setFlash('error', 'Δεν έχετε δικαίωμα να επεξεργαστείτε ομάδες.');
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $teamId = (int) post('team_id');
+        $team = dbFetchOne("SELECT * FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
+        if (!$team) {
+            setFlash('error', 'Η ομάδα δεν βρέθηκε.');
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $approvedVolunteers = dbFetchAll(
+            "SELECT DISTINCT pr.volunteer_id, u.name
+             FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             JOIN users u ON u.id = pr.volunteer_id
+             WHERE s.mission_id = ? AND pr.status = ?",
+            [$missionId, PARTICIPATION_APPROVED]
+        );
+        $namesByUserId = array_column($approvedVolunteers, 'name', 'volunteer_id');
+        $approvedIds = array_map('intval', array_column($approvedVolunteers, 'volunteer_id'));
+        $assignedElsewhereIds = array_map('intval', array_column(
+            dbFetchAll("SELECT user_id FROM mission_team_members WHERE mission_id = ? AND team_id != ?", [$missionId, $teamId]),
+            'user_id'
+        ));
+        $eligibleIds = array_diff($approvedIds, $assignedElsewhereIds);
+
+        $memberIds = array_values(array_unique(array_intersect(
+            array_map('intval', (array)($_POST['member_ids'] ?? [])),
+            $eligibleIds
+        )));
+        $leaderId = (int) post('leader_id');
+
+        if (empty($memberIds)) {
+            setFlash('warning', 'Επιλέξτε τουλάχιστον έναν εθελοντή για την ομάδα.');
+        } elseif (!in_array($leaderId, $memberIds, true)) {
+            setFlash('warning', 'Ο υπεύθυνος πρέπει να είναι μέλος της ομάδας.');
+        } else {
+            $oldMemberIds = array_map('intval', array_column(
+                dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]),
+                'user_id'
+            ));
+            dbExecute("DELETE FROM mission_team_members WHERE team_id = ?", [$teamId]);
+            foreach ($memberIds as $memberId) {
+                dbInsert(
+                    "INSERT INTO mission_team_members (team_id, mission_id, user_id, added_at) VALUES (?, ?, ?, NOW())",
+                    [$teamId, $missionId, $memberId]
+                );
+            }
+            dbExecute("UPDATE mission_teams SET leader_id = ?, updated_at = NOW() WHERE id = ?", [$leaderId, $teamId]);
+            logAudit('update_mission_team', 'mission_teams', $teamId, ['member_ids' => $oldMemberIds], ['member_ids' => $memberIds, 'leader_id' => $leaderId]);
+            notifyMissionTeamMembers($missionId, $mission['title'], $team['codename'], (int)$team['team_number'], $memberIds, $leaderId, $namesByUserId);
+            setFlash('success', 'Η ομάδα ' . $team['codename'] . ' ' . $team['team_number'] . ' ενημερώθηκε.');
+        }
+        redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'delete_team') {
+        if (!$canManageWarRoom) {
+            setFlash('error', 'Δεν έχετε δικαίωμα να διαλύσετε ομάδες.');
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $teamId = (int) post('team_id');
+        $team = dbFetchOne("SELECT * FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
+        if ($team) {
+            $formerMembers = dbFetchAll(
+                "SELECT mtm.user_id, u.name FROM mission_team_members mtm JOIN users u ON u.id = mtm.user_id WHERE mtm.team_id = ?",
+                [$teamId]
+            );
+            dbExecute("DELETE FROM mission_teams WHERE id = ?", [$teamId]);
+            logAudit('delete_mission_team', 'mission_teams', $teamId, ['mission_id' => $missionId], null);
+
+            $teamLabel = $team['codename'] . ' ' . $team['team_number'];
+            $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+            foreach ($formerMembers as $member) {
+                sendNotification(
+                    (int)$member['user_id'],
+                    '🔷 Διάλυση ομάδας',
+                    'Η ομάδα «' . $teamLabel . '» της αποστολής «' . $mission['title'] . '» διαλύθηκε.',
+                    'warning', '', ['url' => $warRoomUrl]
+                );
+            }
+            setFlash('success', 'Η ομάδα ' . $teamLabel . ' διαλύθηκε.');
+        } else {
+            setFlash('error', 'Η ομάδα δεν βρέθηκε.');
         }
         redirect('war-room.php?id=' . $missionId);
     }
@@ -167,6 +353,70 @@ $timeState = strtotime($firstShift) > $now ? 'upcoming' : (strtotime($lastShift)
 $activeParticipants = array_values(array_filter($participants, fn($participant) =>
     strtotime($participant['start_time']) <= $now && strtotime($participant['end_time']) > $now
 ));
+
+// ── Mission teams ─────────────────────────────────────────────────────────
+$teamRows = dbFetchAll(
+    "SELECT mt.id, mt.codename, mt.team_number, mt.leader_id, l.name AS leader_name,
+            mtm.user_id, u.name AS member_name
+     FROM mission_teams mt
+     LEFT JOIN users l ON l.id = mt.leader_id
+     LEFT JOIN mission_team_members mtm ON mtm.team_id = mt.id
+     LEFT JOIN users u ON u.id = mtm.user_id
+     WHERE mt.mission_id = ?
+     ORDER BY mt.created_at, u.name",
+    [$missionId]
+);
+$teams = [];
+foreach ($teamRows as $row) {
+    $tid = (int)$row['id'];
+    if (!isset($teams[$tid])) {
+        $teams[$tid] = [
+            'id' => $tid,
+            'codename' => $row['codename'],
+            'team_number' => $row['team_number'],
+            'leader_id' => $row['leader_id'] !== null ? (int)$row['leader_id'] : null,
+            'leader_name' => $row['leader_name'],
+            'members' => [],
+        ];
+    }
+    if ($row['user_id'] !== null) {
+        $teams[$tid]['members'][] = ['user_id' => (int)$row['user_id'], 'name' => $row['member_name']];
+    }
+}
+
+$teamLabelByUserId = [];
+foreach ($teams as $team) {
+    $label = $team['codename'] . ' ' . $team['team_number'];
+    foreach ($team['members'] as $member) {
+        $teamLabelByUserId[$member['user_id']] = $label;
+    }
+}
+
+$distinctApprovedById = [];
+foreach ($participants as $participant) {
+    $vid = (int)$participant['volunteer_id'];
+    if (!isset($distinctApprovedById[$vid])) {
+        $distinctApprovedById[$vid] = ['user_id' => $vid, 'name' => $participant['name']];
+    }
+}
+$unassignedApproved = array_values(array_filter(
+    $distinctApprovedById,
+    fn($p) => !isset($teamLabelByUserId[$p['user_id']])
+));
+
+$myTeamId = null;
+foreach ($teams as $team) {
+    foreach ($team['members'] as $member) {
+        if ($member['user_id'] === (int)$user['id']) {
+            $myTeamId = $team['id'];
+            break 2;
+        }
+    }
+}
+$chatTeams = $canManageWarRoom
+    ? array_values($teams)
+    : array_values(array_filter($teams, fn($t) => $t['id'] === $myTeamId));
+
 $pageTitle = 'War Room — ' . $mission['title'];
 $currentPage = 'war-room';
 include __DIR__ . '/includes/header.php';
@@ -208,13 +458,57 @@ include __DIR__ . '/includes/header.php';
             <div class="card-body p-0"><div id="warRoomMap"></div></div>
         </div>
 
+        <div class="card shadow-sm mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-diagram-3 me-1"></i>Ομάδες Αποστολής</h5>
+                <?php if ($canManageWarRoom && !empty($unassignedApproved)): ?>
+                <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createTeamModal">
+                    <i class="bi bi-plus-lg me-1"></i>Νέα Ομάδα
+                </button>
+                <?php endif; ?>
+            </div>
+            <div class="list-group list-group-flush">
+                <?php foreach ($teams as $team): ?>
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                        <div>
+                            <span class="badge bg-dark fs-6 me-2"><?= h($team['codename'] . ' ' . $team['team_number']) ?></span>
+                            <?php if ($team['leader_name']): ?>
+                            <span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i><?= h($team['leader_name']) ?></span>
+                            <?php endif; ?>
+                            <div class="small mt-2">
+                                <?php foreach ($team['members'] as $member): ?>
+                                <span class="badge bg-light text-dark border me-1 mb-1"><?= h($member['name']) ?><?= $member['user_id'] === $team['leader_id'] ? ' ⭐' : '' ?></span>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                        <?php if ($canManageWarRoom): ?>
+                        <div class="d-flex gap-1">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editTeamModal-<?= $team['id'] ?>" title="Επεξεργασία"><i class="bi bi-pencil"></i></button>
+                            <form method="post" onsubmit="return confirm('Διάλυση ομάδας <?= h(addslashes($team['codename'] . ' ' . $team['team_number'])) ?>;')">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="delete_team">
+                                <input type="hidden" name="team_id" value="<?= $team['id'] ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Διάλυση"><i class="bi bi-x-lg"></i></button>
+                            </form>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+                <?php if (empty($teams)): ?>
+                <div class="list-group-item text-muted">Δεν έχουν δημιουργηθεί ομάδες ακόμη.</div>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <div class="card shadow-sm">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-people me-1"></i>Εγκεκριμένοι εθελοντές (<?= count($participants) ?>)</h5></div>
             <div class="list-group list-group-flush">
                 <?php foreach ($participants as $participant): ?>
                 <?php $status = $participant['field_status'] ?? ''; ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                    <div><strong><?= h($participant['name']) ?></strong><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? ' · Τελευταίο στίγμα: ' . date('H:i', strtotime($participant['last_ping_at'])) : ' · Δεν υπάρχει στίγμα' ?></small></div>
+                    <div><strong><?= h($participant['name']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): ?> <span class="badge bg-dark"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? ' · Τελευταίο στίγμα: ' . date('H:i', strtotime($participant['last_ping_at'])) : ' · Δεν υπάρχει στίγμα' ?></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>">
                         <?= $status === 'needs_help' ? 'Χρειάζεται βοήθεια' : ($status === 'on_site' ? 'Επί τόπου' : ($status === 'on_way' ? 'Σε κίνηση' : 'Χωρίς κατάσταση')) ?>
                     </span>
@@ -296,6 +590,109 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<?php if ($canManageWarRoom): ?>
+<div class="modal fade" id="createTeamModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-lg me-1"></i>Νέα Ομάδα</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" class="team-form" data-leader-select="#createTeamLeader">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="create_team">
+                <div class="modal-body">
+                    <p class="small text-muted">Επιλέξτε μέλη από τους διαθέσιμους (χωρίς ομάδα) εθελοντές.</p>
+                    <div class="border rounded p-2 mb-3" style="max-height:220px;overflow:auto;">
+                        <?php foreach ($unassignedApproved as $person): ?>
+                        <label class="form-check d-flex align-items-center gap-2 py-1">
+                            <input class="form-check-input team-member-check" type="checkbox" name="member_ids[]" value="<?= $person['user_id'] ?>" data-name="<?= h($person['name']) ?>">
+                            <span><?= h($person['name']) ?></span>
+                        </label>
+                        <?php endforeach; ?>
+                        <?php if (empty($unassignedApproved)): ?>
+                        <div class="text-muted small">Δεν υπάρχουν διαθέσιμοι εθελοντές.</div>
+                        <?php endif; ?>
+                    </div>
+                    <label class="form-label small fw-semibold">Υπεύθυνος ομάδας</label>
+                    <select class="form-select team-leader-select" name="leader_id" id="createTeamLeader" required>
+                        <option value="">Επιλέξτε μέλη πρώτα…</option>
+                    </select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-primary">Δημιουργία</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<?php foreach ($teams as $team): ?>
+<?php
+    $memberIdsInTeam = array_column($team['members'], 'user_id');
+    $editablePool = array_merge(
+        $team['members'],
+        array_values(array_filter($unassignedApproved, fn($p) => !in_array($p['user_id'], $memberIdsInTeam, true)))
+    );
+?>
+<div class="modal fade" id="editTeamModal-<?= $team['id'] ?>" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil me-1"></i>Επεξεργασία <?= h($team['codename'] . ' ' . $team['team_number']) ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" class="team-form" data-leader-select="#editTeamLeader-<?= $team['id'] ?>">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="update_team">
+                <input type="hidden" name="team_id" value="<?= $team['id'] ?>">
+                <div class="modal-body">
+                    <div class="border rounded p-2 mb-3" style="max-height:220px;overflow:auto;">
+                        <?php foreach ($editablePool as $person): ?>
+                        <label class="form-check d-flex align-items-center gap-2 py-1">
+                            <input class="form-check-input team-member-check" type="checkbox" name="member_ids[]"
+                                   value="<?= $person['user_id'] ?>" data-name="<?= h($person['name']) ?>"
+                                   <?= in_array($person['user_id'], $memberIdsInTeam, true) ? 'checked' : '' ?>>
+                            <span><?= h($person['name']) ?></span>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
+                    <label class="form-label small fw-semibold">Υπεύθυνος ομάδας</label>
+                    <select class="form-select team-leader-select" name="leader_id" id="editTeamLeader-<?= $team['id'] ?>" required data-current="<?= $team['leader_id'] ?>"></select>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-primary">Αποθήκευση</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endforeach; ?>
+<?php endif; ?>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-chat-dots me-1"></i>Συνομιλία</h5></div>
+    <div class="card-body">
+        <ul class="nav nav-pills mb-3 flex-wrap" id="chatRoomTabs">
+            <li class="nav-item">
+                <button type="button" class="nav-link active chat-room-tab" data-team-id="">Γενικό</button>
+            </li>
+            <?php foreach ($chatTeams as $ct): ?>
+            <li class="nav-item">
+                <button type="button" class="nav-link chat-room-tab" data-team-id="<?= $ct['id'] ?>"><?= h($ct['codename'] . ' ' . $ct['team_number']) ?></button>
+            </li>
+            <?php endforeach; ?>
+        </ul>
+        <div id="chatMessages" class="border rounded p-3 mb-3" style="height:320px;overflow-y:auto;background:#f8f9fa;"></div>
+        <form id="chatSendForm" class="d-flex gap-2">
+            <textarea id="chatInput" class="form-control" rows="1" maxlength="2000" placeholder="Γράψτε μήνυμα…" required></textarea>
+            <button type="submit" class="btn btn-primary"><i class="bi bi-send-fill"></i></button>
+        </form>
+    </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const csrfToken = '<?= csrfToken() ?>';
@@ -328,6 +725,134 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
     }, () => { status.textContent = 'Δεν δόθηκε άδεια πρόσβασης στο GPS.'; status.className = 'small mb-2 text-danger'; button.disabled = false; }, {enableHighAccuracy:true, timeout:10000});
 }));
 setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1').then(response => response.json()).then(data => { renderPins(data.pins || []); document.getElementById('mapRefresh').textContent = data.time || ''; }).catch(() => {}), 15000);
+
+document.querySelectorAll('.team-form').forEach(form => {
+    const leaderSelect = form.querySelector(form.dataset.leaderSelect);
+    if (!leaderSelect) return;
+    const checkboxes = form.querySelectorAll('.team-member-check');
+    const currentLeaderId = leaderSelect.dataset.current || '';
+    function refreshLeaderOptions() {
+        const checked = Array.from(checkboxes).filter(cb => cb.checked);
+        const previousValue = leaderSelect.value || currentLeaderId;
+        leaderSelect.innerHTML = '';
+        if (checked.length === 0) {
+            leaderSelect.innerHTML = '<option value="">Επιλέξτε μέλη πρώτα…</option>';
+            return;
+        }
+        checked.forEach(cb => {
+            const opt = document.createElement('option');
+            opt.value = cb.value;
+            opt.textContent = cb.dataset.name;
+            if (cb.value === String(previousValue)) opt.selected = true;
+            leaderSelect.appendChild(opt);
+        });
+    }
+    checkboxes.forEach(cb => cb.addEventListener('change', refreshLeaderOptions));
+    refreshLeaderOptions();
+});
+
+(function() {
+    const chatMessagesEl = document.getElementById('chatMessages');
+    const chatInput = document.getElementById('chatInput');
+    const chatForm = document.getElementById('chatSendForm');
+    if (!chatMessagesEl || !chatForm) return;
+
+    const missionId = <?= $missionId ?>;
+    let activeTeamId = '';
+    let lastIdByRoom = {};
+
+    function renderMessage(msg) {
+        const wrap = document.createElement('div');
+        wrap.className = 'mb-2 d-flex ' + (msg.mine ? 'justify-content-end' : 'justify-content-start');
+        const bubble = document.createElement('div');
+        bubble.className = 'p-2 rounded' + (msg.mine ? ' bg-primary text-white' : ' bg-white border');
+        bubble.style.maxWidth = '75%';
+        const meta = document.createElement('div');
+        meta.className = 'small d-flex align-items-center gap-1 ' + (msg.mine ? 'text-white-50' : 'text-muted');
+        const metaText = document.createElement('span');
+        metaText.textContent = msg.name + ' · ' + msg.time;
+        meta.appendChild(metaText);
+        if (msg.can_delete) {
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'btn btn-sm btn-link p-0 ' + (msg.mine ? 'text-white-50' : 'text-danger');
+            del.style.fontSize = '.8rem';
+            del.innerHTML = '<i class="bi bi-trash"></i>';
+            del.addEventListener('click', () => deleteMessage(msg.id, wrap));
+            meta.appendChild(del);
+        }
+        const body = document.createElement('div');
+        body.textContent = msg.message;
+        body.style.whiteSpace = 'pre-wrap';
+        bubble.appendChild(meta);
+        bubble.appendChild(body);
+        wrap.appendChild(bubble);
+        chatMessagesEl.appendChild(wrap);
+    }
+
+    function loadRoom(teamId) {
+        activeTeamId = teamId;
+        lastIdByRoom[teamId] = 0;
+        chatMessagesEl.innerHTML = '';
+        fetch(`mission-chat.php?mission_id=${missionId}&team_id=${teamId}&after_id=0`)
+            .then(response => response.json())
+            .then(data => {
+                if (!data.ok) { chatMessagesEl.textContent = data.error || 'Σφάλμα φόρτωσης.'; return; }
+                data.messages.forEach(renderMessage);
+                if (data.messages.length) lastIdByRoom[teamId] = data.messages[data.messages.length - 1].id;
+                chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+            })
+            .catch(() => { chatMessagesEl.textContent = 'Σφάλμα φόρτωσης.'; });
+    }
+
+    function pollRoom() {
+        const teamId = activeTeamId;
+        const afterId = lastIdByRoom[teamId] || 0;
+        fetch(`mission-chat.php?mission_id=${missionId}&team_id=${teamId}&after_id=${afterId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (!data.ok || teamId !== activeTeamId || !data.messages.length) return;
+                const nearBottom = chatMessagesEl.scrollHeight - chatMessagesEl.scrollTop - chatMessagesEl.clientHeight < 60;
+                data.messages.forEach(renderMessage);
+                lastIdByRoom[teamId] = data.messages[data.messages.length - 1].id;
+                if (nearBottom) chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+            })
+            .catch(() => {});
+    }
+
+    function deleteMessage(id, el) {
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: missionId, message_id: id});
+        fetch('mission-chat.php', {method: 'POST', body: data}).then(response => response.json()).then(result => {
+            if (result.ok) el.remove();
+        });
+    }
+
+    document.querySelectorAll('.chat-room-tab').forEach(tab => tab.addEventListener('click', () => {
+        document.querySelectorAll('.chat-room-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        loadRoom(tab.dataset.teamId);
+    }));
+
+    chatForm.addEventListener('submit', event => {
+        event.preventDefault();
+        const text = chatInput.value.trim();
+        if (!text) return;
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'send', mission_id: missionId, team_id: activeTeamId, message: text});
+        fetch('mission-chat.php', {method: 'POST', body: data}).then(response => response.json()).then(result => {
+            if (result.ok) {
+                renderMessage(result.message);
+                lastIdByRoom[activeTeamId] = result.message.id;
+                chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+                chatInput.value = '';
+            } else {
+                alert(result.error || 'Αποτυχία αποστολής.');
+            }
+        }).catch(() => alert('Αποτυχία αποστολής.'));
+    });
+
+    loadRoom('');
+    setInterval(pollRoom, 5000);
+})();
 </script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
