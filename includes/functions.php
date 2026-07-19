@@ -669,13 +669,13 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
 }
 
 /**
- * War Room: load field photos for a mission, newest first. Visibility is
+ * War Room: load field photos/videos for a mission, newest first. Visibility is
  * "everyone with War Room access sees everything" (unlike dispatches, which
  * are team-scoped) — so this is a flat query, no per-user filtering.
  */
 function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canManageWarRoom, int $limit = 30): array {
     $rows = dbFetchAll(
-        "SELECT p.id, p.user_id, p.lat, p.lng, p.created_at, u.name AS user_name
+        "SELECT p.id, p.user_id, p.media_type, p.lat, p.lng, p.created_at, u.name AS user_name
          FROM mission_photos p
          JOIN users u ON u.id = p.user_id
          WHERE p.mission_id = ?
@@ -686,6 +686,7 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
 
     return array_map(fn($row) => [
         'id'         => (int) $row['id'],
+        'media_type' => $row['media_type'],
         'user_name'  => $row['user_name'],
         'time'       => date('d/m H:i', strtotime($row['created_at'])),
         'lat'        => $row['lat'] !== null ? (float) $row['lat'] : null,

@@ -1822,6 +1822,7 @@ CREATE TABLE IF NOT EXISTS `mission_photos` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `mission_id` INT UNSIGNED NOT NULL,
     `user_id` INT UNSIGNED NOT NULL,
+    `media_type` ENUM('photo','video') NOT NULL DEFAULT 'photo',
     `stored_name` VARCHAR(255) NOT NULL,
     `original_name` VARCHAR(255) NULL,
     `mime_type` VARCHAR(100) NOT NULL,

@@ -1,9 +1,9 @@
 <?php
 /**
- * VolunteerOps - Mission Photo Endpoint
- * War Room: any approved participant uploads a field photo (sender, timestamp,
- * and best-effort GPS are captured); admins or the sender can delete one.
- * POST only, AJAX/multipart.
+ * VolunteerOps - Mission Photo/Video Endpoint
+ * War Room: any approved participant uploads a field photo or video (sender,
+ * timestamp, and best-effort GPS are captured); admins or the sender can
+ * delete one. POST only, AJAX/multipart.
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -13,12 +13,13 @@ header('Content-Type: application/json');
 
 /**
  * Notify command staff (system/department admins, this mission's shift leaders,
- * and its responsible user) that a field photo came in. Mirrors the recipient
- * resolution in mission-dispatch.php's notifyDispatchArrival().
+ * and its responsible user) that a field photo/video came in. Mirrors the
+ * recipient resolution in mission-dispatch.php's notifyDispatchArrival().
  */
-function notifyPhotoReceived(int $missionId, string $missionTitle, ?int $responsibleUserId, string $senderName, int $senderId): void {
+function notifyPhotoReceived(int $missionId, string $missionTitle, ?int $responsibleUserId, string $senderName, int $senderId, string $mediaType): void {
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $message = $senderName . ' έστειλε φωτογραφία από το πεδίο για την αποστολή «' . $missionTitle . '».';
+    $kind = $mediaType === 'video' ? 'βίντεο' : 'φωτογραφία';
+    $message = $senderName . ' έστειλε ' . $kind . ' από το πεδίο για την αποστολή «' . $missionTitle . '».';
 
     $admins = dbFetchAll("SELECT id FROM users WHERE role IN (?, ?) AND is_active = 1", [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
     $leaders = dbFetchAll(
@@ -37,8 +38,10 @@ function notifyPhotoReceived(int $missionId, string $missionTitle, ?int $respons
     }
     $recipientIds = array_values(array_unique(array_diff($recipientIds, [$senderId])));
 
+    $title = $mediaType === 'video' ? '🎥 Νέο Βίντεο' : '📷 Νέα Φωτογραφία';
+    $code = $mediaType === 'video' ? 'mission_video_received' : 'mission_photo_received';
     foreach ($recipientIds as $recipientId) {
-        sendNotification($recipientId, '📷 Νέα Φωτογραφία', $message, 'info', 'mission_photo_received', [
+        sendNotification($recipientId, $title, $message, 'info', $code, [
             'url' => $warRoomUrl,
             'tag' => 'photo-received-mission-' . $missionId,
         ]);
@@ -80,28 +83,36 @@ $action = post('action');
 
 if ($action === 'upload') {
     if (!$isApprovedParticipant) {
-        echo json_encode(['ok' => false, 'error' => 'Μόνο εγκεκριμένοι εθελοντές μπορούν να στείλουν φωτογραφία.']);
+        echo json_encode(['ok' => false, 'error' => 'Μόνο εγκεκριμένοι εθελοντές μπορούν να στείλουν φωτογραφία ή βίντεο.']);
         exit;
     }
-    if (empty($_FILES['photo']['name']) || $_FILES['photo']['error'] !== UPLOAD_ERR_OK) {
-        echo json_encode(['ok' => false, 'error' => 'Επιλέξτε μια φωτογραφία.']);
+    if (empty($_FILES['media']['name']) || $_FILES['media']['error'] !== UPLOAD_ERR_OK) {
+        echo json_encode(['ok' => false, 'error' => 'Επιλέξτε ένα αρχείο.']);
         exit;
     }
 
-    $file = $_FILES['photo'];
-    $allowedExt  = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-    $allowedMime = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    $file = $_FILES['media'];
+    $photoExt   = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+    $photoMime  = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    $videoExt   = ['mp4', 'webm', 'mov', 'm4v'];
+    $videoMime  = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-m4v'];
     $origName = basename($file['name']);
     $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mime = $finfo->file($file['tmp_name']);
 
-    if (!in_array($ext, $allowedExt, true) || !in_array($mime, $allowedMime, true)) {
-        echo json_encode(['ok' => false, 'error' => 'Επιτρέπονται μόνο αρχεία εικόνας (JPG, PNG, GIF, WebP).']);
+    if (in_array($ext, $photoExt, true) && in_array($mime, $photoMime, true)) {
+        $mediaType = 'photo';
+        $maxSize = UPLOAD_MAX_SIZE;
+    } elseif (in_array($ext, $videoExt, true) && in_array($mime, $videoMime, true)) {
+        $mediaType = 'video';
+        $maxSize = VIDEO_MAX_SIZE;
+    } else {
+        echo json_encode(['ok' => false, 'error' => 'Επιτρέπονται μόνο αρχεία εικόνας (JPG, PNG, GIF, WebP) ή βίντεο (MP4, WebM, MOV).']);
         exit;
     }
-    if ($file['size'] > UPLOAD_MAX_SIZE) {
-        echo json_encode(['ok' => false, 'error' => 'Το αρχείο υπερβαίνει το μέγιστο επιτρεπτό μέγεθος.']);
+    if ($file['size'] > $maxSize) {
+        echo json_encode(['ok' => false, 'error' => 'Το αρχείο υπερβαίνει το μέγιστο επιτρεπτό μέγεθος (' . ($maxSize / 1024 / 1024) . 'MB).']);
         exit;
     }
 
@@ -121,16 +132,17 @@ if ($action === 'upload') {
     $lng = ($lngRaw !== '' && $lngRaw !== null && is_numeric($lngRaw)) ? (float) $lngRaw : null;
 
     $photoId = dbInsert(
-        "INSERT INTO mission_photos (mission_id, user_id, stored_name, original_name, mime_type, file_size, lat, lng, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $userId, $storedName, $origName, $mime, (int) $file['size'], $lat, $lng]
+        "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, original_name, mime_type, file_size, lat, lng, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $userId, $mediaType, $storedName, $origName, $mime, (int) $file['size'], $lat, $lng]
     );
-    logAudit('upload_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId]);
+    logAudit('upload_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId, 'media_type' => $mediaType]);
 
-    notifyPhotoReceived($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $user['name'], $userId);
+    notifyPhotoReceived($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $user['name'], $userId, $mediaType);
 
-    echo json_encode(['ok' => true, 'photo' => [
+    echo json_encode(['ok' => true, 'media' => [
         'id'         => (int) $photoId,
+        'media_type' => $mediaType,
         'user_name'  => $user['name'],
         'time'       => date('d/m H:i'),
         'lat'        => $lat,

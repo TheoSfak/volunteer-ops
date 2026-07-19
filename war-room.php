@@ -165,6 +165,44 @@ if (isPost()) {
             setFlash('success', 'Στάλθηκε αίτημα φωτογραφίας σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
         }
         redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'request_video') {
+        if (!$canManageWarRoom) {
+            setFlash('error', 'Δεν έχετε δικαίωμα να ζητήσετε βίντεο.');
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $activeRecipients = dbFetchAll(
+            "SELECT DISTINCT pr.volunteer_id, u.name
+             FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             JOIN users u ON u.id = pr.volunteer_id
+             WHERE s.mission_id = ? AND pr.status = ?
+               AND s.start_time <= NOW() AND s.end_time > NOW()",
+            [$missionId, PARTICIPATION_APPROVED]
+        );
+        $activeIds = array_map('intval', array_column($activeRecipients, 'volunteer_id'));
+        $requestedIds = post('request_scope') === 'all'
+            ? $activeIds
+            : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
+
+        if (empty($requestedIds)) {
+            setFlash('warning', 'Επιλέξτε τουλάχιστον έναν εθελοντή με ενεργή βάρδια.');
+        } else {
+            $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+            $title = '🎥 Ζητείται βίντεο';
+            $message = 'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε βίντεο από το πεδίο.';
+            foreach ($requestedIds as $recipientId) {
+                sendNotification($recipientId, $title, $message, 'warning', '', [
+                    'url' => $warRoomUrl,
+                    'tag' => 'video-request-mission-' . $missionId,
+                    'vibrate' => [300, 100, 300, 100, 500],
+                    'bannerMission' => $missionId,
+                ]);
+            }
+            logAudit('request_mission_video', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
+            setFlash('success', 'Στάλθηκε αίτημα βίντεο σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
+        }
+        redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'global_message') {
         if (!$canManageWarRoom) {
             setFlash('error', 'Δεν έχετε δικαίωμα να στείλετε καθολικό μήνυμα.');
@@ -430,7 +468,7 @@ if (get('ajax') === '1') {
         'time' => date('H:i:s'),
         'banner' => $bannerRow ? ['id' => (int)$bannerRow['id'], 'message' => $bannerRow['message']] : null,
         'dispatches' => $dispatches,
-        'photos' => $photos,
+        'media' => $photos,
     ]);
     exit;
 }
@@ -532,6 +570,7 @@ include __DIR__ . '/includes/header.php';
 <style>
     #warRoomMap { height: 520px; border-radius: 12px; }
     .war-room-hero { background: linear-gradient(135deg, #172554, #b91c1c); color: #fff; border-radius: 14px; }
+    .war-room-hero h1 { color: #fff; font-weight: 700; }
     .participant-row { border-left: 4px solid #e2e8f0; }
     .participant-row.needs-help { border-left-color: #dc2626; }
     .war-room-banner { display: none; align-items: center; gap: 10px; background: #000; border-bottom: 2px solid #dc2626; padding: 8px 12px; }
@@ -582,16 +621,22 @@ include __DIR__ . '/includes/header.php';
 
     <div class="col-lg-4">
         <div class="card shadow-sm h-100">
-            <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i>Φωτογραφίες Πεδίου</h5></div>
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i>Φωτογραφίες &amp; Βίντεο Πεδίου</h5></div>
             <div class="card-body d-flex flex-column" style="height:520px;">
                 <?php if ($isApprovedParticipant): ?>
-                <label class="btn btn-primary w-100 mb-2 mb-0">
-                    <i class="bi bi-camera-fill me-1"></i>Αποστολή φωτογραφίας
-                    <input type="file" id="photoInput" accept="image/*" class="d-none">
-                </label>
-                <div class="small mb-2" id="photoUploadStatus"></div>
+                <div class="d-flex gap-2 mb-2">
+                    <label class="btn btn-primary w-100 mb-0">
+                        <i class="bi bi-camera-fill me-1"></i>Φωτογραφία
+                        <input type="file" id="photoInput" accept="image/*" class="d-none">
+                    </label>
+                    <label class="btn btn-primary w-100 mb-0">
+                        <i class="bi bi-camera-reels-fill me-1"></i>Βίντεο
+                        <input type="file" id="videoInput" accept="video/*" class="d-none">
+                    </label>
+                </div>
+                <div class="small mb-2" id="mediaUploadStatus"></div>
                 <?php endif; ?>
-                <div id="photoList" class="flex-grow-1 overflow-auto"></div>
+                <div id="mediaList" class="flex-grow-1 overflow-auto"></div>
             </div>
         </div>
     </div>
@@ -750,6 +795,35 @@ include __DIR__ . '/includes/header.php';
                     <form method="post">
                         <?= csrfField() ?>
                         <input type="hidden" name="action" value="request_photo">
+                        <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
+                            <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
+                        </button>
+                        <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
+                        <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
+                            <?php foreach ($activeParticipants as $participant): ?>
+                            <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
+                                <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
+                            </label>
+                            <?php endforeach; ?>
+                        </div>
+                        <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
+                            <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
+                        </button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4 border-warning">
+            <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-reels-fill me-1"></i>Ζήτηση βίντεο</h5></div>
+            <div class="card-body">
+                <?php if (empty($activeParticipants)): ?>
+                    <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
+                <?php else: ?>
+                    <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση. Ο ήχος εξαρτάται από τις ρυθμίσεις της συσκευής του εθελοντή.</p>
+                    <form method="post">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="request_video">
                         <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
                             <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
                         </button>
@@ -952,7 +1026,7 @@ const csrfToken = '<?= csrfToken() ?>';
 const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>;
 let pins = <?= json_encode($pins) ?>;
 let dispatches = <?= json_encode($dispatches) ?>;
-let photos = <?= json_encode($photos) ?>;
+let media = <?= json_encode($photos) ?>;
 const map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
 const pinLayer = L.layerGroup().addTo(map);
@@ -1023,46 +1097,49 @@ function renderPins(items) {
     }
 }
 
-function renderPhotos(items) {
-    const list = document.getElementById('photoList');
+function renderMedia(items) {
+    const list = document.getElementById('mediaList');
     if (!items.length) {
-        list.innerHTML = '<div class="text-muted small">Δεν έχουν σταλεί φωτογραφίες ακόμη.</div>';
+        list.innerHTML = '<div class="text-muted small">Δεν έχουν σταλεί φωτογραφίες ή βίντεο ακόμη.</div>';
         return;
     }
-    list.innerHTML = items.map(p => `
+    list.innerHTML = items.map(m => `
         <div class="card mb-2">
-            <img src="mission-photo-view.php?id=${p.id}" class="card-img-top" style="height:160px;object-fit:cover;cursor:pointer;" onclick="window.open('mission-photo-view.php?id=${p.id}', '_blank')">
+            ${m.media_type === 'video'
+                ? `<video src="mission-photo-view.php?id=${m.id}" class="card-img-top" style="height:160px;object-fit:cover;background:#000;" controls preload="metadata"></video>`
+                : `<img src="mission-photo-view.php?id=${m.id}" class="card-img-top" style="height:160px;object-fit:cover;cursor:pointer;" onclick="window.open('mission-photo-view.php?id=${m.id}', '_blank')">`}
             <div class="card-body p-2 d-flex justify-content-between align-items-center">
                 <div class="small">
-                    <strong>${p.user_name}</strong><br>
-                    <span class="text-muted">${p.time}</span>
+                    <strong>${m.media_type === 'video' ? '🎥 ' : '📷 '}${m.user_name}</strong><br>
+                    <span class="text-muted">${m.time}</span>
                 </div>
                 <div class="d-flex gap-1">
-                    ${p.lat !== null ? `<button type="button" class="btn btn-sm btn-outline-secondary photo-locate-btn" data-lat="${p.lat}" data-lng="${p.lng}" title="Εμφάνιση στον χάρτη"><i class="bi bi-geo-alt-fill"></i></button>` : ''}
-                    ${p.can_delete ? `<button type="button" class="btn btn-sm btn-outline-danger photo-delete-btn" data-id="${p.id}" title="Διαγραφή"><i class="bi bi-trash"></i></button>` : ''}
+                    ${m.lat !== null ? `<button type="button" class="btn btn-sm btn-outline-secondary media-locate-btn" data-lat="${m.lat}" data-lng="${m.lng}" title="Εμφάνιση στον χάρτη"><i class="bi bi-geo-alt-fill"></i></button>` : ''}
+                    ${m.can_delete ? `<button type="button" class="btn btn-sm btn-outline-danger media-delete-btn" data-id="${m.id}" title="Διαγραφή"><i class="bi bi-trash"></i></button>` : ''}
                 </div>
             </div>
         </div>
     `).join('');
-    list.querySelectorAll('.photo-locate-btn').forEach(btn => btn.addEventListener('click', () => {
+    list.querySelectorAll('.media-locate-btn').forEach(btn => btn.addEventListener('click', () => {
         map.setView([parseFloat(btn.dataset.lat), parseFloat(btn.dataset.lng)], 16);
     }));
-    list.querySelectorAll('.photo-delete-btn').forEach(btn => btn.addEventListener('click', () => {
-        if (!confirm('Διαγραφή αυτής της φωτογραφίας;')) return;
+    list.querySelectorAll('.media-delete-btn').forEach(btn => btn.addEventListener('click', () => {
+        if (!confirm('Διαγραφή αυτού του αρχείου;')) return;
         const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: btn.dataset.id});
         fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
-            if (result.ok) renderPhotos(photos = photos.filter(p => String(p.id) !== btn.dataset.id));
+            if (result.ok) renderMedia(media = media.filter(m => String(m.id) !== btn.dataset.id));
             else alert(result.error || 'Αποτυχία διαγραφής.');
         });
     }));
 }
 
-const photoInput = document.getElementById('photoInput');
-if (photoInput) {
-    photoInput.addEventListener('change', () => {
-        const file = photoInput.files[0];
+function wireMediaInput(inputId, sentLabel) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    input.addEventListener('change', () => {
+        const file = input.files[0];
         if (!file) return;
-        const status = document.getElementById('photoUploadStatus');
+        const status = document.getElementById('mediaUploadStatus');
         status.textContent = 'Αποστολή…';
         status.className = 'small mb-2';
 
@@ -1071,19 +1148,19 @@ if (photoInput) {
             data.append('csrf_token', csrfToken);
             data.append('action', 'upload');
             data.append('mission_id', '<?= $missionId ?>');
-            data.append('photo', file);
+            data.append('media', file);
             if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
             fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
                 if (result.ok) {
-                    status.textContent = '✓ Η φωτογραφία εστάλη.';
+                    status.textContent = '✓ ' + sentLabel + ' εστάλη.';
                     status.className = 'small mb-2 text-success';
-                    renderPhotos(photos = [result.photo, ...photos]);
+                    renderMedia(media = [result.media, ...media]);
                 } else {
                     status.textContent = result.error || 'Αποτυχία αποστολής.';
                     status.className = 'small mb-2 text-danger';
                 }
-                photoInput.value = '';
-            }).catch(() => { status.textContent = 'Αποτυχία αποστολής.'; status.className = 'small mb-2 text-danger'; photoInput.value = ''; });
+                input.value = '';
+            }).catch(() => { status.textContent = 'Αποτυχία αποστολής.'; status.className = 'small mb-2 text-danger'; input.value = ''; });
         };
 
         if (navigator.geolocation) {
@@ -1097,7 +1174,10 @@ if (photoInput) {
         }
     });
 }
-setTimeout(() => { renderPins(pins); renderDispatches(dispatches); renderPhotos(photos); }, 200);
+wireMediaInput('photoInput', 'Η φωτογραφία');
+wireMediaInput('videoInput', 'Το βίντεο');
+
+setTimeout(() => { renderPins(pins); renderDispatches(dispatches); renderMedia(media); }, 200);
 
 let bannerAfterId = <?= $bannerSinceId ?>;
 let bannerHideTimer = null;
@@ -1182,7 +1262,7 @@ function setFieldStatus(btn, prId, status) {
 setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => response.json()).then(data => {
     renderPins(data.pins || []);
     if (data.dispatches) renderDispatches(dispatches = data.dispatches);
-    if (data.photos) renderPhotos(photos = data.photos);
+    if (data.media) renderMedia(media = data.media);
     document.getElementById('mapRefresh').textContent = data.time || '';
     if (data.banner && data.banner.id > bannerAfterId) {
         bannerAfterId = data.banner.id;
