@@ -4084,6 +4084,119 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 71,
+            'description' => 'Create mission_teams + mission_team_members tables (War Room team assignments)',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_teams'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE mission_teams (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            codename VARCHAR(20) NOT NULL,
+                            team_number TINYINT UNSIGNED NOT NULL,
+                            leader_id INT UNSIGNED NULL,
+                            created_by INT UNSIGNED NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (leader_id) REFERENCES users(id) ON DELETE SET NULL,
+                            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+                            UNIQUE KEY uniq_mission_number (mission_id, team_number)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $table2 = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_team_members'"
+                );
+                if (!$table2) {
+                    dbExecute(
+                        "CREATE TABLE mission_team_members (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            team_id INT UNSIGNED NOT NULL,
+                            mission_id INT UNSIGNED NOT NULL,
+                            user_id INT UNSIGNED NOT NULL,
+                            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE CASCADE,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            UNIQUE KEY uniq_mission_user (mission_id, user_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
+        [
+            'version'     => 72,
+            'description' => 'Add team_id to mission_chat_messages (War Room private team chat) + register mission_team_chat notification',
+            'up' => function () {
+                // mission_chat_messages already exists (shipped since install via schema.sql, for the
+                // existing mission-view.php general chat) — just extend it with a nullable team_id.
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_chat_messages'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE mission_chat_messages (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            user_id INT UNSIGNED NOT NULL,
+                            message TEXT NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            INDEX idx_mission_created (mission_id, created_at)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_chat_messages' AND COLUMN_NAME = 'team_id'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE mission_chat_messages ADD COLUMN team_id INT UNSIGNED NULL AFTER mission_id");
+                }
+
+                $fk = dbFetchOne(
+                    "SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_chat_messages'
+                       AND COLUMN_NAME = 'team_id' AND REFERENCED_TABLE_NAME = 'mission_teams'"
+                );
+                if (!$fk) {
+                    dbExecute("ALTER TABLE mission_chat_messages ADD CONSTRAINT fk_mission_chat_team FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE CASCADE");
+                }
+
+                $idx = dbFetchOne(
+                    "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_chat_messages' AND INDEX_NAME = 'idx_chat_room'"
+                );
+                if (!$idx) {
+                    dbExecute("ALTER TABLE mission_chat_messages ADD INDEX idx_chat_room (mission_id, team_id, id)");
+                }
+
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_team_chat'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_team_chat',
+                            'Μήνυμα Ομάδας War Room',
+                            'Νέο μήνυμα στο ιδιωτικό chat της ομάδας σας σε μια αποστολή (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
