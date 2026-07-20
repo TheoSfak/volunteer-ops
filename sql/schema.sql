@@ -1841,7 +1841,8 @@ CREATE TABLE IF NOT EXISTS `mission_photos` (
 CREATE TABLE IF NOT EXISTS `mission_orders` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `mission_id` INT UNSIGNED NOT NULL,
-    `order_type` ENUM('location','photo','video') NOT NULL,
+    `order_type` ENUM('location','photo','video','task') NOT NULL,
+    `task_text` TEXT NULL,
     `created_by` INT UNSIGNED NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
@@ -1875,6 +1876,31 @@ CREATE TABLE IF NOT EXISTS `mission_dispatch_receipts` (
     FOREIGN KEY (`dispatch_id`) REFERENCES `mission_dispatch_points`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- MISSION SHORTAGE REPORTS (War Room team-to-admin shortage ticketing)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_shortage_reports` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `reporter_id` INT UNSIGNED NOT NULL,
+    `team_id` INT UNSIGNED NULL,
+    `shortage_type` ENUM('people','equipment','medical','vehicle','other') NOT NULL,
+    `severity` ENUM('low','medium','high','critical') NOT NULL DEFAULT 'medium',
+    `title` VARCHAR(255) NOT NULL,
+    `description` TEXT NOT NULL,
+    `acknowledged_at` TIMESTAMP NULL,
+    `acknowledged_by` INT UNSIGNED NULL,
+    `resolved_at` TIMESTAMP NULL,
+    `resolved_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`reporter_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`acknowledged_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`resolved_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_shortage_mission` (`mission_id`, `resolved_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

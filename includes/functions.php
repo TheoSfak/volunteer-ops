@@ -721,3 +721,85 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
         'can_delete' => $canManageWarRoom || (int) $row['user_id'] === $currentUserId,
     ], $rows);
 }
+
+/**
+ * War Room: load $userId's own task-type orders for a mission — the "Οι Εντολές μου"
+ * self-service checklist. Unlike location/photo/video (auto-fulfilled elsewhere),
+ * task orders can only be marked complete by the recipient via mission-order.php
+ * action=complete, so the UI needs each one's ack/fulfill state. Shared by
+ * war-room.php (full render + ajax poll), like loadMissionPhotosForUser above.
+ */
+function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
+    $rows = dbFetchAll(
+        "SELECT o.id AS order_id, o.task_text, o.created_at, r.acknowledged_at, r.fulfilled_at
+         FROM mission_order_recipients r
+         JOIN mission_orders o ON o.id = r.order_id
+         WHERE o.mission_id = ? AND r.user_id = ? AND o.order_type = 'task'
+         ORDER BY o.created_at DESC",
+        [$missionId, $userId]
+    );
+
+    return array_map(fn($row) => [
+        'order_id'        => (int) $row['order_id'],
+        'task_text'       => $row['task_text'],
+        'sent_at'         => date('d/m H:i', strtotime($row['created_at'])),
+        'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
+        'fulfilled_at'    => $row['fulfilled_at'] ? date('d/m H:i', strtotime($row['fulfilled_at'])) : null,
+    ], $rows);
+}
+
+/**
+ * War Room: command-staff recipient set for admin-facing alerts (shortage
+ * reports, and reusable for similar future cases) — system/dept admins +
+ * this mission's shift leaders + the mission's responsible_user_id. Mirrors
+ * the resolution already duplicated in mission-dispatch.php/mission-photo.php/
+ * mission-chat.php/volunteer-status.php; centralized here for new code only,
+ * not retrofitted into those four.
+ */
+function getMissionCommandStaffIds(int $missionId, ?int $responsibleUserId, int $excludeUserId = 0): array {
+    $admins = dbFetchAll("SELECT id FROM users WHERE role IN (?, ?) AND is_active = 1", [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+    $leaders = dbFetchAll(
+        "SELECT DISTINCT u.id FROM users u
+         JOIN participation_requests pr ON pr.volunteer_id = u.id
+         JOIN shifts s ON pr.shift_id = s.id
+         WHERE s.mission_id = ? AND u.role = ? AND u.is_active = 1 AND pr.status = ?",
+        [$missionId, ROLE_SHIFT_LEADER, PARTICIPATION_APPROVED]
+    );
+    $ids = array_merge(array_map('intval', array_column($admins, 'id')), array_map('intval', array_column($leaders, 'id')));
+    if ($responsibleUserId) {
+        $ids[] = (int) $responsibleUserId;
+    }
+    return array_values(array_unique(array_diff($ids, [$excludeUserId])));
+}
+
+/**
+ * War Room: unresolved shortage reports for the admin "Αναφορές Έλλειψης" card.
+ * Caller MUST gate this behind $canManageWarRoom before calling — titles,
+ * descriptions and reporter identity are sensitive, this function has no
+ * built-in permission check of its own.
+ */
+function loadUnresolvedShortageReportsForMission(int $missionId): array {
+    $rows = dbFetchAll(
+        "SELECT r.id, r.shortage_type, r.severity, r.title, r.description, r.created_at, r.acknowledged_at,
+                r.team_id, u.name AS reporter_name, mt.codename, mt.team_number
+         FROM mission_shortage_reports r
+         JOIN users u ON u.id = r.reporter_id
+         LEFT JOIN mission_teams mt ON mt.id = r.team_id
+         WHERE r.mission_id = ? AND r.resolved_at IS NULL
+         ORDER BY FIELD(r.severity, 'critical', 'high', 'medium', 'low'), r.created_at ASC",
+        [$missionId]
+    );
+
+    return array_map(fn($row) => [
+        'id'              => (int) $row['id'],
+        'type_label'      => SHORTAGE_TYPE_LABELS[$row['shortage_type']] ?? $row['shortage_type'],
+        'severity'        => $row['severity'],
+        'severity_label'  => SHORTAGE_SEVERITY_LABELS[$row['severity']] ?? $row['severity'],
+        'title'           => $row['title'],
+        'description'     => $row['description'],
+        'reporter_name'   => $row['reporter_name'],
+        'team_label'      => $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'Χωρίς ομάδα',
+        'created_at'      => date('d/m H:i', strtotime($row['created_at'])),
+        'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
+    ], $rows);
+}
