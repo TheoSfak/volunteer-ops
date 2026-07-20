@@ -4441,6 +4441,77 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 78,
+            'description' => 'Add task order type + task_text to mission_orders (War Room free-form task orders)',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_orders' AND COLUMN_NAME = 'task_text'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE mission_orders ADD COLUMN task_text TEXT NULL AFTER order_type");
+                }
+
+                $orderTypeCol = dbFetchValue(
+                    "SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_orders' AND COLUMN_NAME = 'order_type'"
+                );
+                if ($orderTypeCol && !str_contains($orderTypeCol, "'task'")) {
+                    dbExecute("ALTER TABLE mission_orders MODIFY COLUMN order_type ENUM('location','photo','video','task') NOT NULL");
+                }
+            },
+        ],
+
+        [
+            'version'     => 79,
+            'description' => 'Create mission_shortage_reports table (War Room team-to-admin shortage ticketing)',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_shortage_reports'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE mission_shortage_reports (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            reporter_id INT UNSIGNED NOT NULL,
+                            team_id INT UNSIGNED NULL,
+                            shortage_type ENUM('people','equipment','medical','vehicle','other') NOT NULL,
+                            severity ENUM('low','medium','high','critical') NOT NULL DEFAULT 'medium',
+                            title VARCHAR(255) NOT NULL,
+                            description TEXT NOT NULL,
+                            acknowledged_at TIMESTAMP NULL,
+                            acknowledged_by INT UNSIGNED NULL,
+                            resolved_at TIMESTAMP NULL,
+                            resolved_by INT UNSIGNED NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
+                            FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL,
+                            FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL,
+                            FOREIGN KEY (resolved_by) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_shortage_mission (mission_id, resolved_at)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_shortage_report'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_shortage_report',
+                            'Αναφορά Έλλειψης War Room (χαμηλή/μεσαία)',
+                            'Ένας εθελοντής ανέφερε έλλειψη χαμηλής/μεσαίας σοβαρότητας (η υψηλή/κρίσιμη ειδοποιεί πάντα, ανεξαρτήτως ρύθμισης).',
+                        ]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

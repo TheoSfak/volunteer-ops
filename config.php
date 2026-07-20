@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.78.0');
-define('DB_SCHEMA_VERSION', 77);
+define('APP_VERSION', '3.80.0');
+define('DB_SCHEMA_VERSION', 79);
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
@@ -243,6 +243,29 @@ define('COMPLAINT_PRIORITY_COLORS', [
     COMPLAINT_PRIORITY_LOW => 'secondary',
     COMPLAINT_PRIORITY_MEDIUM => 'warning',
     COMPLAINT_PRIORITY_HIGH => 'danger',
+]);
+
+// War Room shortage reports
+define('SHORTAGE_TYPE_LABELS', [
+    'people'    => 'Προσωπικό',
+    'equipment' => 'Εξοπλισμός',
+    'medical'   => 'Υγειονομικό υλικό',
+    'vehicle'   => 'Όχημα',
+    'other'     => 'Άλλο',
+]);
+
+define('SHORTAGE_SEVERITY_LABELS', [
+    'low'      => 'Χαμηλή',
+    'medium'   => 'Μεσαία',
+    'high'     => 'Υψηλή',
+    'critical' => 'Κρίσιμη',
+]);
+
+define('SHORTAGE_SEVERITY_COLORS', [
+    'low'      => 'secondary',
+    'medium'   => 'info',
+    'high'     => 'warning',
+    'critical' => 'danger',
 ]);
 
 

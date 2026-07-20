@@ -58,6 +58,14 @@ try {
     exit;
 }
 
+// Audit trail for every field-status change (War Room Activity feed source).
+// 'needs_help' keeps its pre-existing action string unchanged; on_way/on_site
+// are new — previously only needs_help was ever logged here.
+$auditActionByStatus = [
+    'on_way' => 'field_status_on_way', 'on_site' => 'field_status_on_site', 'needs_help' => 'needs_help',
+];
+logAudit($auditActionByStatus[$status], 'participation_requests', $prId);
+
 // If needs_help → notify all admins + shift leader (single bulk INSERT)
 if ($status === 'needs_help') {
     $currentUser = getCurrentUser();
@@ -83,8 +91,6 @@ if ($status === 'needs_help') {
     if (!empty($recipientIds)) {
         sendBulkNotifications($recipientIds, $notifyTitle, $notifyMessage, 'danger');
     }
-
-    logAudit('needs_help', 'participation_requests', $prId);
 }
 
 $labels = [

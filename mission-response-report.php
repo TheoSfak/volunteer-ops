@@ -45,6 +45,7 @@ $typeMeta = [
     'location' => '📍 Στίγμα GPS',
     'photo'    => '📷 Φωτογραφία',
     'video'    => '🎥 Βίντεο',
+    'task'     => '📋 Γενική Εντολή',
     'dispatch' => '🧭 Εντολή Κίνησης',
 ];
 
@@ -59,7 +60,7 @@ $detail = [];
 
 // ── location/photo/video orders ─────────────────────────────────────────────
 $orderRows = dbFetchAll(
-    "SELECT o.order_type, o.created_at AS sent_at, r.team_id, r.user_id, u.name AS user_name,
+    "SELECT o.order_type, o.task_text, o.created_at AS sent_at, r.team_id, r.user_id, u.name AS user_name,
             r.acknowledged_at, r.fulfilled_at
      FROM mission_order_recipients r
      JOIN mission_orders o ON o.id = r.order_id
@@ -76,7 +77,7 @@ foreach ($orderRows as $row) {
         'team_id'     => $teamId,
         'team_label'  => $teamId ? ($teamLabels[$teamId] ?? '—') : 'Χωρίς ομάδα',
         'user_name'   => $row['user_name'],
-        'label'       => null,
+        'label'       => $row['order_type'] === 'task' ? $row['task_text'] : null,
         'sent_at'     => $row['sent_at'],
         'ack_at'      => $row['acknowledged_at'],
         'fulfill_at'  => $row['fulfilled_at'],
@@ -202,4 +203,77 @@ $detail = array_map(function ($row) {
     return $row;
 }, $detail);
 
-echo json_encode(['ok' => true, 'summary' => $summary, 'detail' => $detail]);
+// ── shortage reports (inverse direction: admin responding to a team's report) ──
+$shortageRows = dbFetchAll(
+    "SELECT r.shortage_type, r.severity, r.title, r.created_at AS sent_at, r.team_id, u.name AS user_name,
+            r.acknowledged_at, r.resolved_at
+     FROM mission_shortage_reports r
+     JOIN users u ON u.id = r.reporter_id
+     WHERE r.mission_id = ?
+     ORDER BY r.created_at DESC",
+    [$missionId]
+);
+$shortageDetail = [];
+foreach ($shortageRows as $row) {
+    $teamId = $row['team_id'] ? (int) $row['team_id'] : null;
+    $shortageDetail[] = [
+        'type_label'     => SHORTAGE_TYPE_LABELS[$row['shortage_type']] ?? $row['shortage_type'],
+        'severity'       => $row['severity'],
+        'severity_label' => SHORTAGE_SEVERITY_LABELS[$row['severity']] ?? $row['severity'],
+        'team_label'     => $teamId ? ($teamLabels[$teamId] ?? '—') : 'Χωρίς ομάδα',
+        'reporter_name'  => $row['user_name'],
+        'title'          => $row['title'],
+        'sent_at'        => $row['sent_at'],
+        'seen_at'        => $row['acknowledged_at'],
+        'resolved_at'    => $row['resolved_at'],
+    ];
+}
+foreach ($shortageDetail as &$row) {
+    $row['seen_minutes'] = reportMinutesBetween($row['sent_at'], $row['seen_at']);
+    $row['resolved_minutes'] = reportMinutesBetween($row['sent_at'], $row['resolved_at']);
+}
+unset($row);
+usort($shortageDetail, fn($a, $b) => strtotime($b['sent_at']) <=> strtotime($a['sent_at']));
+
+$bySeverity = [];
+foreach ($shortageDetail as $row) {
+    $sev = $row['severity'];
+    if (!isset($bySeverity[$sev])) {
+        $bySeverity[$sev] = ['label' => $row['severity_label'], 'count' => 0, 'seen_count' => 0, 'resolved_count' => 0, 'seen_sum' => 0.0, 'resolved_sum' => 0.0];
+    }
+    $bySeverity[$sev]['count']++;
+    if ($row['seen_minutes'] !== null) {
+        $bySeverity[$sev]['seen_count']++;
+        $bySeverity[$sev]['seen_sum'] += $row['seen_minutes'];
+    }
+    if ($row['resolved_minutes'] !== null) {
+        $bySeverity[$sev]['resolved_count']++;
+        $bySeverity[$sev]['resolved_sum'] += $row['resolved_minutes'];
+    }
+}
+$severityRank = ['critical' => 0, 'high' => 1, 'medium' => 2, 'low' => 3];
+$shortageSummary = [];
+foreach ($bySeverity as $sev => $s) {
+    $shortageSummary[] = [
+        'severity'             => $sev,
+        'severity_label'       => $s['label'],
+        'report_count'         => $s['count'],
+        'seen_rate'            => $s['count'] ? round($s['seen_count'] / $s['count'] * 100) : 0,
+        'resolved_rate'        => $s['count'] ? round($s['resolved_count'] / $s['count'] * 100) : 0,
+        'avg_seen_minutes'     => $s['seen_count'] ? round($s['seen_sum'] / $s['seen_count'], 1) : null,
+        'avg_resolved_minutes' => $s['resolved_count'] ? round($s['resolved_sum'] / $s['resolved_count'], 1) : null,
+    ];
+}
+usort($shortageSummary, fn($a, $b) => ($severityRank[$a['severity']] ?? 9) <=> ($severityRank[$b['severity']] ?? 9));
+
+$shortageDetail = array_map(function ($row) {
+    $row['sent_at'] = date('d/m H:i', strtotime($row['sent_at']));
+    $row['seen_at'] = $row['seen_at'] ? date('d/m H:i', strtotime($row['seen_at'])) : null;
+    $row['resolved_at'] = $row['resolved_at'] ? date('d/m H:i', strtotime($row['resolved_at'])) : null;
+    return $row;
+}, $shortageDetail);
+
+echo json_encode([
+    'ok' => true, 'summary' => $summary, 'detail' => $detail,
+    'shortageSummary' => $shortageSummary, 'shortageDetail' => $shortageDetail,
+]);
