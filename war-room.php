@@ -69,7 +69,7 @@ function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $
  * by request_location/request_photo/request_video — the only difference between them
  * is order_type + notification copy.
  */
-function createMissionOrderAndNotify(int $missionId, string $missionTitle, string $orderType, int $createdBy, array $recipientIds, string $title, string $message): int {
+function createMissionOrderAndNotify(int $missionId, string $missionTitle, string $orderType, int $createdBy, array $recipientIds, string $title, string $message, string $broadcastMessage): int {
     $orderId = dbInsert(
         "INSERT INTO mission_orders (mission_id, order_type, created_by, created_at) VALUES (?, ?, ?, NOW())",
         [$missionId, $orderType, $createdBy]
@@ -88,6 +88,29 @@ function createMissionOrderAndNotify(int $missionId, string $missionTitle, strin
             'vibrate' => [300, 100, 300, 100, 500],
             'bannerMission' => $missionId,
             'orderId' => (int) $orderId,
+        ]);
+    }
+
+    // Every order also scrolls as a banner for every other approved participant of the
+    // mission, not just whoever it was actually addressed to, so the whole mission stays
+    // aware of what's being asked. No orderId here — no order row, no "Ελήφθη" button —
+    // this is informational only, unlike the real recipients notified above.
+    $allApproved = dbFetchAll(
+        "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
+         JOIN shifts s ON s.id = pr.shift_id
+         WHERE s.mission_id = ? AND pr.status = ?",
+        [$missionId, PARTICIPATION_APPROVED]
+    );
+    $bystanderIds = array_diff(
+        array_map('intval', array_column($allApproved, 'volunteer_id')),
+        $recipientIds,
+        [$createdBy]
+    );
+    foreach ($bystanderIds as $bystanderId) {
+        sendNotification($bystanderId, $title, $broadcastMessage, 'info', '', [
+            'url' => $warRoomUrl,
+            'tag' => $orderType . '-request-mission-' . $missionId,
+            'bannerMission' => $missionId,
         ]);
     }
 
@@ -147,7 +170,8 @@ if (isPost()) {
             createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'location', $user['id'], $requestedIds,
                 '📍 Ζητείται στίγμα GPS',
-                'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε το τρέχον στίγμα σας.'
+                'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε το τρέχον στίγμα σας.',
+                'Ζητήθηκε στίγμα GPS από εθελοντές της αποστολής «' . $mission['title'] . '».'
             );
             logAudit('request_mission_location', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
             setFlash('success', 'Στάλθηκε αίτημα στίγματος σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
@@ -179,7 +203,8 @@ if (isPost()) {
             createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'photo', $user['id'], $requestedIds,
                 '📷 Ζητείται φωτογραφία',
-                'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε φωτογραφία από το πεδίο.'
+                'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε φωτογραφία από το πεδίο.',
+                'Ζητήθηκε φωτογραφία πεδίου από εθελοντές της αποστολής «' . $mission['title'] . '».'
             );
             logAudit('request_mission_photo', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
             setFlash('success', 'Στάλθηκε αίτημα φωτογραφίας σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
@@ -211,7 +236,8 @@ if (isPost()) {
             createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'video', $user['id'], $requestedIds,
                 '🎥 Ζητείται βίντεο',
-                'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε βίντεο από το πεδίο.'
+                'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε βίντεο από το πεδίο.',
+                'Ζητήθηκε βίντεο πεδίου από εθελοντές της αποστολής «' . $mission['title'] . '».'
             );
             logAudit('request_mission_video', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
             setFlash('success', 'Στάλθηκε αίτημα βίντεο σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
@@ -1285,7 +1311,42 @@ setTimeout(() => { renderPins(pins); renderDispatches(dispatches); renderMedia(m
 
 let bannerAfterId = <?= $bannerSinceId ?>;
 let bannerHideTimer = null;
+
+// Loud alert sound for incoming War Room banners (orders, dispatches, global messages).
+// Browsers block audio until the page has seen a user gesture, so we lazily create/resume
+// the AudioContext on the first click/tap/keydown anywhere on the page.
+let warRoomAudioCtx = null;
+function unlockWarRoomAudio() {
+    if (!warRoomAudioCtx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        warRoomAudioCtx = new Ctx();
+    }
+    if (warRoomAudioCtx.state === 'suspended') warRoomAudioCtx.resume().catch(() => {});
+}
+['click', 'touchstart', 'keydown'].forEach(evt => document.addEventListener(evt, unlockWarRoomAudio, {once: true}));
+
+function playWarRoomAlertSound() {
+    unlockWarRoomAudio();
+    if (!warRoomAudioCtx || warRoomAudioCtx.state !== 'running') return;
+    const ctx = warRoomAudioCtx;
+    const now = ctx.currentTime;
+    [0, 0.32, 0.64].forEach((offset, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = i % 2 === 0 ? 988 : 740;
+        gain.gain.setValueAtTime(0.0001, now + offset);
+        gain.gain.exponentialRampToValueAtTime(1, now + offset + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.28);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(now + offset);
+        osc.stop(now + offset + 0.3);
+    });
+}
+
 function showWarRoomBanner(text, orderId) {
+    playWarRoomAlertSound();
     const el = document.getElementById('warRoomBanner');
     document.getElementById('warRoomBannerText').textContent = text;
     el.style.display = 'flex';
