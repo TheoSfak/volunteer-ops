@@ -214,17 +214,16 @@ if ($action === 'create') {
     );
     logAudit('create_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'type' => $type]);
 
-    // Recipients: members of the specific team, or every approved volunteer of the mission.
-    if ($teamId) {
-        $recipients = dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]);
-    } else {
-        $recipients = dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id AS user_id FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             WHERE s.mission_id = ? AND pr.status = ?",
-            [$missionId, PARTICIPATION_APPROVED]
-        );
-    }
+    // Recipients: every approved volunteer of the mission gets the scrolling banner, even
+    // when the dispatch itself targets one team — only that team's map shows the actual
+    // pin (loadMissionDispatchesForUser), but everyone should see that an order went out.
+    // (Team members are always a subset of approved participants, so this covers them too.)
+    $recipients = dbFetchAll(
+        "SELECT DISTINCT pr.volunteer_id AS user_id FROM participation_requests pr
+         JOIN shifts s ON s.id = pr.shift_id
+         WHERE s.mission_id = ? AND pr.status = ?",
+        [$missionId, PARTICIPATION_APPROVED]
+    );
 
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     $title = $type === 'point' ? '📍 Νέο σημείο στον χάρτη' : '🗺️ Νέα περιοχή στον χάρτη';
