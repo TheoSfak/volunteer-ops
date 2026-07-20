@@ -133,6 +133,8 @@ if ($mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
     redirect('mission-view.php?id=' . $missionId);
 }
 
+$fieldMode = ($_COOKIE['wr_field_mode'] ?? '') === '1';
+
 if (isPost()) {
     verifyCsrf();
     if (post('action') === 'close_mission') {
@@ -519,6 +521,14 @@ if (isPost()) {
             setFlash('success', 'Η αναφορά έλλειψης υποβλήθηκε.');
         }
         redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'toggle_field_mode') {
+        $newFieldMode = $fieldMode ? '0' : '1';
+        setcookie('wr_field_mode', $newFieldMode, [
+            'expires' => time() + 31536000, 'path' => '/',
+            'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
+            'httponly' => true, 'samesite' => 'Lax',
+        ]);
+        redirect('war-room.php?id=' . $missionId);
     }
 }
 
@@ -753,10 +763,17 @@ include __DIR__ . '/includes/header.php';
             <span class="badge fs-6 <?= $timeState === 'active' ? 'bg-success' : ($timeState === 'upcoming' ? 'bg-info text-dark' : 'bg-warning text-dark') ?>">
                 <?= $timeState === 'active' ? 'ΣΕ ΕΞΕΛΙΞΗ' : ($timeState === 'upcoming' ? 'ΠΡΟΣΕΧΩΣ' : 'ΕΚΚΡΕΜΕΙ ΚΛΕΙΣΙΜΟ') ?>
             </span>
-            <?php if ($canManageWarRoom): ?>
+            <?php if ($canManageWarRoom && !$fieldMode): ?>
             <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i>Αναφορά Χρόνων</button>
             <button type="button" class="btn btn-outline-light" onclick="window.open('mission-report-print.php?mission_id=<?= $missionId ?>', '_blank')"><i class="bi bi-printer me-1"></i>Αναφορά PDF</button>
             <?php endif; ?>
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="toggle_field_mode">
+                <button type="submit" class="btn btn-outline-light">
+                    <i class="bi bi-<?= $fieldMode ? 'grid-3x3-gap' : 'geo-alt' ?> me-1"></i><?= $fieldMode ? 'Πλήρης Προβολή' : 'Λειτουργία Πεδίου' ?>
+                </button>
+            </form>
             <a href="ops-dashboard.php" class="btn btn-light"><i class="bi bi-arrow-left me-1"></i>Επιχειρησιακό</a>
         </div>
     </div>
@@ -764,6 +781,14 @@ include __DIR__ . '/includes/header.php';
 
 <?= showFlash() ?>
 
+<div id="warRoomBanner" class="war-room-banner">
+    <i class="bi bi-broadcast"></i>
+    <div class="war-room-banner-track"><span id="warRoomBannerText"></span></div>
+    <button type="button" id="warRoomBannerAckBtn" class="btn btn-sm btn-light fw-semibold d-none" style="flex-shrink:0;">Ελήφθη</button>
+    <button type="button" id="warRoomBannerClose" class="war-room-banner-close" aria-label="Κλείσιμο">&times;</button>
+</div>
+
+<?php if (!$fieldMode): ?>
 <div class="row g-4 mb-4">
     <div class="col-lg-8">
         <div class="card shadow-sm h-100">
@@ -772,12 +797,6 @@ include __DIR__ . '/includes/header.php';
                 <small class="text-muted">Ενημέρωση: <span id="mapRefresh"><?= date('H:i:s') ?></span></small>
             </div>
             <div class="card-body p-0">
-                <div id="warRoomBanner" class="war-room-banner">
-                    <i class="bi bi-broadcast"></i>
-                    <div class="war-room-banner-track"><span id="warRoomBannerText"></span></div>
-                    <button type="button" id="warRoomBannerAckBtn" class="btn btn-sm btn-light fw-semibold d-none" style="flex-shrink:0;">Ελήφθη</button>
-                    <button type="button" id="warRoomBannerClose" class="war-room-banner-close" aria-label="Κλείσιμο">&times;</button>
-                </div>
                 <div id="warRoomMap"></div>
             </div>
         </div>
@@ -791,11 +810,21 @@ include __DIR__ . '/includes/header.php';
                 <div class="d-flex gap-2 mb-2">
                     <label class="btn btn-primary w-100 mb-0">
                         <i class="bi bi-camera-fill me-1"></i>Φωτογραφία
-                        <input type="file" id="photoInput" accept="image/*" class="d-none">
+                        <input type="file" id="photoCaptureInput" accept="image/*" capture="environment" class="d-none">
                     </label>
+                    <label class="btn btn-outline-primary w-100 mb-0">
+                        <i class="bi bi-images me-1"></i>Συλλογή
+                        <input type="file" id="photoGalleryInput" accept="image/*" class="d-none">
+                    </label>
+                </div>
+                <div class="d-flex gap-2 mb-2">
                     <label class="btn btn-primary w-100 mb-0">
                         <i class="bi bi-camera-reels-fill me-1"></i>Βίντεο
-                        <input type="file" id="videoInput" accept="video/*" class="d-none">
+                        <input type="file" id="videoCaptureInput" accept="video/*" capture="environment" class="d-none">
+                    </label>
+                    <label class="btn btn-outline-primary w-100 mb-0">
+                        <i class="bi bi-images me-1"></i>Συλλογή
+                        <input type="file" id="videoGalleryInput" accept="video/*" class="d-none">
                     </label>
                 </div>
                 <div class="small mb-2" id="mediaUploadStatus"></div>
@@ -805,8 +834,10 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+<?php endif; ?>
 
 <div class="row g-4">
+    <?php if (!$fieldMode): ?>
     <div class="col-lg-8">
         <div class="card shadow-sm mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -1008,8 +1039,9 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
     </div>
+    <?php endif; ?>
 
-    <div class="col-lg-4">
+    <div class="<?= $fieldMode ? 'col-lg-6 mx-auto' : 'col-lg-4' ?>">
         <div class="card shadow-sm mb-4 border-primary">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-geo-alt-fill me-1"></i>Το στίγμα μου</h5></div>
             <div class="card-body">
@@ -1070,6 +1102,7 @@ include __DIR__ . '/includes/header.php';
         </div>
         <?php endif; ?>
 
+        <?php if (!$fieldMode): ?>
         <div class="card shadow-sm mb-4">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-calendar-range me-1"></i>Βάρδιες</h5></div>
             <div class="list-group list-group-flush">
@@ -1078,8 +1111,9 @@ include __DIR__ . '/includes/header.php';
                 <?php endforeach; ?>
             </div>
         </div>
+        <?php endif; ?>
 
-        <?php if ($canManageWarRoom): ?>
+        <?php if ($canManageWarRoom && !$fieldMode): ?>
         <div class="card shadow-sm mb-4 border-danger">
             <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i>Αναφορές Έλλειψης</h5></div>
             <div class="card-body">
@@ -1319,20 +1353,24 @@ include __DIR__ . '/includes/header.php';
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const csrfToken = '<?= csrfToken() ?>';
+const fieldMode = <?= $fieldMode ? 'true' : 'false' ?>;
 const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>;
 let pins = <?= json_encode($pins) ?>;
 let dispatches = <?= json_encode($dispatches) ?>;
 let media = <?= json_encode($photos) ?>;
 let myTasks = <?= json_encode($myTasks) ?>;
 let shortageReports = <?= json_encode($shortageReports) ?>;
-const map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
-const pinLayer = L.layerGroup().addTo(map);
-// FeatureGroup (not plain LayerGroup) is required here: only FeatureGroup
-// propagates child-layer events like 'popupopen' up to the group's own
-// listeners, which is how dispatchLayer.on('popupopen', ...) below wires up
-// the Ελήφθη/Άφιξη/Διαγραφή buttons inside each dispatch's popup.
-const dispatchLayer = L.featureGroup().addTo(map);
+let map = null, pinLayer = null, dispatchLayer = null;
+if (!fieldMode) {
+    map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
+    pinLayer = L.layerGroup().addTo(map);
+    // FeatureGroup (not plain LayerGroup) is required here: only FeatureGroup
+    // propagates child-layer events like 'popupopen' up to the group's own
+    // listeners, which is how dispatchLayer.on('popupopen', ...) below wires up
+    // the Ελήφθη/Άφιξη/Διαγραφή buttons inside each dispatch's popup.
+    dispatchLayer = L.featureGroup().addTo(map);
+}
 function renderDispatches(items) {
     // A live poll can re-run this while an admin has a dispatch popup open
     // (very plausible for an area — there's more to read before deciding to
@@ -1376,6 +1414,7 @@ function renderDispatches(items) {
     });
     if (reopenLayer) reopenLayer.openPopup();
 }
+if (!fieldMode) {
 dispatchLayer.on('popupopen', event => {
     const popupEl = event.popup.getElement();
     const delBtn = popupEl.querySelector('.dispatch-delete-btn');
@@ -1412,6 +1451,7 @@ dispatchLayer.on('popupopen', event => {
     }
 });
 if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup('<strong>Σημείο αποστολής</strong><br><?= h(addslashes($mission['title'])) ?>');
+}
 let hasFitPins = false;
 function renderPins(items) {
     pinLayer.clearLayers();
@@ -1608,10 +1648,16 @@ function wireMediaInput(inputId, sentLabel) {
         }
     });
 }
-wireMediaInput('photoInput', 'Η φωτογραφία');
-wireMediaInput('videoInput', 'Το βίντεο');
+wireMediaInput('photoCaptureInput', 'Η φωτογραφία');
+wireMediaInput('photoGalleryInput', 'Η φωτογραφία');
+wireMediaInput('videoCaptureInput', 'Το βίντεο');
+wireMediaInput('videoGalleryInput', 'Το βίντεο');
 
-setTimeout(() => { renderPins(pins); renderDispatches(dispatches); renderMedia(media); renderMyTasks(myTasks); renderShortageReports(shortageReports); }, 200);
+setTimeout(() => {
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderMedia(media); }
+    renderMyTasks(myTasks);
+    renderShortageReports(shortageReports);
+}, 200);
 
 let bannerAfterId = <?= $bannerSinceId ?>;
 let bannerHideTimer = null;
@@ -1697,8 +1743,10 @@ function loadActivity() {
         document.getElementById('activityRefresh').textContent = new Date().toLocaleTimeString('el-GR', {hour: '2-digit', minute: '2-digit'});
     }).catch(() => {});
 }
-loadActivity();
-setInterval(loadActivity, 15000);
+if (!fieldMode) {
+    loadActivity();
+    setInterval(loadActivity, 15000);
+}
 
 const reportModalEl = document.getElementById('reportModal');
 if (reportModalEl) {
@@ -1812,13 +1860,15 @@ function setFieldStatus(btn, prId, status) {
 }
 
 setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => response.json()).then(data => {
-    renderPins(data.pins || []);
-    if (data.dispatches) renderDispatches(dispatches = data.dispatches);
-    if (data.media) renderMedia(media = data.media);
+    if (!fieldMode) {
+        renderPins(data.pins || []);
+        if (data.dispatches) renderDispatches(dispatches = data.dispatches);
+        if (data.media) renderMedia(media = data.media);
+    }
     if (data.myTasks) renderMyTasks(myTasks = data.myTasks);
     if (data.shortageReports) renderShortageReports(shortageReports = data.shortageReports);
     if (data.onlinePresence) renderPresence(data.onlinePresence);
-    document.getElementById('mapRefresh').textContent = data.time || '';
+    if (!fieldMode) document.getElementById('mapRefresh').textContent = data.time || '';
     if (data.banner && data.banner.id > bannerAfterId) {
         bannerAfterId = data.banner.id;
         showWarRoomBanner(data.banner.message, data.banner.orderId);
