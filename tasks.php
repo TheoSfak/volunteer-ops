@@ -11,25 +11,37 @@ $assignedToMe = get('assigned_to_me', '');
 $page = max(1, (int)get('page', 1));
 $perPage = 20;
 
-// Build query
-$where = ['1=1'];
-$params = [];
+// Base scope (non-admins only ever see their own assigned tasks) — shared by
+// the main query below and the two tab-count queries, so the tabs and the
+// list they filter always agree on "which tasks this user can see".
+$baseWhere = ['1=1'];
+$baseParams = [];
+if (!isAdmin()) {
+    $baseWhere[] = 'EXISTS (SELECT 1 FROM task_assignments ta WHERE ta.task_id = t.id AND ta.user_id = ?)';
+    $baseParams[] = $user['id'];
+}
+if ($assignedToMe) {
+    $baseWhere[] = 'EXISTS (SELECT 1 FROM task_assignments ta WHERE ta.task_id = t.id AND ta.user_id = ?)';
+    $baseParams[] = $user['id'];
+}
+$baseWhereClause = implode(' AND ', $baseWhere);
 
-if ($status) {
+$activeCount = (int) dbFetchValue("SELECT COUNT(*) FROM tasks t WHERE $baseWhereClause AND t.status != 'COMPLETED'", $baseParams);
+$completedCount = (int) dbFetchValue("SELECT COUNT(*) FROM tasks t WHERE $baseWhereClause AND t.status = 'COMPLETED'", $baseParams);
+
+// Build query — "status" drives both the Ενεργές/Ολοκληρωμένες tabs and the
+// admin's finer dropdown: empty (default/"Ενεργές" tab) excludes completed
+// tasks, 'ALL' removes the status condition entirely, any real enum value
+// (including 'COMPLETED' for the Ολοκληρωμένες tab) filters to exactly that.
+$where = $baseWhere;
+$params = $baseParams;
+if ($status === 'ALL') {
+    // no status condition — every status
+} elseif ($status !== '') {
     $where[] = 't.status = ?';
     $params[] = $status;
-}
-
-// Show tasks assigned to current user if filter is on
-if ($assignedToMe) {
-    $where[] = 'EXISTS (SELECT 1 FROM task_assignments ta WHERE ta.task_id = t.id AND ta.user_id = ?)';
-    $params[] = $user['id'];
-}
-
-// Non-admins see only their assigned tasks
-if (!isAdmin()) {
-    $where[] = 'EXISTS (SELECT 1 FROM task_assignments ta WHERE ta.task_id = t.id AND ta.user_id = ?)';
-    $params[] = $user['id'];
+} else {
+    $where[] = "t.status != 'COMPLETED'";
 }
 
 $whereClause = implode(' AND ', $where);
@@ -113,6 +125,20 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
 </div>
 
+<!-- Active / Completed tabs -->
+<ul class="nav nav-tabs mb-4">
+    <li class="nav-item">
+        <a class="nav-link <?= $status !== 'COMPLETED' ? 'active' : '' ?>" href="tasks.php<?= $assignedToMe ? '?assigned_to_me=1' : '' ?>">
+            <i class="bi bi-list-task me-1"></i>Ενεργές <span class="badge bg-secondary ms-1"><?= $activeCount ?></span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $status === 'COMPLETED' ? 'active' : '' ?>" href="tasks.php?status=COMPLETED<?= $assignedToMe ? '&assigned_to_me=1' : '' ?>">
+            <i class="bi bi-check2-circle me-1"></i>Ολοκληρωμένες <span class="badge bg-secondary ms-1"><?= $completedCount ?></span>
+        </a>
+    </li>
+</ul>
+
 <!-- Filters -->
 <?php if (isAdmin()): ?>
 <div class="card mb-4">
@@ -121,7 +147,8 @@ include __DIR__ . '/includes/header.php';
             <div class="col-md-3">
                 <label class="form-label">Κατάσταση</label>
                 <select class="form-select" name="status">
-                    <option value="">Όλες</option>
+                    <option value="" <?= $status === '' ? 'selected' : '' ?>>Ενεργές (προεπιλογή)</option>
+                    <option value="ALL" <?= $status === 'ALL' ? 'selected' : '' ?>>Όλες οι καταστάσεις</option>
                     <?php foreach ($statusLabels as $key => $label): ?>
                         <option value="<?= $key ?>" <?= $status === $key ? 'selected' : '' ?>>
                             <?= h($label) ?>
