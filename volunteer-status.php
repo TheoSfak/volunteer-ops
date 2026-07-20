@@ -25,6 +25,13 @@ $userId  = getCurrentUserId();
 $prId    = (int) post('pr_id');
 $status  = post('status');
 
+// Optional GPS (only ever sent alongside 'needs_help' — the SOS button) — same
+// nullable-if-not-numeric idiom as mission-photo.php's optional lat/lng capture.
+$latRaw = post('lat');
+$lngRaw = post('lng');
+$lat = ($latRaw !== '' && $latRaw !== null && is_numeric($latRaw)) ? (float) $latRaw : null;
+$lng = ($lngRaw !== '' && $lngRaw !== null && is_numeric($lngRaw)) ? (float) $lngRaw : null;
+
 $allowedStatuses = ['on_way', 'on_site', 'needs_help'];
 if (!in_array($status, $allowedStatuses, true)) {
     echo json_encode(['ok' => false, 'error' => 'Μη έγκυρη κατάσταση']);
@@ -33,7 +40,7 @@ if (!in_array($status, $allowedStatuses, true)) {
 
 // Verify the PR belongs to this user and is APPROVED
 $pr = dbFetchOne(
-    "SELECT pr.id, pr.shift_id, m.title as mission_title, m.id as mission_id
+    "SELECT pr.id, pr.shift_id, m.title as mission_title, m.id as mission_id, m.responsible_user_id
      FROM participation_requests pr
      JOIN shifts s ON pr.shift_id = s.id
      JOIN missions m ON s.mission_id = m.id
@@ -66,30 +73,51 @@ $auditActionByStatus = [
 ];
 logAudit($auditActionByStatus[$status], 'participation_requests', $prId);
 
-// If needs_help → notify all admins + shift leader (single bulk INSERT)
+// If needs_help → this IS the SOS button: open (or refresh) a War Room SOS
+// alert ticket and alert command staff. A duplicate-open-alert guard stops
+// repeated taps from spamming a fresh row + notification every time; if one
+// is already open we just refresh its coordinates (the volunteer may be
+// moving) and leave the existing ticket/notification alone.
 if ($status === 'needs_help') {
-    $currentUser = getCurrentUser();
-    $notifyTitle   = '🆘 Χρειάζεται Βοήθεια!';
-    $notifyMessage = h($currentUser['name']) . ' χρειάζεται βοήθεια στην αποστολή «' . $pr['mission_title'] . '». Ανοίξτε το Επιχ. Dashboard.';
+    $missionId = (int) $pr['mission_id'];
 
-    // Collect all recipient IDs (admins + mission shift leaders)
-    $admins = dbFetchAll(
-        "SELECT id FROM users WHERE role IN ('" . ROLE_SYSTEM_ADMIN . "', '" . ROLE_DEPARTMENT_ADMIN . "') AND is_active = 1",
-        []
+    $existingAlertId = dbFetchValue(
+        "SELECT id FROM mission_sos_alerts WHERE pr_id = ? AND resolved_at IS NULL",
+        [$prId]
     );
-    $leaders = dbFetchAll(
-        "SELECT DISTINCT u.id FROM users u
-         JOIN participation_requests pr2 ON pr2.volunteer_id = u.id
-         JOIN shifts s ON pr2.shift_id = s.id
-         WHERE s.mission_id = ? AND u.role = '" . ROLE_SHIFT_LEADER . "' AND u.is_active = 1 AND pr2.status = '" . PARTICIPATION_APPROVED . "'",
-        [$pr['mission_id']]
-    );
-    $recipientIds = array_unique(array_merge(
-        array_column($admins, 'id'),
-        array_column($leaders, 'id')
-    ));
-    if (!empty($recipientIds)) {
-        sendBulkNotifications($recipientIds, $notifyTitle, $notifyMessage, 'danger');
+
+    if ($existingAlertId) {
+        dbExecute("UPDATE mission_sos_alerts SET lat = ?, lng = ? WHERE id = ?", [$lat, $lng, (int) $existingAlertId]);
+    } else {
+        $currentUser = getCurrentUser();
+
+        $teamId = getUserTeamIdForMission($missionId, $userId);
+        $myTeam = $teamId ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$teamId]) : null;
+        $teamLabel = $myTeam ? ($myTeam['codename'] . ' ' . $myTeam['team_number']) : 'Χωρίς ομάδα';
+
+        dbInsert(
+            "INSERT INTO mission_sos_alerts (mission_id, user_id, pr_id, team_id, lat, lng, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, NOW())",
+            [$missionId, $userId, $prId, $teamId, $lat, $lng]
+        );
+
+        $recipientIds = getMissionCommandStaffIds(
+            $missionId,
+            $pr['responsible_user_id'] ? (int) $pr['responsible_user_id'] : null,
+            $userId
+        );
+        $warRoomUrl    = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+        $notifyTitle   = '🆘 SOS — ' . mb_strtoupper($teamLabel, 'UTF-8');
+        $notifyMessage = h($currentUser['name']) . ' (' . h($teamLabel) . ') χρειάζεται ΑΜΕΣΗ βοήθεια στην αποστολή «' . $pr['mission_title'] . '»!';
+        foreach ($recipientIds as $recipientId) {
+            // Mandatory (empty code) — same convention as orders/global-message/
+            // high-severity shortage reports, so an SOS can never be silently muted.
+            sendNotification($recipientId, $notifyTitle, $notifyMessage, 'danger', '', [
+                'url'     => $warRoomUrl,
+                'tag'     => 'sos-alert-mission-' . $missionId,
+                'vibrate' => [300, 100, 300, 100, 500, 100, 500],
+            ]);
+        }
     }
 }
 

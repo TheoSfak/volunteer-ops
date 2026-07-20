@@ -65,6 +65,13 @@ if (isPost()) {
                 "UPDATE participation_requests SET field_status = NULL, field_status_updated_at = NOW() WHERE id = ?",
                 [$prId]
             );
+            // Also resolve any linked War Room SOS alert — otherwise dismissing the
+            // badge here would leave that alert's siren/overlay blaring forever on
+            // war-room.php with no way to stop it from there.
+            dbExecute(
+                "UPDATE mission_sos_alerts SET resolved_at = NOW(), resolved_by = ? WHERE pr_id = ? AND resolved_at IS NULL",
+                [$currentUser['id'], $prId]
+            );
             logAudit('dismiss_help', 'participation_requests', $prId);
             setFlash('success', 'Η ειδοποίηση βοήθειας απορρίφθηκε.');
         }

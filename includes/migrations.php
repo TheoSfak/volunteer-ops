@@ -4543,6 +4543,42 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 81,
+            'description' => 'Create mission_sos_alerts table (War Room SOS alarm — GPS-tagged needs_help lifecycle)',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_sos_alerts'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE mission_sos_alerts (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            user_id INT UNSIGNED NOT NULL,
+                            pr_id INT UNSIGNED NULL,
+                            team_id INT UNSIGNED NULL,
+                            lat DECIMAL(10,7) NULL,
+                            lng DECIMAL(10,7) NULL,
+                            acknowledged_at TIMESTAMP NULL,
+                            acknowledged_by INT UNSIGNED NULL,
+                            resolved_at TIMESTAMP NULL,
+                            resolved_by INT UNSIGNED NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            FOREIGN KEY (pr_id) REFERENCES participation_requests(id) ON DELETE SET NULL,
+                            FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL,
+                            FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL,
+                            FOREIGN KEY (resolved_by) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_sos_mission (mission_id, resolved_at)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

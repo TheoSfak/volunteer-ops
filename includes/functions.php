@@ -805,6 +805,37 @@ function loadUnresolvedShortageReportsForMission(int $missionId): array {
 }
 
 /**
+ * War Room: open (unresolved) SOS alerts for the command-staff alarm overlay +
+ * "Ειδοποιήσεις SOS" card. Caller MUST gate this behind $canManageWarRoom before
+ * calling — reporter identity and live location are sensitive, this function has
+ * no built-in permission check of its own. Mirrors loadUnresolvedShortageReportsForMission,
+ * except user_name/team_label are escaped here (not left raw) since this feeds an
+ * auto-triggered, no-click-required surface rather than a manually-opened list.
+ */
+function loadOpenSosAlertsForMission(int $missionId): array {
+    $rows = dbFetchAll(
+        "SELECT a.id, a.pr_id, a.lat, a.lng, a.created_at, a.acknowledged_at,
+                a.team_id, u.name AS user_name, mt.codename, mt.team_number
+         FROM mission_sos_alerts a
+         JOIN users u ON u.id = a.user_id
+         LEFT JOIN mission_teams mt ON mt.id = a.team_id
+         WHERE a.mission_id = ? AND a.resolved_at IS NULL
+         ORDER BY a.created_at ASC",
+        [$missionId]
+    );
+
+    return array_map(fn($row) => [
+        'id'              => (int) $row['id'],
+        'user_name'       => h($row['user_name']),
+        'team_label'      => h($row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'Χωρίς ομάδα'),
+        'lat'             => $row['lat'] !== null ? (float) $row['lat'] : null,
+        'lng'             => $row['lng'] !== null ? (float) $row['lng'] : null,
+        'created_at'      => date('d/m H:i', strtotime($row['created_at'])),
+        'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
+    ], $rows);
+}
+
+/**
  * War Room: user_ids currently "present" on this mission's War Room — last
  * touched the 15s ajax poll within the last 2x its interval. Shared by
  * war-room.php's full-page render (initial dot state) and its own ajax
