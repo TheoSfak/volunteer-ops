@@ -1398,7 +1398,23 @@ function renderDispatches(items) {
         const ackHtml = item.can_ack
             ? `<br><button type="button" class="btn btn-sm btn-success mt-1 dispatch-ack-btn" data-id="${item.id}"><i class="bi bi-check-lg me-1"></i>Άφιξη</button>`
             : (item.my_ack ? `<div class="small text-success mt-1">✓ Αφίξατε στις ${item.my_ack}</div>` : '');
-        const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + item.label : ''}` + acksHtml + receiveHtml + ackHtml +
+        // Google Maps opened with no "origin" resolves directions from the
+        // device's own current location — simpler and more reliable than us
+        // grabbing navigator.geolocation ourselves (works even if this page
+        // was never granted location permission). A polygon has no single
+        // point, so route to its centroid instead.
+        let destLat, destLng;
+        if (item.type === 'point') {
+            destLat = item.geo.lat;
+            destLng = item.geo.lng;
+        } else {
+            const sum = item.geo.reduce((acc, pt) => [acc[0] + pt[0], acc[1] + pt[1]], [0, 0]);
+            destLat = sum[0] / item.geo.length;
+            destLng = sum[1] / item.geo.length;
+        }
+        const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}&travelmode=driving`;
+        const directionsHtml = `<br><a href="${directionsUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-success mt-1"><i class="bi bi-signpost-2-fill me-1"></i>Οδηγίες</a>`;
+        const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + item.label : ''}` + acksHtml + receiveHtml + ackHtml + directionsHtml +
             (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">Διαγραφή</button>` : '');
         let layer = null;
         if (item.type === 'point') {
