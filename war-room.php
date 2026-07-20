@@ -623,6 +623,7 @@ if (get('ajax') === '1') {
     $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $myTasks = loadMyTaskOrdersForUser($missionId, (int)$user['id']);
     $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
+    $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
     $onlinePresence = loadOnlinePresenceUserIds($missionId);
 
     echo json_encode([
@@ -633,6 +634,7 @@ if (get('ajax') === '1') {
         'media' => $photos,
         'myTasks' => $myTasks,
         'shortageReports' => $shortageReports,
+        'sosAlerts' => $sosAlerts,
         'onlinePresence' => $onlinePresence,
     ]);
     exit;
@@ -656,6 +658,7 @@ $dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canMan
 $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $myTasks = loadMyTaskOrdersForUser($missionId, (int)$user['id']);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
+$sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 
 $firstShift = $shifts[0]['start_time'] ?? $mission['start_datetime'];
 $lastShift = !empty($shifts) ? end($shifts)['end_time'] : $mission['end_datetime'];
@@ -750,6 +753,16 @@ include __DIR__ . '/includes/header.php';
     .war-room-banner .bi-broadcast { color: #ff3b30; }
     .war-room-banner-close { background: transparent; border: none; color: #ff3b30; font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0 4px; flex-shrink: 0; }
     @keyframes warRoomPulseRed { 0%, 100% { box-shadow: 0 0 0 0 rgba(220,53,69,0); } 50% { box-shadow: 0 0 0 10px rgba(220,53,69,0.4); } }
+    #sosOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
+    #sosOverlay.sos-active { display: block; animation: sosPulseCorners 1s ease-in-out infinite; }
+    #sosOverlay.sos-calm { display: block; animation: none; box-shadow: inset 0 0 120px 40px rgba(220,38,38,.35); }
+    @keyframes sosPulseCorners {
+        0%, 100% { box-shadow: inset 0 0 60px 20px rgba(220,38,38,.25), inset 0 0 160px 60px rgba(220,38,38,.12); }
+        50%      { box-shadow: inset 0 0 120px 50px rgba(220,38,38,.65), inset 0 0 260px 120px rgba(220,38,38,.35); }
+    }
+    .sos-map-marquee { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.75); padding: 6px 10px; overflow: hidden; z-index: 500; }
+    .sos-map-marquee-track { white-space: nowrap; position: relative; height: 1.4em; }
+    .sos-map-marquee-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #ff3b30; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; animation: warRoomBannerScroll 14s linear infinite; }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
@@ -788,6 +801,10 @@ include __DIR__ . '/includes/header.php';
     <button type="button" id="warRoomBannerClose" class="war-room-banner-close" aria-label="Κλείσιμο">&times;</button>
 </div>
 
+<?php if ($canManageWarRoom): ?>
+<div id="sosOverlay"></div>
+<?php endif; ?>
+
 <?php if (!$fieldMode): ?>
 <div class="row g-4 mb-4">
     <div class="col-lg-8">
@@ -796,8 +813,13 @@ include __DIR__ . '/includes/header.php';
                 <h5 class="mb-0"><i class="bi bi-map me-1"></i>Ζωντανός χάρτης αποστολής</h5>
                 <small class="text-muted">Ενημέρωση: <span id="mapRefresh"><?= date('H:i:s') ?></span></small>
             </div>
-            <div class="card-body p-0">
+            <div class="card-body p-0" style="position:relative;">
                 <div id="warRoomMap"></div>
+                <?php if ($canManageWarRoom): ?>
+                <div id="sosMapMarquee" class="sos-map-marquee d-none">
+                    <div class="sos-map-marquee-track"><span id="sosMapMarqueeText"></span></div>
+                </div>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -1115,6 +1137,13 @@ include __DIR__ . '/includes/header.php';
 
         <?php if ($canManageWarRoom && !$fieldMode): ?>
         <div class="card shadow-sm mb-4 border-danger">
+            <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="bi bi-sos me-1"></i>Ειδοποιήσεις SOS</h5></div>
+            <div class="card-body">
+                <div id="sosAlertsList"><p class="text-muted mb-0">Δεν υπάρχουν ενεργές ειδοποιήσεις SOS.</p></div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4 border-danger">
             <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i>Αναφορές Έλλειψης</h5></div>
             <div class="card-body">
                 <div id="shortageReportsList"></div>
@@ -1360,6 +1389,7 @@ let dispatches = <?= json_encode($dispatches) ?>;
 let media = <?= json_encode($photos) ?>;
 let myTasks = <?= json_encode($myTasks) ?>;
 let shortageReports = <?= json_encode($shortageReports) ?>;
+let sosAlerts = <?= json_encode($sosAlerts) ?>;
 let map = null, pinLayer = null, dispatchLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
@@ -1623,6 +1653,51 @@ function renderShortageReports(items) {
     }));
 }
 
+function renderSosAlerts(items) {
+    const list = document.getElementById('sosAlertsList');
+    if (!list) return;
+    if (!items.length) {
+        list.innerHTML = '<p class="text-muted mb-0">Δεν υπάρχουν ενεργές ειδοποιήσεις SOS.</p>';
+        return;
+    }
+    list.innerHTML = items.map(a => `
+        <div class="border border-danger rounded p-2 mb-2">
+            <div><strong>🆘 ${a.team_label}</strong> — ${a.user_name}</div>
+            <div class="text-muted" style="font-size:.75rem;">${a.created_at}${a.lat !== null ? ` · <a href="#" class="sos-locate-link" data-lat="${a.lat}" data-lng="${a.lng}">δείτε στον χάρτη</a>` : ' · χωρίς GPS'}${a.acknowledged_at ? ' · Ελήφθη: ' + a.acknowledged_at : ''}</div>
+            <div class="mt-1">${a.acknowledged_at
+                ? `<button type="button" class="btn btn-sm btn-success w-100 sos-resolve-btn" data-alert-id="${a.id}">Λύθηκε</button>`
+                : `<button type="button" class="btn btn-sm btn-warning w-100 sos-ack-btn" data-alert-id="${a.id}">Ελήφθη</button>`}</div>
+        </div>
+    `).join('');
+    list.querySelectorAll('.sos-locate-link').forEach(link => link.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (!fieldMode && map) { map.setView([parseFloat(link.dataset.lat), parseFloat(link.dataset.lng)], 16); }
+    }));
+    list.querySelectorAll('.sos-ack-btn').forEach(btn => btn.addEventListener('click', () => {
+        btn.disabled = true;
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge', alert_id: btn.dataset.alertId});
+        fetch('mission-sos.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                const item = sosAlerts.find(x => String(x.id) === btn.dataset.alertId);
+                if (item) item.acknowledged_at = item.acknowledged_at || 'τώρα';
+                renderSosAlerts(sosAlerts);
+                if (!fieldMode) updateSosAlarmState(sosAlerts);
+            } else { btn.disabled = false; alert(result.error || 'Αποτυχία.'); }
+        }).catch(() => { btn.disabled = false; });
+    }));
+    list.querySelectorAll('.sos-resolve-btn').forEach(btn => btn.addEventListener('click', () => {
+        btn.disabled = true;
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'resolve', alert_id: btn.dataset.alertId});
+        fetch('mission-sos.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                sosAlerts = sosAlerts.filter(x => String(x.id) !== btn.dataset.alertId);
+                renderSosAlerts(sosAlerts);
+                if (!fieldMode) updateSosAlarmState(sosAlerts);
+            } else { btn.disabled = false; alert(result.error || 'Αποτυχία.'); }
+        }).catch(() => { btn.disabled = false; });
+    }));
+}
+
 function wireMediaInput(inputId, sentLabel) {
     const input = document.getElementById(inputId);
     if (!input) return;
@@ -1673,6 +1748,8 @@ setTimeout(() => {
     if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderMedia(media); }
     renderMyTasks(myTasks);
     renderShortageReports(shortageReports);
+    renderSosAlerts(sosAlerts);
+    if (!fieldMode) updateSosAlarmState(sosAlerts);
 }, 200);
 
 let bannerAfterId = <?= $bannerSinceId ?>;
@@ -1709,6 +1786,77 @@ function playWarRoomAlertSound() {
         osc.start(now + offset);
         osc.stop(now + offset + 0.3);
     });
+}
+
+// Continuous SOS siren — distinct from the one-shot triple-beep above, reuses
+// the same shared warRoomAudioCtx. Guarded by sosSirenOsc so repeated calls
+// across successive poll ticks don't stack additional oscillators.
+let sosSirenOsc = null;
+let sosSirenGain = null;
+let sosSirenTimer = null;
+function playSosSiren() {
+    unlockWarRoomAudio();
+    if (sosSirenOsc || !warRoomAudioCtx || warRoomAudioCtx.state !== 'running') return;
+    const ctx = warRoomAudioCtx;
+    sosSirenOsc = ctx.createOscillator();
+    sosSirenGain = ctx.createGain();
+    sosSirenOsc.type = 'sine';
+    sosSirenGain.gain.value = 0.35;
+    sosSirenOsc.connect(sosSirenGain).connect(ctx.destination);
+    sosSirenOsc.frequency.setValueAtTime(500, ctx.currentTime);
+    sosSirenOsc.start();
+    const sweep = () => {
+        if (!sosSirenOsc) return;
+        const now = ctx.currentTime;
+        sosSirenOsc.frequency.cancelScheduledValues(now);
+        sosSirenOsc.frequency.setValueAtTime(500, now);
+        sosSirenOsc.frequency.linearRampToValueAtTime(1000, now + 0.6);
+        sosSirenOsc.frequency.linearRampToValueAtTime(500, now + 1.2);
+        sosSirenTimer = setTimeout(sweep, 1200);
+    };
+    sweep();
+}
+function stopSosSiren() {
+    if (sosSirenTimer) { clearTimeout(sosSirenTimer); sosSirenTimer = null; }
+    if (sosSirenOsc) {
+        try { sosSirenOsc.stop(); } catch (e) {}
+        sosSirenOsc.disconnect();
+        sosSirenOsc = null;
+    }
+    if (sosSirenGain) { sosSirenGain.disconnect(); sosSirenGain = null; }
+}
+
+// Drives the full-viewport red corner overlay + map marquee from the current
+// sosAlerts list. Any unacknowledged alert = siren + pulsing corners; all
+// acknowledged-but-unresolved = calm static red; no open alerts = fully off.
+function updateSosAlarmState(items) {
+    const overlay = document.getElementById('sosOverlay');
+    if (!overlay) return;
+    const anyUnacked = items.some(a => !a.acknowledged_at);
+    if (!items.length) {
+        overlay.classList.remove('sos-active', 'sos-calm');
+        stopSosSiren();
+    } else if (anyUnacked) {
+        overlay.classList.add('sos-active');
+        overlay.classList.remove('sos-calm');
+        playSosSiren();
+    } else {
+        overlay.classList.remove('sos-active');
+        overlay.classList.add('sos-calm');
+        stopSosSiren();
+    }
+    const marquee = document.getElementById('sosMapMarquee');
+    if (marquee) {
+        if (items.length) {
+            document.getElementById('sosMapMarqueeText').textContent = items.map(a =>
+                '🆘 ' + a.team_label.toUpperCase() + ' ΣΕ SOS — ' + a.user_name + ' χρειάζεται άμεση βοήθεια!'
+            ).join('     •••     ');
+            marquee.classList.remove('d-none');
+        } else {
+            marquee.classList.add('d-none');
+            document.getElementById('sosMapMarqueeText').textContent = '';
+        }
+    }
 }
 
 function showWarRoomBanner(text, orderId) {
@@ -1851,28 +1999,44 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
 function setFieldStatus(btn, prId, status) {
     const group = document.getElementById('statusBtns-' + prId);
     if (group) group.querySelectorAll('button').forEach(b => b.disabled = true);
-    const data = new URLSearchParams({csrf_token: csrfToken, pr_id: prId, status: status});
-    fetch('volunteer-status.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
-        if (result.ok) {
-            const badge = document.getElementById('statusBadge-' + prId);
-            if (badge) badge.textContent = result.label;
-            const colorMap = {on_way: 'warning', on_site: 'success', needs_help: 'danger'};
-            if (group) {
-                group.querySelectorAll('button').forEach(b => {
-                    const s = b.getAttribute('onclick').match(/'([^']+)'\)$/)?.[1];
-                    if (s) { b.className = 'btn btn-sm ' + (s === result.status ? 'btn-' + colorMap[s] : 'btn-outline-' + colorMap[s]); }
-                    b.disabled = false;
-                });
+
+    const send = (lat, lng) => {
+        const params = {csrf_token: csrfToken, pr_id: prId, status: status};
+        if (lat !== null) { params.lat = lat; params.lng = lng; }
+        fetch('volunteer-status.php', {method: 'POST', body: new URLSearchParams(params)}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                const badge = document.getElementById('statusBadge-' + prId);
+                if (badge) badge.textContent = result.label;
+                const colorMap = {on_way: 'warning', on_site: 'success', needs_help: 'danger'};
+                if (group) {
+                    group.querySelectorAll('button').forEach(b => {
+                        const s = b.getAttribute('onclick').match(/'([^']+)'\)$/)?.[1];
+                        if (s) { b.className = 'btn btn-sm ' + (s === result.status ? 'btn-' + colorMap[s] : 'btn-outline-' + colorMap[s]); }
+                        b.disabled = false;
+                    });
+                }
+                if (status === 'needs_help') {
+                    const panel = btn.closest('.card');
+                    if (panel) panel.style.animation = 'warRoomPulseRed 0.5s 3';
+                }
+            } else {
+                alert(result.error || 'Αποτυχία ενημέρωσης κατάστασης.');
+                if (group) group.querySelectorAll('button').forEach(b => b.disabled = false);
             }
-            if (status === 'needs_help') {
-                const panel = btn.closest('.card');
-                if (panel) panel.style.animation = 'warRoomPulseRed 0.5s 3';
-            }
-        } else {
-            alert(result.error || 'Αποτυχία ενημέρωσης κατάστασης.');
-            if (group) group.querySelectorAll('button').forEach(b => b.disabled = false);
-        }
-    }).catch(() => { if (group) group.querySelectorAll('button').forEach(b => b.disabled = false); });
+        }).catch(() => { if (group) group.querySelectorAll('button').forEach(b => b.disabled = false); });
+    };
+
+    // SOS specifically tries to attach GPS, but never blocks on it — an alert
+    // without coordinates beats no alert at all if geolocation fails/denies.
+    if (status === 'needs_help' && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            pos => send(pos.coords.latitude, pos.coords.longitude),
+            () => send(null, null),
+            {enableHighAccuracy: true, timeout: 5000}
+        );
+    } else {
+        send(null, null);
+    }
 }
 
 setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => response.json()).then(data => {
@@ -1883,6 +2047,10 @@ setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after='
     }
     if (data.myTasks) renderMyTasks(myTasks = data.myTasks);
     if (data.shortageReports) renderShortageReports(shortageReports = data.shortageReports);
+    if (data.sosAlerts) {
+        renderSosAlerts(sosAlerts = data.sosAlerts);
+        if (!fieldMode) updateSosAlarmState(sosAlerts);
+    }
     if (data.onlinePresence) renderPresence(data.onlinePresence);
     if (!fieldMode) document.getElementById('mapRefresh').textContent = data.time || '';
     if (data.banner && data.banner.id > bannerAfterId) {

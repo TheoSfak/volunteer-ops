@@ -853,44 +853,55 @@ function showPingStatus(prId, msg, type) {
 
 // ── Field Status ─────────────────────────────────────────────────────────────
 function setStatus(btn, prId, status) {
-    const body = new URLSearchParams({
-        csrf_token: CSRF_TOKEN,
-        pr_id:   prId,
-        status:  status,
-    });
     // Optimistically disable all buttons in group
     const group = document.getElementById('statusBtns-' + prId);
     if (group) group.querySelectorAll('button').forEach(b => b.disabled = true);
 
-    fetch('volunteer-status.php', { method: 'POST', body })
-        .then(r => r.json())
-        .then(d => {
-            if (d.ok) {
-                // Update badge
-                const badge = document.getElementById('statusBadge-' + prId);
-                if (badge) badge.textContent = d.label;
+    const send = (lat, lng) => {
+        const params = { csrf_token: CSRF_TOKEN, pr_id: prId, status: status };
+        if (lat !== null) { params.lat = lat; params.lng = lng; }
+        fetch('volunteer-status.php', { method: 'POST', body: new URLSearchParams(params) })
+            .then(r => r.json())
+            .then(d => {
+                if (d.ok) {
+                    // Update badge
+                    const badge = document.getElementById('statusBadge-' + prId);
+                    if (badge) badge.textContent = d.label;
 
-                // Re-style buttons
-                const colorMap = { on_way: 'warning', on_site: 'success', needs_help: 'danger' };
-                if (group) {
-                    group.querySelectorAll('button').forEach(b => {
-                        const s = b.getAttribute('onclick').match(/'([^']+)'\s*\)$/)?.[1];
-                        if (s) {
-                            const c = colorMap[s];
-                            b.className = 'btn btn-sm ' + (s === d.status ? 'btn-' + c : 'btn-outline-' + c);
-                        }
-                        b.disabled = false;
-                    });
-                }
+                    // Re-style buttons
+                    const colorMap = { on_way: 'warning', on_site: 'success', needs_help: 'danger' };
+                    if (group) {
+                        group.querySelectorAll('button').forEach(b => {
+                            const s = b.getAttribute('onclick').match(/'([^']+)'\s*\)$/)?.[1];
+                            if (s) {
+                                const c = colorMap[s];
+                                b.className = 'btn btn-sm ' + (s === d.status ? 'btn-' + c : 'btn-outline-' + c);
+                            }
+                            b.disabled = false;
+                        });
+                    }
 
-                if (status === 'needs_help') {
-                    // Flash the panel red
-                    const panel = btn.closest('.card');
-                    if (panel) { panel.style.animation = 'pulse-red 0.5s 3'; }
+                    if (status === 'needs_help') {
+                        // Flash the panel red
+                        const panel = btn.closest('.card');
+                        if (panel) { panel.style.animation = 'pulse-red 0.5s 3'; }
+                    }
                 }
-            }
-        })
-        .catch(() => { if (group) group.querySelectorAll('button').forEach(b => b.disabled = false); });
+            })
+            .catch(() => { if (group) group.querySelectorAll('button').forEach(b => b.disabled = false); });
+    };
+
+    // SOS specifically tries to attach GPS, but never blocks on it — an alert
+    // without coordinates beats no alert at all if geolocation fails/denies.
+    if (status === 'needs_help' && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            pos => send(pos.coords.latitude, pos.coords.longitude),
+            () => send(null, null),
+            { enableHighAccuracy: true, timeout: 5000 }
+        );
+    } else {
+        send(null, null);
+    }
 }
 </script>
 <style>
