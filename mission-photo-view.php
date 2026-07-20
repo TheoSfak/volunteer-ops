@@ -23,7 +23,10 @@ $mission = dbFetchOne(
     "SELECT id, status, show_in_ops, responsible_user_id FROM missions WHERE id = ? AND deleted_at IS NULL",
     [$photo['mission_id']]
 );
-if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
+// Allow CLOSED too (not just OPEN) so the mission-report-print.php archival
+// export can still embed photos after a mission closes — the permission
+// check right below is unaffected, this only extends *when*, not *who*.
+if (!$mission || !in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED], true) || empty($mission['show_in_ops'])) {
     http_response_code(404);
     exit('Δεν βρέθηκε.');
 }

@@ -665,6 +665,11 @@ include __DIR__ . '/includes/header.php';
                 <i class="bi bi-broadcast-pin me-1"></i>War Room
             </a>
         <?php endif; ?>
+        <?php if ($canManageMissions || $isResponsible): ?>
+            <button type="button" class="btn btn-outline-secondary" onclick="window.open('mission-report-print.php?mission_id=<?= $mission['id'] ?>', '_blank')">
+                <i class="bi bi-printer me-1"></i>Αναφορά PDF
+            </button>
+        <?php endif; ?>
         <?php if ($canManageMissions): ?>
             <a href="mission-form.php?id=<?= $mission['id'] ?>" class="btn btn-outline-primary">
                 <i class="bi bi-pencil me-1"></i>Επεξεργασία

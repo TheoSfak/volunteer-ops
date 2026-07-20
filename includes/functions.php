@@ -803,3 +803,17 @@ function loadUnresolvedShortageReportsForMission(int $missionId): array {
         'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
     ], $rows);
 }
+
+/**
+ * War Room: user_ids currently "present" on this mission's War Room — last
+ * touched the 15s ajax poll within the last 2x its interval. Shared by
+ * war-room.php's full-page render (initial dot state) and its own ajax
+ * branch (per-poll dot state) so both compute "online" identically.
+ */
+function loadOnlinePresenceUserIds(int $missionId): array {
+    $rows = dbFetchAll(
+        "SELECT user_id FROM mission_presence WHERE mission_id = ? AND last_seen_at > DATE_SUB(NOW(), INTERVAL 30 SECOND)",
+        [$missionId]
+    );
+    return array_map('intval', array_column($rows, 'user_id'));
+}

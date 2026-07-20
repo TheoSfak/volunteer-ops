@@ -1841,7 +1841,7 @@ CREATE TABLE IF NOT EXISTS `mission_photos` (
 CREATE TABLE IF NOT EXISTS `mission_orders` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `mission_id` INT UNSIGNED NOT NULL,
-    `order_type` ENUM('location','photo','video','task') NOT NULL,
+    `order_type` ENUM('location','photo','video','task','message') NOT NULL,
     `task_text` TEXT NULL,
     `created_by` INT UNSIGNED NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1901,6 +1901,18 @@ CREATE TABLE IF NOT EXISTS `mission_shortage_reports` (
     FOREIGN KEY (`acknowledged_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`resolved_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     INDEX `idx_shortage_mission` (`mission_id`, `resolved_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- MISSION PRESENCE (War Room live "who has this open" tracking)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_presence` (
+    `mission_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `last_seen_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`mission_id`, `user_id`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;
