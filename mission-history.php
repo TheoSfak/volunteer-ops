@@ -126,7 +126,7 @@ foreach ($arrivedRows as $row) {
 }
 
 // ── orders (location/photo/video/task): sent / acknowledged / fulfilled ───────
-$orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋'];
+$orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢'];
 $orderRows = dbFetchAll(
     "SELECT o.order_type, o.task_text, o.created_at AS sent_at, r.team_id, r.acknowledged_at, r.fulfilled_at,
             u.name AS actor_name, mt.codename, mt.team_number
@@ -141,7 +141,7 @@ foreach ($orderRows as $row) {
     $icon = $orderTypeIcons[$row['order_type']] ?? '📋';
     $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'χωρίς ομάδα';
     $extra = '';
-    if ($row['order_type'] === 'task' && $row['task_text']) {
+    if (in_array($row['order_type'], ['task', 'message'], true) && $row['task_text']) {
         $snippet = mb_strlen($row['task_text']) > 120 ? mb_substr($row['task_text'], 0, 117) . '…' : $row['task_text'];
         $extra = ' — «' . h($snippet) . '»';
     }

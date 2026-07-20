@@ -46,6 +46,7 @@ $typeMeta = [
     'photo'    => '📷 Φωτογραφία',
     'video'    => '🎥 Βίντεο',
     'task'     => '📋 Γενική Εντολή',
+    'message'  => '📢 Καθολικό Μήνυμα',
     'dispatch' => '🧭 Εντολή Κίνησης',
 ];
 
@@ -77,7 +78,7 @@ foreach ($orderRows as $row) {
         'team_id'     => $teamId,
         'team_label'  => $teamId ? ($teamLabels[$teamId] ?? '—') : 'Χωρίς ομάδα',
         'user_name'   => $row['user_name'],
-        'label'       => $row['order_type'] === 'task' ? $row['task_text'] : null,
+        'label'       => in_array($row['order_type'], ['task', 'message'], true) ? $row['task_text'] : null,
         'sent_at'     => $row['sent_at'],
         'ack_at'      => $row['acknowledged_at'],
         'fulfill_at'  => $row['fulfilled_at'],

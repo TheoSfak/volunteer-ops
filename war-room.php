@@ -300,25 +300,23 @@ if (isPost()) {
                  WHERE s.mission_id = ? AND pr.status = ?",
                 [$missionId, PARTICIPATION_APPROVED]
             );
+            // createMissionOrderAndNotify() itself never excludes the creator from
+            // the real-recipient loop (none of its other 4 callers needed to) — the
+            // exclusion has to happen here, same as the old hand-rolled loop did.
+            $recipientIds = array_values(array_diff(
+                array_map('intval', array_column($recipients, 'volunteer_id')),
+                [(int) $user['id']]
+            ));
 
-            $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-            $title = '📢 Καθολικό μήνυμα — ' . $mission['title'];
-            $sentCount = 0;
-            foreach ($recipients as $recipient) {
-                $recipientId = (int) $recipient['volunteer_id'];
-                if ($recipientId === (int) $user['id']) {
-                    continue;
-                }
-                sendNotification($recipientId, $title, $broadcastText, 'warning', '', [
-                    'url' => $warRoomUrl,
-                    'tag' => 'global-message-mission-' . $missionId,
-                    'vibrate' => [300, 100, 300, 100, 500],
-                    'bannerMission' => $missionId,
-                ]);
-                $sentCount++;
-            }
+            createMissionOrderAndNotify(
+                $missionId, $mission['title'], 'message', $user['id'], $recipientIds,
+                '📢 Καθολικό μήνυμα — ' . $mission['title'],
+                $broadcastText,
+                'Στάλθηκε καθολικό μήνυμα στην αποστολή «' . $mission['title'] . '».',
+                $broadcastText
+            );
             logAudit('global_message_war_room', 'missions', $missionId, null, ['message' => $broadcastText]);
-            setFlash('success', 'Το καθολικό μήνυμα εστάλη σε ' . $sentCount . ' εθελοντές.');
+            setFlash('success', 'Το καθολικό μήνυμα εστάλη σε ' . count($recipientIds) . ' εθελοντές.');
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'create_team') {
@@ -541,6 +539,7 @@ $participants = dbFetchAll(
     [$missionId, PARTICIPATION_APPROVED]
 );
 $myAssignments = array_values(array_filter($participants, fn($participant) => (int)$participant['volunteer_id'] === (int)$user['id']));
+$onlinePresenceIds = loadOnlinePresenceUserIds($missionId);
 
 $shifts = dbFetchAll(
     "SELECT s.*, COUNT(CASE WHEN pr.status = '" . PARTICIPATION_APPROVED . "' THEN 1 END) AS approved_count,
@@ -575,6 +574,16 @@ $loadPins = function () use ($missionId, $hasFieldStatus) {
 
 if (get('ajax') === '1') {
     header('Content-Type: application/json');
+
+    // Live-presence heartbeat: every open War Room tab hits this branch every
+    // 15s, so it doubles as the "I'm still here" signal — no separate endpoint
+    // or client timer needed.
+    dbExecute(
+        "INSERT INTO mission_presence (mission_id, user_id, last_seen_at) VALUES (?, ?, NOW())
+         ON DUPLICATE KEY UPDATE last_seen_at = NOW()",
+        [$missionId, $user['id']]
+    );
+
     $pins = array_map(fn($pin) => [
         'lat' => (float)$pin['lat'], 'lng' => (float)$pin['lng'], 'name' => $pin['name'],
         'status' => $pin['field_status'], 'time' => date('H:i', strtotime($pin['created_at']))
@@ -604,6 +613,7 @@ if (get('ajax') === '1') {
     $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $myTasks = loadMyTaskOrdersForUser($missionId, (int)$user['id']);
     $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
+    $onlinePresence = loadOnlinePresenceUserIds($missionId);
 
     echo json_encode([
         'pins' => $pins,
@@ -613,6 +623,7 @@ if (get('ajax') === '1') {
         'media' => $photos,
         'myTasks' => $myTasks,
         'shortageReports' => $shortageReports,
+        'onlinePresence' => $onlinePresence,
     ]);
     exit;
 }
@@ -719,6 +730,9 @@ include __DIR__ . '/includes/header.php';
     .war-room-hero h1 { color: #fff; font-weight: 700; }
     .participant-row { border-left: 4px solid #e2e8f0; }
     .participant-row.needs-help { border-left-color: #dc2626; }
+    .presence-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
+    .presence-dot.presence-online { background: #28a745; }
+    .presence-dot.presence-offline { background: #adb5bd; }
     .war-room-banner { display: none; align-items: center; gap: 10px; background: #000; border-bottom: 2px solid #dc2626; padding: 8px 12px; }
     .war-room-banner-track { flex: 1; overflow: hidden; white-space: nowrap; position: relative; height: 1.6em; }
     .war-room-banner-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #ff3b30; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; animation: warRoomBannerScroll 14s linear infinite; }
@@ -741,6 +755,7 @@ include __DIR__ . '/includes/header.php';
             </span>
             <?php if ($canManageWarRoom): ?>
             <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i>Αναφορά Χρόνων</button>
+            <button type="button" class="btn btn-outline-light" onclick="window.open('mission-report-print.php?mission_id=<?= $missionId ?>', '_blank')"><i class="bi bi-printer me-1"></i>Αναφορά PDF</button>
             <?php endif; ?>
             <a href="ops-dashboard.php" class="btn btn-light"><i class="bi bi-arrow-left me-1"></i>Επιχειρησιακό</a>
         </div>
@@ -843,7 +858,7 @@ include __DIR__ . '/includes/header.php';
                 <?php foreach ($participants as $participant): ?>
                 <?php $status = $participant['field_status'] ?? ''; ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                    <div><strong><?= h($participant['name']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): ?> <span class="badge bg-dark"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? ' · Τελευταίο στίγμα: ' . date('H:i', strtotime($participant['last_ping_at'])) : ' · Δεν υπάρχει στίγμα' ?></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'presence-online' : 'presence-offline' ?>" title="<?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'Online' : 'Offline' ?>"></span><strong><?= h($participant['name']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): ?> <span class="badge bg-dark"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? ' · Τελευταίο στίγμα: ' . date('H:i', strtotime($participant['last_ping_at'])) : ' · Δεν υπάρχει στίγμα' ?></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>">
                         <?= $status === 'needs_help' ? 'Χρειάζεται βοήθεια' : ($status === 'on_site' ? 'Επί τόπου' : ($status === 'on_way' ? 'Σε κίνηση' : 'Χωρίς κατάσταση')) ?>
                     </span>
@@ -852,6 +867,136 @@ include __DIR__ . '/includes/header.php';
                 <?php if (empty($participants)): ?><div class="list-group-item text-muted">Δεν υπάρχουν εγκεκριμένοι εθελοντές.</div><?php endif; ?>
             </div>
         </div>
+
+        <?php if ($canManageWarRoom): ?>
+        <div class="row g-4 mt-0">
+            <div class="col-md-6">
+                <div class="card shadow-sm h-100 border-warning">
+                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-bell-fill me-1"></i>Ζήτηση στίγματος</h5></div>
+                    <div class="card-body">
+                        <?php if (empty($activeParticipants)): ?>
+                            <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
+                        <?php else: ?>
+                            <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση. Ο ήχος εξαρτάται από τις ρυθμίσεις της συσκευής του εθελοντή.</p>
+                            <form method="post">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="request_location">
+                                <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
+                                    <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
+                                </button>
+                                <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
+                                <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
+                                    <?php foreach ($activeParticipants as $participant): ?>
+                                    <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
+                                        <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
+                                        <small class="text-muted"><?= $participant['last_ping_at'] ? date('H:i', strtotime($participant['last_ping_at'])) : 'χωρίς στίγμα' ?></small>
+                                    </label>
+                                    <?php endforeach; ?>
+                                </div>
+                                <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
+                                    <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card shadow-sm h-100 border-warning">
+                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i>Ζήτηση φωτογραφίας</h5></div>
+                    <div class="card-body">
+                        <?php if (empty($activeParticipants)): ?>
+                            <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
+                        <?php else: ?>
+                            <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση. Ο ήχος εξαρτάται από τις ρυθμίσεις της συσκευής του εθελοντή.</p>
+                            <form method="post">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="request_photo">
+                                <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
+                                    <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
+                                </button>
+                                <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
+                                <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
+                                    <?php foreach ($activeParticipants as $participant): ?>
+                                    <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
+                                        <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
+                                    </label>
+                                    <?php endforeach; ?>
+                                </div>
+                                <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
+                                    <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card shadow-sm h-100 border-warning">
+                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-reels-fill me-1"></i>Ζήτηση βίντεο</h5></div>
+                    <div class="card-body">
+                        <?php if (empty($activeParticipants)): ?>
+                            <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
+                        <?php else: ?>
+                            <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση. Ο ήχος εξαρτάται από τις ρυθμίσεις της συσκευής του εθελοντή.</p>
+                            <form method="post">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="request_video">
+                                <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
+                                    <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
+                                </button>
+                                <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
+                                <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
+                                    <?php foreach ($activeParticipants as $participant): ?>
+                                    <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
+                                        <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
+                                    </label>
+                                    <?php endforeach; ?>
+                                </div>
+                                <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
+                                    <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card shadow-sm h-100 border-warning">
+                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-clipboard-check-fill me-1"></i>Γενική Εντολή</h5></div>
+                    <div class="card-body">
+                        <?php if (empty($activeParticipants)): ?>
+                            <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
+                        <?php else: ?>
+                            <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση και ελεύθερο κείμενο εντολής. Ο εθελοντής επιβεβαιώνει χειροκίνητα την ολοκλήρωση.</p>
+                            <form method="post">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="request_task">
+                                <textarea name="task_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="Περιγράψτε την εντολή…" required></textarea>
+                                <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
+                                    <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
+                                </button>
+                                <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
+                                <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
+                                    <?php foreach ($activeParticipants as $participant): ?>
+                                    <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
+                                        <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
+                                    </label>
+                                    <?php endforeach; ?>
+                                </div>
+                                <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
+                                    <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <div class="card shadow-sm mt-4">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -952,124 +1097,6 @@ include __DIR__ . '/includes/header.php';
                     <textarea name="global_message_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="Γράψτε το μήνυμα προς όλους τους εθελοντές…" required></textarea>
                     <button type="submit" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i>Αποστολή σε όλους (<?= count($participants) ?>)</button>
                 </form>
-            </div>
-        </div>
-
-        <div class="card shadow-sm mb-4 border-warning">
-            <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-bell-fill me-1"></i>Ζήτηση στίγματος</h5></div>
-            <div class="card-body">
-                <?php if (empty($activeParticipants)): ?>
-                    <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
-                <?php else: ?>
-                    <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση. Ο ήχος εξαρτάται από τις ρυθμίσεις της συσκευής του εθελοντή.</p>
-                    <form method="post">
-                        <?= csrfField() ?>
-                        <input type="hidden" name="action" value="request_location">
-                        <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
-                            <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
-                        </button>
-                        <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
-                        <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
-                            <?php foreach ($activeParticipants as $participant): ?>
-                            <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
-                                <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
-                                <small class="text-muted"><?= $participant['last_ping_at'] ? date('H:i', strtotime($participant['last_ping_at'])) : 'χωρίς στίγμα' ?></small>
-                            </label>
-                            <?php endforeach; ?>
-                        </div>
-                        <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
-                            <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
-                        </button>
-                    </form>
-                <?php endif; ?>
-            </div>
-        </div>
-
-        <div class="card shadow-sm mb-4 border-warning">
-            <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i>Ζήτηση φωτογραφίας</h5></div>
-            <div class="card-body">
-                <?php if (empty($activeParticipants)): ?>
-                    <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
-                <?php else: ?>
-                    <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση. Ο ήχος εξαρτάται από τις ρυθμίσεις της συσκευής του εθελοντή.</p>
-                    <form method="post">
-                        <?= csrfField() ?>
-                        <input type="hidden" name="action" value="request_photo">
-                        <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
-                            <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
-                        </button>
-                        <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
-                        <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
-                            <?php foreach ($activeParticipants as $participant): ?>
-                            <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
-                                <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
-                            </label>
-                            <?php endforeach; ?>
-                        </div>
-                        <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
-                            <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
-                        </button>
-                    </form>
-                <?php endif; ?>
-            </div>
-        </div>
-
-        <div class="card shadow-sm mb-4 border-warning">
-            <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-reels-fill me-1"></i>Ζήτηση βίντεο</h5></div>
-            <div class="card-body">
-                <?php if (empty($activeParticipants)): ?>
-                    <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
-                <?php else: ?>
-                    <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση. Ο ήχος εξαρτάται από τις ρυθμίσεις της συσκευής του εθελοντή.</p>
-                    <form method="post">
-                        <?= csrfField() ?>
-                        <input type="hidden" name="action" value="request_video">
-                        <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
-                            <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
-                        </button>
-                        <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
-                        <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
-                            <?php foreach ($activeParticipants as $participant): ?>
-                            <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
-                                <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
-                            </label>
-                            <?php endforeach; ?>
-                        </div>
-                        <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
-                            <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
-                        </button>
-                    </form>
-                <?php endif; ?>
-            </div>
-        </div>
-
-        <div class="card shadow-sm mb-4 border-warning">
-            <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-clipboard-check-fill me-1"></i>Γενική Εντολή</h5></div>
-            <div class="card-body">
-                <?php if (empty($activeParticipants)): ?>
-                    <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
-                <?php else: ?>
-                    <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση και ελεύθερο κείμενο εντολής. Ο εθελοντής επιβεβαιώνει χειροκίνητα την ολοκλήρωση.</p>
-                    <form method="post">
-                        <?= csrfField() ?>
-                        <input type="hidden" name="action" value="request_task">
-                        <textarea name="task_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="Περιγράψτε την εντολή…" required></textarea>
-                        <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
-                            <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
-                        </button>
-                        <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
-                        <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
-                            <?php foreach ($activeParticipants as $participant): ?>
-                            <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
-                                <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
-                            </label>
-                            <?php endforeach; ?>
-                        </div>
-                        <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
-                            <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
-                        </button>
-                    </form>
-                <?php endif; ?>
             </div>
         </div>
 
@@ -1488,6 +1515,17 @@ function renderMyTasks(items) {
     }));
 }
 
+function renderPresence(onlineIds) {
+    const onlineSet = new Set((onlineIds || []).map(String));
+    document.querySelectorAll('[id^="presence-"]').forEach(el => {
+        const uid = el.id.slice('presence-'.length);
+        const isOnline = onlineSet.has(uid);
+        el.classList.toggle('presence-online', isOnline);
+        el.classList.toggle('presence-offline', !isOnline);
+        el.title = isOnline ? 'Online' : 'Offline';
+    });
+}
+
 function renderShortageReports(items) {
     const list = document.getElementById('shortageReportsList');
     if (!list) return;
@@ -1779,6 +1817,7 @@ setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after='
     if (data.media) renderMedia(media = data.media);
     if (data.myTasks) renderMyTasks(myTasks = data.myTasks);
     if (data.shortageReports) renderShortageReports(shortageReports = data.shortageReports);
+    if (data.onlinePresence) renderPresence(data.onlinePresence);
     document.getElementById('mapRefresh').textContent = data.time || '';
     if (data.banner && data.banner.id > bannerAfterId) {
         bannerAfterId = data.banner.id;
