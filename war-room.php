@@ -1401,6 +1401,9 @@ if (!fieldMode) {
     // the Ελήφθη/Άφιξη/Διαγραφή buttons inside each dispatch's popup.
     dispatchLayer = L.featureGroup().addTo(map);
 }
+function escapeHtml(str) {
+    return String(str ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
 function renderDispatches(items) {
     // A live poll can re-run this while an admin has a dispatch popup open
     // (very plausible for an area — there's more to read before deciding to
@@ -1420,7 +1423,7 @@ function renderDispatches(items) {
     let reopenLayer = null;
     items.forEach(item => {
         const acksHtml = item.acks.length
-            ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? a.team_label + ' — ' : ''}${a.user_name} (${a.time})`).join('<br>') + '</div>'
+            ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? a.team_label + ' — ' : ''}${escapeHtml(a.user_name)} (${a.time})`).join('<br>') + '</div>'
             : '';
         const receiveHtml = item.can_receive
             ? `<br><button type="button" class="btn btn-sm btn-warning mt-1 dispatch-receive-btn" data-id="${item.id}"><i class="bi bi-flag me-1"></i>Ελήφθη</button>`
@@ -1444,7 +1447,7 @@ function renderDispatches(items) {
         }
         const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}&travelmode=driving`;
         const directionsHtml = `<br><a href="${directionsUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-success mt-1"><i class="bi bi-signpost-2-fill me-1"></i>Οδηγίες</a>`;
-        const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + item.label : ''}` + acksHtml + receiveHtml + ackHtml + directionsHtml +
+        const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + acksHtml + receiveHtml + ackHtml + directionsHtml +
             (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">Διαγραφή</button>` : '');
         let layer = null;
         if (item.type === 'point') {
@@ -1505,7 +1508,7 @@ function renderPins(items) {
     items.forEach(pin => {
         const color = colors[pin.status] || '#2563eb';
         const icon = L.divIcon({className:'', html:`<span style="display:block;width:16px;height:16px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 4px #0008"></span>`, iconSize:[16,16], iconAnchor:[8,8]});
-        L.marker([pin.lat, pin.lng], {icon}).addTo(pinLayer).bindPopup(`<strong>${pin.name}</strong><br>${pin.time}`);
+        L.marker([pin.lat, pin.lng], {icon}).addTo(pinLayer).bindPopup(`<strong>${escapeHtml(pin.name)}</strong><br>${pin.time}`);
     });
     if (!hasFitPins && items.length) {
         hasFitPins = true;
@@ -1533,7 +1536,7 @@ function renderMedia(items) {
                 : `<img src="mission-photo-view.php?id=${m.id}" class="card-img-top" style="height:160px;object-fit:cover;cursor:pointer;" onclick="window.open('mission-photo-view.php?id=${m.id}', '_blank')">`}
             <div class="card-body p-2 d-flex justify-content-between align-items-center">
                 <div class="small">
-                    <strong>${m.media_type === 'video' ? '🎥 ' : '📷 '}${m.user_name}</strong><br>
+                    <strong>${m.media_type === 'video' ? '🎥 ' : '📷 '}${escapeHtml(m.user_name)}</strong><br>
                     <span class="text-muted">${m.time}</span>
                 </div>
                 <div class="d-flex gap-1">
@@ -1572,7 +1575,7 @@ function renderMyTasks(items) {
             actionHtml = `<button type="button" class="btn btn-sm btn-warning w-100 my-task-ack-btn" data-order-id="${t.order_id}">Ελήφθη</button>`;
         }
         return `<div class="border rounded p-2 mb-2">
-            <div class="small">${t.task_text}</div>
+            <div class="small">${escapeHtml(t.task_text)}</div>
             <div class="text-muted" style="font-size:.75rem;">Στάλθηκε ${t.sent_at}</div>
             <div class="mt-1">${actionHtml}</div>
         </div>`;
@@ -1622,9 +1625,9 @@ function renderShortageReports(items) {
     const sevColor = {low: 'secondary', medium: 'info', high: 'warning', critical: 'danger'};
     list.innerHTML = items.map(r => `
         <div class="border rounded p-2 mb-2">
-            <div><span class="badge bg-${sevColor[r.severity] || 'secondary'}">${r.severity_label}</span> <strong>${r.type_label}</strong> — ${r.title}</div>
-            <div class="small mt-1">${r.description}</div>
-            <div class="text-muted" style="font-size:.75rem;">${r.reporter_name} (${r.team_label}) · ${r.created_at}${r.acknowledged_at ? ' · Είδατε: ' + r.acknowledged_at : ''}</div>
+            <div><span class="badge bg-${sevColor[r.severity] || 'secondary'}">${r.severity_label}</span> <strong>${r.type_label}</strong> — ${escapeHtml(r.title)}</div>
+            <div class="small mt-1">${escapeHtml(r.description)}</div>
+            <div class="text-muted" style="font-size:.75rem;">${escapeHtml(r.reporter_name)} (${r.team_label}) · ${r.created_at}${r.acknowledged_at ? ' · Είδατε: ' + r.acknowledged_at : ''}</div>
             <div class="mt-1">${r.acknowledged_at
                 ? `<button type="button" class="btn btn-sm btn-success w-100 shortage-resolve-btn" data-report-id="${r.id}">Λύθηκε</button>`
                 : `<button type="button" class="btn btn-sm btn-warning w-100 shortage-seen-btn" data-report-id="${r.id}">Είδα</button>`}</div>
@@ -1941,8 +1944,8 @@ if (reportModalEl) {
                 <div class="list-group-item d-flex justify-content-between align-items-start gap-3">
                     <div>
                         <span class="me-1">${d.type_label}</span>
-                        <strong>${d.team_label}</strong> — ${d.user_name}
-                        ${d.label ? ' («' + d.label + '»)' : ''}
+                        <strong>${d.team_label}</strong> — ${escapeHtml(d.user_name)}
+                        ${d.label ? ' («' + escapeHtml(d.label) + '»)' : ''}
                         <div class="small text-muted">
                             Στάλθηκε ${d.sent_at}
                             · Ελήφθη ${d.ack_at ? d.ack_at + ' (' + d.ack_minutes + ' λεπ.)' : '—'}
@@ -1967,8 +1970,8 @@ if (reportModalEl) {
                 <div class="list-group-item d-flex justify-content-between align-items-start gap-3">
                     <div>
                         <span class="badge bg-${({low:'secondary',medium:'info',high:'warning',critical:'danger'})[d.severity] || 'secondary'} me-1">${d.severity_label}</span>
-                        <strong>${d.team_label}</strong> — ${d.reporter_name}
-                        («${d.title}»)
+                        <strong>${d.team_label}</strong> — ${escapeHtml(d.reporter_name)}
+                        («${escapeHtml(d.title)}»)
                         <div class="small text-muted">
                             Στάλθηκε ${d.sent_at}
                             · Είδε ${d.seen_at ? d.seen_at + ' (' + d.seen_minutes + ' λεπ.)' : '—'}
