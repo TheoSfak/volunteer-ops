@@ -1095,9 +1095,28 @@ let media = <?= json_encode($photos) ?>;
 const map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
 const pinLayer = L.layerGroup().addTo(map);
-const dispatchLayer = L.layerGroup().addTo(map);
+// FeatureGroup (not plain LayerGroup) is required here: only FeatureGroup
+// propagates child-layer events like 'popupopen' up to the group's own
+// listeners, which is how dispatchLayer.on('popupopen', ...) below wires up
+// the Ελήφθη/Άφιξη/Διαγραφή buttons inside each dispatch's popup.
+const dispatchLayer = L.featureGroup().addTo(map);
 function renderDispatches(items) {
+    // A live poll can re-run this while an admin has a dispatch popup open
+    // (very plausible for an area — there's more to read before deciding to
+    // click "Διαγραφή" than for a simple point). clearLayers() below destroys
+    // that popup and its buttons out from under them with no visible error.
+    // Remember which dispatch was open and reopen the freshly-rendered
+    // version of it afterward, so its buttons stay live and its popupopen
+    // handler re-wires correctly instead of clicking into a dead popup.
+    let openDispatchId = null;
+    dispatchLayer.eachLayer(layer => {
+        if (layer.dispatchId !== undefined && layer.isPopupOpen && layer.isPopupOpen()) {
+            openDispatchId = layer.dispatchId;
+        }
+    });
+
     dispatchLayer.clearLayers();
+    let reopenLayer = null;
     items.forEach(item => {
         const acksHtml = item.acks.length
             ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? a.team_label + ' — ' : ''}${a.user_name} (${a.time})`).join('<br>') + '</div>'
@@ -1110,13 +1129,19 @@ function renderDispatches(items) {
             : (item.my_ack ? `<div class="small text-success mt-1">✓ Αφίξατε στις ${item.my_ack}</div>` : '');
         const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + item.label : ''}` + acksHtml + receiveHtml + ackHtml +
             (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">Διαγραφή</button>` : '');
+        let layer = null;
         if (item.type === 'point') {
             const icon = L.divIcon({className:'', html:'<i class="bi bi-geo-alt-fill" style="font-size:28px;color:#7c3aed;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[28,28], iconAnchor:[14,26]});
-            L.marker([item.geo.lat, item.geo.lng], {icon}).addTo(dispatchLayer).bindPopup(popupHtml);
+            layer = L.marker([item.geo.lat, item.geo.lng], {icon}).addTo(dispatchLayer).bindPopup(popupHtml);
         } else if (item.type === 'polygon') {
-            L.polygon(item.geo, {color:'#7c3aed', fillOpacity:0.15}).addTo(dispatchLayer).bindPopup(popupHtml);
+            layer = L.polygon(item.geo, {color:'#7c3aed', fillOpacity:0.15}).addTo(dispatchLayer).bindPopup(popupHtml);
+        }
+        if (layer) {
+            layer.dispatchId = item.id;
+            if (String(item.id) === String(openDispatchId)) reopenLayer = layer;
         }
     });
+    if (reopenLayer) reopenLayer.openPopup();
 }
 dispatchLayer.on('popupopen', event => {
     const popupEl = event.popup.getElement();
