@@ -4579,6 +4579,41 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 82,
+            'description' => 'Add color to mission_teams (War Room team colors + matching GPS pin colors)',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_teams' AND COLUMN_NAME = 'color'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE mission_teams ADD COLUMN color VARCHAR(7) NULL AFTER team_number");
+
+                    // Backfill teams created before this migration, same ordinal
+                    // rule war-room.php uses for new ones (index among that
+                    // mission's teams, oldest first, cycling every 8 colors) —
+                    // keeps war-room.php's colors array as the single source of
+                    // truth (duplicated here since this file has no access to
+                    // war-room.php's local constants).
+                    $colors = ['#e34948','#008300','#4a3aa7','#eda100','#2a78d6','#e87ba4','#1baf7a','#eb6834'];
+                    $missionIds = array_column(
+                        dbFetchAll("SELECT DISTINCT mission_id FROM mission_teams"),
+                        'mission_id'
+                    );
+                    foreach ($missionIds as $missionId) {
+                        $teamIds = array_column(
+                            dbFetchAll("SELECT id FROM mission_teams WHERE mission_id = ? ORDER BY created_at, id", [$missionId]),
+                            'id'
+                        );
+                        foreach ($teamIds as $i => $teamId) {
+                            dbExecute("UPDATE mission_teams SET color = ? WHERE id = ?", [$colors[$i % count($colors)], $teamId]);
+                        }
+                    }
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

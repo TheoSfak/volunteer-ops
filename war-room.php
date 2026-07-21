@@ -35,6 +35,26 @@ if (!defined('MISSION_TEAM_CODENAMES')) {
         'Sierra','Tango','Uniform','Victor','Whiskey','X-ray','Yankee','Zulu']);
 }
 
+// Team color palette, same index basis as MISSION_TEAM_CODENAMES above (team N
+// gets codename[N % 26] and color[N % 8] — colors cycle every 8 teams since a
+// colorblind-safe categorical palette only stays distinguishable up to ~8
+// slots; ordering was picked (and validated with the dataviz skill's
+// scripts/validate_palette.js) to lead with red for Alpha / green for Bravo
+// as requested, then fill the rest by worst-adjacent-pair CVD separation.
+if (!defined('MISSION_TEAM_COLORS')) {
+    define('MISSION_TEAM_COLORS', ['#e34948','#008300','#4a3aa7','#eda100','#2a78d6','#e87ba4','#1baf7a','#eb6834']);
+}
+// Readable text color per swatch (WCAG contrast checked); anything not listed
+// defaults to black in teamBadgeColors() below.
+if (!defined('MISSION_TEAM_COLOR_TEXT')) {
+    define('MISSION_TEAM_COLOR_TEXT', ['#008300' => '#fff', '#4a3aa7' => '#fff']);
+}
+/** Returns [background, text] hex pair for a team badge; null color falls back to the old bg-dark look. */
+function teamBadgeColors(?string $color): array {
+    if (!$color) return ['#212529', '#fff'];
+    return [$color, MISSION_TEAM_COLOR_TEXT[$color] ?? '#000'];
+}
+
 /**
  * Notify every team member (individually) about their team assignment.
  * $namesByUserId must map user_id => name for all ids in $memberIds/$leaderId.
@@ -356,6 +376,7 @@ if (isPost()) {
         } else {
             $teamCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_teams WHERE mission_id = ?", [$missionId]);
             $codename = MISSION_TEAM_CODENAMES[$teamCount % count(MISSION_TEAM_CODENAMES)];
+            $teamColor = MISSION_TEAM_COLORS[$teamCount % count(MISSION_TEAM_COLORS)];
 
             $teamNumber = null;
             for ($attempt = 0; $attempt < 50; $attempt++) {
@@ -371,8 +392,8 @@ if (isPost()) {
                 setFlash('error', 'Δεν ήταν δυνατή η δημιουργία μοναδικού αριθμού ομάδας. Δοκιμάστε ξανά.');
             } else {
                 $teamId = dbInsert(
-                    "INSERT INTO mission_teams (mission_id, codename, team_number, leader_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
-                    [$missionId, $codename, $teamNumber, $leaderId, $user['id']]
+                    "INSERT INTO mission_teams (mission_id, codename, team_number, color, leader_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+                    [$missionId, $codename, $teamNumber, $teamColor, $leaderId, $user['id']]
                 );
                 foreach ($memberIds as $memberId) {
                     dbInsert(
@@ -566,11 +587,13 @@ $loadPins = function () use ($missionId, $hasFieldStatus) {
     try {
         $field = $hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status';
         return dbFetchAll(
-            "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.created_at, u.name{$field}
+            "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.created_at, u.name, mt.color AS team_color{$field}
              FROM volunteer_pings vp
              JOIN shifts s ON s.id = vp.shift_id
              JOIN users u ON u.id = vp.user_id
              LEFT JOIN participation_requests pr ON pr.shift_id = vp.shift_id AND pr.volunteer_id = vp.user_id
+             LEFT JOIN mission_team_members mtm ON mtm.user_id = vp.user_id AND mtm.mission_id = s.mission_id
+             LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
              WHERE s.mission_id = ?
                AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
                AND vp.id = (SELECT MAX(vp2.id) FROM volunteer_pings vp2 WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id)
@@ -596,7 +619,7 @@ if (get('ajax') === '1') {
 
     $pins = array_map(fn($pin) => [
         'lat' => (float)$pin['lat'], 'lng' => (float)$pin['lng'], 'name' => $pin['name'],
-        'status' => $pin['field_status'], 'time' => date('H:i', strtotime($pin['created_at']))
+        'status' => $pin['field_status'], 'team_color' => $pin['team_color'], 'time' => date('H:i', strtotime($pin['created_at']))
     ], $loadPins());
 
     $bannerAfterId = (int) get('banner_after');
@@ -642,7 +665,7 @@ if (get('ajax') === '1') {
 
 $pins = array_map(fn($pin) => [
     'lat' => (float)$pin['lat'], 'lng' => (float)$pin['lng'], 'name' => $pin['name'],
-    'status' => $pin['field_status'], 'time' => date('H:i', strtotime($pin['created_at']))
+    'status' => $pin['field_status'], 'team_color' => $pin['team_color'], 'time' => date('H:i', strtotime($pin['created_at']))
 ], $loadPins());
 
 // Baseline for the live request banner: ignore anything sent before this page load,
@@ -670,7 +693,7 @@ $activeParticipants = array_values(array_filter($participants, fn($participant) 
 
 // ── Mission teams ─────────────────────────────────────────────────────────
 $teamRows = dbFetchAll(
-    "SELECT mt.id, mt.codename, mt.team_number, mt.leader_id, l.name AS leader_name,
+    "SELECT mt.id, mt.codename, mt.team_number, mt.color, mt.leader_id, l.name AS leader_name,
             mtm.user_id, u.name AS member_name
      FROM mission_teams mt
      LEFT JOIN users l ON l.id = mt.leader_id
@@ -688,6 +711,7 @@ foreach ($teamRows as $row) {
             'id' => $tid,
             'codename' => $row['codename'],
             'team_number' => $row['team_number'],
+            'color' => $row['color'],
             'leader_id' => $row['leader_id'] !== null ? (int)$row['leader_id'] : null,
             'leader_name' => $row['leader_name'],
             'members' => [],
@@ -699,10 +723,12 @@ foreach ($teamRows as $row) {
 }
 
 $teamLabelByUserId = [];
+$teamColorByUserId = [];
 foreach ($teams as $team) {
     $label = $team['codename'] . ' ' . $team['team_number'];
     foreach ($team['members'] as $member) {
         $teamLabelByUserId[$member['user_id']] = $label;
+        $teamColorByUserId[$member['user_id']] = $team['color'];
     }
 }
 
@@ -872,10 +898,11 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="list-group list-group-flush">
                 <?php foreach ($teams as $team): ?>
+                <?php [$teamBg, $teamFg] = teamBadgeColors($team['color']); ?>
                 <div class="list-group-item">
                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
                         <div>
-                            <span class="badge bg-dark fs-6 me-2"><?= h($team['codename'] . ' ' . $team['team_number']) ?></span>
+                            <span class="badge fs-6 me-2" style="background:<?= h($teamBg) ?>;color:<?= h($teamFg) ?>;"><?= h($team['codename'] . ' ' . $team['team_number']) ?></span>
                             <?php if ($team['leader_name']): ?>
                             <span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i><?= h($team['leader_name']) ?></span>
                             <?php endif; ?>
@@ -911,7 +938,7 @@ include __DIR__ . '/includes/header.php';
                 <?php foreach ($participants as $participant): ?>
                 <?php $status = $participant['field_status'] ?? ''; ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'presence-online' : 'presence-offline' ?>" title="<?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'Online' : 'Offline' ?>"></span><strong><?= h($participant['name']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): ?> <span class="badge bg-dark"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? ' · Τελευταίο στίγμα: ' . date('H:i', strtotime($participant['last_ping_at'])) : ' · Δεν υπάρχει στίγμα' ?></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'presence-online' : 'presence-offline' ?>" title="<?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'Online' : 'Offline' ?>"></span><strong><?= h($participant['name']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? ' · Τελευταίο στίγμα: ' . date('H:i', strtotime($participant['last_ping_at'])) : ' · Δεν υπάρχει στίγμα' ?></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>">
                         <?= $status === 'needs_help' ? 'Χρειάζεται βοήθεια' : ($status === 'on_site' ? 'Επί τόπου' : ($status === 'on_way' ? 'Σε κίνηση' : 'Χωρίς κατάσταση')) ?>
                     </span>
@@ -1502,13 +1529,25 @@ dispatchLayer.on('popupopen', event => {
 if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup('<strong>Σημείο αποστολής</strong><br><?= h(addslashes($mission['title'])) ?>');
 }
 let hasFitPins = false;
+function pinStatusLabel(status) {
+    return {needs_help: 'Χρειάζεται βοήθεια', on_site: 'Επί τόπου', on_way: 'Σε κίνηση'}[status] || '';
+}
 function renderPins(items) {
     pinLayer.clearLayers();
-    const colors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
+    const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
     items.forEach(pin => {
-        const color = colors[pin.status] || '#2563eb';
-        const icon = L.divIcon({className:'', html:`<span style="display:block;width:16px;height:16px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 4px #0008"></span>`, iconSize:[16,16], iconAnchor:[8,8]});
-        L.marker([pin.lat, pin.lng], {icon}).addTo(pinLayer).bindPopup(`<strong>${escapeHtml(pin.name)}</strong><br>${pin.time}`);
+        // Team color takes priority (the whole point is spotting which team a
+        // pin belongs to at a glance); volunteers with no team fall back to the
+        // original status-based color. needs_help always gets a pulsing red
+        // ring on top, team-colored or not, so that safety signal never
+        // disappears just because someone's on a team.
+        const color = pin.team_color || statusColors[pin.status] || '#2563eb';
+        const ring = pin.status === 'needs_help'
+            ? 'border:3px solid #dc2626;animation:warRoomPulseRed 1s infinite;'
+            : 'border:2px solid white;';
+        const icon = L.divIcon({className:'', html:`<span style="display:block;width:16px;height:16px;background:${color};${ring}border-radius:50%;box-shadow:0 1px 4px #0008"></span>`, iconSize:[16,16], iconAnchor:[8,8]});
+        const statusLine = pinStatusLabel(pin.status);
+        L.marker([pin.lat, pin.lng], {icon}).addTo(pinLayer).bindPopup(`<strong>${escapeHtml(pin.name)}</strong><br>${pin.time}${statusLine ? '<br>' + statusLine : ''}`);
     });
     if (!hasFitPins && items.length) {
         hasFitPins = true;
