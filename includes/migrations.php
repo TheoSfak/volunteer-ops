@@ -4614,6 +4614,25 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 83,
+            'description' => 'Register mission_dispatch_receive notification code (War Room loud banner+sound when a team confirms receipt of a dispatch, matching the existing arrival alert)',
+            'up' => function () {
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_dispatch_receive'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_dispatch_receive',
+                            'Επιβεβαίωση Λήψης Σημείου War Room',
+                            'Μια ομάδα επιβεβαίωσε λήψη σημείου/περιοχής που της στάλθηκε (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
