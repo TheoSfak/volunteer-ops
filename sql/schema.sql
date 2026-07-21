@@ -1330,6 +1330,7 @@ CREATE TABLE IF NOT EXISTS `volunteer_pings` (
     `shift_id` INT UNSIGNED NOT NULL,
     `lat` DECIMAL(10, 8) NOT NULL,
     `lng` DECIMAL(11, 8) NOT NULL,
+    `source` ENUM('manual','auto') NOT NULL DEFAULT 'manual',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`shift_id`) REFERENCES `shifts`(`id`) ON DELETE CASCADE,

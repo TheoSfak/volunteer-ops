@@ -811,6 +811,7 @@ include __DIR__ . '/includes/header.php';
             <?php if ($canManageWarRoom && !$fieldMode): ?>
             <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i>Αναφορά Χρόνων</button>
             <button type="button" class="btn btn-outline-light" onclick="window.open('mission-report-print.php?mission_id=<?= $missionId ?>', '_blank')"><i class="bi bi-printer me-1"></i>Αναφορά PDF</button>
+            <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i>Πορεία Ομάδων</button>
             <?php endif; ?>
             <form method="post">
                 <?= csrfField() ?>
@@ -846,6 +847,34 @@ include __DIR__ . '/includes/header.php';
                 <h5 class="mb-0"><i class="bi bi-map me-1"></i>Ζωντανός χάρτης αποστολής</h5>
                 <small class="text-muted">Ενημέρωση: <span id="mapRefresh"><?= date('H:i:s') ?></span></small>
             </div>
+            <?php if ($canManageWarRoom): ?>
+            <div class="card-header bg-light border-top d-none" id="trailFilterBar">
+                <div class="row g-2 align-items-end">
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small fw-semibold mb-1">Ομάδα</label>
+                        <select class="form-select form-select-sm" id="trailTeamSelect">
+                            <option value="">Όλες οι ομάδες</option>
+                            <?php foreach ($teams as $team): ?>
+                            <option value="<?= $team['id'] ?>"><?= h($team['codename'] . ' ' . $team['team_number']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-5">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="trailIncludeAdmin" checked>
+                            <label class="form-check-label small" for="trailIncludeAdmin">Σημεία/περιοχές διαχειριστή</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="trailIncludeAuto">
+                            <label class="form-check-label small" for="trailIncludeAuto">Αυτόματα στίγματα</label>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <button type="button" class="btn btn-sm btn-primary w-100" id="trailApplyBtn"><i class="bi bi-funnel-fill me-1"></i>Εμφάνιση</button>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
             <div class="card-body p-0" style="position:relative;">
                 <div id="warRoomMap"></div>
                 <?php if ($canManageWarRoom): ?>
@@ -1120,6 +1149,7 @@ include __DIR__ . '/includes/header.php';
                         <button type="button" class="btn btn-sm <?= $myFieldStatus === 'needs_help' ? 'btn-danger' : 'btn-outline-danger' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'needs_help')">🆘 SOS</button>
                     </div>
                     <?php endforeach; ?>
+                    <p class="small text-muted mb-0">Όσο αυτή η σελίδα παραμένει ανοιχτή, το στίγμα σας αποστέλλεται αυτόματα κάθε 3 λεπτά.</p>
                 <?php endif; ?>
             </div>
         </div>
@@ -1442,7 +1472,7 @@ let mediaSignature = JSON.stringify(media);
 let myTasks = <?= json_encode($myTasks) ?>;
 let shortageReports = <?= json_encode($shortageReports) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
-let map = null, pinLayer = null, dispatchLayer = null;
+let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
@@ -1452,6 +1482,9 @@ if (!fieldMode) {
     // listeners, which is how dispatchLayer.on('popupopen', ...) below wires up
     // the Ελήφθη/Άφιξη/Διαγραφή buttons inside each dispatch's popup.
     dispatchLayer = L.featureGroup().addTo(map);
+    // Not attached to the map yet — only shown while trail mode is active
+    // (enterTrailMode()/exitTrailMode() below), swapped in place of pinLayer.
+    trailLayer = L.layerGroup();
 }
 function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -1585,6 +1618,81 @@ function renderPins(items) {
             map.setView(coords[0], 15);
         }
     }
+}
+
+// "Πορεία Ομάδων" — historical GPS trail view, toggled in place of the live
+// pinLayer on the same map (not a second map instance). Own fitBounds call,
+// deliberately not sharing hasFitPins above (that flag is one-shot for the
+// initial live view and reusing it here would break one view or the other).
+let trailModeActive = false;
+function renderTrail(trails) {
+    trailLayer.clearLayers();
+    const bounds = [];
+    trails.forEach(trail => {
+        const color = trail.team_color || '#2563eb';
+        const latlngs = trail.points.map(p => [p.lat, p.lng]);
+        if (latlngs.length > 1) {
+            L.polyline(latlngs, {color, weight: 3, opacity: 0.8}).addTo(trailLayer);
+        }
+        trail.points.forEach((point, i) => {
+            const isLast = i === trail.points.length - 1;
+            const isFirst = i === 0 && trail.points.length > 1;
+            let marker;
+            if (isLast) {
+                const icon = L.divIcon({className:'', html:`<span style="display:block;width:16px;height:16px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 4px #0008"></span>`, iconSize:[16,16], iconAnchor:[8,8]});
+                marker = L.marker([point.lat, point.lng], {icon}).addTo(trailLayer);
+            } else {
+                marker = L.circleMarker([point.lat, point.lng], {radius: isFirst ? 7 : 5, color:'#fff', weight: isFirst ? 3 : 2, fillColor: color, fillOpacity: 1}).addTo(trailLayer);
+            }
+            const sourceLabel = point.source === 'auto' ? ' (αυτόματο)' : '';
+            marker.bindTooltip(`<strong>${escapeHtml(trail.name)}</strong><br>${point.time}${sourceLabel}`);
+            bounds.push([point.lat, point.lng]);
+        });
+    });
+    if (bounds.length) {
+        map.invalidateSize();
+        map.fitBounds(L.latLngBounds(bounds), {padding: [40, 40]});
+    }
+}
+function enterTrailMode() {
+    const teamId = document.getElementById('trailTeamSelect').value || '0';
+    const includeAuto = document.getElementById('trailIncludeAuto').checked ? '1' : '0';
+    const includeAdmin = document.getElementById('trailIncludeAdmin').checked;
+    const params = new URLSearchParams({mission_id: <?= $missionId ?>, team_id: teamId, include_auto: includeAuto});
+    fetch('mission-track.php?' + params).then(r => r.json()).then(result => {
+        if (!result.ok) { alert(result.error || 'Αποτυχία φόρτωσης πορείας.'); return; }
+        if (!trailModeActive) {
+            map.removeLayer(pinLayer);
+            trailLayer.addTo(map);
+            trailModeActive = true;
+        }
+        if (includeAdmin) { if (!map.hasLayer(dispatchLayer)) dispatchLayer.addTo(map); }
+        else if (map.hasLayer(dispatchLayer)) { map.removeLayer(dispatchLayer); }
+        renderTrail(result.trails);
+    }).catch(() => alert('Αποτυχία φόρτωσης πορείας.'));
+}
+function exitTrailMode() {
+    trailModeActive = false;
+    trailLayer.clearLayers();
+    if (map.hasLayer(trailLayer)) map.removeLayer(trailLayer);
+    if (!map.hasLayer(pinLayer)) pinLayer.addTo(map);
+    if (!map.hasLayer(dispatchLayer)) dispatchLayer.addTo(map);
+}
+const trailModeToggleBtn = document.getElementById('trailModeToggle');
+if (trailModeToggleBtn) {
+    const trailFilterBar = document.getElementById('trailFilterBar');
+    trailModeToggleBtn.addEventListener('click', () => {
+        if (trailModeActive) {
+            exitTrailMode();
+            trailFilterBar.classList.add('d-none');
+            trailModeToggleBtn.innerHTML = '<i class="bi bi-clock-history me-1"></i>Πορεία Ομάδων';
+        } else {
+            trailFilterBar.classList.remove('d-none');
+            trailModeToggleBtn.innerHTML = '<i class="bi bi-x-lg me-1"></i>Ζωντανή Προβολή';
+            enterTrailMode();
+        }
+    });
+    document.getElementById('trailApplyBtn').addEventListener('click', enterTrailMode);
 }
 
 function renderMedia(items) {
@@ -2125,6 +2233,22 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
         }).catch(() => { status.textContent = 'Αποτυχία αποστολής στίγματος.'; status.className = 'small mb-2 text-danger'; }).finally(() => button.disabled = false);
     }, () => { status.textContent = 'Δεν δόθηκε άδεια πρόσβασης στο GPS.'; status.className = 'small mb-2 text-danger'; button.disabled = false; }, {enableHighAccuracy:true, timeout:10000});
 }));
+
+// Passive background capture while this page stays open — silent (no status
+// text, doesn't touch the manual button above), tagged source=auto so it's
+// excluded from alerts/history/reports and hidden from the trail view unless
+// the admin explicitly filters it in. One getCurrentPosition() call per tick
+// reused for every active shift assignment, not one read per button.
+setInterval(() => {
+    const buttons = document.querySelectorAll('.send-ping');
+    if (!buttons.length || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(position => {
+        buttons.forEach(button => {
+            const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, source: 'auto'});
+            fetch('ping-location.php', {method: 'POST', body: data});
+        });
+    }, () => {}, {enableHighAccuracy: true, timeout: 10000});
+}, 180000);
 
 function setFieldStatus(btn, prId, status) {
     const group = document.getElementById('statusBtns-' + prId);
