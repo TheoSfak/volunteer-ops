@@ -48,10 +48,17 @@ function notifyMissionTeamChat(int $missionId, string $missionTitle, array $team
 
     $recipientIds = array_values(array_unique(array_diff($recipientIds, [$senderId])));
     foreach ($recipientIds as $recipientId) {
-        sendNotification($recipientId, '💬 ' . $teamLabel, $senderName . ': ' . $preview, 'info', 'mission_team_chat', [
+        $pushData = [
             'url' => $warRoomUrl,
             'tag' => 'mission-chat-team-' . $teamId,
-        ]);
+        ];
+        // Only an admin/shift-leader message to the team's private room gets the
+        // loud scrolling banner + sound — a regular member posting (notifying
+        // command staff, the other branch above) stays a quiet bell, same as before.
+        if ($senderIsAdmin) {
+            $pushData['bannerMission'] = $missionId;
+        }
+        sendNotification($recipientId, '💬 ' . $teamLabel, $senderName . ': ' . $preview, 'info', 'mission_team_chat', $pushData);
     }
 }
 

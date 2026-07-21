@@ -44,6 +44,32 @@ function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $respo
         sendNotification($recipientId, '✅ Αναφορά Άφιξης', $message, 'success', 'mission_dispatch_ack', [
             'url' => $warRoomUrl,
             'tag' => 'dispatch-ack-mission-' . $missionId,
+            'bannerMission' => $missionId,
+        ]);
+    }
+}
+
+/**
+ * Notify command staff that a team confirmed receipt ("Ελήφθη") of a dispatch
+ * point/area — the earlier stage of notifyDispatchArrival() above. Also threads
+ * bannerMission into pushData so this pops the scrolling banner + alert sound
+ * for command staff (war-room.php's banner mechanism is generic: any
+ * sendNotification() pushData with bannerMission => $missionId qualifies, no
+ * per-feature banner code needed), same as arrival now gets above.
+ */
+function notifyDispatchReceive(int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $receiverName, int $receiverId): void {
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $kind = $dispatch['type'] === 'point' ? 'σημείου' : 'περιοχής';
+    $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
+    $who = $teamLabel ? 'Η ομάδα ' . $teamLabel : $receiverName;
+    $message = $who . ' επιβεβαίωσε λήψη ' . $kind . $labelPart . ' της αποστολής «' . $missionTitle . '».';
+
+    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $receiverId);
+    foreach ($recipientIds as $recipientId) {
+        sendNotification($recipientId, '📩 Επιβεβαίωση Λήψης', $message, 'info', 'mission_dispatch_receive', [
+            'url' => $warRoomUrl,
+            'tag' => 'dispatch-receive-mission-' . $missionId,
+            'bannerMission' => $missionId,
         ]);
     }
 }
@@ -96,7 +122,7 @@ if ($action === 'receive') {
     }
 
     $dispatchId = (int) post('id');
-    $dispatch = dbFetchOne("SELECT id, team_id FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
+    $dispatch = dbFetchOne("SELECT id, team_id, label, type FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
     if (!$dispatch) {
         echo json_encode(['ok' => false, 'error' => 'Δεν βρέθηκε.']);
         exit;
@@ -117,6 +143,15 @@ if ($action === 'receive') {
         logAudit('team_received_dispatch', 'mission_dispatch_points', $dispatchId, null, [
             'mission_id' => $missionId, 'team_id' => $myTeamId, 'user_id' => $userId,
         ]);
+
+        $teamLabel = null;
+        if ($myTeamId) {
+            $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$myTeamId]);
+            if ($teamRow) {
+                $teamLabel = $teamRow['codename'] . ' ' . $teamRow['team_number'];
+            }
+        }
+        notifyDispatchReceive($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $dispatch, $teamLabel, $user['name'], $userId);
     }
 
     $dispatches = loadMissionDispatchesForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
