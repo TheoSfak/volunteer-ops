@@ -10,6 +10,30 @@ requireLogin();
 
 header('Content-Type: application/json');
 
+/**
+ * Notify command staff that a volunteer sent their GPS location — mirrors
+ * mission-dispatch.php's notifyDispatchReceive()/notifyDispatchArrival()
+ * shape (own notification code, bannerMission for the loud scrolling
+ * banner + sound, getMissionCommandStaffIds() for recipients). Fires on
+ * every ping regardless of whether it was requested via a War Room order —
+ * request fulfillment is already tracked separately
+ * (mission_order_recipients.fulfilled_at) for the response-time report;
+ * this is the live "someone just sent their location" alert.
+ */
+function notifyVolunteerGpsPing(int $missionId, string $missionTitle, ?int $responsibleUserId, string $senderName, int $senderId): void {
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $message = $senderName . ' έστειλε το στίγμα του/της στην αποστολή «' . $missionTitle . '».';
+
+    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $senderId);
+    foreach ($recipientIds as $recipientId) {
+        sendNotification($recipientId, '📍 Νέο Στίγμα Εθελοντή', $message, 'info', 'mission_gps_ping', [
+            'url' => $warRoomUrl,
+            'tag' => 'gps-ping-mission-' . $missionId,
+            'bannerMission' => $missionId,
+        ]);
+    }
+}
+
 if (!isPost()) {
     echo json_encode(['ok' => false, 'error' => 'Method not allowed']);
     exit;
@@ -22,6 +46,7 @@ if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_to
 }
 
 $userId  = getCurrentUserId();
+$user    = getCurrentUser();
 $shiftId = (int) post('shift_id');
 $lat     = (float) post('lat');
 $lng     = (float) post('lng');
@@ -34,7 +59,7 @@ if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180 || ($lat == 0 && $lng =
 
 // Verify user has an APPROVED participation for this shift
 $pr = dbFetchOne(
-    "SELECT pr.id, s.mission_id FROM participation_requests pr
+    "SELECT pr.id, s.mission_id, m.title AS mission_title, m.responsible_user_id FROM participation_requests pr
      JOIN shifts s ON pr.shift_id = s.id
      JOIN missions m ON s.mission_id = m.id
      WHERE pr.shift_id = ? AND pr.volunteer_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "'
@@ -57,6 +82,14 @@ try {
     echo json_encode(['ok' => false, 'error' => 'Η λειτουργία GPS δεν είναι διαθέσιμη ακόμη (χρειάζεται migration βάσης).']);
     exit;
 }
+
+notifyVolunteerGpsPing(
+    (int) $pr['mission_id'],
+    $pr['mission_title'],
+    $pr['responsible_user_id'] ? (int) $pr['responsible_user_id'] : null,
+    $user['name'],
+    $userId
+);
 
 // Auto-fulfill any outstanding War Room "send your location" orders for this user.
 try {

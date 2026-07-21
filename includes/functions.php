@@ -702,9 +702,12 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
  */
 function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canManageWarRoom, int $limit = 30): array {
     $rows = dbFetchAll(
-        "SELECT p.id, p.user_id, p.media_type, p.lat, p.lng, p.created_at, u.name AS user_name
+        "SELECT p.id, p.user_id, p.media_type, p.lat, p.lng, p.created_at, u.name AS user_name,
+                mt.codename, mt.team_number
          FROM mission_photos p
          JOIN users u ON u.id = p.user_id
+         LEFT JOIN mission_team_members mtm ON mtm.user_id = p.user_id AND mtm.mission_id = p.mission_id
+         LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
          WHERE p.mission_id = ?
          ORDER BY p.created_at DESC
          LIMIT ?",
@@ -715,6 +718,7 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
         'id'         => (int) $row['id'],
         'media_type' => $row['media_type'],
         'user_name'  => $row['user_name'],
+        'team_label' => $row['codename'] ? $row['codename'] . ' ' . $row['team_number'] : null,
         'time'       => date('d/m H:i', strtotime($row['created_at'])),
         'lat'        => $row['lat'] !== null ? (float) $row['lat'] : null,
         'lng'        => $row['lng'] !== null ? (float) $row['lng'] : null,

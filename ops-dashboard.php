@@ -552,7 +552,7 @@ include __DIR__ . '/includes/header.php';
                     </button>
                     <?php endif; ?>
                     <a href="war-room.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-danger fw-semibold">
-                        <i class="bi bi-broadcast-pin me-1"></i>War Room
+                        <i class="bi bi-broadcast-pin me-1"></i>Action Room
                     </a>
                     <a href="mission-view.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-primary">
                         <i class="bi bi-arrow-right"></i>
@@ -692,7 +692,7 @@ include __DIR__ . '/includes/header.php';
                     <?php if ($m['department_name']): ?>
                         <span class="badge bg-secondary"><?= h($m['department_name']) ?></span>
                     <?php endif; ?>
-                    <a href="war-room.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-danger fw-semibold"><i class="bi bi-broadcast-pin me-1"></i>War Room</a>
+                    <a href="war-room.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-danger fw-semibold"><i class="bi bi-broadcast-pin me-1"></i>Action Room</a>
                     <a href="mission-view.php?id=<?= $m['id'] ?>" class="btn btn-sm btn-outline-primary">
                         <i class="bi bi-arrow-right"></i>
                     </a>
@@ -750,7 +750,7 @@ include __DIR__ . '/includes/header.php';
                             <strong><?= h($m['title']) ?></strong>
                             <div class="small text-muted mt-1">Τελευταία βάρδια: <?= formatDateTime(date('Y-m-d H:i:s', $m['operational_end'])) ?></div>
                         </div>
-                        <a href="war-room.php?id=<?= $m['id'] ?>" class="btn btn-danger fw-semibold"><i class="bi bi-broadcast-pin me-1"></i>Άνοιγμα War Room</a>
+                        <a href="war-room.php?id=<?= $m['id'] ?>" class="btn btn-danger fw-semibold"><i class="bi bi-broadcast-pin me-1"></i>Άνοιγμα Action Room</a>
                     </div>
                 </div>
                 <?php endforeach; ?>
