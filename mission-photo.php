@@ -44,6 +44,7 @@ function notifyPhotoReceived(int $missionId, string $missionTitle, ?int $respons
         sendNotification($recipientId, $title, $message, 'info', $code, [
             'url' => $warRoomUrl,
             'tag' => 'photo-received-mission-' . $missionId,
+            'bannerMission' => $missionId,
         ]);
     }
 }
