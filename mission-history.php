@@ -204,7 +204,7 @@ $pingRows = dbFetchAll(
      JOIN shifts s ON s.id = vp.shift_id
      JOIN users u ON u.id = vp.user_id
      LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = vp.user_id
-     WHERE s.mission_id = ? AND (? = 1 OR vp.user_id = ? OR mtm.team_id = ?)
+     WHERE s.mission_id = ? AND vp.source = 'manual' AND (? = 1 OR vp.user_id = ? OR mtm.team_id = ?)
      ORDER BY vp.created_at DESC LIMIT 150",
     [$missionId, $isAdminParam, $userId, $viewerTeamId]
 );

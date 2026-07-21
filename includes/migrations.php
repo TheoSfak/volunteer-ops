@@ -4661,6 +4661,20 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 86,
+            'description' => 'Add source to volunteer_pings (manual vs. auto-captured GPS, Action Room passive tracking while the page is open)',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'volunteer_pings' AND COLUMN_NAME = 'source'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE volunteer_pings ADD COLUMN source ENUM('manual','auto') NOT NULL DEFAULT 'manual' AFTER lng");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

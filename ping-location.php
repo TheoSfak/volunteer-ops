@@ -50,6 +50,7 @@ $user    = getCurrentUser();
 $shiftId = (int) post('shift_id');
 $lat     = (float) post('lat');
 $lng     = (float) post('lng');
+$source  = post('source') === 'auto' ? 'auto' : 'manual';
 
 // Validate coordinates
 if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180 || ($lat == 0 && $lng == 0)) {
@@ -75,21 +76,25 @@ if (!$pr) {
 // Insert ping
 try {
     dbInsert(
-        "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, created_at) VALUES (?, ?, ?, ?, NOW())",
-        [$userId, $shiftId, $lat, $lng]
+        "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, source, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
+        [$userId, $shiftId, $lat, $lng, $source]
     );
 } catch (Exception $e) {
     echo json_encode(['ok' => false, 'error' => 'Η λειτουργία GPS δεν είναι διαθέσιμη ακόμη (χρειάζεται migration βάσης).']);
     exit;
 }
 
-notifyVolunteerGpsPing(
-    (int) $pr['mission_id'],
-    $pr['mission_title'],
-    $pr['responsible_user_id'] ? (int) $pr['responsible_user_id'] : null,
-    $user['name'],
-    $userId
-);
+// Auto-captured pings (passive, every few minutes while Action Room is open)
+// stay quiet — only a manual tap should trigger the loud command-staff alert.
+if ($source !== 'auto') {
+    notifyVolunteerGpsPing(
+        (int) $pr['mission_id'],
+        $pr['mission_title'],
+        $pr['responsible_user_id'] ? (int) $pr['responsible_user_id'] : null,
+        $user['name'],
+        $userId
+    );
+}
 
 // Auto-fulfill any outstanding War Room "send your location" orders for this user.
 try {

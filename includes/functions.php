@@ -696,6 +696,67 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
 }
 
 /**
+ * War Room "Πορεία Ομάδων": full historical GPS trail per volunteer for a
+ * mission (not just the latest ping like the live map's $loadPins), grouped
+ * by user_id (not user+shift — a volunteer has at most one team per mission
+ * per uniq_mission_user, so merging pings across their shift assignments
+ * into one continuous trail is correct). $teamId = 0 means all teams; the
+ * mtm.mission_id = s.mission_id join condition makes a team_id from another
+ * mission safely match nothing, no separate ownership check needed.
+ * Auto-captured pings (source='auto') are excluded unless $includeAuto is
+ * true — admin-only opt-in filter, off by default everywhere else.
+ */
+function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAuto): array {
+    $rows = dbFetchAll(
+        "SELECT vp.user_id, vp.lat, vp.lng, vp.created_at, vp.source,
+                u.name, mtm.team_id, mt.color AS team_color
+         FROM volunteer_pings vp
+         JOIN shifts s ON s.id = vp.shift_id
+         JOIN users u ON u.id = vp.user_id
+         LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = vp.user_id
+         LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
+         WHERE s.mission_id = ?
+           AND (? = 0 OR mtm.team_id = ?)
+           AND (vp.source = 'manual' OR ? = 1)
+         ORDER BY vp.user_id, vp.created_at
+         LIMIT 20000",
+        [$missionId, $teamId, $teamId, $includeAuto ? 1 : 0]
+    );
+
+    $trailsByUser = [];
+    foreach ($rows as $row) {
+        $userId = (int) $row['user_id'];
+        if (!isset($trailsByUser[$userId])) {
+            $trailsByUser[$userId] = [
+                'user_id'    => $userId,
+                'name'       => $row['name'],
+                'team_color' => $row['team_color'],
+                'points'     => [],
+            ];
+        }
+        // Flat safety ceiling per trail, not a real pagination control — this
+        // codebase has no window-function usage anywhere, so trimming here in
+        // PHP (keep the most recent points) matches its existing style.
+        if (count($trailsByUser[$userId]['points']) >= 1000) {
+            array_shift($trailsByUser[$userId]['points']);
+        }
+        $trailsByUser[$userId]['points'][] = [
+            'lat'    => (float) $row['lat'],
+            'lng'    => (float) $row['lng'],
+            // 'd/m H:i' (not the live dot's bare 'H:i') — a trail is often
+            // reviewed on a different day than it was recorded. Formatted
+            // server-side since PHP/MySQL are both synced to Europe/Athens;
+            // sending raw created_at for client-side Date parsing would use
+            // the viewer's own browser timezone instead.
+            'time'   => date('d/m H:i', strtotime($row['created_at'])),
+            'source' => $row['source'],
+        ];
+    }
+
+    return array_values($trailsByUser);
+}
+
+/**
  * War Room: load field photos/videos for a mission, newest first. Visibility is
  * "everyone with War Room access sees everything" (unlike dispatches, which
  * are team-scoped) — so this is a flat query, no per-user filtering.
@@ -1215,7 +1276,7 @@ function loadMissionActivityEventsForReport(int $missionId): array {
          FROM volunteer_pings vp
          JOIN shifts s ON s.id = vp.shift_id
          JOIN users u ON u.id = vp.user_id
-         WHERE s.mission_id = ?
+         WHERE s.mission_id = ? AND vp.source = 'manual'
          ORDER BY vp.created_at DESC",
         [$missionId]
     );

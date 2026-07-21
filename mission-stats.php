@@ -118,7 +118,7 @@ $photos = array_values(array_filter($media, fn($m) => $m['media_type'] === 'phot
 $videos = array_values(array_filter($media, fn($m) => $m['media_type'] === 'video'));
 
 $pingCount = (int) dbFetchValue(
-    "SELECT COUNT(*) FROM volunteer_pings vp JOIN shifts s ON s.id = vp.shift_id WHERE s.mission_id = ?",
+    "SELECT COUNT(*) FROM volunteer_pings vp JOIN shifts s ON s.id = vp.shift_id WHERE s.mission_id = ? AND vp.source = 'manual'",
     [$missionId]
 );
 $chatCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_chat_messages WHERE mission_id = ?", [$missionId]);
