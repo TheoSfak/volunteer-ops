@@ -789,6 +789,11 @@ include __DIR__ . '/includes/header.php';
     .sos-map-marquee { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.75); padding: 6px 10px; overflow: hidden; z-index: 500; }
     .sos-map-marquee-track { white-space: nowrap; position: relative; height: 1.4em; }
     .sos-map-marquee-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #ff3b30; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; animation: warRoomBannerScroll 14s linear infinite; }
+    /* Focus mode: reclaim the app's own left sidebar for more War Room room. */
+    body.war-room-focus .sidebar,
+    body.war-room-focus .sidebar-overlay,
+    body.war-room-focus .sidebar-toggle { display: none; }
+    body.war-room-focus .main-content { margin-left: 0; }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
@@ -813,6 +818,7 @@ include __DIR__ . '/includes/header.php';
                     <i class="bi bi-<?= $fieldMode ? 'grid-3x3-gap' : 'geo-alt' ?> me-1"></i><?= $fieldMode ? 'Πλήρης Προβολή' : 'Λειτουργία Πεδίου' ?>
                 </button>
             </form>
+            <button type="button" id="warRoomFocusToggle" class="btn btn-outline-light"><i class="bi bi-arrows-fullscreen me-1"></i>Πλήρης Οθόνη</button>
             <a href="ops-dashboard.php" class="btn btn-light"><i class="bi bi-arrow-left me-1"></i>Επιχειρησιακό</a>
         </div>
     </div>
@@ -1933,6 +1939,36 @@ function hideWarRoomBanner() {
 }
 document.getElementById('warRoomBannerClose').addEventListener('click', hideWarRoomBanner);
 
+// Focus mode: hide the app's own left sidebar and expand War Room to the
+// full window width, plus request real browser fullscreen for a kiosk-style
+// big-screen view. The two are tied to one button/state so a native Esc-key
+// fullscreen exit also brings the sidebar back, instead of leaving it stuck
+// hidden with no visible way to undo it.
+(function() {
+    const focusBtn = document.getElementById('warRoomFocusToggle');
+    if (!focusBtn) return;
+    function setFocusMode(active) {
+        document.body.classList.toggle('war-room-focus', active);
+        focusBtn.innerHTML = active
+            ? '<i class="bi bi-fullscreen-exit me-1"></i>Έξοδος Πλήρους Οθόνης'
+            : '<i class="bi bi-arrows-fullscreen me-1"></i>Πλήρης Οθόνη';
+    }
+    focusBtn.addEventListener('click', () => {
+        const entering = !document.body.classList.contains('war-room-focus');
+        setFocusMode(entering);
+        if (entering) {
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            }
+        } else if (document.fullscreenElement) {
+            document.exitFullscreen().catch(() => {});
+        }
+    });
+    document.addEventListener('fullscreenchange', () => {
+        if (!document.fullscreenElement) setFocusMode(false);
+    });
+})();
+
 function loadActivity() {
     fetch('mission-history.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(data => {
         const list = document.getElementById('activityList');
@@ -2099,7 +2135,7 @@ setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after='
         bannerAfterId = data.banner.id;
         showWarRoomBanner(data.banner.message, data.banner.orderId);
     }
-}).catch(() => {}), 15000);
+}).catch(() => {}), 5000);
 
 document.querySelectorAll('.team-form').forEach(form => {
     const leaderSelect = form.querySelector(form.dataset.leaderSelect);
