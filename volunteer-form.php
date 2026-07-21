@@ -59,6 +59,7 @@ if (isPost()) {
         'department_id' => post('department_id') ?: null,
         'warehouse_id' => post('warehouse_id') ?: null,
         'is_active' => isset($_POST['is_active']) ? 1 : 0,
+        'is_external' => isset($_POST['is_external']) ? 1 : 0,
         'position_id' => post('position_id') ?: null,
         'id_card' => post('id_card') ?: null,
         'afm' => post('afm') ?: null,
@@ -135,8 +136,8 @@ if (isPost()) {
         if ($volunteer) {
             // Update
             dbExecute(
-                "UPDATE users SET 
-                 name = ?, email = ?, phone = ?, role = ?, custom_role_id = ?, department_id = ?, warehouse_id = ?, is_active = ?,
+                "UPDATE users SET
+                 name = ?, email = ?, phone = ?, role = ?, custom_role_id = ?, department_id = ?, warehouse_id = ?, is_active = ?, is_external = ?,
                  volunteer_type = ?, cohort_year = ?, position_id = ?,
                  id_card = ?, afm = ?, amka = ?, driving_license = ?, vehicle_plate = ?,
                  pants_size = ?, shirt_size = ?, blouse_size = ?, fleece_size = ?,
@@ -144,7 +145,7 @@ if (isPost()) {
                  WHERE id = ?",
                 [
                     $data['name'], $data['email'], $data['phone'],
-                    $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'],
+                    $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'],
                     $volunteerType, $cohortYear, $data['position_id'],
                     $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
@@ -165,14 +166,14 @@ if (isPost()) {
         } else {
             // Create
             $id = dbInsert(
-                "INSERT INTO users 
-                 (name, email, password, phone, role, custom_role_id, department_id, warehouse_id, is_active, volunteer_type, cohort_year, position_id,
+                "INSERT INTO users
+                 (name, email, password, phone, role, custom_role_id, department_id, warehouse_id, is_active, is_external, volunteer_type, cohort_year, position_id,
                   id_card, afm, amka, driving_license, vehicle_plate, pants_size, shirt_size, blouse_size, fleece_size,
                   registry_epidrasis, registry_ggpp, total_points, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                 [
                     $data['name'], $data['email'], password_hash($password, PASSWORD_DEFAULT),
-                    $data['phone'], $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'],
+                    $data['phone'], $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'],
                     $volunteerType, $cohortYear, $data['position_id'],
                     $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
@@ -237,6 +238,7 @@ $form = $volunteer ?: [
     'department_id' => $currentUser['department_id'],
     'warehouse_id' => $currentUser['warehouse_id'] ?? null,
     'is_active' => 1,
+    'is_external' => 0,
     'volunteer_type' => VTYPE_RESCUER,
     'cohort_year' => null,
     'position_id' => null,
@@ -414,14 +416,25 @@ include __DIR__ . '/includes/header.php';
             
             <div class="mb-3">
                 <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="is_active" id="is_active" 
+                    <input class="form-check-input" type="checkbox" name="is_active" id="is_active"
                            <?= $form['is_active'] ? 'checked' : '' ?>>
                     <label class="form-check-label" for="is_active">
                         Ενεργός λογαριασμός
                     </label>
                 </div>
             </div>
-            
+
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="is_external" id="is_external"
+                           <?= !empty($form['is_external']) ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="is_external">
+                        Εξωτερική ομάδα / guest λογαριασμός
+                    </label>
+                </div>
+                <small class="text-muted">Για μέλη άλλων διασωστικών ομάδων. Ο λογαριασμός βλέπει αποκλειστικά το Action Room της αποστολής όπου τον προσθέσετε ως συμμετέχοντα — καμία άλλη σελίδα ή αποστολή.</small>
+            </div>
+
             <hr>
             <h5 class="mb-3"><i class="bi bi-card-heading me-2"></i>Προσωπικά Στοιχεία</h5>
             

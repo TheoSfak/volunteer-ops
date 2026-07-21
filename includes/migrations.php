@@ -4675,6 +4675,49 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 87,
+            'description' => 'Add is_external to users (partner/guest rescue-team accounts locked down to Action Room for their own missions only)',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_external'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN is_external TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active");
+                }
+            },
+        ],
+
+        [
+            'version'     => 88,
+            'description' => 'Backfill mission_recurrences table + missions.recurrence_id/recurrence_instance_date — present in sql/schema.sql\'s fresh-install DDL but never had a migration, so any pre-existing DB was permanently missing them and missions.php (which unconditionally selects m.recurrence_id) fatals',
+            'up' => function () {
+                dbExecute(
+                    "CREATE TABLE IF NOT EXISTS `mission_recurrences` (
+                        `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                        `type` ENUM('weekly', 'random_days', 'interval') NOT NULL,
+                        `weekdays` JSON NULL COMMENT 'ISO weekday numbers [1=Mon..7=Sun]',
+                        `random_dates` JSON NULL COMMENT 'Array of Y-m-d date strings',
+                        `interval_days` TINYINT UNSIGNED NULL COMMENT '1-6 days between instances',
+                        `interval_start_date` DATE NULL,
+                        `end_date` DATE NOT NULL COMMENT 'Last date to generate instances up to',
+                        `created_by` INT UNSIGNED NULL,
+                        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                );
+
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'missions' AND COLUMN_NAME = 'recurrence_id'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE missions ADD COLUMN recurrence_id INT UNSIGNED NULL, ADD COLUMN recurrence_instance_date DATE NULL, ADD INDEX idx_missions_recurrence (recurrence_id)");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -151,6 +151,15 @@ function isSystemAdmin() {
 }
 
 /**
+ * Partner/guest rescue-team account — locked down to Action Room
+ * for the mission(s) an admin has approved them on, nothing else.
+ */
+function isExternalGuest() {
+    $user = getCurrentUser();
+    return $user && !empty($user['is_external']);
+}
+
+/**
  * Check if user has specific role
  */
 function hasRole($role) {

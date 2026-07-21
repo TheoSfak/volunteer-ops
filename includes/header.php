@@ -914,6 +914,26 @@ if (isLoggedIn()) {
         </a>
         
         <ul class="nav flex-column">
+            <?php if (isExternalGuest()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'missions' ? 'active' : '' ?>" href="missions.php">
+                    <i class="bi bi-broadcast-pin"></i> Οι Αποστολές μου
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'profile' ? 'active' : '' ?>" href="profile.php">
+                    <i class="bi bi-person"></i> Ο Λογαριασμός μου
+                </a>
+            </li>
+            <li class="nav-item">
+                <form action="logout.php" method="post">
+                    <?= csrfField() ?>
+                    <button type="submit" class="nav-link border-0 bg-transparent text-start w-100">
+                        <i class="bi bi-box-arrow-right"></i> Αποσύνδεση
+                    </button>
+                </form>
+            </li>
+            <?php else: ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'dashboard' ? 'active' : '' ?>" href="dashboard.php">
                     <i class="bi bi-speedometer2"></i> Πίνακας Ελέγχου
@@ -1262,6 +1282,7 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
+            <?php endif; ?>
         </ul>
     </nav>
     
@@ -1352,6 +1373,7 @@ if (isLoggedIn()) {
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i>Το Προφίλ μου</a></li>
+                        <?php if (!isExternalGuest()): ?>
                         <li><a class="dropdown-item" href="my-participations.php"><i class="bi bi-list-check me-2"></i>Οι Αιτήσεις μου</a></li>
                         <?php if (!empty($currentUser['custom_role_id'])): ?>
                         <li><a class="dropdown-item" href="my-permissions.php"><i class="bi bi-shield-check me-2"></i>Τα Δικαιώματά μου</a></li>
@@ -1362,6 +1384,7 @@ if (isLoggedIn()) {
                         <li><a class="dropdown-item" href="notification-preferences.php"><i class="bi bi-bell me-2"></i>Ρυθμίσεις Ειδοποιήσεων</a></li>
                         <li><a class="dropdown-item" href="complaint-form.php"><i class="bi bi-exclamation-triangle me-2"></i>Αναφορά Παραπόνου</a></li>
                         <li><a class="dropdown-item" href="my-complaints.php"><i class="bi bi-chat-left-dots me-2"></i>Τα Παράπονά μου</a></li>
+                        <?php endif; ?>
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <form action="logout.php" method="post" class="d-inline">

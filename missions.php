@@ -112,6 +112,13 @@ if ($user['role'] === ROLE_DEPARTMENT_ADMIN && $user['department_id']) {
     $params[] = $user['department_id'];
 }
 
+// External/guest accounts (partner rescue teams) only see mission(s) they're an approved participant of
+if (isExternalGuest()) {
+    $where[] = 'm.id IN (SELECT s.mission_id FROM participation_requests pr JOIN shifts s ON pr.shift_id = s.id WHERE pr.volunteer_id = ? AND pr.status = ?)';
+    $params[] = $user['id'];
+    $params[] = PARTICIPATION_APPROVED;
+}
+
 $whereClause = implode(' AND ', $where);
 $orderBy = 'm.start_datetime DESC, m.id DESC';
 if ($status === STATUS_OPEN) {
@@ -153,6 +160,9 @@ if (canSeeTep()) {
 } else {
     $missionTypesFilter = dbFetchAll("SELECT id, name FROM mission_types WHERE is_active = 1 AND id != ? ORDER BY sort_order", [$tepMissionTypeId]);
 }
+
+// External guests can't reach mission-view.php (Action Room only) — link straight there instead
+$missionLinkBase = isExternalGuest() ? 'war-room.php' : 'mission-view.php';
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -307,7 +317,7 @@ include __DIR__ . '/includes/header.php';
                         <?php foreach ($missions as $mission): ?>
                             <tr>
                                 <td>
-                                    <a href="mission-view.php?id=<?= $mission['id'] ?>" class="text-decoration-none">
+                                    <a href="<?= $missionLinkBase ?>?id=<?= $mission['id'] ?>" class="text-decoration-none">
                                         <strong><?= h($mission['title']) ?></strong>
                                     </a>
                                     <?php if ($mission['is_urgent']): ?>
@@ -382,7 +392,7 @@ include __DIR__ . '/includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td class="text-end">
-                                    <a href="mission-view.php?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-primary" title="Προβολή">
+                                    <a href="<?= $missionLinkBase ?>?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-primary" title="Προβολή">
                                         <i class="bi bi-eye"></i>
                                     </a>
                                     <?php if (isAdmin()): ?>
@@ -412,7 +422,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="card-body">
                             <div class="mobile-card-header">
                                 <div>
-                                    <a href="mission-view.php?id=<?= $mission['id'] ?>" class="text-decoration-none">
+                                    <a href="<?= $missionLinkBase ?>?id=<?= $mission['id'] ?>" class="text-decoration-none">
                                         <strong><?= h($mission['title']) ?></strong>
                                     </a>
                                     <?php if ($mission['is_urgent']): ?>
@@ -498,7 +508,7 @@ include __DIR__ . '/includes/header.php';
                             <?php endif; ?>
                             
                             <div class="mobile-card-actions">
-                                <a href="mission-view.php?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-primary">
+                                <a href="<?= $missionLinkBase ?>?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-primary">
                                     <i class="bi bi-eye me-1"></i>Προβολή
                                 </a>
                                 <?php if (isAdmin()): ?>
