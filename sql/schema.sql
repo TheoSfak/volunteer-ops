@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `department_id` INT UNSIGNED NULL,
     `warehouse_id` INT UNSIGNED NULL,
     `is_active` TINYINT(1) DEFAULT 1,
+    `is_external` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Partner/guest rescue-team account — locked to Action Room for own missions only',
     `total_points` INT DEFAULT 0,
     `monthly_points` INT DEFAULT 0,
     `email_verified_at` TIMESTAMP NULL,

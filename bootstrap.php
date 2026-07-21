@@ -74,3 +74,29 @@ if (isLoggedIn() && isset($_GET['exit_preview'])) {
     unset($_SESSION['preview_role_id']);
     redirect('roles.php');
 }
+
+// External/guest accounts (partner rescue teams, users.is_external): locked down
+// to Action Room for their own approved mission(s) only. Everything outside this
+// allow-list — including the app's own dashboard/leaderboard/training/etc. — redirects
+// away. The AJAX/JSON endpoints below already carry their own per-mission auth checks
+// (isApprovedParticipant / canManageWarRoom), so allow-listing them just lets those
+// existing checks answer normally instead of this gate intercepting the request first.
+if (isLoggedIn() && isExternalGuest()) {
+    $__extScript = basename($_SERVER['SCRIPT_NAME'] ?? '');
+    $__extAllowed = [
+        'war-room.php', 'missions.php', 'profile.php', 'logout.php',
+        'mission-chat.php', 'mission-photo.php', 'mission-photo-view.php',
+        'mission-dispatch.php', 'mission-order.php', 'mission-sos.php',
+        'mission-shortage.php', 'mission-history.php', 'mission-response-report.php',
+        'mission-track.php', 'ping-location.php', 'volunteer-status.php',
+        'geocode-address.php', 'api-push-subscribe.php',
+    ];
+    if (!in_array($__extScript, $__extAllowed, true)) {
+        $__extMissionIds = getExternalGuestMissionIds(getCurrentUserId());
+        if (count($__extMissionIds) === 1) {
+            redirect('war-room.php?id=' . $__extMissionIds[0]);
+        }
+        redirect('missions.php');
+    }
+    unset($__extScript, $__extAllowed);
+}

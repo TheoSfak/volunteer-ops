@@ -609,6 +609,27 @@ function getUserTeamIdForMission(int $missionId, int $userId): ?int {
 }
 
 /**
+ * External/guest accounts (users.is_external) are locked to Action Room for
+ * only the mission(s) an admin has approved them on — this is that scope,
+ * derived from the same participation_requests rows normal volunteers use
+ * (an admin approves them via mission-view.php's "manual_add_volunteer",
+ * no separate binding needed). Most-recently-started mission first.
+ */
+function getExternalGuestMissionIds(int $userId): array {
+    $rows = dbFetchAll(
+        "SELECT DISTINCT s.mission_id, MAX(s.start_time) as last_start
+         FROM participation_requests pr
+         JOIN shifts s ON pr.shift_id = s.id
+         JOIN missions m ON m.id = s.mission_id AND m.deleted_at IS NULL
+         WHERE pr.volunteer_id = ? AND pr.status = ?
+         GROUP BY s.mission_id
+         ORDER BY last_start DESC",
+        [$userId, PARTICIPATION_APPROVED]
+    );
+    return array_map('intval', array_column($rows, 'mission_id'));
+}
+
+/**
  * War Room: load dispatch points/areas visible to $userId, each augmented with
  * its receipt (mission_dispatch_receipts, "Ελήφθη") and arrival (mission_dispatch_acks,
  * "Άφιξη") acknowledgements — shared by war-room.php (live map, twice) and
