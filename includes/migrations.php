@@ -4633,6 +4633,34 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 84,
+            'description' => 'Register mission_gps_ping notification code (War Room loud banner+sound when a volunteer sends their GPS location)',
+            'up' => function () {
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_gps_ping'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_gps_ping',
+                            'Νέο Στίγμα Εθελοντή War Room',
+                            'Ένας εθελοντής έστειλε το στίγμα GPS του στην αποστολή (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+            },
+        ],
+
+        [
+            'version'     => 85,
+            'description' => 'Rename "War Room" wording to "Action Room" in notification_settings (product rename, no functional change — historical migration text above is left as-is, this UPDATE is the actual fix for both existing and fresh installs)',
+            'up' => function () {
+                dbExecute("UPDATE notification_settings SET name = REPLACE(name, 'War Room', 'Action Room') WHERE name LIKE '%War Room%'");
+                dbExecute("UPDATE notification_settings SET description = REPLACE(description, 'War Room', 'Action Room') WHERE description LIKE '%War Room%'");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

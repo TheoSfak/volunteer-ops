@@ -662,7 +662,7 @@ include __DIR__ . '/includes/header.php';
     <div>
         <?php if (!empty($mission['show_in_ops']) && $mission['status'] === STATUS_OPEN && ($canManageMissions || $isResponsible || $isApprovedParticipant)): ?>
             <a href="war-room.php?id=<?= $mission['id'] ?>" class="btn btn-danger">
-                <i class="bi bi-broadcast-pin me-1"></i>War Room
+                <i class="bi bi-broadcast-pin me-1"></i>Action Room
             </a>
         <?php endif; ?>
         <?php if ($canManageMissions || $isResponsible): ?>

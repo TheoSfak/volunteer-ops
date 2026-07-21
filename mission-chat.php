@@ -89,7 +89,7 @@ $isApprovedParticipant = (bool) dbFetchValue(
     [$missionId, $userId, PARTICIPATION_APPROVED]
 );
 if (!$canManageWarRoom && !$isApprovedParticipant) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν έχετε πρόσβαση στο War Room αυτής της αποστολής.']);
+    echo json_encode(['ok' => false, 'error' => 'Δεν έχετε πρόσβαση στο Action Room αυτής της αποστολής.']);
     exit;
 }
 

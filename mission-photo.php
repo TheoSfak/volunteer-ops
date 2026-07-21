@@ -70,7 +70,7 @@ $isApprovedParticipant = (bool) dbFetchValue(
     [$missionId, $userId, PARTICIPATION_APPROVED]
 );
 if (!$canManageWarRoom && !$isApprovedParticipant) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν έχετε πρόσβαση στο War Room αυτής της αποστολής.']);
+    echo json_encode(['ok' => false, 'error' => 'Δεν έχετε πρόσβαση στο Action Room αυτής της αποστολής.']);
     exit;
 }
 
@@ -149,10 +149,20 @@ if ($action === 'upload') {
 
     notifyPhotoReceived($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $user['name'], $userId, $mediaType);
 
+    $teamLabel = null;
+    $myTeamId = getUserTeamIdForMission($missionId, $userId);
+    if ($myTeamId) {
+        $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$myTeamId]);
+        if ($teamRow) {
+            $teamLabel = $teamRow['codename'] . ' ' . $teamRow['team_number'];
+        }
+    }
+
     echo json_encode(['ok' => true, 'media' => [
         'id'         => (int) $photoId,
         'media_type' => $mediaType,
         'user_name'  => $user['name'],
+        'team_label' => $teamLabel,
         'time'       => date('d/m H:i'),
         'lat'        => $lat,
         'lng'        => $lng,

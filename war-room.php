@@ -145,7 +145,7 @@ $isApprovedParticipant = (bool)dbFetchValue(
     [$missionId, $user['id'], PARTICIPATION_APPROVED]
 );
 if (!$canManageWarRoom && !$isApprovedParticipant) {
-    setFlash('error', 'Έχετε πρόσβαση στο War Room μόνο για αποστολές στις οποίες είστε εγκεκριμένος/η.');
+    setFlash('error', 'Έχετε πρόσβαση στο Action Room μόνο για αποστολές στις οποίες είστε εγκεκριμένος/η.');
     redirect('dashboard.php');
 }
 if ($mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
@@ -757,7 +757,7 @@ $chatTeams = $canManageWarRoom
     ? array_values($teams)
     : array_values(array_filter($teams, fn($t) => $t['id'] === $myTeamId));
 
-$pageTitle = 'War Room — ' . $mission['title'];
+$pageTitle = 'Action Room — ' . $mission['title'];
 $currentPage = 'war-room';
 include __DIR__ . '/includes/header.php';
 ?>
@@ -794,12 +794,13 @@ include __DIR__ . '/includes/header.php';
     body.war-room-focus .sidebar-overlay,
     body.war-room-focus .sidebar-toggle { display: none; }
     body.war-room-focus .main-content { margin-left: 0; }
+    #mediaList { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; align-content: start; }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
     <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
         <div>
-            <div class="text-uppercase small fw-semibold opacity-75 mb-1"><i class="bi bi-broadcast-pin me-1"></i>War Room · Επιχειρησιακό Κέντρο Αποστολής</div>
+            <div class="text-uppercase small fw-semibold opacity-75 mb-1"><i class="bi bi-broadcast-pin me-1"></i>Action Room · Επιχειρησιακό Κέντρο Αποστολής</div>
             <h1 class="h3 mb-2"><?= h($mission['title']) ?></h1>
             <div class="small opacity-75"><i class="bi bi-geo-alt me-1"></i><?= h($mission['location']) ?> · <?= formatDateTime($firstShift) ?> έως <?= formatDateTime($lastShift) ?></div>
         </div>
@@ -1186,7 +1187,7 @@ include __DIR__ . '/includes/header.php';
         <div class="card shadow-sm mb-4 border-danger">
             <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-megaphone-fill me-1 text-danger"></i>Καθολικό Μήνυμα</h5></div>
             <div class="card-body">
-                <p class="small text-muted">Εμφανίζεται ως κυλιόμενο μήνυμα (60 δευτ.) σε όσους έχουν ανοιχτό το War Room και στέλνεται ως ειδοποίηση σε όλους τους εγκεκριμένους εθελοντές της αποστολής.</p>
+                <p class="small text-muted">Εμφανίζεται ως κυλιόμενο μήνυμα (60 δευτ.) σε όσους έχουν ανοιχτό το Action Room και στέλνεται ως ειδοποίηση σε όλους τους εγκεκριμένους εθελοντές της αποστολής.</p>
                 <form method="post">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="global_message">
@@ -1412,6 +1413,17 @@ include __DIR__ . '/includes/header.php';
 </div>
 <?php endif; ?>
 
+<div class="modal fade" id="mediaViewModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content bg-dark">
+            <div class="modal-header border-0 py-2">
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Κλείσιμο"></button>
+            </div>
+            <div class="modal-body p-0 text-center" id="mediaViewModalBody"></div>
+        </div>
+    </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const csrfToken = '<?= csrfToken() ?>';
@@ -1420,6 +1432,13 @@ const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)
 let pins = <?= json_encode($pins) ?>;
 let dispatches = <?= json_encode($dispatches) ?>;
 let media = <?= json_encode($photos) ?>;
+// Media re-renders every image tag from scratch (mission-photo-view.php is
+// deliberately Cache-Control: no-store, since it's access-gated field media),
+// so re-running renderMedia() on a poll tick where nothing actually changed
+// means a real re-download of every photo/video, not just a visual flicker.
+// Track what was last rendered and skip the call entirely when the fetched
+// list is byte-for-byte the same.
+let mediaSignature = JSON.stringify(media);
 let myTasks = <?= json_encode($myTasks) ?>;
 let shortageReports = <?= json_encode($shortageReports) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
@@ -1571,26 +1590,43 @@ function renderPins(items) {
 function renderMedia(items) {
     const list = document.getElementById('mediaList');
     if (!items.length) {
-        list.innerHTML = '<div class="text-muted small">Δεν έχουν σταλεί φωτογραφίες ή βίντεο ακόμη.</div>';
+        list.innerHTML = '<div class="text-muted small" style="grid-column:1/-1;">Δεν έχουν σταλεί φωτογραφίες ή βίντεο ακόμη.</div>';
         return;
     }
-    list.innerHTML = items.map(m => `
-        <div class="card mb-2">
+    list.innerHTML = items.map(m => {
+        const icon = m.media_type === 'video' ? '🎥 ' : '📷 ';
+        // Team is the headline (bigger/bold) when the sender has one — the
+        // individual's name drops to a small muted line underneath, rather
+        // than being the only identity shown. Teamless senders keep the old
+        // single-line look, just their name, since there's no team to lead with.
+        const whoBlock = m.team_label
+            ? `<div style="font-size:.85rem;font-weight:700;line-height:1.2;">${icon}${escapeHtml(m.team_label)}</div><div class="text-muted" style="font-size:.7rem;">${escapeHtml(m.user_name)}</div>`
+            : `<div class="fw-bold" style="font-size:.8rem;">${icon}${escapeHtml(m.user_name)}</div>`;
+        // Two-column grid (#mediaList below) leaves each card roughly half as
+        // wide as before, so the footer stacks name-block over a
+        // time+buttons row instead of the old side-by-side split, which
+        // would squeeze/overflow at this width.
+        return `
+        <div class="card">
             ${m.media_type === 'video'
-                ? `<video src="mission-photo-view.php?id=${m.id}" class="card-img-top" style="height:160px;object-fit:cover;background:#000;" controls preload="metadata"></video>`
-                : `<img src="mission-photo-view.php?id=${m.id}" class="card-img-top" style="height:160px;object-fit:cover;cursor:pointer;" onclick="window.open('mission-photo-view.php?id=${m.id}', '_blank')">`}
-            <div class="card-body p-2 d-flex justify-content-between align-items-center">
-                <div class="small">
-                    <strong>${m.media_type === 'video' ? '🎥 ' : '📷 '}${escapeHtml(m.user_name)}</strong><br>
-                    <span class="text-muted">${m.time}</span>
-                </div>
-                <div class="d-flex gap-1">
-                    ${m.lat !== null ? `<button type="button" class="btn btn-sm btn-outline-secondary media-locate-btn" data-lat="${m.lat}" data-lng="${m.lng}" title="Εμφάνιση στον χάρτη"><i class="bi bi-geo-alt-fill"></i></button>` : ''}
-                    ${m.can_delete ? `<button type="button" class="btn btn-sm btn-outline-danger media-delete-btn" data-id="${m.id}" title="Διαγραφή"><i class="bi bi-trash"></i></button>` : ''}
+                ? `<video src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="video" style="height:90px;object-fit:cover;background:#000;cursor:pointer;" preload="metadata"></video>`
+                : `<img src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="photo" style="height:90px;object-fit:cover;cursor:pointer;">`}
+            <div class="card-body p-2">
+                ${whoBlock}
+                <div class="d-flex justify-content-between align-items-center mt-1">
+                    <span class="text-muted" style="font-size:.7rem;">${m.time}</span>
+                    <div class="d-flex gap-1">
+                        ${m.lat !== null ? `<button type="button" class="btn btn-sm btn-outline-secondary media-locate-btn p-1" data-lat="${m.lat}" data-lng="${m.lng}" title="Εμφάνιση στον χάρτη"><i class="bi bi-geo-alt-fill" style="font-size:.7rem;"></i></button>` : ''}
+                        ${m.can_delete ? `<button type="button" class="btn btn-sm btn-outline-danger media-delete-btn p-1" data-id="${m.id}" title="Διαγραφή"><i class="bi bi-trash" style="font-size:.7rem;"></i></button>` : ''}
+                    </div>
                 </div>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
+    list.querySelectorAll('.media-view-trigger').forEach(el => el.addEventListener('click', () => {
+        openMediaViewModal(el.dataset.id, el.dataset.mediaType);
+    }));
     list.querySelectorAll('.media-locate-btn').forEach(btn => btn.addEventListener('click', () => {
         map.setView([parseFloat(btn.dataset.lat), parseFloat(btn.dataset.lng)], 16);
     }));
@@ -1598,11 +1634,26 @@ function renderMedia(items) {
         if (!confirm('Διαγραφή αυτού του αρχείου;')) return;
         const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: btn.dataset.id});
         fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
-            if (result.ok) renderMedia(media = media.filter(m => String(m.id) !== btn.dataset.id));
+            if (result.ok) { renderMedia(media = media.filter(m => String(m.id) !== btn.dataset.id)); mediaSignature = JSON.stringify(media); }
             else alert(result.error || 'Αποτυχία διαγραφής.');
         });
     }));
 }
+
+// Media click opens a lightbox modal instead of a new tab — the modal body
+// is emptied on close so a playing video actually stops (removing the
+// element from the DOM halts playback) rather than silently continuing in
+// the background.
+function openMediaViewModal(id, mediaType) {
+    const body = document.getElementById('mediaViewModalBody');
+    body.innerHTML = mediaType === 'video'
+        ? `<video src="mission-photo-view.php?id=${id}" controls autoplay style="max-width:100%;max-height:80vh;"></video>`
+        : `<img src="mission-photo-view.php?id=${id}" style="max-width:100%;max-height:80vh;">`;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('mediaViewModal')).show();
+}
+document.getElementById('mediaViewModal').addEventListener('hidden.bs.modal', () => {
+    document.getElementById('mediaViewModalBody').innerHTML = '';
+});
 
 function renderMyTasks(items) {
     const list = document.getElementById('myTasksList');
@@ -1768,6 +1819,7 @@ function wireMediaInput(inputId, sentLabel) {
                     status.textContent = '✓ ' + sentLabel + ' εστάλη.';
                     status.className = 'small mb-2 text-success';
                     renderMedia(media = [result.media, ...media]);
+                    mediaSignature = JSON.stringify(media);
                 } else {
                     status.textContent = result.error || 'Αποτυχία αποστολής.';
                     status.className = 'small mb-2 text-danger';
@@ -2121,7 +2173,13 @@ setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after='
     if (!fieldMode) {
         renderPins(data.pins || []);
         if (data.dispatches) renderDispatches(dispatches = data.dispatches);
-        if (data.media) renderMedia(media = data.media);
+        if (data.media) {
+            const sig = JSON.stringify(data.media);
+            if (sig !== mediaSignature) {
+                mediaSignature = sig;
+                renderMedia(media = data.media);
+            }
+        }
     }
     if (data.myTasks) renderMyTasks(myTasks = data.myTasks);
     if (data.shortageReports) renderShortageReports(shortageReports = data.shortageReports);
