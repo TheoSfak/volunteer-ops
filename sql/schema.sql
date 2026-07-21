@@ -1760,6 +1760,7 @@ CREATE TABLE IF NOT EXISTS `mission_teams` (
     `mission_id` INT UNSIGNED NOT NULL,
     `codename` VARCHAR(20) NOT NULL,
     `team_number` TINYINT UNSIGNED NOT NULL,
+    `color` VARCHAR(7) NULL,
     `leader_id` INT UNSIGNED NULL,
     `created_by` INT UNSIGNED NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
