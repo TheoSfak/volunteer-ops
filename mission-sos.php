@@ -21,7 +21,7 @@ if (!isPost()) {
 }
 
 if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
-    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
+    echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }
 
@@ -36,13 +36,13 @@ $alert = dbFetchOne(
     [$alertId]
 );
 if (!$alert) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν βρέθηκε η ειδοποίηση SOS.']);
+    echo json_encode(['ok' => false, 'error' => t('sos.alert_not_found')]);
     exit;
 }
 
 $canManageWarRoom = hasPagePermission('missions_manage') || (int) $alert['responsible_user_id'] === (int) $userId;
 if (!$canManageWarRoom) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν έχετε δικαίωμα διαχείρισης ειδοποιήσεων SOS.']);
+    echo json_encode(['ok' => false, 'error' => t('sos.no_manage_permission')]);
     exit;
 }
 
@@ -79,7 +79,7 @@ if ($action === 'resolve') {
             db()->commit();
         } catch (Exception $e) {
             db()->rollBack();
-            echo json_encode(['ok' => false, 'error' => 'Αποτυχία επίλυσης.']);
+            echo json_encode(['ok' => false, 'error' => t('sos.resolve_failed')]);
             exit;
         }
     }
@@ -87,4 +87,4 @@ if ($action === 'resolve') {
     exit;
 }
 
-echo json_encode(['ok' => false, 'error' => 'Άγνωστη ενέργεια.']);
+echo json_encode(['ok' => false, 'error' => t('common.unknown_action')]);

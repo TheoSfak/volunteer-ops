@@ -7,7 +7,7 @@ require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/subscription-iris.php';
 requireLogin();
 
-$pageTitle = 'Το Προφίλ μου';
+$pageTitle = t('profile.page_title');
 $user = getCurrentUser();
 
 // Get volunteer profile
@@ -144,7 +144,7 @@ if (isPost()) {
             $phone = post('phone');
             
             if (empty($name)) {
-                $errors[] = 'Το όνομα είναι υποχρεωτικό.';
+                $errors[] = t('profile.name_required');
             }
             
             if (empty($errors)) {
@@ -192,7 +192,7 @@ if (isPost()) {
                 }
                 
                 logAudit('update_profile', 'users', $user['id']);
-                $success = 'Το προφίλ ενημερώθηκε επιτυχώς.';
+                $success = t('profile.updated_success');
                 
                 // Refresh data
                 $user = dbFetchOne("SELECT * FROM users WHERE id = ?", [$user['id']]);
@@ -206,15 +206,15 @@ if (isPost()) {
             $confirmPass = $_POST['confirm_password'] ?? '';
             
             if (empty($currentPass) || empty($newPass)) {
-                $errors[] = 'Συμπληρώστε όλα τα πεδία.';
+                $errors[] = t('profile.fill_all_fields');
             } elseif ($newPass !== $confirmPass) {
-                $errors[] = 'Οι νέοι κωδικοί δεν ταιριάζουν.';
+                $errors[] = t('profile.passwords_dont_match');
             } elseif (strlen($newPass) < 6) {
-                $errors[] = 'Ο νέος κωδικός πρέπει να έχει τουλάχιστον 6 χαρακτήρες.';
+                $errors[] = t('profile.password_too_short');
             } else {
                 $result = updatePassword($user['id'], $currentPass, $newPass);
                 if ($result['success']) {
-                    $success = 'Ο κωδικός άλλαξε επιτυχώς.';
+                    $success = t('profile.password_changed_success');
                 } else {
                     $errors[] = $result['message'];
                 }
@@ -277,9 +277,9 @@ if (isPost()) {
                 finfo_close($finfo);
 
                 if (!in_array($mime, $allowedMime)) {
-                    $errors[] = 'Επιτρέπονται μόνο αρχεία εικόνας (JPG, PNG, GIF, WebP).';
+                    $errors[] = t('profile.photo_invalid_type');
                 } elseif ($file['size'] > 5 * 1024 * 1024) {
-                    $errors[] = 'Το αρχείο δεν μπορεί να είναι μεγαλύτερο από 5MB.';
+                    $errors[] = t('profile.photo_too_large');
                 } else {
                     $src = match($mime) {
                         'image/jpeg' => imagecreatefromjpeg($file['tmp_name']),
@@ -309,9 +309,9 @@ if (isPost()) {
                         dbExecute("UPDATE users SET profile_photo = ?, updated_at = NOW() WHERE id = ?", [$filename, $user['id']]);
                         logAudit('update_photo', 'users', $user['id']);
                         $user = dbFetchOne("SELECT * FROM users WHERE id = ?", [$user['id']]);
-                        $success = 'Η φωτογραφία προφίλ ενημερώθηκε.';
+                        $success = t('profile.photo_updated');
                     } else {
-                        $errors[] = 'Αδυναμία επεξεργασίας της εικόνας.';
+                        $errors[] = t('profile.photo_processing_failed');
                     }
                 }
             } elseif (post('delete_photo') === '1') {
@@ -322,7 +322,7 @@ if (isPost()) {
                 dbExecute("UPDATE users SET profile_photo = NULL, updated_at = NOW() WHERE id = ?", [$user['id']]);
                 logAudit('delete_photo', 'users', $user['id']);
                 $user = dbFetchOne("SELECT * FROM users WHERE id = ?", [$user['id']]);
-                $success = 'Η φωτογραφία διαγράφηκε.';
+                $success = t('profile.photo_deleted');
             }
             break;
     }
@@ -494,8 +494,8 @@ include __DIR__ . '/includes/header.php';
             <div class="mt-1">
                 <?= roleBadge($user['role']) ?>
                 <?= volunteerTypeBadge($user['volunteer_type'] ?? VTYPE_RESCUER) ?>
-                <span class="badge bg-light text-dark ms-1" style="font-size:.72rem"><i class="bi bi-calendar3 me-1"></i>Μέλος από <?= formatDate($user['created_at']) ?></span>
-                <a href="volunteer-report.php?id=<?= $user['id'] ?>" target="_blank" class="badge bg-info text-white ms-1 text-decoration-none" style="font-size:.72rem"><i class="bi bi-file-earmark-text me-1"></i>Αναφορά</a>
+                <span class="badge bg-light text-dark ms-1" style="font-size:.72rem"><i class="bi bi-calendar3 me-1"></i><?= t('profile.member_since_prefix', ['date' => formatDate($user['created_at'])]) ?></span>
+                <a href="volunteer-report.php?id=<?= $user['id'] ?>" target="_blank" class="badge bg-info text-white ms-1 text-decoration-none" style="font-size:.72rem"><i class="bi bi-file-earmark-text me-1"></i><?= t('profile.report_link') ?></a>
             </div>
         </div>
     </div>
@@ -937,7 +937,7 @@ $myRequiredMissing = dbFetchAll(
         <!-- Profile Form -->
         <div class="card pp-card accent-primary mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-person-vcard text-primary me-2"></i>Στοιχεία Προφίλ</h5>
+                <h5 class="mb-0"><i class="bi bi-person-vcard text-primary me-2"></i><?= t('profile.section_title') ?></h5>
             </div>
             <div class="card-body">
                 <form method="post">
@@ -946,7 +946,7 @@ $myRequiredMissing = dbFetchAll(
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">Ονοματεπώνυμο *</label>
+                            <label class="form-label"><?= t('profile.field_name') ?></label>
                             <input type="text" class="form-control" name="name" value="<?= h($user['name']) ?>" required>
                         </div>
                         <div class="col-md-6 mb-3">
@@ -957,11 +957,11 @@ $myRequiredMissing = dbFetchAll(
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">Τηλέφωνο</label>
+                            <label class="form-label"><?= t('profile.field_phone') ?></label>
                             <input type="tel" class="form-control" name="phone" value="<?= h($user['phone']) ?>">
                         </div>
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">Ομάδα Αίματος</label>
+                            <label class="form-label"><?= t('profile.field_blood_type') ?></label>
                             <select class="form-select" name="blood_type">
                                 <option value="">-</option>
                                 <?php foreach (['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', '0+', '0-'] as $bt): ?>
@@ -972,66 +972,66 @@ $myRequiredMissing = dbFetchAll(
                     </div>
                     
                     <div class="mb-3">
-                        <label class="form-label">Σύντομο Βιογραφικό</label>
+                        <label class="form-label"><?= t('profile.field_bio') ?></label>
                         <textarea class="form-control" name="bio" rows="3"><?= h($profile['bio'] ?? '') ?></textarea>
                     </div>
                     
                     <hr>
-                    <h6 class="mb-3">Διεύθυνση</h6>
-                    
+                    <h6 class="mb-3"><?= t('profile.field_address') ?></h6>
+
                     <div class="mb-3">
-                        <label class="form-label">Διεύθυνση</label>
+                        <label class="form-label"><?= t('profile.field_address') ?></label>
                         <input type="text" class="form-control" name="address" value="<?= h($profile['address'] ?? '') ?>">
                     </div>
                     
                     <div class="row">
                         <div class="col-md-8 mb-3">
-                            <label class="form-label">Πόλη</label>
+                            <label class="form-label"><?= t('profile.field_city') ?></label>
                             <input type="text" class="form-control" name="city" value="<?= h($profile['city'] ?? '') ?>">
                         </div>
                         <div class="col-md-4 mb-3">
-                            <label class="form-label">Τ.Κ.</label>
+                            <label class="form-label"><?= t('profile.field_postal_code') ?></label>
                             <input type="text" class="form-control" name="postal_code" value="<?= h($profile['postal_code'] ?? '') ?>">
                         </div>
                     </div>
                     
                     <hr>
-                    <h6 class="mb-3">Επαφή Έκτακτης Ανάγκης</h6>
+                    <h6 class="mb-3"><?= t('profile.section_emergency_contact') ?></h6>
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">Όνομα</label>
+                            <label class="form-label"><?= t('profile.field_contact_name') ?></label>
                             <input type="text" class="form-control" name="emergency_contact_name" value="<?= h($profile['emergency_contact_name'] ?? '') ?>">
                         </div>
                         <div class="col-md-6 mb-3">
-                            <label class="form-label">Τηλέφωνο</label>
+                            <label class="form-label"><?= t('profile.field_phone') ?></label>
                             <input type="tel" class="form-control" name="emergency_contact_phone" value="<?= h($profile['emergency_contact_phone'] ?? '') ?>">
                         </div>
                     </div>
                     
                     <hr>
-                    <h6 class="mb-3">Διαθεσιμότητα & Ικανότητες</h6>
+                    <h6 class="mb-3"><?= t('profile.section_availability') ?></h6>
                     
                     <div class="row mb-3">
                         <div class="col-md-4">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" name="available_weekdays" id="weekdays" 
                                        <?= ($profile['available_weekdays'] ?? 1) ? 'checked' : '' ?>>
-                                <label class="form-check-label" for="weekdays">Καθημερινές</label>
+                                <label class="form-check-label" for="weekdays"><?= t('profile.avail_weekdays') ?></label>
                             </div>
                         </div>
                         <div class="col-md-4">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" name="available_weekends" id="weekends"
                                        <?= ($profile['available_weekends'] ?? 1) ? 'checked' : '' ?>>
-                                <label class="form-check-label" for="weekends">Σαββατοκύριακα</label>
+                                <label class="form-check-label" for="weekends"><?= t('profile.avail_weekends') ?></label>
                             </div>
                         </div>
                         <div class="col-md-4">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" name="available_nights" id="nights"
                                        <?= ($profile['available_nights'] ?? 0) ? 'checked' : '' ?>>
-                                <label class="form-check-label" for="nights">Νυχτερινές</label>
+                                <label class="form-check-label" for="nights"><?= t('profile.avail_nights') ?></label>
                             </div>
                         </div>
                     </div>
@@ -1041,20 +1041,20 @@ $myRequiredMissing = dbFetchAll(
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" name="has_driving_license" id="license"
                                        <?= ($profile['has_driving_license'] ?? 0) ? 'checked' : '' ?>>
-                                <label class="form-check-label" for="license">Έχω δίπλωμα οδήγησης</label>
+                                <label class="form-check-label" for="license"><?= t('profile.has_license') ?></label>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" name="has_first_aid" id="firstaid"
                                        <?= ($profile['has_first_aid'] ?? 0) ? 'checked' : '' ?>>
-                                <label class="form-check-label" for="firstaid">Πιστοποίηση Πρώτων Βοηθειών</label>
+                                <label class="form-check-label" for="firstaid"><?= t('profile.has_first_aid') ?></label>
                             </div>
                         </div>
                     </div>
-                    
+
                     <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-check-lg me-1"></i>Αποθήκευση
+                        <i class="bi bi-check-lg me-1"></i><?= t('common.save') ?>
                     </button>
                 </form>
             </div>
@@ -1064,7 +1064,7 @@ $myRequiredMissing = dbFetchAll(
         <!-- Χρεωμένα Υλικά -->
         <div class="card pp-card accent-primary mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-box-seam text-primary me-2"></i>Χρεωμένα Υλικά</h5>
+                <h5 class="mb-0"><i class="bi bi-box-seam text-primary me-2"></i><?= t('profile.bookings_title') ?></h5>
                 <span class="badge bg-primary rounded-pill"><?= count($activeBookings) ?></span>
             </div>
             <div class="card-body p-0">
@@ -1073,10 +1073,10 @@ $myRequiredMissing = dbFetchAll(
                         <thead class="table-light">
                             <tr>
                                 <th>Barcode</th>
-                                <th>Υλικό</th>
-                                <th>Ημ. Χρέωσης</th>
-                                <th>Αναμ. Επιστροφή</th>
-                                <th>Κατάσταση</th>
+                                <th><?= t('profile.bookings_col_item') ?></th>
+                                <th><?= t('profile.bookings_col_checkout_date') ?></th>
+                                <th><?= t('profile.bookings_col_expected_return') ?></th>
+                                <th><?= t('profile.bookings_col_status') ?></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1104,9 +1104,9 @@ $myRequiredMissing = dbFetchAll(
                                 </td>
                                 <td>
                                     <?php if ($overdue): ?>
-                                        <span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>Εκπρόθεσμη</span>
+                                        <span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i><?= t('profile.bookings_overdue') ?></span>
                                     <?php else: ?>
-                                        <span class="badge bg-primary">Ενεργή</span>
+                                        <span class="badge bg-primary"><?= t('profile.bookings_active') ?></span>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -1123,12 +1123,12 @@ $myRequiredMissing = dbFetchAll(
         <!-- Profile Photo -->
         <div class="card pp-card accent-primary mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-camera text-primary me-2"></i>Φωτογραφία Προφίλ</h5>
+                <h5 class="mb-0"><i class="bi bi-camera text-primary me-2"></i><?= t('profile.photo_card_title') ?></h5>
             </div>
             <div class="card-body text-center">
                 <?php if (!empty($user['profile_photo']) && file_exists(__DIR__ . '/uploads/avatars/' . $user['profile_photo'])): ?>
                     <img src="<?= BASE_URL ?>/uploads/avatars/<?= h($user['profile_photo']) ?>?t=<?= time() ?>"
-                         class="rounded-circle mb-3" style="width:120px;height:120px;object-fit:cover;" alt="Φωτογραφία Προφίλ">
+                         class="rounded-circle mb-3" style="width:120px;height:120px;object-fit:cover;" alt="<?= t('profile.photo_card_title') ?>">
                 <?php else: ?>
                     <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center mx-auto mb-3"
                          style="width:120px;height:120px;font-size:3rem;">
@@ -1141,10 +1141,10 @@ $myRequiredMissing = dbFetchAll(
                     <input type="hidden" name="action" value="update_photo">
                     <div class="mb-2">
                         <input type="file" class="form-control form-control-sm" name="photo" accept="image/*" required>
-                        <div class="form-text">JPG, PNG, GIF, WebP — μέγιστο 5MB</div>
+                        <div class="form-text"><?= t('profile.photo_help_text') ?></div>
                     </div>
                     <button type="submit" class="btn btn-primary btn-sm w-100">
-                        <i class="bi bi-upload me-1"></i>Ανέβασμα
+                        <i class="bi bi-upload me-1"></i><?= t('profile.upload_btn') ?>
                     </button>
                 </form>
 
@@ -1154,8 +1154,8 @@ $myRequiredMissing = dbFetchAll(
                         <input type="hidden" name="action" value="update_photo">
                         <input type="hidden" name="delete_photo" value="1">
                         <button type="submit" class="btn btn-outline-danger btn-sm w-100"
-                                onclick="return confirm('Διαγραφή φωτογραφίας;')">
-                            <i class="bi bi-trash me-1"></i>Διαγραφή
+                                onclick="return confirm('<?= h(addslashes(t('profile.delete_photo_confirm'))) ?>')">
+                            <i class="bi bi-trash me-1"></i><?= t('common.delete') ?>
                         </button>
                     </form>
                 <?php endif; ?>
@@ -1165,7 +1165,7 @@ $myRequiredMissing = dbFetchAll(
         <!-- Change Password -->
         <div class="card pp-card accent-danger mb-4">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-lock text-danger me-2"></i>Αλλαγή Κωδικού</h5>
+                <h5 class="mb-0"><i class="bi bi-lock text-danger me-2"></i><?= t('profile.change_password_title') ?></h5>
             </div>
             <div class="card-body">
                 <form method="post">
@@ -1173,19 +1173,19 @@ $myRequiredMissing = dbFetchAll(
                     <input type="hidden" name="action" value="update_password">
                     
                     <div class="mb-3">
-                        <label class="form-label">Τρέχων Κωδικός</label>
+                        <label class="form-label"><?= t('profile.current_password_label') ?></label>
                         <input type="password" class="form-control" name="current_password" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Νέος Κωδικός</label>
+                        <label class="form-label"><?= t('profile.new_password_label') ?></label>
                         <input type="password" class="form-control" name="new_password" minlength="6" required>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Επιβεβαίωση</label>
+                        <label class="form-label"><?= t('profile.confirm_password_label') ?></label>
                         <input type="password" class="form-control" name="confirm_password" required>
                     </div>
                     <button type="submit" class="btn btn-warning w-100">
-                        <i class="bi bi-key me-1"></i>Αλλαγή Κωδικού
+                        <i class="bi bi-key me-1"></i><?= t('profile.change_password_title') ?>
                     </button>
                 </form>
             </div>
@@ -1198,7 +1198,7 @@ $myRequiredMissing = dbFetchAll(
                 <?= roleBadge($user['role']) ?>
                 <?= volunteerTypeBadge($user['volunteer_type'] ?? VTYPE_RESCUER) ?>
                 <p class="text-muted mt-2 mb-0 small">
-                    Μέλος από <?= formatDate($user['created_at']) ?>
+                    <?= t('profile.member_since_prefix', ['date' => formatDate($user['created_at'])]) ?>
                 </p>
             </div>
         </div>
@@ -1207,18 +1207,18 @@ $myRequiredMissing = dbFetchAll(
         <div class="card pp-card">
             <div class="card-body text-center py-4">
                 <div class="mb-2" style="font-size:2.5rem;opacity:.7"><i class="bi bi-book"></i></div>
-                <h6 class="fw-bold mb-3">Εγχειρίδιο Χρήσης</h6>
+                <h6 class="fw-bold mb-3"><?= t('profile.manual_title') ?></h6>
                 <?php if (isAdmin()): ?>
                     <a href="docs/manual-admin.html" target="_blank" class="btn btn-outline-primary w-100">
-                        <i class="bi bi-book me-1"></i>Εγχειρίδιο Διαχειριστή
+                        <i class="bi bi-book me-1"></i><?= t('profile.manual_admin') ?>
                     </a>
                 <?php else: ?>
                     <a href="docs/manual-user.html" target="_blank" class="btn btn-outline-primary w-100">
-                        <i class="bi bi-book me-1"></i>Εγχειρίδιο Εθελοντή
+                        <i class="bi bi-book me-1"></i><?= t('profile.manual_volunteer') ?>
                     </a>
                 <?php endif; ?>
                 <p class="text-muted mt-2 mb-0 small">
-                    <i class="bi bi-printer me-1"></i>Εκτυπώστε ή αποθηκεύστε ως PDF
+                    <i class="bi bi-printer me-1"></i><?= t('profile.manual_print_hint') ?>
                 </p>
             </div>
         </div>

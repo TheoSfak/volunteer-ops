@@ -24,7 +24,7 @@ if (!isPost()) {
 }
 
 if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
-    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
+    echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }
 
@@ -38,7 +38,7 @@ if ($action === 'acknowledge') {
         [$orderId, $userId]
     );
     if (!$recipient) {
-        echo json_encode(['ok' => false, 'error' => 'Δεν βρέθηκε αίτημα για εσάς.']);
+        echo json_encode(['ok' => false, 'error' => t('order.no_request_for_you')]);
         exit;
     }
 
@@ -62,11 +62,11 @@ if ($action === 'complete') {
         [$orderId, $userId]
     );
     if (!$recipient) {
-        echo json_encode(['ok' => false, 'error' => 'Δεν βρέθηκε αίτημα για εσάς.']);
+        echo json_encode(['ok' => false, 'error' => t('order.no_request_for_you')]);
         exit;
     }
     if ($recipient['order_type'] !== 'task') {
-        echo json_encode(['ok' => false, 'error' => 'Η ολοκλήρωση δεν υποστηρίζεται για αυτόν τον τύπο εντολής.']);
+        echo json_encode(['ok' => false, 'error' => t('order.complete_not_supported')]);
         exit;
     }
 
@@ -82,4 +82,4 @@ if ($action === 'complete') {
     exit;
 }
 
-echo json_encode(['ok' => false, 'error' => 'Άγνωστη ενέργεια.']);
+echo json_encode(['ok' => false, 'error' => t('common.unknown_action')]);

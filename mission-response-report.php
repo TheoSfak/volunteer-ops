@@ -24,13 +24,13 @@ $mission = dbFetchOne(
     [$missionId]
 );
 if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
-    echo json_encode(['ok' => false, 'error' => 'Η αποστολή δεν βρέθηκε ή δεν είναι ενεργή στο Επιχειρησιακό.']);
+    echo json_encode(['ok' => false, 'error' => t('common.mission_not_found_or_inactive')]);
     exit;
 }
 
 $canManageWarRoom = hasPagePermission('missions_manage') || (int)$mission['responsible_user_id'] === (int)$userId;
 if (!$canManageWarRoom) {
-    echo json_encode(['ok' => false, 'error' => 'Η αναφορά αυτή είναι διαθέσιμη μόνο σε διαχειριστές.']);
+    echo json_encode(['ok' => false, 'error' => t('report.admin_only')]);
     exit;
 }
 
@@ -38,7 +38,7 @@ if (!$canManageWarRoom) {
 // shared with mission-report-print.php and mission-stats.php — it returns raw,
 // unformatted timestamps, so this page applies its own compact date() format
 // (the archival print export intentionally uses a longer format with the year).
-$report = computeMissionResponseReport($missionId);
+$report = computeMissionResponseReport($missionId, getUserLanguage($userId));
 $summary = $report['summary'];
 $shortageSummary = $report['shortageSummary'];
 

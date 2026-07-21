@@ -36,7 +36,7 @@ $mission = dbFetchOne(
     [$missionId]
 );
 if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
-    echo json_encode(['ok' => false, 'error' => 'Η αποστολή δεν βρέθηκε ή δεν είναι ενεργή στο Επιχειρησιακό.']);
+    echo json_encode(['ok' => false, 'error' => t('common.mission_not_found_or_inactive')]);
     exit;
 }
 
@@ -48,12 +48,13 @@ $isApprovedParticipant = (bool) dbFetchValue(
     [$missionId, $userId, PARTICIPATION_APPROVED]
 );
 if (!$canManageWarRoom && !$isApprovedParticipant) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν έχετε πρόσβαση στο Action Room αυτής της αποστολής.']);
+    echo json_encode(['ok' => false, 'error' => t('common.no_access_action_room')]);
     exit;
 }
 
 $isAdminParam = $canManageWarRoom ? 1 : 0;
 $viewerTeamId = getUserTeamIdForMission($missionId, $userId);
+$viewerLang = getUserLanguage($userId);
 
 // Predicate 1 — dispatch family only (sent/received/arrived).
 $dispatchScopeSql = "(d.team_id IS NULL OR ? = 1 OR d.team_id IN (SELECT team_id FROM mission_team_members WHERE user_id = ?))";
@@ -70,12 +71,12 @@ $sentRows = dbFetchAll(
     [$missionId, $isAdminParam, $userId]
 );
 foreach ($sentRows as $row) {
-    $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'όλες τις ομάδες';
-    $kind = $row['type'] === 'point' ? 'σημείο' : 'περιοχή';
+    $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : t('history.to_all_teams', [], $viewerLang);
+    $kind = t($row['type'] === 'point' ? 'history.kind_point' : 'history.kind_area', [], $viewerLang);
+    $labelSuffix = $row['label'] ? t('history.label_suffix_dash', ['label' => h($row['label'])], $viewerLang) : '';
     $events[] = [
         'icon' => '📍',
-        'text' => h($row['actor_name']) . ' έστειλε ' . $kind . ' στη ' . h($teamLabel)
-            . ($row['label'] ? ' — «' . h($row['label']) . '»' : ''),
+        'text' => t('history.dispatch_sent', ['actor' => h($row['actor_name']), 'kind' => $kind, 'team' => h($teamLabel), 'label_suffix' => $labelSuffix], $viewerLang),
         'time' => date('d/m H:i', strtotime($row['created_at'])),
         'ts'   => strtotime($row['created_at']),
     ];
@@ -92,11 +93,11 @@ $receivedRows = dbFetchAll(
     [$missionId, $isAdminParam, $userId]
 );
 foreach ($receivedRows as $row) {
-    $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'όλες τις ομάδες';
+    $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : t('history.to_all_teams', [], $viewerLang);
+    $labelSuffix = $row['label'] ? t('history.label_suffix_dash', ['label' => h($row['label'])], $viewerLang) : '';
     $events[] = [
         'icon' => '🚩',
-        'text' => h($row['actor_name']) . ' έλαβε εντολή προς ' . h($teamLabel)
-            . ($row['label'] ? ' — «' . h($row['label']) . '»' : ''),
+        'text' => t('history.dispatch_received', ['actor' => h($row['actor_name']), 'team' => h($teamLabel), 'label_suffix' => $labelSuffix], $viewerLang),
         'time' => date('d/m H:i', strtotime($row['created_at'])),
         'ts'   => strtotime($row['created_at']),
     ];
@@ -115,11 +116,12 @@ $arrivedRows = dbFetchAll(
 );
 foreach ($arrivedRows as $row) {
     $teamLabel = $row['ack_team_id'] ? ($row['ack_codename'] . ' ' . $row['ack_team_number']) : null;
+    $labelSuffix = $row['dispatch_label'] ? t('history.label_suffix_at', ['label' => h($row['dispatch_label'])], $viewerLang) : '';
     $events[] = [
         'icon' => '✅',
-        'text' => ($teamLabel ? 'Η ομάδα ' . h($teamLabel) : h($row['actor_name'])) . ' ανέφερε άφιξη'
-            . ($row['dispatch_label'] ? ' στο «' . h($row['dispatch_label']) . '»' : '')
-            . ($teamLabel ? ' (' . h($row['actor_name']) . ')' : ''),
+        'text' => $teamLabel
+            ? t('history.dispatch_arrived_team', ['team' => h($teamLabel), 'label_suffix' => $labelSuffix, 'actor' => h($row['actor_name'])], $viewerLang)
+            : t('history.dispatch_arrived_solo', ['actor' => h($row['actor_name']), 'label_suffix' => $labelSuffix], $viewerLang),
         'time' => date('d/m H:i', strtotime($row['created_at'])),
         'ts'   => strtotime($row['created_at']),
     ];
@@ -139,22 +141,22 @@ $orderRows = dbFetchAll(
 );
 foreach ($orderRows as $row) {
     $icon = $orderTypeIcons[$row['order_type']] ?? '📋';
-    $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'χωρίς ομάδα';
+    $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : t('history.no_team', [], $viewerLang);
     $extra = '';
     if (in_array($row['order_type'], ['task', 'message'], true) && $row['task_text']) {
         $snippet = mb_strlen($row['task_text']) > 120 ? mb_substr($row['task_text'], 0, 117) . '…' : $row['task_text'];
-        $extra = ' — «' . h($snippet) . '»';
+        $extra = t('history.label_suffix_dash', ['label' => h($snippet)], $viewerLang);
     }
     $events[] = [
         'icon' => $icon,
-        'text' => 'Εντολή προς ' . h($row['actor_name']) . ' (' . h($teamLabel) . ')' . $extra,
+        'text' => t('history.order_sent', ['actor' => h($row['actor_name']), 'team' => h($teamLabel), 'extra' => $extra], $viewerLang),
         'time' => date('d/m H:i', strtotime($row['sent_at'])),
         'ts'   => strtotime($row['sent_at']),
     ];
     if ($row['acknowledged_at']) {
         $events[] = [
             'icon' => '👍',
-            'text' => h($row['actor_name']) . ' έλαβε εντολή (' . h($teamLabel) . ')' . $extra,
+            'text' => t('history.order_acknowledged', ['actor' => h($row['actor_name']), 'team' => h($teamLabel), 'extra' => $extra], $viewerLang),
             'time' => date('d/m H:i', strtotime($row['acknowledged_at'])),
             'ts'   => strtotime($row['acknowledged_at']),
         ];
@@ -162,7 +164,7 @@ foreach ($orderRows as $row) {
     if ($row['fulfilled_at']) {
         $events[] = [
             'icon' => '✅',
-            'text' => h($row['actor_name']) . ' ολοκλήρωσε εντολή (' . h($teamLabel) . ')' . $extra,
+            'text' => t('history.order_fulfilled', ['actor' => h($row['actor_name']), 'team' => h($teamLabel), 'extra' => $extra], $viewerLang),
             'time' => date('d/m H:i', strtotime($row['fulfilled_at'])),
             'ts'   => strtotime($row['fulfilled_at']),
         ];
@@ -174,7 +176,11 @@ foreach ($orderRows as $row) {
 // without it this join would match unrelated logAudit() call sites by
 // coincidental numeric id.
 $fieldStatusIcons = ['field_status_on_way' => '🚗', 'field_status_on_site' => '✅', 'needs_help' => '🆘'];
-$fieldStatusText  = ['field_status_on_way' => 'σε κίνηση', 'field_status_on_site' => 'επί τόπου', 'needs_help' => 'χρειάζεται βοήθεια (SOS)'];
+$fieldStatusText  = [
+    'field_status_on_way' => t('history.status_on_way', [], $viewerLang),
+    'field_status_on_site' => t('history.status_on_site', [], $viewerLang),
+    'needs_help' => t('history.status_needs_help', [], $viewerLang),
+];
 $statusRows = dbFetchAll(
     "SELECT al.action, al.created_at, u.name AS actor_name, mtm.team_id AS actor_team_id
      FROM audit_logs al
@@ -191,7 +197,7 @@ $statusRows = dbFetchAll(
 foreach ($statusRows as $row) {
     $events[] = [
         'icon' => $fieldStatusIcons[$row['action']] ?? '📶',
-        'text' => h($row['actor_name']) . ' → ' . $fieldStatusText[$row['action']],
+        'text' => t('history.field_status_change', ['actor' => h($row['actor_name']), 'status' => $fieldStatusText[$row['action']]], $viewerLang),
         'time' => date('d/m H:i', strtotime($row['created_at'])),
         'ts'   => strtotime($row['created_at']),
     ];
@@ -211,7 +217,7 @@ $pingRows = dbFetchAll(
 foreach ($pingRows as $row) {
     $events[] = [
         'icon' => '📡',
-        'text' => h($row['actor_name']) . ' έστειλε στίγμα GPS',
+        'text' => t('history.gps_ping_sent', ['actor' => h($row['actor_name'])], $viewerLang),
         'time' => date('d/m H:i', strtotime($row['created_at'])),
         'ts'   => strtotime($row['created_at']),
     ];
@@ -229,17 +235,17 @@ $shortageRows = dbFetchAll(
     [$missionId, $isAdminParam, $userId, $viewerTeamId]
 );
 foreach ($shortageRows as $row) {
-    $label = SHORTAGE_TYPE_LABELS[$row['shortage_type']] ?? $row['shortage_type'];
+    $label = shortageTypeLabel($row['shortage_type'], $viewerLang);
     $events[] = [
         'icon' => '⚠️',
-        'text' => h($row['actor_name']) . ' ανέφερε έλλειψη (' . h($label) . ') — «' . h($row['title']) . '»',
+        'text' => t('history.shortage_reported', ['actor' => h($row['actor_name']), 'type' => h($label), 'title' => h($row['title'])], $viewerLang),
         'time' => date('d/m H:i', strtotime($row['created_at'])),
         'ts'   => strtotime($row['created_at']),
     ];
     if ($row['acknowledged_at']) {
         $events[] = [
             'icon' => '👁️',
-            'text' => 'Η αναφορά «' . h($row['title']) . '» ελέγχθηκε',
+            'text' => t('history.shortage_seen', ['title' => h($row['title'])], $viewerLang),
             'time' => date('d/m H:i', strtotime($row['acknowledged_at'])),
             'ts'   => strtotime($row['acknowledged_at']),
         ];
@@ -247,7 +253,7 @@ foreach ($shortageRows as $row) {
     if ($row['resolved_at']) {
         $events[] = [
             'icon' => '✅',
-            'text' => 'Η αναφορά «' . h($row['title']) . '» λύθηκε',
+            'text' => t('history.shortage_resolved', ['title' => h($row['title'])], $viewerLang),
             'time' => date('d/m H:i', strtotime($row['resolved_at'])),
             'ts'   => strtotime($row['resolved_at']),
         ];

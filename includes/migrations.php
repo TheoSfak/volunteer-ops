@@ -4718,6 +4718,20 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 89,
+            'description' => 'Add language to users (per-user Action Room UI language, admin-set via volunteer-form.php, default el — no behavior change for existing accounts)',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'language'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN language ENUM('el','en') NOT NULL DEFAULT 'el' AFTER is_external");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

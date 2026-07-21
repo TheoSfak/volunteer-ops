@@ -30,7 +30,7 @@ if (isLoggedIn()) {
 }
 ?>
 <!DOCTYPE html>
-<html lang="el">
+<html lang="<?= ($currentUser['language'] ?? DEFAULT_LANGUAGE) === 'en' ? 'en' : 'el' ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -917,19 +917,19 @@ if (isLoggedIn()) {
             <?php if (isExternalGuest()): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'missions' ? 'active' : '' ?>" href="missions.php">
-                    <i class="bi bi-broadcast-pin"></i> Οι Αποστολές μου
+                    <i class="bi bi-broadcast-pin"></i> <?= t('nav.my_missions') ?>
                 </a>
             </li>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'profile' ? 'active' : '' ?>" href="profile.php">
-                    <i class="bi bi-person"></i> Ο Λογαριασμός μου
+                    <i class="bi bi-person"></i> <?= t('nav.my_account') ?>
                 </a>
             </li>
             <li class="nav-item">
                 <form action="logout.php" method="post">
                     <?= csrfField() ?>
                     <button type="submit" class="nav-link border-0 bg-transparent text-start w-100">
-                        <i class="bi bi-box-arrow-right"></i> Αποσύνδεση
+                        <i class="bi bi-box-arrow-right"></i> <?= t('nav.logout') ?>
                     </button>
                 </form>
             </li>
@@ -1372,7 +1372,7 @@ if (isLoggedIn()) {
                         <span class="user-type-badge d-none d-md-inline"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_RESCUER) ?></span>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
-                        <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i>Το Προφίλ μου</a></li>
+                        <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i><?= t('nav.my_profile') ?></a></li>
                         <?php if (!isExternalGuest()): ?>
                         <li><a class="dropdown-item" href="my-participations.php"><i class="bi bi-list-check me-2"></i>Οι Αιτήσεις μου</a></li>
                         <?php if (!empty($currentUser['custom_role_id'])): ?>

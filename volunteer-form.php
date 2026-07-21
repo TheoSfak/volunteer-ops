@@ -60,6 +60,7 @@ if (isPost()) {
         'warehouse_id' => post('warehouse_id') ?: null,
         'is_active' => isset($_POST['is_active']) ? 1 : 0,
         'is_external' => isset($_POST['is_external']) ? 1 : 0,
+        'language' => in_array(post('language'), SUPPORTED_LANGUAGES, true) ? post('language') : DEFAULT_LANGUAGE,
         'position_id' => post('position_id') ?: null,
         'id_card' => post('id_card') ?: null,
         'afm' => post('afm') ?: null,
@@ -137,7 +138,7 @@ if (isPost()) {
             // Update
             dbExecute(
                 "UPDATE users SET
-                 name = ?, email = ?, phone = ?, role = ?, custom_role_id = ?, department_id = ?, warehouse_id = ?, is_active = ?, is_external = ?,
+                 name = ?, email = ?, phone = ?, role = ?, custom_role_id = ?, department_id = ?, warehouse_id = ?, is_active = ?, is_external = ?, language = ?,
                  volunteer_type = ?, cohort_year = ?, position_id = ?,
                  id_card = ?, afm = ?, amka = ?, driving_license = ?, vehicle_plate = ?,
                  pants_size = ?, shirt_size = ?, blouse_size = ?, fleece_size = ?,
@@ -145,7 +146,7 @@ if (isPost()) {
                  WHERE id = ?",
                 [
                     $data['name'], $data['email'], $data['phone'],
-                    $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'],
+                    $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'], $data['language'],
                     $volunteerType, $cohortYear, $data['position_id'],
                     $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
@@ -167,13 +168,13 @@ if (isPost()) {
             // Create
             $id = dbInsert(
                 "INSERT INTO users
-                 (name, email, password, phone, role, custom_role_id, department_id, warehouse_id, is_active, is_external, volunteer_type, cohort_year, position_id,
+                 (name, email, password, phone, role, custom_role_id, department_id, warehouse_id, is_active, is_external, language, volunteer_type, cohort_year, position_id,
                   id_card, afm, amka, driving_license, vehicle_plate, pants_size, shirt_size, blouse_size, fleece_size,
                   registry_epidrasis, registry_ggpp, total_points, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                 [
                     $data['name'], $data['email'], password_hash($password, PASSWORD_DEFAULT),
-                    $data['phone'], $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'],
+                    $data['phone'], $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'], $data['language'],
                     $volunteerType, $cohortYear, $data['position_id'],
                     $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
@@ -239,6 +240,7 @@ $form = $volunteer ?: [
     'warehouse_id' => $currentUser['warehouse_id'] ?? null,
     'is_active' => 1,
     'is_external' => 0,
+    'language' => DEFAULT_LANGUAGE,
     'volunteer_type' => VTYPE_RESCUER,
     'cohort_year' => null,
     'position_id' => null,
@@ -433,6 +435,15 @@ include __DIR__ . '/includes/header.php';
                     </label>
                 </div>
                 <small class="text-muted">Για μέλη άλλων διασωστικών ομάδων. Ο λογαριασμός βλέπει αποκλειστικά το Action Room της αποστολής όπου τον προσθέσετε ως συμμετέχοντα — καμία άλλη σελίδα ή αποστολή.</small>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Γλώσσα Action Room</label>
+                <select class="form-select" name="language" style="max-width: 250px;">
+                    <option value="el" <?= ($form['language'] ?? DEFAULT_LANGUAGE) === 'el' ? 'selected' : '' ?>>Ελληνικά</option>
+                    <option value="en" <?= ($form['language'] ?? DEFAULT_LANGUAGE) === 'en' ? 'selected' : '' ?>>English</option>
+                </select>
+                <small class="text-muted">Γλώσσα προβολής του Action Room (χάρτης, εντολές, ειδοποιήσεις) για αυτόν τον χρήστη.</small>
             </div>
 
             <hr>

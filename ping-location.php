@@ -22,15 +22,20 @@ header('Content-Type: application/json');
  */
 function notifyVolunteerGpsPing(int $missionId, string $missionTitle, ?int $responsibleUserId, string $senderName, int $senderId): void {
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $message = $senderName . ' έστειλε το στίγμα του/της στην αποστολή «' . $missionTitle . '».';
-
     $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $senderId);
+    $langByUserId = getUserLanguages($recipientIds);
     foreach ($recipientIds as $recipientId) {
-        sendNotification($recipientId, '📍 Νέο Στίγμα Εθελοντή', $message, 'info', 'mission_gps_ping', [
-            'url' => $warRoomUrl,
-            'tag' => 'gps-ping-mission-' . $missionId,
-            'bannerMission' => $missionId,
-        ]);
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        sendNotification(
+            $recipientId,
+            t('ping.notify_title', [], $lang),
+            t('ping.notify_message', ['name' => $senderName, 'mission' => $missionTitle], $lang),
+            'info', 'mission_gps_ping', [
+                'url' => $warRoomUrl,
+                'tag' => 'gps-ping-mission-' . $missionId,
+                'bannerMission' => $missionId,
+            ]
+        );
     }
 }
 
@@ -41,7 +46,7 @@ if (!isPost()) {
 
 // AJAX-safe CSRF check (verifyCsrf() redirects on failure which breaks fetch)
 if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
-    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
+    echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }
 
@@ -54,7 +59,7 @@ $source  = post('source') === 'auto' ? 'auto' : 'manual';
 
 // Validate coordinates
 if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180 || ($lat == 0 && $lng == 0)) {
-    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρες συντεταγμένες']);
+    echo json_encode(['ok' => false, 'error' => t('ping.invalid_coordinates')]);
     exit;
 }
 
@@ -69,7 +74,7 @@ $pr = dbFetchOne(
 );
 
 if (!$pr) {
-    echo json_encode(['ok' => false, 'error' => 'Η αποστολή δεν είναι ανοιχτή στο Επιχειρησιακό ή δεν έχετε εγκεκριμένη συμμετοχή']);
+    echo json_encode(['ok' => false, 'error' => t('ping.mission_not_open_or_not_approved')]);
     exit;
 }
 
@@ -80,7 +85,7 @@ try {
         [$userId, $shiftId, $lat, $lng, $source]
     );
 } catch (Exception $e) {
-    echo json_encode(['ok' => false, 'error' => 'Η λειτουργία GPS δεν είναι διαθέσιμη ακόμη (χρειάζεται migration βάσης).']);
+    echo json_encode(['ok' => false, 'error' => t('ping.gps_unavailable_migration')]);
     exit;
 }
 

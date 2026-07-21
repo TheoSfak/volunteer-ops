@@ -9,7 +9,7 @@ requireLogin();
 
 $missionId = (int)get('id');
 if (!$missionId) {
-    setFlash('error', 'Η αποστολή δεν βρέθηκε.');
+    setFlash('error', t('common.mission_not_found'));
     redirect('dashboard.php');
 }
 
@@ -25,7 +25,7 @@ $mission = dbFetchOne(
     [$missionId]
 );
 if (!$mission) {
-    setFlash('error', 'Η αποστολή δεν βρέθηκε.');
+    setFlash('error', t('common.mission_not_found'));
     redirect('dashboard.php');
 }
 
@@ -63,19 +63,21 @@ function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $
     $teamLabel = $codename . ' ' . $teamNumber;
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     $leaderName = $namesByUserId[$leaderId] ?? '';
+    $langByUserId = getUserLanguages($memberIds);
     foreach ($memberIds as $memberId) {
+        $lang = $langByUserId[$memberId] ?? DEFAULT_LANGUAGE;
         $teammateNames = array_filter(array_map(
             fn($id) => $namesByUserId[$id] ?? '',
             array_values(array_diff($memberIds, [$memberId]))
         ));
-        $message = 'Αποστολή «' . $missionTitle . '» — μπήκατε στην ομάδα «' . $teamLabel . '».';
+        $message = t('team.notify.assigned', ['mission' => $missionTitle, 'team' => $teamLabel], $lang);
         if (!empty($teammateNames)) {
-            $message .= ' Μαζί σας: ' . implode(', ', $teammateNames) . '.';
+            $message .= t('team.notify.mates', ['names' => implode(', ', $teammateNames)], $lang);
         }
         $message .= $memberId === $leaderId
-            ? ' Είστε ο υπεύθυνος της ομάδας.'
-            : ' Υπεύθυνος: ' . $leaderName . '.';
-        sendNotification($memberId, '🔷 Ομάδα ' . $teamLabel, $message, 'info', '', [
+            ? t('team.notify.leader_self', [], $lang)
+            : t('team.notify.leader_other', ['leader' => $leaderName], $lang);
+        sendNotification($memberId, t('team.notify.title', ['team' => $teamLabel], $lang), $message, 'info', '', [
             'url' => $warRoomUrl,
             'tag' => 'mission-team-' . $missionId,
         ]);
@@ -89,20 +91,29 @@ function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $
  * by request_location/request_photo/request_video — the only difference between them
  * is order_type + notification copy.
  */
-function createMissionOrderAndNotify(int $missionId, string $missionTitle, string $orderType, int $createdBy, array $recipientIds, string $title, string $message, string $broadcastMessage, ?string $taskText = null): int {
+function createMissionOrderAndNotify(
+    int $missionId, string $missionTitle, string $orderType, int $createdBy, array $recipientIds,
+    string $titleKey, array $titleVars, ?string $rawMessage, string $messageKey, array $messageVars,
+    string $broadcastKey, array $broadcastVars, ?string $taskText = null
+): int {
     $orderId = dbInsert(
         "INSERT INTO mission_orders (mission_id, order_type, task_text, created_by, created_at) VALUES (?, ?, ?, ?, NOW())",
         [$missionId, $orderType, $taskText, $createdBy]
     );
 
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $recipientLangs = getUserLanguages($recipientIds);
     foreach ($recipientIds as $recipientId) {
+        $lang = $recipientLangs[$recipientId] ?? DEFAULT_LANGUAGE;
         $teamId = getUserTeamIdForMission($missionId, $recipientId);
         dbInsert(
             "INSERT INTO mission_order_recipients (order_id, user_id, team_id) VALUES (?, ?, ?)",
             [$orderId, $recipientId, $teamId]
         );
-        sendNotification($recipientId, $title, $message, 'warning', '', [
+        // Free-form task/broadcast text ($rawMessage) is never translated — it's
+        // exactly what the admin typed, per the "free text stays as typed" rule.
+        $message = $rawMessage ?? t($messageKey, $messageVars, $lang);
+        sendNotification($recipientId, t($titleKey, $titleVars, $lang), $message, 'warning', '', [
             'url' => $warRoomUrl,
             'tag' => $orderType . '-request-mission-' . $missionId,
             'vibrate' => [300, 100, 300, 100, 500],
@@ -126,8 +137,10 @@ function createMissionOrderAndNotify(int $missionId, string $missionTitle, strin
         $recipientIds,
         [$createdBy]
     );
+    $bystanderLangs = getUserLanguages($bystanderIds);
     foreach ($bystanderIds as $bystanderId) {
-        sendNotification($bystanderId, $title, $broadcastMessage, 'info', '', [
+        $lang = $bystanderLangs[$bystanderId] ?? DEFAULT_LANGUAGE;
+        sendNotification($bystanderId, t($titleKey, $titleVars, $lang), t($broadcastKey, $broadcastVars, $lang), 'info', '', [
             'url' => $warRoomUrl,
             'tag' => $orderType . '-request-mission-' . $missionId,
             'bannerMission' => $missionId,
@@ -145,11 +158,11 @@ $isApprovedParticipant = (bool)dbFetchValue(
     [$missionId, $user['id'], PARTICIPATION_APPROVED]
 );
 if (!$canManageWarRoom && !$isApprovedParticipant) {
-    setFlash('error', 'Έχετε πρόσβαση στο Action Room μόνο για αποστολές στις οποίες είστε εγκεκριμένος/η.');
+    setFlash('error', t('wr.access_denied'));
     redirect('dashboard.php');
 }
 if ($mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
-    setFlash('warning', 'Η αποστολή δεν είναι ενεργή στο Επιχειρησιακό.');
+    setFlash('warning', t('wr.mission_not_active'));
     redirect('mission-view.php?id=' . $missionId);
 }
 
@@ -159,16 +172,16 @@ if (isPost()) {
     verifyCsrf();
     if (post('action') === 'close_mission') {
         if (!$canManageWarRoom) {
-            setFlash('error', 'Δεν έχετε δικαίωμα να κλείσετε αυτή την αποστολή.');
+            setFlash('error', t('wr.perm.close_mission'));
         } else {
             dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ? AND status = ?", [STATUS_CLOSED, $missionId, STATUS_OPEN]);
             logAudit('close_from_war_room', 'missions', $missionId, null, ['old_status' => STATUS_OPEN]);
-            setFlash('success', 'Η αποστολή έκλεισε και αφαιρέθηκε από το Επιχειρησιακό.');
+            setFlash('success', t('wr.mission_closed_success'));
             redirect('ops-dashboard.php');
         }
     } elseif (post('action') === 'request_location') {
         if (!$canManageWarRoom) {
-            setFlash('error', 'Δεν έχετε δικαίωμα να ζητήσετε στίγματα.');
+            setFlash('error', t('wr.perm.request_location'));
             redirect('war-room.php?id=' . $missionId);
         }
 
@@ -187,21 +200,20 @@ if (isPost()) {
             : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
 
         if (empty($requestedIds)) {
-            setFlash('warning', 'Επιλέξτε τουλάχιστον έναν εθελοντή με ενεργή βάρδια.');
+            setFlash('warning', t('common.select_active_volunteer'));
         } else {
             createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'location', $user['id'], $requestedIds,
-                '📍 Ζητείται στίγμα GPS',
-                'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε το τρέχον στίγμα σας.',
-                'Ζητήθηκε στίγμα GPS από εθελοντές της αποστολής «' . $mission['title'] . '».'
+                'order.location.title', [], null, 'order.location.message', ['mission' => $mission['title']],
+                'order.location.broadcast', ['mission' => $mission['title']]
             );
             logAudit('request_mission_location', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
-            setFlash('success', 'Στάλθηκε αίτημα στίγματος σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
+            setFlash('success', t('order.location.sent_flash', ['count' => count($requestedIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'request_photo') {
         if (!$canManageWarRoom) {
-            setFlash('error', 'Δεν έχετε δικαίωμα να ζητήσετε φωτογραφία.');
+            setFlash('error', t('wr.perm.request_photo'));
             redirect('war-room.php?id=' . $missionId);
         }
 
@@ -220,21 +232,20 @@ if (isPost()) {
             : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
 
         if (empty($requestedIds)) {
-            setFlash('warning', 'Επιλέξτε τουλάχιστον έναν εθελοντή με ενεργή βάρδια.');
+            setFlash('warning', t('common.select_active_volunteer'));
         } else {
             createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'photo', $user['id'], $requestedIds,
-                '📷 Ζητείται φωτογραφία',
-                'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε φωτογραφία από το πεδίο.',
-                'Ζητήθηκε φωτογραφία πεδίου από εθελοντές της αποστολής «' . $mission['title'] . '».'
+                'order.photo.title', [], null, 'order.photo.message', ['mission' => $mission['title']],
+                'order.photo.broadcast', ['mission' => $mission['title']]
             );
             logAudit('request_mission_photo', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
-            setFlash('success', 'Στάλθηκε αίτημα φωτογραφίας σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
+            setFlash('success', t('order.photo.sent_flash', ['count' => count($requestedIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'request_video') {
         if (!$canManageWarRoom) {
-            setFlash('error', 'Δεν έχετε δικαίωμα να ζητήσετε βίντεο.');
+            setFlash('error', t('wr.perm.request_video'));
             redirect('war-room.php?id=' . $missionId);
         }
 
@@ -253,21 +264,20 @@ if (isPost()) {
             : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
 
         if (empty($requestedIds)) {
-            setFlash('warning', 'Επιλέξτε τουλάχιστον έναν εθελοντή με ενεργή βάρδια.');
+            setFlash('warning', t('common.select_active_volunteer'));
         } else {
             createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'video', $user['id'], $requestedIds,
-                '🎥 Ζητείται βίντεο',
-                'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» ζητά να στείλετε βίντεο από το πεδίο.',
-                'Ζητήθηκε βίντεο πεδίου από εθελοντές της αποστολής «' . $mission['title'] . '».'
+                'order.video.title', [], null, 'order.video.message', ['mission' => $mission['title']],
+                'order.video.broadcast', ['mission' => $mission['title']]
             );
             logAudit('request_mission_video', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
-            setFlash('success', 'Στάλθηκε αίτημα βίντεο σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
+            setFlash('success', t('order.video.sent_flash', ['count' => count($requestedIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'request_task') {
         if (!$canManageWarRoom) {
-            setFlash('error', 'Δεν έχετε δικαίωμα να δώσετε εντολή.');
+            setFlash('error', t('wr.perm.request_task'));
             redirect('war-room.php?id=' . $missionId);
         }
 
@@ -289,24 +299,23 @@ if (isPost()) {
             : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
 
         if ($taskText === '') {
-            setFlash('warning', 'Γράψτε το κείμενο της εντολής πριν την αποστολή.');
+            setFlash('warning', t('order.task.empty_warning'));
         } elseif (empty($requestedIds)) {
-            setFlash('warning', 'Επιλέξτε τουλάχιστον έναν εθελοντή με ενεργή βάρδια.');
+            setFlash('warning', t('common.select_active_volunteer'));
         } else {
             createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'task', $user['id'], $requestedIds,
-                '📋 Νέα Εντολή — ' . $mission['title'],
-                $taskText,
-                'Δόθηκε εντολή σε εθελοντές της αποστολής «' . $mission['title'] . '»: «' . $taskText . '».',
+                'order.task.title', ['mission' => $mission['title']], $taskText, '', [],
+                'order.task.broadcast', ['mission' => $mission['title'], 'text' => $taskText],
                 $taskText
             );
             logAudit('request_mission_task', 'missions', $missionId, null, ['recipient_ids' => $requestedIds, 'task_text' => $taskText]);
-            setFlash('success', 'Στάλθηκε εντολή σε ' . count($requestedIds) . ' ενεργούς εθελοντές.');
+            setFlash('success', t('order.task.sent_flash', ['count' => count($requestedIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'global_message') {
         if (!$canManageWarRoom) {
-            setFlash('error', 'Δεν έχετε δικαίωμα να στείλετε καθολικό μήνυμα.');
+            setFlash('error', t('wr.perm.global_message'));
             redirect('war-room.php?id=' . $missionId);
         }
 
@@ -314,7 +323,7 @@ if (isPost()) {
         $broadcastText = mb_substr($broadcastText, 0, 500);
 
         if ($broadcastText === '') {
-            setFlash('warning', 'Γράψτε ένα μήνυμα πριν την αποστολή.');
+            setFlash('warning', t('global_message.empty_warning'));
         } else {
             $recipients = dbFetchAll(
                 "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
@@ -332,18 +341,17 @@ if (isPost()) {
 
             createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'message', $user['id'], $recipientIds,
-                '📢 Καθολικό μήνυμα — ' . $mission['title'],
-                $broadcastText,
-                'Στάλθηκε καθολικό μήνυμα στην αποστολή «' . $mission['title'] . '».',
+                'global_message.title', ['mission' => $mission['title']], $broadcastText, '', [],
+                'global_message.broadcast', ['mission' => $mission['title']],
                 $broadcastText
             );
             logAudit('global_message_war_room', 'missions', $missionId, null, ['message' => $broadcastText]);
-            setFlash('success', 'Το καθολικό μήνυμα εστάλη σε ' . count($recipientIds) . ' εθελοντές.');
+            setFlash('success', t('global_message.sent_flash', ['count' => count($recipientIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'create_team') {
         if (!$canManageWarRoom) {
-            setFlash('error', 'Δεν έχετε δικαίωμα να δημιουργήσετε ομάδες.');
+            setFlash('error', t('wr.perm.create_team'));
             redirect('war-room.php?id=' . $missionId);
         }
 
@@ -370,9 +378,9 @@ if (isPost()) {
         $leaderId = (int) post('leader_id');
 
         if (empty($memberIds)) {
-            setFlash('warning', 'Επιλέξτε τουλάχιστον έναν διαθέσιμο εθελοντή για την ομάδα.');
+            setFlash('warning', t('team.create.select_member_warning'));
         } elseif (!in_array($leaderId, $memberIds, true)) {
-            setFlash('warning', 'Ο υπεύθυνος πρέπει να είναι μέλος της ομάδας.');
+            setFlash('warning', t('team.leader_must_be_member'));
         } else {
             $teamCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_teams WHERE mission_id = ?", [$missionId]);
             $codename = MISSION_TEAM_CODENAMES[$teamCount % count(MISSION_TEAM_CODENAMES)];
@@ -389,7 +397,7 @@ if (isPost()) {
             }
 
             if ($teamNumber === null) {
-                setFlash('error', 'Δεν ήταν δυνατή η δημιουργία μοναδικού αριθμού ομάδας. Δοκιμάστε ξανά.');
+                setFlash('error', t('team.create.number_failed'));
             } else {
                 $teamId = dbInsert(
                     "INSERT INTO mission_teams (mission_id, codename, team_number, color, leader_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
@@ -403,20 +411,20 @@ if (isPost()) {
                 }
                 logAudit('create_mission_team', 'mission_teams', $teamId, null, ['mission_id' => $missionId, 'member_ids' => $memberIds, 'leader_id' => $leaderId]);
                 notifyMissionTeamMembers($missionId, $mission['title'], $codename, $teamNumber, $memberIds, $leaderId, $namesByUserId);
-                setFlash('success', 'Δημιουργήθηκε η ομάδα ' . $codename . ' ' . $teamNumber . '.');
+                setFlash('success', t('team.create.success_flash', ['team' => $codename . ' ' . $teamNumber]));
             }
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'update_team') {
         if (!$canManageWarRoom) {
-            setFlash('error', 'Δεν έχετε δικαίωμα να επεξεργαστείτε ομάδες.');
+            setFlash('error', t('wr.perm.update_team'));
             redirect('war-room.php?id=' . $missionId);
         }
 
         $teamId = (int) post('team_id');
         $team = dbFetchOne("SELECT * FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
         if (!$team) {
-            setFlash('error', 'Η ομάδα δεν βρέθηκε.');
+            setFlash('error', t('common.team_not_found'));
             redirect('war-room.php?id=' . $missionId);
         }
 
@@ -443,9 +451,9 @@ if (isPost()) {
         $leaderId = (int) post('leader_id');
 
         if (empty($memberIds)) {
-            setFlash('warning', 'Επιλέξτε τουλάχιστον έναν εθελοντή για την ομάδα.');
+            setFlash('warning', t('team.update.select_member_warning'));
         } elseif (!in_array($leaderId, $memberIds, true)) {
-            setFlash('warning', 'Ο υπεύθυνος πρέπει να είναι μέλος της ομάδας.');
+            setFlash('warning', t('team.leader_must_be_member'));
         } else {
             $oldMemberIds = array_map('intval', array_column(
                 dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]),
@@ -461,12 +469,12 @@ if (isPost()) {
             dbExecute("UPDATE mission_teams SET leader_id = ?, updated_at = NOW() WHERE id = ?", [$leaderId, $teamId]);
             logAudit('update_mission_team', 'mission_teams', $teamId, ['member_ids' => $oldMemberIds], ['member_ids' => $memberIds, 'leader_id' => $leaderId]);
             notifyMissionTeamMembers($missionId, $mission['title'], $team['codename'], (int)$team['team_number'], $memberIds, $leaderId, $namesByUserId);
-            setFlash('success', 'Η ομάδα ' . $team['codename'] . ' ' . $team['team_number'] . ' ενημερώθηκε.');
+            setFlash('success', t('team.update.success_flash', ['team' => $team['codename'] . ' ' . $team['team_number']]));
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'delete_team') {
         if (!$canManageWarRoom) {
-            setFlash('error', 'Δεν έχετε δικαίωμα να διαλύσετε ομάδες.');
+            setFlash('error', t('wr.perm.delete_team'));
             redirect('war-room.php?id=' . $missionId);
         }
 
@@ -482,22 +490,24 @@ if (isPost()) {
 
             $teamLabel = $team['codename'] . ' ' . $team['team_number'];
             $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+            $formerMemberLangs = getUserLanguages(array_column($formerMembers, 'user_id'));
             foreach ($formerMembers as $member) {
+                $lang = $formerMemberLangs[(int)$member['user_id']] ?? DEFAULT_LANGUAGE;
                 sendNotification(
                     (int)$member['user_id'],
-                    '🔷 Διάλυση ομάδας',
-                    'Η ομάδα «' . $teamLabel . '» της αποστολής «' . $mission['title'] . '» διαλύθηκε.',
+                    t('team.delete.notify_title', [], $lang),
+                    t('team.delete.notify_message', ['team' => $teamLabel, 'mission' => $mission['title']], $lang),
                     'warning', '', ['url' => $warRoomUrl]
                 );
             }
-            setFlash('success', 'Η ομάδα ' . $teamLabel . ' διαλύθηκε.');
+            setFlash('success', t('team.delete.success_flash', ['team' => $teamLabel]));
         } else {
-            setFlash('error', 'Η ομάδα δεν βρέθηκε.');
+            setFlash('error', t('common.team_not_found'));
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'report_shortage') {
         if (!$isApprovedParticipant) {
-            setFlash('error', 'Μόνο εγκεκριμένοι εθελοντές μπορούν να υποβάλουν αναφορά έλλειψης.');
+            setFlash('error', t('wr.perm.report_shortage'));
             redirect('war-room.php?id=' . $missionId);
         }
 
@@ -509,9 +519,9 @@ if (isPost()) {
         $description = mb_substr(trim((string) post('description')), 0, 2000);
 
         if (!in_array($shortageType, $allowedTypes, true) || !in_array($severity, $allowedSeverities, true)) {
-            setFlash('error', 'Μη έγκυρα στοιχεία αναφοράς.');
+            setFlash('error', t('shortage.invalid_fields'));
         } elseif ($title === '' || $description === '') {
-            setFlash('warning', 'Συμπληρώστε τίτλο και περιγραφή πριν την υποβολή.');
+            setFlash('warning', t('shortage.missing_fields'));
         } else {
             $teamId = getUserTeamIdForMission($missionId, $user['id']);
             $reportId = dbInsert(
@@ -523,12 +533,17 @@ if (isPost()) {
 
             $recipientIds = getMissionCommandStaffIds($missionId, $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, (int) $user['id']);
             $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-            $severityLabel = SHORTAGE_SEVERITY_LABELS[$severity] ?? $severity;
-            $typeLabel = SHORTAGE_TYPE_LABELS[$shortageType] ?? $shortageType;
-            $notifTitle = '⚠️ Αναφορά Έλλειψης — ' . $mission['title'];
-            $notifMessage = h($user['name']) . ' ανέφερε έλλειψη (' . $typeLabel . ', σοβαρότητα: ' . $severityLabel . '): «' . $title . '».';
             $isLoud = in_array($severity, ['high', 'critical'], true);
+            $shortageRecipientLangs = getUserLanguages($recipientIds);
             foreach ($recipientIds as $recipientId) {
+                $lang = $shortageRecipientLangs[$recipientId] ?? DEFAULT_LANGUAGE;
+                $notifTitle = t('shortage.notify_title', ['mission' => $mission['title']], $lang);
+                $notifMessage = t('shortage.notify_message', [
+                    'name' => h($user['name']),
+                    'type' => shortageTypeLabel($shortageType, $lang),
+                    'severity' => shortageSeverityLabel($severity, $lang),
+                    'title' => $title,
+                ], $lang);
                 $pushData = ['url' => $warRoomUrl, 'tag' => 'shortage-report-mission-' . $missionId];
                 if ($isLoud) {
                     $pushData['bannerMission'] = $missionId;
@@ -539,7 +554,7 @@ if (isPost()) {
                 // preference — low/medium uses the configurable code instead.
                 sendNotification($recipientId, $notifTitle, $notifMessage, $isLoud ? 'danger' : 'info', $isLoud ? '' : 'mission_shortage_report', $pushData);
             }
-            setFlash('success', 'Η αναφορά έλλειψης υποβλήθηκε.');
+            setFlash('success', t('shortage.submitted_flash'));
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'toggle_field_mode') {
@@ -800,28 +815,28 @@ include __DIR__ . '/includes/header.php';
 <div class="war-room-hero p-4 mb-4 shadow-sm">
     <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
         <div>
-            <div class="text-uppercase small fw-semibold opacity-75 mb-1"><i class="bi bi-broadcast-pin me-1"></i>Action Room · Επιχειρησιακό Κέντρο Αποστολής</div>
+            <div class="text-uppercase small fw-semibold opacity-75 mb-1"><i class="bi bi-broadcast-pin me-1"></i><?= t('hero.eyebrow') ?></div>
             <h1 class="h3 mb-2"><?= h($mission['title']) ?></h1>
-            <div class="small opacity-75"><i class="bi bi-geo-alt me-1"></i><?= h($mission['location']) ?> · <?= formatDateTime($firstShift) ?> έως <?= formatDateTime($lastShift) ?></div>
+            <div class="small opacity-75"><i class="bi bi-geo-alt me-1"></i><?= h($mission['location']) ?> · <?= formatDateTime($firstShift) ?> <?= t('hero.until') ?> <?= formatDateTime($lastShift) ?></div>
         </div>
         <div class="d-flex gap-2 align-items-center">
             <span class="badge fs-6 <?= $timeState === 'active' ? 'bg-success' : ($timeState === 'upcoming' ? 'bg-info text-dark' : 'bg-warning text-dark') ?>">
-                <?= $timeState === 'active' ? 'ΣΕ ΕΞΕΛΙΞΗ' : ($timeState === 'upcoming' ? 'ΠΡΟΣΕΧΩΣ' : 'ΕΚΚΡΕΜΕΙ ΚΛΕΙΣΙΜΟ') ?>
+                <?= $timeState === 'active' ? t('hero.status_active') : ($timeState === 'upcoming' ? t('hero.status_upcoming') : t('hero.status_overdue')) ?>
             </span>
             <?php if ($canManageWarRoom && !$fieldMode): ?>
-            <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i>Αναφορά Χρόνων</button>
-            <button type="button" class="btn btn-outline-light" onclick="window.open('mission-report-print.php?mission_id=<?= $missionId ?>', '_blank')"><i class="bi bi-printer me-1"></i>Αναφορά PDF</button>
-            <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i>Πορεία Ομάδων</button>
+            <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
+            <button type="button" class="btn btn-outline-light" onclick="window.open('mission-report-print.php?mission_id=<?= $missionId ?>', '_blank')"><i class="bi bi-printer me-1"></i><?= t('hero.btn_pdf_report') ?></button>
+            <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i><?= t('hero.btn_team_trail') ?></button>
             <?php endif; ?>
             <form method="post">
                 <?= csrfField() ?>
                 <input type="hidden" name="action" value="toggle_field_mode">
                 <button type="submit" class="btn btn-outline-light">
-                    <i class="bi bi-<?= $fieldMode ? 'grid-3x3-gap' : 'geo-alt' ?> me-1"></i><?= $fieldMode ? 'Πλήρης Προβολή' : 'Λειτουργία Πεδίου' ?>
+                    <i class="bi bi-<?= $fieldMode ? 'grid-3x3-gap' : 'geo-alt' ?> me-1"></i><?= $fieldMode ? t('hero.btn_full_view') : t('hero.btn_field_mode') ?>
                 </button>
             </form>
-            <button type="button" id="warRoomFocusToggle" class="btn btn-outline-light"><i class="bi bi-arrows-fullscreen me-1"></i>Πλήρης Οθόνη</button>
-            <a href="ops-dashboard.php" class="btn btn-light"><i class="bi bi-arrow-left me-1"></i>Επιχειρησιακό</a>
+            <button type="button" id="warRoomFocusToggle" class="btn btn-outline-light"><i class="bi bi-arrows-fullscreen me-1"></i><?= t('hero.btn_fullscreen') ?></button>
+            <a href="ops-dashboard.php" class="btn btn-light"><i class="bi bi-arrow-left me-1"></i><?= t('hero.btn_back_ops') ?></a>
         </div>
     </div>
 </div>
@@ -831,8 +846,8 @@ include __DIR__ . '/includes/header.php';
 <div id="warRoomBanner" class="war-room-banner">
     <i class="bi bi-broadcast"></i>
     <div class="war-room-banner-track"><span id="warRoomBannerText"></span></div>
-    <button type="button" id="warRoomBannerAckBtn" class="btn btn-sm btn-light fw-semibold d-none" style="flex-shrink:0;">Ελήφθη</button>
-    <button type="button" id="warRoomBannerClose" class="war-room-banner-close" aria-label="Κλείσιμο">&times;</button>
+    <button type="button" id="warRoomBannerAckBtn" class="btn btn-sm btn-light fw-semibold d-none" style="flex-shrink:0;"><?= t('banner.ack_btn') ?></button>
+    <button type="button" id="warRoomBannerClose" class="war-room-banner-close" aria-label="<?= t('common.close') ?>">&times;</button>
 </div>
 
 <?php if ($canManageWarRoom): ?>
@@ -844,16 +859,16 @@ include __DIR__ . '/includes/header.php';
     <div class="col-lg-8">
         <div class="card shadow-sm h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-map me-1"></i>Ζωντανός χάρτης αποστολής</h5>
-                <small class="text-muted">Ενημέρωση: <span id="mapRefresh"><?= date('H:i:s') ?></span></small>
+                <h5 class="mb-0"><i class="bi bi-map me-1"></i><?= t('map.title') ?></h5>
+                <small class="text-muted"><?= t('common.updated_label') ?> <span id="mapRefresh"><?= date('H:i:s') ?></span></small>
             </div>
             <?php if ($canManageWarRoom): ?>
             <div class="card-header bg-light border-top d-none" id="trailFilterBar">
                 <div class="row g-2 align-items-end">
                     <div class="col-6 col-md-3">
-                        <label class="form-label small fw-semibold mb-1">Ομάδα</label>
+                        <label class="form-label small fw-semibold mb-1"><?= t('trail.team_label') ?></label>
                         <select class="form-select form-select-sm" id="trailTeamSelect">
-                            <option value="">Όλες οι ομάδες</option>
+                            <option value=""><?= t('common.all_teams') ?></option>
                             <?php foreach ($teams as $team): ?>
                             <option value="<?= $team['id'] ?>"><?= h($team['codename'] . ' ' . $team['team_number']) ?></option>
                             <?php endforeach; ?>
@@ -862,15 +877,15 @@ include __DIR__ . '/includes/header.php';
                     <div class="col-6 col-md-5">
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="trailIncludeAdmin" checked>
-                            <label class="form-check-label small" for="trailIncludeAdmin">Σημεία/περιοχές διαχειριστή</label>
+                            <label class="form-check-label small" for="trailIncludeAdmin"><?= t('trail.include_admin_points') ?></label>
                         </div>
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="trailIncludeAuto">
-                            <label class="form-check-label small" for="trailIncludeAuto">Αυτόματα στίγματα</label>
+                            <label class="form-check-label small" for="trailIncludeAuto"><?= t('trail.include_auto') ?></label>
                         </div>
                     </div>
                     <div class="col-12 col-md-4">
-                        <button type="button" class="btn btn-sm btn-primary w-100" id="trailApplyBtn"><i class="bi bi-funnel-fill me-1"></i>Εμφάνιση</button>
+                        <button type="button" class="btn btn-sm btn-primary w-100" id="trailApplyBtn"><i class="bi bi-funnel-fill me-1"></i><?= t('trail.apply_btn') ?></button>
                     </div>
                 </div>
             </div>
@@ -888,26 +903,26 @@ include __DIR__ . '/includes/header.php';
 
     <div class="col-lg-4">
         <div class="card shadow-sm h-100">
-            <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i>Φωτογραφίες &amp; Βίντεο Πεδίου</h5></div>
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('media.panel_title') ?></h5></div>
             <div class="card-body d-flex flex-column" style="height:520px;">
                 <?php if ($isApprovedParticipant): ?>
                 <div class="d-flex gap-2 mb-2">
                     <label class="btn btn-primary w-100 mb-0">
-                        <i class="bi bi-camera-fill me-1"></i>Φωτογραφία
+                        <i class="bi bi-camera-fill me-1"></i><?= t('media.photo_btn') ?>
                         <input type="file" id="photoCaptureInput" accept="image/*" capture="environment" class="d-none">
                     </label>
                     <label class="btn btn-outline-primary w-100 mb-0">
-                        <i class="bi bi-images me-1"></i>Συλλογή
+                        <i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?>
                         <input type="file" id="photoGalleryInput" accept="image/*" class="d-none">
                     </label>
                 </div>
                 <div class="d-flex gap-2 mb-2">
                     <label class="btn btn-primary w-100 mb-0">
-                        <i class="bi bi-camera-reels-fill me-1"></i>Βίντεο
+                        <i class="bi bi-camera-reels-fill me-1"></i><?= t('media.video_btn') ?>
                         <input type="file" id="videoCaptureInput" accept="video/*" capture="environment" class="d-none">
                     </label>
                     <label class="btn btn-outline-primary w-100 mb-0">
-                        <i class="bi bi-images me-1"></i>Συλλογή
+                        <i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?>
                         <input type="file" id="videoGalleryInput" accept="video/*" class="d-none">
                     </label>
                 </div>
@@ -925,10 +940,10 @@ include __DIR__ . '/includes/header.php';
     <div class="col-lg-8">
         <div class="card shadow-sm mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-diagram-3 me-1"></i>Ομάδες Αποστολής</h5>
+                <h5 class="mb-0"><i class="bi bi-diagram-3 me-1"></i><?= t('teams.panel_title') ?></h5>
                 <?php if ($canManageWarRoom && !empty($unassignedApproved)): ?>
                 <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createTeamModal">
-                    <i class="bi bi-plus-lg me-1"></i>Νέα Ομάδα
+                    <i class="bi bi-plus-lg me-1"></i><?= t('teams.new_btn') ?>
                 </button>
                 <?php endif; ?>
             </div>
@@ -950,12 +965,12 @@ include __DIR__ . '/includes/header.php';
                         </div>
                         <?php if ($canManageWarRoom): ?>
                         <div class="d-flex gap-1">
-                            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editTeamModal-<?= $team['id'] ?>" title="Επεξεργασία"><i class="bi bi-pencil"></i></button>
-                            <form method="post" onsubmit="return confirm('Διάλυση ομάδας <?= h(addslashes($team['codename'] . ' ' . $team['team_number'])) ?>;')">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editTeamModal-<?= $team['id'] ?>" title="<?= t('common.edit') ?>"><i class="bi bi-pencil"></i></button>
+                            <form method="post" onsubmit="return confirm('<?= h(addslashes(t('teams.delete_confirm', ['team' => $team['codename'] . ' ' . $team['team_number']]))) ?>')">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="delete_team">
                                 <input type="hidden" name="team_id" value="<?= $team['id'] ?>">
-                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Διάλυση"><i class="bi bi-x-lg"></i></button>
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="<?= t('teams.delete_btn_title') ?>"><i class="bi bi-x-lg"></i></button>
                             </form>
                         </div>
                         <?php endif; ?>
@@ -963,24 +978,24 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 <?php endforeach; ?>
                 <?php if (empty($teams)): ?>
-                <div class="list-group-item text-muted">Δεν έχουν δημιουργηθεί ομάδες ακόμη.</div>
+                <div class="list-group-item text-muted"><?= t('teams.empty') ?></div>
                 <?php endif; ?>
             </div>
         </div>
 
         <div class="card shadow-sm">
-            <div class="card-header"><h5 class="mb-0"><i class="bi bi-people me-1"></i>Εγκεκριμένοι εθελοντές (<?= count($participants) ?>)</h5></div>
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-people me-1"></i><?= t('participants.panel_title', ['count' => count($participants)]) ?></h5></div>
             <div class="list-group list-group-flush">
                 <?php foreach ($participants as $participant): ?>
                 <?php $status = $participant['field_status'] ?? ''; ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'presence-online' : 'presence-offline' ?>" title="<?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'Online' : 'Offline' ?>"></span><strong><?= h($participant['name']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? ' · Τελευταίο στίγμα: ' . date('H:i', strtotime($participant['last_ping_at'])) : ' · Δεν υπάρχει στίγμα' ?></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'presence-online' : 'presence-offline' ?>" title="<?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? t('common.online') : t('common.offline') ?>"></span><strong><?= h($participant['name']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => date('H:i', strtotime($participant['last_ping_at']))]) : t('participants.no_ping') ?></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>">
-                        <?= $status === 'needs_help' ? 'Χρειάζεται βοήθεια' : ($status === 'on_site' ? 'Επί τόπου' : ($status === 'on_way' ? 'Σε κίνηση' : 'Χωρίς κατάσταση')) ?>
+                        <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
                 </div>
                 <?php endforeach; ?>
-                <?php if (empty($participants)): ?><div class="list-group-item text-muted">Δεν υπάρχουν εγκεκριμένοι εθελοντές.</div><?php endif; ?>
+                <?php if (empty($participants)): ?><div class="list-group-item text-muted"><?= t('participants.empty') ?></div><?php endif; ?>
             </div>
         </div>
 
@@ -988,29 +1003,29 @@ include __DIR__ . '/includes/header.php';
         <div class="row g-4 mt-0">
             <div class="col-md-6">
                 <div class="card shadow-sm h-100 border-warning">
-                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-bell-fill me-1"></i>Ζήτηση στίγματος</h5></div>
+                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-bell-fill me-1"></i><?= t('request.location.card_title') ?></h5></div>
                     <div class="card-body">
                         <?php if (empty($activeParticipants)): ?>
-                            <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
+                            <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
                         <?php else: ?>
-                            <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση. Ο ήχος εξαρτάται από τις ρυθμίσεις της συσκευής του εθελοντή.</p>
+                            <p class="small text-muted"><?= t('common.push_vibrate_note') ?></p>
                             <form method="post">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="request_location">
                                 <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
-                                    <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
+                                    <i class="bi bi-broadcast me-1"></i><?= t('common.request_all_active', ['count' => count($activeParticipants)]) ?>
                                 </button>
-                                <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
+                                <div class="small fw-semibold mb-2"><?= t('common.or_select_volunteers') ?></div>
                                 <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
                                     <?php foreach ($activeParticipants as $participant): ?>
                                     <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
                                         <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
-                                        <small class="text-muted"><?= $participant['last_ping_at'] ? date('H:i', strtotime($participant['last_ping_at'])) : 'χωρίς στίγμα' ?></small>
+                                        <small class="text-muted"><?= $participant['last_ping_at'] ? date('H:i', strtotime($participant['last_ping_at'])) : t('common.no_ping_short') ?></small>
                                     </label>
                                     <?php endforeach; ?>
                                 </div>
                                 <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
-                                    <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
+                                    <i class="bi bi-person-check me-1"></i><?= t('common.request_selected') ?>
                                 </button>
                             </form>
                         <?php endif; ?>
@@ -1020,19 +1035,19 @@ include __DIR__ . '/includes/header.php';
 
             <div class="col-md-6">
                 <div class="card shadow-sm h-100 border-warning">
-                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i>Ζήτηση φωτογραφίας</h5></div>
+                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('request.photo.card_title') ?></h5></div>
                     <div class="card-body">
                         <?php if (empty($activeParticipants)): ?>
-                            <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
+                            <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
                         <?php else: ?>
-                            <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση. Ο ήχος εξαρτάται από τις ρυθμίσεις της συσκευής του εθελοντή.</p>
+                            <p class="small text-muted"><?= t('common.push_vibrate_note') ?></p>
                             <form method="post">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="request_photo">
                                 <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
-                                    <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
+                                    <i class="bi bi-broadcast me-1"></i><?= t('common.request_all_active', ['count' => count($activeParticipants)]) ?>
                                 </button>
-                                <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
+                                <div class="small fw-semibold mb-2"><?= t('common.or_select_volunteers') ?></div>
                                 <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
                                     <?php foreach ($activeParticipants as $participant): ?>
                                     <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
@@ -1041,7 +1056,7 @@ include __DIR__ . '/includes/header.php';
                                     <?php endforeach; ?>
                                 </div>
                                 <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
-                                    <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
+                                    <i class="bi bi-person-check me-1"></i><?= t('common.request_selected') ?>
                                 </button>
                             </form>
                         <?php endif; ?>
@@ -1051,19 +1066,19 @@ include __DIR__ . '/includes/header.php';
 
             <div class="col-md-6">
                 <div class="card shadow-sm h-100 border-warning">
-                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-reels-fill me-1"></i>Ζήτηση βίντεο</h5></div>
+                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-reels-fill me-1"></i><?= t('request.video.card_title') ?></h5></div>
                     <div class="card-body">
                         <?php if (empty($activeParticipants)): ?>
-                            <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
+                            <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
                         <?php else: ?>
-                            <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση. Ο ήχος εξαρτάται από τις ρυθμίσεις της συσκευής του εθελοντή.</p>
+                            <p class="small text-muted"><?= t('common.push_vibrate_note') ?></p>
                             <form method="post">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="request_video">
                                 <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
-                                    <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
+                                    <i class="bi bi-broadcast me-1"></i><?= t('common.request_all_active', ['count' => count($activeParticipants)]) ?>
                                 </button>
-                                <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
+                                <div class="small fw-semibold mb-2"><?= t('common.or_select_volunteers') ?></div>
                                 <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
                                     <?php foreach ($activeParticipants as $participant): ?>
                                     <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
@@ -1072,7 +1087,7 @@ include __DIR__ . '/includes/header.php';
                                     <?php endforeach; ?>
                                 </div>
                                 <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
-                                    <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
+                                    <i class="bi bi-person-check me-1"></i><?= t('common.request_selected') ?>
                                 </button>
                             </form>
                         <?php endif; ?>
@@ -1082,20 +1097,20 @@ include __DIR__ . '/includes/header.php';
 
             <div class="col-md-6">
                 <div class="card shadow-sm h-100 border-warning">
-                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-clipboard-check-fill me-1"></i>Γενική Εντολή</h5></div>
+                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-clipboard-check-fill me-1"></i><?= t('request.task.card_title') ?></h5></div>
                     <div class="card-body">
                         <?php if (empty($activeParticipants)): ?>
-                            <p class="text-muted mb-0">Δεν υπάρχουν εθελοντές με βάρδια σε εξέλιξη αυτή τη στιγμή.</p>
+                            <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
                         <?php else: ?>
-                            <p class="small text-muted">Στέλνει άμεση ειδοποίηση push με έντονη δόνηση και ελεύθερο κείμενο εντολής. Ο εθελοντής επιβεβαιώνει χειροκίνητα την ολοκλήρωση.</p>
+                            <p class="small text-muted"><?= t('request.task.note') ?></p>
                             <form method="post">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="request_task">
-                                <textarea name="task_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="Περιγράψτε την εντολή…" required></textarea>
+                                <textarea name="task_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="<?= t('request.task.placeholder') ?>" required></textarea>
                                 <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
-                                    <i class="bi bi-broadcast me-1"></i>Ζήτηση από όλους τους ενεργούς (<?= count($activeParticipants) ?>)
+                                    <i class="bi bi-broadcast me-1"></i><?= t('common.request_all_active', ['count' => count($activeParticipants)]) ?>
                                 </button>
-                                <div class="small fw-semibold mb-2">Ή επιλέξτε εθελοντές:</div>
+                                <div class="small fw-semibold mb-2"><?= t('common.or_select_volunteers') ?></div>
                                 <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
                                     <?php foreach ($activeParticipants as $participant): ?>
                                     <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
@@ -1104,7 +1119,7 @@ include __DIR__ . '/includes/header.php';
                                     <?php endforeach; ?>
                                 </div>
                                 <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
-                                    <i class="bi bi-person-check me-1"></i>Ζήτηση από επιλεγμένους
+                                    <i class="bi bi-person-check me-1"></i><?= t('common.request_selected') ?>
                                 </button>
                             </form>
                         <?php endif; ?>
@@ -1116,11 +1131,11 @@ include __DIR__ . '/includes/header.php';
 
         <div class="card shadow-sm mt-4">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-activity me-1"></i>Δραστηριότητα</h5>
-                <small class="text-muted">Ενημέρωση: <span id="activityRefresh"></span></small>
+                <h5 class="mb-0"><i class="bi bi-activity me-1"></i><?= t('activity.panel_title') ?></h5>
+                <small class="text-muted"><?= t('common.updated_label') ?> <span id="activityRefresh"></span></small>
             </div>
             <div class="card-body">
-                <div id="activityList" style="max-height:420px;overflow-y:auto;"><div class="text-muted small">Φόρτωση…</div></div>
+                <div id="activityList" style="max-height:420px;overflow-y:auto;"><div class="text-muted small"><?= t('common.loading') ?></div></div>
             </div>
         </div>
     </div>
@@ -1128,34 +1143,34 @@ include __DIR__ . '/includes/header.php';
 
     <div class="<?= $fieldMode ? 'col-lg-6 mx-auto' : 'col-lg-4' ?>">
         <div class="card shadow-sm mb-4 border-primary">
-            <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-geo-alt-fill me-1"></i>Το στίγμα μου</h5></div>
+            <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-geo-alt-fill me-1"></i><?= t('myping.panel_title') ?></h5></div>
             <div class="card-body">
                 <?php if (empty($myAssignments)): ?>
-                    <p class="text-muted mb-0">Δεν έχετε εγκεκριμένη βάρδια σε αυτή την αποστολή.</p>
+                    <p class="text-muted mb-0"><?= t('myping.no_shift') ?></p>
                 <?php else: ?>
-                    <p class="small text-muted">Επιλέξτε τη βάρδια για την οποία βρίσκεστε στο πεδίο.</p>
+                    <p class="small text-muted"><?= t('myping.select_shift_note') ?></p>
                     <?php foreach ($myAssignments as $assignment): ?>
                     <button type="button" class="btn btn-primary w-100 mb-2 send-ping" data-shift-id="<?= $assignment['shift_id'] ?>" data-pr-id="<?= $assignment['pr_id'] ?>">
-                        <i class="bi bi-send-fill me-1"></i>Αποστολή στίγματος · <?= date('H:i', strtotime($assignment['start_time'])) ?>
+                        <i class="bi bi-send-fill me-1"></i><?= t('myping.send_btn', ['time' => date('H:i', strtotime($assignment['start_time']))]) ?>
                     </button>
                     <div class="small mb-2" id="pingStatus-<?= $assignment['pr_id'] ?>"></div>
                     <?php $myFieldStatus = $assignment['field_status'] ?? null; ?>
                     <div class="small mb-1" id="statusBadge-<?= $assignment['pr_id'] ?>">
-                        <?= $myFieldStatus ? h(['on_way' => '🚗 Σε Κίνηση', 'on_site' => '✅ Επί Τόπου', 'needs_help' => '🆘 SOS'][$myFieldStatus] ?? '') : '— Χωρίς κατάσταση' ?>
+                        <?= $myFieldStatus ? h(['on_way' => t('status.self_on_way'), 'on_site' => t('status.self_on_site'), 'needs_help' => t('status.self_sos')][$myFieldStatus] ?? '') : t('status.self_none') ?>
                     </div>
                     <div class="btn-group w-100 mb-3" role="group" id="statusBtns-<?= $assignment['pr_id'] ?>">
-                        <button type="button" class="btn btn-sm <?= $myFieldStatus === 'on_way' ? 'btn-warning' : 'btn-outline-warning' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_way')">🚗 Κίνηση</button>
-                        <button type="button" class="btn btn-sm <?= $myFieldStatus === 'on_site' ? 'btn-success' : 'btn-outline-success' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_site')">✅ Θέση μου</button>
-                        <button type="button" class="btn btn-sm <?= $myFieldStatus === 'needs_help' ? 'btn-danger' : 'btn-outline-danger' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'needs_help')">🆘 SOS</button>
+                        <button type="button" class="btn btn-sm <?= $myFieldStatus === 'on_way' ? 'btn-warning' : 'btn-outline-warning' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_way')"><?= t('myping.btn_on_way') ?></button>
+                        <button type="button" class="btn btn-sm <?= $myFieldStatus === 'on_site' ? 'btn-success' : 'btn-outline-success' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_site')"><?= t('myping.btn_on_site') ?></button>
+                        <button type="button" class="btn btn-sm <?= $myFieldStatus === 'needs_help' ? 'btn-danger' : 'btn-outline-danger' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'needs_help')"><?= t('myping.btn_sos') ?></button>
                     </div>
                     <?php endforeach; ?>
-                    <p class="small text-muted mb-0">Όσο αυτή η σελίδα παραμένει ανοιχτή, το στίγμα σας αποστέλλεται αυτόματα κάθε 3 λεπτά.</p>
+                    <p class="small text-muted mb-0"><?= t('myping.auto_note') ?></p>
                 <?php endif; ?>
             </div>
         </div>
 
         <div class="card shadow-sm mb-4 border-primary">
-            <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-clipboard-check me-1"></i>Οι Εντολές μου</h5></div>
+            <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-clipboard-check me-1"></i><?= t('mytasks.panel_title') ?></h5></div>
             <div class="card-body">
                 <div id="myTasksList"></div>
             </div>
@@ -1163,26 +1178,26 @@ include __DIR__ . '/includes/header.php';
 
         <?php if ($isApprovedParticipant): ?>
         <div class="card shadow-sm mb-4 border-warning">
-            <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i>Αναφορά Έλλειψης</h5></div>
+            <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('shortage.card_title') ?></h5></div>
             <div class="card-body">
                 <form method="post">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="report_shortage">
-                    <label class="form-label small fw-semibold">Είδος</label>
+                    <label class="form-label small fw-semibold"><?= t('shortage.type_label') ?></label>
                     <select name="shortage_type" class="form-select mb-2" required>
                         <?php foreach (SHORTAGE_TYPE_LABELS as $val => $label): ?>
-                        <option value="<?= h($val) ?>"><?= h($label) ?></option>
+                        <option value="<?= h($val) ?>"><?= h(shortageTypeLabel($val)) ?></option>
                         <?php endforeach; ?>
                     </select>
-                    <label class="form-label small fw-semibold">Σοβαρότητα</label>
+                    <label class="form-label small fw-semibold"><?= t('shortage.severity_label') ?></label>
                     <select name="severity" class="form-select mb-2" required>
                         <?php foreach (SHORTAGE_SEVERITY_LABELS as $val => $label): ?>
-                        <option value="<?= h($val) ?>" <?= $val === 'medium' ? 'selected' : '' ?>><?= h($label) ?></option>
+                        <option value="<?= h($val) ?>" <?= $val === 'medium' ? 'selected' : '' ?>><?= h(shortageSeverityLabel($val)) ?></option>
                         <?php endforeach; ?>
                     </select>
-                    <input type="text" name="title" class="form-control mb-2" maxlength="255" placeholder="Σύντομος τίτλος…" required>
-                    <textarea name="description" class="form-control mb-2" rows="3" maxlength="2000" placeholder="Περιγραφή της έλλειψης…" required></textarea>
-                    <button type="submit" class="btn btn-warning w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i>Υποβολή Αναφοράς</button>
+                    <input type="text" name="title" class="form-control mb-2" maxlength="255" placeholder="<?= t('shortage.title_placeholder') ?>" required>
+                    <textarea name="description" class="form-control mb-2" rows="3" maxlength="2000" placeholder="<?= t('shortage.desc_placeholder') ?>" required></textarea>
+                    <button type="submit" class="btn btn-warning w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('shortage.submit_btn') ?></button>
                 </form>
             </div>
         </div>
@@ -1190,10 +1205,10 @@ include __DIR__ . '/includes/header.php';
 
         <?php if (!$fieldMode): ?>
         <div class="card shadow-sm mb-4">
-            <div class="card-header"><h5 class="mb-0"><i class="bi bi-calendar-range me-1"></i>Βάρδιες</h5></div>
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-calendar-range me-1"></i><?= t('shifts.panel_title') ?></h5></div>
             <div class="list-group list-group-flush">
                 <?php foreach ($shifts as $shift): ?>
-                <div class="list-group-item"><strong><?= formatDateTime($shift['start_time']) ?></strong><br><small class="text-muted">έως <?= date('H:i', strtotime($shift['end_time'])) ?> · <?= $shift['approved_count'] ?>/<?= $shift['max_volunteers'] ?> εγκεκριμένοι</small></div>
+                <div class="list-group-item"><strong><?= formatDateTime($shift['start_time']) ?></strong><br><small class="text-muted"><?= t('hero.until') ?> <?= date('H:i', strtotime($shift['end_time'])) ?> · <?= $shift['approved_count'] ?>/<?= $shift['max_volunteers'] ?> <?= t('shifts.approved_count_suffix') ?></small></div>
                 <?php endforeach; ?>
             </div>
         </div>
@@ -1201,55 +1216,55 @@ include __DIR__ . '/includes/header.php';
 
         <?php if ($canManageWarRoom && !$fieldMode): ?>
         <div class="card shadow-sm mb-4 border-danger">
-            <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="bi bi-sos me-1"></i>Ειδοποιήσεις SOS</h5></div>
+            <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="bi bi-sos me-1"></i><?= t('sos.panel_title') ?></h5></div>
             <div class="card-body">
-                <div id="sosAlertsList"><p class="text-muted mb-0">Δεν υπάρχουν ενεργές ειδοποιήσεις SOS.</p></div>
+                <div id="sosAlertsList"><p class="text-muted mb-0"><?= t('sos.empty') ?></p></div>
             </div>
         </div>
 
         <div class="card shadow-sm mb-4 border-danger">
-            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i>Αναφορές Έλλειψης</h5></div>
+            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i><?= t('shortage.list_panel_title') ?></h5></div>
             <div class="card-body">
                 <div id="shortageReportsList"></div>
             </div>
         </div>
 
         <div class="card shadow-sm mb-4 border-danger">
-            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-megaphone-fill me-1 text-danger"></i>Καθολικό Μήνυμα</h5></div>
+            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-megaphone-fill me-1 text-danger"></i><?= t('global_message.card_title') ?></h5></div>
             <div class="card-body">
-                <p class="small text-muted">Εμφανίζεται ως κυλιόμενο μήνυμα (60 δευτ.) σε όσους έχουν ανοιχτό το Action Room και στέλνεται ως ειδοποίηση σε όλους τους εγκεκριμένους εθελοντές της αποστολής.</p>
+                <p class="small text-muted"><?= t('global_message.note') ?></p>
                 <form method="post">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="global_message">
-                    <textarea name="global_message_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="Γράψτε το μήνυμα προς όλους τους εθελοντές…" required></textarea>
-                    <button type="submit" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i>Αποστολή σε όλους (<?= count($participants) ?>)</button>
+                    <textarea name="global_message_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="<?= t('global_message.placeholder') ?>" required></textarea>
+                    <button type="submit" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('global_message.submit_btn', ['count' => count($participants)]) ?></button>
                 </form>
             </div>
         </div>
 
         <div class="card shadow-sm mb-4 border-primary">
-            <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-geo-fill me-1"></i>Αποστολή Στίγματος/Περιοχής</h5></div>
+            <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-geo-fill me-1"></i><?= t('dispatch.card_title') ?></h5></div>
             <div class="card-body">
-                <p class="small text-muted">Στείλτε ένα σημείο ή μια περιοχή στον χάρτη — θα εμφανιστεί μόνιμα στον χάρτη των παραληπτών.</p>
-                <label class="form-label small fw-semibold">Παραλήπτες</label>
+                <p class="small text-muted"><?= t('dispatch.note') ?></p>
+                <label class="form-label small fw-semibold"><?= t('dispatch.recipients_label') ?></label>
                 <select class="form-select mb-3" id="dispatchTeamSelect">
-                    <option value="">Όλες οι ομάδες</option>
+                    <option value=""><?= t('common.all_teams') ?></option>
                     <?php foreach ($teams as $team): ?>
                     <option value="<?= $team['id'] ?>"><?= h($team['codename'] . ' ' . $team['team_number']) ?></option>
                     <?php endforeach; ?>
                 </select>
                 <button type="button" class="btn btn-primary w-100 fw-semibold" data-bs-toggle="modal" data-bs-target="#dispatchMapModal">
-                    <i class="bi bi-pin-map-fill me-1"></i>Αποστολή Στίγματος
+                    <i class="bi bi-pin-map-fill me-1"></i><?= t('dispatch.send_btn') ?>
                 </button>
             </div>
         </div>
 
         <div class="card border-danger shadow-sm">
-            <div class="card-body"><h6><i class="bi bi-shield-exclamation text-danger me-1"></i>Διαχείριση αποστολής</h6>
-                <p class="small text-muted">Το κλείσιμο αφαιρεί την αποστολή από το Επιχειρησιακό και σταματά τη λήψη νέων στιγμάτων.</p>
-                <form method="post" onsubmit="return confirm('Είστε σίγουρος/η ότι θέλετε να κλείσετε την αποστολή;')">
+            <div class="card-body"><h6><i class="bi bi-shield-exclamation text-danger me-1"></i><?= t('admin.mission_mgmt_title') ?></h6>
+                <p class="small text-muted"><?= t('admin.close_note') ?></p>
+                <form method="post" onsubmit="return confirm('<?= h(addslashes(t('admin.close_confirm'))) ?>')">
                     <?= csrfField() ?><input type="hidden" name="action" value="close_mission">
-                    <button class="btn btn-danger w-100"><i class="bi bi-x-octagon-fill me-1"></i>Κλείσιμο αποστολής</button>
+                    <button class="btn btn-danger w-100"><i class="bi bi-x-octagon-fill me-1"></i><?= t('admin.close_btn') ?></button>
                 </form>
             </div>
         </div>
@@ -1262,14 +1277,14 @@ include __DIR__ . '/includes/header.php';
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-plus-lg me-1"></i>Νέα Ομάδα</h5>
+                <h5 class="modal-title"><i class="bi bi-plus-lg me-1"></i><?= t('teams.new_btn') ?></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form method="post" class="team-form" data-leader-select="#createTeamLeader">
                 <?= csrfField() ?>
                 <input type="hidden" name="action" value="create_team">
                 <div class="modal-body">
-                    <p class="small text-muted">Επιλέξτε μέλη από τους διαθέσιμους (χωρίς ομάδα) εθελοντές.</p>
+                    <p class="small text-muted"><?= t('teams.create_modal.select_note') ?></p>
                     <div class="border rounded p-2 mb-3" style="max-height:220px;overflow:auto;">
                         <?php foreach ($unassignedApproved as $person): ?>
                         <label class="form-check d-flex align-items-center gap-2 py-1">
@@ -1278,17 +1293,17 @@ include __DIR__ . '/includes/header.php';
                         </label>
                         <?php endforeach; ?>
                         <?php if (empty($unassignedApproved)): ?>
-                        <div class="text-muted small">Δεν υπάρχουν διαθέσιμοι εθελοντές.</div>
+                        <div class="text-muted small"><?= t('teams.create_modal.no_available') ?></div>
                         <?php endif; ?>
                     </div>
-                    <label class="form-label small fw-semibold">Υπεύθυνος ομάδας</label>
+                    <label class="form-label small fw-semibold"><?= t('teams.leader_label') ?></label>
                     <select class="form-select team-leader-select" name="leader_id" id="createTeamLeader" required>
-                        <option value="">Επιλέξτε μέλη πρώτα…</option>
+                        <option value=""><?= t('teams.select_members_first') ?></option>
                     </select>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
-                    <button type="submit" class="btn btn-primary">Δημιουργία</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= t('common.cancel') ?></button>
+                    <button type="submit" class="btn btn-primary"><?= t('common.create') ?></button>
                 </div>
             </form>
         </div>
@@ -1307,7 +1322,7 @@ include __DIR__ . '/includes/header.php';
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-pencil me-1"></i>Επεξεργασία <?= h($team['codename'] . ' ' . $team['team_number']) ?></h5>
+                <h5 class="modal-title"><i class="bi bi-pencil me-1"></i><?= h(t('teams.edit_modal_title', ['team' => $team['codename'] . ' ' . $team['team_number']])) ?></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form method="post" class="team-form" data-leader-select="#editTeamLeader-<?= $team['id'] ?>">
@@ -1325,12 +1340,12 @@ include __DIR__ . '/includes/header.php';
                         </label>
                         <?php endforeach; ?>
                     </div>
-                    <label class="form-label small fw-semibold">Υπεύθυνος ομάδας</label>
+                    <label class="form-label small fw-semibold"><?= t('teams.leader_label') ?></label>
                     <select class="form-select team-leader-select" name="leader_id" id="editTeamLeader-<?= $team['id'] ?>" required data-current="<?= $team['leader_id'] ?>"></select>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
-                    <button type="submit" class="btn btn-primary">Αποθήκευση</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= t('common.cancel') ?></button>
+                    <button type="submit" class="btn btn-primary"><?= t('common.save') ?></button>
                 </div>
             </form>
         </div>
@@ -1340,11 +1355,11 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 
 <div class="card shadow-sm mb-4">
-    <div class="card-header"><h5 class="mb-0"><i class="bi bi-chat-dots me-1"></i>Συνομιλία</h5></div>
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-chat-dots me-1"></i><?= t('chat.panel_title') ?></h5></div>
     <div class="card-body">
         <ul class="nav nav-pills mb-3 flex-wrap" id="chatRoomTabs">
             <li class="nav-item">
-                <button type="button" class="nav-link active chat-room-tab" data-team-id="">Γενικό</button>
+                <button type="button" class="nav-link active chat-room-tab" data-team-id=""><?= t('chat.general_room') ?></button>
             </li>
             <?php foreach ($chatTeams as $ct): ?>
             <li class="nav-item">
@@ -1354,7 +1369,7 @@ include __DIR__ . '/includes/header.php';
         </ul>
         <div id="chatMessages" class="border rounded p-3 mb-3" style="height:320px;overflow-y:auto;background:#f8f9fa;"></div>
         <form id="chatSendForm" class="d-flex gap-2">
-            <textarea id="chatInput" class="form-control" rows="1" maxlength="2000" placeholder="Γράψτε μήνυμα…" required></textarea>
+            <textarea id="chatInput" class="form-control" rows="1" maxlength="2000" placeholder="<?= t('chat.placeholder') ?>" required></textarea>
             <button type="submit" class="btn btn-primary"><i class="bi bi-send-fill"></i></button>
         </form>
     </div>
@@ -1365,50 +1380,50 @@ include __DIR__ . '/includes/header.php';
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-stopwatch me-1"></i>Αναφορά Χρόνων Απόκρισης</h5>
+                <h5 class="modal-title"><i class="bi bi-stopwatch me-1"></i><?= t('report.modal_title') ?></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <h6 class="text-muted small text-uppercase fw-semibold mb-2">Ανά ομάδα</h6>
+                <h6 class="text-muted small text-uppercase fw-semibold mb-2"><?= t('report.by_team') ?></h6>
                 <div class="table-responsive mb-4">
                     <table class="table table-sm table-bordered align-middle">
                         <thead class="table-light">
                             <tr>
-                                <th>Ομάδα</th>
-                                <th class="text-end">Εντολές</th>
-                                <th class="text-end">Ελήφθη</th>
-                                <th class="text-end">Ολοκληρώθηκε</th>
-                                <th class="text-end">Μέσος χρόνος αποδοχής</th>
-                                <th class="text-end">Μέσος χρόνος ολοκλήρωσης</th>
+                                <th><?= t('trail.team_label') ?></th>
+                                <th class="text-end"><?= t('report.col_orders') ?></th>
+                                <th class="text-end"><?= t('banner.ack_btn') ?></th>
+                                <th class="text-end"><?= t('report.col_completed') ?></th>
+                                <th class="text-end"><?= t('report.col_avg_ack') ?></th>
+                                <th class="text-end"><?= t('report.col_avg_complete') ?></th>
                             </tr>
                         </thead>
                         <tbody id="reportSummaryBody">
-                            <tr><td colspan="6" class="text-muted small">Φόρτωση…</td></tr>
+                            <tr><td colspan="6" class="text-muted small"><?= t('common.loading') ?></td></tr>
                         </tbody>
                     </table>
                 </div>
-                <h6 class="text-muted small text-uppercase fw-semibold mb-2">Λεπτομέρειες</h6>
+                <h6 class="text-muted small text-uppercase fw-semibold mb-2"><?= t('report.details') ?></h6>
                 <div id="reportDetailList" class="list-group list-group-flush"></div>
 
-                <h6 class="text-muted small text-uppercase fw-semibold mb-2 mt-4">Αναφορές Έλλειψης — Ανά Σοβαρότητα</h6>
+                <h6 class="text-muted small text-uppercase fw-semibold mb-2 mt-4"><?= t('report.shortage_by_severity') ?></h6>
                 <div class="table-responsive mb-4">
                     <table class="table table-sm table-bordered align-middle">
                         <thead class="table-light">
                             <tr>
-                                <th>Σοβαρότητα</th>
-                                <th class="text-end">Αναφορές</th>
-                                <th class="text-end">Είδε</th>
-                                <th class="text-end">Λύθηκε</th>
-                                <th class="text-end">Μέσος χρόνος (Είδα)</th>
-                                <th class="text-end">Μέσος χρόνος επίλυσης</th>
+                                <th><?= t('shortage.severity_label') ?></th>
+                                <th class="text-end"><?= t('report.col_reports') ?></th>
+                                <th class="text-end"><?= t('report.col_seen') ?></th>
+                                <th class="text-end"><?= t('report.col_resolved') ?></th>
+                                <th class="text-end"><?= t('report.col_avg_seen') ?></th>
+                                <th class="text-end"><?= t('report.col_avg_resolve') ?></th>
                             </tr>
                         </thead>
                         <tbody id="shortageReportSummaryBody">
-                            <tr><td colspan="6" class="text-muted small">Φόρτωση…</td></tr>
+                            <tr><td colspan="6" class="text-muted small"><?= t('common.loading') ?></td></tr>
                         </tbody>
                     </table>
                 </div>
-                <h6 class="text-muted small text-uppercase fw-semibold mb-2">Λεπτομέρειες Αναφορών Έλλειψης</h6>
+                <h6 class="text-muted small text-uppercase fw-semibold mb-2"><?= t('report.shortage_details') ?></h6>
                 <div id="shortageReportDetailList" class="list-group list-group-flush"></div>
             </div>
         </div>
@@ -1419,22 +1434,22 @@ include __DIR__ . '/includes/header.php';
     <div class="modal-dialog modal-fullscreen">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h5 class="modal-title"><i class="bi bi-pin-map-fill me-1"></i>Αποστολή Στίγματος/Περιοχής</h5>
+                <h5 class="modal-title"><i class="bi bi-pin-map-fill me-1"></i><?= t('dispatch.card_title') ?></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column">
                 <div class="p-2 border-bottom d-flex flex-wrap gap-2 align-items-center bg-light">
-                    <input type="text" id="dispatchAddressInput" class="form-control" style="max-width:320px;" placeholder="Διεύθυνση (προαιρετικό)…">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" id="dispatchAddressSearch"><i class="bi bi-search me-1"></i>Αναζήτηση</button>
+                    <input type="text" id="dispatchAddressInput" class="form-control" style="max-width:320px;" placeholder="<?= t('dispatch.address_placeholder') ?>">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="dispatchAddressSearch"><i class="bi bi-search me-1"></i><?= t('dispatch.search_btn') ?></button>
                     <span class="text-muted small" id="dispatchAddressStatus"></span>
-                    <input type="text" id="dispatchNoteInput" class="form-control" style="max-width:260px;" maxlength="200" placeholder="Σύντομη σημείωση (προαιρετικό)…">
+                    <input type="text" id="dispatchNoteInput" class="form-control" style="max-width:260px;" maxlength="200" placeholder="<?= t('dispatch.note_placeholder') ?>">
                     <div class="ms-auto d-flex gap-2">
-                        <button type="button" class="btn btn-outline-secondary btn-sm" id="dispatchClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i>Καθαρισμός</button>
-                        <button type="button" class="btn btn-success btn-sm" id="dispatchSendBtn" disabled><i class="bi bi-send-fill me-1"></i>Αποστολή</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="dispatchClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
+                        <button type="button" class="btn btn-success btn-sm" id="dispatchSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('dispatch.send_short_btn') ?></button>
                     </div>
                 </div>
                 <div class="small text-muted px-2 py-1 bg-light border-bottom">
-                    Κάντε click στον χάρτη για να τοποθετήσετε ένα σημείο. Για περιοχή, κάντε click σε πολλά σημεία και μετά ξανά στο 1ο σημείο για να κλείσει το σχήμα.
+                    <?= t('dispatch.map_instructions') ?>
                 </div>
                 <div id="dispatchMap" style="flex:1;min-height:0;"></div>
             </div>
@@ -1447,7 +1462,7 @@ include __DIR__ . '/includes/header.php';
     <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content bg-dark">
             <div class="modal-header border-0 py-2">
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Κλείσιμο"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="<?= t('common.close') ?>"></button>
             </div>
             <div class="modal-body p-0 text-center" id="mediaViewModalBody"></div>
         </div>
@@ -1457,6 +1472,15 @@ include __DIR__ . '/includes/header.php';
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const csrfToken = '<?= csrfToken() ?>';
+<?php $__wrStrings = loadLangStrings('war-room'); $__viewerLang = $user['language'] ?? DEFAULT_LANGUAGE; ?>
+const WR_STRINGS = <?= json_encode($__wrStrings[$__viewerLang] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+const WR_STRINGS_FALLBACK = <?= json_encode($__wrStrings[DEFAULT_LANGUAGE] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+function t(key, vars = {}) {
+    let text = WR_STRINGS[key] ?? WR_STRINGS_FALLBACK[key] ?? key;
+    for (const [k, v] of Object.entries(vars)) text = text.replaceAll('{' + k + '}', String(v));
+    return text;
+}
+const jsLocale = <?= json_encode($__viewerLang === 'en' ? 'en-US' : 'el-GR') ?>;
 const fieldMode = <?= $fieldMode ? 'true' : 'false' ?>;
 const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>;
 let pins = <?= json_encode($pins) ?>;
@@ -1511,11 +1535,11 @@ function renderDispatches(items) {
             ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? a.team_label + ' — ' : ''}${escapeHtml(a.user_name)} (${a.time})`).join('<br>') + '</div>'
             : '';
         const receiveHtml = item.can_receive
-            ? `<br><button type="button" class="btn btn-sm btn-warning mt-1 dispatch-receive-btn" data-id="${item.id}"><i class="bi bi-flag me-1"></i>Ελήφθη</button>`
-            : (item.my_receipt ? `<div class="small text-muted mt-1">✓ Ελήφθη στις ${item.my_receipt}</div>` : '');
+            ? `<br><button type="button" class="btn btn-sm btn-warning mt-1 dispatch-receive-btn" data-id="${item.id}"><i class="bi bi-flag me-1"></i>${t('banner.ack_btn')}</button>`
+            : (item.my_receipt ? `<div class="small text-muted mt-1">${t('dispatch.received_at_prefix', {time: item.my_receipt})}</div>` : '');
         const ackHtml = item.can_ack
-            ? `<br><button type="button" class="btn btn-sm btn-success mt-1 dispatch-ack-btn" data-id="${item.id}"><i class="bi bi-check-lg me-1"></i>Άφιξη</button>`
-            : (item.my_ack ? `<div class="small text-success mt-1">✓ Αφίξατε στις ${item.my_ack}</div>` : '');
+            ? `<br><button type="button" class="btn btn-sm btn-success mt-1 dispatch-ack-btn" data-id="${item.id}"><i class="bi bi-check-lg me-1"></i>${t('dispatch.arrival_btn')}</button>`
+            : (item.my_ack ? `<div class="small text-success mt-1">${t('dispatch.arrived_at_prefix', {time: item.my_ack})}</div>` : '');
         // Google Maps opened with no "origin" resolves directions from the
         // device's own current location — simpler and more reliable than us
         // grabbing navigator.geolocation ourselves (works even if this page
@@ -1531,9 +1555,9 @@ function renderDispatches(items) {
             destLng = sum[1] / item.geo.length;
         }
         const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}&travelmode=driving`;
-        const directionsHtml = `<br><a href="${directionsUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-success mt-1"><i class="bi bi-signpost-2-fill me-1"></i>Οδηγίες</a>`;
+        const directionsHtml = `<br><a href="${directionsUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-success mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
         const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + acksHtml + receiveHtml + ackHtml + directionsHtml +
-            (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">Διαγραφή</button>` : '');
+            (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">${t('common.delete')}</button>` : '');
         let layer = null;
         if (item.type === 'point') {
             const icon = L.divIcon({className:'', html:'<i class="bi bi-geo-alt-fill" style="font-size:28px;color:#7c3aed;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[28,28], iconAnchor:[14,26]});
@@ -1554,7 +1578,7 @@ dispatchLayer.on('popupopen', event => {
     const delBtn = popupEl.querySelector('.dispatch-delete-btn');
     if (delBtn) {
         delBtn.addEventListener('click', () => {
-            if (!confirm('Διαγραφή αυτού του σημείου/περιοχής;')) return;
+            if (!confirm(t('dispatch.delete_confirm'))) return;
             const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: delBtn.dataset.id});
             fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
                 if (result.ok) { map.closePopup(); renderDispatches(dispatches = dispatches.filter(d => String(d.id) !== delBtn.dataset.id)); }
@@ -1568,7 +1592,7 @@ dispatchLayer.on('popupopen', event => {
             const data = new URLSearchParams({csrf_token: csrfToken, action: 'ack', mission_id: <?= $missionId ?>, id: ackBtn.dataset.id});
             fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
                 if (result.ok) { map.closePopup(); if (result.dispatches) renderDispatches(dispatches = result.dispatches); }
-                else { alert(result.error || 'Αποτυχία αποστολής.'); ackBtn.disabled = false; }
+                else { alert(result.error || t('common.send_failed')); ackBtn.disabled = false; }
             });
         });
     }
@@ -1579,16 +1603,16 @@ dispatchLayer.on('popupopen', event => {
             const data = new URLSearchParams({csrf_token: csrfToken, action: 'receive', mission_id: <?= $missionId ?>, id: receiveBtn.dataset.id});
             fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
                 if (result.ok) { map.closePopup(); if (result.dispatches) renderDispatches(dispatches = result.dispatches); }
-                else { alert(result.error || 'Αποτυχία αποστολής.'); receiveBtn.disabled = false; }
+                else { alert(result.error || t('common.send_failed')); receiveBtn.disabled = false; }
             });
         });
     }
 });
-if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup('<strong>Σημείο αποστολής</strong><br><?= h(addslashes($mission['title'])) ?>');
+if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup('<strong>' + t('map.mission_point_label') + '</strong><br><?= h(addslashes($mission['title'])) ?>');
 }
 let hasFitPins = false;
 function pinStatusLabel(status) {
-    return {needs_help: 'Χρειάζεται βοήθεια', on_site: 'Επί τόπου', on_way: 'Σε κίνηση'}[status] || '';
+    return {needs_help: t('status.badge_needs_help'), on_site: t('status.badge_on_site'), on_way: t('status.badge_on_way')}[status] || '';
 }
 function renderPins(items) {
     pinLayer.clearLayers();
@@ -1644,7 +1668,7 @@ function renderTrail(trails) {
             } else {
                 marker = L.circleMarker([point.lat, point.lng], {radius: isFirst ? 7 : 5, color:'#fff', weight: isFirst ? 3 : 2, fillColor: color, fillOpacity: 1}).addTo(trailLayer);
             }
-            const sourceLabel = point.source === 'auto' ? ' (αυτόματο)' : '';
+            const sourceLabel = point.source === 'auto' ? t('trail.auto_suffix') : '';
             marker.bindTooltip(`<strong>${escapeHtml(trail.name)}</strong><br>${point.time}${sourceLabel}`);
             bounds.push([point.lat, point.lng]);
         });
@@ -1660,7 +1684,7 @@ function enterTrailMode() {
     const includeAdmin = document.getElementById('trailIncludeAdmin').checked;
     const params = new URLSearchParams({mission_id: <?= $missionId ?>, team_id: teamId, include_auto: includeAuto});
     fetch('mission-track.php?' + params).then(r => r.json()).then(result => {
-        if (!result.ok) { alert(result.error || 'Αποτυχία φόρτωσης πορείας.'); return; }
+        if (!result.ok) { alert(result.error || t('trail.load_failed')); return; }
         if (!trailModeActive) {
             map.removeLayer(pinLayer);
             trailLayer.addTo(map);
@@ -1669,7 +1693,7 @@ function enterTrailMode() {
         if (includeAdmin) { if (!map.hasLayer(dispatchLayer)) dispatchLayer.addTo(map); }
         else if (map.hasLayer(dispatchLayer)) { map.removeLayer(dispatchLayer); }
         renderTrail(result.trails);
-    }).catch(() => alert('Αποτυχία φόρτωσης πορείας.'));
+    }).catch(() => alert(t('trail.load_failed')));
 }
 function exitTrailMode() {
     trailModeActive = false;
@@ -1685,10 +1709,10 @@ if (trailModeToggleBtn) {
         if (trailModeActive) {
             exitTrailMode();
             trailFilterBar.classList.add('d-none');
-            trailModeToggleBtn.innerHTML = '<i class="bi bi-clock-history me-1"></i>Πορεία Ομάδων';
+            trailModeToggleBtn.innerHTML = '<i class="bi bi-clock-history me-1"></i>' + t('hero.btn_team_trail');
         } else {
             trailFilterBar.classList.remove('d-none');
-            trailModeToggleBtn.innerHTML = '<i class="bi bi-x-lg me-1"></i>Ζωντανή Προβολή';
+            trailModeToggleBtn.innerHTML = '<i class="bi bi-x-lg me-1"></i>' + t('trail.exit_btn');
             enterTrailMode();
         }
     });
@@ -1698,7 +1722,7 @@ if (trailModeToggleBtn) {
 function renderMedia(items) {
     const list = document.getElementById('mediaList');
     if (!items.length) {
-        list.innerHTML = '<div class="text-muted small" style="grid-column:1/-1;">Δεν έχουν σταλεί φωτογραφίες ή βίντεο ακόμη.</div>';
+        list.innerHTML = '<div class="text-muted small" style="grid-column:1/-1;">' + t('media.empty') + '</div>';
         return;
     }
     list.innerHTML = items.map(m => {
@@ -1724,8 +1748,8 @@ function renderMedia(items) {
                 <div class="d-flex justify-content-between align-items-center mt-1">
                     <span class="text-muted" style="font-size:.7rem;">${m.time}</span>
                     <div class="d-flex gap-1">
-                        ${m.lat !== null ? `<button type="button" class="btn btn-sm btn-outline-secondary media-locate-btn p-1" data-lat="${m.lat}" data-lng="${m.lng}" title="Εμφάνιση στον χάρτη"><i class="bi bi-geo-alt-fill" style="font-size:.7rem;"></i></button>` : ''}
-                        ${m.can_delete ? `<button type="button" class="btn btn-sm btn-outline-danger media-delete-btn p-1" data-id="${m.id}" title="Διαγραφή"><i class="bi bi-trash" style="font-size:.7rem;"></i></button>` : ''}
+                        ${m.lat !== null ? `<button type="button" class="btn btn-sm btn-outline-secondary media-locate-btn p-1" data-lat="${m.lat}" data-lng="${m.lng}" title="${t('media.locate_title')}"><i class="bi bi-geo-alt-fill" style="font-size:.7rem;"></i></button>` : ''}
+                        ${m.can_delete ? `<button type="button" class="btn btn-sm btn-outline-danger media-delete-btn p-1" data-id="${m.id}" title="${t('common.delete')}"><i class="bi bi-trash" style="font-size:.7rem;"></i></button>` : ''}
                     </div>
                 </div>
             </div>
@@ -1739,11 +1763,11 @@ function renderMedia(items) {
         map.setView([parseFloat(btn.dataset.lat), parseFloat(btn.dataset.lng)], 16);
     }));
     list.querySelectorAll('.media-delete-btn').forEach(btn => btn.addEventListener('click', () => {
-        if (!confirm('Διαγραφή αυτού του αρχείου;')) return;
+        if (!confirm(t('media.delete_confirm'))) return;
         const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: btn.dataset.id});
         fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
             if (result.ok) { renderMedia(media = media.filter(m => String(m.id) !== btn.dataset.id)); mediaSignature = JSON.stringify(media); }
-            else alert(result.error || 'Αποτυχία διαγραφής.');
+            else alert(result.error || t('common.delete_failed'));
         });
     }));
 }
@@ -1766,21 +1790,21 @@ document.getElementById('mediaViewModal').addEventListener('hidden.bs.modal', ()
 function renderMyTasks(items) {
     const list = document.getElementById('myTasksList');
     if (!items.length) {
-        list.innerHTML = '<p class="text-muted mb-0">Δεν έχετε ανατεθειμένες εντολές σε αυτή την αποστολή.</p>';
+        list.innerHTML = '<p class="text-muted mb-0">' + t('mytasks.empty') + '</p>';
         return;
     }
-    list.innerHTML = items.map(t => {
+    list.innerHTML = items.map(task => {
         let actionHtml;
-        if (t.fulfilled_at) {
-            actionHtml = `<span class="badge bg-success">✓ Ολοκληρώθηκε στις ${t.fulfilled_at}</span>`;
-        } else if (t.acknowledged_at) {
-            actionHtml = `<button type="button" class="btn btn-sm btn-success w-100 my-task-complete-btn" data-order-id="${t.order_id}">Ολοκληρώθηκε</button>`;
+        if (task.fulfilled_at) {
+            actionHtml = `<span class="badge bg-success">${t('mytasks.completed_at_prefix', {time: task.fulfilled_at})}</span>`;
+        } else if (task.acknowledged_at) {
+            actionHtml = `<button type="button" class="btn btn-sm btn-success w-100 my-task-complete-btn" data-order-id="${task.order_id}">${t('mytasks.complete_btn')}</button>`;
         } else {
-            actionHtml = `<button type="button" class="btn btn-sm btn-warning w-100 my-task-ack-btn" data-order-id="${t.order_id}">Ελήφθη</button>`;
+            actionHtml = `<button type="button" class="btn btn-sm btn-warning w-100 my-task-ack-btn" data-order-id="${task.order_id}">${t('banner.ack_btn')}</button>`;
         }
         return `<div class="border rounded p-2 mb-2">
-            <div class="small">${escapeHtml(t.task_text)}</div>
-            <div class="text-muted" style="font-size:.75rem;">Στάλθηκε ${t.sent_at}</div>
+            <div class="small">${escapeHtml(task.task_text)}</div>
+            <div class="text-muted" style="font-size:.75rem;">${t('mytasks.sent_prefix', {time: task.sent_at})}</div>
             <div class="mt-1">${actionHtml}</div>
         </div>`;
     }).join('');
@@ -1789,10 +1813,10 @@ function renderMyTasks(items) {
         const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge', order_id: btn.dataset.orderId});
         fetch('mission-order.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
             if (result.ok) {
-                const item = myTasks.find(t => String(t.order_id) === btn.dataset.orderId);
-                if (item) item.acknowledged_at = item.acknowledged_at || 'τώρα';
+                const item = myTasks.find(task => String(task.order_id) === btn.dataset.orderId);
+                if (item) item.acknowledged_at = item.acknowledged_at || t('common.now');
                 renderMyTasks(myTasks);
-            } else { btn.disabled = false; alert(result.error || 'Αποτυχία.'); }
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
     }));
     list.querySelectorAll('.my-task-complete-btn').forEach(btn => btn.addEventListener('click', () => {
@@ -1800,10 +1824,10 @@ function renderMyTasks(items) {
         const data = new URLSearchParams({csrf_token: csrfToken, action: 'complete', order_id: btn.dataset.orderId});
         fetch('mission-order.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
             if (result.ok) {
-                const item = myTasks.find(t => String(t.order_id) === btn.dataset.orderId);
-                if (item) { item.fulfilled_at = 'τώρα'; item.acknowledged_at = item.acknowledged_at || 'τώρα'; }
+                const item = myTasks.find(task => String(task.order_id) === btn.dataset.orderId);
+                if (item) { item.fulfilled_at = t('common.now'); item.acknowledged_at = item.acknowledged_at || t('common.now'); }
                 renderMyTasks(myTasks);
-            } else { btn.disabled = false; alert(result.error || 'Αποτυχία.'); }
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
     }));
 }
@@ -1815,7 +1839,7 @@ function renderPresence(onlineIds) {
         const isOnline = onlineSet.has(uid);
         el.classList.toggle('presence-online', isOnline);
         el.classList.toggle('presence-offline', !isOnline);
-        el.title = isOnline ? 'Online' : 'Offline';
+        el.title = isOnline ? t('common.online') : t('common.offline');
     });
 }
 
@@ -1823,7 +1847,7 @@ function renderShortageReports(items) {
     const list = document.getElementById('shortageReportsList');
     if (!list) return;
     if (!items.length) {
-        list.innerHTML = '<p class="text-muted mb-0">Δεν υπάρχουν ανοιχτές αναφορές έλλειψης.</p>';
+        list.innerHTML = '<p class="text-muted mb-0">' + t('shortage.empty_list') + '</p>';
         return;
     }
     const sevColor = {low: 'secondary', medium: 'info', high: 'warning', critical: 'danger'};
@@ -1831,10 +1855,10 @@ function renderShortageReports(items) {
         <div class="border rounded p-2 mb-2">
             <div><span class="badge bg-${sevColor[r.severity] || 'secondary'}">${r.severity_label}</span> <strong>${r.type_label}</strong> — ${escapeHtml(r.title)}</div>
             <div class="small mt-1">${escapeHtml(r.description)}</div>
-            <div class="text-muted" style="font-size:.75rem;">${escapeHtml(r.reporter_name)} (${r.team_label}) · ${r.created_at}${r.acknowledged_at ? ' · Είδατε: ' + r.acknowledged_at : ''}</div>
+            <div class="text-muted" style="font-size:.75rem;">${escapeHtml(r.reporter_name)} (${r.team_label}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
             <div class="mt-1">${r.acknowledged_at
-                ? `<button type="button" class="btn btn-sm btn-success w-100 shortage-resolve-btn" data-report-id="${r.id}">Λύθηκε</button>`
-                : `<button type="button" class="btn btn-sm btn-warning w-100 shortage-seen-btn" data-report-id="${r.id}">Είδα</button>`}</div>
+                ? `<button type="button" class="btn btn-sm btn-success w-100 shortage-resolve-btn" data-report-id="${r.id}">${t('shortage.resolve_btn')}</button>`
+                : `<button type="button" class="btn btn-sm btn-warning w-100 shortage-seen-btn" data-report-id="${r.id}">${t('shortage.seen_btn')}</button>`}</div>
         </div>
     `).join('');
     list.querySelectorAll('.shortage-seen-btn').forEach(btn => btn.addEventListener('click', () => {
@@ -1843,9 +1867,9 @@ function renderShortageReports(items) {
         fetch('mission-shortage.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
             if (result.ok) {
                 const item = shortageReports.find(x => String(x.id) === btn.dataset.reportId);
-                if (item) item.acknowledged_at = item.acknowledged_at || 'τώρα';
+                if (item) item.acknowledged_at = item.acknowledged_at || t('common.now');
                 renderShortageReports(shortageReports);
-            } else { btn.disabled = false; alert(result.error || 'Αποτυχία.'); }
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
     }));
     list.querySelectorAll('.shortage-resolve-btn').forEach(btn => btn.addEventListener('click', () => {
@@ -1855,7 +1879,7 @@ function renderShortageReports(items) {
             if (result.ok) {
                 shortageReports = shortageReports.filter(x => String(x.id) !== btn.dataset.reportId);
                 renderShortageReports(shortageReports);
-            } else { btn.disabled = false; alert(result.error || 'Αποτυχία.'); }
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
     }));
 }
@@ -1864,16 +1888,16 @@ function renderSosAlerts(items) {
     const list = document.getElementById('sosAlertsList');
     if (!list) return;
     if (!items.length) {
-        list.innerHTML = '<p class="text-muted mb-0">Δεν υπάρχουν ενεργές ειδοποιήσεις SOS.</p>';
+        list.innerHTML = '<p class="text-muted mb-0">' + t('sos.empty') + '</p>';
         return;
     }
     list.innerHTML = items.map(a => `
         <div class="border border-danger rounded p-2 mb-2">
             <div><strong>🆘 ${a.team_label}</strong> — ${a.user_name}</div>
-            <div class="text-muted" style="font-size:.75rem;">${a.created_at}${a.lat !== null ? ` · <a href="#" class="sos-locate-link" data-lat="${a.lat}" data-lng="${a.lng}">δείτε στον χάρτη</a>` : ' · χωρίς GPS'}${a.acknowledged_at ? ' · Ελήφθη: ' + a.acknowledged_at : ''}</div>
+            <div class="text-muted" style="font-size:.75rem;">${a.created_at}${a.lat !== null ? ` · <a href="#" class="sos-locate-link" data-lat="${a.lat}" data-lng="${a.lng}">${t('sos.view_on_map')}</a>` : t('sos.no_gps')}${a.acknowledged_at ? t('sos.ack_at_prefix', {time: a.acknowledged_at}) : ''}</div>
             <div class="mt-1">${a.acknowledged_at
-                ? `<button type="button" class="btn btn-sm btn-success w-100 sos-resolve-btn" data-alert-id="${a.id}">Λύθηκε</button>`
-                : `<button type="button" class="btn btn-sm btn-warning w-100 sos-ack-btn" data-alert-id="${a.id}">Ελήφθη</button>`}</div>
+                ? `<button type="button" class="btn btn-sm btn-success w-100 sos-resolve-btn" data-alert-id="${a.id}">${t('shortage.resolve_btn')}</button>`
+                : `<button type="button" class="btn btn-sm btn-warning w-100 sos-ack-btn" data-alert-id="${a.id}">${t('banner.ack_btn')}</button>`}</div>
         </div>
     `).join('');
     list.querySelectorAll('.sos-locate-link').forEach(link => link.addEventListener('click', (e) => {
@@ -1886,10 +1910,10 @@ function renderSosAlerts(items) {
         fetch('mission-sos.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
             if (result.ok) {
                 const item = sosAlerts.find(x => String(x.id) === btn.dataset.alertId);
-                if (item) item.acknowledged_at = item.acknowledged_at || 'τώρα';
+                if (item) item.acknowledged_at = item.acknowledged_at || t('common.now');
                 renderSosAlerts(sosAlerts);
                 if (!fieldMode) updateSosAlarmState(sosAlerts);
-            } else { btn.disabled = false; alert(result.error || 'Αποτυχία.'); }
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
     }));
     list.querySelectorAll('.sos-resolve-btn').forEach(btn => btn.addEventListener('click', () => {
@@ -1900,7 +1924,7 @@ function renderSosAlerts(items) {
                 sosAlerts = sosAlerts.filter(x => String(x.id) !== btn.dataset.alertId);
                 renderSosAlerts(sosAlerts);
                 if (!fieldMode) updateSosAlarmState(sosAlerts);
-            } else { btn.disabled = false; alert(result.error || 'Αποτυχία.'); }
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
     }));
 }
@@ -1912,7 +1936,7 @@ function wireMediaInput(inputId, sentLabel) {
         const file = input.files[0];
         if (!file) return;
         const status = document.getElementById('mediaUploadStatus');
-        status.textContent = 'Αποστολή…';
+        status.textContent = t('media.uploading');
         status.className = 'small mb-2';
 
         const send = (lat, lng) => {
@@ -1924,16 +1948,16 @@ function wireMediaInput(inputId, sentLabel) {
             if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
             fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
                 if (result.ok) {
-                    status.textContent = '✓ ' + sentLabel + ' εστάλη.';
+                    status.textContent = '✓ ' + sentLabel + t('media.sent_suffix');
                     status.className = 'small mb-2 text-success';
                     renderMedia(media = [result.media, ...media]);
                     mediaSignature = JSON.stringify(media);
                 } else {
-                    status.textContent = result.error || 'Αποτυχία αποστολής.';
+                    status.textContent = result.error || t('common.send_failed');
                     status.className = 'small mb-2 text-danger';
                 }
                 input.value = '';
-            }).catch(() => { status.textContent = 'Αποτυχία αποστολής.'; status.className = 'small mb-2 text-danger'; input.value = ''; });
+            }).catch(() => { status.textContent = t('common.send_failed'); status.className = 'small mb-2 text-danger'; input.value = ''; });
         };
 
         if (navigator.geolocation) {
@@ -1947,10 +1971,10 @@ function wireMediaInput(inputId, sentLabel) {
         }
     });
 }
-wireMediaInput('photoCaptureInput', 'Η φωτογραφία');
-wireMediaInput('photoGalleryInput', 'Η φωτογραφία');
-wireMediaInput('videoCaptureInput', 'Το βίντεο');
-wireMediaInput('videoGalleryInput', 'Το βίντεο');
+wireMediaInput('photoCaptureInput', t('media.photo_label'));
+wireMediaInput('photoGalleryInput', t('media.photo_label'));
+wireMediaInput('videoCaptureInput', t('media.video_label'));
+wireMediaInput('videoGalleryInput', t('media.video_label'));
 
 setTimeout(() => {
     if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderMedia(media); }
@@ -2057,7 +2081,7 @@ function updateSosAlarmState(items) {
     if (marquee) {
         if (items.length) {
             document.getElementById('sosMapMarqueeText').textContent = items.map(a =>
-                '🆘 ' + a.team_label.toUpperCase() + ' ΣΕ SOS — ' + a.user_name + ' χρειάζεται άμεση βοήθεια!'
+                t('sos.marquee_text', {team: a.team_label.toUpperCase(), name: a.user_name})
             ).join('     •••     ');
             marquee.classList.remove('d-none');
         } else {
@@ -2079,13 +2103,13 @@ function showWarRoomBanner(text, orderId) {
     if (orderId) {
         ackBtn.classList.remove('d-none');
         ackBtn.disabled = false;
-        ackBtn.textContent = 'Ελήφθη';
+        ackBtn.textContent = t('banner.ack_btn');
         ackBtn.onclick = () => {
             ackBtn.disabled = true;
             const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge', order_id: orderId});
             fetch('mission-order.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
-                if (result.ok) { ackBtn.textContent = '✓ Ελήφθη'; }
-                else { ackBtn.disabled = false; alert(result.error || 'Αποτυχία.'); }
+                if (result.ok) { ackBtn.textContent = t('banner.acked_label'); }
+                else { ackBtn.disabled = false; alert(result.error || t('common.failed')); }
             }).catch(() => { ackBtn.disabled = false; });
         };
     } else {
@@ -2110,8 +2134,8 @@ document.getElementById('warRoomBannerClose').addEventListener('click', hideWarR
     function setFocusMode(active) {
         document.body.classList.toggle('war-room-focus', active);
         focusBtn.innerHTML = active
-            ? '<i class="bi bi-fullscreen-exit me-1"></i>Έξοδος Πλήρους Οθόνης'
-            : '<i class="bi bi-arrows-fullscreen me-1"></i>Πλήρης Οθόνη';
+            ? '<i class="bi bi-fullscreen-exit me-1"></i>' + t('hero.btn_exit_fullscreen')
+            : '<i class="bi bi-arrows-fullscreen me-1"></i>' + t('hero.btn_fullscreen');
     }
     focusBtn.addEventListener('click', () => {
         const entering = !document.body.classList.contains('war-room-focus');
@@ -2133,7 +2157,7 @@ function loadActivity() {
     fetch('mission-history.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(data => {
         const list = document.getElementById('activityList');
         if (!data.ok || !data.events.length) {
-            list.innerHTML = '<div class="text-muted small">Δεν υπάρχουν καταγεγραμμένα γεγονότα ακόμη.</div>';
+            list.innerHTML = '<div class="text-muted small">' + t('activity.empty') + '</div>';
             return;
         }
         list.innerHTML = data.events.map(e => `
@@ -2142,7 +2166,7 @@ function loadActivity() {
                 <small class="text-muted text-nowrap">${e.time}</small>
             </div>
         `).join('');
-        document.getElementById('activityRefresh').textContent = new Date().toLocaleTimeString('el-GR', {hour: '2-digit', minute: '2-digit'});
+        document.getElementById('activityRefresh').textContent = new Date().toLocaleTimeString(jsLocale, {hour: '2-digit', minute: '2-digit'});
     }).catch(() => {});
 }
 if (!fieldMode) {
@@ -2157,9 +2181,9 @@ if (reportModalEl) {
         const detailList = document.getElementById('reportDetailList');
         const shortageSummaryBody = document.getElementById('shortageReportSummaryBody');
         const shortageDetailList = document.getElementById('shortageReportDetailList');
-        summaryBody.innerHTML = '<tr><td colspan="6" class="text-muted small">Φόρτωση…</td></tr>';
+        summaryBody.innerHTML = '<tr><td colspan="6" class="text-muted small">' + t('common.loading') + '</td></tr>';
         detailList.innerHTML = '';
-        shortageSummaryBody.innerHTML = '<tr><td colspan="6" class="text-muted small">Φόρτωση…</td></tr>';
+        shortageSummaryBody.innerHTML = '<tr><td colspan="6" class="text-muted small">' + t('common.loading') + '</td></tr>';
         shortageDetailList.innerHTML = '';
         fetch('mission-response-report.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(data => {
             if (!data.ok) { summaryBody.innerHTML = `<tr><td colspan="6" class="text-danger small">${data.error}</td></tr>`; return; }
@@ -2170,10 +2194,10 @@ if (reportModalEl) {
                     <td class="text-end">${s.order_count}</td>
                     <td class="text-end">${s.ack_rate}%</td>
                     <td class="text-end">${s.fulfill_rate}%</td>
-                    <td class="text-end">${s.avg_ack_minutes !== null ? s.avg_ack_minutes + ' λεπ.' : '—'}</td>
-                    <td class="text-end">${s.avg_fulfill_minutes !== null ? s.avg_fulfill_minutes + ' λεπ.' : '—'}</td>
+                    <td class="text-end">${s.avg_ack_minutes !== null ? s.avg_ack_minutes + t('report.minutes_suffix') : '—'}</td>
+                    <td class="text-end">${s.avg_fulfill_minutes !== null ? s.avg_fulfill_minutes + t('report.minutes_suffix') : '—'}</td>
                 </tr>
-            `).join('') : '<tr><td colspan="6" class="text-muted small">Δεν έχουν σταλεί εντολές ακόμη.</td></tr>';
+            `).join('') : '<tr><td colspan="6" class="text-muted small">' + t('report.no_orders_yet') + '</td></tr>';
 
             detailList.innerHTML = data.detail.length ? data.detail.map(d => `
                 <div class="list-group-item d-flex justify-content-between align-items-start gap-3">
@@ -2182,13 +2206,13 @@ if (reportModalEl) {
                         <strong>${d.team_label}</strong> — ${escapeHtml(d.user_name)}
                         ${d.label ? ' («' + escapeHtml(d.label) + '»)' : ''}
                         <div class="small text-muted">
-                            Στάλθηκε ${d.sent_at}
-                            · Ελήφθη ${d.ack_at ? d.ack_at + ' (' + d.ack_minutes + ' λεπ.)' : '—'}
-                            · Ολοκληρώθηκε ${d.fulfill_at ? d.fulfill_at + ' (' + d.fulfill_minutes + ' λεπ.)' : '—'}
+                            ${t('mytasks.sent_prefix', {time: d.sent_at})}
+                            ${d.ack_at ? t('report.detail_ack_prefix') + d.ack_at + ' (' + d.ack_minutes + t('report.minutes_suffix') + ')' : t('report.detail_ack_prefix') + '—'}
+                            ${d.fulfill_at ? t('report.detail_complete_prefix') + d.fulfill_at + ' (' + d.fulfill_minutes + t('report.minutes_suffix') + ')' : t('report.detail_complete_prefix') + '—'}
                         </div>
                     </div>
                 </div>
-            `).join('') : '<div class="text-muted small">Δεν υπάρχουν λεπτομέρειες.</div>';
+            `).join('') : '<div class="text-muted small">' + t('report.no_details') + '</div>';
 
             shortageSummaryBody.innerHTML = data.shortageSummary.length ? data.shortageSummary.map(s => `
                 <tr>
@@ -2196,10 +2220,10 @@ if (reportModalEl) {
                     <td class="text-end">${s.report_count}</td>
                     <td class="text-end">${s.seen_rate}%</td>
                     <td class="text-end">${s.resolved_rate}%</td>
-                    <td class="text-end">${s.avg_seen_minutes !== null ? s.avg_seen_minutes + ' λεπ.' : '—'}</td>
-                    <td class="text-end">${s.avg_resolved_minutes !== null ? s.avg_resolved_minutes + ' λεπ.' : '—'}</td>
+                    <td class="text-end">${s.avg_seen_minutes !== null ? s.avg_seen_minutes + t('report.minutes_suffix') : '—'}</td>
+                    <td class="text-end">${s.avg_resolved_minutes !== null ? s.avg_resolved_minutes + t('report.minutes_suffix') : '—'}</td>
                 </tr>
-            `).join('') : '<tr><td colspan="6" class="text-muted small">Δεν έχουν υποβληθεί αναφορές έλλειψης ακόμη.</td></tr>';
+            `).join('') : '<tr><td colspan="6" class="text-muted small">' + t('report.no_shortage_yet') + '</td></tr>';
 
             shortageDetailList.innerHTML = data.shortageDetail.length ? data.shortageDetail.map(d => `
                 <div class="list-group-item d-flex justify-content-between align-items-start gap-3">
@@ -2208,30 +2232,30 @@ if (reportModalEl) {
                         <strong>${d.team_label}</strong> — ${escapeHtml(d.reporter_name)}
                         («${escapeHtml(d.title)}»)
                         <div class="small text-muted">
-                            Στάλθηκε ${d.sent_at}
-                            · Είδε ${d.seen_at ? d.seen_at + ' (' + d.seen_minutes + ' λεπ.)' : '—'}
-                            · Λύθηκε ${d.resolved_at ? d.resolved_at + ' (' + d.resolved_minutes + ' λεπ.)' : '—'}
+                            ${t('mytasks.sent_prefix', {time: d.sent_at})}
+                            ${d.seen_at ? t('report.detail_seen_prefix') + d.seen_at + ' (' + d.seen_minutes + t('report.minutes_suffix') + ')' : t('report.detail_seen_prefix') + '—'}
+                            ${d.resolved_at ? t('report.detail_resolved_prefix') + d.resolved_at + ' (' + d.resolved_minutes + t('report.minutes_suffix') + ')' : t('report.detail_resolved_prefix') + '—'}
                         </div>
                     </div>
                 </div>
-            `).join('') : '<div class="text-muted small">Δεν υπάρχουν λεπτομέρειες.</div>';
+            `).join('') : '<div class="text-muted small">' + t('report.no_details') + '</div>';
         }).catch(() => {
-            summaryBody.innerHTML = '<tr><td colspan="6" class="text-danger small">Αποτυχία φόρτωσης.</td></tr>';
+            summaryBody.innerHTML = '<tr><td colspan="6" class="text-danger small">' + t('common.load_failed') + '</td></tr>';
         });
     });
 }
 
 document.querySelectorAll('.send-ping').forEach(button => button.addEventListener('click', () => {
     const status = document.getElementById('pingStatus-' + button.dataset.prId);
-    if (!navigator.geolocation) { status.textContent = 'Το GPS δεν υποστηρίζεται από τη συσκευή.'; return; }
-    button.disabled = true; status.textContent = 'Εντοπισμός θέσης…';
+    if (!navigator.geolocation) { status.textContent = t('myping.gps_unsupported'); return; }
+    button.disabled = true; status.textContent = t('myping.locating');
     navigator.geolocation.getCurrentPosition(position => {
         const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude});
         fetch('ping-location.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
-            status.textContent = result.ok ? '✓ Το στίγμα εστάλη στις ' + result.ts : result.error;
+            status.textContent = result.ok ? t('myping.ping_sent_prefix', {time: result.ts}) : result.error;
             status.className = 'small mb-2 ' + (result.ok ? 'text-success' : 'text-danger');
-        }).catch(() => { status.textContent = 'Αποτυχία αποστολής στίγματος.'; status.className = 'small mb-2 text-danger'; }).finally(() => button.disabled = false);
-    }, () => { status.textContent = 'Δεν δόθηκε άδεια πρόσβασης στο GPS.'; status.className = 'small mb-2 text-danger'; button.disabled = false; }, {enableHighAccuracy:true, timeout:10000});
+        }).catch(() => { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; }).finally(() => button.disabled = false);
+    }, () => { status.textContent = t('myping.gps_denied'); status.className = 'small mb-2 text-danger'; button.disabled = false; }, {enableHighAccuracy:true, timeout:10000});
 }));
 
 // Passive background capture while this page stays open — silent (no status
@@ -2274,7 +2298,7 @@ function setFieldStatus(btn, prId, status) {
                     if (panel) panel.style.animation = 'warRoomPulseRed 0.5s 3';
                 }
             } else {
-                alert(result.error || 'Αποτυχία ενημέρωσης κατάστασης.');
+                alert(result.error || t('myping.status_update_failed'));
                 if (group) group.querySelectorAll('button').forEach(b => b.disabled = false);
             }
         }).catch(() => { if (group) group.querySelectorAll('button').forEach(b => b.disabled = false); });
@@ -2329,7 +2353,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         const previousValue = leaderSelect.value || currentLeaderId;
         leaderSelect.innerHTML = '';
         if (checked.length === 0) {
-            leaderSelect.innerHTML = '<option value="">Επιλέξτε μέλη πρώτα…</option>';
+            leaderSelect.innerHTML = '<option value="">' + t('teams.select_members_first') + '</option>';
             return;
         }
         checked.forEach(cb => {
@@ -2390,12 +2414,12 @@ document.querySelectorAll('.team-form').forEach(form => {
         fetch(`mission-chat.php?mission_id=${missionId}&team_id=${teamId}&after_id=0`)
             .then(response => response.json())
             .then(data => {
-                if (!data.ok) { chatMessagesEl.textContent = data.error || 'Σφάλμα φόρτωσης.'; return; }
+                if (!data.ok) { chatMessagesEl.textContent = data.error || t('chat.load_error'); return; }
                 data.messages.forEach(renderMessage);
                 if (data.messages.length) lastIdByRoom[teamId] = data.messages[data.messages.length - 1].id;
                 chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
             })
-            .catch(() => { chatMessagesEl.textContent = 'Σφάλμα φόρτωσης.'; });
+            .catch(() => { chatMessagesEl.textContent = t('chat.load_error'); });
     }
 
     function pollRoom() {
@@ -2438,9 +2462,9 @@ document.querySelectorAll('.team-form').forEach(form => {
                 chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
                 chatInput.value = '';
             } else {
-                alert(result.error || 'Αποτυχία αποστολής.');
+                alert(result.error || t('common.send_failed'));
             }
-        }).catch(() => alert('Αποτυχία αποστολής.'));
+        }).catch(() => alert(t('common.send_failed')));
     });
 
     loadRoom('');
@@ -2528,16 +2552,16 @@ document.querySelectorAll('.team-form').forEach(form => {
     addressSearchBtn.addEventListener('click', () => {
         const q = addressInput.value.trim();
         if (!q) return;
-        addressStatus.textContent = 'Αναζήτηση…';
+        addressStatus.textContent = t('dispatch.searching');
         fetch('geocode-address.php?q=' + encodeURIComponent(q)).then(response => response.json()).then(result => {
             if (result.ok) {
                 dispatchMap.setView([result.lat, result.lng], 16);
                 lastAddressLabel = result.display_name || q;
                 addressStatus.textContent = '✓ ' + lastAddressLabel;
             } else {
-                addressStatus.textContent = result.error || 'Δεν βρέθηκε.';
+                addressStatus.textContent = result.error || t('dispatch.address_not_found');
             }
-        }).catch(() => { addressStatus.textContent = 'Αποτυχία αναζήτησης.'; });
+        }).catch(() => { addressStatus.textContent = t('dispatch.search_failed'); });
     });
 
     sendBtn.addEventListener('click', () => {
@@ -2557,10 +2581,10 @@ document.querySelectorAll('.team-form').forEach(form => {
                     .then(response => response.json())
                     .then(d => { if (d.dispatches) renderDispatches(dispatches = d.dispatches); });
             } else {
-                alert(result.error || 'Αποτυχία αποστολής.');
+                alert(result.error || t('common.send_failed'));
                 sendBtn.disabled = false;
             }
-        }).catch(() => { alert('Αποτυχία αποστολής.'); sendBtn.disabled = false; });
+        }).catch(() => { alert(t('common.send_failed')); sendBtn.disabled = false; });
     });
 })();
 </script>

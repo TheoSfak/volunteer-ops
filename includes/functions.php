@@ -705,7 +705,7 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'type'        => $row['type'],
             'geo'         => json_decode($row['geo'], true),
             'label'       => $row['label'],
-            'team_label'  => $teamId ? ($row['codename'] . ' ' . $row['team_number']) : 'Όλες οι ομάδες',
+            'team_label'  => $teamId ? ($row['codename'] . ' ' . $row['team_number']) : t('common.all_teams'),
             'can_delete'  => $canManageWarRoom,
             'acks'        => array_map(fn($a) => ['team_label' => $a['team_label'] ?? '—', 'user_name' => $a['user_name'], 'time' => $a['time']], $acks),
             'my_ack'      => $myAck,
@@ -878,13 +878,13 @@ function loadUnresolvedShortageReportsForMission(int $missionId): array {
 
     return array_map(fn($row) => [
         'id'              => (int) $row['id'],
-        'type_label'      => SHORTAGE_TYPE_LABELS[$row['shortage_type']] ?? $row['shortage_type'],
+        'type_label'      => shortageTypeLabel($row['shortage_type']),
         'severity'        => $row['severity'],
-        'severity_label'  => SHORTAGE_SEVERITY_LABELS[$row['severity']] ?? $row['severity'],
+        'severity_label'  => shortageSeverityLabel($row['severity']),
         'title'           => $row['title'],
         'description'     => $row['description'],
         'reporter_name'   => $row['reporter_name'],
-        'team_label'      => $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'Χωρίς ομάδα',
+        'team_label'      => $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : t('history.no_team_capitalized'),
         'created_at'      => date('d/m H:i', strtotime($row['created_at'])),
         'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
     ], $rows);
@@ -913,7 +913,7 @@ function loadOpenSosAlertsForMission(int $missionId): array {
     return array_map(fn($row) => [
         'id'              => (int) $row['id'],
         'user_name'       => h($row['user_name']),
-        'team_label'      => h($row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'Χωρίς ομάδα'),
+        'team_label'      => h($row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : t('history.no_team_capitalized')),
         'lat'             => $row['lat'] !== null ? (float) $row['lat'] : null,
         'lng'             => $row['lng'] !== null ? (float) $row['lng'] : null,
         'created_at'      => date('d/m H:i', strtotime($row['created_at'])),
@@ -953,14 +953,20 @@ function reportMinutesBetween(?string $from, ?string $to): ?float {
  * date() format, since the live report and the archival export intentionally
  * format timestamps differently (compact vs. with year).
  */
-function computeMissionResponseReport(int $missionId): array {
+function computeMissionResponseReport(int $missionId, ?string $lang = null): array {
+    // $lang defaults to null (-> DEFAULT_LANGUAGE, i.e. today's Greek text) so the
+    // two out-of-scope callers (mission-stats.php, mission-report-print.php) are
+    // completely unaffected; only mission-response-report.php passes the viewer's
+    // real language. See includes/i18n.php's note on SHORTAGE_TYPE_LABELS for why
+    // this function must not change shape for those two callers.
+    $lang = $lang ?? DEFAULT_LANGUAGE;
     $typeMeta = [
-        'location' => '📍 Στίγμα GPS',
-        'photo'    => '📷 Φωτογραφία',
-        'video'    => '🎥 Βίντεο',
-        'task'     => '📋 Γενική Εντολή',
-        'message'  => '📢 Καθολικό Μήνυμα',
-        'dispatch' => '🧭 Εντολή Κίνησης',
+        'location' => t('report.type_location', [], $lang),
+        'photo'    => t('report.type_photo', [], $lang),
+        'video'    => t('report.type_video', [], $lang),
+        'task'     => t('report.type_task', [], $lang),
+        'message'  => t('report.type_message', [], $lang),
+        'dispatch' => t('report.type_dispatch', [], $lang),
     ];
 
     $teamLabels = [];
@@ -987,7 +993,7 @@ function computeMissionResponseReport(int $missionId): array {
             'type_label'  => $typeMeta[$row['order_type']] ?? $row['order_type'],
             'order_type'  => $row['order_type'],
             'team_id'     => $teamId,
-            'team_label'  => $teamId ? ($teamLabels[$teamId] ?? '—') : 'Χωρίς ομάδα',
+            'team_label'  => $teamId ? ($teamLabels[$teamId] ?? '—') : t('history.no_team_capitalized', [], $lang),
             'user_name'   => $row['user_name'],
             'label'       => in_array($row['order_type'], ['task', 'message'], true) ? $row['task_text'] : null,
             'sent_at'     => $row['sent_at'],
@@ -1055,7 +1061,7 @@ function computeMissionResponseReport(int $missionId): array {
                 'type_label' => $typeMeta['dispatch'],
                 'order_type' => 'dispatch',
                 'team_id'    => $entry['team_id'],
-                'team_label' => $entry['team_id'] ? ($teamLabels[$entry['team_id']] ?? '—') : 'Χωρίς ομάδα',
+                'team_label' => $entry['team_id'] ? ($teamLabels[$entry['team_id']] ?? '—') : t('history.no_team_capitalized', [], $lang),
                 'user_name'  => $entry['user_name'],
                 'label'      => $d['label'],
                 'sent_at'    => $d['sent_at'],
@@ -1117,10 +1123,10 @@ function computeMissionResponseReport(int $missionId): array {
     foreach ($shortageRows as $row) {
         $teamId = $row['team_id'] ? (int) $row['team_id'] : null;
         $shortageDetail[] = [
-            'type_label'     => SHORTAGE_TYPE_LABELS[$row['shortage_type']] ?? $row['shortage_type'],
+            'type_label'     => shortageTypeLabel($row['shortage_type'], $lang),
             'severity'       => $row['severity'],
-            'severity_label' => SHORTAGE_SEVERITY_LABELS[$row['severity']] ?? $row['severity'],
-            'team_label'     => $teamId ? ($teamLabels[$teamId] ?? '—') : 'Χωρίς ομάδα',
+            'severity_label' => shortageSeverityLabel($row['severity'], $lang),
+            'team_label'     => $teamId ? ($teamLabels[$teamId] ?? '—') : t('history.no_team_capitalized', [], $lang),
             'reporter_name'  => $row['user_name'],
             'title'          => $row['title'],
             'sent_at'        => $row['sent_at'],
