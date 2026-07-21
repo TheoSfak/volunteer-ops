@@ -18,10 +18,7 @@ header('Content-Type: application/json');
  */
 function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $ackerName, int $ackerId): void {
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $kind = $dispatch['type'] === 'point' ? 'στο σημείο' : 'στην περιοχή';
     $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
-    $who = $teamLabel ? 'Η ομάδα ' . $teamLabel : $ackerName;
-    $message = $who . ' ανέφερε άφιξη ' . $kind . $labelPart . ' της αποστολής «' . $missionTitle . '».';
 
     $admins = dbFetchAll("SELECT id FROM users WHERE role IN (?, ?) AND is_active = 1", [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
     $leaders = dbFetchAll(
@@ -40,8 +37,13 @@ function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $respo
     }
     $recipientIds = array_values(array_unique(array_diff($recipientIds, [$ackerId])));
 
+    $langByUserId = getUserLanguages($recipientIds);
     foreach ($recipientIds as $recipientId) {
-        sendNotification($recipientId, '✅ Αναφορά Άφιξης', $message, 'success', 'mission_dispatch_ack', [
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        $kind = t($dispatch['type'] === 'point' ? 'dispatch.kind_at_point' : 'dispatch.kind_at_area', [], $lang);
+        $who = $teamLabel ? t('dispatch.team_label_prefix', ['team' => $teamLabel], $lang) : $ackerName;
+        $message = t('dispatch.arrival_message', ['who' => $who, 'kind' => $kind, 'label_part' => $labelPart, 'mission' => $missionTitle], $lang);
+        sendNotification($recipientId, t('dispatch.arrival_notify_title', [], $lang), $message, 'success', 'mission_dispatch_ack', [
             'url' => $warRoomUrl,
             'tag' => 'dispatch-ack-mission-' . $missionId,
             'bannerMission' => $missionId,
@@ -59,14 +61,16 @@ function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $respo
  */
 function notifyDispatchReceive(int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $receiverName, int $receiverId): void {
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $kind = $dispatch['type'] === 'point' ? 'σημείου' : 'περιοχής';
     $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
-    $who = $teamLabel ? 'Η ομάδα ' . $teamLabel : $receiverName;
-    $message = $who . ' επιβεβαίωσε λήψη ' . $kind . $labelPart . ' της αποστολής «' . $missionTitle . '».';
 
     $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $receiverId);
+    $langByUserId = getUserLanguages($recipientIds);
     foreach ($recipientIds as $recipientId) {
-        sendNotification($recipientId, '📩 Επιβεβαίωση Λήψης', $message, 'info', 'mission_dispatch_receive', [
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        $kind = t($dispatch['type'] === 'point' ? 'dispatch.kind_of_point' : 'dispatch.kind_of_area', [], $lang);
+        $who = $teamLabel ? t('dispatch.team_label_prefix', ['team' => $teamLabel], $lang) : $receiverName;
+        $message = t('dispatch.receive_message', ['who' => $who, 'kind' => $kind, 'label_part' => $labelPart, 'mission' => $missionTitle], $lang);
+        sendNotification($recipientId, t('dispatch.receive_notify_title', [], $lang), $message, 'info', 'mission_dispatch_receive', [
             'url' => $warRoomUrl,
             'tag' => 'dispatch-receive-mission-' . $missionId,
             'bannerMission' => $missionId,
@@ -84,7 +88,7 @@ $mission = dbFetchOne(
     [$missionId]
 );
 if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
-    echo json_encode(['ok' => false, 'error' => 'Η αποστολή δεν βρέθηκε ή δεν είναι ενεργή στο Επιχειρησιακό.']);
+    echo json_encode(['ok' => false, 'error' => t('common.mission_not_found_or_inactive')]);
     exit;
 }
 
@@ -96,7 +100,7 @@ $isApprovedParticipant = (bool) dbFetchValue(
     [$missionId, $userId, PARTICIPATION_APPROVED]
 );
 if (!$canManageWarRoom && !$isApprovedParticipant) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν έχετε πρόσβαση στο Action Room αυτής της αποστολής.']);
+    echo json_encode(['ok' => false, 'error' => t('common.no_access_action_room')]);
     exit;
 }
 
@@ -109,7 +113,7 @@ if (!isPost()) {
 
 // ── POST: create, delete, or ack ────────────────────────────────────────────
 if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
-    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
+    echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }
 
@@ -117,20 +121,20 @@ $action = post('action');
 
 if ($action === 'receive') {
     if (!$isApprovedParticipant) {
-        echo json_encode(['ok' => false, 'error' => 'Μόνο εγκεκριμένοι εθελοντές μπορούν να επιβεβαιώσουν λήψη.']);
+        echo json_encode(['ok' => false, 'error' => t('dispatch.only_approved_can_receive')]);
         exit;
     }
 
     $dispatchId = (int) post('id');
     $dispatch = dbFetchOne("SELECT id, team_id, label, type FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
     if (!$dispatch) {
-        echo json_encode(['ok' => false, 'error' => 'Δεν βρέθηκε.']);
+        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
     }
 
     $myTeamId = getUserTeamIdForMission($missionId, $userId);
     if ($dispatch['team_id'] && (int) $dispatch['team_id'] !== $myTeamId) {
-        echo json_encode(['ok' => false, 'error' => 'Αυτή η εντολή δεν αφορά την ομάδα σας.']);
+        echo json_encode(['ok' => false, 'error' => t('dispatch.not_your_team')]);
         exit;
     }
 
@@ -161,21 +165,21 @@ if ($action === 'receive') {
 
 if ($action === 'ack') {
     if (!$isApprovedParticipant) {
-        echo json_encode(['ok' => false, 'error' => 'Μόνο εγκεκριμένοι εθελοντές μπορούν να αναφέρουν άφιξη.']);
+        echo json_encode(['ok' => false, 'error' => t('dispatch.only_approved_can_ack')]);
         exit;
     }
 
     $dispatchId = (int) post('id');
     $dispatch = dbFetchOne("SELECT id, team_id, label, type FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
     if (!$dispatch) {
-        echo json_encode(['ok' => false, 'error' => 'Δεν βρέθηκε.']);
+        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
     }
 
     $myTeamId = getUserTeamIdForMission($missionId, $userId);
 
     if ($dispatch['team_id'] && (int) $dispatch['team_id'] !== $myTeamId) {
-        echo json_encode(['ok' => false, 'error' => 'Αυτή η εντολή δεν αφορά την ομάδα σας.']);
+        echo json_encode(['ok' => false, 'error' => t('dispatch.not_your_team')]);
         exit;
     }
 
@@ -205,7 +209,7 @@ if ($action === 'ack') {
 }
 
 if (!$canManageWarRoom) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν έχετε δικαίωμα διαχείρισης σημείων.']);
+    echo json_encode(['ok' => false, 'error' => t('dispatch.no_manage_permission')]);
     exit;
 }
 
@@ -216,7 +220,7 @@ if ($action === 'create') {
     if ($teamId) {
         $team = dbFetchOne("SELECT id FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
         if (!$team) {
-            echo json_encode(['ok' => false, 'error' => 'Η ομάδα δεν βρέθηκε.']);
+            echo json_encode(['ok' => false, 'error' => t('common.team_not_found')]);
             exit;
         }
     }
@@ -228,18 +232,18 @@ if ($action === 'create') {
 
     if ($type === 'point') {
         if (!is_array($rawGeo) || !isset($rawGeo['lat'], $rawGeo['lng'])) {
-            echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο σημείο.']);
+            echo json_encode(['ok' => false, 'error' => t('dispatch.invalid_point')]);
             exit;
         }
         $geo = ['lat' => (float) $rawGeo['lat'], 'lng' => (float) $rawGeo['lng']];
     } elseif ($type === 'polygon') {
         if (!is_array($rawGeo) || count($rawGeo) < 3) {
-            echo json_encode(['ok' => false, 'error' => 'Το πολύγωνο χρειάζεται τουλάχιστον 3 σημεία.']);
+            echo json_encode(['ok' => false, 'error' => t('dispatch.polygon_needs_3_points')]);
             exit;
         }
         $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
     } else {
-        echo json_encode(['ok' => false, 'error' => 'Άγνωστος τύπος σημείου.']);
+        echo json_encode(['ok' => false, 'error' => t('dispatch.unknown_point_type')]);
         exit;
     }
 
@@ -261,17 +265,19 @@ if ($action === 'create') {
     );
 
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $title = $type === 'point' ? '📍 Νέο σημείο στον χάρτη' : '🗺️ Νέα περιοχή στον χάρτη';
-    $message = 'Ο/Η υπεύθυνος/η της αποστολής «' . $mission['title'] . '» έστειλε '
-        . ($type === 'point' ? 'ένα σημείο' : 'μια περιοχή') . ' στον χάρτη.'
-        . ($label ? ' (' . $label . ')' : '');
+    $titleKey = $type === 'point' ? 'dispatch.create_notify_title_point' : 'dispatch.create_notify_title_area';
+    $kindKey = $type === 'point' ? 'dispatch.a_point' : 'dispatch.an_area';
+    $labelSuffix = $label ? ' (' . $label . ')' : '';
 
-    foreach ($recipients as $recipient) {
-        $recipientId = (int) $recipient['user_id'];
-        if ($recipientId === (int) $userId) {
-            continue;
-        }
-        sendNotification($recipientId, $title, $message, 'info', 'mission_dispatch_point', [
+    $recipientIds = array_values(array_diff(
+        array_map(fn($r) => (int) $r['user_id'], $recipients),
+        [(int) $userId]
+    ));
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        $message = t('dispatch.create_notify_message', ['mission' => $mission['title'], 'kind' => t($kindKey, [], $lang), 'label_suffix' => $labelSuffix], $lang);
+        sendNotification($recipientId, t($titleKey, [], $lang), $message, 'info', 'mission_dispatch_point', [
             'url' => $warRoomUrl,
             'tag' => 'dispatch-point-mission-' . $missionId,
             'bannerMission' => $missionId,
@@ -286,7 +292,7 @@ if ($action === 'delete') {
     $dispatchId = (int) post('id');
     $row = dbFetchOne("SELECT id FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
     if (!$row) {
-        echo json_encode(['ok' => false, 'error' => 'Δεν βρέθηκε.']);
+        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
     }
     dbExecute("DELETE FROM mission_dispatch_points WHERE id = ?", [$dispatchId]);
@@ -295,4 +301,4 @@ if ($action === 'delete') {
     exit;
 }
 
-echo json_encode(['ok' => false, 'error' => 'Άγνωστη ενέργεια.']);
+echo json_encode(['ok' => false, 'error' => t('common.unknown_action')]);

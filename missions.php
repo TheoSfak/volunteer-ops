@@ -24,7 +24,7 @@ if (isPost() && post('action') === 'duplicate' && isAdmin()) {
               is_urgent, status, responsible_user_id, created_by, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
             [
-                'Αντίγραφο: ' . $src['title'],
+                t('missions_page.duplicate_prefix', ['title' => $src['title']]),
                 $src['description'],
                 $src['mission_type_id'],
                 $src['department_id'],
@@ -43,10 +43,10 @@ if (isPost() && post('action') === 'duplicate' && isAdmin()) {
             ]
         );
         logAudit('duplicate', 'missions', $newId, null, ['source_id' => $srcId]);
-        setFlash('success', 'Η αποστολή αντιγράφηκε. Μπορείτε να την επεξεργαστείτε.');
+        setFlash('success', t('missions_page.duplicated_flash'));
         redirect('mission-form.php?id=' . $newId);
     }
-    setFlash('error', 'Δεν βρέθηκε η αποστολή.');
+    setFlash('error', t('missions_page.mission_not_found_alt'));
     redirect('missions.php');
 }
 
@@ -66,13 +66,13 @@ $perPage = 20;
 
 // Dynamic page title
 $statusTitles = [
-    STATUS_OPEN => 'Ενεργές Αποστολές',
-    STATUS_CLOSED => 'Κλειστές Αποστολές',
-    STATUS_COMPLETED => 'Ολοκληρωμένες Αποστολές',
-    STATUS_DRAFT => 'Πρόχειρες Αποστολές',
-    STATUS_CANCELED => 'Ακυρωμένες Αποστολές'
+    STATUS_OPEN => t('missions_page.status_title_open'),
+    STATUS_CLOSED => t('missions_page.status_title_closed'),
+    STATUS_COMPLETED => t('missions_page.status_title_completed'),
+    STATUS_DRAFT => t('missions_page.status_title_draft'),
+    STATUS_CANCELED => t('missions_page.status_title_canceled'),
 ];
-$pageTitle = $statusTitles[$status] ?? 'Αποστολές';
+$pageTitle = $statusTitles[$status] ?? t('missions_page.title');
 
 // Build query
 $where = ['m.deleted_at IS NULL'];
@@ -223,20 +223,20 @@ include __DIR__ . '/includes/header.php';
 
 <div class="missions-page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <h1 class="h3 mb-0">
-        <i class="bi bi-flag me-2"></i>Αποστολές
+        <i class="bi bi-flag me-2"></i><?= t('missions_page.title') ?>
     </h1>
     <?php if (isAdmin()): ?>
         <div class="d-flex flex-wrap gap-2">
-            <a href="exports/export-missions.php?status=<?= h($status) ?>&department_id=<?= h($department) ?>&search=<?= h($search) ?>&mission_type=<?= h($missionType) ?>" 
+            <a href="exports/export-missions.php?status=<?= h($status) ?>&department_id=<?= h($department) ?>&search=<?= h($search) ?>&mission_type=<?= h($missionType) ?>"
                class="btn btn-outline-success">
-                <i class="bi bi-download me-1"></i>Εξαγωγή CSV
+                <i class="bi bi-download me-1"></i><?= t('missions_page.export_csv') ?>
             </a>
-            <a href="exports/export-missions.php" 
-               class="btn btn-outline-secondary" title="Εξαγωγή όλων των αποστολών">
-                <i class="bi bi-download me-1"></i>Εξαγωγή Όλων
+            <a href="exports/export-missions.php"
+               class="btn btn-outline-secondary" title="<?= t('missions_page.export_all_title') ?>">
+                <i class="bi bi-download me-1"></i><?= t('missions_page.export_all_btn') ?>
             </a>
             <a href="mission-form.php" class="btn btn-primary">
-                <i class="bi bi-plus-lg me-1"></i>Νέα Αποστολή
+                <i class="bi bi-plus-lg me-1"></i><?= t('missions_page.new_mission_btn') ?>
             </a>
         </div>
     <?php endif; ?>
@@ -247,12 +247,12 @@ include __DIR__ . '/includes/header.php';
     <div class="card-body">
         <form method="get" class="row g-2">
             <div class="col-md-3">
-                <input type="text" class="form-control form-control-sm" name="search" placeholder="Αναζήτηση..." 
+                <input type="text" class="form-control form-control-sm" name="search" placeholder="<?= t('missions_page.search_placeholder') ?>"
                        value="<?= h($search) ?>">
             </div>
             <div class="col-md-2">
                 <select class="form-select form-select-sm" name="status">
-                    <option value="">Όλες οι καταστάσεις</option>
+                    <option value=""><?= t('missions_page.all_statuses') ?></option>
                     <?php foreach ($GLOBALS['STATUS_LABELS'] as $key => $label): ?>
                         <option value="<?= $key ?>" <?= $status === $key ? 'selected' : '' ?>>
                             <?= h($label) ?>
@@ -262,7 +262,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="col-md-2">
                 <select class="form-select form-select-sm" name="mission_type">
-                    <option value="">Όλοι οι τύποι</option>
+                    <option value=""><?= t('missions_page.all_types') ?></option>
                     <?php foreach ($missionTypesFilter as $mtf): ?>
                         <option value="<?= $mtf['id'] ?>" <?= $missionType == $mtf['id'] ? 'selected' : '' ?>>
                             <?= h($mtf['name']) ?>
@@ -272,7 +272,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="col-md-3">
                 <select class="form-select form-select-sm" name="department">
-                    <option value="">Όλα τα τμήματα</option>
+                    <option value=""><?= t('missions_page.all_departments') ?></option>
                     <?php foreach ($departments as $dept): ?>
                         <option value="<?= $dept['id'] ?>" <?= $department == $dept['id'] ? 'selected' : '' ?>>
                             <?= h($dept['name']) ?>
@@ -282,11 +282,11 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="col-md-2">
                 <button type="submit" class="btn btn-outline-primary w-100">
-                    <i class="bi bi-search me-1"></i>Φίλτρο
+                    <i class="bi bi-search me-1"></i><?= t('missions_page.filter_btn') ?>
                 </button>
             </div>
             <div class="col-md-2">
-                <a href="missions.php" class="btn btn-outline-secondary w-100">Καθαρισμός</a>
+                <a href="missions.php" class="btn btn-outline-secondary w-100"><?= t('dispatch.clear_btn') ?></a>
             </div>
         </form>
     </div>
@@ -296,21 +296,21 @@ include __DIR__ . '/includes/header.php';
 <div class="card">
     <div class="card-body p-0">
         <?php if (empty($missions)): ?>
-            <p class="text-muted text-center py-5">Δεν βρέθηκαν αποστολές.</p>
+            <p class="text-muted text-center py-5"><?= t('missions_page.empty') ?></p>
         <?php else: ?>
             <!-- Desktop/Tablet table view (hidden on portrait phones) -->
             <div class="table-responsive d-none d-sm-block">
                 <table class="table table-hover table-sm align-middle mb-0">
                     <thead class="table-light">
                         <tr>
-                            <th>Τίτλος</th>
-                            <th>Τύπος</th>
-                            <th>Τμήμα</th>
-                            <th>Ημερομηνία</th>
-                            <th>Βάρδιες</th>
-                            <th>Εθελοντές</th>
-                            <th>Κατάσταση</th>
-                            <th class="text-end">Ενέργειες</th>
+                            <th><?= t('missions_page.col_title') ?></th>
+                            <th><?= t('missions_page.col_type') ?></th>
+                            <th><?= t('missions_page.col_department') ?></th>
+                            <th><?= t('missions_page.col_date') ?></th>
+                            <th><?= t('missions_page.col_shifts') ?></th>
+                            <th><?= t('missions_page.col_volunteers') ?></th>
+                            <th><?= t('missions_page.col_status') ?></th>
+                            <th class="text-end"><?= t('missions_page.col_actions') ?></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -321,11 +321,11 @@ include __DIR__ . '/includes/header.php';
                                         <strong><?= h($mission['title']) ?></strong>
                                     </a>
                                     <?php if ($mission['is_urgent']): ?>
-                                        <span class="badge bg-danger ms-1">Επείγον</span>
+                                        <span class="badge bg-danger ms-1"><?= t('missions_page.urgent_badge') ?></span>
                                     <?php endif; ?>
                                     <?php if ($mission['recurrence_id']): ?>
-                                        <span class="badge bg-info text-dark ms-1" title="Αποστολή σε επαναλαμβανόμενη σειρά">
-                                            <i class="bi bi-arrow-repeat me-1"></i>Σειρά
+                                        <span class="badge bg-info text-dark ms-1" title="<?= t('missions_page.recurring_title') ?>">
+                                            <i class="bi bi-arrow-repeat me-1"></i><?= t('missions_page.recurring_badge') ?>
                                         </span>
                                     <?php endif; ?>
                                     <br>
@@ -363,11 +363,11 @@ include __DIR__ . '/includes/header.php';
                                             </span>
                                             <div class="vol-label justify-content-center text-<?= $vColor ?>">
                                                 <?php if ($vPct >= 100): ?>
-                                                    <i class="bi bi-check-circle-fill"></i> Πλήρης!
+                                                    <i class="bi bi-check-circle-fill"></i> <?= t('missions_page.full_badge') ?>
                                                 <?php elseif ($vPct == 0): ?>
-                                                    <i class="bi bi-exclamation-triangle-fill"></i> Χρειάζονται εθελοντές
+                                                    <i class="bi bi-exclamation-triangle-fill"></i> <?= t('missions_page.need_volunteers') ?>
                                                 <?php else: ?>
-                                                    <i class="bi bi-hourglass-split"></i> Απομένουν <?= $mission['max_volunteers'] - $mission['volunteer_count'] ?>
+                                                    <i class="bi bi-hourglass-split"></i> <?= t('missions_page.remaining_prefix', ['count' => $mission['max_volunteers'] - $mission['volunteer_count']]) ?>
                                                 <?php endif; ?>
                                             </div>
                                         </div>
@@ -381,29 +381,29 @@ include __DIR__ . '/includes/header.php';
                                         $days = floor($elapsed / 86400);
                                         $hours = floor(($elapsed % 86400) / 3600);
                                         $elapsedText = '';
-                                        if ($days > 0) $elapsedText .= $days . ' μέρ' . ($days == 1 ? 'α' : 'ες');
-                                        if ($hours > 0) $elapsedText .= ($days > 0 ? ' και ' : '') . $hours . ' ώρ' . ($hours == 1 ? 'α' : 'ες');
-                                        if (!$elapsedText) $elapsedText = 'Μόλις τώρα';
+                                        if ($days > 0) $elapsedText .= $days . ' ' . t($days == 1 ? 'missions_page.days_singular' : 'missions_page.days_plural');
+                                        if ($hours > 0) $elapsedText .= ($days > 0 ? t('missions_page.and_connector') : '') . $hours . ' ' . t($hours == 1 ? 'missions_page.hours_singular' : 'missions_page.hours_plural');
+                                        if (!$elapsedText) $elapsedText = t('missions_page.just_now');
                                     ?>
                                         <br>
-                                        <span class="badge bg-danger mt-1 d-block mx-auto" style="font-size:.7rem;width:fit-content;" title="Έληξε πριν <?= h($elapsedText) ?>" data-bs-toggle="tooltip">
-                                            <i class="bi bi-clock-history"></i> ΕΛΗΞΕ
+                                        <span class="badge bg-danger mt-1 d-block mx-auto" style="font-size:.7rem;width:fit-content;" title="<?= t('missions_page.overdue_since_prefix', ['elapsed' => h($elapsedText)]) ?>" data-bs-toggle="tooltip">
+                                            <i class="bi bi-clock-history"></i> <?= t('missions_page.overdue_badge') ?>
                                         </span>
                                     <?php endif; ?>
                                 </td>
                                 <td class="text-end">
-                                    <a href="<?= $missionLinkBase ?>?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-primary" title="Προβολή">
+                                    <a href="<?= $missionLinkBase ?>?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-primary" title="<?= t('missions_page.view_btn') ?>">
                                         <i class="bi bi-eye"></i>
                                     </a>
                                     <?php if (isAdmin()): ?>
-                                        <a href="mission-form.php?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-secondary" title="Επεξεργασία">
+                                        <a href="mission-form.php?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-secondary" title="<?= t('common.edit') ?>">
                                             <i class="bi bi-pencil"></i>
                                         </a>
                                         <form method="post" class="d-inline">
                                             <?= csrfField() ?>
                                             <input type="hidden" name="action" value="duplicate">
                                             <input type="hidden" name="mission_id" value="<?= $mission['id'] ?>">
-                                            <button type="submit" class="btn btn-sm btn-outline-info" title="Αντιγραφή">
+                                            <button type="submit" class="btn btn-sm btn-outline-info" title="<?= t('missions_page.duplicate_btn') ?>">
                                                 <i class="bi bi-copy"></i>
                                             </button>
                                         </form>
@@ -426,7 +426,7 @@ include __DIR__ . '/includes/header.php';
                                         <strong><?= h($mission['title']) ?></strong>
                                     </a>
                                     <?php if ($mission['is_urgent']): ?>
-                                        <span class="badge bg-danger ms-1">Επείγον</span>
+                                        <span class="badge bg-danger ms-1"><?= t('missions_page.urgent_badge') ?></span>
                                     <?php endif; ?>
                                 </div>
                                 <div>
@@ -437,12 +437,12 @@ include __DIR__ . '/includes/header.php';
                                         $days = floor($elapsed / 86400);
                                         $hours = floor(($elapsed % 86400) / 3600);
                                         $elapsedText = '';
-                                        if ($days > 0) $elapsedText .= $days . ' μέρ' . ($days == 1 ? 'α' : 'ες');
-                                        if ($hours > 0) $elapsedText .= ($days > 0 ? ' και ' : '') . $hours . ' ώρ' . ($hours == 1 ? 'α' : 'ες');
-                                        if (!$elapsedText) $elapsedText = 'Μόλις τώρα';
+                                        if ($days > 0) $elapsedText .= $days . ' ' . t($days == 1 ? 'missions_page.days_singular' : 'missions_page.days_plural');
+                                        if ($hours > 0) $elapsedText .= ($days > 0 ? t('missions_page.and_connector') : '') . $hours . ' ' . t($hours == 1 ? 'missions_page.hours_singular' : 'missions_page.hours_plural');
+                                        if (!$elapsedText) $elapsedText = t('missions_page.just_now');
                                     ?>
-                                        <span class="badge bg-danger d-block mx-auto" style="font-size:.7rem;width:fit-content;" title="Έληξε πριν <?= h($elapsedText) ?>">
-                                            <i class="bi bi-clock-history"></i> ΕΛΗΞΕ
+                                        <span class="badge bg-danger d-block mx-auto" style="font-size:.7rem;width:fit-content;" title="<?= t('missions_page.overdue_since_prefix', ['elapsed' => h($elapsedText)]) ?>">
+                                            <i class="bi bi-clock-history"></i> <?= t('missions_page.overdue_badge') ?>
                                         </span>
                                     <?php endif; ?>
                                 </div>
@@ -482,9 +482,9 @@ include __DIR__ . '/includes/header.php';
                                 </span>
                                 <span class="vol-label d-inline-flex ms-2 text-<?= $mColor ?>">
                                     <?php if ($mPct >= 100): ?>
-                                        <i class="bi bi-check-circle-fill"></i> Πλήρης!
+                                        <i class="bi bi-check-circle-fill"></i> <?= t('missions_page.full_badge') ?>
                                     <?php elseif ($mPct == 0): ?>
-                                        <i class="bi bi-exclamation-triangle-fill"></i> Κενό
+                                        <i class="bi bi-exclamation-triangle-fill"></i> <?= t('missions_page.empty_slots') ?>
                                     <?php else: ?>
                                         <i class="bi bi-hourglass-split"></i> -<?= $mission['max_volunteers'] - $mission['volunteer_count'] ?>
                                     <?php endif; ?>
@@ -493,34 +493,34 @@ include __DIR__ . '/includes/header.php';
                             <div class="mobile-card-row">
                                 <small>
                                     <span class="badge bg-secondary"><?= $mission['shift_count'] ?></span>
-                                    <span class="text-muted ms-1">βάρδιες</span>
+                                    <span class="text-muted ms-1"><?= t('missions_page.shifts_label') ?></span>
                                 </small>
                             </div>
                             <?php else: ?>
                             <div class="mobile-card-row">
                                 <small>
                                     <span class="badge bg-secondary"><?= $mission['shift_count'] ?></span>
-                                    <span class="text-muted ms-1">βάρδιες</span>
+                                    <span class="text-muted ms-1"><?= t('missions_page.shifts_label') ?></span>
                                     <span class="badge bg-info ms-2"><?= $mission['volunteer_count'] ?></span>
-                                    <span class="text-muted ms-1">εθελοντές</span>
+                                    <span class="text-muted ms-1"><?= t('missions_page.volunteers_label') ?></span>
                                 </small>
                             </div>
                             <?php endif; ?>
-                            
+
                             <div class="mobile-card-actions">
                                 <a href="<?= $missionLinkBase ?>?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-primary">
-                                    <i class="bi bi-eye me-1"></i>Προβολή
+                                    <i class="bi bi-eye me-1"></i><?= t('missions_page.view_btn') ?>
                                 </a>
                                 <?php if (isAdmin()): ?>
                                     <a href="mission-form.php?id=<?= $mission['id'] ?>" class="btn btn-sm btn-outline-secondary">
-                                        <i class="bi bi-pencil me-1"></i>Επεξεργασία
+                                        <i class="bi bi-pencil me-1"></i><?= t('common.edit') ?>
                                     </a>
                                     <form method="post" class="d-inline">
                                         <?= csrfField() ?>
                                         <input type="hidden" name="action" value="duplicate">
                                         <input type="hidden" name="mission_id" value="<?= $mission['id'] ?>">
                                         <button type="submit" class="btn btn-sm btn-outline-info">
-                                            <i class="bi bi-copy me-1"></i>Αντιγραφή
+                                            <i class="bi bi-copy me-1"></i><?= t('missions_page.duplicate_btn') ?>
                                         </button>
                                     </form>
                                 <?php endif; ?>

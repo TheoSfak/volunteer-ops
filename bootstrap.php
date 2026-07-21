@@ -13,6 +13,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/auth.php';
+require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/includes/permissions.php';
 require_once __DIR__ . '/includes/email.php';
 require_once __DIR__ . '/includes/webpush.php';

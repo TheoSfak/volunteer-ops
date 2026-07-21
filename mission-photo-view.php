@@ -16,7 +16,7 @@ $photoId = (int) get('id');
 $photo = dbFetchOne("SELECT * FROM mission_photos WHERE id = ?", [$photoId]);
 if (!$photo) {
     http_response_code(404);
-    exit('Δεν βρέθηκε.');
+    exit(t('common.not_found'));
 }
 
 $mission = dbFetchOne(
@@ -28,7 +28,7 @@ $mission = dbFetchOne(
 // check right below is unaffected, this only extends *when*, not *who*.
 if (!$mission || !in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED], true) || empty($mission['show_in_ops'])) {
     http_response_code(404);
-    exit('Δεν βρέθηκε.');
+    exit(t('common.not_found'));
 }
 
 $canManageWarRoom = hasPagePermission('missions_manage') || (int)$mission['responsible_user_id'] === (int)$userId;
@@ -40,13 +40,13 @@ $isApprovedParticipant = (bool) dbFetchValue(
 );
 if (!$canManageWarRoom && !$isApprovedParticipant) {
     http_response_code(403);
-    exit('Δεν έχετε πρόσβαση.');
+    exit(t('common.no_access'));
 }
 
 $filePath = __DIR__ . '/uploads/mission-photos/' . basename($photo['stored_name']);
 if (!is_file($filePath) || !is_readable($filePath)) {
     http_response_code(404);
-    exit('Το αρχείο δεν βρέθηκε στο σύστημα.');
+    exit(t('media.file_not_found_on_disk'));
 }
 
 // Trust the actual file contents rather than the MIME value stored in the DB.
@@ -58,7 +58,7 @@ $allowedMimes = [
 ];
 if (!in_array($mime, $allowedMimes, true)) {
     http_response_code(415);
-    exit('Μη υποστηριζόμενος τύπος αρχείου.');
+    exit(t('media.unsupported_file_type'));
 }
 
 while (ob_get_level() > 0) {

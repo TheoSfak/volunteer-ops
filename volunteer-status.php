@@ -17,7 +17,7 @@ if (!isPost()) {
 
 // AJAX-safe CSRF check (verifyCsrf() redirects on failure which breaks fetch)
 if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
-    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
+    echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }
 
@@ -34,7 +34,7 @@ $lng = ($lngRaw !== '' && $lngRaw !== null && is_numeric($lngRaw)) ? (float) $ln
 
 $allowedStatuses = ['on_way', 'on_site', 'needs_help'];
 if (!in_array($status, $allowedStatuses, true)) {
-    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρη κατάσταση']);
+    echo json_encode(['ok' => false, 'error' => t('status.invalid_status')]);
     exit;
 }
 
@@ -50,7 +50,7 @@ $pr = dbFetchOne(
 );
 
 if (!$pr) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν βρέθηκε η αίτηση']);
+    echo json_encode(['ok' => false, 'error' => t('status.request_not_found')]);
     exit;
 }
 
@@ -61,7 +61,7 @@ try {
         [$status, $prId]
     );
 } catch (Exception $e) {
-    echo json_encode(['ok' => false, 'error' => 'Η λειτουργία status δεν είναι διαθέσιμη ακόμη (χρειάζεται migration βάσης).']);
+    echo json_encode(['ok' => false, 'error' => t('status.feature_unavailable_migration')]);
     exit;
 }
 
@@ -93,7 +93,7 @@ if ($status === 'needs_help') {
 
         $teamId = getUserTeamIdForMission($missionId, $userId);
         $myTeam = $teamId ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$teamId]) : null;
-        $teamLabel = $myTeam ? ($myTeam['codename'] . ' ' . $myTeam['team_number']) : 'Χωρίς ομάδα';
+        $teamLabel = $myTeam ? ($myTeam['codename'] . ' ' . $myTeam['team_number']) : t('status.no_team_label');
 
         dbInsert(
             "INSERT INTO mission_sos_alerts (mission_id, user_id, pr_id, team_id, lat, lng, created_at)
@@ -106,10 +106,12 @@ if ($status === 'needs_help') {
             $pr['responsible_user_id'] ? (int) $pr['responsible_user_id'] : null,
             $userId
         );
-        $warRoomUrl    = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-        $notifyTitle   = '🆘 SOS — ' . mb_strtoupper($teamLabel, 'UTF-8');
-        $notifyMessage = h($currentUser['name']) . ' (' . h($teamLabel) . ') χρειάζεται ΑΜΕΣΗ βοήθεια στην αποστολή «' . $pr['mission_title'] . '»!';
+        $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+        $langByUserId = getUserLanguages($recipientIds);
         foreach ($recipientIds as $recipientId) {
+            $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+            $notifyTitle = t('sos.notify_title', ['team' => mb_strtoupper($teamLabel, 'UTF-8')], $lang);
+            $notifyMessage = t('sos.notify_message', ['name' => h($currentUser['name']), 'team' => h($teamLabel), 'mission' => $pr['mission_title']], $lang);
             // Mandatory (empty code) — same convention as orders/global-message/
             // high-severity shortage reports, so an SOS can never be silently muted.
             sendNotification($recipientId, $notifyTitle, $notifyMessage, 'danger', '', [
@@ -122,9 +124,9 @@ if ($status === 'needs_help') {
 }
 
 $labels = [
-    'on_way'      => '🚗 Σε Κίνηση',
-    'on_site'     => '✅ Επί Τόπου',
-    'needs_help'  => '🆘 Χρειάζεται Βοήθεια',
+    'on_way'      => t('status.self_on_way'),
+    'on_site'     => t('status.self_on_site'),
+    'needs_help'  => t('status.label_needs_help'),
 ];
 
 echo json_encode(['ok' => true, 'label' => $labels[$status], 'status' => $status]);

@@ -77,7 +77,7 @@ $mission = dbFetchOne(
     [$missionId]
 );
 if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
-    echo json_encode(['ok' => false, 'error' => 'Η αποστολή δεν βρέθηκε ή δεν είναι ενεργή στο Επιχειρησιακό.']);
+    echo json_encode(['ok' => false, 'error' => t('common.mission_not_found_or_inactive')]);
     exit;
 }
 
@@ -89,7 +89,7 @@ $isApprovedParticipant = (bool) dbFetchValue(
     [$missionId, $userId, PARTICIPATION_APPROVED]
 );
 if (!$canManageWarRoom && !$isApprovedParticipant) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν έχετε πρόσβαση στο Action Room αυτής της αποστολής.']);
+    echo json_encode(['ok' => false, 'error' => t('common.no_access_action_room')]);
     exit;
 }
 
@@ -97,7 +97,7 @@ $team = null;
 if ($teamId) {
     $team = dbFetchOne("SELECT * FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
     if (!$team) {
-        echo json_encode(['ok' => false, 'error' => 'Η ομάδα δεν βρέθηκε.']);
+        echo json_encode(['ok' => false, 'error' => t('common.team_not_found')]);
         exit;
     }
     $isTeamMember = (bool) dbFetchValue(
@@ -105,7 +105,7 @@ if ($teamId) {
         [$teamId, $userId]
     );
     if (!$canManageWarRoom && !$isTeamMember) {
-        echo json_encode(['ok' => false, 'error' => 'Δεν έχετε πρόσβαση σε αυτό το chat.']);
+        echo json_encode(['ok' => false, 'error' => t('chat.no_room_access')]);
         exit;
     }
 }
@@ -157,7 +157,7 @@ if (!isPost()) {
 
 // ── POST: send or delete ────────────────────────────────────────────────────
 if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
-    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
+    echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }
 
@@ -166,7 +166,7 @@ $action = post('action');
 if ($action === 'send') {
     $message = trim((string) post('message'));
     if ($message === '') {
-        echo json_encode(['ok' => false, 'error' => 'Το μήνυμα δεν μπορεί να είναι κενό.']);
+        echo json_encode(['ok' => false, 'error' => t('chat.empty_message')]);
         exit;
     }
     if (mb_strlen($message) > 2000) {
@@ -201,11 +201,11 @@ if ($action === 'delete') {
         [$messageId, $missionId]
     );
     if (!$row) {
-        echo json_encode(['ok' => false, 'error' => 'Το μήνυμα δεν βρέθηκε.']);
+        echo json_encode(['ok' => false, 'error' => t('chat.message_not_found')]);
         exit;
     }
     if ((int) $row['user_id'] !== (int) $userId && !$canManageWarRoom) {
-        echo json_encode(['ok' => false, 'error' => 'Δεν έχετε δικαίωμα διαγραφής.']);
+        echo json_encode(['ok' => false, 'error' => t('chat.no_delete_permission')]);
         exit;
     }
 
@@ -216,4 +216,4 @@ if ($action === 'delete') {
     exit;
 }
 
-echo json_encode(['ok' => false, 'error' => 'Άγνωστη ενέργεια.']);
+echo json_encode(['ok' => false, 'error' => t('common.unknown_action')]);

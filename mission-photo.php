@@ -18,8 +18,6 @@ header('Content-Type: application/json');
  */
 function notifyPhotoReceived(int $missionId, string $missionTitle, ?int $responsibleUserId, string $senderName, int $senderId, string $mediaType): void {
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $kind = $mediaType === 'video' ? 'βίντεο' : 'φωτογραφία';
-    $message = $senderName . ' έστειλε ' . $kind . ' από το πεδίο για την αποστολή «' . $missionTitle . '».';
 
     $admins = dbFetchAll("SELECT id FROM users WHERE role IN (?, ?) AND is_active = 1", [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
     $leaders = dbFetchAll(
@@ -38,10 +36,14 @@ function notifyPhotoReceived(int $missionId, string $missionTitle, ?int $respons
     }
     $recipientIds = array_values(array_unique(array_diff($recipientIds, [$senderId])));
 
-    $title = $mediaType === 'video' ? '🎥 Νέο Βίντεο' : '📷 Νέα Φωτογραφία';
+    $titleKey = $mediaType === 'video' ? 'photo.notify_title_video' : 'photo.notify_title_photo';
+    $kindKey = $mediaType === 'video' ? 'photo.kind_video' : 'photo.kind_photo';
     $code = $mediaType === 'video' ? 'mission_video_received' : 'mission_photo_received';
+    $langByUserId = getUserLanguages($recipientIds);
     foreach ($recipientIds as $recipientId) {
-        sendNotification($recipientId, $title, $message, 'info', $code, [
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        $message = t('photo.notify_message', ['name' => $senderName, 'kind' => t($kindKey, [], $lang), 'mission' => $missionTitle], $lang);
+        sendNotification($recipientId, t($titleKey, [], $lang), $message, 'info', $code, [
             'url' => $warRoomUrl,
             'tag' => 'photo-received-mission-' . $missionId,
             'bannerMission' => $missionId,
@@ -59,7 +61,7 @@ $mission = dbFetchOne(
     [$missionId]
 );
 if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
-    echo json_encode(['ok' => false, 'error' => 'Η αποστολή δεν βρέθηκε ή δεν είναι ενεργή στο Επιχειρησιακό.']);
+    echo json_encode(['ok' => false, 'error' => t('common.mission_not_found_or_inactive')]);
     exit;
 }
 
@@ -71,12 +73,12 @@ $isApprovedParticipant = (bool) dbFetchValue(
     [$missionId, $userId, PARTICIPATION_APPROVED]
 );
 if (!$canManageWarRoom && !$isApprovedParticipant) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν έχετε πρόσβαση στο Action Room αυτής της αποστολής.']);
+    echo json_encode(['ok' => false, 'error' => t('common.no_access_action_room')]);
     exit;
 }
 
 if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
-    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
+    echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }
 
@@ -84,11 +86,11 @@ $action = post('action');
 
 if ($action === 'upload') {
     if (!$isApprovedParticipant) {
-        echo json_encode(['ok' => false, 'error' => 'Μόνο εγκεκριμένοι εθελοντές μπορούν να στείλουν φωτογραφία ή βίντεο.']);
+        echo json_encode(['ok' => false, 'error' => t('photo.only_approved_can_send')]);
         exit;
     }
     if (empty($_FILES['media']['name']) || $_FILES['media']['error'] !== UPLOAD_ERR_OK) {
-        echo json_encode(['ok' => false, 'error' => 'Επιλέξτε ένα αρχείο.']);
+        echo json_encode(['ok' => false, 'error' => t('photo.select_file')]);
         exit;
     }
 
@@ -109,11 +111,11 @@ if ($action === 'upload') {
         $mediaType = 'video';
         $maxSize = VIDEO_MAX_SIZE;
     } else {
-        echo json_encode(['ok' => false, 'error' => 'Επιτρέπονται μόνο αρχεία εικόνας (JPG, PNG, GIF, WebP) ή βίντεο (MP4, WebM, MOV).']);
+        echo json_encode(['ok' => false, 'error' => t('photo.invalid_type')]);
         exit;
     }
     if ($file['size'] > $maxSize) {
-        echo json_encode(['ok' => false, 'error' => 'Το αρχείο υπερβαίνει το μέγιστο επιτρεπτό μέγεθος (' . ($maxSize / 1024 / 1024) . 'MB).']);
+        echo json_encode(['ok' => false, 'error' => t('photo.file_too_large', ['size' => $maxSize / 1024 / 1024])]);
         exit;
     }
 
@@ -123,7 +125,7 @@ if ($action === 'upload') {
     }
     $storedName = 'mphoto_' . $missionId . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
     if (!move_uploaded_file($file['tmp_name'], $destDir . $storedName)) {
-        echo json_encode(['ok' => false, 'error' => 'Αποτυχία αποθήκευσης του αρχείου.']);
+        echo json_encode(['ok' => false, 'error' => t('photo.save_failed')]);
         exit;
     }
 
@@ -176,11 +178,11 @@ if ($action === 'delete') {
     $photoId = (int) post('id');
     $photo = dbFetchOne("SELECT id, user_id, stored_name FROM mission_photos WHERE id = ? AND mission_id = ?", [$photoId, $missionId]);
     if (!$photo) {
-        echo json_encode(['ok' => false, 'error' => 'Δεν βρέθηκε.']);
+        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
     }
     if (!$canManageWarRoom && (int) $photo['user_id'] !== $userId) {
-        echo json_encode(['ok' => false, 'error' => 'Δεν έχετε δικαίωμα διαγραφής αυτής της φωτογραφίας.']);
+        echo json_encode(['ok' => false, 'error' => t('photo.no_delete_permission')]);
         exit;
     }
 
@@ -195,4 +197,4 @@ if ($action === 'delete') {
     exit;
 }
 
-echo json_encode(['ok' => false, 'error' => 'Άγνωστη ενέργεια.']);
+echo json_encode(['ok' => false, 'error' => t('common.unknown_action')]);

@@ -21,7 +21,7 @@ if (!isPost()) {
 }
 
 if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
-    echo json_encode(['ok' => false, 'error' => 'Μη έγκυρο αίτημα. Ανανεώστε τη σελίδα.']);
+    echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }
 
@@ -36,13 +36,13 @@ $report = dbFetchOne(
     [$reportId]
 );
 if (!$report) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν βρέθηκε η αναφορά.']);
+    echo json_encode(['ok' => false, 'error' => t('shortage.report_not_found')]);
     exit;
 }
 
 $canManageWarRoom = hasPagePermission('missions_manage') || (int) $report['responsible_user_id'] === (int) $userId;
 if (!$canManageWarRoom) {
-    echo json_encode(['ok' => false, 'error' => 'Δεν έχετε δικαίωμα διαχείρισης αναφορών έλλειψης.']);
+    echo json_encode(['ok' => false, 'error' => t('shortage.no_manage_permission')]);
     exit;
 }
 
@@ -70,4 +70,4 @@ if ($action === 'resolve') {
     exit;
 }
 
-echo json_encode(['ok' => false, 'error' => 'Άγνωστη ενέργεια.']);
+echo json_encode(['ok' => false, 'error' => t('common.unknown_action')]);

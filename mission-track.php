@@ -19,13 +19,13 @@ $mission = dbFetchOne(
     [$missionId]
 );
 if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
-    echo json_encode(['ok' => false, 'error' => 'Η αποστολή δεν βρέθηκε ή δεν είναι ενεργή στο Επιχειρησιακό.']);
+    echo json_encode(['ok' => false, 'error' => t('common.mission_not_found_or_inactive')]);
     exit;
 }
 
 $canManageWarRoom = hasPagePermission('missions_manage') || (int)$mission['responsible_user_id'] === (int)$userId;
 if (!$canManageWarRoom) {
-    echo json_encode(['ok' => false, 'error' => 'Η πορεία ομάδων είναι διαθέσιμη μόνο σε διαχειριστές.']);
+    echo json_encode(['ok' => false, 'error' => t('trail.admin_only')]);
     exit;
 }
 
