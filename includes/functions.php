@@ -841,6 +841,32 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
 }
 
 /**
+ * Action Room: load every shared battle-map annotation (freehand/arrow/text)
+ * for a mission. Unlike dispatch points, there's no per-team targeting or
+ * per-viewer ack state — every approved participant sees every annotation,
+ * and only command staff can create/delete (enforced entirely by whether the
+ * drawing toolbar renders at all, not by a per-row flag here).
+ */
+function loadMissionAnnotationsForMission(int $missionId): array {
+    $rows = dbFetchAll(
+        "SELECT a.id, a.type, a.geo, a.label, u.name AS created_by_name, a.created_at
+         FROM mission_annotations a
+         JOIN users u ON u.id = a.created_by
+         WHERE a.mission_id = ?
+         ORDER BY a.created_at",
+        [$missionId]
+    );
+    return array_map(fn($row) => [
+        'id'              => (int) $row['id'],
+        'type'            => $row['type'],
+        'geo'             => json_decode($row['geo'], true),
+        'label'           => $row['label'],
+        'created_by_name' => $row['created_by_name'],
+        'time'            => date('H:i', strtotime($row['created_at'])),
+    ], $rows);
+}
+
+/**
  * War Room: load $userId's own task-type orders for a mission — the "Οι Εντολές μου"
  * self-service checklist. Unlike location/photo/video (auto-fulfilled elsewhere),
  * task orders can only be marked complete by the recipient via mission-order.php

@@ -1805,6 +1805,22 @@ CREATE TABLE IF NOT EXISTS `mission_dispatch_points` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- MISSION ANNOTATIONS (Action Room shared battle-map freehand/arrow/text sketches)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_annotations` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `type` ENUM('freehand','arrow','text') NOT NULL,
+    `geo` TEXT NOT NULL,
+    `label` VARCHAR(255) NULL,
+    `created_by` INT UNSIGNED NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    INDEX `idx_annotation_mission` (`mission_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- MISSION DISPATCH ACKS (War Room team arrival reports)
 -- =============================================
 CREATE TABLE IF NOT EXISTS `mission_dispatch_acks` (

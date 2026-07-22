@@ -4780,6 +4780,32 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                 }
             },
         ],
+        [
+            'version'     => 93,
+            'description' => 'Create mission_annotations table (Action Room shared battle-map freehand/arrow/text sketches)',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_annotations'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE mission_annotations (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            type ENUM('freehand','arrow','text') NOT NULL,
+                            geo TEXT NOT NULL,
+                            label VARCHAR(255) NULL,
+                            created_by INT UNSIGNED NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+                            INDEX idx_annotation_mission (mission_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
 
     ];
     // ────────────────────────────────────────────────────────────────────────
