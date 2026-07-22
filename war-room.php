@@ -760,6 +760,8 @@ include __DIR__ . '/includes/header.php';
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
     #warRoomMap { height: 520px; border-radius: 12px; }
+    #mapCard.map-fullscreen-active { position: fixed; inset: 0; z-index: 1040; border-radius: 0; }
+    #mapCard.map-fullscreen-active #warRoomMap { height: 100%; border-radius: 0; }
     .war-room-hero { background: linear-gradient(135deg, #172554, #b91c1c); color: #fff; border-radius: 14px; }
     .war-room-hero h1 { color: #fff; font-weight: 700; }
     .participant-row { border-left: 4px solid #e2e8f0; }
@@ -767,7 +769,7 @@ include __DIR__ . '/includes/header.php';
     .presence-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
     .presence-dot.presence-online { background: #28a745; }
     .presence-dot.presence-offline { background: #adb5bd; }
-    .war-room-banner { display: none; align-items: center; gap: 10px; background: #000; border-bottom: 2px solid #dc2626; padding: 8px 12px; }
+    .war-room-banner { display: none; align-items: center; gap: 10px; background: #000; border-bottom: 2px solid #dc2626; padding: 8px 12px; position: relative; z-index: 1900; }
     .war-room-banner-track { flex: 1; overflow: hidden; white-space: nowrap; position: relative; height: 1.6em; }
     .war-room-banner-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #ff3b30; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; animation: warRoomBannerScroll 14s linear infinite; }
     @keyframes warRoomBannerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
@@ -837,10 +839,15 @@ include __DIR__ . '/includes/header.php';
 <?php if (!$fieldMode): ?>
 <div class="row g-4 mb-4">
     <div class="col-lg-8">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100" id="mapCard">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-map me-1"></i><?= t('map.title') ?></h5>
-                <small class="text-muted"><?= t('common.updated_label') ?> <span id="mapRefresh"><?= date('H:i:s') ?></span></small>
+                <div class="d-flex align-items-center gap-2">
+                    <small class="text-muted"><?= t('common.updated_label') ?> <span id="mapRefresh"><?= date('H:i:s') ?></span></small>
+                    <button type="button" id="mapFullscreenToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.btn_fullscreen') ?>">
+                        <i class="bi bi-arrows-fullscreen"></i>
+                    </button>
+                </div>
             </div>
             <?php if ($canManageWarRoom): ?>
             <div class="card-header bg-light border-top d-none" id="trailFilterBar">
@@ -2140,6 +2147,35 @@ document.getElementById('warRoomBannerClose').addEventListener('click', hideWarR
     });
 })();
 
+// Map-only fullscreen: separate from Focus Mode above (that hides the whole
+// app's sidebar; this just expands the live-map card itself). Driven by our
+// own class rather than the :fullscreen CSS pseudo-class so the "fill the
+// screen" effect works even when a real fullscreen grant isn't available,
+// with the real Fullscreen API layered on top on a best-effort basis.
+(function() {
+    const mapFsBtn = document.getElementById('mapFullscreenToggle');
+    const mapCardEl = document.getElementById('mapCard');
+    if (!mapFsBtn || !mapCardEl) return;
+    function setMapFullscreen(active) {
+        mapCardEl.classList.toggle('map-fullscreen-active', active);
+        mapFsBtn.innerHTML = active ? '<i class="bi bi-fullscreen-exit"></i>' : '<i class="bi bi-arrows-fullscreen"></i>';
+        mapFsBtn.title = active ? t('map.btn_exit_fullscreen') : t('map.btn_fullscreen');
+        setTimeout(() => { if (map) map.invalidateSize(); }, 150);
+    }
+    mapFsBtn.addEventListener('click', () => {
+        const entering = !mapCardEl.classList.contains('map-fullscreen-active');
+        setMapFullscreen(entering);
+        if (entering) {
+            if (mapCardEl.requestFullscreen) mapCardEl.requestFullscreen().catch(() => {});
+        } else if (document.fullscreenElement === mapCardEl) {
+            document.exitFullscreen().catch(() => {});
+        }
+    });
+    document.addEventListener('fullscreenchange', () => {
+        if (document.fullscreenElement !== mapCardEl) setMapFullscreen(false);
+    });
+})();
+
 function loadActivity() {
     fetch('mission-history.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(data => {
         const list = document.getElementById('activityList');
@@ -2306,7 +2342,7 @@ function setFieldStatus(btn, prId, status) {
 
 setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => response.json()).then(data => {
     if (!fieldMode) {
-        renderPins(data.pins || []);
+        renderPins(pins = data.pins || []);
         if (data.dispatches) renderDispatches(dispatches = data.dispatches);
         if (data.media) {
             const sig = JSON.stringify(data.media);
@@ -2471,11 +2507,39 @@ document.querySelectorAll('.team-form').forEach(form => {
     const sendBtn = document.getElementById('dispatchSendBtn');
 
     let dispatchMap = null;
+    let refLayer = null;
     let drawPoints = [];
     let vertexMarkers = [];
     let shapeLayer = null;
     let isClosed = false;
     let lastAddressLabel = '';
+
+    // Dimmed, read-only copy of what the live map currently shows (volunteer
+    // pings + existing dispatch points/areas) so the admin isn't drawing a
+    // new dispatch blind — reads the same `pins`/`dispatches` globals the
+    // live map itself is rendered from, refreshed on every modal open.
+    // Tooltip-only (no popups/buttons): this map's click handler is for
+    // placing new draw points, not for managing existing ones.
+    function renderDispatchContext() {
+        if (!refLayer) return;
+        refLayer.clearLayers();
+        const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
+        pins.forEach(pin => {
+            const color = pin.team_color || statusColors[pin.status] || '#2563eb';
+            L.circleMarker([pin.lat, pin.lng], {radius:6, weight:2, color:'#fff', fillColor:color, fillOpacity:0.55, opacity:0.6})
+                .addTo(refLayer)
+                .bindTooltip(escapeHtml(pin.name));
+        });
+        dispatches.forEach(item => {
+            const tooltip = item.label ? escapeHtml(item.label) : item.team_label;
+            if (item.type === 'point') {
+                const icon = L.divIcon({className:'', html:'<i class="bi bi-geo-alt-fill" style="font-size:22px;color:#7c3aed;opacity:0.55;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[22,22], iconAnchor:[11,20]});
+                L.marker([item.geo.lat, item.geo.lng], {icon}).addTo(refLayer).bindTooltip(tooltip);
+            } else if (item.type === 'polygon') {
+                L.polygon(item.geo, {color:'#7c3aed', weight:2, opacity:0.5, fillOpacity:0.1}).addTo(refLayer).bindTooltip(tooltip);
+            }
+        });
+    }
 
     function resetDrawing() {
         drawPoints = [];
@@ -2521,8 +2585,10 @@ document.querySelectorAll('.team-form').forEach(form => {
             const center = missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73];
             dispatchMap = L.map('dispatchMap').setView(center, missionLocation.lat ? 13 : 7);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(dispatchMap);
+            refLayer = L.layerGroup().addTo(dispatchMap);
             dispatchMap.on('click', onMapClick);
         }
+        renderDispatchContext();
         setTimeout(() => dispatchMap.invalidateSize(), 100);
     });
 

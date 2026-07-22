@@ -138,6 +138,8 @@ return [
 
         // Map / trail
         'map.title' => 'Ζωντανός χάρτης αποστολής',
+        'map.btn_fullscreen' => 'Πλήρης οθόνη χάρτη',
+        'map.btn_exit_fullscreen' => 'Έξοδος πλήρους οθόνης χάρτη',
         'trail.team_label' => 'Ομάδα',
         'trail.include_admin_points' => 'Σημεία/περιοχές διαχειριστή',
         'trail.include_auto' => 'Αυτόματα στίγματα',
@@ -654,6 +656,8 @@ return [
         'banner.ack_btn' => 'Acknowledge',
 
         'map.title' => 'Live mission map',
+        'map.btn_fullscreen' => 'Fullscreen map',
+        'map.btn_exit_fullscreen' => 'Exit map fullscreen',
         'trail.team_label' => 'Team',
         'trail.include_admin_points' => 'Admin points/areas',
         'trail.include_auto' => 'Automatic pings',
