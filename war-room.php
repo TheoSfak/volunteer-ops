@@ -790,7 +790,6 @@ include __DIR__ . '/includes/header.php';
     body.war-room-focus .sidebar-toggle { display: none; }
     body.war-room-focus .main-content { margin-left: 0; }
     #mediaList { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; align-content: start; }
-    .guest-name-tag { border-bottom: 1px dashed #b45309; color: #b45309; cursor: help; }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
@@ -1499,7 +1498,7 @@ function escapeHtml(str) {
 function guestNameHtml(name, isExternal, orgName) {
     if (!isExternal) return escapeHtml(name);
     const org = (orgName && orgName.trim() !== '') ? orgName : t('guest.org_unknown');
-    return `<span class="guest-name-tag" title="${escapeHtml(t('guest.org_tooltip', {org}))}">${escapeHtml(name)}</span>`;
+    return `${escapeHtml(name)}<sup class="guest-org-badge" title="${escapeHtml(t('guest.org_tooltip', {org}))}">${escapeHtml(org)}</sup>`;
 }
 function renderDispatches(items) {
     // A live poll can re-run this while an admin has a dispatch popup open
