@@ -1422,7 +1422,7 @@ if (isLoggedIn()) {
         
         <!-- Page Content -->
         <div class="content-wrapper">
-            <?php if (!empty($appLogo) && file_exists(__DIR__ . '/../uploads/logos/' . $appLogo)): ?>
+            <?php if ($currentPage !== 'war-room' && !empty($appLogo) && file_exists(__DIR__ . '/../uploads/logos/' . $appLogo)): ?>
                 <div class="app-content-logo text-center mb-4" style="padding: 2rem 0;">
                     <img src="uploads/logos/<?= h($appLogo) ?>" alt="<?= h($appName) ?>" style="max-width: 200px; max-height: 150px; width: auto; height: auto; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.15);">
                 </div>
