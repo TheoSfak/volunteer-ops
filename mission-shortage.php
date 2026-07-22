@@ -29,9 +29,11 @@ $action = post('action');
 $reportId = (int) post('report_id');
 
 $report = dbFetchOne(
-    "SELECT r.id, r.mission_id, r.acknowledged_at, r.resolved_at, m.responsible_user_id
+    "SELECT r.id, r.mission_id, r.reporter_id, r.team_id, r.title, r.acknowledged_at, r.resolved_at,
+            m.title AS mission_title, m.responsible_user_id, mt.codename, mt.team_number
      FROM mission_shortage_reports r
      JOIN missions m ON m.id = r.mission_id
+     LEFT JOIN mission_teams mt ON mt.id = r.team_id
      WHERE r.id = ?",
     [$reportId]
 );
@@ -46,10 +48,44 @@ if (!$canManageWarRoom) {
     exit;
 }
 
+// Notify whoever the report actually concerns when the admin acts on it —
+// the reporter's team if they had one at submit time, or just the reporter
+// themselves if they didn't (there's no wider "team" to loop in). Excludes
+// the acting admin in case they happen to be a member of that same team.
+function notifyShortageAffectedUsers(array $report, string $titleKey, string $messageKey, string $notifCode, int $actingUserId): void {
+    if ($report['team_id']) {
+        $recipientIds = array_map('intval', array_column(
+            dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [(int) $report['team_id']]),
+            'user_id'
+        ));
+    } else {
+        $recipientIds = [(int) $report['reporter_id']];
+    }
+    $recipientIds = array_values(array_unique(array_diff($recipientIds, [$actingUserId])));
+    if (!$recipientIds) {
+        return;
+    }
+
+    $teamLabel = $report['team_id'] ? ($report['codename'] . ' ' . $report['team_number']) : t('history.no_team_capitalized');
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $report['mission_id'];
+    $langs = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langs[$recipientId] ?? DEFAULT_LANGUAGE;
+        $notifTitle = t($titleKey, ['mission' => $report['mission_title']], $lang);
+        $notifMessage = t($messageKey, ['title' => $report['title'], 'team' => $teamLabel], $lang);
+        sendNotification($recipientId, $notifTitle, $notifMessage, 'success', $notifCode, [
+            'url' => $warRoomUrl,
+            'tag' => $notifCode . '-' . $report['id'],
+            'bannerMission' => $report['mission_id'],
+        ]);
+    }
+}
+
 if ($action === 'seen') {
     if (!$report['acknowledged_at']) {
         dbExecute("UPDATE mission_shortage_reports SET acknowledged_at = NOW(), acknowledged_by = ? WHERE id = ?", [$userId, $reportId]);
         logAudit('acknowledge_shortage_report', 'mission_shortage_reports', $reportId, null, ['mission_id' => $report['mission_id']]);
+        notifyShortageAffectedUsers($report, 'shortage.seen_notify_title', 'shortage.seen_notify_message', 'mission_shortage_seen', $userId);
     }
     echo json_encode(['ok' => true]);
     exit;
@@ -65,6 +101,7 @@ if ($action === 'resolve') {
             [$userId, $userId, $reportId]
         );
         logAudit('resolve_shortage_report', 'mission_shortage_reports', $reportId, null, ['mission_id' => $report['mission_id']]);
+        notifyShortageAffectedUsers($report, 'shortage.resolved_notify_title', 'shortage.resolved_notify_message', 'mission_shortage_resolved', $userId);
     }
     echo json_encode(['ok' => true]);
     exit;

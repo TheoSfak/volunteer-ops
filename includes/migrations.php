@@ -4744,6 +4744,42 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                 }
             },
         ],
+        [
+            'version'     => 91,
+            'description' => 'Register mission_shortage_seen notification code (War Room loud banner+sound to the reporting team when an admin marks their shortage report seen)',
+            'up' => function () {
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_shortage_seen'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_shortage_seen',
+                            'Η Έλλειψή σας Ελήφθη (War Room)',
+                            'Ο διαχειριστής είδε την αναφορά έλλειψής σας (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+            },
+        ],
+        [
+            'version'     => 92,
+            'description' => 'Register mission_shortage_resolved notification code (War Room loud banner+sound to the reporting team when an admin marks their shortage report resolved)',
+            'up' => function () {
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_shortage_resolved'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_shortage_resolved',
+                            'Η Έλλειψή σας Λύθηκε (War Room)',
+                            'Ο διαχειριστής επισήμανε την αναφορά έλλειψής σας ως λυμένη (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+            },
+        ],
 
     ];
     // ────────────────────────────────────────────────────────────────────────

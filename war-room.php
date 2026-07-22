@@ -762,6 +762,7 @@ include __DIR__ . '/includes/header.php';
     #warRoomMap { height: 520px; border-radius: 12px; }
     #mapCard.map-fullscreen-active { position: fixed; inset: 0; z-index: 1040; border-radius: 0; }
     #mapCard.map-fullscreen-active #warRoomMap { height: 100%; border-radius: 0; }
+    #mapCard.map-fullscreen-active #warRoomBanner { position: absolute; left: 0; right: 0; bottom: 0; z-index: 600; border-top: 2px solid #dc2626; border-bottom: none; }
     .war-room-hero { background: linear-gradient(135deg, #172554, #b91c1c); color: #fff; border-radius: 14px; }
     .war-room-hero h1 { color: #fff; font-weight: 700; }
     .participant-row { border-left: 4px solid #e2e8f0; }
@@ -2156,10 +2157,27 @@ document.getElementById('warRoomBannerClose').addEventListener('click', hideWarR
     const mapFsBtn = document.getElementById('mapFullscreenToggle');
     const mapCardEl = document.getElementById('mapCard');
     if (!mapFsBtn || !mapCardEl) return;
+    // The alert banner (orders/dispatch/global messages) lives at the top of
+    // the whole page normally. While the map is fullscreen that's off-screen
+    // from what's actually visible, so we physically relocate the same node
+    // (not a clone — its close/ack button listeners and running scroll
+    // animation keep working untouched) into the map card, bottom-anchored
+    // like the existing SOS marquee. bannerHome remembers exactly where it
+    // came from so exiting puts it back in precisely the right spot.
+    const bannerEl = document.getElementById('warRoomBanner');
+    const mapBodyEl = mapCardEl.querySelector('.card-body');
+    const bannerHome = bannerEl ? {parent: bannerEl.parentNode, next: bannerEl.nextSibling} : null;
     function setMapFullscreen(active) {
         mapCardEl.classList.toggle('map-fullscreen-active', active);
         mapFsBtn.innerHTML = active ? '<i class="bi bi-fullscreen-exit"></i>' : '<i class="bi bi-arrows-fullscreen"></i>';
         mapFsBtn.title = active ? t('map.btn_exit_fullscreen') : t('map.btn_fullscreen');
+        if (bannerEl && mapBodyEl && bannerHome) {
+            if (active) {
+                mapBodyEl.appendChild(bannerEl);
+            } else {
+                bannerHome.parent.insertBefore(bannerEl, bannerHome.next);
+            }
+        }
         setTimeout(() => { if (map) map.invalidateSize(); }, 150);
     }
     mapFsBtn.addEventListener('click', () => {
