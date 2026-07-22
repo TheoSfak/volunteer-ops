@@ -40,7 +40,7 @@ if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_o
     exit;
 }
 
-$canManageWarRoom = hasPagePermission('missions_manage') || (int)$mission['responsible_user_id'] === (int)$userId;
+$canManageWarRoom = canManageActionRoom($mission['responsible_user_id'] ? (int)$mission['responsible_user_id'] : null, (int)$userId);
 $isApprovedParticipant = (bool) dbFetchValue(
     "SELECT COUNT(*) FROM participation_requests pr
      JOIN shifts s ON s.id = pr.shift_id

@@ -1,6 +1,16 @@
 <?php
 /**
  * VolunteerOps - Profile Page
+ *
+ * i18n scope (Action Room English support, see includes/i18n.php): only the
+ * "core account" parts of this page are translated via t() — hero header,
+ * the profile-edit form, password change, avatar upload, and the booked-
+ * equipment table. Everything else (annual subscription/IRIS, certificates,
+ * exam history, achievements, TEP hours) is Greek-only BY DESIGN, not an
+ * oversight — the user explicitly scoped it out since this page turned out
+ * far bigger than expected. Look for the "i18n scope" HTML comments below
+ * marking where the translated section starts/ends before adding new text
+ * to either side.
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -501,6 +511,15 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<!-- i18n scope: everything from here down to the "i18n scope: core account
+     section resumes" marker below is Greek-only by design (IRIS/subscription,
+     certificates, exam history, achievements, TEP) — do not add t() calls here
+     without first checking includes/lang/war-room.php's profile.php section. -->
+<?php if (!isExternalGuest()): ?>
+<!-- Guest accounts skip this whole block: subscription/IRIS, hours/points/
+     achievements tiles, exam history, attendance/TEP/training-mission goals
+     are all concepts that don't apply to a partner-org volunteer visiting for
+     one mission — none of it is meaningful or should be tracked for them. -->
 <!-- Annual Subscription -->
 <?php $subscriptionDays = $mySubscription ? (int)floor((strtotime($mySubscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400) : null; $subscriptionColor = $subscriptionDays === null ? 'secondary' : ($subscriptionDays < 0 ? 'danger' : ($subscriptionDays <= 7 ? 'danger' : ($subscriptionDays <= 30 ? 'warning' : ($subscriptionDays <= 90 ? 'info' : 'success')))); ?>
 <?php $myIrisRequest = subscriptionIrisLatestRequest((int)$user['id']); $canIrisRenew = subscriptionIrisIsEligible($mySubscription); ?>
@@ -931,7 +950,13 @@ $myRequiredMissing = dbFetchAll(
     </div>
 </div>
 <?php endif; ?>
+<?php endif; // !isExternalGuest() ?>
 
+<!-- i18n scope: core account section resumes (translated via t() — hero above
+     plus everything from here down: edit-profile form, booked equipment,
+     password change, avatar upload). New user-facing strings in this stretch
+     must use t() with both 'el' and 'en' entries in includes/lang/war-room.php,
+     per the app's Action Room i18n convention. -->
 <div class="row">
     <div class="col-lg-8">
         <!-- Profile Form -->

@@ -16,7 +16,7 @@ header('Content-Type: application/json');
  * admin — the mission's admins/shift leaders, same recipient set as the
  * needs_help escalation in volunteer-status.php.
  */
-function notifyMissionTeamChat(int $missionId, string $missionTitle, array $team, int $senderId, string $senderName, string $message, bool $senderIsAdmin): void {
+function notifyMissionTeamChat(int $missionId, string $missionTitle, array $team, int $senderId, string $senderName, string $message, bool $senderIsAdmin, ?int $responsibleUserId = null): void {
     $teamId = (int) $team['id'];
     $teamLabel = $team['codename'] . ' ' . $team['team_number'];
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
@@ -28,22 +28,7 @@ function notifyMissionTeamChat(int $missionId, string $missionTitle, array $team
     ));
 
     if (!$senderIsAdmin) {
-        $admins = dbFetchAll(
-            "SELECT id FROM users WHERE role IN (?, ?) AND is_active = 1",
-            [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]
-        );
-        $leaders = dbFetchAll(
-            "SELECT DISTINCT u.id FROM users u
-             JOIN participation_requests pr2 ON pr2.volunteer_id = u.id
-             JOIN shifts s ON pr2.shift_id = s.id
-             WHERE s.mission_id = ? AND u.role = ? AND u.is_active = 1 AND pr2.status = ?",
-            [$missionId, ROLE_SHIFT_LEADER, PARTICIPATION_APPROVED]
-        );
-        $recipientIds = array_merge(
-            $recipientIds,
-            array_map('intval', array_column($admins, 'id')),
-            array_map('intval', array_column($leaders, 'id'))
-        );
+        $recipientIds = array_merge($recipientIds, getMissionCommandStaffIds($missionId, $responsibleUserId, $senderId));
     }
 
     $recipientIds = array_values(array_unique(array_diff($recipientIds, [$senderId])));
@@ -81,7 +66,7 @@ if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_o
     exit;
 }
 
-$canManageWarRoom = hasPagePermission('missions_manage') || (int)$mission['responsible_user_id'] === (int)$userId;
+$canManageWarRoom = canManageActionRoom($mission['responsible_user_id'] ? (int)$mission['responsible_user_id'] : null, (int)$userId);
 $isApprovedParticipant = (bool) dbFetchValue(
     "SELECT COUNT(*) FROM participation_requests pr
      JOIN shifts s ON s.id = pr.shift_id
@@ -122,7 +107,7 @@ if (!isPost()) {
     if ($afterId > 0) {
         $params[] = $afterId;
         $rows = dbFetchAll(
-            "SELECT c.id, c.user_id, u.name, c.message, c.created_at
+            "SELECT c.id, c.user_id, u.name, u.is_external, u.guest_org_name, c.message, c.created_at
              FROM mission_chat_messages c
              JOIN users u ON u.id = c.user_id
              WHERE c.mission_id = ? AND {$teamSql} AND c.id > ?
@@ -131,7 +116,7 @@ if (!isPost()) {
         );
     } else {
         $rows = dbFetchAll(
-            "SELECT c.id, c.user_id, u.name, c.message, c.created_at
+            "SELECT c.id, c.user_id, u.name, u.is_external, u.guest_org_name, c.message, c.created_at
              FROM mission_chat_messages c
              JOIN users u ON u.id = c.user_id
              WHERE c.mission_id = ? AND {$teamSql}
@@ -142,13 +127,15 @@ if (!isPost()) {
     }
 
     $messages = array_map(fn($r) => [
-        'id'         => (int) $r['id'],
-        'user_id'    => (int) $r['user_id'],
-        'name'       => $r['name'],
-        'message'    => $r['message'],
-        'time'       => date('H:i', strtotime($r['created_at'])),
-        'mine'       => (int) $r['user_id'] === (int) $userId,
-        'can_delete' => (int) $r['user_id'] === (int) $userId || $canManageWarRoom,
+        'id'            => (int) $r['id'],
+        'user_id'       => (int) $r['user_id'],
+        'name'          => $r['name'],
+        'is_external'   => (bool) $r['is_external'],
+        'guest_org_name'=> $r['guest_org_name'],
+        'message'       => $r['message'],
+        'time'          => date('H:i', strtotime($r['created_at'])),
+        'mine'          => (int) $r['user_id'] === (int) $userId,
+        'can_delete'    => (int) $r['user_id'] === (int) $userId || $canManageWarRoom,
     ], $rows);
 
     echo json_encode(['ok' => true, 'messages' => $messages]);
@@ -156,7 +143,7 @@ if (!isPost()) {
 }
 
 // ── POST: send or delete ────────────────────────────────────────────────────
-if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
+if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string) $_POST['csrf_token'])) {
     echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }
@@ -179,17 +166,19 @@ if ($action === 'send') {
     );
 
     if ($teamId && $team) {
-        notifyMissionTeamChat($missionId, $mission['title'], $team, $userId, $user['name'], $message, $canManageWarRoom);
+        notifyMissionTeamChat($missionId, $mission['title'], $team, $userId, $user['name'], $message, $canManageWarRoom, $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null);
     }
 
     echo json_encode(['ok' => true, 'message' => [
-        'id'         => (int) $messageId,
-        'user_id'    => (int) $userId,
-        'name'       => $user['name'],
-        'message'    => $message,
-        'time'       => date('H:i'),
-        'mine'       => true,
-        'can_delete' => true,
+        'id'             => (int) $messageId,
+        'user_id'        => (int) $userId,
+        'name'           => $user['name'],
+        'is_external'    => (bool) $user['is_external'],
+        'guest_org_name' => $user['guest_org_name'],
+        'message'        => $message,
+        'time'           => date('H:i'),
+        'mine'           => true,
+        'can_delete'     => true,
     ]]);
     exit;
 }

@@ -20,22 +20,7 @@ function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $respo
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
 
-    $admins = dbFetchAll("SELECT id FROM users WHERE role IN (?, ?) AND is_active = 1", [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
-    $leaders = dbFetchAll(
-        "SELECT DISTINCT u.id FROM users u
-         JOIN participation_requests pr ON pr.volunteer_id = u.id
-         JOIN shifts s ON pr.shift_id = s.id
-         WHERE s.mission_id = ? AND u.role = ? AND u.is_active = 1 AND pr.status = ?",
-        [$missionId, ROLE_SHIFT_LEADER, PARTICIPATION_APPROVED]
-    );
-    $recipientIds = array_merge(
-        array_map('intval', array_column($admins, 'id')),
-        array_map('intval', array_column($leaders, 'id'))
-    );
-    if ($responsibleUserId) {
-        $recipientIds[] = $responsibleUserId;
-    }
-    $recipientIds = array_values(array_unique(array_diff($recipientIds, [$ackerId])));
+    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $ackerId);
 
     $langByUserId = getUserLanguages($recipientIds);
     foreach ($recipientIds as $recipientId) {
@@ -92,7 +77,7 @@ if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_o
     exit;
 }
 
-$canManageWarRoom = hasPagePermission('missions_manage') || (int)$mission['responsible_user_id'] === (int)$userId;
+$canManageWarRoom = canManageActionRoom($mission['responsible_user_id'] ? (int)$mission['responsible_user_id'] : null, (int)$userId);
 $isApprovedParticipant = (bool) dbFetchValue(
     "SELECT COUNT(*) FROM participation_requests pr
      JOIN shifts s ON s.id = pr.shift_id
@@ -112,7 +97,7 @@ if (!isPost()) {
 }
 
 // ── POST: create, delete, or ack ────────────────────────────────────────────
-if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
+if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string) $_POST['csrf_token'])) {
     echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }

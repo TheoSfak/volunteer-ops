@@ -23,7 +23,7 @@ if (!isPost()) {
     exit;
 }
 
-if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
+if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string) $_POST['csrf_token'])) {
     echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }
