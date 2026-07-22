@@ -35,25 +35,9 @@ if (!defined('MISSION_TEAM_CODENAMES')) {
         'Sierra','Tango','Uniform','Victor','Whiskey','X-ray','Yankee','Zulu']);
 }
 
-// Team color palette, same index basis as MISSION_TEAM_CODENAMES above (team N
-// gets codename[N % 26] and color[N % 8] — colors cycle every 8 teams since a
-// colorblind-safe categorical palette only stays distinguishable up to ~8
-// slots; ordering was picked (and validated with the dataviz skill's
-// scripts/validate_palette.js) to lead with red for Alpha / green for Bravo
-// as requested, then fill the rest by worst-adjacent-pair CVD separation.
-if (!defined('MISSION_TEAM_COLORS')) {
-    define('MISSION_TEAM_COLORS', ['#e34948','#008300','#4a3aa7','#eda100','#2a78d6','#e87ba4','#1baf7a','#eb6834']);
-}
-// Readable text color per swatch (WCAG contrast checked); anything not listed
-// defaults to black in teamBadgeColors() below.
-if (!defined('MISSION_TEAM_COLOR_TEXT')) {
-    define('MISSION_TEAM_COLOR_TEXT', ['#008300' => '#fff', '#4a3aa7' => '#fff']);
-}
-/** Returns [background, text] hex pair for a team badge; null color falls back to the old bg-dark look. */
-function teamBadgeColors(?string $color): array {
-    if (!$color) return ['#212529', '#fff'];
-    return [$color, MISSION_TEAM_COLOR_TEXT[$color] ?? '#000'];
-}
+// MISSION_TEAM_COLORS/MISSION_TEAM_COLOR_TEXT and teamBadgeColors() moved to
+// includes/functions.php (still same index basis as MISSION_TEAM_CODENAMES
+// above) once loadMissionDispatchesForUser() there needed them too.
 
 /**
  * Notify every team member (individually) about their team assignment.
@@ -771,6 +755,10 @@ include __DIR__ . '/includes/header.php';
     #mapCard.map-fullscreen-active { position: fixed; inset: 0; z-index: 1040; border-radius: 0; }
     #mapCard.map-fullscreen-active #warRoomMap { height: 100%; border-radius: 0; }
     #mapCard.map-fullscreen-active #warRoomBanner { position: absolute; left: 0; right: 0; bottom: 0; z-index: 600; border-top: 2px solid #dc2626; border-bottom: none; }
+    /* Strips Leaflet's default white tooltip box/arrow so only our own colored
+       pill (inline-styled per team in dispatchTeamLabelHtml()) shows through. */
+    .dispatch-team-label { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
+    .dispatch-team-label::before { display: none !important; }
     .war-room-hero { background: linear-gradient(135deg, #172554, #b91c1c); color: #fff; border-radius: 14px; }
     .war-room-hero h1 { color: #fff; font-weight: 700; }
     .participant-row { border-left: 4px solid #e2e8f0; }
@@ -1513,6 +1501,13 @@ function guestNameHtml(name, isExternal, orgName) {
     const org = (orgName && orgName.trim() !== '') ? orgName : t('guest.org_unknown');
     return `${escapeHtml(name)}<sup class="guest-org-badge" title="${escapeHtml(t('guest.org_tooltip', {org}))}">${escapeHtml(org)}</sup>`;
 }
+// Small colored pill (team's own badge color, or the dark "all teams" fallback
+// teamBadgeColors() already returns for a null team) shown as a permanent —
+// not hover/click-only — Leaflet tooltip, so which team a dispatch point/area
+// belongs to is visible on the map at a glance.
+function dispatchTeamLabelHtml(item) {
+    return `<span style="background:${item.team_color_bg};color:${item.team_color_fg};padding:2px 8px;border-radius:10px;font-weight:700;font-size:.72rem;white-space:nowrap;box-shadow:0 1px 3px #0006;">${escapeHtml(item.team_label)}</span>`;
+}
 function renderDispatches(items) {
     // A live poll can re-run this while an admin has a dispatch popup open
     // (very plausible for an area — there's more to read before deciding to
@@ -1562,8 +1557,10 @@ function renderDispatches(items) {
         if (item.type === 'point') {
             const icon = L.divIcon({className:'', html:'<i class="bi bi-geo-alt-fill" style="font-size:28px;color:#7c3aed;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[28,28], iconAnchor:[14,26]});
             layer = L.marker([item.geo.lat, item.geo.lng], {icon}).addTo(dispatchLayer).bindPopup(popupHtml);
+            layer.bindTooltip(dispatchTeamLabelHtml(item), {permanent:true, direction:'right', offset:[8,-8], className:'dispatch-team-label', interactive:false});
         } else if (item.type === 'polygon') {
             layer = L.polygon(item.geo, {color:'#7c3aed', fillOpacity:0.15}).addTo(dispatchLayer).bindPopup(popupHtml);
+            layer.bindTooltip(dispatchTeamLabelHtml(item), {permanent:true, direction:'center', className:'dispatch-team-label', interactive:false});
         }
         if (layer) {
             layer.dispatchId = item.id;
