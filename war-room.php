@@ -545,6 +545,19 @@ $participants = dbFetchAll(
 $myAssignments = array_values(array_filter($participants, fn($participant) => (int)$participant['volunteer_id'] === (int)$user['id']));
 $onlinePresenceIds = loadOnlinePresenceUserIds($missionId);
 
+// A participant's GPS ping (manual or auto) is flagged stale past 3x the
+// passive auto-ping cadence (3 min) — enough headroom to not cry wolf over
+// one missed tick's jitter, but still an honest signal once the gap is real
+// (e.g. the tab got backgrounded/suspended, or geolocation permission was
+// revoked). Shared by the full render and the ajax poll below so both agree.
+$pingStaleThresholdSeconds = 540;
+$pingIsStaleByVolunteerId = [];
+foreach ($participants as $participant) {
+    $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']] =
+        $participant['last_ping_at'] !== null
+        && strtotime($participant['last_ping_at']) < (time() - $pingStaleThresholdSeconds);
+}
+
 $shifts = dbFetchAll(
     "SELECT s.*, COUNT(CASE WHEN pr.status = '" . PARTICIPATION_APPROVED . "' THEN 1 END) AS approved_count,
             COUNT(CASE WHEN pr.status = '" . PARTICIPATION_PENDING . "' THEN 1 END) AS pending_count
@@ -640,6 +653,7 @@ if (get('ajax') === '1') {
         'shortageReports' => $shortageReports,
         'sosAlerts' => $sosAlerts,
         'onlinePresence' => $onlinePresence,
+        'pingStaleness' => $pingIsStaleByVolunteerId,
     ]);
     exit;
 }
@@ -970,7 +984,7 @@ include __DIR__ . '/includes/header.php';
                 <?php foreach ($participants as $participant): ?>
                 <?php $status = $participant['field_status'] ?? ''; ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'presence-online' : 'presence-offline' ?>" title="<?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['guest_org_name']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => date('H:i', strtotime($participant['last_ping_at']))]) : t('participants.no_ping') ?></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'presence-online' : 'presence-offline' ?>" title="<?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['guest_org_name']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => date('H:i', strtotime($participant['last_ping_at']))]) : t('participants.no_ping') ?><?php if ($participant['last_ping_at']): ?><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']] ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span><?php endif; ?></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>">
                         <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
@@ -1477,6 +1491,29 @@ let mediaSignature = JSON.stringify(media);
 let myTasks = <?= json_encode($myTasks) ?>;
 let shortageReports = <?= json_encode($shortageReports) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
+
+// Field Mode only, automatic — keeps the screen from sleeping so passive
+// location capture keeps working while a volunteer's phone is out. The
+// browser force-releases this lock the instant the tab is hidden and does
+// NOT re-acquire it automatically, so it must be explicitly re-requested on
+// every return to visible or it silently stays dead after the first
+// backgrounding. Never blocks anything else on success/failure (unsupported
+// browser, low battery mode, non-secure context all just no-op quietly),
+// matching this file's existing defensive style for the Fullscreen API.
+let wakeLockSentinel = null;
+function requestWarRoomWakeLock() {
+    if (!fieldMode || !('wakeLock' in navigator)) return;
+    navigator.wakeLock.request('screen').then(sentinel => {
+        wakeLockSentinel = sentinel;
+        sentinel.addEventListener('release', () => { wakeLockSentinel = null; });
+    }).catch(() => { wakeLockSentinel = null; });
+}
+if (fieldMode) {
+    requestWarRoomWakeLock();
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') requestWarRoomWakeLock();
+    });
+}
 let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
@@ -1837,6 +1874,13 @@ function renderPresence(onlineIds) {
         el.classList.toggle('presence-online', isOnline);
         el.classList.toggle('presence-offline', !isOnline);
         el.title = isOnline ? t('common.online') : t('common.offline');
+    });
+}
+
+function renderPingStaleness(staleness) {
+    document.querySelectorAll('[id^="ping-stale-"]').forEach(el => {
+        const uid = el.id.slice('ping-stale-'.length);
+        el.classList.toggle('d-none', !staleness[uid]);
     });
 }
 
@@ -2321,18 +2365,66 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
 // Passive background capture while this page stays open — silent (no status
 // text, doesn't touch the manual button above), tagged source=auto so it's
 // excluded from alerts/history/reports and hidden from the trail view unless
-// the admin explicitly filters it in. One getCurrentPosition() call per tick
-// reused for every active shift assignment, not one read per button.
-setInterval(() => {
+// the admin explicitly filters it in. Uses watchPosition() rather than a
+// fresh getCurrentPosition() per tick so however often the OS delivers a fix
+// doesn't change send frequency — a separate local-only timer below still
+// decides when the ~3-minute cadence is actually due, preserving the exact
+// send/DB-write volume every existing source='auto' consumer already assumes.
+const AUTO_PING_CADENCE_MS = 180000;
+let latestAutoPosition = null;
+let lastAutoPingSentAt = Date.now();
+
+function sendAutoPing(position) {
     const buttons = document.querySelectorAll('.send-ping');
-    if (!buttons.length || !navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(position => {
-        buttons.forEach(button => {
-            const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, source: 'auto'});
-            fetch('ping-location.php', {method: 'POST', body: data});
-        });
-    }, () => {}, {enableHighAccuracy: true, timeout: 10000});
-}, 180000);
+    if (!buttons.length) return;
+    lastAutoPingSentAt = Date.now();
+    buttons.forEach(button => {
+        const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, source: 'auto'});
+        fetch('ping-location.php', {method: 'POST', body: data}).catch(() => {});
+    });
+}
+
+// enableHighAccuracy is deliberately false here (unlike the manual button
+// above) — a live ops-map pin doesn't need meter-level precision, and pairing
+// continuous high-accuracy GPS with Field Mode's always-on screen (below)
+// over a multi-hour mission is a real battery cost not worth paying twice.
+// Delayed a few seconds so the location-permission prompt doesn't fire the
+// instant the page renders, before anyone's read anything on it.
+setTimeout(() => {
+    if (!navigator.geolocation || !document.querySelectorAll('.send-ping').length) return;
+    navigator.geolocation.watchPosition(
+        position => { latestAutoPosition = position; },
+        () => {},
+        {enableHighAccuracy: false, maximumAge: 60000, timeout: 20000}
+    );
+}, 5000);
+
+// Local-only check, no GPS/network call of its own — just decides whether the
+// cadence window has elapsed and, if so, sends whatever watchPosition most
+// recently handed us. Ticks far more often than the cadence itself (15s vs
+// 3min) so send timing stays accurate without a one-shot GPS read per send.
+setInterval(() => {
+    if (!latestAutoPosition) return;
+    if (Date.now() - lastAutoPingSentAt < AUTO_PING_CADENCE_MS) return;
+    sendAutoPing(latestAutoPosition);
+}, 15000);
+
+// Catch-up: if the tab was backgrounded/suspended through a whole cadence
+// window, don't wait for the next scheduled tick once it's visible again — a
+// long-cached fix would show a stale location, so this takes one fresh read
+// rather than reusing latestAutoPosition. Gates on the same lastAutoPingSentAt
+// the tick above uses, so whichever fires first closes the window for the
+// other with no separate bookkeeping and no double-send risk.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!navigator.geolocation || !document.querySelectorAll('.send-ping').length) return;
+    if (Date.now() - lastAutoPingSentAt < AUTO_PING_CADENCE_MS) return;
+    navigator.geolocation.getCurrentPosition(
+        position => { latestAutoPosition = position; sendAutoPing(position); },
+        () => {},
+        {enableHighAccuracy: false, timeout: 10000}
+    );
+});
 
 function setFieldStatus(btn, prId, status) {
     const group = document.getElementById('statusBtns-' + prId);
@@ -2396,6 +2488,7 @@ setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after='
         if (!fieldMode) updateSosAlarmState(sosAlerts);
     }
     if (data.onlinePresence) renderPresence(data.onlinePresence);
+    if (data.pingStaleness) renderPingStaleness(data.pingStaleness);
     if (!fieldMode) document.getElementById('mapRefresh').textContent = data.time || '';
     if (data.banners && data.banners.length) {
         data.banners.forEach(b => {
