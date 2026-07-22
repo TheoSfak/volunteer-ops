@@ -629,6 +629,27 @@ function getExternalGuestMissionIds(int $userId): array {
     return array_map('intval', array_column($rows, 'mission_id'));
 }
 
+// Team color palette, same index basis as war-room.php's own MISSION_TEAM_CODENAMES
+// (team N gets codename[N % 26] and color[N % 8] — colors cycle every 8 teams
+// since a colorblind-safe categorical palette only stays distinguishable up to
+// ~8 slots; ordering was picked, and validated with the dataviz skill's
+// scripts/validate_palette.js, to lead with red for Alpha / green for Bravo as
+// requested, then fill the rest by worst-adjacent-pair CVD separation).
+// Moved here from war-room.php once loadMissionDispatchesForUser() below also
+// needed the same [bg, fg] pair, for the dispatch map's permanent team-label
+// pills — same palette team badges/pins/trail lines already use.
+if (!defined('MISSION_TEAM_COLORS')) {
+    define('MISSION_TEAM_COLORS', ['#e34948','#008300','#4a3aa7','#eda100','#2a78d6','#e87ba4','#1baf7a','#eb6834']);
+}
+if (!defined('MISSION_TEAM_COLOR_TEXT')) {
+    define('MISSION_TEAM_COLOR_TEXT', ['#008300' => '#fff', '#4a3aa7' => '#fff']);
+}
+/** Returns [background, text] hex pair for a team badge; null color falls back to the old bg-dark look. */
+function teamBadgeColors(?string $color): array {
+    if (!$color) return ['#212529', '#fff'];
+    return [$color, MISSION_TEAM_COLOR_TEXT[$color] ?? '#000'];
+}
+
 /**
  * War Room: load dispatch points/areas visible to $userId, each augmented with
  * its receipt (mission_dispatch_receipts, "Ελήφθη") and arrival (mission_dispatch_acks,
@@ -637,7 +658,7 @@ function getExternalGuestMissionIds(int $userId): array {
  */
 function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
     $rows = dbFetchAll(
-        "SELECT d.id, d.team_id, d.type, d.geo, d.label, mt.codename, mt.team_number
+        "SELECT d.id, d.team_id, d.type, d.geo, d.label, mt.codename, mt.team_number, mt.color
          FROM mission_dispatch_points d
          LEFT JOIN mission_teams mt ON mt.id = d.team_id
          WHERE d.mission_id = ?
@@ -702,6 +723,7 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             }
         }
         $myReceipt = $receiptsByDispatch[$dispatchId][$userId] ?? null;
+        [$teamColorBg, $teamColorFg] = teamBadgeColors($teamId ? $row['color'] : null);
 
         return [
             'id'          => $dispatchId,
@@ -709,6 +731,8 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'geo'         => json_decode($row['geo'], true),
             'label'       => $row['label'],
             'team_label'  => $teamId ? ($row['codename'] . ' ' . $row['team_number']) : t('common.all_teams'),
+            'team_color_bg' => $teamColorBg,
+            'team_color_fg' => $teamColorFg,
             'can_delete'  => $canManageWarRoom,
             'acks'        => array_map(fn($a) => [
                 'team_label' => $a['team_label'] ?? '—', 'user_name' => $a['user_name'],

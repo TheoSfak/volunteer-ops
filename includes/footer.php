@@ -93,8 +93,12 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/gr.js"></script>
 
-    <?php if (function_exists('isLoggedIn') && isLoggedIn()): ?>
-    <!-- Auto-logout on inactivity -->
+    <?php if (function_exists('isLoggedIn') && isLoggedIn() && basename($_SERVER['PHP_SELF'], '.php') !== 'war-room'): ?>
+    <!-- Auto-logout on inactivity — skipped on Action Room (war-room.php):
+         an admin legitimately sits watching the live map/alerts for long
+         stretches with no clicks, including in kiosk/fullscreen mode, so
+         auto-logging them out there would be actively harmful, not a safe
+         default. -->
     <script>
     (function() {
         var timeoutMinutes = <?= (int)(getSetting('session_timeout_minutes', '120')) ?>;
