@@ -529,7 +529,7 @@ include __DIR__ . '/includes/header.php';
                     <tr class="<?= !$v['is_active'] ? 'table-secondary text-muted' : '' ?>">
                         <td data-label="Εθελοντής">
                             <a href="volunteer-view.php?id=<?= $v['id'] ?>" class="text-decoration-none fw-semibold">
-                                <?= h($v['name']) ?>
+                                <?= guestNameHtml($v['name'], (bool)$v['is_external'], $v['guest_org_name']) ?>
                             </a><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_RESCUER) ?><?= positionBadge($v['position_name'] ?? '') ?>
                             <br><small class="text-muted"><?= h($v['email']) ?><?= $v['phone'] ? ' · ' . h($v['phone']) : '' ?></small>
                         </td>

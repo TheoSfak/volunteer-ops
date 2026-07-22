@@ -682,7 +682,7 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
         <div class="flex-grow-1">
             <h1 class="h4 mb-1 text-white fw-bold">
-                <?= h($volunteer['name']) ?>
+                <?= guestNameHtml($volunteer['name'], (bool)$volunteer['is_external'], $volunteer['guest_org_name']) ?>
                 <?= volunteerTypeBadge($volunteer['volunteer_type'] ?? VTYPE_RESCUER) ?>
                 <?php if (!empty($volunteer['position_name'])): ?>
                     <span class="badge bg-<?= h($volunteer['position_color'] ?? 'secondary') ?> ms-1" style="font-size:.7rem">
@@ -1397,7 +1397,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
                         <i class="bi bi-person-fill"></i>
                     </div>
                 <?php endif; ?>
-                <h5 class="mb-1"><?= h($volunteer['name']) ?></h5>
+                <h5 class="mb-1"><?= guestNameHtml($volunteer['name'], (bool)$volunteer['is_external'], $volunteer['guest_org_name']) ?></h5>
                 <small class="text-muted d-block mb-3"><?= h($volunteer['email']) ?></small>
 
                 <?php if (isAdmin()): ?>
