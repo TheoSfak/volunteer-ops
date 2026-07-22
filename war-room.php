@@ -642,6 +642,7 @@ if (get('ajax') === '1') {
     $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
     $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
     $onlinePresence = loadOnlinePresenceUserIds($missionId);
+    $annotations = loadMissionAnnotationsForMission($missionId);
 
     echo json_encode([
         'pins' => $pins,
@@ -654,6 +655,7 @@ if (get('ajax') === '1') {
         'sosAlerts' => $sosAlerts,
         'onlinePresence' => $onlinePresence,
         'pingStaleness' => $pingIsStaleByVolunteerId,
+        'annotations' => $annotations,
     ]);
     exit;
 }
@@ -677,6 +679,7 @@ $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRo
 $myTasks = loadMyTaskOrdersForUser($missionId, (int)$user['id']);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
+$annotations = loadMissionAnnotationsForMission($missionId);
 
 $firstShift = $shifts[0]['start_time'] ?? $mission['start_datetime'];
 $lastShift = !empty($shifts) ? end($shifts)['end_time'] : $mission['end_datetime'];
@@ -780,6 +783,12 @@ include __DIR__ . '/includes/header.php';
     .presence-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
     .presence-dot.presence-online { background: #28a745; }
     .presence-dot.presence-offline { background: #adb5bd; }
+    #annotationToolbar button.active { background: #1f2937; color: #fff; border-color: #1f2937; }
+    #mapCard.wr-draw-active #warRoomMap { cursor: crosshair; }
+    #mapCard.wr-draw-active .leaflet-marker-pane,
+    #mapCard.wr-draw-active .leaflet-overlay-pane { pointer-events: none; }
+    .wr-anno-arrowhead { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 16px solid; filter: drop-shadow(0 1px 2px #0008); }
+    .wr-anno-text-label { display: inline-block; padding: 2px 8px; border-radius: 4px; color: #fff; font-weight: 600; font-size: .78rem; white-space: nowrap; box-shadow: 0 1px 3px #0006; }
     .war-room-banner { display: none; flex-direction: column; background: #000; border-bottom: 2px solid #dc2626; position: relative; z-index: 1900; max-height: 40vh; overflow-y: auto; }
     .war-room-banner-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
     .war-room-banner-row + .war-room-banner-row { border-top: 1px solid rgba(255,59,48,.35); }
@@ -788,6 +797,13 @@ include __DIR__ . '/includes/header.php';
     @keyframes warRoomBannerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
     .war-room-banner .bi-broadcast { color: #ff3b30; flex-shrink: 0; }
     .war-room-banner-close { background: transparent; border: none; color: #ff3b30; font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0 4px; flex-shrink: 0; }
+    @media (min-width: 992px) {
+        /* Set on the track itself, not the span inside it — both tracks size
+           their height in `em` relative to their own font-size, so bumping
+           the span alone would grow the text without growing its container,
+           clipping it. Font-size set here is inherited by the span anyway. */
+        .war-room-banner-track, .sos-map-marquee-track { font-size: 1.35rem; }
+    }
     @keyframes warRoomPulseRed { 0%, 100% { box-shadow: 0 0 0 0 rgba(220,53,69,0); } 50% { box-shadow: 0 0 0 10px rgba(220,53,69,0.4); } }
     #sosOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
     #sosOverlay.sos-active { display: block; animation: sosPulseCorners 1s ease-in-out infinite; }
@@ -852,6 +868,14 @@ include __DIR__ . '/includes/header.php';
                 <h5 class="mb-0"><i class="bi bi-map me-1"></i><?= t('map.title') ?></h5>
                 <div class="d-flex align-items-center gap-2">
                     <small class="text-muted"><?= t('common.updated_label') ?> <span id="mapRefresh"><?= date('H:i:s') ?></span></small>
+                    <?php if ($canManageWarRoom): ?>
+                    <div class="btn-group btn-group-sm" role="group" id="annotationToolbar">
+                        <button type="button" class="btn btn-outline-secondary" id="annoToolFreehand" data-tool="freehand" title="<?= t('annotation.tool_freehand') ?>"><i class="bi bi-pencil"></i></button>
+                        <button type="button" class="btn btn-outline-secondary" id="annoToolArrow" data-tool="arrow" title="<?= t('annotation.tool_arrow') ?>"><i class="bi bi-arrow-up-right"></i></button>
+                        <button type="button" class="btn btn-outline-secondary" id="annoToolText" data-tool="text" title="<?= t('annotation.tool_text') ?>"><i class="bi bi-fonts"></i></button>
+                        <button type="button" class="btn btn-outline-secondary" id="annoToolErase" data-tool="erase" title="<?= t('annotation.tool_erase') ?>"><i class="bi bi-eraser"></i></button>
+                    </div>
+                    <?php endif; ?>
                     <button type="button" id="mapFullscreenToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.btn_fullscreen') ?>">
                         <i class="bi bi-arrows-fullscreen"></i>
                     </button>
@@ -1480,6 +1504,7 @@ const fieldMode = <?= $fieldMode ? 'true' : 'false' ?>;
 const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>;
 let pins = <?= json_encode($pins) ?>;
 let dispatches = <?= json_encode($dispatches) ?>;
+let annotations = <?= json_encode($annotations) ?>;
 let media = <?= json_encode($photos) ?>;
 // Media re-renders every image tag from scratch (mission-photo-view.php is
 // deliberately Cache-Control: no-store, since it's access-gated field media),
@@ -1514,7 +1539,7 @@ if (fieldMode) {
         if (document.visibilityState === 'visible') requestWarRoomWakeLock();
     });
 }
-let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null;
+let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
@@ -1527,6 +1552,75 @@ if (!fieldMode) {
     // Not attached to the map yet — only shown while trail mode is active
     // (enterTrailMode()/exitTrailMode() below), swapped in place of pinLayer.
     trailLayer = L.layerGroup();
+    // Battle-map annotations get their own pane (above the default marker/
+    // overlay panes) so a draw-mode CSS rule can suspend pin/dispatch click
+    // interactivity without touching this one — the eraser must keep working
+    // while everything else is suspended. annotationLayer holds only the
+    // persisted shapes (rebuilt from scratch by renderAnnotations() every
+    // poll, like dispatchLayer); annotationDrawLayer holds only the
+    // in-progress gesture preview (an active freehand stroke, a pending arrow
+    // start point) so a poll tick landing mid-gesture can never wipe out what's
+    // currently being drawn.
+    map.createPane('annotationPane');
+    map.getPane('annotationPane').style.zIndex = 610;
+    annotationLayer = L.featureGroup().addTo(map);
+    annotationDrawLayer = L.layerGroup().addTo(map);
+}
+const ANNOTATION_COLOR = '#1f2937';
+// Battle-map annotation tool state — a plain toggle over the same live map
+// instance (not a second map, unlike the dispatch-composition modal), since
+// the whole point is sketching directly on what everyone's already looking
+// at. Only one tool is ever active at a time; selecting the same one again
+// deselects it and returns the map to normal pan/click behavior.
+let activeTool = null; // null | 'freehand' | 'arrow' | 'text' | 'erase'
+let freehandPoints = [], freehandPreviewLayer = null;
+let arrowStart = null, arrowStartMarker = null;
+function cancelActiveDrawing() {
+    if (map) { map.dragging.enable(); map.doubleClickZoom.enable(); }
+    if (annotationDrawLayer) annotationDrawLayer.clearLayers();
+    freehandPoints = []; freehandPreviewLayer = null;
+    arrowStart = null; arrowStartMarker = null;
+}
+function setActiveTool(tool) {
+    cancelActiveDrawing();
+    if (map) map.closePopup();
+    activeTool = (activeTool === tool) ? null : tool;
+    document.querySelectorAll('#annotationToolbar button').forEach(b => b.classList.toggle('active', b.dataset.tool === activeTool));
+    const mapCardEl = document.getElementById('mapCard');
+    if (mapCardEl) mapCardEl.classList.toggle('wr-draw-active', !!activeTool);
+    if (map) {
+        // Disabled proactively here (tool-selection time), not reactively
+        // inside a mousedown handler — disabling mid-gesture would race
+        // against Leaflet's own internal drag-handler already latching onto
+        // the same event. Only freehand needs this: arrow/text are pure
+        // clicks, and the dispatch-composition tool already proves Leaflet
+        // cleanly separates click-from-pan without disabling dragging.
+        if (activeTool === 'freehand') map.dragging.disable();
+        if (activeTool) map.doubleClickZoom.disable();
+    }
+}
+const annoToolbarEl = document.getElementById('annotationToolbar');
+if (annoToolbarEl) {
+    annoToolbarEl.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => setActiveTool(btn.dataset.tool)));
+}
+// Safety net: a mousedown with no matching mouseup (alt-tab mid-stroke, focus
+// stolen mid-gesture) would otherwise leave map.dragging permanently disabled
+// for the rest of the session, since nothing else would ever call
+// cancelActiveDrawing() again.
+window.addEventListener('blur', cancelActiveDrawing);
+function bearing(latlng1, latlng2) {
+    const lat1 = latlng1.lat * Math.PI / 180, lat2 = latlng2.lat * Math.PI / 180, dLng = (latlng2.lng - latlng1.lng) * Math.PI / 180;
+    const y = Math.sin(dLng) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+function submitAnnotation(type, geo, label) {
+    const data = new URLSearchParams({csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>, type, geo: JSON.stringify(geo)});
+    if (label) data.append('label', label);
+    fetch('mission-annotation.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+        if (result.ok) renderAnnotations(annotations = [...annotations, result.annotation]);
+        else alert(result.error || t('common.send_failed'));
+    }).catch(() => alert(t('common.send_failed')));
 }
 function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -1606,6 +1700,42 @@ function renderDispatches(items) {
     });
     if (reopenLayer) reopenLayer.openPopup();
 }
+// Battle-map annotations: rebuilt from scratch every poll, exactly like
+// renderDispatches above — but never touches annotationDrawLayer, which
+// holds only the in-progress gesture preview, so a poll tick landing
+// mid-stroke can't rip out what's currently being drawn. Per-layer click
+// listeners are only attached when the drawing toolbar exists in the DOM at
+// all (command-staff sessions) — a regular viewer's annotations render but
+// are otherwise inert, with zero click handling wired up at all.
+function renderAnnotations(items) {
+    annotationLayer.clearLayers();
+    const canErase = !!document.getElementById('annotationToolbar');
+    items.forEach(item => {
+        let layer = null;
+        if (item.type === 'freehand') {
+            layer = L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 4, pane: 'annotationPane'}).addTo(annotationLayer);
+        } else if (item.type === 'arrow') {
+            const [p1, p2] = item.geo;
+            L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 3, pane: 'annotationPane'}).addTo(annotationLayer);
+            const brng = bearing(L.latLng(p1[0], p1[1]), L.latLng(p2[0], p2[1]));
+            const headIcon = L.divIcon({className:'', html:`<div class="wr-anno-arrowhead" style="transform:rotate(${brng}deg);border-bottom-color:${ANNOTATION_COLOR}"></div>`, iconSize:[16,16], iconAnchor:[8,8]});
+            layer = L.marker(p2, {icon: headIcon, pane: 'annotationPane'}).addTo(annotationLayer);
+        } else if (item.type === 'text') {
+            const icon = L.divIcon({className:'', html:`<span class="wr-anno-text-label" style="background:${ANNOTATION_COLOR}">${escapeHtml(item.label)}</span>`, iconAnchor:[0, 12]});
+            layer = L.marker([item.geo.lat, item.geo.lng], {icon, pane: 'annotationPane'}).addTo(annotationLayer);
+        }
+        if (layer && canErase) {
+            layer.on('click', () => {
+                if (activeTool !== 'erase') return;
+                if (!confirm(t('annotation.delete_confirm'))) return;
+                const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: item.id});
+                fetch('mission-annotation.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+                    if (result.ok) renderAnnotations(annotations = annotations.filter(a => String(a.id) !== String(item.id)));
+                });
+            });
+        }
+    });
+}
 if (!fieldMode) {
 dispatchLayer.on('popupopen', event => {
     const popupEl = event.popup.getElement();
@@ -1640,6 +1770,97 @@ dispatchLayer.on('popupopen', event => {
                 else { alert(result.error || t('common.send_failed')); receiveBtn.disabled = false; }
             });
         });
+    }
+});
+// Freehand: mousedown starts a stroke, mousemove samples points at a
+// zoom-independent pixel-distance threshold (not a geographic one, so visual
+// density stays constant whether zoomed in or out), mouseup finalizes and
+// sends it. mouseup is bound on document (not just the map) so releasing
+// outside the map container still ends the stroke. Touch handlers mirror the
+// mouse ones exactly — command staff may well be on a tablet at a command
+// post, and unlike arrow/text (single taps, which Leaflet's own 'click'
+// event already normalizes across mouse and touch), a sustained drag gesture
+// is the one interaction here genuinely likely to fight with a mobile
+// browser's native touch handling if left mouse-only.
+function touchToLatLng(touch) {
+    return map.containerPointToLatLng(map.mouseEventToContainerPoint({clientX: touch.clientX, clientY: touch.clientY}));
+}
+function startFreehand(latlng, containerPoint) {
+    freehandPoints = [[latlng.lat, latlng.lng]];
+    freehandPreviewLayer = L.polyline(freehandPoints, {color: ANNOTATION_COLOR, weight: 4, pane: 'annotationPane'}).addTo(annotationDrawLayer);
+    return containerPoint;
+}
+function appendFreehandPoint(latlng, lastPx, currentPx) {
+    if (lastPx.distanceTo(currentPx) < 7) return lastPx;
+    freehandPoints.push([latlng.lat, latlng.lng]);
+    if (freehandPreviewLayer && freehandPoints.length < 500) freehandPreviewLayer.setLatLngs(freehandPoints);
+    return currentPx;
+}
+function finishFreehand() {
+    annotationDrawLayer.clearLayers();
+    if (freehandPoints.length >= 2) submitAnnotation('freehand', freehandPoints, null);
+    freehandPoints = [];
+}
+map.on('mousedown', e => {
+    if (activeTool !== 'freehand') return;
+    let lastPx = startFreehand(e.latlng, e.containerPoint);
+    const onMove = ev => { lastPx = appendFreehandPoint(ev.latlng, lastPx, ev.containerPoint); };
+    const onUp = () => { map.off('mousemove', onMove); document.removeEventListener('mouseup', onUp); finishFreehand(); };
+    map.on('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+});
+document.getElementById('warRoomMap').addEventListener('touchstart', e => {
+    if (activeTool !== 'freehand' || !e.touches.length) return;
+    e.preventDefault();
+    const latlng = touchToLatLng(e.touches[0]);
+    let lastPx = startFreehand(latlng, map.latLngToContainerPoint(latlng));
+    const onMove = ev => {
+        if (!ev.touches.length) return;
+        ev.preventDefault();
+        const moveLatLng = touchToLatLng(ev.touches[0]);
+        lastPx = appendFreehandPoint(moveLatLng, lastPx, map.latLngToContainerPoint(moveLatLng));
+    };
+    const onEnd = () => { document.getElementById('warRoomMap').removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onEnd); finishFreehand(); };
+    document.getElementById('warRoomMap').addEventListener('touchmove', onMove, {passive: false});
+    document.addEventListener('touchend', onEnd);
+}, {passive: false});
+
+// Arrow: two clicks (start, then end) — matches the dispatch polygon tool's
+// own "click commits a point, no mousemove rubber-band" interaction, rather
+// than inventing a richer one. Text: one click opens a Leaflet popup with a
+// plain input, reusing the map's own popup positioning rather than a native
+// prompt() (unused anywhere in this app for real data entry) or a modal
+// (which would visually disconnect the input from the labeled location).
+map.on('click', e => {
+    if (activeTool === 'arrow') {
+        if (!arrowStart) {
+            arrowStart = e.latlng;
+            arrowStartMarker = L.circleMarker(e.latlng, {radius:6, color: ANNOTATION_COLOR, fillColor:'#fff', fillOpacity:1, weight:2, pane:'annotationPane'}).addTo(annotationDrawLayer);
+        } else {
+            const points = [[arrowStart.lat, arrowStart.lng], [e.latlng.lat, e.latlng.lng]];
+            annotationDrawLayer.clearLayers();
+            arrowStart = null;
+            submitAnnotation('arrow', points, null);
+        }
+    } else if (activeTool === 'text') {
+        const latlng = e.latlng;
+        L.popup({closeOnClick: false})
+            .setLatLng(latlng)
+            .setContent(`<input type="text" maxlength="80" class="form-control form-control-sm mb-1" id="annoTextInput" placeholder="${t('annotation.text_placeholder')}">
+                          <button type="button" class="btn btn-sm btn-primary w-100" id="annoTextSave">${t('common.save')}</button>`)
+            .openOn(map);
+        setTimeout(() => {
+            const input = document.getElementById('annoTextInput');
+            if (!input) return;
+            input.focus();
+            const save = () => {
+                const text = input.value.trim();
+                if (text) submitAnnotation('text', {lat: latlng.lat, lng: latlng.lng}, text);
+                map.closePopup();
+            };
+            document.getElementById('annoTextSave')?.addEventListener('click', save);
+            input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); save(); } });
+        }, 0);
     }
 });
 if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup('<strong>' + t('map.mission_point_label') + '</strong><br><?= h(addslashes($mission['title'])) ?>');
@@ -2018,7 +2239,7 @@ wireMediaInput('videoCaptureInput', t('media.video_label'));
 wireMediaInput('videoGalleryInput', t('media.video_label'));
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderMedia(media); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); }
     renderMyTasks(myTasks);
     renderShortageReports(shortageReports);
     renderSosAlerts(sosAlerts);
@@ -2473,6 +2694,7 @@ setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after='
     if (!fieldMode) {
         renderPins(pins = data.pins || []);
         if (data.dispatches) renderDispatches(dispatches = data.dispatches);
+        if (data.annotations) renderAnnotations(annotations = data.annotations);
         if (data.media) {
             const sig = JSON.stringify(data.media);
             if (sig !== mediaSignature) {
