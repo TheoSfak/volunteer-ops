@@ -864,6 +864,27 @@ if (isLoggedIn()) {
         .note-style .note-dropdown-menu,
         .note-para .note-dropdown-menu { z-index: 3060 !important; }
         .note-editor .note-toolbar .note-dropdown-toggle::after { display: none; }
+
+        /* Guest (is_external) org/team-name badge — always-visible small pill
+           riding top-right of the person's name, everywhere a name renders
+           app-wide (Action Room participant/team/chat/media/dispatch/SOS/
+           shortage lists, and the guest's own profile hero). Shared here
+           rather than in war-room.php's own <style> block since it now also
+           needs to work on profile.php. */
+        .guest-org-badge {
+            display: inline-block;
+            font-size: .62em;
+            font-weight: 700;
+            color: #fff;
+            background: #b45309;
+            border-radius: 999px;
+            padding: 1px 6px;
+            margin-left: 4px;
+            vertical-align: top;
+            line-height: 1.4;
+            white-space: nowrap;
+            cursor: help;
+        }
     </style>
 </head>
 <body>
@@ -1368,7 +1389,7 @@ if (isLoggedIn()) {
                         <?php else: ?>
                             <i class="bi bi-person-circle me-1 flex-shrink-0"></i>
                         <?php endif; ?>
-                        <span class="user-name-text d-none d-sm-inline"><?= h($currentUser['name'] ?? 'Χρήστης') ?></span>
+                        <span class="user-name-text d-none d-sm-inline"><?= $currentUser ? guestNameHtml($currentUser['name'], (bool)($currentUser['is_external'] ?? false), $currentUser['guest_org_name'] ?? null) : h('Χρήστης') ?></span>
                         <span class="user-type-badge d-none d-md-inline"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_RESCUER) ?></span>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">

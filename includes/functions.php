@@ -860,21 +860,23 @@ function canManageActionRoom(?int $responsibleUserId, int $userId): bool {
 }
 
 /**
- * War Room: wraps a name with a colored, dashed-underline native tooltip
- * showing their home rescue-team/organization — only for is_external accounts
- * (users.guest_org_name). Everyone else's name renders exactly as before
- * (plain escaped text, byte-identical to a bare h($name) call). Used
- * everywhere a person's name is shown across Action Room so a guest's
- * organization is recognizable at a glance, not just on their own profile.
- * Mirrored client-side by the same-named JS function in war-room.php for
- * names that render from a JS poll (chat, media, dispatch, SOS, shortage).
+ * War Room: appends an always-visible small badge showing a guest's home
+ * rescue-team/organization right after their name — only for is_external
+ * accounts (users.guest_org_name). Everyone else's name renders exactly as
+ * before (plain escaped text, byte-identical to a bare h($name) call). The
+ * badge itself also carries a native title= tooltip (full org name, in case
+ * it's ever truncated visually) on top of always being visible — "visible at
+ * a glance AND on hover", not hover-only. Used everywhere a person's name is
+ * shown app-wide, including the guest's own profile hero (not just Action
+ * Room). Mirrored client-side by the same-named JS function in war-room.php
+ * for names that render from a JS poll (chat, media, dispatch, SOS, shortage).
  */
 function guestNameHtml(string $name, bool $isExternal, ?string $orgName): string {
     if (!$isExternal) {
         return h($name);
     }
     $org = ($orgName !== null && trim($orgName) !== '') ? $orgName : t('guest.org_unknown');
-    return '<span class="guest-name-tag" title="' . h(t('guest.org_tooltip', ['org' => $org])) . '">' . h($name) . '</span>';
+    return h($name) . '<sup class="guest-org-badge" title="' . h(t('guest.org_tooltip', ['org' => $org])) . '">' . h($org) . '</sup>';
 }
 
 /**

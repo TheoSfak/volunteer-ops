@@ -494,7 +494,7 @@ include __DIR__ . '/includes/header.php';
             <div class="hero-avatar-placeholder"><i class="bi bi-person-fill"></i></div>
         <?php endif; ?>
         <div class="flex-grow-1">
-            <h1 class="h4 mb-1 text-white fw-bold"><?= h($user['name']) ?></h1>
+            <h1 class="h4 mb-1 text-white fw-bold"><?= guestNameHtml($user['name'], (bool)$user['is_external'], $user['guest_org_name']) ?></h1>
             <div style="opacity:.85">
                 <i class="bi bi-envelope me-1"></i><?= h($user['email']) ?>
                 <?php if ($user['phone']): ?>
