@@ -611,24 +611,32 @@ if (get('ajax') === '1') {
         'status' => $pin['field_status'], 'team_color' => $pin['team_color'], 'time' => date('H:i', strtotime($pin['created_at']))
     ], $loadPins());
 
+    // Every new banner-worthy notification since the client's last checkpoint
+    // is returned (not just the latest) so concurrent alerts each get their
+    // own scrolling row client-side instead of the newest silently replacing
+    // an older one that arrived in the same 5s poll window. Ascending order:
+    // the client prepends each row in turn, so the last one processed (the
+    // newest) ends up on top, same as if they'd arrived one at a time.
     $bannerAfterId = (int) get('banner_after');
-    $bannerRow = dbFetchOne(
-        "SELECT id, message, data FROM notifications WHERE user_id = ? AND id > ? AND JSON_EXTRACT(data, '$.bannerMission') = ? ORDER BY id DESC LIMIT 1",
+    $bannerRows = dbFetchAll(
+        "SELECT id, message, data FROM notifications WHERE user_id = ? AND id > ? AND JSON_EXTRACT(data, '$.bannerMission') = ? ORDER BY id ASC",
         [$user['id'], $bannerAfterId, $missionId]
     );
-    $bannerOrderId = null;
-    if ($bannerRow) {
+    $banners = [];
+    foreach ($bannerRows as $bannerRow) {
         $bannerData = json_decode((string) $bannerRow['data'], true);
         $rawOrderId = $bannerData['orderId'] ?? null;
+        $orderId = null;
         if ($rawOrderId) {
             $acked = (bool) dbFetchValue(
                 "SELECT acknowledged_at FROM mission_order_recipients WHERE order_id = ? AND user_id = ?",
                 [$rawOrderId, $user['id']]
             );
             if (!$acked) {
-                $bannerOrderId = (int) $rawOrderId;
+                $orderId = (int) $rawOrderId;
             }
         }
+        $banners[] = ['id' => (int) $bannerRow['id'], 'message' => $bannerRow['message'], 'orderId' => $orderId];
     }
 
     $dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
@@ -641,7 +649,7 @@ if (get('ajax') === '1') {
     echo json_encode([
         'pins' => $pins,
         'time' => date('H:i:s'),
-        'banner' => $bannerRow ? ['id' => (int)$bannerRow['id'], 'message' => $bannerRow['message'], 'orderId' => $bannerOrderId] : null,
+        'banners' => $banners,
         'dispatches' => $dispatches,
         'media' => $photos,
         'myTasks' => $myTasks,
@@ -770,11 +778,13 @@ include __DIR__ . '/includes/header.php';
     .presence-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
     .presence-dot.presence-online { background: #28a745; }
     .presence-dot.presence-offline { background: #adb5bd; }
-    .war-room-banner { display: none; align-items: center; gap: 10px; background: #000; border-bottom: 2px solid #dc2626; padding: 8px 12px; position: relative; z-index: 1900; }
+    .war-room-banner { display: none; flex-direction: column; background: #000; border-bottom: 2px solid #dc2626; position: relative; z-index: 1900; max-height: 40vh; overflow-y: auto; }
+    .war-room-banner-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
+    .war-room-banner-row + .war-room-banner-row { border-top: 1px solid rgba(255,59,48,.35); }
     .war-room-banner-track { flex: 1; overflow: hidden; white-space: nowrap; position: relative; height: 1.6em; }
     .war-room-banner-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #ff3b30; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; animation: warRoomBannerScroll 14s linear infinite; }
     @keyframes warRoomBannerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
-    .war-room-banner .bi-broadcast { color: #ff3b30; }
+    .war-room-banner .bi-broadcast { color: #ff3b30; flex-shrink: 0; }
     .war-room-banner-close { background: transparent; border: none; color: #ff3b30; font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0 4px; flex-shrink: 0; }
     @keyframes warRoomPulseRed { 0%, 100% { box-shadow: 0 0 0 0 rgba(220,53,69,0); } 50% { box-shadow: 0 0 0 10px rgba(220,53,69,0.4); } }
     #sosOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
@@ -826,12 +836,7 @@ include __DIR__ . '/includes/header.php';
 
 <?= showFlash() ?>
 
-<div id="warRoomBanner" class="war-room-banner">
-    <i class="bi bi-broadcast"></i>
-    <div class="war-room-banner-track"><span id="warRoomBannerText"></span></div>
-    <button type="button" id="warRoomBannerAckBtn" class="btn btn-sm btn-light fw-semibold d-none" style="flex-shrink:0;"><?= t('banner.ack_btn') ?></button>
-    <button type="button" id="warRoomBannerClose" class="war-room-banner-close" aria-label="<?= t('common.close') ?>">&times;</button>
-</div>
+<div id="warRoomBanner" class="war-room-banner"></div>
 
 <?php if ($canManageWarRoom): ?>
 <div id="sosOverlay"></div>
@@ -1980,7 +1985,10 @@ setTimeout(() => {
 }, 200);
 
 let bannerAfterId = <?= $bannerSinceId ?>;
-let bannerHideTimer = null;
+// notification id -> {el, timer} for every currently-showing banner row —
+// concurrent alerts each get their own row/timer instead of one message
+// overwriting another that's still scrolling.
+const activeBannerRows = new Map();
 
 // Loud alert sound for incoming War Room banners (orders, dispatches, global messages).
 // Browsers block audio until the page has seen a user gesture, so we lazily create/resume
@@ -2086,19 +2094,22 @@ function updateSosAlarmState(items) {
     }
 }
 
-function showWarRoomBanner(text, orderId) {
+function showWarRoomBanner(id, text, orderId) {
+    if (activeBannerRows.has(id)) return;
     playWarRoomAlertSound();
-    const el = document.getElementById('warRoomBanner');
-    document.getElementById('warRoomBannerText').textContent = text;
-    el.style.display = 'flex';
-    if (bannerHideTimer) clearTimeout(bannerHideTimer);
-    bannerHideTimer = setTimeout(hideWarRoomBanner, 60000);
 
-    const ackBtn = document.getElementById('warRoomBannerAckBtn');
+    const row = document.createElement('div');
+    row.className = 'war-room-banner-row';
+    row.innerHTML = `
+        <i class="bi bi-broadcast"></i>
+        <div class="war-room-banner-track"><span></span></div>
+        <button type="button" class="btn btn-sm btn-light fw-semibold${orderId ? '' : ' d-none'}" style="flex-shrink:0;">${t('banner.ack_btn')}</button>
+        <button type="button" class="war-room-banner-close" aria-label="${t('common.close')}">&times;</button>
+    `;
+    row.querySelector('span').textContent = text;
+
     if (orderId) {
-        ackBtn.classList.remove('d-none');
-        ackBtn.disabled = false;
-        ackBtn.textContent = t('banner.ack_btn');
+        const ackBtn = row.querySelector('.btn-light');
         ackBtn.onclick = () => {
             ackBtn.disabled = true;
             const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge', order_id: orderId});
@@ -2107,16 +2118,27 @@ function showWarRoomBanner(text, orderId) {
                 else { ackBtn.disabled = false; alert(result.error || t('common.failed')); }
             }).catch(() => { ackBtn.disabled = false; });
         };
-    } else {
-        ackBtn.classList.add('d-none');
-        ackBtn.onclick = null;
+    }
+    row.querySelector('.war-room-banner-close').addEventListener('click', () => hideWarRoomBannerRow(id));
+
+    // New rows go to the top of the stack, oldest sinks toward the bottom.
+    const container = document.getElementById('warRoomBanner');
+    container.prepend(row);
+    container.style.display = 'flex';
+
+    const timer = setTimeout(() => hideWarRoomBannerRow(id), 60000);
+    activeBannerRows.set(id, {el: row, timer});
+}
+function hideWarRoomBannerRow(id) {
+    const entry = activeBannerRows.get(id);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    entry.el.remove();
+    activeBannerRows.delete(id);
+    if (activeBannerRows.size === 0) {
+        document.getElementById('warRoomBanner').style.display = 'none';
     }
 }
-function hideWarRoomBanner() {
-    document.getElementById('warRoomBanner').style.display = 'none';
-    if (bannerHideTimer) { clearTimeout(bannerHideTimer); bannerHideTimer = null; }
-}
-document.getElementById('warRoomBannerClose').addEventListener('click', hideWarRoomBanner);
 
 // Focus mode: hide the app's own left sidebar and expand War Room to the
 // full window width, plus request real browser fullscreen for a kiosk-style
@@ -2378,9 +2400,11 @@ setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after='
     }
     if (data.onlinePresence) renderPresence(data.onlinePresence);
     if (!fieldMode) document.getElementById('mapRefresh').textContent = data.time || '';
-    if (data.banner && data.banner.id > bannerAfterId) {
-        bannerAfterId = data.banner.id;
-        showWarRoomBanner(data.banner.message, data.banner.orderId);
+    if (data.banners && data.banners.length) {
+        data.banners.forEach(b => {
+            if (b.id > bannerAfterId) bannerAfterId = b.id;
+            showWarRoomBanner(b.id, b.message, b.orderId);
+        });
     }
 }).catch(() => {}), 5000);
 
