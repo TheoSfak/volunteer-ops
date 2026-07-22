@@ -532,6 +532,10 @@ return [
         'profile.manual_volunteer' => 'Εγχειρίδιο Εθελοντή',
         'profile.manual_print_hint' => 'Εκτυπώστε ή αποθηκεύστε ως PDF',
         'profile.page_title' => 'Το Προφίλ μου',
+
+        // Guest org-name tooltip (shown on a guest's name everywhere in Action Room)
+        'guest.org_tooltip' => 'Ομάδα guest: {org}',
+        'guest.org_unknown' => 'Εξωτερική ομάδα',
     ],
     'en' => [
         'common.mission_not_found' => 'Mission not found.',
@@ -1011,5 +1015,9 @@ return [
         'profile.manual_volunteer' => 'Volunteer Manual',
         'profile.manual_print_hint' => 'Print or save as PDF',
         'profile.page_title' => 'My Profile',
+
+        // Guest org-name tooltip (shown on a guest's name everywhere in Action Room)
+        'guest.org_tooltip' => 'Guest team: {org}',
+        'guest.org_unknown' => 'External team',
     ],
 ];

@@ -4731,6 +4731,19 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                 }
             },
         ],
+        [
+            'version'     => 90,
+            'description' => 'Add guest_org_name to users (partner rescue-team/organization name for is_external accounts, shown as a tooltip on their name throughout Action Room)',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'guest_org_name'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN guest_org_name VARCHAR(150) NULL AFTER language");
+                }
+            },
+        ],
 
     ];
     // ────────────────────────────────────────────────────────────────────────

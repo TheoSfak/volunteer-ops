@@ -19,7 +19,11 @@ $operationalDefaultTypeIds = array_map('intval', array_column(
 ));
 
 // Get all active volunteers for responsible selection
-$allVolunteers = dbFetchAll("SELECT id, name, role FROM users WHERE is_active = 1 AND role IN (?, ?, ?, ?) ORDER BY name", 
+// is_external = 0: guest/partner-org accounts must never be selectable as a
+// mission's responsible person — that grants full Action Room admin powers
+// (canManageActionRoom() in functions.php), which would defeat the point of
+// locking guests down to a single mission's Action Room in the first place.
+$allVolunteers = dbFetchAll("SELECT id, name, role FROM users WHERE is_active = 1 AND is_external = 0 AND role IN (?, ?, ?, ?) ORDER BY name",
     [ROLE_VOLUNTEER, ROLE_SHIFT_LEADER, ROLE_DEPARTMENT_ADMIN, ROLE_SYSTEM_ADMIN]);
 
 $mission = null;

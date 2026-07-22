@@ -237,7 +237,7 @@ function verifyCsrf() {
         setFlash('error', 'Δεν μπορείτε να κάνετε αλλαγές κατά τη διάρκεια προεπισκόπησης ρόλου.');
         redirect('dashboard.php');
     }
-    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
+    if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string) $_POST['csrf_token'])) {
         setFlash('error', 'Μη έγκυρο αίτημα. Παρακαλώ δοκιμάστε ξανά.');
         // Do NOT use HTTP_REFERER — it is attacker-controlled and enables open redirect
         redirect('dashboard.php');
@@ -654,7 +654,8 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
     $dispatchIds = array_map('intval', array_column($rows, 'id'));
     $placeholders = implode(',', array_fill(0, count($dispatchIds), '?'));
     $ackRows = dbFetchAll(
-        "SELECT a.dispatch_id, a.team_id, a.user_id, a.created_at, u.name AS user_name, mt.codename, mt.team_number
+        "SELECT a.dispatch_id, a.team_id, a.user_id, a.created_at, u.name AS user_name,
+                u.is_external, u.guest_org_name, mt.codename, mt.team_number
          FROM mission_dispatch_acks a
          JOIN users u ON u.id = a.user_id
          LEFT JOIN mission_teams mt ON mt.id = a.team_id
@@ -665,10 +666,12 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
     $acksByDispatch = [];
     foreach ($ackRows as $ack) {
         $acksByDispatch[(int) $ack['dispatch_id']][] = [
-            'team_label' => $ack['team_id'] ? ($ack['codename'] . ' ' . $ack['team_number']) : null,
-            'user_name'  => $ack['user_name'],
-            'user_id'    => (int) $ack['user_id'],
-            'time'       => date('H:i', strtotime($ack['created_at'])),
+            'team_label'     => $ack['team_id'] ? ($ack['codename'] . ' ' . $ack['team_number']) : null,
+            'user_name'      => $ack['user_name'],
+            'is_external'    => (bool) $ack['is_external'],
+            'guest_org_name' => $ack['guest_org_name'],
+            'user_id'        => (int) $ack['user_id'],
+            'time'           => date('H:i', strtotime($ack['created_at'])),
         ];
     }
 
@@ -707,7 +710,10 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'label'       => $row['label'],
             'team_label'  => $teamId ? ($row['codename'] . ' ' . $row['team_number']) : t('common.all_teams'),
             'can_delete'  => $canManageWarRoom,
-            'acks'        => array_map(fn($a) => ['team_label' => $a['team_label'] ?? '—', 'user_name' => $a['user_name'], 'time' => $a['time']], $acks),
+            'acks'        => array_map(fn($a) => [
+                'team_label' => $a['team_label'] ?? '—', 'user_name' => $a['user_name'],
+                'is_external' => $a['is_external'], 'guest_org_name' => $a['guest_org_name'], 'time' => $a['time'],
+            ], $acks),
             'my_ack'      => $myAck,
             'can_ack'     => $isApprovedParticipant && !$myAck && $eligible,
             'my_receipt'  => $myReceipt,
@@ -785,7 +791,7 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
 function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canManageWarRoom, int $limit = 30): array {
     $rows = dbFetchAll(
         "SELECT p.id, p.user_id, p.media_type, p.lat, p.lng, p.created_at, u.name AS user_name,
-                mt.codename, mt.team_number
+                u.is_external, u.guest_org_name, mt.codename, mt.team_number
          FROM mission_photos p
          JOIN users u ON u.id = p.user_id
          LEFT JOIN mission_team_members mtm ON mtm.user_id = p.user_id AND mtm.mission_id = p.mission_id
@@ -797,14 +803,16 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
     );
 
     return array_map(fn($row) => [
-        'id'         => (int) $row['id'],
-        'media_type' => $row['media_type'],
-        'user_name'  => $row['user_name'],
-        'team_label' => $row['codename'] ? $row['codename'] . ' ' . $row['team_number'] : null,
-        'time'       => date('d/m H:i', strtotime($row['created_at'])),
-        'lat'        => $row['lat'] !== null ? (float) $row['lat'] : null,
-        'lng'        => $row['lng'] !== null ? (float) $row['lng'] : null,
-        'can_delete' => $canManageWarRoom || (int) $row['user_id'] === $currentUserId,
+        'id'             => (int) $row['id'],
+        'media_type'     => $row['media_type'],
+        'user_name'      => $row['user_name'],
+        'is_external'    => (bool) $row['is_external'],
+        'guest_org_name' => $row['guest_org_name'],
+        'team_label'     => $row['codename'] ? $row['codename'] . ' ' . $row['team_number'] : null,
+        'time'           => date('d/m H:i', strtotime($row['created_at'])),
+        'lat'            => $row['lat'] !== null ? (float) $row['lat'] : null,
+        'lng'            => $row['lng'] !== null ? (float) $row['lng'] : null,
+        'can_delete'     => $canManageWarRoom || (int) $row['user_id'] === $currentUserId,
     ], $rows);
 }
 
@@ -832,6 +840,41 @@ function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
         'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
         'fulfilled_at'    => $row['fulfilled_at'] ? date('d/m H:i', strtotime($row['fulfilled_at'])) : null,
     ], $rows);
+}
+
+/**
+ * War Room: whether $userId has admin/manager-level control of an Action Room
+ * (close the mission, broadcast, manage teams, issue orders, view reports, ...).
+ * External/guest accounts (users.is_external) are hard-excluded here regardless
+ * of hasPagePermission()/responsible_user_id — bootstrap.php's allow-list only
+ * restricts *which pages* a guest can reach, this is what stops them gaining
+ * admin *powers* once on an allowed one. Concretely: mission-form.php's
+ * "Υπεύθυνος Αποστολής" dropdown has no reason to exclude guests by itself
+ * (fixed separately, defense-in-depth), so without this check here, picking a
+ * partner org's lead as a mission's responsible_user_id would silently hand
+ * that guest full Action Room admin powers for that mission.
+ */
+function canManageActionRoom(?int $responsibleUserId, int $userId): bool {
+    if (isExternalGuest()) return false;
+    return hasPagePermission('missions_manage') || ($responsibleUserId !== null && $responsibleUserId === $userId);
+}
+
+/**
+ * War Room: wraps a name with a colored, dashed-underline native tooltip
+ * showing their home rescue-team/organization — only for is_external accounts
+ * (users.guest_org_name). Everyone else's name renders exactly as before
+ * (plain escaped text, byte-identical to a bare h($name) call). Used
+ * everywhere a person's name is shown across Action Room so a guest's
+ * organization is recognizable at a glance, not just on their own profile.
+ * Mirrored client-side by the same-named JS function in war-room.php for
+ * names that render from a JS poll (chat, media, dispatch, SOS, shortage).
+ */
+function guestNameHtml(string $name, bool $isExternal, ?string $orgName): string {
+    if (!$isExternal) {
+        return h($name);
+    }
+    $org = ($orgName !== null && trim($orgName) !== '') ? $orgName : t('guest.org_unknown');
+    return '<span class="guest-name-tag" title="' . h(t('guest.org_tooltip', ['org' => $org])) . '">' . h($name) . '</span>';
 }
 
 /**
@@ -867,7 +910,7 @@ function getMissionCommandStaffIds(int $missionId, ?int $responsibleUserId, int 
 function loadUnresolvedShortageReportsForMission(int $missionId): array {
     $rows = dbFetchAll(
         "SELECT r.id, r.shortage_type, r.severity, r.title, r.description, r.created_at, r.acknowledged_at,
-                r.team_id, u.name AS reporter_name, mt.codename, mt.team_number
+                r.team_id, u.name AS reporter_name, u.is_external, u.guest_org_name, mt.codename, mt.team_number
          FROM mission_shortage_reports r
          JOIN users u ON u.id = r.reporter_id
          LEFT JOIN mission_teams mt ON mt.id = r.team_id
@@ -884,6 +927,8 @@ function loadUnresolvedShortageReportsForMission(int $missionId): array {
         'title'           => $row['title'],
         'description'     => $row['description'],
         'reporter_name'   => $row['reporter_name'],
+        'is_external'     => (bool) $row['is_external'],
+        'guest_org_name'  => $row['guest_org_name'],
         'team_label'      => $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : t('history.no_team_capitalized'),
         'created_at'      => date('d/m H:i', strtotime($row['created_at'])),
         'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
@@ -901,7 +946,7 @@ function loadUnresolvedShortageReportsForMission(int $missionId): array {
 function loadOpenSosAlertsForMission(int $missionId): array {
     $rows = dbFetchAll(
         "SELECT a.id, a.pr_id, a.lat, a.lng, a.created_at, a.acknowledged_at,
-                a.team_id, u.name AS user_name, mt.codename, mt.team_number
+                a.team_id, u.name AS user_name, u.is_external, u.guest_org_name, mt.codename, mt.team_number
          FROM mission_sos_alerts a
          JOIN users u ON u.id = a.user_id
          LEFT JOIN mission_teams mt ON mt.id = a.team_id
@@ -910,9 +955,16 @@ function loadOpenSosAlertsForMission(int $missionId): array {
         [$missionId]
     );
 
+    // user_name is deliberately NOT pre-escaped here (unlike before) — it now
+    // rides along with is_external/guest_org_name for the JS-side
+    // guestNameHtml() helper to wrap and escape together, same as the
+    // dispatch-acks/media loaders. team_label keeps its original
+    // pre-escaped-server-side treatment, unchanged.
     return array_map(fn($row) => [
         'id'              => (int) $row['id'],
-        'user_name'       => h($row['user_name']),
+        'user_name'       => $row['user_name'],
+        'is_external'     => (bool) $row['is_external'],
+        'guest_org_name'  => $row['guest_org_name'],
         'team_label'      => h($row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : t('history.no_team_capitalized')),
         'lat'             => $row['lat'] !== null ? (float) $row['lat'] : null,
         'lng'             => $row['lng'] !== null ? (float) $row['lng'] : null,

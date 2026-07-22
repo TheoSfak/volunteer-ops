@@ -150,7 +150,29 @@ function createMissionOrderAndNotify(
     return (int) $orderId;
 }
 
-$canManageWarRoom = hasPagePermission('missions_manage') || (int)$mission['responsible_user_id'] === (int)$user['id'];
+/**
+ * War Room: resolve which active-shift volunteers a location/photo/video/task
+ * request targets — either every currently-active participant, or just the
+ * ones the admin checked. Shared by the 4 near-identical request_* handlers
+ * below (each used to run this exact query + intersection independently).
+ */
+function resolveRequestedActiveRecipients(int $missionId): array {
+    $activeRecipients = dbFetchAll(
+        "SELECT DISTINCT pr.volunteer_id, u.name
+         FROM participation_requests pr
+         JOIN shifts s ON s.id = pr.shift_id
+         JOIN users u ON u.id = pr.volunteer_id
+         WHERE s.mission_id = ? AND pr.status = ?
+           AND s.start_time <= NOW() AND s.end_time > NOW()",
+        [$missionId, PARTICIPATION_APPROVED]
+    );
+    $activeIds = array_map('intval', array_column($activeRecipients, 'volunteer_id'));
+    return post('request_scope') === 'all'
+        ? $activeIds
+        : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
+}
+
+$canManageWarRoom = canManageActionRoom($mission['responsible_user_id'] ? (int)$mission['responsible_user_id'] : null, (int)$user['id']);
 $isApprovedParticipant = (bool)dbFetchValue(
     "SELECT COUNT(*) FROM participation_requests pr
      JOIN shifts s ON s.id = pr.shift_id
@@ -185,19 +207,7 @@ if (isPost()) {
             redirect('war-room.php?id=' . $missionId);
         }
 
-        $activeRecipients = dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id, u.name
-             FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             JOIN users u ON u.id = pr.volunteer_id
-             WHERE s.mission_id = ? AND pr.status = ?
-               AND s.start_time <= NOW() AND s.end_time > NOW()",
-            [$missionId, PARTICIPATION_APPROVED]
-        );
-        $activeIds = array_map('intval', array_column($activeRecipients, 'volunteer_id'));
-        $requestedIds = post('request_scope') === 'all'
-            ? $activeIds
-            : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
+        $requestedIds = resolveRequestedActiveRecipients($missionId);
 
         if (empty($requestedIds)) {
             setFlash('warning', t('common.select_active_volunteer'));
@@ -217,19 +227,7 @@ if (isPost()) {
             redirect('war-room.php?id=' . $missionId);
         }
 
-        $activeRecipients = dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id, u.name
-             FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             JOIN users u ON u.id = pr.volunteer_id
-             WHERE s.mission_id = ? AND pr.status = ?
-               AND s.start_time <= NOW() AND s.end_time > NOW()",
-            [$missionId, PARTICIPATION_APPROVED]
-        );
-        $activeIds = array_map('intval', array_column($activeRecipients, 'volunteer_id'));
-        $requestedIds = post('request_scope') === 'all'
-            ? $activeIds
-            : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
+        $requestedIds = resolveRequestedActiveRecipients($missionId);
 
         if (empty($requestedIds)) {
             setFlash('warning', t('common.select_active_volunteer'));
@@ -249,19 +247,7 @@ if (isPost()) {
             redirect('war-room.php?id=' . $missionId);
         }
 
-        $activeRecipients = dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id, u.name
-             FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             JOIN users u ON u.id = pr.volunteer_id
-             WHERE s.mission_id = ? AND pr.status = ?
-               AND s.start_time <= NOW() AND s.end_time > NOW()",
-            [$missionId, PARTICIPATION_APPROVED]
-        );
-        $activeIds = array_map('intval', array_column($activeRecipients, 'volunteer_id'));
-        $requestedIds = post('request_scope') === 'all'
-            ? $activeIds
-            : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
+        $requestedIds = resolveRequestedActiveRecipients($missionId);
 
         if (empty($requestedIds)) {
             setFlash('warning', t('common.select_active_volunteer'));
@@ -284,19 +270,7 @@ if (isPost()) {
         $taskText = trim((string) post('task_text'));
         $taskText = mb_substr($taskText, 0, 500);
 
-        $activeRecipients = dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id, u.name
-             FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             JOIN users u ON u.id = pr.volunteer_id
-             WHERE s.mission_id = ? AND pr.status = ?
-               AND s.start_time <= NOW() AND s.end_time > NOW()",
-            [$missionId, PARTICIPATION_APPROVED]
-        );
-        $activeIds = array_map('intval', array_column($activeRecipients, 'volunteer_id'));
-        $requestedIds = post('request_scope') === 'all'
-            ? $activeIds
-            : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
+        $requestedIds = resolveRequestedActiveRecipients($missionId);
 
         if ($taskText === '') {
             setFlash('warning', t('order.task.empty_warning'));
@@ -575,7 +549,7 @@ $hasFieldStatus = (bool)dbFetchValue(
 $fieldStatusColumns = $hasFieldStatus ? ', pr.field_status, pr.field_status_updated_at' : ', NULL AS field_status, NULL AS field_status_updated_at';
 $participants = dbFetchAll(
     "SELECT pr.id AS pr_id, pr.volunteer_id, pr.attended{$fieldStatusColumns},
-            u.name, u.phone, s.id AS shift_id, s.start_time, s.end_time,
+            u.name, u.phone, u.is_external, u.guest_org_name, s.id AS shift_id, s.start_time, s.end_time,
             (SELECT MAX(vp.created_at) FROM volunteer_pings vp WHERE vp.user_id = pr.volunteer_id AND vp.shift_id = pr.shift_id) AS last_ping_at
      FROM participation_requests pr
      JOIN users u ON u.id = pr.volunteer_id
@@ -709,7 +683,8 @@ $activeParticipants = array_values(array_filter($participants, fn($participant) 
 // ── Mission teams ─────────────────────────────────────────────────────────
 $teamRows = dbFetchAll(
     "SELECT mt.id, mt.codename, mt.team_number, mt.color, mt.leader_id, l.name AS leader_name,
-            mtm.user_id, u.name AS member_name
+            l.is_external AS leader_is_external, l.guest_org_name AS leader_guest_org_name,
+            mtm.user_id, u.name AS member_name, u.is_external AS member_is_external, u.guest_org_name AS member_guest_org_name
      FROM mission_teams mt
      LEFT JOIN users l ON l.id = mt.leader_id
      LEFT JOIN mission_team_members mtm ON mtm.team_id = mt.id
@@ -729,11 +704,16 @@ foreach ($teamRows as $row) {
             'color' => $row['color'],
             'leader_id' => $row['leader_id'] !== null ? (int)$row['leader_id'] : null,
             'leader_name' => $row['leader_name'],
+            'leader_is_external' => (bool) $row['leader_is_external'],
+            'leader_guest_org_name' => $row['leader_guest_org_name'],
             'members' => [],
         ];
     }
     if ($row['user_id'] !== null) {
-        $teams[$tid]['members'][] = ['user_id' => (int)$row['user_id'], 'name' => $row['member_name']];
+        $teams[$tid]['members'][] = [
+            'user_id' => (int)$row['user_id'], 'name' => $row['member_name'],
+            'is_external' => (bool) $row['member_is_external'], 'guest_org_name' => $row['member_guest_org_name'],
+        ];
     }
 }
 
@@ -810,6 +790,7 @@ include __DIR__ . '/includes/header.php';
     body.war-room-focus .sidebar-toggle { display: none; }
     body.war-room-focus .main-content { margin-left: 0; }
     #mediaList { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; align-content: start; }
+    .guest-name-tag { border-bottom: 1px dashed #b45309; color: #b45309; cursor: help; }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
@@ -955,11 +936,11 @@ include __DIR__ . '/includes/header.php';
                         <div>
                             <span class="badge fs-6 me-2" style="background:<?= h($teamBg) ?>;color:<?= h($teamFg) ?>;"><?= h($team['codename'] . ' ' . $team['team_number']) ?></span>
                             <?php if ($team['leader_name']): ?>
-                            <span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i><?= h($team['leader_name']) ?></span>
+                            <span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i><?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_guest_org_name']) ?></span>
                             <?php endif; ?>
                             <div class="small mt-2">
                                 <?php foreach ($team['members'] as $member): ?>
-                                <span class="badge bg-light text-dark border me-1 mb-1"><?= h($member['name']) ?><?= $member['user_id'] === $team['leader_id'] ? ' ⭐' : '' ?></span>
+                                <span class="badge bg-light text-dark border me-1 mb-1"><?= guestNameHtml($member['name'], $member['is_external'], $member['guest_org_name']) ?><?= $member['user_id'] === $team['leader_id'] ? ' ⭐' : '' ?></span>
                                 <?php endforeach; ?>
                             </div>
                         </div>
@@ -989,7 +970,7 @@ include __DIR__ . '/includes/header.php';
                 <?php foreach ($participants as $participant): ?>
                 <?php $status = $participant['field_status'] ?? ''; ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'presence-online' : 'presence-offline' ?>" title="<?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? t('common.online') : t('common.offline') ?>"></span><strong><?= h($participant['name']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => date('H:i', strtotime($participant['last_ping_at']))]) : t('participants.no_ping') ?></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'presence-online' : 'presence-offline' ?>" title="<?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['guest_org_name']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => date('H:i', strtotime($participant['last_ping_at']))]) : t('participants.no_ping') ?></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>">
                         <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
@@ -1513,6 +1494,13 @@ if (!fieldMode) {
 function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 }
+// Mirrors guestNameHtml() in includes/functions.php for names that render from
+// a JS poll (chat, media, dispatch, SOS, shortage) rather than server-side PHP.
+function guestNameHtml(name, isExternal, orgName) {
+    if (!isExternal) return escapeHtml(name);
+    const org = (orgName && orgName.trim() !== '') ? orgName : t('guest.org_unknown');
+    return `<span class="guest-name-tag" title="${escapeHtml(t('guest.org_tooltip', {org}))}">${escapeHtml(name)}</span>`;
+}
 function renderDispatches(items) {
     // A live poll can re-run this while an admin has a dispatch popup open
     // (very plausible for an area — there's more to read before deciding to
@@ -1532,7 +1520,7 @@ function renderDispatches(items) {
     let reopenLayer = null;
     items.forEach(item => {
         const acksHtml = item.acks.length
-            ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? a.team_label + ' — ' : ''}${escapeHtml(a.user_name)} (${a.time})`).join('<br>') + '</div>'
+            ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? a.team_label + ' — ' : ''}${guestNameHtml(a.user_name, a.is_external, a.guest_org_name)} (${a.time})`).join('<br>') + '</div>'
             : '';
         const receiveHtml = item.can_receive
             ? `<br><button type="button" class="btn btn-sm btn-warning mt-1 dispatch-receive-btn" data-id="${item.id}"><i class="bi bi-flag me-1"></i>${t('banner.ack_btn')}</button>`
@@ -1732,8 +1720,8 @@ function renderMedia(items) {
         // than being the only identity shown. Teamless senders keep the old
         // single-line look, just their name, since there's no team to lead with.
         const whoBlock = m.team_label
-            ? `<div style="font-size:.85rem;font-weight:700;line-height:1.2;">${icon}${escapeHtml(m.team_label)}</div><div class="text-muted" style="font-size:.7rem;">${escapeHtml(m.user_name)}</div>`
-            : `<div class="fw-bold" style="font-size:.8rem;">${icon}${escapeHtml(m.user_name)}</div>`;
+            ? `<div style="font-size:.85rem;font-weight:700;line-height:1.2;">${icon}${escapeHtml(m.team_label)}</div><div class="text-muted" style="font-size:.7rem;">${guestNameHtml(m.user_name, m.is_external, m.guest_org_name)}</div>`
+            : `<div class="fw-bold" style="font-size:.8rem;">${icon}${guestNameHtml(m.user_name, m.is_external, m.guest_org_name)}</div>`;
         // Two-column grid (#mediaList below) leaves each card roughly half as
         // wide as before, so the footer stacks name-block over a
         // time+buttons row instead of the old side-by-side split, which
@@ -1855,7 +1843,7 @@ function renderShortageReports(items) {
         <div class="border rounded p-2 mb-2">
             <div><span class="badge bg-${sevColor[r.severity] || 'secondary'}">${r.severity_label}</span> <strong>${r.type_label}</strong> — ${escapeHtml(r.title)}</div>
             <div class="small mt-1">${escapeHtml(r.description)}</div>
-            <div class="text-muted" style="font-size:.75rem;">${escapeHtml(r.reporter_name)} (${r.team_label}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
+            <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.guest_org_name)} (${r.team_label}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
             <div class="mt-1">${r.acknowledged_at
                 ? `<button type="button" class="btn btn-sm btn-success w-100 shortage-resolve-btn" data-report-id="${r.id}">${t('shortage.resolve_btn')}</button>`
                 : `<button type="button" class="btn btn-sm btn-warning w-100 shortage-seen-btn" data-report-id="${r.id}">${t('shortage.seen_btn')}</button>`}</div>
@@ -1893,7 +1881,7 @@ function renderSosAlerts(items) {
     }
     list.innerHTML = items.map(a => `
         <div class="border border-danger rounded p-2 mb-2">
-            <div><strong>🆘 ${a.team_label}</strong> — ${a.user_name}</div>
+            <div><strong>🆘 ${a.team_label}</strong> — ${guestNameHtml(a.user_name, a.is_external, a.guest_org_name)}</div>
             <div class="text-muted" style="font-size:.75rem;">${a.created_at}${a.lat !== null ? ` · <a href="#" class="sos-locate-link" data-lat="${a.lat}" data-lng="${a.lng}">${t('sos.view_on_map')}</a>` : t('sos.no_gps')}${a.acknowledged_at ? t('sos.ack_at_prefix', {time: a.acknowledged_at}) : ''}</div>
             <div class="mt-1">${a.acknowledged_at
                 ? `<button type="button" class="btn btn-sm btn-success w-100 sos-resolve-btn" data-alert-id="${a.id}">${t('shortage.resolve_btn')}</button>`
@@ -2387,7 +2375,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         const meta = document.createElement('div');
         meta.className = 'small d-flex align-items-center gap-1 ' + (msg.mine ? 'text-white-50' : 'text-muted');
         const metaText = document.createElement('span');
-        metaText.textContent = msg.name + ' · ' + msg.time;
+        metaText.innerHTML = guestNameHtml(msg.name, msg.is_external, msg.guest_org_name) + ' · ' + escapeHtml(msg.time);
         meta.appendChild(metaText);
         if (msg.can_delete) {
             const del = document.createElement('button');

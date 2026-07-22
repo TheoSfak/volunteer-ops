@@ -23,7 +23,7 @@ if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_o
     exit;
 }
 
-$canManageWarRoom = hasPagePermission('missions_manage') || (int)$mission['responsible_user_id'] === (int)$userId;
+$canManageWarRoom = canManageActionRoom($mission['responsible_user_id'] ? (int)$mission['responsible_user_id'] : null, (int)$userId);
 if (!$canManageWarRoom) {
     echo json_encode(['ok' => false, 'error' => t('trail.admin_only')]);
     exit;

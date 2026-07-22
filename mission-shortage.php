@@ -20,7 +20,7 @@ if (!isPost()) {
     exit;
 }
 
-if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== ($_SESSION['csrf_token'] ?? '')) {
+if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string) $_POST['csrf_token'])) {
     echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }
@@ -40,7 +40,7 @@ if (!$report) {
     exit;
 }
 
-$canManageWarRoom = hasPagePermission('missions_manage') || (int) $report['responsible_user_id'] === (int) $userId;
+$canManageWarRoom = canManageActionRoom($report['responsible_user_id'] ? (int) $report['responsible_user_id'] : null, (int) $userId);
 if (!$canManageWarRoom) {
     echo json_encode(['ok' => false, 'error' => t('shortage.no_manage_permission')]);
     exit;
