@@ -23,10 +23,15 @@ $mission = dbFetchOne(
     "SELECT id, status, show_in_ops, responsible_user_id FROM missions WHERE id = ? AND deleted_at IS NULL",
     [$photo['mission_id']]
 );
-// Allow CLOSED too (not just OPEN) so the mission-report-print.php archival
-// export can still embed photos after a mission closes — the permission
-// check right below is unaffected, this only extends *when*, not *who*.
-if (!$mission || !in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED], true) || empty($mission['show_in_ops'])) {
+// Allow CLOSED and COMPLETED too (not just OPEN) so the mission-report-print.php
+// archival export can still embed photos after a mission closes — the
+// permission check right below is unaffected, this only extends *when*, not
+// *who*. COMPLETED specifically matters here: submitting a debrief
+// (mission-debrief.php) auto-transitions a mission straight to COMPLETED,
+// and a mission with a debrief already on file is exactly the kind whose
+// print report gets pulled up later — that photo gallery was 404ing for
+// every such mission until this was widened past just CLOSED.
+if (!$mission || !in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED, STATUS_COMPLETED], true) || empty($mission['show_in_ops'])) {
     http_response_code(404);
     exit(t('common.not_found'));
 }
