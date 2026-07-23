@@ -1098,6 +1098,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
             'order_type'  => $row['order_type'],
             'team_id'     => $teamId,
             'team_label'  => $teamId ? ($teamLabels[$teamId] ?? '—') : t('history.no_team_capitalized', [], $lang),
+            'user_id'     => (int) $row['user_id'],
             'user_name'   => $row['user_name'],
             'label'       => in_array($row['order_type'], ['task', 'message'], true) ? $row['task_text'] : null,
             'sent_at'     => $row['sent_at'],
@@ -1166,6 +1167,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
                 'order_type' => 'dispatch',
                 'team_id'    => $entry['team_id'],
                 'team_label' => $entry['team_id'] ? ($teamLabels[$entry['team_id']] ?? '—') : t('history.no_team_capitalized', [], $lang),
+                'user_id'    => $entry['user_id'],
                 'user_name'  => $entry['user_name'],
                 'label'      => $d['label'],
                 'sent_at'    => $d['sent_at'],
@@ -1215,7 +1217,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
 
     // ── shortage reports (inverse direction: admin responding to a team's report) ──
     $shortageRows = dbFetchAll(
-        "SELECT r.shortage_type, r.severity, r.title, r.created_at AS sent_at, r.team_id, u.name AS user_name,
+        "SELECT r.shortage_type, r.severity, r.title, r.created_at AS sent_at, r.team_id, r.reporter_id, u.name AS user_name,
                 r.acknowledged_at, r.resolved_at
          FROM mission_shortage_reports r
          JOIN users u ON u.id = r.reporter_id
@@ -1232,6 +1234,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
             'severity_label' => shortageSeverityLabel($row['severity'], $lang),
             'team_id'        => $teamId,
             'team_label'     => $teamId ? ($teamLabels[$teamId] ?? '—') : t('history.no_team_capitalized', [], $lang),
+            'reporter_id'    => (int) $row['reporter_id'],
             'reporter_name'  => $row['user_name'],
             'title'          => $row['title'],
             'sent_at'        => $row['sent_at'],
@@ -1301,6 +1304,41 @@ function missionScoreTierMeta(float $score): array {
 }
 
 /**
+ * War Room: turns a raw list of minute-deltas (order-ack, shortage-seen,
+ * shortage-resolved — anything "how long until X happened") into a 0-100
+ * speed score that a single forgotten outlier can't destroy. A plain mean
+ * lets one order left overnight (e.g. 1000+ minutes) drag the average for
+ * every other, genuinely-fast response down with it — confirmed on a real
+ * production PDF where this made an entire chart read as "0" next to that
+ * one bar. Anything past $thresholdMinutes is excluded from the average
+ * (kept only as a count) and instead docks the score directly, the same
+ * "per-occurrence penalty" shape already used for unresolved-critical
+ * shortages elsewhere in computeMissionScore() — so a forgotten item still
+ * costs real points, it just can't single-handedly zero out an otherwise
+ * fast team.
+ */
+function missionScoreForgottenAwareSpeed(array $minutesList, float $decayFactor, int $thresholdMinutes, int $penaltyPerForgotten): array {
+    $present = array_values(array_filter($minutesList, fn($m) => $m !== null));
+    if (empty($present)) {
+        return ['available' => false, 'score' => null, 'avg_minutes' => null, 'forgotten_count' => 0];
+    }
+    $normal = array_filter($present, fn($m) => $m <= $thresholdMinutes);
+    $forgottenCount = count($present) - count($normal);
+    $avgNormal = count($normal) ? array_sum($normal) / count($normal) : null;
+    // No normal-speed data at all (every single response was forgotten) —
+    // start from a neutral 100 rather than assuming the worst on top of the
+    // forgotten penalty below, which already does the real punishing.
+    $base = $avgNormal !== null ? max(0, min(100, 100 - $avgNormal * $decayFactor)) : 100.0;
+    $score = max(0, $base - $forgottenCount * $penaltyPerForgotten);
+    return [
+        'available'       => true,
+        'score'           => $score,
+        'avg_minutes'     => $avgNormal !== null ? round($avgNormal, 1) : null,
+        'forgotten_count' => $forgottenCount,
+    ];
+}
+
+/**
  * War Room: post-mission performance score — an overall 0-100 grade plus a
  * per-team leaderboard, for mission-stats.php's score-validation section and
  * mission-report-print.php's read-only display. Reuses
@@ -1316,6 +1354,23 @@ function missionScoreTierMeta(float $score): array {
  * completely inactive mission would vacuously score 100 from the shortage
  * pillar's neutral "nothing went wrong" default alone. Callers must treat a
  * null overall as "insufficient data to score", not persist it.
+ *
+ * Two fairness passes happen before any pillar is computed, both prompted by
+ * a real production PDF where a single forgotten order distorted everything
+ * downstream of it:
+ *  1. Rows whose actor is no longer an approved participant in this mission
+ *     (their participation was later canceled/removed — "left by mistake")
+ *     are dropped from every score computation entirely, via $approvedIds.
+ *     This ONLY affects scoring, never the archival detail — $report itself
+ *     is untouched (PHP arrays are copy-on-write), so mission-stats.php /
+ *     mission-report-print.php's detail tables and activity feed keep
+ *     showing literally everything that happened, unfiltered.
+ *  2. Any surviving response/seen/resolved time past
+ *     MISSION_SCORE_FORGOTTEN_MINUTES is excluded from the relevant speed
+ *     *average* (so one 1000-minute gap can't flatten nine 2-minute ones)
+ *     but still docks the score directly as a per-occurrence penalty, via
+ *     missionScoreForgottenAwareSpeed() above — see that function's own
+ *     comment for why a mean alone isn't enough here.
  */
 function computeMissionScore(int $missionId, ?array $report = null): array {
     $report = $report ?? computeMissionResponseReport($missionId);
@@ -1324,28 +1379,50 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
 
     $debrief = dbFetchOne("SELECT rating, objectives_met FROM mission_debriefs WHERE mission_id = ?", [$missionId]);
     $teams = dbFetchAll("SELECT id, codename, team_number, color FROM mission_teams WHERE mission_id = ? ORDER BY team_number", [$missionId]);
-    $approvedCount = (int) dbFetchValue(
-        "SELECT COUNT(DISTINCT pr.volunteer_id) FROM participation_requests pr
+    $approvedIds = array_map('intval', array_column(dbFetchAll(
+        "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
          JOIN shifts s ON s.id = pr.shift_id
          WHERE s.mission_id = ? AND pr.status = ?",
         [$missionId, PARTICIPATION_APPROVED]
-    );
+    ), 'volunteer_id'));
+    $approvedCount = count($approvedIds);
     $capacity = (int) dbFetchValue("SELECT COALESCE(SUM(max_volunteers), 0) FROM shifts WHERE mission_id = ?", [$missionId]);
 
+    $forgottenThresholdMinutes = 240; // 4 hours — past this, treat as "forgotten"/off-shift, not merely slow
+    $forgottenPenalty = 15; // same magnitude as the unresolved-critical-shortage penalty below, one consistent scale
+
+    $scoredDetail = array_values(array_filter($detail, fn($d) => in_array($d['user_id'], $approvedIds, true)));
+    $scoredShortage = array_values(array_filter($shortageDetail, fn($d) => in_array($d['reporter_id'], $approvedIds, true)));
+
+    // Named incidents for the narrative to cite directly ("η εντολή X προς Y
+    // έμεινε αναπάντητη Z ώρες") rather than only ever speaking in aggregates.
+    $forgottenOrders = [];
+    foreach ($scoredDetail as $row) {
+        if ($row['ack_minutes'] !== null && $row['ack_minutes'] > $forgottenThresholdMinutes) {
+            $forgottenOrders[] = ['label' => $row['type_label'], 'user_name' => $row['user_name'], 'team_label' => $row['team_label'], 'minutes' => $row['ack_minutes']];
+        }
+    }
+    usort($forgottenOrders, fn($a, $b) => $b['minutes'] <=> $a['minutes']);
+    $forgottenShortages = [];
+    foreach ($scoredShortage as $row) {
+        if ($row['seen_minutes'] !== null && $row['seen_minutes'] > $forgottenThresholdMinutes) {
+            $forgottenShortages[] = ['title' => $row['title'], 'reporter_name' => $row['reporter_name'], 'team_label' => $row['team_label'], 'minutes' => $row['seen_minutes']];
+        }
+    }
+    usort($forgottenShortages, fn($a, $b) => $b['minutes'] <=> $a['minutes']);
+
     // ── mission-wide pillars ─────────────────────────────────────────────────
-    $totalOrders = count($detail);
-    $ackRows = array_filter($detail, fn($d) => $d['ack_minutes'] !== null);
+    $totalOrders = count($scoredDetail);
     $pillars = [];
 
-    if (count($ackRows) > 0) {
-        $avgAck = array_sum(array_column($ackRows, 'ack_minutes')) / count($ackRows);
-        $pillars['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => true, 'score' => max(0, min(100, 100 - $avgAck * 2.5)), 'raw' => ['avg_minutes' => round($avgAck, 1)]];
+    $responseCalc = missionScoreForgottenAwareSpeed(array_column($scoredDetail, 'ack_minutes'), 2.5, $forgottenThresholdMinutes, $forgottenPenalty);
+    if ($responseCalc['available']) {
+        $pillars['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => true, 'score' => $responseCalc['score'], 'raw' => ['avg_minutes' => $responseCalc['avg_minutes'], 'forgotten_count' => $responseCalc['forgotten_count']]];
     } else {
-        $avgAck = null;
         $pillars['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => false, 'score' => null, 'raw' => []];
     }
 
-    $fulfilledRows = array_filter($detail, fn($d) => $d['fulfill_minutes'] !== null);
+    $fulfilledRows = array_filter($scoredDetail, fn($d) => $d['fulfill_minutes'] !== null);
     $fulfilled = count($fulfilledRows);
     if ($totalOrders > 0) {
         $pillars['completion'] = ['label' => 'Ολοκλήρωση Εντολών', 'weight' => 20, 'available' => true, 'score' => $fulfilled / $totalOrders * 100, 'raw' => ['fulfilled' => $fulfilled, 'total' => $totalOrders]];
@@ -1354,9 +1431,9 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     }
     $avgFulfillMinutes = count($fulfilledRows) ? round(array_sum(array_column($fulfilledRows, 'fulfill_minutes')) / count($fulfilledRows), 1) : null;
 
-    $totalShortage = count($shortageDetail);
-    $resolved = count(array_filter($shortageDetail, fn($d) => $d['resolved_at'] !== null));
-    $unresolvedCritical = count(array_filter($shortageDetail, fn($d) => $d['resolved_at'] === null && $d['severity'] === 'critical'));
+    $totalShortage = count($scoredShortage);
+    $resolved = count(array_filter($scoredShortage, fn($d) => $d['resolved_at'] !== null));
+    $unresolvedCritical = count(array_filter($scoredShortage, fn($d) => $d['resolved_at'] === null && $d['severity'] === 'critical'));
     if ($totalShortage > 0) {
         $shortageScore = max(0, min(100, ($resolved / $totalShortage * 100) - $unresolvedCritical * 15));
     } else {
@@ -1385,16 +1462,16 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     //    *outcome* — resolved or not, penalized for unresolved criticals) —
     //    this one grades *speed*, and is null (not defaulted to neutral) when
     //    there are zero shortage reports, since there's nothing to judge the
-    //    command staff's reaction time on. ─────────────────────────────────
-    $seenRows = array_filter($shortageDetail, fn($d) => $d['seen_minutes'] !== null);
-    $avgSeenMinutes = count($seenRows) ? round(array_sum(array_column($seenRows, 'seen_minutes')) / count($seenRows), 1) : null;
-    $resolvedMinRows = array_filter($shortageDetail, fn($d) => $d['resolved_minutes'] !== null);
-    $avgResolvedMinutes = count($resolvedMinRows) ? round(array_sum(array_column($resolvedMinRows, 'resolved_minutes')) / count($resolvedMinRows), 1) : null;
-    $seenCount = count($seenRows);
+    //    command staff's reaction time on. Same forgotten-aware treatment as
+    //    the response pillar — a shortage seen 16 hours late shouldn't erase
+    //    every other same-day acknowledgment from the average. ────────────
+    $seenCalc = missionScoreForgottenAwareSpeed(array_column($scoredShortage, 'seen_minutes'), 2.5, $forgottenThresholdMinutes, $forgottenPenalty);
+    $resolvedCalc = missionScoreForgottenAwareSpeed(array_column($scoredShortage, 'resolved_minutes'), 1.0, $forgottenThresholdMinutes, $forgottenPenalty);
+    $seenCount = count(array_filter($scoredShortage, fn($d) => $d['seen_minutes'] !== null));
 
     $commandParts = [];
-    if ($avgSeenMinutes !== null) $commandParts[] = ['score' => max(0, min(100, 100 - $avgSeenMinutes * 2.5)), 'weight' => 50];
-    if ($avgResolvedMinutes !== null) $commandParts[] = ['score' => max(0, min(100, 100 - $avgResolvedMinutes * 1.0)), 'weight' => 50];
+    if ($seenCalc['available']) $commandParts[] = ['score' => $seenCalc['score'], 'weight' => 50];
+    if ($resolvedCalc['available']) $commandParts[] = ['score' => $resolvedCalc['score'], 'weight' => 50];
     if ($totalShortage > 0 && !empty($commandParts)) {
         $cWeightSum = array_sum(array_column($commandParts, 'weight'));
         $cWeightedScore = array_sum(array_map(fn($p) => $p['score'] * $p['weight'], $commandParts));
@@ -1407,23 +1484,63 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
         $commandAvailable = false;
     }
     $command = [
-        'available'      => $commandAvailable,
-        'score'          => $commandScore,
-        'tier'           => $commandTier,
-        'avg_seen'       => $avgSeenMinutes,
-        'avg_resolved'   => $avgResolvedMinutes,
-        'seen_rate'      => $totalShortage ? round($seenCount / $totalShortage * 100) : null,
-        'resolved_rate'  => $totalShortage ? round($resolved / $totalShortage * 100) : null,
-        'total_reports'  => $totalShortage,
+        'available'          => $commandAvailable,
+        'score'              => $commandScore,
+        'tier'               => $commandTier,
+        'avg_seen'           => $seenCalc['avg_minutes'],
+        'avg_resolved'       => $resolvedCalc['avg_minutes'],
+        'seen_rate'          => $totalShortage ? round($seenCount / $totalShortage * 100) : null,
+        'resolved_rate'      => $totalShortage ? round($resolved / $totalShortage * 100) : null,
+        'total_reports'      => $totalShortage,
+        'forgotten_incidents' => $forgottenShortages,
     ];
     // Captured now, before the per-team loop below reuses $avgAck as its own
-    // local (per-team) variable name — this is the mission-wide value.
+    // local (per-team) variable name — these are the mission-wide values.
     $metrics = [
-        'avg_ack'      => $avgAck !== null ? round($avgAck, 1) : null,
-        'avg_fulfill'  => $avgFulfillMinutes,
-        'avg_seen'     => $avgSeenMinutes,
-        'avg_resolved' => $avgResolvedMinutes,
+        'avg_ack'          => $responseCalc['avg_minutes'],
+        'avg_fulfill'      => $avgFulfillMinutes,
+        'avg_seen'         => $seenCalc['avg_minutes'],
+        'avg_resolved'     => $resolvedCalc['avg_minutes'],
+        'forgotten_orders' => $responseCalc['forgotten_count'],
     ];
+
+    // ── historical baseline — same mission_type_id, everything except this
+    //    mission, same forgotten-minutes cutoff applied to the acknowledgment
+    //    side so a past fluke can't distort the comparison baseline either.
+    //    Cheap set-based aggregation (not a per-mission computeMissionScore()
+    //    call in a loop) since only two numbers are needed. Gated on a small
+    //    minimum sample so 1-2 historical data points don't produce a noisy
+    //    "50% faster than history" claim. ──────────────────────────────────
+    $missionTypeId = (int) dbFetchValue("SELECT mission_type_id FROM missions WHERE id = ?", [$missionId]);
+    $historical = ['avg_ack' => null, 'avg_ack_sample' => 0, 'completion_rate' => null, 'completion_sample' => 0];
+    if ($missionTypeId) {
+        $histAck = dbFetchOne(
+            "SELECT AVG(TIMESTAMPDIFF(MINUTE, o.created_at, r.acknowledged_at)) AS avg_ack, COUNT(*) AS n
+             FROM mission_order_recipients r
+             JOIN mission_orders o ON o.id = r.order_id
+             JOIN missions m ON m.id = o.mission_id
+             WHERE m.mission_type_id = ? AND m.id != ? AND m.deleted_at IS NULL
+               AND r.acknowledged_at IS NOT NULL
+               AND TIMESTAMPDIFF(MINUTE, o.created_at, r.acknowledged_at) <= ?",
+            [$missionTypeId, $missionId, $forgottenThresholdMinutes]
+        );
+        $histCompletion = dbFetchOne(
+            "SELECT COUNT(*) AS total, SUM(CASE WHEN r.fulfilled_at IS NOT NULL THEN 1 ELSE 0 END) AS fulfilled
+             FROM mission_order_recipients r
+             JOIN mission_orders o ON o.id = r.order_id
+             JOIN missions m ON m.id = o.mission_id
+             WHERE m.mission_type_id = ? AND m.id != ? AND m.deleted_at IS NULL",
+            [$missionTypeId, $missionId]
+        );
+        $histAckN = $histAck ? (int) $histAck['n'] : 0;
+        $histTotal = $histCompletion ? (int) $histCompletion['total'] : 0;
+        $historical = [
+            'avg_ack'            => ($histAckN >= 3 && $histAck['avg_ack'] !== null) ? round((float) $histAck['avg_ack'], 1) : null,
+            'avg_ack_sample'     => $histAckN,
+            'completion_rate'    => ($histTotal >= 3) ? round(((int) $histCompletion['fulfilled']) / $histTotal * 100) : null,
+            'completion_sample'  => $histTotal,
+        ];
+    }
 
     $hasSubstantiveData = $pillars['response']['available'] || $pillars['completion']['available']
         || $pillars['staffing']['available'] || $pillars['debrief']['available'];
@@ -1442,25 +1559,26 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     //    team_label) so it can't be confused by two teams that happen to
     //    render identically — see computeMissionResponseReport()'s $detail
     //    (already carries team_id) and $shortageDetail (carries it as of the
-    //    field added just above this function) ──────────────────────────────
+    //    field added just above this function). Built from the same
+    //    approved-only $scoredDetail/$scoredShortage as the mission-wide
+    //    pillars above, not the raw $detail/$shortageDetail. ──────────────
     $byTeamOrders = [];
-    foreach ($detail as $row) {
+    foreach ($scoredDetail as $row) {
         $tid = $row['team_id'];
         if ($tid === null) continue;
         if (!isset($byTeamOrders[$tid])) {
-            $byTeamOrders[$tid] = ['count' => 0, 'ack_count' => 0, 'ack_sum' => 0.0, 'fulfill_count' => 0];
+            $byTeamOrders[$tid] = ['count' => 0, 'ack_minutes' => [], 'fulfill_count' => 0];
         }
         $byTeamOrders[$tid]['count']++;
         if ($row['ack_minutes'] !== null) {
-            $byTeamOrders[$tid]['ack_count']++;
-            $byTeamOrders[$tid]['ack_sum'] += $row['ack_minutes'];
+            $byTeamOrders[$tid]['ack_minutes'][] = $row['ack_minutes'];
         }
         if ($row['fulfill_minutes'] !== null) {
             $byTeamOrders[$tid]['fulfill_count']++;
         }
     }
     $byTeamShortage = [];
-    foreach ($shortageDetail as $row) {
+    foreach ($scoredShortage as $row) {
         $tid = $row['team_id'];
         if ($tid === null) continue;
         if (!isset($byTeamShortage[$tid])) {
@@ -1490,9 +1608,9 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
         // teams on dispatch-arrival time, which depends on how far each
         // team's point was and isn't a fair performance signal.
         $teamPillars = [];
-        if ($orders && $orders['ack_count'] > 0) {
-            $avgAck = $orders['ack_sum'] / $orders['ack_count'];
-            $teamPillars['response'] = ['weight' => 45, 'available' => true, 'score' => max(0, min(100, 100 - $avgAck * 2.5)), 'raw' => ['avg_minutes' => round($avgAck, 1)]];
+        $teamResponseCalc = $orders ? missionScoreForgottenAwareSpeed($orders['ack_minutes'], 2.5, $forgottenThresholdMinutes, $forgottenPenalty) : ['available' => false, 'score' => null, 'avg_minutes' => null, 'forgotten_count' => 0];
+        if ($teamResponseCalc['available']) {
+            $teamPillars['response'] = ['weight' => 45, 'available' => true, 'score' => $teamResponseCalc['score'], 'raw' => ['avg_minutes' => $teamResponseCalc['avg_minutes'], 'forgotten_count' => $teamResponseCalc['forgotten_count']]];
         } else {
             $teamPillars['response'] = ['weight' => 45, 'available' => false, 'score' => null, 'raw' => []];
         }
@@ -1537,12 +1655,14 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     unset($t);
 
     return [
-        'overall'  => $overall,
-        'tier'     => $overallTier,
-        'pillars'  => $pillars,
-        'teams'    => $teamScores,
-        'metrics'  => $metrics,
-        'command'  => $command,
+        'overall'          => $overall,
+        'tier'             => $overallTier,
+        'pillars'          => $pillars,
+        'teams'            => $teamScores,
+        'metrics'          => $metrics,
+        'command'          => $command,
+        'forgotten_orders' => $forgottenOrders,
+        'historical'       => $historical,
     ];
 }
 
@@ -1644,17 +1764,49 @@ function generateMissionObserverNarrative(array $score, string $missionTitle): s
         if ($onlyPhrase !== '') $sentences[] = $onlyPhrase;
     }
 
-    if ($tier === 'critical') {
-        $weakLabels = [];
-        foreach ($available as $p) {
-            if ($p['score'] < 65) $weakLabels[] = $p['label'];
+    if ($score['historical']['avg_ack'] !== null && $score['metrics']['avg_ack'] !== null) {
+        $hist = $score['historical']['avg_ack'];
+        $diffPct = $hist > 0 ? round((($score['metrics']['avg_ack'] - $hist) / $hist) * 100) : 0;
+        if ($diffPct <= -10) {
+            $sentences[] = 'Ο μέσος χρόνος απόκρισης ήταν ' . abs($diffPct) . "% ταχύτερος από τον ιστορικό μέσο όρο ({$hist} λεπ.) για αποστολές ίδιου τύπου.";
+        } elseif ($diffPct >= 10) {
+            $sentences[] = 'Ο μέσος χρόνος απόκρισης ήταν ' . $diffPct . "% πιο αργός από τον ιστορικό μέσο όρο ({$hist} λεπ.) για αποστολές ίδιου τύπου.";
+        } else {
+            $sentences[] = "Ο μέσος χρόνος απόκρισης ήταν σε γενικές γραμμές στα ίδια επίπεδα με τον ιστορικό μέσο όρο ({$hist} λεπ.) για αποστολές ίδιου τύπου.";
         }
-        $weakLabels = array_slice($weakLabels, 0, 2);
-        if (!empty($weakLabels)) {
+    }
+
+    if (!empty($score['forgotten_orders'])) {
+        $worst = $score['forgotten_orders'][0];
+        $hours = round($worst['minutes'] / 60, 1);
+        $extra = count($score['forgotten_orders']) > 1 ? ', εκ των οποίων δεν ήταν η μοναδική τέτοια περίπτωση.' : '.';
+        $sentences[] = "Ιδιαίτερη προσοχή χρειάζεται η εντολή «{$worst['label']}» προς {$worst['user_name']} ({$worst['team_label']}), η οποία παρέμεινε αναπάντητη για περίπου {$hours} ώρες" . $extra;
+    }
+
+    $recommendations = [
+        'response'   => 'Εξετάστε συντομότερες υπενθυμίσεις (push notification) προς τις ομάδες όταν μια εντολή μένει αναπάντητη για μεγάλο διάστημα.',
+        'completion' => 'Εξετάστε αν οι εντολές ήταν σαφείς και εφικτές εντός του διαθέσιμου χρόνου κάθε ομάδας.',
+        'shortage'   => 'Εξετάστε ταχύτερη πρώτη ανταπόκριση στις αναφορές έλλειψης, ιδίως τις κρίσιμες.',
+        'staffing'   => 'Εξετάστε αύξηση του αριθμού διαθέσιμων εθελοντών ή καλύτερη προ-δρομολόγηση βαρδιών στην επόμενη αποστολή.',
+        'debrief'    => 'Εξετάστε πιο αναλυτική τεκμηρίωση των στόχων πριν την έναρξη της επόμενης αποστολής.',
+    ];
+    if ($tier === 'critical') {
+        $weakKeys = [];
+        foreach ($available as $key => $p) {
+            if ($p['score'] < 65) $weakKeys[] = $key;
+        }
+        $weakKeys = array_slice($weakKeys, 0, 2);
+        if (!empty($weakKeys)) {
+            $weakLabels = array_map(fn($k) => $available[$k]['label'], $weakKeys);
             $sentences[] = 'Προτεραιότητα για μελλοντικές ασκήσεις θα πρέπει να αποτελέσει η βελτίωση σε: ' . implode(' και ', $weakLabels) . '.';
+            foreach ($weakKeys as $k) {
+                if (isset($recommendations[$k])) $sentences[] = $recommendations[$k];
+            }
         }
     } elseif ($tier === 'warning' && $weakest !== null) {
         $sentences[] = "Ο τομέας «{$weakest['label']}» παραμένει ο πιο αδύναμος κρίκος και αξίζει ιδιαίτερη προσοχή στην επόμενη άσκηση.";
+        $weakestKeyFinal = array_search($weakest, $available, true);
+        if ($weakestKeyFinal !== false && isset($recommendations[$weakestKeyFinal])) $sentences[] = $recommendations[$weakestKeyFinal];
     } elseif ($tier === 'good') {
         if ($weakest !== null && $weakest['score'] < 85) {
             $sentences[] = "Παρά τη συνολικά άριστη εικόνα, ο τομέας «{$weakest['label']}» υπολείπεται ελαφρώς των υπολοίπων και θα μπορούσε να βελτιωθεί περαιτέρω.";
@@ -1692,8 +1844,15 @@ function generateCommandNarrative(array $command): string {
         'warning'  => 'Ο χρόνος αυτός είναι αποδεκτός, ωστόσο ταχύτερη πρώτη αντίδραση στις αναφορές θα ενίσχυε την επιχειρησιακή εικόνα.',
         'critical' => 'Ο χρόνος αυτός κρίνεται αυξημένος και ενδέχεται να έχει επιβαρύνει τη διαχείριση προβλημάτων στο πεδίο — συνιστάται στενότερη παρακολούθηση του καναλιού αναφορών σε επόμενες ασκήσεις.',
     ];
+    $sentences = [$base, $verdicts[$tier]];
 
-    return $base . ' ' . $verdicts[$tier];
+    if (!empty($command['forgotten_incidents'])) {
+        $worst = $command['forgotten_incidents'][0];
+        $hours = round($worst['minutes'] / 60, 1);
+        $sentences[] = "Ιδιαίτερα αξιοσημείωτη είναι η αναφορά «{$worst['title']}» από {$worst['reporter_name']} ({$worst['team_label']}), η οποία παρέμεινε χωρίς παρατήρηση για περίπου {$hours} ώρες.";
+    }
+
+    return implode(' ', $sentences);
 }
 
 /**

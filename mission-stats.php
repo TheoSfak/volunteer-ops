@@ -312,6 +312,7 @@ include __DIR__ . '/includes/header.php';
     .hero-metric-tile .hmt-icon { font-size: 1.4rem; color: var(--hmt-color, #2a78d6); margin-bottom: 6px; }
     .hero-metric-tile .hmt-value { font-size: 2.3rem; font-weight: 800; color: #0b0b0b; line-height: 1; }
     .hero-metric-tile .hmt-label { font-size: .82rem; color: #52514e; margin-top: 6px; }
+    .hero-metric-tile .hmt-note { font-size: .72rem; margin-top: 4px; }
 
     .command-severity-table { width: 100%; font-size: .85rem; margin-top: 10px; }
     .command-severity-table th { text-align: left; color: #898781; font-weight: 600; font-size: .75rem; text-transform: uppercase; padding: 4px 8px; border-bottom: 2px solid #eee; }
@@ -439,6 +440,9 @@ include __DIR__ . '/includes/header.php';
         <div class="hmt-icon"><i class="bi bi-lightning-charge-fill"></i></div>
         <div class="hmt-value"><?= $score['metrics']['avg_ack'] !== null ? number_format($score['metrics']['avg_ack'], 1) : '—' ?></div>
         <div class="hmt-label">Μ.Ο. Απόκρισης Ομάδων σε Εντολές (λεπ.)</div>
+        <?php if (!empty($score['metrics']['forgotten_orders'])): ?>
+        <div class="hmt-note text-warning"><i class="bi bi-exclamation-triangle-fill"></i> <?= $score['metrics']['forgotten_orders'] ?> ξεχασμένη<?= $score['metrics']['forgotten_orders'] > 1 ? 'ες' : '' ?> (&gt;4ώρες, εξαιρούνται)</div>
+        <?php endif; ?>
     </div>
     <div class="hero-metric-tile" style="--hmt-color:#1baf7a;">
         <div class="hmt-icon"><i class="bi bi-check2-circle"></i></div>
