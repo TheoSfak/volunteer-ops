@@ -106,37 +106,24 @@ $observerNarrative = generateMissionObserverNarrative($score, $mission['title'])
 $teamComparisonNarrative = generateTeamComparisonNarrative($score['teams']);
 $commandNarrative = generateCommandNarrative($score['command']);
 
-// Per-order-type breakdown (ack vs fulfill, same unit/scale) — computed from
-// $report['detail'] (raw datetimes/minutes) BEFORE the display-formatting
-// array_map below reassigns the local $detail; array_map returns a new array
-// so $report['detail'] itself is untouched either way, but computing this
-// first keeps the numeric-vs-display distinction obvious while reading.
-$byOrderType = [];
-foreach ($report['detail'] as $row) {
-    $t = $row['order_type'];
-    if (!isset($byOrderType[$t])) {
-        $byOrderType[$t] = ['label' => $row['type_label'], 'ack_count' => 0, 'ack_sum' => 0.0, 'fulfill_count' => 0, 'fulfill_sum' => 0.0, 'count' => 0];
-    }
-    $byOrderType[$t]['count']++;
-    if ($row['ack_minutes'] !== null) { $byOrderType[$t]['ack_count']++; $byOrderType[$t]['ack_sum'] += $row['ack_minutes']; }
-    if ($row['fulfill_minutes'] !== null) { $byOrderType[$t]['fulfill_count']++; $byOrderType[$t]['fulfill_sum'] += $row['fulfill_minutes']; }
-}
-$orderTypeLabels = [];
-$orderTypeCounts = [];
-$orderTypeAvgAck = [];
-$orderTypeAvgFulfill = [];
-$orderTypeAckCounts = [];
-$orderTypeFulfillCounts = [];
-foreach ($byOrderType as $s) {
-    $orderTypeLabels[] = $s['label'];
-    $orderTypeCounts[] = $s['count'];
-    $orderTypeAvgAck[] = $s['ack_count'] ? round($s['ack_sum'] / $s['ack_count'], 1) : 0;
-    $orderTypeAvgFulfill[] = $s['fulfill_count'] ? round($s['fulfill_sum'] / $s['fulfill_count'], 1) : 0;
-    $orderTypeAckCounts[] = $s['ack_count'];
-    $orderTypeFulfillCounts[] = $s['fulfill_count'];
-}
+// Per-order-type breakdown (ack vs fulfill, forgotten-aware) — shared with
+// mission-stats.php via computeMissionOrderTypeBreakdown() so the two pages
+// can't drift on the averaging formula; both pass the same raw, unfiltered
+// $report['detail'].
+$orderTypeBreakdown = computeMissionOrderTypeBreakdown($report['detail'], MISSION_SCORE_FORGOTTEN_MINUTES);
+$orderTypeLabels = array_column($orderTypeBreakdown, 'label');
+$orderTypeCounts = array_column($orderTypeBreakdown, 'count');
+$orderTypeAvgAck = array_column($orderTypeBreakdown, 'avg_ack_minutes');
+$orderTypeAvgFulfill = array_column($orderTypeBreakdown, 'avg_fulfill_minutes');
+$orderTypeForgottenAck = array_column($orderTypeBreakdown, 'forgotten_ack_count');
+$orderTypeForgottenFulfill = array_column($orderTypeBreakdown, 'forgotten_fulfill_count');
 
-$summary = $report['summary'];
+// Per-team rollup — same forgotten-aware treatment, via a function
+// deliberately separate from $report['summary'] itself (see
+// computeMissionTeamSpeedBreakdown()'s own docblock: that raw $summary is
+// also read live by mission-response-report.php/war-room.php, which this
+// change must not affect).
+$teamSpeedBreakdown = computeMissionTeamSpeedBreakdown($report['detail'], MISSION_SCORE_FORGOTTEN_MINUTES);
 $shortageSummary = $report['shortageSummary'];
 $detail = array_map(function ($row) {
     $row['sent_at'] = date('d/m/Y H:i', strtotime($row['sent_at']));
@@ -152,14 +139,56 @@ $shortageDetail = array_map(function ($row) {
 }, $report['shortageDetail']);
 
 $totalOrders = count($report['detail']);
-$ackRows = array_filter($report['detail'], fn($d) => $d['ack_minutes'] !== null);
 $fulfillCount = count(array_filter($report['detail'], fn($d) => $d['fulfill_minutes'] !== null));
-$avgAckMinutes = count($ackRows) ? round(array_sum(array_column($ackRows, 'ack_minutes')) / count($ackRows), 1) : null;
+// Headline KPI tile reuses the score's own forgotten-aware mission-wide
+// average rather than a second, separate plain-mean computation — avoids
+// this page ever showing two disagreeing "average response time" numbers.
+$avgAckMinutes = $score['metrics']['avg_ack'];
 $fulfillRate = $totalOrders ? round($fulfillCount / $totalOrders * 100) : 0;
 
 $totalShortage = count($report['shortageDetail']);
 $resolvedShortage = count(array_filter($report['shortageDetail'], fn($d) => $d['resolved_at'] !== null));
 $resolvedShortageRate = $totalShortage ? round($resolvedShortage / $totalShortage * 100) : 0;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 2b. Radar / histogram / trend-arrow prep — new visuals, this page only.
+// ═══════════════════════════════════════════════════════════════════════════
+$radarPillars = array_filter($score['pillars'], fn($p) => $p['available']);
+$radarLabels = array_values(array_map(fn($p) => $p['label'], $radarPillars));
+$radarData = array_values(array_map(fn($p) => round($p['score'], 1), $radarPillars));
+$showPillarRadar = count($radarPillars) >= 3; // a 1-2 axis "radar" is degenerate
+
+// Team-comparison radar: only teams with ALL 3 team-pillars available share
+// one uniform axis set — a print page has no tooltip to disambiguate "no
+// data" from "scored near zero" the way a null point would look, so a
+// partial team is cleanly excluded (with a caption) rather than plotted
+// misleadingly. Capped well below where overlaid polygons get unreadable.
+$teamRadarMaxTeams = 5;
+$qualifyingTeams = array_values(array_filter($score['teams'], fn($t) =>
+    $t['pillars']['response']['available'] && $t['pillars']['completion']['available'] && $t['pillars']['shortage']['available']
+));
+$teamRadarTeams = array_slice($qualifyingTeams, 0, $teamRadarMaxTeams); // $score['teams'] is already rank-sorted
+$showTeamRadar = count($teamRadarTeams) >= 2; // matches generateTeamComparisonNarrative()'s own >=2 gate
+$teamRadarOmittedCount = count($score['teams']) - count($teamRadarTeams);
+// Team-level pillars carry no 'label' of their own — sourced from the
+// mission-wide pillars, which always have one regardless of availability.
+$teamRadarLabels = [$score['pillars']['response']['label'], $score['pillars']['completion']['label'], $score['pillars']['shortage']['label']];
+$teamRadarDatasets = array_map(fn($t) => [
+    'label' => $t['codename'] . ' ' . $t['team_number'],
+    'data' => [round($t['pillars']['response']['score'], 1), round($t['pillars']['completion']['score'], 1), round($t['pillars']['shortage']['score'], 1)],
+    'borderColor' => $t['color'],
+    'backgroundColor' => $t['color'] . '1A', // ~10% alpha
+    'pointBackgroundColor' => $t['color'],
+    'borderWidth' => 2,
+], $teamRadarTeams);
+
+$histogram = $score['response_histogram'];
+$showHistogram = $histogram['available'];
+
+$ackTrend      = missionMinutesTrend($score['metrics']['avg_ack'], $score['historical']['avg_ack']);
+$fulfillTrend  = missionMinutesTrend($score['metrics']['avg_fulfill'], $score['historical']['avg_fulfill']);
+$seenTrend     = missionMinutesTrend($score['metrics']['avg_seen'], $score['historical']['avg_seen']);
+$resolvedTrend = missionMinutesTrend($score['metrics']['avg_resolved'], $score['historical']['avg_resolved']);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 3. Debrief narrative — same table mission-stats.php already reads.
@@ -264,9 +293,12 @@ $photoPoints = array_values(array_filter($media, fn($m) => $m['lat'] !== null));
 // only waits for elements that will actually exist on the page.
 $expectedReady = 0;
 if ($score['overall'] !== null) $expectedReady++; // gauge
+if ($showPillarRadar) $expectedReady++; // pillarRadarChart
 if (!empty($timelineData)) $expectedReady++; // timeline
-if (!empty($summary)) $expectedReady += 2; // teamCount + teamAck
+if (!empty($teamSpeedBreakdown)) $expectedReady += 2; // teamCount + teamAck
+if ($showTeamRadar) $expectedReady++; // teamRadarChart
 if (!empty($orderTypeLabels)) $expectedReady += 2; // orderType pie + responseDetail bar
+if ($showHistogram) $expectedReady++; // responseHistogramChart
 if (!empty($shortageSummary)) $expectedReady += 2; // shortageSeverity pie + commandSeverity bar
 if (!empty($lastPings) || !empty($dispatchGeo) || !empty($photoPoints)) $expectedReady++; // map tiles
 $expectedReady += count($photos); // gallery thumbnails — see the img wireup near the closing script
@@ -350,6 +382,9 @@ $printDate = date('d/m/Y H:i');
         .hero-metric-tile .hmt-value { font-size: 1.7rem; font-weight: 800; color: #0b0b0b; line-height: 1; }
         .hero-metric-tile .hmt-label { font-size: 7.3pt; color: #52514e; margin-top: 5px; }
         .hero-metric-tile .hmt-note { font-size: 6.6pt; margin-top: 3px; }
+        .hero-metric-tile .hmt-trend { font-size: 8pt; font-weight: 700; margin-left: 4px; }
+        .hero-metric-tile .hmt-trend.better { color: #0ca30c; }
+        .hero-metric-tile .hmt-trend.worse { color: #d03b3b; }
 
         .command-severity-table { width: 100%; font-size: 8.3pt; margin-top: 8px; }
         .command-severity-table th { text-align: left; color: #898781; font-weight: 600; font-size: 7.3pt; text-transform: uppercase; padding: 3px 6px; border-bottom: 2px solid #eee; }
@@ -460,6 +495,11 @@ $printDate = date('d/m/Y H:i');
             <?php endforeach; ?>
         </div>
     </div>
+    <?php if ($showPillarRadar): ?>
+    <div style="margin-top:16px; max-width:340px; margin-left:auto; margin-right:auto;">
+        <div class="pr-chart-wrap" style="height:240px;"><canvas id="pillarRadarChart"></canvas></div>
+    </div>
+    <?php endif; ?>
     <div class="score-validation-line">
         <?php if ($scoreReview): ?>
             <span class="validated">✓ Επικυρώθηκε</span> από <?= h($scoreReview['validator_name']) ?> στις <?= formatDateTime($scoreReview['validated_at']) ?> — Τελική βαθμολογία: <strong><?= number_format($scoreReview['final_score'], 1) ?></strong>
@@ -492,26 +532,45 @@ $printDate = date('d/m/Y H:i');
 </div>
 <?php endif; ?>
 
+<?php if ($showTeamRadar): ?>
+<div class="pr-card">
+    <h2>🕸️ Σύγκριση Ομάδων ανά Τομέα</h2>
+    <div class="pr-chart-wrap" style="height:280px;"><canvas id="teamRadarChart"></canvas></div>
+    <?php if ($teamRadarOmittedCount > 0): ?>
+    <p style="font-size:7.5pt; color:#999; margin-top:4px;"><?= $teamRadarOmittedCount ?> ομάδ<?= $teamRadarOmittedCount === 1 ? 'α' : 'ες' ?> δεν εμφανίζ<?= $teamRadarOmittedCount === 1 ? 'εται' : 'ονται' ?> σε αυτό το γράφημα (ελλιπή δεδομένα σε έναν ή περισσότερους τομείς, ή εκτός των πρώτων <?= $teamRadarMaxTeams ?>) — παραμέν<?= $teamRadarOmittedCount === 1 ? 'ει' : 'ουν' ?> ορατ<?= $teamRadarOmittedCount === 1 ? 'ή' : 'ές' ?> στην παραπάνω κατάταξη.</p>
+    <?php endif; ?>
+</div>
+<?php endif; ?>
+
 <!-- Response & resolution time headline metrics -->
 <div class="hero-metrics-row">
     <div class="hero-metric-tile" style="--hmt-color:#2a78d6;">
-        <div class="hmt-value"><?= $score['metrics']['avg_ack'] !== null ? number_format($score['metrics']['avg_ack'], 1) : '—' ?></div>
+        <div class="hmt-value"><?= $score['metrics']['avg_ack'] !== null ? number_format($score['metrics']['avg_ack'], 1) : '—' ?><?php if ($ackTrend && $ackTrend['direction'] !== 'neutral'): ?><span class="hmt-trend <?= $ackTrend['direction'] ?>"><?= $ackTrend['direction'] === 'better' ? '▼' : '▲' ?> <?= $ackTrend['pct'] ?>%</span><?php endif; ?></div>
         <div class="hmt-label">Μ.Ο. Απόκρισης Ομάδων σε Εντολές (λεπ.)</div>
         <?php if (!empty($score['metrics']['forgotten_orders'])): ?>
         <div class="hmt-note" style="color:#a56600;"><?= $score['metrics']['forgotten_orders'] ?> ξεχασμένη<?= $score['metrics']['forgotten_orders'] > 1 ? 'ες' : '' ?> (&gt;4ώρες, εξαιρούνται)</div>
         <?php endif; ?>
     </div>
     <div class="hero-metric-tile" style="--hmt-color:#1baf7a;">
-        <div class="hmt-value"><?= $score['metrics']['avg_fulfill'] !== null ? number_format($score['metrics']['avg_fulfill'], 1) : '—' ?></div>
+        <div class="hmt-value"><?= $score['metrics']['avg_fulfill'] !== null ? number_format($score['metrics']['avg_fulfill'], 1) : '—' ?><?php if ($fulfillTrend && $fulfillTrend['direction'] !== 'neutral'): ?><span class="hmt-trend <?= $fulfillTrend['direction'] ?>"><?= $fulfillTrend['direction'] === 'better' ? '▼' : '▲' ?> <?= $fulfillTrend['pct'] ?>%</span><?php endif; ?></div>
         <div class="hmt-label">Μ.Ο. Ολοκλήρωσης Εντολών (λεπ.)</div>
+        <?php if (!empty($score['metrics']['forgotten_fulfill'])): ?>
+        <div class="hmt-note" style="color:#a56600;"><?= $score['metrics']['forgotten_fulfill'] ?> ξεχασμένη<?= $score['metrics']['forgotten_fulfill'] > 1 ? 'ες' : '' ?> (&gt;4ώρες, εξαιρούνται)</div>
+        <?php endif; ?>
     </div>
     <div class="hero-metric-tile" style="--hmt-color:#eda100;">
-        <div class="hmt-value"><?= $score['metrics']['avg_seen'] !== null ? number_format($score['metrics']['avg_seen'], 1) : '—' ?></div>
+        <div class="hmt-value"><?= $score['metrics']['avg_seen'] !== null ? number_format($score['metrics']['avg_seen'], 1) : '—' ?><?php if ($seenTrend && $seenTrend['direction'] !== 'neutral'): ?><span class="hmt-trend <?= $seenTrend['direction'] ?>"><?= $seenTrend['direction'] === 'better' ? '▼' : '▲' ?> <?= $seenTrend['pct'] ?>%</span><?php endif; ?></div>
         <div class="hmt-label">Μ.Ο. Παρατήρησης Ελλείψεων (λεπ.)</div>
+        <?php if (!empty($score['metrics']['forgotten_seen'])): ?>
+        <div class="hmt-note" style="color:#a56600;"><?= $score['metrics']['forgotten_seen'] ?> ξεχασμένη<?= $score['metrics']['forgotten_seen'] > 1 ? 'ες' : '' ?> (&gt;4ώρες, εξαιρούνται)</div>
+        <?php endif; ?>
     </div>
     <div class="hero-metric-tile" style="--hmt-color:#e34948;">
-        <div class="hmt-value"><?= $score['metrics']['avg_resolved'] !== null ? number_format($score['metrics']['avg_resolved'], 1) : '—' ?></div>
+        <div class="hmt-value"><?= $score['metrics']['avg_resolved'] !== null ? number_format($score['metrics']['avg_resolved'], 1) : '—' ?><?php if ($resolvedTrend && $resolvedTrend['direction'] !== 'neutral'): ?><span class="hmt-trend <?= $resolvedTrend['direction'] ?>"><?= $resolvedTrend['direction'] === 'better' ? '▼' : '▲' ?> <?= $resolvedTrend['pct'] ?>%</span><?php endif; ?></div>
         <div class="hmt-label">Μ.Ο. Επίλυσης Ελλείψεων (λεπ.)</div>
+        <?php if (!empty($score['metrics']['forgotten_resolved'])): ?>
+        <div class="hmt-note" style="color:#a56600;"><?= $score['metrics']['forgotten_resolved'] ?> ξεχασμένη<?= $score['metrics']['forgotten_resolved'] > 1 ? 'ες' : '' ?> (&gt;4ώρες, εξαιρούνται)</div>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -571,7 +630,7 @@ $printDate = date('d/m/Y H:i');
     <?php endif; ?>
 </div>
 
-<?php if (!empty($summary)): ?>
+<?php if (!empty($teamSpeedBreakdown)): ?>
 <div class="pr-card">
     <h2>📊 Εντολές &amp; Χρόνος Απόκρισης ανά Ομάδα</h2>
     <div class="pr-chart-grid">
@@ -613,12 +672,20 @@ $printDate = date('d/m/Y H:i');
             <tr>
                 <td><?= $lbl ?></td>
                 <td><?= $orderTypeCounts[$i] ?></td>
-                <td><?= $orderTypeAckCounts[$i] ? $orderTypeAvgAck[$i] . ' λεπ.' : '—' ?></td>
-                <td><?= $orderTypeFulfillCounts[$i] ? $orderTypeAvgFulfill[$i] . ' λεπ.' : '—' ?></td>
+                <td><?= $orderTypeAvgAck[$i] !== null ? $orderTypeAvgAck[$i] . ' λεπ.' : '—' ?><?php if ($orderTypeForgottenAck[$i] > 0): ?> <span style="color:#a56600;">(<?= $orderTypeForgottenAck[$i] ?> ξεχ.)</span><?php endif; ?></td>
+                <td><?= $orderTypeAvgFulfill[$i] !== null ? $orderTypeAvgFulfill[$i] . ' λεπ.' : '—' ?><?php if ($orderTypeForgottenFulfill[$i] > 0): ?> <span style="color:#a56600;">(<?= $orderTypeForgottenFulfill[$i] ?> ξεχ.)</span><?php endif; ?></td>
             </tr>
         <?php endforeach; ?>
         </tbody>
     </table>
+</div>
+<?php endif; ?>
+
+<?php if ($showHistogram): ?>
+<div class="pr-card">
+    <h2>⏱️ Κατανομή Χρόνων Απόκρισης (λεπ.)</h2>
+    <div class="pr-chart-wrap"><canvas id="responseHistogramChart"></canvas></div>
+    <p style="font-size:7.5pt; color:#999; margin-top:4px;">Βασίζεται σε <?= $histogram['total_acknowledged'] ?> εντολές που έλαβαν απάντηση (εξαιρούνται εντολές χωρίς καμία απάντηση ακόμα).</p>
 </div>
 <?php endif; ?>
 
@@ -705,20 +772,20 @@ $printDate = date('d/m/Y H:i');
 <!-- Response-time detail (preserved in full) -->
 <div class="pr-card">
     <h2>📋 Αναφορά Χρόνων Απόκρισης &mdash; Ανά Ομάδα</h2>
-    <?php if (empty($summary)): ?>
+    <?php if (empty($teamSpeedBreakdown)): ?>
         <p class="pr-empty">Δεν έχουν σταλεί εντολές σε αυτή την αποστολή.</p>
     <?php else: ?>
     <table>
         <thead><tr><th>Ομάδα</th><th>Εντολές</th><th>Ελήφθη</th><th>Ολοκληρώθηκε</th><th>Μέσος χρόνος αποδοχής</th><th>Μέσος χρόνος ολοκλήρωσης</th></tr></thead>
         <tbody>
-            <?php foreach ($summary as $s): ?>
+            <?php foreach ($teamSpeedBreakdown as $s): ?>
             <tr>
                 <td><?= h($s['team_label']) ?></td>
                 <td><?= $s['order_count'] ?></td>
                 <td><?= $s['ack_rate'] ?>%</td>
                 <td><?= $s['fulfill_rate'] ?>%</td>
-                <td><?= $s['avg_ack_minutes'] !== null ? $s['avg_ack_minutes'] . ' λεπ.' : '—' ?></td>
-                <td><?= $s['avg_fulfill_minutes'] !== null ? $s['avg_fulfill_minutes'] . ' λεπ.' : '—' ?></td>
+                <td><?= $s['avg_ack_minutes'] !== null ? $s['avg_ack_minutes'] . ' λεπ.' : '—' ?><?php if ($s['forgotten_ack_count'] > 0): ?> <span style="color:#a56600;">(<?= $s['forgotten_ack_count'] ?> ξεχ.)</span><?php endif; ?></td>
+                <td><?= $s['avg_fulfill_minutes'] !== null ? $s['avg_fulfill_minutes'] . ' λεπ.' : '—' ?><?php if ($s['forgotten_fulfill_count'] > 0): ?> <span style="color:#a56600;">(<?= $s['forgotten_fulfill_count'] ?> ξεχ.)</span><?php endif; ?></td>
             </tr>
             <?php endforeach; ?>
         </tbody>
@@ -834,6 +901,32 @@ mc('scoreGaugeChart', 'doughnut', {
 }, { cutout: '76%', plugins: { legend: { display: false }, tooltip: { enabled: false } } });
 <?php endif; ?>
 
+<?php if ($showPillarRadar): ?>
+mc('pillarRadarChart', 'radar', {
+    labels: <?= json_encode($radarLabels) ?>,
+    datasets: [{ label: 'Βαθμολογία', data: <?= json_encode($radarData) ?>, borderColor: PALETTE[0], backgroundColor: 'rgba(42,120,214,.15)', pointBackgroundColor: PALETTE[0], borderWidth: 2 }]
+}, {
+    scales: { r: { min: 0, max: 100, ticks: { stepSize: 25, backdropColor: 'transparent' }, grid: { color: '#e1e0d9' }, angleLines: { color: '#e1e0d9' }, pointLabels: { font: { size: 9 } } } },
+    plugins: { legend: { display: false } }
+});
+<?php endif; ?>
+
+<?php if ($showTeamRadar): ?>
+mc('teamRadarChart', 'radar', {
+    labels: <?= json_encode($teamRadarLabels) ?>,
+    datasets: <?= json_encode($teamRadarDatasets) ?>
+}, {
+    scales: { r: { min: 0, max: 100, ticks: { stepSize: 25, backdropColor: 'transparent' }, grid: { color: '#e1e0d9' }, angleLines: { color: '#e1e0d9' }, pointLabels: { font: { size: 9 } } } }
+});
+<?php endif; ?>
+
+<?php if ($showHistogram): ?>
+mc('responseHistogramChart', 'bar', {
+    labels: <?= json_encode(array_column($histogram['buckets'], 'label')) ?>,
+    datasets: [{ label: 'Εντολές', data: <?= json_encode(array_column($histogram['buckets'], 'count')) ?>, backgroundColor: ['#86b6ef','#5598e7','#2a78d6','#184f95','#a56600'], borderRadius: 4 }]
+}, { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } });
+<?php endif; ?>
+
 <?php if (!empty($shortageSummary)): ?>
 mc('commandSeverityChart', 'bar', {
     labels: <?= json_encode(array_column($shortageSummary, 'severity_label')) ?>,
@@ -851,15 +944,15 @@ mc('timelineChart', 'line', {
 }, { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } });
 <?php endif; ?>
 
-<?php if (!empty($summary)): ?>
+<?php if (!empty($teamSpeedBreakdown)): ?>
 mc('teamCountChart', 'bar', {
-    labels: <?= json_encode(array_column($summary, 'team_label')) ?>,
-    datasets: [{ label: 'Εντολές', data: <?= json_encode(array_column($summary, 'order_count')) ?>, backgroundColor: <?= json_encode(array_map(fn($s) => $teamColorByLabel[$s['team_label']] ?? '#2a78d6', $summary)) ?>, borderRadius: 4 }]
+    labels: <?= json_encode(array_column($teamSpeedBreakdown, 'team_label')) ?>,
+    datasets: [{ label: 'Εντολές', data: <?= json_encode(array_column($teamSpeedBreakdown, 'order_count')) ?>, backgroundColor: <?= json_encode(array_map(fn($s) => $teamColorByLabel[$s['team_label']] ?? '#2a78d6', $teamSpeedBreakdown)) ?>, borderRadius: 4 }]
 }, { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } });
 
 mc('teamAckChart', 'bar', {
-    labels: <?= json_encode(array_column($summary, 'team_label')) ?>,
-    datasets: [{ label: 'Λεπτά', data: <?= json_encode(array_map(fn($s) => $s['avg_ack_minutes'] ?? 0, $summary)) ?>, backgroundColor: <?= json_encode(array_map(fn($s) => $teamColorByLabel[$s['team_label']] ?? '#1baf7a', $summary)) ?>, borderRadius: 4 }]
+    labels: <?= json_encode(array_column($teamSpeedBreakdown, 'team_label')) ?>,
+    datasets: [{ label: 'Λεπτά', data: <?= json_encode(array_column($teamSpeedBreakdown, 'avg_ack_minutes')) ?>, backgroundColor: <?= json_encode(array_map(fn($s) => $teamColorByLabel[$s['team_label']] ?? '#1baf7a', $teamSpeedBreakdown)) ?>, borderRadius: 4 }]
 }, { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } });
 <?php endif; ?>
 

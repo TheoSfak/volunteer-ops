@@ -63,15 +63,18 @@ $volunteerHours = $attendanceReady ? (float) dbFetchValue(
 // Shared response-time computation (also used by mission-response-report.php
 // and mission-report-print.php) — raw timestamps, this page formats its own.
 $report = computeMissionResponseReport($missionId);
-$summary = $report['summary'];
+// Forgotten-aware per-team rollup, shared with mission-report-print.php via
+// computeMissionTeamSpeedBreakdown() — deliberately separate from
+// $report['summary'] itself (see that function's own docblock: the raw
+// $summary is also read live by mission-response-report.php/war-room.php,
+// which this fix must not affect).
+$teamSpeedBreakdown = computeMissionTeamSpeedBreakdown($report['detail'], MISSION_SCORE_FORGOTTEN_MINUTES);
 $detail = $report['detail'];
 $shortageSummary = $report['shortageSummary'];
 $shortageDetail = $report['shortageDetail'];
 
 $totalOrders = count($detail);
-$ackRows = array_filter($detail, fn($d) => $d['ack_minutes'] !== null);
 $fulfillCount = count(array_filter($detail, fn($d) => $d['fulfill_minutes'] !== null));
-$avgAckMinutes = count($ackRows) ? round(array_sum(array_column($ackRows, 'ack_minutes')) / count($ackRows), 1) : null;
 $fulfillRate = $totalOrders ? round($fulfillCount / $totalOrders * 100) : 0;
 
 $totalShortage = count($shortageDetail);
@@ -80,30 +83,15 @@ $resolvedShortageRate = $totalShortage ? round($resolvedShortage / $totalShortag
 
 // Per-order-type response times (ack vs fulfill, same unit/scale — a single
 // shared axis, unlike team order-count vs minutes which stay two charts).
-$byOrderType = [];
-foreach ($detail as $row) {
-    $t = $row['order_type'];
-    if (!isset($byOrderType[$t])) {
-        $byOrderType[$t] = ['label' => $row['type_label'], 'ack_count' => 0, 'ack_sum' => 0.0, 'fulfill_count' => 0, 'fulfill_sum' => 0.0, 'count' => 0];
-    }
-    $byOrderType[$t]['count']++;
-    if ($row['ack_minutes'] !== null) { $byOrderType[$t]['ack_count']++; $byOrderType[$t]['ack_sum'] += $row['ack_minutes']; }
-    if ($row['fulfill_minutes'] !== null) { $byOrderType[$t]['fulfill_count']++; $byOrderType[$t]['fulfill_sum'] += $row['fulfill_minutes']; }
-}
-$orderTypeLabels = [];
-$orderTypeCounts = [];
-$orderTypeAvgAck = [];
-$orderTypeAvgFulfill = [];
-$orderTypeAckCounts = [];
-$orderTypeFulfillCounts = [];
-foreach ($byOrderType as $s) {
-    $orderTypeLabels[] = $s['label'];
-    $orderTypeCounts[] = $s['count'];
-    $orderTypeAvgAck[] = $s['ack_count'] ? round($s['ack_sum'] / $s['ack_count'], 1) : 0;
-    $orderTypeAvgFulfill[] = $s['fulfill_count'] ? round($s['fulfill_sum'] / $s['fulfill_count'], 1) : 0;
-    $orderTypeAckCounts[] = $s['ack_count'];
-    $orderTypeFulfillCounts[] = $s['fulfill_count'];
-}
+// Forgotten-aware, shared with mission-report-print.php via
+// computeMissionOrderTypeBreakdown() so the two pages can't drift.
+$orderTypeBreakdown = computeMissionOrderTypeBreakdown($detail, MISSION_SCORE_FORGOTTEN_MINUTES);
+$orderTypeLabels = array_column($orderTypeBreakdown, 'label');
+$orderTypeCounts = array_column($orderTypeBreakdown, 'count');
+$orderTypeAvgAck = array_column($orderTypeBreakdown, 'avg_ack_minutes');
+$orderTypeAvgFulfill = array_column($orderTypeBreakdown, 'avg_fulfill_minutes');
+$orderTypeForgottenAck = array_column($orderTypeBreakdown, 'forgotten_ack_count');
+$orderTypeForgottenFulfill = array_column($orderTypeBreakdown, 'forgotten_fulfill_count');
 
 // Activity feed, for the timeline chart — hourly buckets.
 $events = loadMissionActivityEventsForReport($missionId);
@@ -142,6 +130,10 @@ $photoPoints = array_values(array_filter($media, fn($m) => $m['lat'] !== null));
 
 // ── Mission score + validation review ───────────────────────────────────────
 $score = computeMissionScore($missionId, $report);
+// Headline KPI tile reuses the score's own forgotten-aware mission-wide
+// average rather than a second, separate plain-mean computation — avoids
+// this page ever showing two disagreeing "average response time" numbers.
+$avgAckMinutes = $score['metrics']['avg_ack'];
 $scoreReview = dbFetchOne(
     "SELECT r.*, u.name AS validator_name FROM mission_score_reviews r
      JOIN users u ON u.id = r.validated_by WHERE r.mission_id = ?",
@@ -448,16 +440,25 @@ include __DIR__ . '/includes/header.php';
         <div class="hmt-icon"><i class="bi bi-check2-circle"></i></div>
         <div class="hmt-value"><?= $score['metrics']['avg_fulfill'] !== null ? number_format($score['metrics']['avg_fulfill'], 1) : '—' ?></div>
         <div class="hmt-label">Μ.Ο. Ολοκλήρωσης Εντολών (λεπ.)</div>
+        <?php if (!empty($score['metrics']['forgotten_fulfill'])): ?>
+        <div class="hmt-note text-warning"><i class="bi bi-exclamation-triangle-fill"></i> <?= $score['metrics']['forgotten_fulfill'] ?> ξεχασμένη<?= $score['metrics']['forgotten_fulfill'] > 1 ? 'ες' : '' ?> (&gt;4ώρες, εξαιρούνται)</div>
+        <?php endif; ?>
     </div>
     <div class="hero-metric-tile" style="--hmt-color:#eda100;">
         <div class="hmt-icon"><i class="bi bi-eye-fill"></i></div>
         <div class="hmt-value"><?= $score['metrics']['avg_seen'] !== null ? number_format($score['metrics']['avg_seen'], 1) : '—' ?></div>
         <div class="hmt-label">Μ.Ο. Παρατήρησης Ελλείψεων από Διοίκηση (λεπ.)</div>
+        <?php if (!empty($score['metrics']['forgotten_seen'])): ?>
+        <div class="hmt-note text-warning"><i class="bi bi-exclamation-triangle-fill"></i> <?= $score['metrics']['forgotten_seen'] ?> ξεχασμένη<?= $score['metrics']['forgotten_seen'] > 1 ? 'ες' : '' ?> (&gt;4ώρες, εξαιρούνται)</div>
+        <?php endif; ?>
     </div>
     <div class="hero-metric-tile" style="--hmt-color:#e34948;">
         <div class="hmt-icon"><i class="bi bi-tools"></i></div>
         <div class="hmt-value"><?= $score['metrics']['avg_resolved'] !== null ? number_format($score['metrics']['avg_resolved'], 1) : '—' ?></div>
         <div class="hmt-label">Μ.Ο. Επίλυσης Ελλείψεων (λεπ.)</div>
+        <?php if (!empty($score['metrics']['forgotten_resolved'])): ?>
+        <div class="hmt-note text-warning"><i class="bi bi-exclamation-triangle-fill"></i> <?= $score['metrics']['forgotten_resolved'] ?> ξεχασμένη<?= $score['metrics']['forgotten_resolved'] > 1 ? 'ες' : '' ?> (&gt;4ώρες, εξαιρούνται)</div>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -642,7 +643,7 @@ include __DIR__ . '/includes/header.php';
     <div class="col-lg-6">
         <div class="mstats-card">
             <h2><i class="bi bi-diagram-3-fill text-primary"></i>Εντολές ανά Ομάδα</h2>
-            <?php if (empty($summary)): ?>
+            <?php if (empty($teamSpeedBreakdown)): ?>
                 <p class="mstats-empty">Δεν έχουν σταλεί εντολές.</p>
             <?php else: ?>
                 <div class="mstats-chart-wrap"><canvas id="teamCountChart"></canvas></div>
@@ -652,7 +653,7 @@ include __DIR__ . '/includes/header.php';
     <div class="col-lg-6">
         <div class="mstats-card">
             <h2><i class="bi bi-stopwatch-fill text-primary"></i>Μέσος Χρόνος Απόκρισης ανά Ομάδα</h2>
-            <?php if (empty($summary)): ?>
+            <?php if (empty($teamSpeedBreakdown)): ?>
                 <p class="mstats-empty">Δεν έχουν σταλεί εντολές.</p>
             <?php else: ?>
                 <div class="mstats-chart-wrap"><canvas id="teamAckChart"></canvas></div>
@@ -698,8 +699,8 @@ include __DIR__ . '/includes/header.php';
                 <tr>
                     <td><?= $lbl ?></td>
                     <td><?= $orderTypeCounts[$i] ?></td>
-                    <td><?= $orderTypeAckCounts[$i] ? $orderTypeAvgAck[$i] . ' λεπ.' : '—' ?></td>
-                    <td><?= $orderTypeFulfillCounts[$i] ? $orderTypeAvgFulfill[$i] . ' λεπ.' : '—' ?></td>
+                    <td><?= $orderTypeAvgAck[$i] !== null ? $orderTypeAvgAck[$i] . ' λεπ.' : '—' ?><?php if ($orderTypeForgottenAck[$i] > 0): ?> <span class="text-warning">(<?= $orderTypeForgottenAck[$i] ?> ξεχ.)</span><?php endif; ?></td>
+                    <td><?= $orderTypeAvgFulfill[$i] !== null ? $orderTypeAvgFulfill[$i] . ' λεπ.' : '—' ?><?php if ($orderTypeForgottenFulfill[$i] > 0): ?> <span class="text-warning">(<?= $orderTypeForgottenFulfill[$i] ?> ξεχ.)</span><?php endif; ?></td>
                 </tr>
             <?php endforeach; ?>
             </tbody>
@@ -812,13 +813,13 @@ mc('timelineChart', 'line', {
 }, { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } });
 
 mc('teamCountChart', 'bar', {
-    labels: <?= json_encode(array_column($summary, 'team_label')) ?>,
-    datasets: [{ label: 'Εντολές', data: <?= json_encode(array_column($summary, 'order_count')) ?>, backgroundColor: PALETTE[0], borderRadius: 4 }]
+    labels: <?= json_encode(array_column($teamSpeedBreakdown, 'team_label')) ?>,
+    datasets: [{ label: 'Εντολές', data: <?= json_encode(array_column($teamSpeedBreakdown, 'order_count')) ?>, backgroundColor: PALETTE[0], borderRadius: 4 }]
 }, { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } });
 
 mc('teamAckChart', 'bar', {
-    labels: <?= json_encode(array_column($summary, 'team_label')) ?>,
-    datasets: [{ label: 'Λεπτά', data: <?= json_encode(array_map(fn($s) => $s['avg_ack_minutes'] ?? 0, $summary)) ?>, backgroundColor: PALETTE[4], borderRadius: 4 }]
+    labels: <?= json_encode(array_column($teamSpeedBreakdown, 'team_label')) ?>,
+    datasets: [{ label: 'Λεπτά', data: <?= json_encode(array_column($teamSpeedBreakdown, 'avg_ack_minutes')) ?>, backgroundColor: PALETTE[4], borderRadius: 4 }]
 }, { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } });
 
 mc('orderTypeChart', 'bar', {

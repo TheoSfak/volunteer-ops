@@ -88,6 +88,11 @@ define('STATUS_CLOSED', 'CLOSED');
 define('STATUS_COMPLETED', 'COMPLETED');
 define('STATUS_CANCELED', 'CANCELED');
 
+// War Room mission scoring — past this many minutes, an order-ack /
+// shortage-seen / shortage-resolved gap counts as "forgotten"/off-shift
+// rather than merely slow (see computeMissionScore() in functions.php).
+define('MISSION_SCORE_FORGOTTEN_MINUTES', 240);
+
 // Participation statuses
 define('PARTICIPATION_PENDING', 'PENDING');
 define('PARTICIPATION_APPROVED', 'APPROVED');

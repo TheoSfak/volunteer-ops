@@ -1304,37 +1304,70 @@ function missionScoreTierMeta(float $score): array {
 }
 
 /**
+ * War Room: raw speed-bucket stats for a list of minute-deltas — splits into
+ * "normal" (<= $thresholdMinutes) and "forgotten" (> $thresholdMinutes,
+ * excluded from the average, kept only as a count), with NO score/decay
+ * logic at all. Shared by missionScoreForgottenAwareSpeed() below (which
+ * layers a decay curve + per-occurrence penalty on top, for the 0-100 score
+ * pillars/leaderboard) and by every *display-only* forgotten-aware average
+ * (order-type breakdown, per-team summary, fulfillment-time hero metric —
+ * see computeMissionOrderTypeBreakdown()/computeMissionTeamSpeedBreakdown())
+ * that needs avg_minutes + forgotten_count but must never see a meaningless
+ * 0-100 "score" for what is just a raw minutes figure.
+ */
+function missionSpeedBucketStats(array $minutesList, int $thresholdMinutes): array {
+    $present = array_values(array_filter($minutesList, fn($m) => $m !== null));
+    $normal = array_values(array_filter($present, fn($m) => $m <= $thresholdMinutes));
+    $forgottenCount = count($present) - count($normal);
+    return [
+        'avg_minutes'     => count($normal) ? round(array_sum($normal) / count($normal), 1) : null,
+        'forgotten_count' => $forgottenCount,
+        'normal_count'    => count($normal),
+        'total_count'     => count($present),
+    ];
+}
+
+/**
  * War Room: turns a raw list of minute-deltas (order-ack, shortage-seen,
  * shortage-resolved — anything "how long until X happened") into a 0-100
- * speed score that a single forgotten outlier can't destroy. A plain mean
- * lets one order left overnight (e.g. 1000+ minutes) drag the average for
- * every other, genuinely-fast response down with it — confirmed on a real
- * production PDF where this made an entire chart read as "0" next to that
- * one bar. Anything past $thresholdMinutes is excluded from the average
- * (kept only as a count) and instead docks the score directly, the same
- * "per-occurrence penalty" shape already used for unresolved-critical
- * shortages elsewhere in computeMissionScore() — so a forgotten item still
- * costs real points, it just can't single-handedly zero out an otherwise
- * fast team.
+ * speed score that a single forgotten outlier can't destroy. Built on
+ * missionSpeedBucketStats() above for the normal/forgotten split, then
+ * applies a smooth exponential half-life decay: score = 100 * 0.5^(avg /
+ * $halfLifeMinutes). This replaced an earlier linear "100 - avg*decayFactor"
+ * formula that hit an exact 0 floor at a fixed number of minutes well before
+ * $thresholdMinutes, collapsing a wide "kinda slow but not forgotten" band
+ * to an identical 0 and losing all ordering within it — confirmed on a real
+ * production PDF where a 1000+-minute outlier had already shown how badly a
+ * plain mean distorts this same data; the decay curve had the same class of
+ * problem one level down. The exponential is asymptotic — never hits
+ * exactly 0, always monotonically decreasing — so relative ordering is
+ * preserved across the whole 0-$thresholdMinutes range. On top of the decay,
+ * anything past $thresholdMinutes still docks the score directly as a
+ * per-occurrence penalty (the same shape already used for
+ * unresolved-critical shortages elsewhere in computeMissionScore()) — so a
+ * forgotten item still costs real points, it just can't single-handedly
+ * zero out an otherwise-fast team.
  */
-function missionScoreForgottenAwareSpeed(array $minutesList, float $decayFactor, int $thresholdMinutes, int $penaltyPerForgotten): array {
-    $present = array_values(array_filter($minutesList, fn($m) => $m !== null));
-    if (empty($present)) {
+function missionScoreForgottenAwareSpeed(array $minutesList, float $halfLifeMinutes, int $thresholdMinutes, int $penaltyPerForgotten): array {
+    $bucket = missionSpeedBucketStats($minutesList, $thresholdMinutes);
+    if ($bucket['total_count'] === 0) {
         return ['available' => false, 'score' => null, 'avg_minutes' => null, 'forgotten_count' => 0];
     }
-    $normal = array_filter($present, fn($m) => $m <= $thresholdMinutes);
-    $forgottenCount = count($present) - count($normal);
-    $avgNormal = count($normal) ? array_sum($normal) / count($normal) : null;
+    $avgNormal = $bucket['avg_minutes'];
     // No normal-speed data at all (every single response was forgotten) —
     // start from a neutral 100 rather than assuming the worst on top of the
     // forgotten penalty below, which already does the real punishing.
-    $base = $avgNormal !== null ? max(0, min(100, 100 - $avgNormal * $decayFactor)) : 100.0;
-    $score = max(0, $base - $forgottenCount * $penaltyPerForgotten);
+    // min(100, ...) guards a theoretical negative $avgNormal (clock-skew/bad
+    // data — reportMinutesBetween() doesn't clamp negative deltas) from
+    // pushing 0.5^negative above 100; no lower clamp is needed since the
+    // exponential is already bounded in (0,100] for any non-negative input.
+    $base = $avgNormal !== null ? min(100, 100 * (0.5 ** ($avgNormal / $halfLifeMinutes))) : 100.0;
+    $score = max(0, $base - $bucket['forgotten_count'] * $penaltyPerForgotten);
     return [
         'available'       => true,
         'score'           => $score,
-        'avg_minutes'     => $avgNormal !== null ? round($avgNormal, 1) : null,
-        'forgotten_count' => $forgottenCount,
+        'avg_minutes'     => $avgNormal,
+        'forgotten_count' => $bucket['forgotten_count'],
     ];
 }
 
@@ -1388,8 +1421,14 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     $approvedCount = count($approvedIds);
     $capacity = (int) dbFetchValue("SELECT COALESCE(SUM(max_volunteers), 0) FROM shifts WHERE mission_id = ?", [$missionId]);
 
-    $forgottenThresholdMinutes = 240; // 4 hours — past this, treat as "forgotten"/off-shift, not merely slow
+    $forgottenThresholdMinutes = MISSION_SCORE_FORGOTTEN_MINUTES; // 4 hours — past this, treat as "forgotten"/off-shift, not merely slow
     $forgottenPenalty = 15; // same magnitude as the unresolved-critical-shortage penalty below, one consistent scale
+    // Half-life (minutes) for the exponential speed-decay curve below — the
+    // resolution half-life is deliberately larger (decays gentler) than the
+    // response/seen one, matching this function's existing documented intent
+    // that fixing something inherently takes longer than merely noticing it.
+    $responseHalfLifeMinutes = 24;
+    $resolutionHalfLifeMinutes = 66;
 
     $scoredDetail = array_values(array_filter($detail, fn($d) => in_array($d['user_id'], $approvedIds, true)));
     $scoredShortage = array_values(array_filter($shortageDetail, fn($d) => in_array($d['reporter_id'], $approvedIds, true)));
@@ -1415,12 +1454,44 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     $totalOrders = count($scoredDetail);
     $pillars = [];
 
-    $responseCalc = missionScoreForgottenAwareSpeed(array_column($scoredDetail, 'ack_minutes'), 2.5, $forgottenThresholdMinutes, $forgottenPenalty);
+    $ackMinutesForScoring = array_column($scoredDetail, 'ack_minutes');
+    $responseCalc = missionScoreForgottenAwareSpeed($ackMinutesForScoring, $responseHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty);
     if ($responseCalc['available']) {
         $pillars['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => true, 'score' => $responseCalc['score'], 'raw' => ['avg_minutes' => $responseCalc['avg_minutes'], 'forgotten_count' => $responseCalc['forgotten_count']]];
     } else {
         $pillars['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => false, 'score' => null, 'raw' => []];
     }
+
+    // ── response-time distribution (mission-report-print.php) — same
+    //    $scoredDetail population the response pillar itself scores, so the
+    //    histogram can never visually disagree with that pillar/hero-tile
+    //    number. Bucket boundaries match the existing normal/forgotten
+    //    cutoff exactly: 60-240 is inclusive of 240 ("normal"), forgotten is
+    //    strictly >240. Never-acknowledged orders (null) are excluded
+    //    entirely — "no response at all" is a different story than
+    //    "responded slowly", and missionSpeedBucketStats() excludes them too.
+    $histogramBuckets = [
+        ['key' => 'lt5',       'label' => '<5',               'count' => 0],
+        ['key' => '5to15',     'label' => '5-15',              'count' => 0],
+        ['key' => '15to60',    'label' => '15-60',             'count' => 0],
+        ['key' => '60to240',   'label' => '60-240',            'count' => 0],
+        ['key' => 'forgotten', 'label' => 'Ξεχασμένες (>240)', 'count' => 0],
+    ];
+    $totalAcknowledged = 0;
+    foreach ($ackMinutesForScoring as $m) {
+        if ($m === null) continue;
+        $totalAcknowledged++;
+        if ($m < 5) $histogramBuckets[0]['count']++;
+        elseif ($m < 15) $histogramBuckets[1]['count']++;
+        elseif ($m < 60) $histogramBuckets[2]['count']++;
+        elseif ($m <= $forgottenThresholdMinutes) $histogramBuckets[3]['count']++;
+        else $histogramBuckets[4]['count']++;
+    }
+    $responseHistogram = [
+        'available'          => $totalAcknowledged > 0,
+        'buckets'            => $histogramBuckets,
+        'total_acknowledged' => $totalAcknowledged,
+    ];
 
     $fulfilledRows = array_filter($scoredDetail, fn($d) => $d['fulfill_minutes'] !== null);
     $fulfilled = count($fulfilledRows);
@@ -1429,7 +1500,10 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     } else {
         $pillars['completion'] = ['label' => 'Ολοκλήρωση Εντολών', 'weight' => 20, 'available' => false, 'score' => null, 'raw' => []];
     }
-    $avgFulfillMinutes = count($fulfilledRows) ? round(array_sum(array_column($fulfilledRows, 'fulfill_minutes')) / count($fulfilledRows), 1) : null;
+    // Forgotten-aware, matching the ack-minutes hero tile right next to this
+    // one — previously a plain mean with no outlier protection or footnote.
+    $fulfillSpeedStats = missionSpeedBucketStats(array_column($scoredDetail, 'fulfill_minutes'), $forgottenThresholdMinutes);
+    $avgFulfillMinutes = $fulfillSpeedStats['avg_minutes'];
 
     $totalShortage = count($scoredShortage);
     $resolved = count(array_filter($scoredShortage, fn($d) => $d['resolved_at'] !== null));
@@ -1465,8 +1539,8 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     //    command staff's reaction time on. Same forgotten-aware treatment as
     //    the response pillar — a shortage seen 16 hours late shouldn't erase
     //    every other same-day acknowledgment from the average. ────────────
-    $seenCalc = missionScoreForgottenAwareSpeed(array_column($scoredShortage, 'seen_minutes'), 2.5, $forgottenThresholdMinutes, $forgottenPenalty);
-    $resolvedCalc = missionScoreForgottenAwareSpeed(array_column($scoredShortage, 'resolved_minutes'), 1.0, $forgottenThresholdMinutes, $forgottenPenalty);
+    $seenCalc = missionScoreForgottenAwareSpeed(array_column($scoredShortage, 'seen_minutes'), $responseHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty);
+    $resolvedCalc = missionScoreForgottenAwareSpeed(array_column($scoredShortage, 'resolved_minutes'), $resolutionHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty);
     $seenCount = count(array_filter($scoredShortage, fn($d) => $d['seen_minutes'] !== null));
 
     $commandParts = [];
@@ -1497,22 +1571,34 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     // Captured now, before the per-team loop below reuses $avgAck as its own
     // local (per-team) variable name — these are the mission-wide values.
     $metrics = [
-        'avg_ack'          => $responseCalc['avg_minutes'],
-        'avg_fulfill'      => $avgFulfillMinutes,
-        'avg_seen'         => $seenCalc['avg_minutes'],
-        'avg_resolved'     => $resolvedCalc['avg_minutes'],
-        'forgotten_orders' => $responseCalc['forgotten_count'],
+        'avg_ack'           => $responseCalc['avg_minutes'],
+        'avg_fulfill'       => $avgFulfillMinutes,
+        'avg_seen'          => $seenCalc['avg_minutes'],
+        'avg_resolved'      => $resolvedCalc['avg_minutes'],
+        'forgotten_orders'  => $responseCalc['forgotten_count'],
+        'forgotten_fulfill' => $fulfillSpeedStats['forgotten_count'],
+        'forgotten_seen'    => $seenCalc['forgotten_count'],
+        'forgotten_resolved' => $resolvedCalc['forgotten_count'],
     ];
 
     // ── historical baseline — same mission_type_id, everything except this
-    //    mission, same forgotten-minutes cutoff applied to the acknowledgment
-    //    side so a past fluke can't distort the comparison baseline either.
+    //    mission, same forgotten-minutes cutoff applied to every side of the
+    //    comparison so a past fluke can't distort the baseline either.
     //    Cheap set-based aggregation (not a per-mission computeMissionScore()
-    //    call in a loop) since only two numbers are needed. Gated on a small
-    //    minimum sample so 1-2 historical data points don't produce a noisy
-    //    "50% faster than history" claim. ──────────────────────────────────
+    //    call in a loop) since only a handful of numbers are needed. Gated on
+    //    a small minimum sample so 1-2 historical data points don't produce a
+    //    noisy "50% faster than history" claim. avg_fulfill/avg_seen/
+    //    avg_resolved back the hero-tile trend arrows (mission-report-print.php)
+    //    only — no narrative sentence reads them, unlike avg_ack/completion_rate
+    //    which generateMissionObserverNarrative() already cites. ─────────────
     $missionTypeId = (int) dbFetchValue("SELECT mission_type_id FROM missions WHERE id = ?", [$missionId]);
-    $historical = ['avg_ack' => null, 'avg_ack_sample' => 0, 'completion_rate' => null, 'completion_sample' => 0];
+    $historical = [
+        'avg_ack' => null, 'avg_ack_sample' => 0,
+        'completion_rate' => null, 'completion_sample' => 0,
+        'avg_fulfill' => null, 'avg_fulfill_sample' => 0,
+        'avg_seen' => null, 'avg_seen_sample' => 0,
+        'avg_resolved' => null, 'avg_resolved_sample' => 0,
+    ];
     if ($missionTypeId) {
         $histAck = dbFetchOne(
             "SELECT AVG(TIMESTAMPDIFF(MINUTE, o.created_at, r.acknowledged_at)) AS avg_ack, COUNT(*) AS n
@@ -1532,13 +1618,52 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
              WHERE m.mission_type_id = ? AND m.id != ? AND m.deleted_at IS NULL",
             [$missionTypeId, $missionId]
         );
+        $histFulfill = dbFetchOne(
+            "SELECT AVG(TIMESTAMPDIFF(MINUTE, o.created_at, r.fulfilled_at)) AS avg_fulfill, COUNT(*) AS n
+             FROM mission_order_recipients r
+             JOIN mission_orders o ON o.id = r.order_id
+             JOIN missions m ON m.id = o.mission_id
+             WHERE m.mission_type_id = ? AND m.id != ? AND m.deleted_at IS NULL
+               AND r.fulfilled_at IS NOT NULL
+               AND TIMESTAMPDIFF(MINUTE, o.created_at, r.fulfilled_at) <= ?",
+            [$missionTypeId, $missionId, $forgottenThresholdMinutes]
+        );
+        $histSeen = dbFetchOne(
+            "SELECT AVG(TIMESTAMPDIFF(MINUTE, r.created_at, r.acknowledged_at)) AS avg_seen, COUNT(*) AS n
+             FROM mission_shortage_reports r
+             JOIN missions m ON m.id = r.mission_id
+             WHERE m.mission_type_id = ? AND m.id != ? AND m.deleted_at IS NULL
+               AND r.acknowledged_at IS NOT NULL
+               AND TIMESTAMPDIFF(MINUTE, r.created_at, r.acknowledged_at) <= ?",
+            [$missionTypeId, $missionId, $forgottenThresholdMinutes]
+        );
+        $histResolved = dbFetchOne(
+            "SELECT AVG(TIMESTAMPDIFF(MINUTE, r.created_at, r.resolved_at)) AS avg_resolved, COUNT(*) AS n
+             FROM mission_shortage_reports r
+             JOIN missions m ON m.id = r.mission_id
+             WHERE m.mission_type_id = ? AND m.id != ? AND m.deleted_at IS NULL
+               AND r.resolved_at IS NOT NULL
+               AND TIMESTAMPDIFF(MINUTE, r.created_at, r.resolved_at) <= ?",
+            [$missionTypeId, $missionId, $forgottenThresholdMinutes]
+        );
+
         $histAckN = $histAck ? (int) $histAck['n'] : 0;
         $histTotal = $histCompletion ? (int) $histCompletion['total'] : 0;
+        $histFulfillN = $histFulfill ? (int) $histFulfill['n'] : 0;
+        $histSeenN = $histSeen ? (int) $histSeen['n'] : 0;
+        $histResolvedN = $histResolved ? (int) $histResolved['n'] : 0;
+
         $historical = [
             'avg_ack'            => ($histAckN >= 3 && $histAck['avg_ack'] !== null) ? round((float) $histAck['avg_ack'], 1) : null,
             'avg_ack_sample'     => $histAckN,
             'completion_rate'    => ($histTotal >= 3) ? round(((int) $histCompletion['fulfilled']) / $histTotal * 100) : null,
             'completion_sample'  => $histTotal,
+            'avg_fulfill'        => ($histFulfillN >= 3 && $histFulfill['avg_fulfill'] !== null) ? round((float) $histFulfill['avg_fulfill'], 1) : null,
+            'avg_fulfill_sample' => $histFulfillN,
+            'avg_seen'           => ($histSeenN >= 3 && $histSeen['avg_seen'] !== null) ? round((float) $histSeen['avg_seen'], 1) : null,
+            'avg_seen_sample'    => $histSeenN,
+            'avg_resolved'       => ($histResolvedN >= 3 && $histResolved['avg_resolved'] !== null) ? round((float) $histResolved['avg_resolved'], 1) : null,
+            'avg_resolved_sample' => $histResolvedN,
         ];
     }
 
@@ -1608,7 +1733,7 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
         // teams on dispatch-arrival time, which depends on how far each
         // team's point was and isn't a fair performance signal.
         $teamPillars = [];
-        $teamResponseCalc = $orders ? missionScoreForgottenAwareSpeed($orders['ack_minutes'], 2.5, $forgottenThresholdMinutes, $forgottenPenalty) : ['available' => false, 'score' => null, 'avg_minutes' => null, 'forgotten_count' => 0];
+        $teamResponseCalc = $orders ? missionScoreForgottenAwareSpeed($orders['ack_minutes'], $responseHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty) : ['available' => false, 'score' => null, 'avg_minutes' => null, 'forgotten_count' => 0];
         if ($teamResponseCalc['available']) {
             $teamPillars['response'] = ['weight' => 45, 'available' => true, 'score' => $teamResponseCalc['score'], 'raw' => ['avg_minutes' => $teamResponseCalc['avg_minutes'], 'forgotten_count' => $teamResponseCalc['forgotten_count']]];
         } else {
@@ -1655,15 +1780,120 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     unset($t);
 
     return [
-        'overall'          => $overall,
-        'tier'             => $overallTier,
-        'pillars'          => $pillars,
-        'teams'            => $teamScores,
-        'metrics'          => $metrics,
-        'command'          => $command,
-        'forgotten_orders' => $forgottenOrders,
-        'historical'       => $historical,
+        'overall'            => $overall,
+        'tier'               => $overallTier,
+        'pillars'            => $pillars,
+        'teams'              => $teamScores,
+        'metrics'            => $metrics,
+        'command'            => $command,
+        'forgotten_orders'   => $forgottenOrders,
+        'historical'         => $historical,
+        'response_histogram' => $responseHistogram,
     ];
+}
+
+/**
+ * War Room: per-order-type breakdown (pie + bar chart + table) shared by
+ * mission-stats.php and mission-report-print.php — previously two
+ * byte-identical inline loops over $report['detail'], now one function so
+ * the two pages can't drift. Forgotten-aware (missionSpeedBucketStats()) on
+ * both the ack and fulfill side, unlike the plain mean it replaces. Operates
+ * on the raw, unfiltered $detail rows computeMissionResponseReport() already
+ * returns (canceled-participant rows included, same as the rest of that
+ * archival dataset) — this changes only the averaging formula, never which
+ * rows are counted.
+ */
+function computeMissionOrderTypeBreakdown(array $detail, int $thresholdMinutes): array {
+    $byType = [];
+    foreach ($detail as $row) {
+        $t = $row['order_type'];
+        if (!isset($byType[$t])) {
+            $byType[$t] = ['label' => $row['type_label'], 'count' => 0, 'ack_minutes' => [], 'fulfill_minutes' => []];
+        }
+        $byType[$t]['count']++;
+        if ($row['ack_minutes'] !== null) $byType[$t]['ack_minutes'][] = $row['ack_minutes'];
+        if ($row['fulfill_minutes'] !== null) $byType[$t]['fulfill_minutes'][] = $row['fulfill_minutes'];
+    }
+    $result = [];
+    foreach ($byType as $type => $s) {
+        $ackStats = missionSpeedBucketStats($s['ack_minutes'], $thresholdMinutes);
+        $fulfillStats = missionSpeedBucketStats($s['fulfill_minutes'], $thresholdMinutes);
+        $result[] = [
+            'order_type'              => $type,
+            'label'                   => $s['label'],
+            'count'                   => $s['count'],
+            'avg_ack_minutes'         => $ackStats['avg_minutes'],
+            'forgotten_ack_count'     => $ackStats['forgotten_count'],
+            'avg_fulfill_minutes'     => $fulfillStats['avg_minutes'],
+            'forgotten_fulfill_count' => $fulfillStats['forgotten_count'],
+        ];
+    }
+    return $result;
+}
+
+/**
+ * War Room: per-team order-response rollup (bar charts + print table) for
+ * mission-stats.php/mission-report-print.php — same shape as
+ * computeMissionResponseReport()'s own $summary, but with forgotten-aware
+ * avg_ack_minutes/avg_fulfill_minutes instead of a plain mean. Deliberately
+ * NOT folded into computeMissionResponseReport() itself: that function's
+ * $summary is also read verbatim by mission-response-report.php's live
+ * (STATUS_OPEN-gated) JSON endpoint, rendered directly inside war-room.php's
+ * own "Αναφορά Χρόνων Απόκρισης" modal — mutating $summary's averaging
+ * formula in place would silently change that live in-mission surface's
+ * numbers too, with no forgotten-count context ever shown there, which is
+ * out of scope here. Operates on the same raw, unfiltered $detail rows
+ * $summary already uses (canceled-participant rows included) — only the
+ * averaging formula differs, never which rows are counted.
+ */
+function computeMissionTeamSpeedBreakdown(array $detail, int $thresholdMinutes): array {
+    $byTeam = [];
+    foreach ($detail as $row) {
+        $label = $row['team_label'];
+        if (!isset($byTeam[$label])) {
+            $byTeam[$label] = ['count' => 0, 'ack_count' => 0, 'fulfill_count' => 0, 'ack_minutes' => [], 'fulfill_minutes' => []];
+        }
+        $byTeam[$label]['count']++;
+        if ($row['ack_minutes'] !== null) { $byTeam[$label]['ack_count']++; $byTeam[$label]['ack_minutes'][] = $row['ack_minutes']; }
+        if ($row['fulfill_minutes'] !== null) { $byTeam[$label]['fulfill_count']++; $byTeam[$label]['fulfill_minutes'][] = $row['fulfill_minutes']; }
+    }
+    $result = [];
+    foreach ($byTeam as $label => $s) {
+        $ackStats = missionSpeedBucketStats($s['ack_minutes'], $thresholdMinutes);
+        $fulfillStats = missionSpeedBucketStats($s['fulfill_minutes'], $thresholdMinutes);
+        $result[] = [
+            'team_label'              => $label,
+            'order_count'             => $s['count'],
+            'ack_rate'                => $s['count'] ? round($s['ack_count'] / $s['count'] * 100) : 0,
+            'fulfill_rate'            => $s['count'] ? round($s['fulfill_count'] / $s['count'] * 100) : 0,
+            'avg_ack_minutes'         => $ackStats['avg_minutes'],
+            'forgotten_ack_count'     => $ackStats['forgotten_count'],
+            'avg_fulfill_minutes'     => $fulfillStats['avg_minutes'],
+            'forgotten_fulfill_count' => $fulfillStats['forgotten_count'],
+        ];
+    }
+    usort($result, fn($a, $b) => $b['order_count'] <=> $a['order_count']);
+    return $result;
+}
+
+/**
+ * War Room: classifies a current-vs-historical minutes comparison into
+ * better/worse/neutral at the same ±10% dead zone
+ * generateMissionObserverNarrative()'s avg_ack-vs-historical sentence uses
+ * (see its own dead-zone block below), so the hero-tile trend arrows
+ * (mission-report-print.php) and that narrative sentence can never disagree
+ * on the cutoff. Lower minutes is always "better" here (every caller is a
+ * response/resolution-speed metric). Returns null when either side of the
+ * comparison is missing.
+ */
+function missionMinutesTrend(?float $current, ?float $historical): ?array {
+    if ($current === null || $historical === null || $historical <= 0) {
+        return null;
+    }
+    $diffPct = round((($current - $historical) / $historical) * 100);
+    if ($diffPct <= -10) return ['direction' => 'better', 'pct' => (int) abs($diffPct)];
+    if ($diffPct >= 10) return ['direction' => 'worse', 'pct' => (int) $diffPct];
+    return ['direction' => 'neutral', 'pct' => (int) $diffPct];
 }
 
 /**
