@@ -1230,6 +1230,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
             'type_label'     => shortageTypeLabel($row['shortage_type'], $lang),
             'severity'       => $row['severity'],
             'severity_label' => shortageSeverityLabel($row['severity'], $lang),
+            'team_id'        => $teamId,
             'team_label'     => $teamId ? ($teamLabels[$teamId] ?? '—') : t('history.no_team_capitalized', [], $lang),
             'reporter_name'  => $row['user_name'],
             'title'          => $row['title'],
@@ -1281,6 +1282,208 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
         'detail' => $detail,
         'shortageSummary' => $shortageSummary,
         'shortageDetail' => $shortageDetail,
+    ];
+}
+
+/**
+ * War Room: maps a 0-100 score to its display tier. Shared by both the
+ * mission-wide score and every per-team leaderboard score computed in
+ * computeMissionScore() below, and by both of that function's Greek-only
+ * callers (mission-stats.php, mission-report-print.php) — kept here rather
+ * than duplicated so the two pages can never drift on the band cutoffs.
+ * Returns [tier, label]; tier is one of 'good'/'warning'/'critical', matching
+ * mission-stats.php's pre-existing .mstats-chip.good/.warning/.critical CSS.
+ */
+function missionScoreTierMeta(float $score): array {
+    if ($score >= 85) return ['good', 'Άριστη Επίδοση'];
+    if ($score >= 65) return ['warning', 'Καλή Επίδοση'];
+    return ['critical', 'Χρειάζεται Βελτίωση'];
+}
+
+/**
+ * War Room: post-mission performance score — an overall 0-100 grade plus a
+ * per-team leaderboard, for mission-stats.php's score-validation section and
+ * mission-report-print.php's read-only display. Reuses
+ * computeMissionResponseReport()'s $detail/$shortageDetail rather than
+ * re-querying orders/shortages a third time; pass an already-fetched $report
+ * to avoid a duplicate call when the caller has one (both current callers do).
+ *
+ * Every pillar is independently gated on having real data — an unavailable
+ * pillar drops out and the rest renormalize, the same "show — not a fake 0"
+ * idea mission-stats.php already applies to its volunteer-hours tile via
+ * $attendanceReady. $overall is null (not 0 or 100) when none of the
+ * response/completion/staffing/debrief pillars have data — otherwise a
+ * completely inactive mission would vacuously score 100 from the shortage
+ * pillar's neutral "nothing went wrong" default alone. Callers must treat a
+ * null overall as "insufficient data to score", not persist it.
+ */
+function computeMissionScore(int $missionId, ?array $report = null): array {
+    $report = $report ?? computeMissionResponseReport($missionId);
+    $detail = $report['detail'];
+    $shortageDetail = $report['shortageDetail'];
+
+    $debrief = dbFetchOne("SELECT rating, objectives_met FROM mission_debriefs WHERE mission_id = ?", [$missionId]);
+    $teams = dbFetchAll("SELECT id, codename, team_number, color FROM mission_teams WHERE mission_id = ? ORDER BY team_number", [$missionId]);
+    $approvedCount = (int) dbFetchValue(
+        "SELECT COUNT(DISTINCT pr.volunteer_id) FROM participation_requests pr
+         JOIN shifts s ON s.id = pr.shift_id
+         WHERE s.mission_id = ? AND pr.status = ?",
+        [$missionId, PARTICIPATION_APPROVED]
+    );
+    $capacity = (int) dbFetchValue("SELECT COALESCE(SUM(max_volunteers), 0) FROM shifts WHERE mission_id = ?", [$missionId]);
+
+    // ── mission-wide pillars ─────────────────────────────────────────────────
+    $totalOrders = count($detail);
+    $ackRows = array_filter($detail, fn($d) => $d['ack_minutes'] !== null);
+    $pillars = [];
+
+    if (count($ackRows) > 0) {
+        $avgAck = array_sum(array_column($ackRows, 'ack_minutes')) / count($ackRows);
+        $pillars['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => true, 'score' => max(0, min(100, 100 - $avgAck * 2.5))];
+    } else {
+        $pillars['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => false, 'score' => null];
+    }
+
+    if ($totalOrders > 0) {
+        $fulfilled = count(array_filter($detail, fn($d) => $d['fulfill_minutes'] !== null));
+        $pillars['completion'] = ['label' => 'Ολοκλήρωση Εντολών', 'weight' => 20, 'available' => true, 'score' => $fulfilled / $totalOrders * 100];
+    } else {
+        $pillars['completion'] = ['label' => 'Ολοκλήρωση Εντολών', 'weight' => 20, 'available' => false, 'score' => null];
+    }
+
+    $totalShortage = count($shortageDetail);
+    if ($totalShortage > 0) {
+        $resolved = count(array_filter($shortageDetail, fn($d) => $d['resolved_at'] !== null));
+        $unresolvedCritical = count(array_filter($shortageDetail, fn($d) => $d['resolved_at'] === null && $d['severity'] === 'critical'));
+        $shortageScore = max(0, min(100, ($resolved / $totalShortage * 100) - $unresolvedCritical * 15));
+    } else {
+        $shortageScore = 100.0; // nothing reported broken — neutral, not penalized
+    }
+    $pillars['shortage'] = ['label' => 'Διαχείριση Ελλείψεων', 'weight' => 20, 'available' => true, 'score' => $shortageScore];
+
+    if ($capacity > 0) {
+        $pillars['staffing'] = ['label' => 'Στελέχωση / Κάλυψη', 'weight' => 15, 'available' => true, 'score' => max(0, min(100, $approvedCount / $capacity * 100))];
+    } else {
+        $pillars['staffing'] = ['label' => 'Στελέχωση / Κάλυψη', 'weight' => 15, 'available' => false, 'score' => null];
+    }
+
+    if ($debrief) {
+        $ratingScore = ((int) $debrief['rating']) / 5 * 100;
+        $objectivesScore = ['YES' => 100, 'PARTIAL' => 55, 'NO' => 15][$debrief['objectives_met']] ?? 55;
+        $pillars['debrief'] = ['label' => 'Απολογισμός Debrief', 'weight' => 20, 'available' => true, 'score' => $ratingScore * 0.6 + $objectivesScore * 0.4];
+    } else {
+        $pillars['debrief'] = ['label' => 'Απολογισμός Debrief', 'weight' => 20, 'available' => false, 'score' => null];
+    }
+
+    $hasSubstantiveData = $pillars['response']['available'] || $pillars['completion']['available']
+        || $pillars['staffing']['available'] || $pillars['debrief']['available'];
+    $weightSum = 0;
+    $weightedScore = 0.0;
+    foreach ($pillars as $p) {
+        if ($p['available']) {
+            $weightSum += $p['weight'];
+            $weightedScore += $p['weight'] * $p['score'];
+        }
+    }
+    $overall = ($hasSubstantiveData && $weightSum > 0) ? round($weightedScore / $weightSum, 2) : null;
+    $overallTier = $overall !== null ? missionScoreTierMeta($overall) : null;
+
+    // ── per-team leaderboard, grouped by team_id (not the display-string
+    //    team_label) so it can't be confused by two teams that happen to
+    //    render identically — see computeMissionResponseReport()'s $detail
+    //    (already carries team_id) and $shortageDetail (carries it as of the
+    //    field added just above this function) ──────────────────────────────
+    $byTeamOrders = [];
+    foreach ($detail as $row) {
+        $tid = $row['team_id'];
+        if ($tid === null) continue;
+        if (!isset($byTeamOrders[$tid])) {
+            $byTeamOrders[$tid] = ['count' => 0, 'ack_count' => 0, 'ack_sum' => 0.0, 'fulfill_count' => 0];
+        }
+        $byTeamOrders[$tid]['count']++;
+        if ($row['ack_minutes'] !== null) {
+            $byTeamOrders[$tid]['ack_count']++;
+            $byTeamOrders[$tid]['ack_sum'] += $row['ack_minutes'];
+        }
+        if ($row['fulfill_minutes'] !== null) {
+            $byTeamOrders[$tid]['fulfill_count']++;
+        }
+    }
+    $byTeamShortage = [];
+    foreach ($shortageDetail as $row) {
+        $tid = $row['team_id'];
+        if ($tid === null) continue;
+        if (!isset($byTeamShortage[$tid])) {
+            $byTeamShortage[$tid] = ['count' => 0, 'resolved' => 0, 'unresolvedCritical' => 0];
+        }
+        $byTeamShortage[$tid]['count']++;
+        if ($row['resolved_at'] !== null) {
+            $byTeamShortage[$tid]['resolved']++;
+        } elseif ($row['severity'] === 'critical') {
+            $byTeamShortage[$tid]['unresolvedCritical']++;
+        }
+    }
+
+    $teamScores = [];
+    foreach ($teams as $team) {
+        $tid = (int) $team['id'];
+        $orders = $byTeamOrders[$tid] ?? null;
+        $shortages = $byTeamShortage[$tid] ?? null;
+        if ($orders === null && $shortages === null) {
+            continue; // nothing to score this team on — excluded from the leaderboard entirely
+        }
+
+        $teamPillars = [];
+        if ($orders && $orders['ack_count'] > 0) {
+            $avgAck = $orders['ack_sum'] / $orders['ack_count'];
+            $teamPillars['response'] = ['weight' => 45, 'available' => true, 'score' => max(0, min(100, 100 - $avgAck * 2.5))];
+        } else {
+            $teamPillars['response'] = ['weight' => 45, 'available' => false, 'score' => null];
+        }
+        if ($orders && $orders['count'] > 0) {
+            $teamPillars['completion'] = ['weight' => 35, 'available' => true, 'score' => $orders['fulfill_count'] / $orders['count'] * 100];
+        } else {
+            $teamPillars['completion'] = ['weight' => 35, 'available' => false, 'score' => null];
+        }
+        if ($shortages && $shortages['count'] > 0) {
+            $rate = $shortages['resolved'] / $shortages['count'] * 100;
+            $teamPillars['shortage'] = ['weight' => 20, 'available' => true, 'score' => max(0, min(100, $rate - $shortages['unresolvedCritical'] * 15))];
+        } else {
+            $teamPillars['shortage'] = ['weight' => 20, 'available' => true, 'score' => 100.0];
+        }
+
+        $tWeightSum = 0;
+        $tWeightedScore = 0.0;
+        foreach ($teamPillars as $p) {
+            if ($p['available']) {
+                $tWeightSum += $p['weight'];
+                $tWeightedScore += $p['weight'] * $p['score'];
+            }
+        }
+        if ($tWeightSum === 0) continue;
+        $tScore = round($tWeightedScore / $tWeightSum, 2);
+
+        $teamScores[] = [
+            'team_id'     => $tid,
+            'codename'    => $team['codename'],
+            'team_number' => $team['team_number'],
+            'color'       => $team['color'] ?: '#898781',
+            'score'       => $tScore,
+            'tier'        => missionScoreTierMeta($tScore),
+            'order_count' => $orders['count'] ?? 0,
+        ];
+    }
+    usort($teamScores, fn($a, $b) => ($b['score'] <=> $a['score']) ?: ($b['order_count'] <=> $a['order_count']));
+    foreach ($teamScores as $i => &$t) {
+        $t['rank'] = $i + 1;
+    }
+    unset($t);
+
+    return [
+        'overall' => $overall,
+        'tier'    => $overallTier,
+        'pillars' => $pillars,
+        'teams'   => $teamScores,
     ];
 }
 

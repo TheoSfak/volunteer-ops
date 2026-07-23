@@ -212,6 +212,23 @@ CREATE TABLE IF NOT EXISTS `mission_debriefs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- MISSION SCORE REVIEWS (admin validation/endorsement of computed mission score)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_score_reviews` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `computed_score` DECIMAL(5,2) NOT NULL,
+    `final_score` DECIMAL(5,2) NOT NULL,
+    `verdict_note` TEXT NULL,
+    `validated_by` INT UNSIGNED NOT NULL,
+    `validated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`validated_by`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY `unique_mission_score_review` (`mission_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- SHIFTS TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS `shifts` (

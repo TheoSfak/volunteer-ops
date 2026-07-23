@@ -136,6 +136,99 @@ $lastPings = dbFetchAll(
 $dispatchGeo = dbFetchAll("SELECT type, geo, label FROM mission_dispatch_points WHERE mission_id = ?", [$missionId]);
 $photoPoints = array_values(array_filter($media, fn($m) => $m['lat'] !== null));
 
+// ── Mission score + validation review ───────────────────────────────────────
+$score = computeMissionScore($missionId, $report);
+$scoreReview = dbFetchOne(
+    "SELECT r.*, u.name AS validator_name FROM mission_score_reviews r
+     JOIN users u ON u.id = r.validated_by WHERE r.mission_id = ?",
+    [$missionId]
+);
+$scoreTierHex = ['good' => '#0ca30c', 'warning' => '#a56600', 'critical' => '#d03b3b'];
+
+// ── Team roster — mirrors war-room.php's team query (leader/members), extended
+//    with a fan-out-safe pre-aggregated hours subquery (a volunteer can hold
+//    >1 shift row per mission, so hours are summed per-volunteer before the
+//    join, not after — a raw join would duplicate/overcount) ────────────────
+$rosterRows = dbFetchAll(
+    "SELECT mt.id AS team_id, mt.codename, mt.team_number, mt.color,
+            mt.leader_id, l.name AS leader_name, l.is_external AS leader_is_external, l.guest_org_name AS leader_guest_org_name,
+            mtm.user_id, u.name AS member_name, u.is_external AS member_is_external, u.guest_org_name AS member_guest_org_name,
+            COALESCE(hrs.hours, 0) AS member_hours
+     FROM mission_teams mt
+     LEFT JOIN users l ON l.id = mt.leader_id
+     LEFT JOIN mission_team_members mtm ON mtm.team_id = mt.id
+     LEFT JOIN users u ON u.id = mtm.user_id
+     LEFT JOIN (
+         SELECT pr.volunteer_id, COALESCE(SUM(pr.actual_hours), 0) AS hours
+         FROM participation_requests pr JOIN shifts s ON s.id = pr.shift_id
+         WHERE s.mission_id = ? AND pr.attended = 1
+         GROUP BY pr.volunteer_id
+     ) hrs ON hrs.volunteer_id = mtm.user_id
+     WHERE mt.mission_id = ?
+     ORDER BY mt.created_at, u.name",
+    [$missionId, $missionId]
+);
+$roster = [];
+foreach ($rosterRows as $row) {
+    $tid = (int) $row['team_id'];
+    if (!isset($roster[$tid])) {
+        $roster[$tid] = [
+            'codename' => $row['codename'], 'team_number' => $row['team_number'], 'color' => $row['color'] ?: '#898781',
+            'leader_name' => $row['leader_name'],
+            'leader_is_external' => (bool) $row['leader_is_external'], 'leader_guest_org_name' => $row['leader_guest_org_name'],
+            'members' => [],
+        ];
+    }
+    if ($row['user_id'] !== null) {
+        $roster[$tid]['members'][] = [
+            'name' => $row['member_name'], 'is_external' => (bool) $row['member_is_external'],
+            'guest_org_name' => $row['member_guest_org_name'], 'hours' => (float) $row['member_hours'],
+        ];
+    }
+}
+
+// ── Score validation — the responsible admin can endorse the computed score
+//    as-is, or override the final number and add a written verdict. One row
+//    per mission (mission_score_reviews.unique_mission_score_review); a
+//    re-submit overwrites it, re-stamping validator/time. ───────────────────
+if (isPost()) {
+    verifyCsrf();
+    if (!$canManageMissions && !$isResponsible) {
+        setFlash('error', 'Δεν έχετε δικαίωμα.');
+        redirect('mission-stats.php?id=' . $missionId);
+    }
+    if ($score['overall'] === null) {
+        setFlash('error', 'Δεν υπάρχουν αρκετά δεδομένα για επικύρωση βαθμολογίας.');
+        redirect('mission-stats.php?id=' . $missionId);
+    }
+    $overrideRaw = trim(post('override_score'));
+    $verdictNote = trim(post('verdict_note'));
+    $errors = [];
+    $finalScore = $score['overall'];
+    if ($overrideRaw !== '') {
+        if (!is_numeric($overrideRaw) || (float) $overrideRaw < 0 || (float) $overrideRaw > 100) {
+            $errors[] = 'Η βαθμολογία πρέπει να είναι αριθμός από 0 έως 100.';
+        } else {
+            $finalScore = round((float) $overrideRaw, 2);
+        }
+    }
+    if (empty($errors)) {
+        dbExecute(
+            "INSERT INTO mission_score_reviews (mission_id, computed_score, final_score, verdict_note, validated_by, validated_at)
+             VALUES (?, ?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE computed_score = VALUES(computed_score), final_score = VALUES(final_score),
+                 verdict_note = VALUES(verdict_note), validated_by = VALUES(validated_by), validated_at = VALUES(validated_at)",
+            [$missionId, $score['overall'], $finalScore, $verdictNote !== '' ? $verdictNote : null, $userId]
+        );
+        logAudit('validate_mission_score', 'missions', $missionId);
+        setFlash('success', 'Η βαθμολογία επικυρώθηκε επιτυχώς.');
+        redirect('mission-stats.php?id=' . $missionId);
+    }
+    foreach ($errors as $e) {
+        setFlash('error', $e);
+    }
+}
+
 $pageTitle = 'Στατιστικά Αποστολής: ' . $mission['title'];
 include __DIR__ . '/includes/header.php';
 ?>
@@ -182,6 +275,26 @@ include __DIR__ . '/includes/header.php';
     .mstats-map-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: .85rem; margin-top: 10px; }
     .mstats-map-legend span { display: inline-flex; align-items: center; gap: 6px; }
     .mstats-map-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+    .score-gauge-wrap { position: relative; width: 200px; height: 200px; margin: 0 auto; }
+    .score-gauge-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+    .score-gauge-center .value { font-size: 2.3rem; font-weight: 800; line-height: 1; }
+    .score-gauge-center .tier-label { font-size: .78rem; font-weight: 600; margin-top: 4px; color: #52514e; }
+    .score-pillar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .score-pillar-label { width: 180px; flex-shrink: 0; font-size: .85rem; font-weight: 600; color: #52514e; }
+    .score-pillar-track { flex: 1; height: 14px; background: #eee; border-radius: 999px; overflow: hidden; }
+    .score-pillar-fill { height: 100%; border-radius: 999px; }
+    .score-pillar-value { width: 46px; flex-shrink: 0; text-align: right; font-weight: 700; font-size: .85rem; }
+    .score-leaderboard-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; background: #f9f9f7; margin-bottom: 8px; border-left: 5px solid; }
+    .score-leaderboard-rank { font-size: 1.3rem; width: 32px; text-align: center; flex-shrink: 0; }
+    .score-leaderboard-team { font-weight: 700; flex: 1; }
+    .score-leaderboard-score { font-weight: 800; font-size: 1.1rem; }
+    .score-validation-box { background: #f9f9f7; border-radius: 12px; padding: 18px; margin-top: 20px; }
+    .roster-team-card { border-radius: 12px; border: 1px solid #eee; padding: 14px 16px; margin-bottom: 12px; height: 100%; }
+    .roster-team-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-weight: 700; flex-wrap: wrap; }
+    .roster-swatch { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; }
+    .roster-member-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: .88rem; border-bottom: 1px solid #f2f2f0; }
+    .roster-member-row:last-child { border-bottom: none; }
 </style>
 
 <div class="container-fluid py-4">
@@ -211,6 +324,114 @@ include __DIR__ . '/includes/header.php';
             <?php endif; ?>
         </div>
     </div>
+</div>
+
+<!-- Mission score -->
+<div class="mstats-card">
+    <h2><i class="bi bi-award-fill text-primary"></i>Βαθμολογία Άσκησης</h2>
+    <?php if ($score['overall'] === null): ?>
+        <p class="mstats-empty">Δεν υπάρχουν ακόμα αρκετά δεδομένα (εντολές, βάρδιες ή αναφορά debrief) για τον υπολογισμό βαθμολογίας.</p>
+    <?php else: ?>
+    <div class="row g-4 align-items-center mb-2">
+        <div class="col-md-4 text-center">
+            <div class="score-gauge-wrap">
+                <canvas id="scoreGaugeChart"></canvas>
+                <div class="score-gauge-center">
+                    <div class="value" style="color:<?= $scoreTierHex[$score['tier'][0]] ?>;"><?= number_format($score['overall'], 1) ?></div>
+                    <div class="tier-label"><?= h($score['tier'][1]) ?></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-8">
+            <?php foreach ($score['pillars'] as $p): ?>
+                <div class="score-pillar-row">
+                    <div class="score-pillar-label"><?= h($p['label']) ?></div>
+                    <?php if ($p['available']): $pTier = missionScoreTierMeta($p['score']); ?>
+                    <div class="score-pillar-track"><div class="score-pillar-fill" style="width:<?= round($p['score']) ?>%;background:<?= $scoreTierHex[$pTier[0]] ?>;"></div></div>
+                    <div class="score-pillar-value"><?= number_format($p['score'], 0) ?></div>
+                    <?php else: ?>
+                    <div class="score-pillar-track"><div class="score-pillar-fill" style="width:0;"></div></div>
+                    <div class="score-pillar-value text-muted">—</div>
+                    <?php endif; ?>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <?php if (!empty($score['teams'])): ?>
+    <h3 class="mt-3 mb-2"><i class="bi bi-trophy-fill text-warning"></i> Κατάταξη Ομάδων</h3>
+    <?php foreach ($score['teams'] as $t): ?>
+        <div class="score-leaderboard-row" style="border-left-color:<?= h($t['color']) ?>;">
+            <div class="score-leaderboard-rank"><?= $t['rank'] === 1 ? '🥇' : ($t['rank'] === 2 ? '🥈' : ($t['rank'] === 3 ? '🥉' : $t['rank'])) ?></div>
+            <span class="badge" style="background:<?= h($t['color']) ?>;color:#fff;"><?= h($t['codename'] . ' ' . $t['team_number']) ?></span>
+            <div class="score-leaderboard-team"><?= h($t['tier'][1]) ?></div>
+            <div class="score-leaderboard-score" style="color:<?= $scoreTierHex[$t['tier'][0]] ?>;"><?= number_format($t['score'], 1) ?></div>
+        </div>
+    <?php endforeach; ?>
+    <?php endif; ?>
+
+    <div class="score-validation-box">
+        <?php if ($scoreReview): ?>
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                <div>
+                    <div class="fw-bold text-success mb-1"><i class="bi bi-patch-check-fill"></i> Επικυρώθηκε από <?= h($scoreReview['validator_name']) ?> στις <?= formatDateTime($scoreReview['validated_at']) ?></div>
+                    <div class="fs-4 fw-bold mb-1">Τελική Βαθμολογία: <?= number_format($scoreReview['final_score'], 1) ?></div>
+                    <?php if (!empty($scoreReview['verdict_note'])): ?><div class="fst-italic">&laquo;<?= nl2br(h($scoreReview['verdict_note'])) ?>&raquo;</div><?php endif; ?>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('scoreValidationForm').classList.toggle('d-none')"><i class="bi bi-pencil"></i> Επεξεργασία</button>
+            </div>
+            <form method="post" action="" id="scoreValidationForm" class="d-none mt-3 pt-3 border-top">
+        <?php else: ?>
+            <h3 class="mb-2"><i class="bi bi-clipboard-check"></i> Επικύρωση Βαθμολογίας</h3>
+            <form method="post" action="">
+        <?php endif; ?>
+                <?= csrfField() ?>
+                <div class="row g-3 align-items-end">
+                    <div class="col-sm-4">
+                        <label class="form-label small fw-semibold">Τελική βαθμολογία <span class="text-muted fw-normal">(προαιρετική διόρθωση, αλλιώς <?= number_format($score['overall'], 1) ?>)</span></label>
+                        <input type="number" step="0.1" min="0" max="100" class="form-control" name="override_score" placeholder="<?= number_format($score['overall'], 1) ?>" value="<?= isPost() ? h(post('override_score')) : ($scoreReview ? h(number_format((float) $scoreReview['final_score'], 1)) : '') ?>">
+                    </div>
+                    <div class="col-sm-8">
+                        <label class="form-label small fw-semibold">Σχόλιο / τελική κρίση παρατηρητή</label>
+                        <textarea class="form-control" name="verdict_note" rows="1" maxlength="1000"><?= isPost() ? h(post('verdict_note')) : h($scoreReview['verdict_note'] ?? '') ?></textarea>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-success mt-3"><i class="bi bi-check2-circle"></i> Επικύρωση Βαθμολογίας</button>
+            </form>
+    </div>
+    <?php endif; ?>
+</div>
+
+<!-- Team roster -->
+<div class="mstats-card">
+    <h2><i class="bi bi-people-fill text-primary"></i>Ρόστερ Ομάδων</h2>
+    <?php if (empty($roster)): ?>
+        <p class="mstats-empty">Δεν έχουν δημιουργηθεί ομάδες.</p>
+    <?php else: ?>
+    <div class="row g-3">
+        <?php foreach ($roster as $team): ?>
+        <div class="col-md-6">
+            <div class="roster-team-card">
+                <div class="roster-team-header">
+                    <span class="roster-swatch" style="background:<?= h($team['color']) ?>;"></span>
+                    <span><?= h($team['codename'] . ' ' . $team['team_number']) ?></span>
+                    <?php if ($team['leader_name']): ?><span class="text-muted fw-normal small">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_guest_org_name']) ?></span><?php endif; ?>
+                </div>
+                <?php if (empty($team['members'])): ?>
+                    <div class="text-muted small">Χωρίς μέλη.</div>
+                <?php else: ?>
+                    <?php foreach ($team['members'] as $m): ?>
+                    <div class="roster-member-row">
+                        <span><?= guestNameHtml($m['name'], $m['is_external'], $m['guest_org_name']) ?></span>
+                        <span class="text-muted"><?= $attendanceReady ? number_format($m['hours'], 1) . ' ώρες' : 'Εκκρεμεί' ?></span>
+                    </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
 </div>
 
 <!-- Headline stat tiles -->
@@ -437,6 +658,13 @@ include __DIR__ . '/includes/header.php';
 <script>
 const PALETTE = ['#2a78d6','#008300','#e87ba4','#eda100','#1baf7a','#eb6834','#4a3aa7','#e34948'];
 Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";
+
+<?php if ($score['overall'] !== null): ?>
+mc('scoreGaugeChart', 'doughnut', {
+    labels: ['Βαθμολογία', ''],
+    datasets: [{ data: [<?= $score['overall'] ?>, <?= max(0, 100 - $score['overall']) ?>], backgroundColor: ['<?= $scoreTierHex[$score['tier'][0]] ?>', '#e9ecef'], borderWidth: 0 }]
+}, { cutout: '76%', plugins: { legend: { display: false }, tooltip: { enabled: false } } });
+<?php endif; ?>
 
 function mc(id, type, data, options = {}) {
     const el = document.getElementById(id);
