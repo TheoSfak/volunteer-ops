@@ -349,6 +349,7 @@ $printDate = date('d/m/Y H:i');
         .hero-metric-tile { background: #fff; border: 1px solid #eee; border-radius: 12px; padding: 14px 10px; text-align: center; border-top: 4px solid var(--hmt-color, #2a78d6); page-break-inside: avoid; }
         .hero-metric-tile .hmt-value { font-size: 1.7rem; font-weight: 800; color: #0b0b0b; line-height: 1; }
         .hero-metric-tile .hmt-label { font-size: 7.3pt; color: #52514e; margin-top: 5px; }
+        .hero-metric-tile .hmt-note { font-size: 6.6pt; margin-top: 3px; }
 
         .command-severity-table { width: 100%; font-size: 8.3pt; margin-top: 8px; }
         .command-severity-table th { text-align: left; color: #898781; font-weight: 600; font-size: 7.3pt; text-transform: uppercase; padding: 3px 6px; border-bottom: 2px solid #eee; }
@@ -496,6 +497,9 @@ $printDate = date('d/m/Y H:i');
     <div class="hero-metric-tile" style="--hmt-color:#2a78d6;">
         <div class="hmt-value"><?= $score['metrics']['avg_ack'] !== null ? number_format($score['metrics']['avg_ack'], 1) : '—' ?></div>
         <div class="hmt-label">Μ.Ο. Απόκρισης Ομάδων σε Εντολές (λεπ.)</div>
+        <?php if (!empty($score['metrics']['forgotten_orders'])): ?>
+        <div class="hmt-note" style="color:#a56600;"><?= $score['metrics']['forgotten_orders'] ?> ξεχασμένη<?= $score['metrics']['forgotten_orders'] > 1 ? 'ες' : '' ?> (&gt;4ώρες, εξαιρούνται)</div>
+        <?php endif; ?>
     </div>
     <div class="hero-metric-tile" style="--hmt-color:#1baf7a;">
         <div class="hmt-value"><?= $score['metrics']['avg_fulfill'] !== null ? number_format($score['metrics']['avg_fulfill'], 1) : '—' ?></div>
