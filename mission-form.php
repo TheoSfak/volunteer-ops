@@ -128,6 +128,22 @@ if (isPost()) {
                         );
                     }
 
+                    // Auto-create a default shift matching the mission's date/time if it's
+                    // (now) Open and still has none — same convention as the create flow
+                    // and the "publish" action on mission-view.php.
+                    $autoCreatedShift = false;
+                    if ($data['status'] === STATUS_OPEN) {
+                        $existingShiftCount = (int) dbFetchValue("SELECT COUNT(*) FROM shifts WHERE mission_id = ?", [$id]);
+                        if ($existingShiftCount === 0) {
+                            dbInsert(
+                                "INSERT INTO shifts (mission_id, start_time, end_time, max_volunteers, min_volunteers, created_at, updated_at)
+                                 VALUES (?, ?, ?, 5, 1, NOW(), NOW())",
+                                [$id, $data['start_datetime'], $data['end_datetime']]
+                            );
+                            $autoCreatedShift = true;
+                        }
+                    }
+
                     db()->commit();
                 } catch (Throwable $e) {
                     if (db()->inTransaction()) {
@@ -135,12 +151,15 @@ if (isPost()) {
                     }
                     throw $e;
                 }
-                
+
                 logAudit('update', 'missions', $id, $mission, $data);
                 $message = 'Η αποστολή ενημερώθηκε επιτυχώς.';
                 if ($updatedShifts > 0) {
                     $shiftLabel = $updatedShifts === 1 ? 'βάρδιας' : 'βαρδιών';
                     $message .= ' Ενημερώθηκε αυτόματα η ημερομηνία ' . $updatedShifts . ' ' . $shiftLabel . '.';
+                } elseif ($autoCreatedShift) {
+                    logAudit('auto_create_shift', 'shifts', $id, 'Αυτόματη δημιουργία βαρδίας κατά την ενημέρωση αποστολής');
+                    $message .= ' Δημιουργήθηκε αυτόματα μία βάρδια.';
                 }
                 setFlash('success', $message);
             } else {
@@ -273,6 +292,17 @@ if (isPost()) {
                         $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
                         $data['is_urgent'], $data['show_in_ops'], $data['status'], $data['responsible_user_id'], $user['id']
                     ]);
+
+                    // Auto-create a default shift matching the mission's own date/time,
+                    // same convention as the recurring-mission path and the publish action.
+                    if ($data['status'] === STATUS_OPEN) {
+                        dbInsert(
+                            "INSERT INTO shifts (mission_id, start_time, end_time, max_volunteers, min_volunteers, created_at, updated_at)
+                             VALUES (?, ?, ?, 5, 1, NOW(), NOW())",
+                            [$newId, $data['start_datetime'], $data['end_datetime']]
+                        );
+                        logAudit('auto_create_shift', 'shifts', $newId, 'Αυτόματη δημιουργία βαρδίας κατά τη δημιουργία αποστολής');
+                    }
 
                     logAudit('create', 'missions', $newId, null, $data);
                     setFlash('success', 'Η αποστολή δημιουργήθηκε επιτυχώς.');
