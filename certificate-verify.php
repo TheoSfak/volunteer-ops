@@ -40,7 +40,7 @@ $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLog
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Επαλήθευση Πιστοποιητικού / Certificate Verification</title>
+    <title>Επαλήθευση Βεβαίωσης / Certificate Verification</title>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=EB+Garamond:wght@400;600&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -89,13 +89,13 @@ $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLog
 
     <?php if ($number === ''): ?>
         <div class="verify-icon" style="color:#918f86;">🔍</div>
-        <div class="verify-title" style="color:#23231f;">Επαλήθευση Πιστοποιητικού / Certificate Verification</div>
-        <div class="verify-subtitle">Εισάγετε τον αριθμό πιστοποιητικού παρακάτω. / Enter a certificate number below.</div>
+        <div class="verify-title" style="color:#23231f;">Επαλήθευση Βεβαίωσης / Certificate Verification</div>
+        <div class="verify-subtitle">Εισάγετε τον αριθμό βεβαίωσης παρακάτω. / Enter a certificate number below.</div>
     <?php elseif ($cert): ?>
         <div class="verify-icon valid">✓</div>
-        <div class="verify-title valid">Γνήσιο Πιστοποιητικό</div>
+        <div class="verify-title valid">Γνήσια Βεβαίωση</div>
         <div class="verify-title valid" style="font-size:12pt;">Genuine Certificate</div>
-        <div class="verify-subtitle">Αυτό το πιστοποιητικό υπάρχει στο μητρώο μας. / This certificate exists in our records.</div>
+        <div class="verify-subtitle">Αυτή η βεβαίωση υπάρχει στο μητρώο μας. / This certificate exists in our records.</div>
         <div class="verify-details">
             <div class="verify-row"><span class="label">Παραλήπτης / Recipient</span><span class="value"><?= h($cert['recipient_name']) ?><?php if ($cert['recipient_is_external'] && $cert['recipient_guest_org_name']): ?> (<?= h($cert['recipient_guest_org_name']) ?>)<?php endif; ?></span></div>
             <div class="verify-row"><span class="label">Αποστολή / Mission</span><span class="value"><?= h($cert['mission_title']) ?></span></div>
@@ -107,7 +107,7 @@ $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLog
         <div class="verify-icon invalid">✕</div>
         <div class="verify-title invalid">Δεν Βρέθηκε</div>
         <div class="verify-title invalid" style="font-size:12pt;">Not Found</div>
-        <div class="verify-subtitle">Δεν βρέθηκε πιστοποιητικό με αυτόν τον αριθμό. / No certificate matches this number.</div>
+        <div class="verify-subtitle">Δεν βρέθηκε βεβαίωση με αυτόν τον αριθμό. / No certificate matches this number.</div>
         <div class="verify-number"><?= h($number) ?></div>
     <?php endif; ?>
 

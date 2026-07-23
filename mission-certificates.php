@@ -43,7 +43,7 @@ if (!$mission) {
 
 $canManageWarRoom = hasPagePermission('missions_manage') || (int) $mission['responsible_user_id'] === (int) $userId;
 if (!$canManageWarRoom) {
-    setFlash('error', 'Η έκδοση πιστοποιητικών είναι διαθέσιμη μόνο σε διαχειριστές.');
+    setFlash('error', 'Η έκδοση βεβαιώσεων είναι διαθέσιμη μόνο σε διαχειριστές.');
     redirect('mission-view.php?id=' . $missionId);
 }
 
@@ -84,7 +84,7 @@ if (isPost()) {
             db()->commit();
         } catch (Exception $e) {
             db()->rollBack();
-            setFlash('error', 'Σφάλμα κατά την έκδοση πιστοποιητικών. Παρακαλώ δοκιμάστε ξανά.');
+            setFlash('error', 'Σφάλμα κατά την έκδοση βεβαιώσεων. Παρακαλώ δοκιμάστε ξανά.');
             redirect('mission-certificates.php?mission_id=' . $missionId);
         }
 
@@ -94,8 +94,8 @@ if (isPost()) {
         foreach ($issued as $row) {
             sendNotification(
                 $row['recipient_id'],
-                'Εκδόθηκε Πιστοποιητικό Συμμετοχής',
-                'Εκδόθηκε πιστοποιητικό συμμετοχής σας στην αποστολή: ' . $mission['title'],
+                'Εκδόθηκε Βεβαίωση Συμμετοχής',
+                'Εκδόθηκε βεβαίωση συμμετοχής σας στην αποστολή: ' . $mission['title'],
                 'success',
                 'mission_certificate_issued',
                 ['url' => 'mission-certificate-print.php?id=' . $row['id']]
@@ -104,7 +104,7 @@ if (isPost()) {
         }
 
         $count = count($issued);
-        setFlash('success', $count === 1 ? 'Το πιστοποιητικό εκδόθηκε επιτυχώς.' : "Εκδόθηκαν $count πιστοποιητικά επιτυχώς.");
+        setFlash('success', $count === 1 ? 'Η βεβαίωση εκδόθηκε επιτυχώς.' : "Εκδόθηκαν $count βεβαιώσεις επιτυχώς.");
         redirect('mission-certificates.php?mission_id=' . $missionId);
     }
 
@@ -114,7 +114,7 @@ if (isPost()) {
         if ($cert) {
             dbExecute("DELETE FROM mission_certificates WHERE id = ?", [$certId]);
             logAudit('delete_mission_certificate', 'mission_certificates', $certId);
-            setFlash('success', 'Το πιστοποιητικό διαγράφηκε.');
+            setFlash('success', 'Η βεβαίωση διαγράφηκε.');
         }
         redirect('mission-certificates.php?mission_id=' . $missionId);
     }
@@ -149,7 +149,7 @@ $pickableUsers = dbFetchAll(
     [$missionId, PARTICIPATION_APPROVED]
 );
 
-$pageTitle = 'Πιστοποιητικά — ' . $mission['title'];
+$pageTitle = 'Βεβαιώσεις — ' . $mission['title'];
 include __DIR__ . '/includes/header.php';
 ?>
 
@@ -159,10 +159,10 @@ include __DIR__ . '/includes/header.php';
             <ol class="breadcrumb mb-0">
                 <li class="breadcrumb-item"><a href="missions.php">Αποστολές</a></li>
                 <li class="breadcrumb-item"><a href="mission-view.php?id=<?= $missionId ?>"><?= h($mission['title']) ?></a></li>
-                <li class="breadcrumb-item active">Πιστοποιητικά</li>
+                <li class="breadcrumb-item active">Βεβαιώσεις</li>
             </ol>
         </nav>
-        <h1 class="h4 mt-2 mb-0"><i class="bi bi-patch-check text-success me-2"></i>Πιστοποιητικά Συμμετοχής</h1>
+        <h1 class="h4 mt-2 mb-0"><i class="bi bi-patch-check text-success me-2"></i>Βεβαιώσεις Συμμετοχής</h1>
     </div>
     <a href="mission-view.php?id=<?= $missionId ?>" class="btn btn-outline-secondary">
         <i class="bi bi-arrow-left me-1"></i>Πίσω στην Αποστολή
@@ -171,7 +171,7 @@ include __DIR__ . '/includes/header.php';
 
 <div class="card mb-4">
     <div class="card-header">
-        <h5 class="mb-0"><i class="bi bi-plus-circle me-1"></i>Έκδοση Νέου Πιστοποιητικού</h5>
+        <h5 class="mb-0"><i class="bi bi-plus-circle me-1"></i>Έκδοση Νέας Βεβαίωσης</h5>
     </div>
     <div class="card-body">
         <form method="post">
@@ -200,7 +200,7 @@ include __DIR__ . '/includes/header.php';
                             <span class="badge bg-success-subtle text-success-emphasis">Συμμετείχε</span>
                         <?php endif; ?>
                         <?php if (in_array((int) $u['id'], array_map('intval', $alreadyCertifiedIds), true)): ?>
-                            <span class="badge bg-warning-subtle text-warning-emphasis" title="Έχει ήδη πιστοποιητικό για αυτή την αποστολή">Ήδη πιστοποιημένος</span>
+                            <span class="badge bg-warning-subtle text-warning-emphasis" title="Έχει ήδη βεβαίωση για αυτή την αποστολή">Έχει ήδη βεβαίωση</span>
                         <?php endif; ?>
                     </label>
                 <?php endforeach; ?>
@@ -208,7 +208,7 @@ include __DIR__ . '/includes/header.php';
 
             <div class="row">
                 <div class="col-md-6 mb-3">
-                    <label class="form-label fw-semibold">Γλώσσα Πιστοποιητικού</label>
+                    <label class="form-label fw-semibold">Γλώσσα Βεβαίωσης</label>
                     <div class="d-flex gap-3">
                         <div class="form-check">
                             <input class="form-check-input" type="radio" name="language" value="el" id="certLangEl" checked>
@@ -227,7 +227,7 @@ include __DIR__ . '/includes/header.php';
             </div>
 
             <button type="submit" class="btn btn-success" id="certSubmitBtn" disabled>
-                <i class="bi bi-patch-check me-1"></i>Έκδοση Πιστοποιητικών
+                <i class="bi bi-patch-check me-1"></i>Έκδοση Βεβαιώσεων
             </button>
         </form>
     </div>
@@ -235,11 +235,11 @@ include __DIR__ . '/includes/header.php';
 
 <div class="card">
     <div class="card-header">
-        <h5 class="mb-0"><i class="bi bi-list-check me-1"></i>Εκδοθέντα Πιστοποιητικά <span class="badge bg-secondary rounded-pill"><?= count($issuedCertificates) ?></span></h5>
+        <h5 class="mb-0"><i class="bi bi-list-check me-1"></i>Εκδοθείσες Βεβαιώσεις <span class="badge bg-secondary rounded-pill"><?= count($issuedCertificates) ?></span></h5>
     </div>
     <div class="card-body p-0">
         <?php if (empty($issuedCertificates)): ?>
-            <p class="text-muted p-3 mb-0">Δεν έχουν εκδοθεί πιστοποιητικά για αυτή την αποστολή ακόμα.</p>
+            <p class="text-muted p-3 mb-0">Δεν έχουν εκδοθεί βεβαιώσεις για αυτή την αποστολή ακόμα.</p>
         <?php else: ?>
             <div class="table-responsive">
                 <table class="table align-middle mb-0">
@@ -263,7 +263,7 @@ include __DIR__ . '/includes/header.php';
                                 <a href="mission-certificate-print.php?id=<?= $c['id'] ?>" target="_blank" class="btn btn-sm btn-outline-success">
                                     <i class="bi bi-eye me-1"></i>Προβολή
                                 </a>
-                                <form method="post" class="d-inline" onsubmit="return confirm('Διαγραφή αυτού του πιστοποιητικού;');">
+                                <form method="post" class="d-inline" onsubmit="return confirm('Διαγραφή αυτής της βεβαίωσης;');">
                                     <?= csrfField() ?>
                                     <input type="hidden" name="action" value="delete">
                                     <input type="hidden" name="certificate_id" value="<?= $c['id'] ?>">
