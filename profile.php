@@ -952,6 +952,58 @@ $myRequiredMissing = dbFetchAll(
 <?php endif; ?>
 <?php endif; // !isExternalGuest() ?>
 
+<!-- Mission Certificates — deliberately OUTSIDE the isExternalGuest() exclusion
+     block above: guests are a primary audience for these (joint-exercise
+     certificates issued to partner-org accounts). Uses t() for its own chrome,
+     unlike the Greek-only block just above, since a guest can be in
+     language='en'. The certificate DOCUMENT itself (mission-certificate-print.php)
+     is a separate, fixed-at-issuance language, not tied to this viewer setting. -->
+<?php
+$myMissionCertificates = dbFetchAll(
+    "SELECT mc.*, m.title AS mission_title
+     FROM mission_certificates mc
+     JOIN missions m ON m.id = mc.mission_id
+     WHERE mc.recipient_user_id = ?
+     ORDER BY mc.issued_at DESC",
+    [$user['id']]
+);
+?>
+<div class="card pp-card accent-success mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-patch-check text-success me-2"></i><?= t('profile.mission_certs_title') ?></h5>
+    </div>
+    <div class="card-body">
+        <?php if (empty($myMissionCertificates)): ?>
+            <p class="text-muted mb-0"><?= t('profile.mission_certs_empty') ?></p>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th><?= t('profile.mission_certs_col_mission') ?></th>
+                            <th><?= t('profile.mission_certs_col_date') ?></th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($myMissionCertificates as $mc): ?>
+                        <tr>
+                            <td><?= h($mc['mission_title']) ?></td>
+                            <td><?= formatDate($mc['issued_at']) ?></td>
+                            <td class="text-end">
+                                <a href="mission-certificate-print.php?id=<?= $mc['id'] ?>" target="_blank" class="btn btn-sm btn-outline-success">
+                                    <i class="bi bi-download me-1"></i><?= t('profile.mission_certs_view_btn') ?>
+                                </a>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+
 <!-- i18n scope: core account section resumes (translated via t() — hero above
      plus everything from here down: edit-profile form, booked equipment,
      password change, avatar upload). New user-facing strings in this stretch

@@ -672,6 +672,9 @@ include __DIR__ . '/includes/header.php';
             <a href="mission-stats.php?id=<?= $mission['id'] ?>" class="btn btn-outline-primary">
                 <i class="bi bi-graph-up-arrow me-1"></i>Στατιστικά
             </a>
+            <a href="mission-certificates.php?mission_id=<?= $mission['id'] ?>" class="btn btn-outline-success">
+                <i class="bi bi-patch-check me-1"></i>Πιστοποιητικά
+            </a>
         <?php endif; ?>
         <?php if ($canManageMissions): ?>
             <a href="mission-form.php?id=<?= $mission['id'] ?>" class="btn btn-outline-primary">
