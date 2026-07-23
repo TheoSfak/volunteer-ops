@@ -69,7 +69,7 @@ $verifyUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' :
 
 $copy = [
     'el' => [
-        'doc_title'   => 'Πιστοποιητικό Συμμετοχής',
+        'doc_title'   => 'Βεβαίωση Συμμετοχής',
         'presented_to'=> 'Απονέμεται στον/στην',
         'body_lead'   => 'για τη συμμετοχή του/της στην αποστολή',
         'held_on'     => 'που πραγματοποιήθηκε στις',
@@ -77,11 +77,11 @@ $copy = [
         'representing'=> 'εκπροσωπώντας',
         'sig_president' => 'Ο Πρόεδρος',
         'sig_secretary' => 'Ο Γενικός Γραμματέας',
-        'cert_no'     => 'Αριθμός Πιστοποιητικού',
+        'cert_no'     => 'Αριθμός Βεβαίωσης',
         'issued_on'   => 'Ημερομηνία Έκδοσης',
         'print_btn'   => '🖶 Εκτύπωση / PDF',
         'close_btn'   => '✕ Κλείσιμο',
-        'notice'      => 'Προεπισκόπηση Εκτύπωσης — Πιστοποιητικό Συμμετοχής',
+        'notice'      => 'Προεπισκόπηση Εκτύπωσης — Βεβαίωση Συμμετοχής',
         'scan_verify' => 'Σαρώστε για επαλήθευση γνησιότητας',
     ],
     'en' => [
@@ -133,9 +133,9 @@ $printDate = date('d/m/Y');
         }
         .cert-border-inner {
             border: 1.5px solid #b8860b;
-            padding: 46px 64px;
+            padding: 30px 56px;
             position: relative;
-            min-height: 620px;
+            min-height: 460px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -153,9 +153,8 @@ $printDate = date('d/m/Y');
         }
         .cert-watermark img { max-height: 380px; }
 
-        .cert-org-row { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; z-index: 1; }
-        .cert-org-row img { height: 44px; width: auto; }
-        .cert-org-name { font-family: 'Playfair Display', serif; font-weight: 700; font-size: 15pt; color: #172554; letter-spacing: .02em; }
+        .cert-org-row { display: flex; align-items: center; justify-content: center; margin-bottom: 10px; z-index: 1; }
+        .cert-org-row img { height: 92px; width: auto; }
 
         .cert-title {
             font-family: 'Playfair Display', serif; font-weight: 800; font-size: 32pt;
@@ -182,19 +181,23 @@ $printDate = date('d/m/Y');
         .cert-citation::before { content: '“'; left: 0; top: -6px; }
         .cert-citation::after { content: '”'; right: 0; bottom: -16px; }
 
-        .cert-signatures { display: flex; justify-content: space-between; width: 100%; max-width: 720px; margin-top: auto; padding-top: 56px; z-index: 1; }
+        .cert-signatures { display: flex; justify-content: space-between; width: 100%; max-width: 720px; margin-top: auto; padding-top: 26px; z-index: 1; }
         .cert-sig { text-align: center; width: 45%; }
         .cert-sig-name { font-family: 'Dancing Script', cursive; font-weight: 700; font-size: 22pt; color: #172554; line-height: 1; transform: rotate(-1.5deg); display: inline-block; }
         .cert-sig-line { border-top: 1.3px solid #23231f; margin-top: 10px; padding-top: 6px; font-size: 9.5pt; letter-spacing: .04em; text-transform: uppercase; color: #52514e; }
 
         .cert-footer-meta {
-            display: flex; justify-content: space-between; align-items: flex-end; width: 100%; max-width: 720px;
-            margin-top: 26px; font-size: 8pt; color: #918f86; z-index: 1;
+            width: 100%; max-width: 720px; text-align: left; line-height: 1.6;
+            margin-top: 14px; font-size: 8pt; color: #918f86; z-index: 1;
         }
-        .cert-footer-meta .cert-meta-text { text-align: left; line-height: 1.6; }
-        .cert-qr { text-align: center; }
-        .cert-qr img { display: block; border: 1px solid #e5e1d5; border-radius: 4px; }
-        .cert-qr .cert-qr-caption { font-size: 6.8pt; color: #918f86; margin-top: 3px; max-width: 90px; }
+        /* QR is deliberately position:absolute, out of normal document flow --
+           adding it as a flow row is what pushed the certificate past one A4
+           page's height when printed; an absolutely-positioned corner badge
+           can never add to the page's flow height, so this can't recur no
+           matter what else gets added to the certificate later. */
+        .cert-qr { position: absolute; right: 20px; bottom: 16px; text-align: center; z-index: 2; }
+        .cert-qr img { display: block; border: 1px solid #e5e1d5; border-radius: 4px; background: #fff; }
+        .cert-qr .cert-qr-caption { font-size: 6.3pt; color: #918f86; margin-top: 2px; max-width: 66px; }
 
         .screen-notice { position: fixed; top: 0; left: 0; right: 0; background: #17375e; color: #fff; text-align: center; padding: 8px 16px; font-size: 10pt; z-index: 9999; display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
         .screen-notice button { background: #fff; color: #17375e; border: none; padding: 4px 14px; border-radius: 4px; cursor: pointer; font-size: 9pt; font-weight: bold; }
@@ -204,7 +207,13 @@ $printDate = date('d/m/Y');
             .screen-notice { display: none !important; }
             body { padding: 0; background: #fff; }
             @page { size: A4 landscape; margin: 8mm; }
-            .cert-page { box-shadow: none; max-width: none; }
+            /* The 48px inline margin-top exists only to clear the fixed
+               .screen-notice bar on screen -- that bar is hidden in print, so
+               the margin must be zeroed too, or it wastes 48px of the one
+               printed page's height for nothing (this was the other half of
+               the "QR pushes to a second page" bug: the content already had
+               no room to spare, and this margin was silently eating into it). */
+            .cert-page { box-shadow: none; max-width: none; margin-top: 0 !important; }
         }
     </style>
 </head>
@@ -228,10 +237,11 @@ $printDate = date('d/m/Y');
             <div class="cert-watermark"><img src="uploads/logos/<?= h($appLogo) ?>" alt=""></div>
             <?php endif; ?>
 
+            <?php if ($hasLogo): ?>
             <div class="cert-org-row">
-                <?php if ($hasLogo): ?><img src="uploads/logos/<?= h($appLogo) ?>" alt=""><?php endif; ?>
-                <span class="cert-org-name"><?= h($orgName) ?></span>
+                <img src="uploads/logos/<?= h($appLogo) ?>" alt="<?= h($orgName) ?>">
             </div>
+            <?php endif; ?>
 
             <div class="cert-title"><?= h($copy['doc_title']) ?></div>
             <div class="cert-title-rule"></div>
@@ -264,17 +274,16 @@ $printDate = date('d/m/Y');
             </div>
 
             <div class="cert-footer-meta">
-                <div class="cert-meta-text">
-                    <div><?= h($copy['cert_no']) ?>: <?= h($cert['certificate_number'] ?: '—') ?></div>
-                    <div><?= h($copy['issued_on']) ?>: <?= formatDate($cert['issued_at']) ?></div>
-                </div>
-                <?php if (!empty($cert['certificate_number'])): ?>
-                <div class="cert-qr">
-                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=90x90&ecc=M&data=<?= urlencode($verifyUrl) ?>" width="90" height="90" alt="QR">
-                    <div class="cert-qr-caption"><?= h($copy['scan_verify']) ?></div>
-                </div>
-                <?php endif; ?>
+                <div><?= h($copy['cert_no']) ?>: <?= h($cert['certificate_number'] ?: '—') ?></div>
+                <div><?= h($copy['issued_on']) ?>: <?= formatDate($cert['issued_at']) ?></div>
             </div>
+
+            <?php if (!empty($cert['certificate_number'])): ?>
+            <div class="cert-qr">
+                <img src="https://api.qrserver.com/v1/create-qr-code/?size=68x68&ecc=M&data=<?= urlencode($verifyUrl) ?>" width="68" height="68" alt="QR">
+                <div class="cert-qr-caption"><?= h($copy['scan_verify']) ?></div>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>

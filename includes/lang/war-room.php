@@ -540,8 +540,8 @@ return [
         'profile.bookings_overdue' => 'Εκπρόθεσμη',
         'profile.bookings_active' => 'Ενεργή',
 
-        'profile.mission_certs_title' => 'Τα Πιστοποιητικά Αποστολών μου',
-        'profile.mission_certs_empty' => 'Δεν έχετε πιστοποιητικά αποστολών ακόμα.',
+        'profile.mission_certs_title' => 'Οι Βεβαιώσεις Αποστολών μου',
+        'profile.mission_certs_empty' => 'Δεν έχετε βεβαιώσεις αποστολών ακόμα.',
         'profile.mission_certs_col_mission' => 'Αποστολή',
         'profile.mission_certs_col_date' => 'Ημ. Έκδοσης',
         'profile.mission_certs_view_btn' => 'Προβολή / Λήψη',
