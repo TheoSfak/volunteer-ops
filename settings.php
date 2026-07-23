@@ -24,6 +24,13 @@ $defaults = [
     'app_name' => 'VolunteerOps',
     'app_description' => 'Σύστημα Διαχείρισης Εθελοντών',
     'app_logo' => '',
+    // Used by mission-report-print.php/inventory-print.php/mission-certificate-print.php
+    // for printed-document headers — previously read via getSetting() but never
+    // actually in $defaults or the form below, so it silently fell back to the
+    // literal string "VolunteerOps" everywhere until now.
+    'org_name' => 'VolunteerOps',
+    'org_president_name' => '',
+    'org_secretary_name' => '',
     'admin_email' => '',
     'timezone' => 'Europe/Athens',
     'date_format' => 'd/m/Y',
@@ -512,7 +519,8 @@ if (isPost()) {
         
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'admin_email', 'timezone', 'date_format',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name',
+            'admin_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
             'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode',
@@ -1070,9 +1078,26 @@ include __DIR__ . '/includes/header.php';
                             </select>
                         </div>
                     </div>
+                    <hr>
+                    <h6 class="mb-2">Στοιχεία Οργανισμού (για Πιστοποιητικά/Εκτυπώσεις)</h6>
+                    <div class="mb-3">
+                        <label class="form-label">Πλήρης Επωνυμία Οργανισμού</label>
+                        <input type="text" class="form-control" name="org_name" value="<?= h($settings['org_name']) ?>" placeholder="π.χ. Ελληνική Ομάδα Διάσωσης Χανίων">
+                        <small class="text-muted">Εμφανίζεται σε εκτυπώσεις/πιστοποιητικά — διαφορετικό από το «Όνομα Εφαρμογής» παραπάνω.</small>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Ονοματεπώνυμο Προέδρου</label>
+                            <input type="text" class="form-control" name="org_president_name" value="<?= h($settings['org_president_name']) ?>">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Ονοματεπώνυμο Γεν. Γραμματέα</label>
+                            <input type="text" class="form-control" name="org_secretary_name" value="<?= h($settings['org_secretary_name']) ?>">
+                        </div>
+                    </div>
                 </div>
             </div>
-            
+
             <!-- Access Settings -->
             <div class="card mb-4">
                 <div class="card-header">

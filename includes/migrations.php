@@ -4834,6 +4834,56 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 95,
+            'description' => 'Create mission_certificates table (bilingual mission-participation certificates, signed by President/Secretary — deliberately standalone from certificate_types/volunteer_certificates and citizen_certificate_types/citizen_certificates, which model something else entirely)',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_certificates'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE mission_certificates (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            recipient_user_id INT UNSIGNED NOT NULL,
+                            language ENUM('el','en') NOT NULL DEFAULT 'el',
+                            certificate_number VARCHAR(40) NULL,
+                            citation_text TEXT NULL,
+                            issued_by INT UNSIGNED NULL,
+                            issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (recipient_user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            FOREIGN KEY (issued_by) REFERENCES users(id) ON DELETE SET NULL,
+                            UNIQUE KEY uniq_mission_certificate_number (certificate_number),
+                            INDEX idx_mission_certificates_mission (mission_id),
+                            INDEX idx_mission_certificates_recipient (recipient_user_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
+        [
+            'version'     => 96,
+            'description' => 'Register mission_certificate_issued notification code (in-app/push alert to a recipient — volunteer or guest — when a Mission Certificate is issued to them)',
+            'up' => function () {
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_certificate_issued'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_certificate_issued',
+                            'Έκδοση Πιστοποιητικού Αποστολής',
+                            'Ένα πιστοποιητικό συμμετοχής σε αποστολή εκδόθηκε στο όνομά σας (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

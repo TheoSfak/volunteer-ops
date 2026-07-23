@@ -1902,6 +1902,28 @@ CREATE TABLE IF NOT EXISTS `mission_order_recipients` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- MISSION CERTIFICATES (bilingual mission-participation certificates, signed
+-- by President/Secretary — standalone from certificate_types/volunteer_certificates
+-- and citizen_certificate_types/citizen_certificates, which model something else)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_certificates` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `recipient_user_id` INT UNSIGNED NOT NULL,
+    `language` ENUM('el','en') NOT NULL DEFAULT 'el',
+    `certificate_number` VARCHAR(40) NULL,
+    `citation_text` TEXT NULL,
+    `issued_by` INT UNSIGNED NULL,
+    `issued_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`recipient_user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`issued_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    UNIQUE KEY `uniq_mission_certificate_number` (`certificate_number`),
+    INDEX `idx_mission_certificates_mission` (`mission_id`),
+    INDEX `idx_mission_certificates_recipient` (`recipient_user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- MISSION DISPATCH RECEIPTS (War Room order acknowledgment, before arrival)
 -- =============================================
 CREATE TABLE IF NOT EXISTS `mission_dispatch_receipts` (
