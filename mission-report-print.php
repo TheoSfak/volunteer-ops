@@ -103,6 +103,7 @@ $scoreReview = dbFetchOne(
 );
 $scoreTierHex = ['good' => '#0ca30c', 'warning' => '#a56600', 'critical' => '#d03b3b'];
 $observerNarrative = generateMissionObserverNarrative($score, $mission['title']);
+$teamComparisonNarrative = generateTeamComparisonNarrative($score['teams']);
 $commandNarrative = generateCommandNarrative($score['command']);
 
 // Per-order-type breakdown (ack vs fulfill, same unit/scale) — computed from
@@ -465,6 +466,9 @@ $printDate = date('d/m/Y H:i');
     <div class="observer-note">
         <h6>🔭 Αξιολόγηση Παρατηρητή</h6>
         <p><?= nl2br(h($observerNarrative)) ?></p>
+        <?php if (!empty($teamComparisonNarrative)): ?>
+        <p style="margin-top:8px;"><?= nl2br(h($teamComparisonNarrative)) ?></p>
+        <?php endif; ?>
     </div>
 </div>
 

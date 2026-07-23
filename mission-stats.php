@@ -144,6 +144,7 @@ $scoreReview = dbFetchOne(
     [$missionId]
 );
 $observerNarrative = generateMissionObserverNarrative($score, $mission['title']);
+$teamComparisonNarrative = generateTeamComparisonNarrative($score['teams']);
 $commandNarrative = generateCommandNarrative($score['command']);
 $scoreTierHex = ['good' => '#0ca30c', 'warning' => '#a56600', 'critical' => '#d03b3b'];
 
@@ -390,6 +391,9 @@ include __DIR__ . '/includes/header.php';
     <div class="observer-note">
         <h6><i class="bi bi-binoculars-fill"></i>Αξιολόγηση Παρατηρητή</h6>
         <p><?= nl2br(h($observerNarrative)) ?></p>
+        <?php if (!empty($teamComparisonNarrative)): ?>
+        <p class="mt-2"><?= nl2br(h($teamComparisonNarrative)) ?></p>
+        <?php endif; ?>
     </div>
 
     <?php if ($score['overall'] !== null): ?>
