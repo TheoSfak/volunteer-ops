@@ -125,11 +125,15 @@ $orderTypeLabels = [];
 $orderTypeCounts = [];
 $orderTypeAvgAck = [];
 $orderTypeAvgFulfill = [];
+$orderTypeAckCounts = [];
+$orderTypeFulfillCounts = [];
 foreach ($byOrderType as $s) {
     $orderTypeLabels[] = $s['label'];
     $orderTypeCounts[] = $s['count'];
     $orderTypeAvgAck[] = $s['ack_count'] ? round($s['ack_sum'] / $s['ack_count'], 1) : 0;
     $orderTypeAvgFulfill[] = $s['fulfill_count'] ? round($s['fulfill_sum'] / $s['fulfill_count'], 1) : 0;
+    $orderTypeAckCounts[] = $s['ack_count'];
+    $orderTypeFulfillCounts[] = $s['fulfill_count'];
 }
 
 $summary = $report['summary'];
@@ -265,6 +269,7 @@ if (!empty($summary)) $expectedReady += 2; // teamCount + teamAck
 if (!empty($orderTypeLabels)) $expectedReady += 2; // orderType pie + responseDetail bar
 if (!empty($shortageSummary)) $expectedReady += 2; // shortageSeverity pie + commandSeverity bar
 if (!empty($lastPings) || !empty($dispatchGeo) || !empty($photoPoints)) $expectedReady++; // map tiles
+$expectedReady += count($photos); // gallery thumbnails — see the img wireup near the closing script
 
 $orgName = getSetting('org_name', 'VolunteerOps');
 $appLogo = getSetting('app_logo', '');
@@ -596,6 +601,20 @@ $printDate = date('d/m/Y H:i');
 <div class="pr-card">
     <h2>⏱️ Χρόνοι Απόκρισης ανά Τύπο Εντολής</h2>
     <div class="pr-chart-wrap tall"><canvas id="responseDetailChart"></canvas></div>
+    <p style="font-size:7.5pt; color:#999; margin-top:4px;">Ένας ασυνήθιστα αργός χρόνος σε έναν τύπο (π.χ. εντολή που έμεινε ολονύχτια αναπάντητη) μπορεί να «τεντώσει» τον κάθετο άξονα και να κάνει τις γρήγορες μπάρες των άλλων τύπων να μοιάζουν μηδενικές — ο παρακάτω πίνακας δείχνει τους πραγματικούς αριθμούς.</p>
+    <table class="command-severity-table">
+        <thead><tr><th>Τύπος</th><th>Εντολές</th><th>Μ.Ο. Αποδοχής</th><th>Μ.Ο. Ολοκλήρωσης</th></tr></thead>
+        <tbody>
+        <?php foreach ($orderTypeLabels as $i => $lbl): ?>
+            <tr>
+                <td><?= $lbl ?></td>
+                <td><?= $orderTypeCounts[$i] ?></td>
+                <td><?= $orderTypeAckCounts[$i] ? $orderTypeAvgAck[$i] . ' λεπ.' : '—' ?></td>
+                <td><?= $orderTypeFulfillCounts[$i] ? $orderTypeAvgFulfill[$i] . ' λεπ.' : '—' ?></td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
 </div>
 <?php endif; ?>
 
@@ -914,6 +933,19 @@ if (mapEl) {
 // auto-print timer, since both trigger the native beforeprint event.
 window.addEventListener('beforeprint', function () {
     if (window.__printMap) window.__printMap.invalidateSize();
+});
+
+// Gallery thumbnails count toward the same readiness gate as the charts/map
+// — without this, auto-print could fire while a slow mission-photo-view.php
+// fetch is still in flight, baking a half-loaded/broken-looking image into
+// the printed PDF. A cached image is already .complete by the time this runs;
+// counted immediately rather than waiting on a load event that will never
+// fire for it. onerror also counts (a genuinely missing file) so one bad
+// photo can't stall every other ready signal forever.
+document.querySelectorAll('.media-item img').forEach(function (img) {
+    if (img.complete) { markReady(); return; }
+    img.addEventListener('load', markReady, { once: true });
+    img.addEventListener('error', markReady, { once: true });
 });
 
 setTimeout(tryAutoprint, 2500);

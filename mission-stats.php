@@ -94,11 +94,15 @@ $orderTypeLabels = [];
 $orderTypeCounts = [];
 $orderTypeAvgAck = [];
 $orderTypeAvgFulfill = [];
+$orderTypeAckCounts = [];
+$orderTypeFulfillCounts = [];
 foreach ($byOrderType as $s) {
     $orderTypeLabels[] = $s['label'];
     $orderTypeCounts[] = $s['count'];
     $orderTypeAvgAck[] = $s['ack_count'] ? round($s['ack_sum'] / $s['ack_count'], 1) : 0;
     $orderTypeAvgFulfill[] = $s['fulfill_count'] ? round($s['fulfill_sum'] / $s['fulfill_count'], 1) : 0;
+    $orderTypeAckCounts[] = $s['ack_count'];
+    $orderTypeFulfillCounts[] = $s['fulfill_count'];
 }
 
 // Activity feed, for the timeline chart — hourly buckets.
@@ -682,6 +686,20 @@ include __DIR__ . '/includes/header.php';
         <p class="mstats-empty">Δεν έχουν σταλεί εντολές.</p>
     <?php else: ?>
         <div class="mstats-chart-wrap tall"><canvas id="responseDetailChart"></canvas></div>
+        <p class="text-muted small mt-2 mb-0">Ένας ασυνήθιστα αργός χρόνος σε έναν τύπο (π.χ. εντολή που έμεινε ολονύχτια αναπάντητη) μπορεί να «τεντώσει» τον κάθετο άξονα και να κάνει τις γρήγορες μπάρες των άλλων τύπων να μοιάζουν μηδενικές — ο παρακάτω πίνακας δείχνει τους πραγματικούς αριθμούς.</p>
+        <table class="command-severity-table">
+            <thead><tr><th>Τύπος</th><th>Εντολές</th><th>Μ.Ο. Αποδοχής</th><th>Μ.Ο. Ολοκλήρωσης</th></tr></thead>
+            <tbody>
+            <?php foreach ($orderTypeLabels as $i => $lbl): ?>
+                <tr>
+                    <td><?= $lbl ?></td>
+                    <td><?= $orderTypeCounts[$i] ?></td>
+                    <td><?= $orderTypeAckCounts[$i] ? $orderTypeAvgAck[$i] . ' λεπ.' : '—' ?></td>
+                    <td><?= $orderTypeFulfillCounts[$i] ? $orderTypeAvgFulfill[$i] . ' λεπ.' : '—' ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
     <?php endif; ?>
 </div>
 
