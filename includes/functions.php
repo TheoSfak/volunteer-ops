@@ -1483,23 +1483,29 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
             continue; // nothing to score this team on — excluded from the leaderboard entirely
         }
 
+        // raw fields deliberately mirror only the distance-independent
+        // dimensions (order-ACKNOWLEDGMENT speed — a device/UI action, not
+        // travel — completion rate, and shortage handling) so anything built
+        // from them (the team-comparison narrative below) can never compare
+        // teams on dispatch-arrival time, which depends on how far each
+        // team's point was and isn't a fair performance signal.
         $teamPillars = [];
         if ($orders && $orders['ack_count'] > 0) {
             $avgAck = $orders['ack_sum'] / $orders['ack_count'];
-            $teamPillars['response'] = ['weight' => 45, 'available' => true, 'score' => max(0, min(100, 100 - $avgAck * 2.5))];
+            $teamPillars['response'] = ['weight' => 45, 'available' => true, 'score' => max(0, min(100, 100 - $avgAck * 2.5)), 'raw' => ['avg_minutes' => round($avgAck, 1)]];
         } else {
-            $teamPillars['response'] = ['weight' => 45, 'available' => false, 'score' => null];
+            $teamPillars['response'] = ['weight' => 45, 'available' => false, 'score' => null, 'raw' => []];
         }
         if ($orders && $orders['count'] > 0) {
-            $teamPillars['completion'] = ['weight' => 35, 'available' => true, 'score' => $orders['fulfill_count'] / $orders['count'] * 100];
+            $teamPillars['completion'] = ['weight' => 35, 'available' => true, 'score' => $orders['fulfill_count'] / $orders['count'] * 100, 'raw' => ['fulfilled' => $orders['fulfill_count'], 'total' => $orders['count']]];
         } else {
-            $teamPillars['completion'] = ['weight' => 35, 'available' => false, 'score' => null];
+            $teamPillars['completion'] = ['weight' => 35, 'available' => false, 'score' => null, 'raw' => []];
         }
         if ($shortages && $shortages['count'] > 0) {
             $rate = $shortages['resolved'] / $shortages['count'] * 100;
-            $teamPillars['shortage'] = ['weight' => 20, 'available' => true, 'score' => max(0, min(100, $rate - $shortages['unresolvedCritical'] * 15))];
+            $teamPillars['shortage'] = ['weight' => 20, 'available' => true, 'score' => max(0, min(100, $rate - $shortages['unresolvedCritical'] * 15)), 'raw' => ['resolved' => $shortages['resolved'], 'total' => $shortages['count']]];
         } else {
-            $teamPillars['shortage'] = ['weight' => 20, 'available' => true, 'score' => 100.0];
+            $teamPillars['shortage'] = ['weight' => 20, 'available' => true, 'score' => 100.0, 'raw' => ['resolved' => 0, 'total' => 0]];
         }
 
         $tWeightSum = 0;
@@ -1521,6 +1527,7 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
             'score'       => $tScore,
             'tier'        => missionScoreTierMeta($tScore),
             'order_count' => $orders['count'] ?? 0,
+            'pillars'     => $teamPillars,
         ];
     }
     usort($teamScores, fn($a, $b) => ($b['score'] <=> $a['score']) ?: ($b['order_count'] <=> $a['order_count']));
@@ -1687,6 +1694,98 @@ function generateCommandNarrative(array $command): string {
     ];
 
     return $base . ' ' . $verdicts[$tier];
+}
+
+/**
+ * War Room: the team-vs-team comparison paragraph appended after the main
+ * observer narrative. Deliberately compares teams ONLY on dimensions that
+ * are fair regardless of geography — order-ACKNOWLEDGMENT speed (a
+ * device/UI action: tapping "Ελήφθη" doesn't require traveling anywhere),
+ * completion RATE (measures follow-through, not raw travel time), and
+ * shortage-report resolution. It never compares raw dispatch arrival/travel
+ * time between teams, since a team sent to a point 1 hour away isn't
+ * performing worse than one sent 10 minutes away — that's geography, not
+ * diligence. (Dispatch arrival times stay visible in the existing
+ * tables/charts as neutral per-team facts, just never used for a
+ * comparative claim here.) Takes $score['teams'] (already ranked, each with
+ * its own $pillars sub-array carrying the same 'raw' shape as the
+ * mission-wide pillars).
+ */
+function generateTeamComparisonNarrative(array $teams): string {
+    if (count($teams) < 2) {
+        return '';
+    }
+    $label = fn($t) => $t['codename'] . ' ' . $t['team_number'];
+    $sentences = [];
+
+    // ── response speed (order acknowledgment) ───────────────────────────
+    $withResponse = array_values(array_filter($teams, fn($t) => $t['pillars']['response']['available']));
+    if (count($withResponse) >= 2) {
+        usort($withResponse, fn($a, $b) => $a['pillars']['response']['raw']['avg_minutes'] <=> $b['pillars']['response']['raw']['avg_minutes']);
+        $fastest = $withResponse[0];
+        $slowest = $withResponse[count($withResponse) - 1];
+        $fMin = $fastest['pillars']['response']['raw']['avg_minutes'];
+        $sMin = $slowest['pillars']['response']['raw']['avg_minutes'];
+        if ($label($fastest) === $label($slowest) || abs($fMin - $sMin) < 0.5) {
+            $sentences[] = 'Ως προς την ταχύτητα αποδοχής εντολών, οι ομάδες παρουσίασαν παρόμοια απόδοση.';
+        } else {
+            $sentences[] = 'Ως προς την ταχύτητα αποδοχής εντολών, η ομάδα ' . $label($fastest) . " ξεχώρισε με μέσο χρόνο {$fMin} λεπτών, έναντι {$sMin} λεπτών της " . $label($slowest) . '.';
+        }
+    }
+
+    // ── completion rate ──────────────────────────────────────────────────
+    $withCompletion = array_values(array_filter($teams, fn($t) => $t['pillars']['completion']['available']));
+    if (count($withCompletion) >= 2) {
+        $rates = array_map(function ($t) use ($label) {
+            $raw = $t['pillars']['completion']['raw'];
+            return ['label' => $label($t), 'rate' => $raw['total'] ? round($raw['fulfilled'] / $raw['total'] * 100) : 0, 'raw' => $raw];
+        }, $withCompletion);
+        usort($rates, fn($a, $b) => $b['rate'] <=> $a['rate']);
+        $best = $rates[0];
+        $worst = $rates[count($rates) - 1];
+        if ($best['label'] === $worst['label'] || abs($best['rate'] - $worst['rate']) < 10) {
+            $sentences[] = 'Στο ποσοστό ολοκλήρωσης εντολών, οι ομάδες κινήθηκαν σε παρόμοια επίπεδα.';
+        } else {
+            $sentences[] = "Στο ποσοστό ολοκλήρωσης εντολών, η {$best['label']} πέτυχε {$best['rate']}% ({$best['raw']['fulfilled']}/{$best['raw']['total']}), έναντι {$worst['rate']}% ({$worst['raw']['fulfilled']}/{$worst['raw']['total']}) της {$worst['label']}.";
+        }
+    }
+
+    // ── shortage handling — only teams that actually reported ≥1, so a team
+    //    with zero reports (neutral 100 by design) never gets falsely
+    //    compared against a team that genuinely resolved real reports ──────
+    $withShortage = array_values(array_filter($teams, fn($t) => $t['pillars']['shortage']['raw']['total'] > 0));
+    if (count($withShortage) >= 2) {
+        $rates = array_map(function ($t) use ($label) {
+            $raw = $t['pillars']['shortage']['raw'];
+            return ['label' => $label($t), 'rate' => round($raw['resolved'] / $raw['total'] * 100), 'raw' => $raw];
+        }, $withShortage);
+        usort($rates, fn($a, $b) => $b['rate'] <=> $a['rate']);
+        $best = $rates[0];
+        $worst = $rates[count($rates) - 1];
+        if ($best['label'] !== $worst['label'] && $best['rate'] !== $worst['rate']) {
+            $sentences[] = "Στη διαχείριση αναφορών έλλειψης, η {$best['label']} έλυσε {$best['raw']['resolved']}/{$best['raw']['total']} αναφορές, ενώ η {$worst['label']} μόλις {$worst['raw']['resolved']}/{$worst['raw']['total']}.";
+        }
+    }
+
+    // ── overall score gap ────────────────────────────────────────────────
+    $byScore = $teams;
+    usort($byScore, fn($a, $b) => $b['score'] <=> $a['score']);
+    $top = $byScore[0];
+    $bottom = $byScore[count($byScore) - 1];
+    $topLabel = $label($top);
+    $bottomLabel = $label($bottom);
+    $topFmt = number_format($top['score'], 1);
+    $bottomFmt = number_format($bottom['score'], 1);
+    $gap = round($top['score'] - $bottom['score'], 1);
+    if ($gap < 5) {
+        $sentences[] = "Η συνολική βαθμολογία των ομάδων ήταν ιδιαίτερα ομοιογενής, με διαφορά μόλις {$gap} μονάδων μεταξύ {$topLabel} και {$bottomLabel}.";
+    } elseif ($gap < 20) {
+        $sentences[] = "Υπήρξε μέτρια απόκλιση {$gap} μονάδων μεταξύ της κορυφαίας ομάδας ({$topLabel}) και της {$bottomLabel}.";
+    } else {
+        $sentences[] = "Η απόσταση βαθμολογίας μεταξύ της κορυφαίας ομάδας ({$topLabel}, {$topFmt}) και της {$bottomLabel} ({$bottomFmt}) έφτασε τις {$gap} μονάδες, υποδεικνύοντας σημαντική ανομοιογένεια στην απόδοση μεταξύ των ομάδων.";
+    }
+
+    return implode(' ', $sentences);
 }
 
 /**
