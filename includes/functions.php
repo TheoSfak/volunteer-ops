@@ -1339,41 +1339,91 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
 
     if (count($ackRows) > 0) {
         $avgAck = array_sum(array_column($ackRows, 'ack_minutes')) / count($ackRows);
-        $pillars['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => true, 'score' => max(0, min(100, 100 - $avgAck * 2.5))];
+        $pillars['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => true, 'score' => max(0, min(100, 100 - $avgAck * 2.5)), 'raw' => ['avg_minutes' => round($avgAck, 1)]];
     } else {
-        $pillars['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => false, 'score' => null];
+        $avgAck = null;
+        $pillars['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => false, 'score' => null, 'raw' => []];
     }
 
+    $fulfilledRows = array_filter($detail, fn($d) => $d['fulfill_minutes'] !== null);
+    $fulfilled = count($fulfilledRows);
     if ($totalOrders > 0) {
-        $fulfilled = count(array_filter($detail, fn($d) => $d['fulfill_minutes'] !== null));
-        $pillars['completion'] = ['label' => 'Ολοκλήρωση Εντολών', 'weight' => 20, 'available' => true, 'score' => $fulfilled / $totalOrders * 100];
+        $pillars['completion'] = ['label' => 'Ολοκλήρωση Εντολών', 'weight' => 20, 'available' => true, 'score' => $fulfilled / $totalOrders * 100, 'raw' => ['fulfilled' => $fulfilled, 'total' => $totalOrders]];
     } else {
-        $pillars['completion'] = ['label' => 'Ολοκλήρωση Εντολών', 'weight' => 20, 'available' => false, 'score' => null];
+        $pillars['completion'] = ['label' => 'Ολοκλήρωση Εντολών', 'weight' => 20, 'available' => false, 'score' => null, 'raw' => []];
     }
+    $avgFulfillMinutes = count($fulfilledRows) ? round(array_sum(array_column($fulfilledRows, 'fulfill_minutes')) / count($fulfilledRows), 1) : null;
 
     $totalShortage = count($shortageDetail);
+    $resolved = count(array_filter($shortageDetail, fn($d) => $d['resolved_at'] !== null));
+    $unresolvedCritical = count(array_filter($shortageDetail, fn($d) => $d['resolved_at'] === null && $d['severity'] === 'critical'));
     if ($totalShortage > 0) {
-        $resolved = count(array_filter($shortageDetail, fn($d) => $d['resolved_at'] !== null));
-        $unresolvedCritical = count(array_filter($shortageDetail, fn($d) => $d['resolved_at'] === null && $d['severity'] === 'critical'));
         $shortageScore = max(0, min(100, ($resolved / $totalShortage * 100) - $unresolvedCritical * 15));
     } else {
         $shortageScore = 100.0; // nothing reported broken — neutral, not penalized
     }
-    $pillars['shortage'] = ['label' => 'Διαχείριση Ελλείψεων', 'weight' => 20, 'available' => true, 'score' => $shortageScore];
+    $pillars['shortage'] = ['label' => 'Διαχείριση Ελλείψεων', 'weight' => 20, 'available' => true, 'score' => $shortageScore, 'raw' => ['resolved' => $resolved, 'total' => $totalShortage, 'unresolved_critical' => $unresolvedCritical]];
 
     if ($capacity > 0) {
-        $pillars['staffing'] = ['label' => 'Στελέχωση / Κάλυψη', 'weight' => 15, 'available' => true, 'score' => max(0, min(100, $approvedCount / $capacity * 100))];
+        $pillars['staffing'] = ['label' => 'Στελέχωση / Κάλυψη', 'weight' => 15, 'available' => true, 'score' => max(0, min(100, $approvedCount / $capacity * 100)), 'raw' => ['approved' => $approvedCount, 'capacity' => $capacity]];
     } else {
-        $pillars['staffing'] = ['label' => 'Στελέχωση / Κάλυψη', 'weight' => 15, 'available' => false, 'score' => null];
+        $pillars['staffing'] = ['label' => 'Στελέχωση / Κάλυψη', 'weight' => 15, 'available' => false, 'score' => null, 'raw' => []];
     }
 
     if ($debrief) {
         $ratingScore = ((int) $debrief['rating']) / 5 * 100;
         $objectivesScore = ['YES' => 100, 'PARTIAL' => 55, 'NO' => 15][$debrief['objectives_met']] ?? 55;
-        $pillars['debrief'] = ['label' => 'Απολογισμός Debrief', 'weight' => 20, 'available' => true, 'score' => $ratingScore * 0.6 + $objectivesScore * 0.4];
+        $pillars['debrief'] = ['label' => 'Απολογισμός Debrief', 'weight' => 20, 'available' => true, 'score' => $ratingScore * 0.6 + $objectivesScore * 0.4, 'raw' => ['rating' => (int) $debrief['rating'], 'objectives' => $debrief['objectives_met']]];
     } else {
-        $pillars['debrief'] = ['label' => 'Απολογισμός Debrief', 'weight' => 20, 'available' => false, 'score' => null];
+        $pillars['debrief'] = ['label' => 'Απολογισμός Debrief', 'weight' => 20, 'available' => false, 'score' => null, 'raw' => []];
     }
+
+    // ── shared headline timing metrics (hero tiles on both pages) + command/
+    //    admin responsiveness — how fast the command staff SAW (acknowledged)
+    //    and RESOLVED teams' shortage reports. Deliberately a separate
+    //    evaluation from the 'shortage' pillar above (which grades the
+    //    *outcome* — resolved or not, penalized for unresolved criticals) —
+    //    this one grades *speed*, and is null (not defaulted to neutral) when
+    //    there are zero shortage reports, since there's nothing to judge the
+    //    command staff's reaction time on. ─────────────────────────────────
+    $seenRows = array_filter($shortageDetail, fn($d) => $d['seen_minutes'] !== null);
+    $avgSeenMinutes = count($seenRows) ? round(array_sum(array_column($seenRows, 'seen_minutes')) / count($seenRows), 1) : null;
+    $resolvedMinRows = array_filter($shortageDetail, fn($d) => $d['resolved_minutes'] !== null);
+    $avgResolvedMinutes = count($resolvedMinRows) ? round(array_sum(array_column($resolvedMinRows, 'resolved_minutes')) / count($resolvedMinRows), 1) : null;
+    $seenCount = count($seenRows);
+
+    $commandParts = [];
+    if ($avgSeenMinutes !== null) $commandParts[] = ['score' => max(0, min(100, 100 - $avgSeenMinutes * 2.5)), 'weight' => 50];
+    if ($avgResolvedMinutes !== null) $commandParts[] = ['score' => max(0, min(100, 100 - $avgResolvedMinutes * 1.0)), 'weight' => 50];
+    if ($totalShortage > 0 && !empty($commandParts)) {
+        $cWeightSum = array_sum(array_column($commandParts, 'weight'));
+        $cWeightedScore = array_sum(array_map(fn($p) => $p['score'] * $p['weight'], $commandParts));
+        $commandScore = round($cWeightedScore / $cWeightSum, 2);
+        $commandTier = missionScoreTierMeta($commandScore);
+        $commandAvailable = true;
+    } else {
+        $commandScore = null;
+        $commandTier = null;
+        $commandAvailable = false;
+    }
+    $command = [
+        'available'      => $commandAvailable,
+        'score'          => $commandScore,
+        'tier'           => $commandTier,
+        'avg_seen'       => $avgSeenMinutes,
+        'avg_resolved'   => $avgResolvedMinutes,
+        'seen_rate'      => $totalShortage ? round($seenCount / $totalShortage * 100) : null,
+        'resolved_rate'  => $totalShortage ? round($resolved / $totalShortage * 100) : null,
+        'total_reports'  => $totalShortage,
+    ];
+    // Captured now, before the per-team loop below reuses $avgAck as its own
+    // local (per-team) variable name — this is the mission-wide value.
+    $metrics = [
+        'avg_ack'      => $avgAck !== null ? round($avgAck, 1) : null,
+        'avg_fulfill'  => $avgFulfillMinutes,
+        'avg_seen'     => $avgSeenMinutes,
+        'avg_resolved' => $avgResolvedMinutes,
+    ];
 
     $hasSubstantiveData = $pillars['response']['available'] || $pillars['completion']['available']
         || $pillars['staffing']['available'] || $pillars['debrief']['available'];
@@ -1480,11 +1530,163 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     unset($t);
 
     return [
-        'overall' => $overall,
-        'tier'    => $overallTier,
-        'pillars' => $pillars,
-        'teams'   => $teamScores,
+        'overall'  => $overall,
+        'tier'     => $overallTier,
+        'pillars'  => $pillars,
+        'teams'    => $teamScores,
+        'metrics'  => $metrics,
+        'command'  => $command,
     ];
+}
+
+/**
+ * War Room: composes the "expert observer" paragraph for the score section —
+ * one paragraph of Greek prose grounded in the actual pillar numbers (not
+ * generic boilerplate), naming the strongest/weakest measured area and, for
+ * a low score, explicitly recommending what to improve. Pure function of
+ * computeMissionScore()'s own output — no new queries, always regenerated
+ * live rather than stored, same "computed, not cached" philosophy as every
+ * other number on this report.
+ */
+function missionScorePillarPhrase(string $key, array $pillar, bool $positive): string {
+    $raw = $pillar['raw'] ?? [];
+    switch ($key) {
+        case 'response':
+            $m = $raw['avg_minutes'] ?? null;
+            if ($m === null) return '';
+            return $positive
+                ? "Ο μέσος χρόνος απόκρισης των ομάδων στις εντολές ήταν {$m} λεπτά, χρόνος που υποδηλώνει υψηλή ετοιμότητα και καλή ροή επικοινωνίας."
+                : "Ο μέσος χρόνος απόκρισης των ομάδων στις εντολές έφτασε τα {$m} λεπτά, χρόνος αυξημένος για επιχειρησιακό περιβάλλον που απαιτεί άμεση αντίδραση.";
+        case 'completion':
+            $f = $raw['fulfilled'] ?? 0;
+            $t = $raw['total'] ?? 0;
+            if ($t === 0) return '';
+            $rate = round($f / $t * 100);
+            return $positive
+                ? "Ολοκληρώθηκαν {$f} από τις {$t} εντολές ({$rate}%), δείχνοντας συνέπεια στην εκτέλεση του έργου που ανατέθηκε."
+                : "Ολοκληρώθηκαν μόλις {$f} από τις {$t} εντολές ({$rate}%), ποσοστό που αφήνει σημαντικό αριθμό εντολών ημιτελείς ή αναπάντητες.";
+        case 'shortage':
+            $r = $raw['resolved'] ?? 0;
+            $t = $raw['total'] ?? 0;
+            if ($t === 0) return 'Δεν αναφέρθηκαν ελλείψεις κατά τη διάρκεια της αποστολής.';
+            $rate = round($r / $t * 100);
+            $uc = $raw['unresolved_critical'] ?? 0;
+            $extra = '';
+            if ($uc > 0) {
+                $extra = ' Ιδιαίτερη ανησυχία προκαλεί το γεγονός ότι ' . ($uc === 1 ? 'μία κρίσιμη αναφορά παρέμεινε ανεπίλυτη' : "{$uc} κρίσιμες αναφορές παρέμειναν ανεπίλυτες") . '.';
+            }
+            return $positive
+                ? "Λύθηκαν {$r} από τις {$t} αναφορές έλλειψης ({$rate}%), απόδειξη αποτελεσματικής διαχείρισης προβλημάτων στο πεδίο."
+                : "Λύθηκαν μόνο {$r} από τις {$t} αναφορές έλλειψης ({$rate}%).{$extra}";
+        case 'staffing':
+            $a = $raw['approved'] ?? 0;
+            $c = $raw['capacity'] ?? 0;
+            if ($c === 0) return '';
+            $rate = round($a / $c * 100);
+            return $positive
+                ? "Η κάλυψη βαρδιών ήταν επαρκής, με {$a} από {$c} διαθέσιμες θέσεις εθελοντών καλυμμένες ({$rate}%)."
+                : "Η κάλυψη βαρδιών ήταν ανεπαρκής, με μόλις {$a} από {$c} διαθέσιμες θέσεις εθελοντών καλυμμένες ({$rate}%), γεγονός που περιόρισε τους διαθέσιμους πόρους στο πεδίο.";
+        case 'debrief':
+            $rt = $raw['rating'] ?? null;
+            if ($rt === null) return '';
+            $objText = ['YES' => 'πλήρως επιτεύχθηκαν', 'PARTIAL' => 'επιτεύχθηκαν εν μέρει', 'NO' => 'δεν επιτεύχθηκαν'][$raw['objectives'] ?? ''] ?? 'επιτεύχθηκαν εν μέρει';
+            return $positive
+                ? "Ο υπεύθυνος αποστολής βαθμολόγησε την άσκηση με {$rt}/5 στο debrief, αναφέροντας ότι οι στόχοι {$objText}."
+                : "Ο υπεύθυνος αποστολής βαθμολόγησε την άσκηση με {$rt}/5 στο debrief, σημειώνοντας ότι οι στόχοι {$objText} — αυτοαξιολόγηση που επιβεβαιώνει τα περιθώρια βελτίωσης.";
+    }
+    return '';
+}
+
+function generateMissionObserverNarrative(array $score, string $missionTitle): string {
+    if ($score['overall'] === null) {
+        return 'Δεν υπάρχουν επαρκή δεδομένα (εντολές, βάρδιες ή αναφορά debrief) ώστε ο παρατηρητής να διατυπώσει τεκμηριωμένη αξιολόγηση για αυτή την αποστολή.';
+    }
+    $tier = $score['tier'][0];
+    $overallFmt = number_format($score['overall'], 1);
+    $title = $missionTitle !== '' ? " «{$missionTitle}»" : '';
+
+    $openers = [
+        'good'     => "Η άσκηση{$title} ολοκληρώθηκε με άριστη συνολική επίδοση ({$overallFmt}/100), αντανακλώντας αποτελεσματικό συντονισμό μεταξύ ομάδων και διοίκησης.",
+        'warning'  => "Η άσκηση{$title} ολοκληρώθηκε με ικανοποιητική συνολική επίδοση ({$overallFmt}/100), με σαφή όμως περιθώρια βελτίωσης σε επιμέρους τομείς.",
+        'critical' => "Η συνολική επίδοση της άσκησης{$title} ({$overallFmt}/100) υστερεί αισθητά από τον επιθυμητό στόχο και καταδεικνύει σοβαρά περιθώρια βελτίωσης.",
+    ];
+    $sentences = [$openers[$tier]];
+
+    // Positive/negative phrasing is picked at a stricter 75-point bar than
+    // the 65/85 tier-color bands — a "warning"-tier pillar (65-84) still
+    // reads as "needs improvement" in prose, since a narrative benefits from
+    // being a bit more discerning than a 3-color badge.
+    $available = array_filter($score['pillars'], fn($p) => $p['available']);
+    $weakest = null;
+    if (count($available) >= 2) {
+        uasort($available, fn($a, $b) => $a['score'] <=> $b['score']);
+        $weakestKey = array_key_first($available);
+        $strongestKey = array_key_last($available);
+        $weakest = $available[$weakestKey];
+
+        $strongPhrase = missionScorePillarPhrase($strongestKey, $available[$strongestKey], $available[$strongestKey]['score'] >= 75);
+        if ($strongPhrase !== '') $sentences[] = $strongPhrase;
+        if ($weakestKey !== $strongestKey) {
+            $weakPhrase = missionScorePillarPhrase($weakestKey, $weakest, $weakest['score'] >= 75);
+            if ($weakPhrase !== '') $sentences[] = $weakPhrase;
+        }
+    } elseif (count($available) === 1) {
+        $onlyKey = array_key_first($available);
+        $weakest = $available[$onlyKey];
+        $onlyPhrase = missionScorePillarPhrase($onlyKey, $weakest, $weakest['score'] >= 75);
+        if ($onlyPhrase !== '') $sentences[] = $onlyPhrase;
+    }
+
+    if ($tier === 'critical') {
+        $weakLabels = [];
+        foreach ($available as $p) {
+            if ($p['score'] < 65) $weakLabels[] = $p['label'];
+        }
+        $weakLabels = array_slice($weakLabels, 0, 2);
+        if (!empty($weakLabels)) {
+            $sentences[] = 'Προτεραιότητα για μελλοντικές ασκήσεις θα πρέπει να αποτελέσει η βελτίωση σε: ' . implode(' και ', $weakLabels) . '.';
+        }
+    } elseif ($tier === 'warning' && $weakest !== null) {
+        $sentences[] = "Ο τομέας «{$weakest['label']}» παραμένει ο πιο αδύναμος κρίκος και αξίζει ιδιαίτερη προσοχή στην επόμενη άσκηση.";
+    } elseif ($tier === 'good') {
+        if ($weakest !== null && $weakest['score'] < 85) {
+            $sentences[] = "Παρά τη συνολικά άριστη εικόνα, ο τομέας «{$weakest['label']}» υπολείπεται ελαφρώς των υπολοίπων και θα μπορούσε να βελτιωθεί περαιτέρω.";
+        } else {
+            $sentences[] = 'Δεν εντοπίζονται αδυναμίες που να απαιτούν άμεση παρέμβαση.';
+        }
+    }
+
+    $unavailable = array_filter($score['pillars'], fn($p) => !$p['available']);
+    if (!empty($unavailable)) {
+        $names = array_map(fn($p) => $p['label'], $unavailable);
+        $sentences[] = 'Σημειώνεται ότι η αξιολόγηση δεν περιλαμβάνει: ' . implode(', ', $names) . ', λόγω έλλειψης σχετικών δεδομένων.';
+    }
+
+    return implode(' ', $sentences);
+}
+
+/**
+ * War Room: the shorter companion paragraph for the new, deliberately
+ * separate "command responsiveness" evaluation ($score['command']) — how
+ * fast command staff saw and resolved teams' shortage reports, as judged on
+ * its own rather than folded into the team-facing overall score.
+ */
+function generateCommandNarrative(array $command): string {
+    if (!$command['available']) {
+        return 'Δεν έχουν υποβληθεί αναφορές έλλειψης κατά τη διάρκεια της αποστολής, συνεπώς δεν υπάρχουν επαρκή δεδομένα για αξιολόγηση του χρόνου ανταπόκρισης της διοίκησης.';
+    }
+    $seenTxt = $command['avg_seen'] !== null ? number_format($command['avg_seen'], 1) . ' λεπτά' : '—';
+    $resolvedTxt = $command['avg_resolved'] !== null ? number_format($command['avg_resolved'], 1) . ' λεπτά' : '—';
+    $tier = $command['tier'][0];
+
+    $base = "Η διοίκηση ανταποκρίθηκε στις {$command['total_reports']} αναφορές έλλειψης των ομάδων σε μέσο χρόνο παρατήρησης {$seenTxt} και προχώρησε σε επίλυση εντός {$resolvedTxt} κατά μέσο όρο.";
+    $verdicts = [
+        'good'     => 'Η ταχύτητα αυτή αντανακλά αποτελεσματική επιχειρησιακή εποπτεία και άμεση διαθεσιμότητα της διοίκησης.',
+        'warning'  => 'Ο χρόνος αυτός είναι αποδεκτός, ωστόσο ταχύτερη πρώτη αντίδραση στις αναφορές θα ενίσχυε την επιχειρησιακή εικόνα.',
+        'critical' => 'Ο χρόνος αυτός κρίνεται αυξημένος και ενδέχεται να έχει επιβαρύνει τη διαχείριση προβλημάτων στο πεδίο — συνιστάται στενότερη παρακολούθηση του καναλιού αναφορών σε επόμενες ασκήσεις.',
+    ];
+
+    return $base . ' ' . $verdicts[$tier];
 }
 
 /**

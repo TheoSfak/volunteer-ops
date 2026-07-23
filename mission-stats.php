@@ -143,6 +143,8 @@ $scoreReview = dbFetchOne(
      JOIN users u ON u.id = r.validated_by WHERE r.mission_id = ?",
     [$missionId]
 );
+$observerNarrative = generateMissionObserverNarrative($score, $mission['title']);
+$commandNarrative = generateCommandNarrative($score['command']);
 $scoreTierHex = ['good' => '#0ca30c', 'warning' => '#a56600', 'critical' => '#d03b3b'];
 
 // ── Team roster — mirrors war-room.php's team query (leader/members), extended
@@ -295,6 +297,20 @@ include __DIR__ . '/includes/header.php';
     .roster-swatch { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; }
     .roster-member-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: .88rem; border-bottom: 1px solid #f2f2f0; }
     .roster-member-row:last-child { border-bottom: none; }
+
+    .observer-note { border-left: 4px solid #4a3aa7; background: #f9f9f7; border-radius: 0 10px 10px 0; padding: 16px 20px; margin-top: 16px; }
+    .observer-note h6 { font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; color: #4a3aa7; }
+    .observer-note p { margin: 0; line-height: 1.65; color: #33322d; }
+
+    .hero-metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+    .hero-metric-tile { background: #fff; border-radius: 14px; padding: 22px 18px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,.06); border-top: 4px solid var(--hmt-color, #2a78d6); }
+    .hero-metric-tile .hmt-icon { font-size: 1.4rem; color: var(--hmt-color, #2a78d6); margin-bottom: 6px; }
+    .hero-metric-tile .hmt-value { font-size: 2.3rem; font-weight: 800; color: #0b0b0b; line-height: 1; }
+    .hero-metric-tile .hmt-label { font-size: .82rem; color: #52514e; margin-top: 6px; }
+
+    .command-severity-table { width: 100%; font-size: .85rem; margin-top: 10px; }
+    .command-severity-table th { text-align: left; color: #898781; font-weight: 600; font-size: .75rem; text-transform: uppercase; padding: 4px 8px; border-bottom: 2px solid #eee; }
+    .command-severity-table td { padding: 6px 8px; border-bottom: 1px solid #f2f2f0; }
 </style>
 
 <div class="container-fluid py-4">
@@ -369,7 +385,14 @@ include __DIR__ . '/includes/header.php';
         </div>
     <?php endforeach; ?>
     <?php endif; ?>
+    <?php endif; ?>
 
+    <div class="observer-note">
+        <h6><i class="bi bi-binoculars-fill"></i>Αξιολόγηση Παρατηρητή</h6>
+        <p><?= nl2br(h($observerNarrative)) ?></p>
+    </div>
+
+    <?php if ($score['overall'] !== null): ?>
     <div class="score-validation-box">
         <?php if ($scoreReview): ?>
             <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
@@ -398,6 +421,77 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 <button type="submit" class="btn btn-success mt-3"><i class="bi bi-check2-circle"></i> Επικύρωση Βαθμολογίας</button>
             </form>
+    </div>
+    <?php endif; ?>
+</div>
+
+<!-- Response & resolution time headline metrics -->
+<div class="hero-metrics-row">
+    <div class="hero-metric-tile" style="--hmt-color:#2a78d6;">
+        <div class="hmt-icon"><i class="bi bi-lightning-charge-fill"></i></div>
+        <div class="hmt-value"><?= $score['metrics']['avg_ack'] !== null ? number_format($score['metrics']['avg_ack'], 1) : '—' ?></div>
+        <div class="hmt-label">Μ.Ο. Απόκρισης Ομάδων σε Εντολές (λεπ.)</div>
+    </div>
+    <div class="hero-metric-tile" style="--hmt-color:#1baf7a;">
+        <div class="hmt-icon"><i class="bi bi-check2-circle"></i></div>
+        <div class="hmt-value"><?= $score['metrics']['avg_fulfill'] !== null ? number_format($score['metrics']['avg_fulfill'], 1) : '—' ?></div>
+        <div class="hmt-label">Μ.Ο. Ολοκλήρωσης Εντολών (λεπ.)</div>
+    </div>
+    <div class="hero-metric-tile" style="--hmt-color:#eda100;">
+        <div class="hmt-icon"><i class="bi bi-eye-fill"></i></div>
+        <div class="hmt-value"><?= $score['metrics']['avg_seen'] !== null ? number_format($score['metrics']['avg_seen'], 1) : '—' ?></div>
+        <div class="hmt-label">Μ.Ο. Παρατήρησης Ελλείψεων από Διοίκηση (λεπ.)</div>
+    </div>
+    <div class="hero-metric-tile" style="--hmt-color:#e34948;">
+        <div class="hmt-icon"><i class="bi bi-tools"></i></div>
+        <div class="hmt-value"><?= $score['metrics']['avg_resolved'] !== null ? number_format($score['metrics']['avg_resolved'], 1) : '—' ?></div>
+        <div class="hmt-label">Μ.Ο. Επίλυσης Ελλείψεων (λεπ.)</div>
+    </div>
+</div>
+
+<!-- Command / admin responsiveness -->
+<div class="mstats-card">
+    <h2><i class="bi bi-headset text-primary"></i>Ανταπόκριση Διοίκησης</h2>
+    <?php if (!$score['command']['available']): ?>
+        <p class="mstats-empty">Δεν έχουν υποβληθεί αναφορές έλλειψης — δεν υπάρχουν δεδομένα για αξιολόγηση της ανταπόκρισης της διοίκησης.</p>
+    <?php else: ?>
+    <div class="d-flex align-items-center gap-3 mb-3 flex-wrap">
+        <span class="mstats-chip <?= $score['command']['tier'][0] ?>"><?= h($score['command']['tier'][1]) ?></span>
+        <span class="text-muted small"><?= $score['command']['total_reports'] ?> αναφορές έλλειψης συνολικά</span>
+    </div>
+    <div class="row g-3 mb-3">
+        <div class="col-6">
+            <div class="hero-metric-tile" style="--hmt-color:#eda100;">
+                <div class="hmt-value"><?= $score['command']['avg_seen'] !== null ? number_format($score['command']['avg_seen'], 1) : '—' ?></div>
+                <div class="hmt-label">Μ.Ο. Χρόνου Παρατήρησης (λεπ.)</div>
+            </div>
+        </div>
+        <div class="col-6">
+            <div class="hero-metric-tile" style="--hmt-color:#e34948;">
+                <div class="hmt-value"><?= $score['command']['avg_resolved'] !== null ? number_format($score['command']['avg_resolved'], 1) : '—' ?></div>
+                <div class="hmt-label">Μ.Ο. Χρόνου Επίλυσης (λεπ.)</div>
+            </div>
+        </div>
+    </div>
+    <?php if (!empty($shortageSummary)): ?>
+    <table class="command-severity-table">
+        <thead><tr><th>Σοβαρότητα</th><th>Αναφορές</th><th>Μ.Ο. Παρατήρησης</th><th>Μ.Ο. Επίλυσης</th></tr></thead>
+        <tbody>
+        <?php foreach ($shortageSummary as $s): ?>
+            <tr>
+                <td><?= h($s['severity_label']) ?></td>
+                <td><?= $s['report_count'] ?></td>
+                <td><?= $s['avg_seen_minutes'] !== null ? $s['avg_seen_minutes'] . ' λεπ.' : '—' ?></td>
+                <td><?= $s['avg_resolved_minutes'] !== null ? $s['avg_resolved_minutes'] . ' λεπ.' : '—' ?></td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    <div class="mstats-chart-wrap mt-3"><canvas id="commandSeverityChart"></canvas></div>
+    <?php endif; ?>
+    <div class="observer-note mt-3">
+        <h6><i class="bi bi-binoculars-fill"></i>Αξιολόγηση Παρατηρητή — Διοίκηση</h6>
+        <p><?= nl2br(h($commandNarrative)) ?></p>
     </div>
     <?php endif; ?>
 </div>
@@ -664,6 +758,16 @@ mc('scoreGaugeChart', 'doughnut', {
     labels: ['Βαθμολογία', ''],
     datasets: [{ data: [<?= $score['overall'] ?>, <?= max(0, 100 - $score['overall']) ?>], backgroundColor: ['<?= $scoreTierHex[$score['tier'][0]] ?>', '#e9ecef'], borderWidth: 0 }]
 }, { cutout: '76%', plugins: { legend: { display: false }, tooltip: { enabled: false } } });
+<?php endif; ?>
+
+<?php if (!empty($shortageSummary)): ?>
+mc('commandSeverityChart', 'bar', {
+    labels: <?= json_encode(array_column($shortageSummary, 'severity_label')) ?>,
+    datasets: [
+        { label: 'Μ.Ο. Παρατήρησης (λεπ.)', data: <?= json_encode(array_map(fn($s) => $s['avg_seen_minutes'] ?? 0, $shortageSummary)) ?>, backgroundColor: '#eda100', borderRadius: 4 },
+        { label: 'Μ.Ο. Επίλυσης (λεπ.)', data: <?= json_encode(array_map(fn($s) => $s['avg_resolved_minutes'] ?? 0, $shortageSummary)) ?>, backgroundColor: '#e34948', borderRadius: 4 }
+    ]
+}, { scales: { y: { beginAtZero: true } } });
 <?php endif; ?>
 
 function mc(id, type, data, options = {}) {
