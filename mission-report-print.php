@@ -102,6 +102,8 @@ $scoreReview = dbFetchOne(
     [$missionId]
 );
 $scoreTierHex = ['good' => '#0ca30c', 'warning' => '#a56600', 'critical' => '#d03b3b'];
+$observerNarrative = generateMissionObserverNarrative($score, $mission['title']);
+$commandNarrative = generateCommandNarrative($score['command']);
 
 // Per-order-type breakdown (ack vs fulfill, same unit/scale) — computed from
 // $report['detail'] (raw datetimes/minutes) BEFORE the display-formatting
@@ -260,7 +262,7 @@ if ($score['overall'] !== null) $expectedReady++; // gauge
 if (!empty($timelineData)) $expectedReady++; // timeline
 if (!empty($summary)) $expectedReady += 2; // teamCount + teamAck
 if (!empty($orderTypeLabels)) $expectedReady += 2; // orderType pie + responseDetail bar
-if (!empty($shortageSummary)) $expectedReady++; // shortageSeverity pie
+if (!empty($shortageSummary)) $expectedReady += 2; // shortageSeverity pie + commandSeverity bar
 if (!empty($lastPings) || !empty($dispatchGeo) || !empty($photoPoints)) $expectedReady++; // map tiles
 
 $orgName = getSetting('org_name', 'VolunteerOps');
@@ -332,6 +334,24 @@ $printDate = date('d/m/Y H:i');
         .roster-member-row:last-child { border-bottom: none; }
 
         #printMap { height: 330px; border-radius: 10px; }
+
+        .observer-note { border-left: 4px solid #4a3aa7; background: #f9f9f7; border-radius: 0 10px 10px 0; padding: 14px 18px; margin-top: 14px; page-break-inside: avoid; }
+        .observer-note h6 { font-weight: 700; margin-bottom: 6px; font-size: 9pt; display: flex; align-items: center; gap: 6px; color: #4a3aa7; }
+        .observer-note p { margin: 0; line-height: 1.6; font-size: 9pt; }
+
+        .hero-metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+        .hero-metric-tile { background: #fff; border: 1px solid #eee; border-radius: 12px; padding: 14px 10px; text-align: center; border-top: 4px solid var(--hmt-color, #2a78d6); page-break-inside: avoid; }
+        .hero-metric-tile .hmt-value { font-size: 1.7rem; font-weight: 800; color: #0b0b0b; line-height: 1; }
+        .hero-metric-tile .hmt-label { font-size: 7.3pt; color: #52514e; margin-top: 5px; }
+
+        .command-severity-table { width: 100%; font-size: 8.3pt; margin-top: 8px; }
+        .command-severity-table th { text-align: left; color: #898781; font-weight: 600; font-size: 7.3pt; text-transform: uppercase; padding: 3px 6px; border-bottom: 2px solid #eee; }
+        .command-severity-table td { padding: 4px 6px; border-bottom: 1px solid #f2f2f0; }
+
+        .pr-chip { display: inline-block; padding: 4px 12px; border-radius: 999px; font-weight: 700; font-size: 8.5pt; }
+        .pr-chip.good { background: rgba(12,163,12,.12); color: #0ca30c; }
+        .pr-chip.warning { background: rgba(250,178,25,.16); color: #a56600; }
+        .pr-chip.critical { background: rgba(208,59,59,.12); color: #d03b3b; }
 
         table { width: 100%; border-collapse: collapse; margin-top: 4px; }
         thead tr { background: #172554; color: #fff; }
@@ -442,6 +462,10 @@ $printDate = date('d/m/Y H:i');
         <?php endif; ?>
     </div>
     <?php endif; ?>
+    <div class="observer-note">
+        <h6>🔭 Αξιολόγηση Παρατηρητή</h6>
+        <p><?= nl2br(h($observerNarrative)) ?></p>
+    </div>
 </div>
 
 <?php if (!empty($score['teams'])): ?>
@@ -457,6 +481,59 @@ $printDate = date('d/m/Y H:i');
     <?php endforeach; ?>
 </div>
 <?php endif; ?>
+
+<!-- Response & resolution time headline metrics -->
+<div class="hero-metrics-row">
+    <div class="hero-metric-tile" style="--hmt-color:#2a78d6;">
+        <div class="hmt-value"><?= $score['metrics']['avg_ack'] !== null ? number_format($score['metrics']['avg_ack'], 1) : '—' ?></div>
+        <div class="hmt-label">Μ.Ο. Απόκρισης Ομάδων σε Εντολές (λεπ.)</div>
+    </div>
+    <div class="hero-metric-tile" style="--hmt-color:#1baf7a;">
+        <div class="hmt-value"><?= $score['metrics']['avg_fulfill'] !== null ? number_format($score['metrics']['avg_fulfill'], 1) : '—' ?></div>
+        <div class="hmt-label">Μ.Ο. Ολοκλήρωσης Εντολών (λεπ.)</div>
+    </div>
+    <div class="hero-metric-tile" style="--hmt-color:#eda100;">
+        <div class="hmt-value"><?= $score['metrics']['avg_seen'] !== null ? number_format($score['metrics']['avg_seen'], 1) : '—' ?></div>
+        <div class="hmt-label">Μ.Ο. Παρατήρησης Ελλείψεων (λεπ.)</div>
+    </div>
+    <div class="hero-metric-tile" style="--hmt-color:#e34948;">
+        <div class="hmt-value"><?= $score['metrics']['avg_resolved'] !== null ? number_format($score['metrics']['avg_resolved'], 1) : '—' ?></div>
+        <div class="hmt-label">Μ.Ο. Επίλυσης Ελλείψεων (λεπ.)</div>
+    </div>
+</div>
+
+<!-- Command / admin responsiveness -->
+<div class="pr-card">
+    <h2>🎧 Ανταπόκριση Διοίκησης</h2>
+    <?php if (!$score['command']['available']): ?>
+        <p class="pr-empty">Δεν έχουν υποβληθεί αναφορές έλλειψης — δεν υπάρχουν δεδομένα για αξιολόγηση της ανταπόκρισης της διοίκησης.</p>
+    <?php else: ?>
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px; flex-wrap:wrap;">
+        <span class="pr-chip <?= $score['command']['tier'][0] ?>"><?= h($score['command']['tier'][1]) ?></span>
+        <span style="color:#888; font-size:8.5pt;"><?= $score['command']['total_reports'] ?> αναφορές έλλειψης συνολικά</span>
+    </div>
+    <?php if (!empty($shortageSummary)): ?>
+    <table class="command-severity-table">
+        <thead><tr><th>Σοβαρότητα</th><th>Αναφορές</th><th>Μ.Ο. Παρατήρησης</th><th>Μ.Ο. Επίλυσης</th></tr></thead>
+        <tbody>
+        <?php foreach ($shortageSummary as $s): ?>
+            <tr>
+                <td><?= h($s['severity_label']) ?></td>
+                <td><?= $s['report_count'] ?></td>
+                <td><?= $s['avg_seen_minutes'] !== null ? $s['avg_seen_minutes'] . ' λεπ.' : '—' ?></td>
+                <td><?= $s['avg_resolved_minutes'] !== null ? $s['avg_resolved_minutes'] . ' λεπ.' : '—' ?></td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    <div class="pr-chart-wrap" style="margin-top:10px;"><canvas id="commandSeverityChart"></canvas></div>
+    <?php endif; ?>
+    <div class="observer-note">
+        <h6>🔭 Αξιολόγηση Παρατηρητή — Διοίκηση</h6>
+        <p><?= nl2br(h($commandNarrative)) ?></p>
+    </div>
+    <?php endif; ?>
+</div>
 
 <!-- Headline KPIs -->
 <div class="pr-tiles">
@@ -728,6 +805,16 @@ mc('scoreGaugeChart', 'doughnut', {
     labels: ['Βαθμολογία', ''],
     datasets: [{ data: [<?= $score['overall'] ?>, <?= max(0, 100 - $score['overall']) ?>], backgroundColor: ['<?= $scoreTierHex[$score['tier'][0]] ?>', '#e9ecef'], borderWidth: 0 }]
 }, { cutout: '76%', plugins: { legend: { display: false }, tooltip: { enabled: false } } });
+<?php endif; ?>
+
+<?php if (!empty($shortageSummary)): ?>
+mc('commandSeverityChart', 'bar', {
+    labels: <?= json_encode(array_column($shortageSummary, 'severity_label')) ?>,
+    datasets: [
+        { label: 'Μ.Ο. Παρατήρησης (λεπ.)', data: <?= json_encode(array_map(fn($s) => $s['avg_seen_minutes'] ?? 0, $shortageSummary)) ?>, backgroundColor: '#eda100', borderRadius: 4 },
+        { label: 'Μ.Ο. Επίλυσης (λεπ.)', data: <?= json_encode(array_map(fn($s) => $s['avg_resolved_minutes'] ?? 0, $shortageSummary)) ?>, backgroundColor: '#e34948', borderRadius: 4 }
+    ]
+}, { scales: { y: { beginAtZero: true } } });
 <?php endif; ?>
 
 <?php if (!empty($timelineData)): ?>
