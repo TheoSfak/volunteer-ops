@@ -4806,6 +4806,33 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                 }
             },
         ],
+        [
+            'version'     => 94,
+            'description' => 'Create mission_score_reviews table (admin validation/endorsement of the computed mission score)',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_score_reviews'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE mission_score_reviews (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            computed_score DECIMAL(5,2) NOT NULL,
+                            final_score DECIMAL(5,2) NOT NULL,
+                            verdict_note TEXT NULL,
+                            validated_by INT UNSIGNED NOT NULL,
+                            validated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (validated_by) REFERENCES users(id) ON DELETE CASCADE,
+                            UNIQUE KEY unique_mission_score_review (mission_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
 
     ];
     // ────────────────────────────────────────────────────────────────────────
