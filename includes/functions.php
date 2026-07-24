@@ -1139,6 +1139,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
         'task'     => t('report.type_task', [], $lang),
         'message'  => t('report.type_message', [], $lang),
         'dispatch' => t('report.type_dispatch', [], $lang),
+        'return_to_base' => t('report.type_return_to_base', [], $lang),
     ];
 
     $teamLabels = [];
@@ -2317,7 +2318,7 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         ];
     }
 
-    $orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢'];
+    $orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'return_to_base' => '🏁'];
     $orderRows = dbFetchAll(
         "SELECT o.order_type, o.task_text, o.created_at AS sent_at, r.team_id, r.acknowledged_at, r.fulfilled_at,
                 u.name AS actor_name, mt.codename, mt.team_number

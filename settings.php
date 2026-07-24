@@ -31,6 +31,7 @@ $defaults = [
     'org_name' => 'VolunteerOps',
     'org_president_name' => '',
     'org_secretary_name' => '',
+    'cert_signature_font_size' => '7',
     'admin_email' => '',
     'timezone' => 'Europe/Athens',
     'date_format' => 'd/m/Y',
@@ -519,7 +520,7 @@ if (isPost()) {
         
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'cert_signature_font_size',
             'admin_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
@@ -1094,6 +1095,12 @@ include __DIR__ . '/includes/header.php';
                             <label class="form-label">Ονοματεπώνυμο Γεν. Γραμματέα</label>
                             <input type="text" class="form-control" name="org_secretary_name" value="<?= h($settings['org_secretary_name']) ?>">
                         </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Μέγεθος Γραμματοσειράς Ονομάτων Υπογραφής (pt)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="cert_signature_font_size"
+                               value="<?= h($settings['cert_signature_font_size']) ?>" min="4" max="24" step="0.5">
+                        <small class="text-muted">Μέγεθος γραμμάτων του ονόματος Προέδρου/Γεν. Γραμματέα πάνω από την υπογραφή στη Βεβαίωση Συμμετοχής.</small>
                     </div>
                 </div>
             </div>

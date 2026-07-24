@@ -96,6 +96,17 @@ return [
         'global_message.placeholder' => 'Γράψτε το μήνυμα προς όλους τους εθελοντές…',
         'global_message.submit_btn' => 'Αποστολή σε όλους ({count})',
 
+        // End of Mission / Return to Base — same loud red-screen+siren treatment
+        // as SOS, but command-initiated and broadcast to everyone at once.
+        'wr.perm.end_mission_broadcast' => 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.',
+        'end_mission_broadcast.card_title' => 'Λήξη Αποστολής — Επιστροφή στη Βάση',
+        'end_mission_broadcast.note' => 'Στέλνει σε όλους τους εγκεκριμένους εθελοντές δυνατό ηχητικό σήμα και κόκκινη οθόνη συναγερμού, ίδιο με το SOS, ζητώντας άμεση επιστροφή στη βάση.',
+        'end_mission_broadcast.confirm' => 'Σίγουρα θέλετε να στείλετε σήμα «Λήξη Αποστολής — Επιστροφή στη Βάση» σε όλους τους εθελοντές;',
+        'end_mission_broadcast.submit_btn' => 'Λήξη Αποστολής — Επιστροφή στη Βάση ({count})',
+        'end_mission_broadcast.sent_flash' => 'Το σήμα «Επιστροφή στη Βάση» εστάλη σε {count} εθελοντές.',
+        'end_mission_broadcast.title' => '🏁 Λήξη Αποστολής — {mission}',
+        'end_mission_broadcast.message' => 'Η αποστολή «{mission}» ολοκληρώθηκε — επιστρέψτε άμεσα στη βάση.',
+
         // Shortage reports
         'shortage.invalid_fields' => 'Μη έγκυρα στοιχεία αναφοράς.',
         'shortage.missing_fields' => 'Συμπληρώστε τίτλο και περιγραφή πριν την υποβολή.',
@@ -437,6 +448,7 @@ return [
         'report.type_task' => '📋 Γενική Εντολή',
         'report.type_message' => '📢 Καθολικό Μήνυμα',
         'report.type_dispatch' => '🧭 Εντολή Κίνησης',
+        'report.type_return_to_base' => '🏁 Επιστροφή στη Βάση',
         'nav.my_missions' => 'Οι Αποστολές μου',
         'nav.my_account' => 'Ο Λογαριασμός μου',
         'nav.my_profile' => 'Το Προφίλ μου',
@@ -672,6 +684,15 @@ return [
         'global_message.note' => 'Appears as scrolling text (60 sec) to anyone with Action Room open, and is sent as a notification to every approved volunteer of the mission.',
         'global_message.placeholder' => 'Write the message to all volunteers…',
         'global_message.submit_btn' => 'Send to all ({count})',
+
+        'wr.perm.end_mission_broadcast' => 'You do not have permission to do this.',
+        'end_mission_broadcast.card_title' => 'End of Mission — Return to Base',
+        'end_mission_broadcast.note' => 'Sends every approved volunteer a loud alarm sound and red alert screen, the same as SOS, asking them to return to base immediately.',
+        'end_mission_broadcast.confirm' => 'Are you sure you want to send an "End of Mission — Return to Base" alert to all volunteers?',
+        'end_mission_broadcast.submit_btn' => 'End of Mission — Return to Base ({count})',
+        'end_mission_broadcast.sent_flash' => '"Return to Base" alert sent to {count} volunteers.',
+        'end_mission_broadcast.title' => '🏁 End of Mission — {mission}',
+        'end_mission_broadcast.message' => 'The mission "{mission}" has concluded — return to base immediately.',
 
         'shortage.invalid_fields' => 'Invalid report data.',
         'shortage.missing_fields' => 'Fill in a title and description before submitting.',
@@ -980,6 +1001,7 @@ return [
         'report.type_task' => '📋 General Task',
         'report.type_message' => '📢 Broadcast Message',
         'report.type_dispatch' => '🧭 Movement Order',
+        'report.type_return_to_base' => '🏁 Return to Base',
         'nav.my_missions' => 'My Missions',
         'nav.my_account' => 'My Account',
         'nav.my_profile' => 'My Profile',

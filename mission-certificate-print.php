@@ -51,6 +51,7 @@ $appLogo = getSetting('app_logo', '');
 $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLogo);
 $presidentName = getSetting('org_president_name', '');
 $secretaryName = getSetting('org_secretary_name', '');
+$sigFontSize = (float) getSetting('cert_signature_font_size', '7');
 
 $lang = $cert['language'] === 'en' ? 'en' : 'el';
 $isGuestRecipient = (bool) $cert['recipient_is_external'];
@@ -185,7 +186,7 @@ $printDate = date('d/m/Y');
         .cert-sig { text-align: center; width: 45%; }
         /* Space above the name is left for a real uploaded signature image,
            to be added later -- not faked with a generated scrawl. */
-        .cert-sig-name { font-family: 'EB Garamond', Georgia, serif; font-weight: 600; font-size: 7pt; color: #23231f; line-height: 1.2; }
+        .cert-sig-name { font-family: 'EB Garamond', Georgia, serif; font-weight: 600; font-size: <?= $sigFontSize ?>pt; color: #23231f; line-height: 1.2; }
         .cert-sig-line { border-top: 1.3px solid #23231f; margin-top: 8px; padding-top: 6px; font-size: 9.5pt; letter-spacing: .04em; text-transform: uppercase; color: #52514e; }
 
         .cert-footer-meta {

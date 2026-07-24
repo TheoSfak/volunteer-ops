@@ -78,7 +78,7 @@ function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $
 function createMissionOrderAndNotify(
     int $missionId, string $missionTitle, string $orderType, int $createdBy, array $recipientIds,
     string $titleKey, array $titleVars, ?string $rawMessage, string $messageKey, array $messageVars,
-    string $broadcastKey, array $broadcastVars, ?string $taskText = null
+    string $broadcastKey, array $broadcastVars, ?string $taskText = null, ?string $alarmStyle = null
 ): int {
     $orderId = dbInsert(
         "INSERT INTO mission_orders (mission_id, order_type, task_text, created_by, created_at) VALUES (?, ?, ?, ?, NOW())",
@@ -97,13 +97,17 @@ function createMissionOrderAndNotify(
         // Free-form task/broadcast text ($rawMessage) is never translated — it's
         // exactly what the admin typed, per the "free text stays as typed" rule.
         $message = $rawMessage ?? t($messageKey, $messageVars, $lang);
-        sendNotification($recipientId, t($titleKey, $titleVars, $lang), $message, 'warning', '', [
+        $pushData = [
             'url' => $warRoomUrl,
             'tag' => $orderType . '-request-mission-' . $missionId,
             'vibrate' => [300, 100, 300, 100, 500],
             'bannerMission' => $missionId,
             'orderId' => (int) $orderId,
-        ]);
+        ];
+        if ($alarmStyle) {
+            $pushData['alarmStyle'] = $alarmStyle;
+        }
+        sendNotification($recipientId, t($titleKey, $titleVars, $lang), $message, 'warning', '', $pushData);
     }
 
     // Every order also scrolls as a banner for every other approved participant of the
@@ -124,11 +128,15 @@ function createMissionOrderAndNotify(
     $bystanderLangs = getUserLanguages($bystanderIds);
     foreach ($bystanderIds as $bystanderId) {
         $lang = $bystanderLangs[$bystanderId] ?? DEFAULT_LANGUAGE;
-        sendNotification($bystanderId, t($titleKey, $titleVars, $lang), t($broadcastKey, $broadcastVars, $lang), 'info', '', [
+        $bystanderPushData = [
             'url' => $warRoomUrl,
             'tag' => $orderType . '-request-mission-' . $missionId,
             'bannerMission' => $missionId,
-        ]);
+        ];
+        if ($alarmStyle) {
+            $bystanderPushData['alarmStyle'] = $alarmStyle;
+        }
+        sendNotification($bystanderId, t($titleKey, $titleVars, $lang), t($broadcastKey, $broadcastVars, $lang), 'info', '', $bystanderPushData);
     }
 
     return (int) $orderId;
@@ -307,6 +315,33 @@ if (isPost()) {
             logAudit('global_message_war_room', 'missions', $missionId, null, ['message' => $broadcastText]);
             setFlash('success', t('global_message.sent_flash', ['count' => count($recipientIds)]));
         }
+        redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'end_mission_broadcast') {
+        if (!$canManageWarRoom) {
+            setFlash('error', t('wr.perm.end_mission_broadcast'));
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $recipients = dbFetchAll(
+            "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             WHERE s.mission_id = ? AND pr.status = ?",
+            [$missionId, PARTICIPATION_APPROVED]
+        );
+        $recipientIds = array_values(array_diff(
+            array_map('intval', array_column($recipients, 'volunteer_id')),
+            [(int) $user['id']]
+        ));
+
+        createMissionOrderAndNotify(
+            $missionId, $mission['title'], 'return_to_base', $user['id'], $recipientIds,
+            'end_mission_broadcast.title', ['mission' => $mission['title']], null,
+            'end_mission_broadcast.message', ['mission' => $mission['title']],
+            'end_mission_broadcast.message', ['mission' => $mission['title']],
+            null, 'return_to_base'
+        );
+        logAudit('end_mission_broadcast', 'missions', $missionId);
+        setFlash('success', t('end_mission_broadcast.sent_flash', ['count' => count($recipientIds)]));
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'create_team') {
         if (!$canManageWarRoom) {
@@ -634,7 +669,12 @@ if (get('ajax') === '1') {
                 $orderId = (int) $rawOrderId;
             }
         }
-        $banners[] = ['id' => (int) $bannerRow['id'], 'message' => $bannerRow['message'], 'orderId' => $orderId];
+        $banners[] = [
+            'id' => (int) $bannerRow['id'],
+            'message' => $bannerRow['message'],
+            'orderId' => $orderId,
+            'alarmStyle' => $bannerData['alarmStyle'] ?? null,
+        ];
     }
 
     $dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
@@ -809,6 +849,12 @@ include __DIR__ . '/includes/header.php';
     #sosOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
     #sosOverlay.sos-active { display: block; animation: sosPulseCorners 1s ease-in-out infinite; }
     #sosOverlay.sos-calm { display: block; animation: none; box-shadow: inset 0 0 120px 40px rgba(220,38,38,.35); }
+    /* End of Mission / Return to Base — a separate overlay from #sosOverlay
+       (own element, own class) so it never interferes with real SOS alert
+       state; reuses the same sosPulseCorners keyframe for the same visual
+       urgency, but auto-clears on a timer instead of staying until acked. */
+    #returnToBaseOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
+    #returnToBaseOverlay.rtb-active { display: block; animation: sosPulseCorners 1s ease-in-out infinite; }
     @keyframes sosPulseCorners {
         0%, 100% { box-shadow: inset 0 0 60px 20px rgba(220,38,38,.25), inset 0 0 160px 60px rgba(220,38,38,.12); }
         50%      { box-shadow: inset 0 0 120px 50px rgba(220,38,38,.65), inset 0 0 260px 120px rgba(220,38,38,.35); }
@@ -859,6 +905,7 @@ include __DIR__ . '/includes/header.php';
 
 <?php if ($canManageWarRoom): ?>
 <div id="sosOverlay"></div>
+<div id="returnToBaseOverlay"></div>
 <?php endif; ?>
 
 <?php if (!$fieldMode): ?>
@@ -1258,6 +1305,20 @@ include __DIR__ . '/includes/header.php';
                     <input type="hidden" name="action" value="global_message">
                     <textarea name="global_message_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="<?= t('global_message.placeholder') ?>" required></textarea>
                     <button type="submit" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('global_message.submit_btn', ['count' => count($participants)]) ?></button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4 border-danger">
+            <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="bi bi-flag-fill me-1"></i><?= t('end_mission_broadcast.card_title') ?></h5></div>
+            <div class="card-body">
+                <p class="small text-muted"><?= t('end_mission_broadcast.note') ?></p>
+                <form method="post" onsubmit="return confirm('<?= h(addslashes(t('end_mission_broadcast.confirm'))) ?>')">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="end_mission_broadcast">
+                    <button type="submit" class="btn btn-danger btn-lg w-100 fw-bold">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('end_mission_broadcast.submit_btn', ['count' => count($participants)]) ?>
+                    </button>
                 </form>
             </div>
         </div>
@@ -2357,9 +2418,30 @@ function updateSosAlarmState(items) {
     }
 }
 
-function showWarRoomBanner(id, text, orderId) {
+// End of Mission / Return to Base — reuses the SOS siren sound engine (via
+// playSosSiren/stopSosSiren) and the SOS pulsing-red-corners keyframe, but on
+// its own overlay element/timer so it never reads or clobbers real SOS state.
+// Only stops the siren afterward if a genuine SOS isn't ALSO currently active.
+let returnToBaseTimer = null;
+function triggerReturnToBaseAlarm() {
+    const overlay = document.getElementById('returnToBaseOverlay');
+    if (!overlay) return;
+    overlay.classList.add('rtb-active');
+    playSosSiren();
+    if (returnToBaseTimer) clearTimeout(returnToBaseTimer);
+    returnToBaseTimer = setTimeout(() => {
+        overlay.classList.remove('rtb-active');
+        const sosOverlay = document.getElementById('sosOverlay');
+        if (!sosOverlay || !sosOverlay.classList.contains('sos-active')) {
+            stopSosSiren();
+        }
+    }, 12000);
+}
+
+function showWarRoomBanner(id, text, orderId, alarmStyle) {
     if (activeBannerRows.has(id)) return;
     playWarRoomAlertSound();
+    if (alarmStyle === 'return_to_base') triggerReturnToBaseAlarm();
 
     const row = document.createElement('div');
     row.className = 'war-room-banner-row';
@@ -2716,7 +2798,7 @@ setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after='
     if (data.banners && data.banners.length) {
         data.banners.forEach(b => {
             if (b.id > bannerAfterId) bannerAfterId = b.id;
-            showWarRoomBanner(b.id, b.message, b.orderId);
+            showWarRoomBanner(b.id, b.message, b.orderId, b.alarmStyle);
         });
     }
 }).catch(() => {}), 5000);
