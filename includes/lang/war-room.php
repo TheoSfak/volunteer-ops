@@ -193,6 +193,7 @@ return [
 
         // Activity
         'activity.panel_title' => 'Δραστηριότητα',
+        'activity.export_btn' => 'Εξαγωγή Excel',
 
         // My ping / field status
         'myping.panel_title' => 'Το στίγμα μου',
@@ -245,6 +246,7 @@ return [
 
         // Chat
         'chat.panel_title' => 'Συνομιλία',
+        'chat.export_btn' => 'Εξαγωγή',
         'chat.general_room' => 'Γενικό',
         'chat.placeholder' => 'Γράψτε μήνυμα…',
 
@@ -783,6 +785,7 @@ return [
         'request.task.placeholder' => 'Describe the task…',
 
         'activity.panel_title' => 'Activity',
+        'activity.export_btn' => 'Export Excel',
 
         'myping.panel_title' => 'My Location',
         'myping.no_shift' => 'You have no approved shift on this mission.',
@@ -827,6 +830,7 @@ return [
         'common.save' => 'Save',
 
         'chat.panel_title' => 'Chat',
+        'chat.export_btn' => 'Export',
         'chat.general_room' => 'General',
         'chat.placeholder' => 'Write a message…',
 

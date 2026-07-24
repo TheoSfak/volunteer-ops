@@ -4990,6 +4990,20 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 103,
+            'description' => 'Add accuracy_meters to volunteer_pings (Geolocation API accuracy radius, used to make "is moving" detection tolerant of GPS/network-location noise instead of a fixed distance guessing at it)',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'volunteer_pings' AND COLUMN_NAME = 'accuracy_meters'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE volunteer_pings ADD COLUMN accuracy_meters DECIMAL(8,2) NULL AFTER lng");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
