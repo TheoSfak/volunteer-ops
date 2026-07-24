@@ -109,7 +109,7 @@ $printDate = date('d/m/Y');
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= h($copy['doc_title']) ?> - <?= h($cert['recipient_name']) ?></title>
-    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Dancing+Script:wght@600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -181,10 +181,12 @@ $printDate = date('d/m/Y');
         .cert-citation::before { content: '“'; left: 0; top: -6px; }
         .cert-citation::after { content: '”'; right: 0; bottom: -16px; }
 
-        .cert-signatures { display: flex; justify-content: space-between; width: 100%; max-width: 720px; margin-top: auto; padding-top: 26px; z-index: 1; }
+        .cert-signatures { display: flex; justify-content: space-between; width: 100%; max-width: 720px; margin-top: auto; padding-top: 20px; z-index: 1; }
         .cert-sig { text-align: center; width: 45%; }
-        .cert-sig-name { font-family: 'Dancing Script', cursive; font-weight: 700; font-size: 22pt; color: #172554; line-height: 1; transform: rotate(-1.5deg); display: inline-block; }
-        .cert-sig-line { border-top: 1.3px solid #23231f; margin-top: 10px; padding-top: 6px; font-size: 9.5pt; letter-spacing: .04em; text-transform: uppercase; color: #52514e; }
+        /* Space above the name is left for a real uploaded signature image,
+           to be added later -- not faked with a generated scrawl. */
+        .cert-sig-name { font-family: 'EB Garamond', Georgia, serif; font-weight: 600; font-size: 7pt; color: #23231f; line-height: 1.2; }
+        .cert-sig-line { border-top: 1.3px solid #23231f; margin-top: 8px; padding-top: 6px; font-size: 9.5pt; letter-spacing: .04em; text-transform: uppercase; color: #52514e; }
 
         .cert-footer-meta {
             width: 100%; max-width: 720px; text-align: left; line-height: 1.6;
