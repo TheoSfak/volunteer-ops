@@ -33,6 +33,7 @@ $defaults = [
     'org_secretary_name' => '',
     'cert_signature_font_size' => '7',
     'war_room_banner_font_size' => '1.35',
+    'war_room_auto_ping_seconds' => '180',
     'admin_email' => '',
     'timezone' => 'Europe/Athens',
     'date_format' => 'd/m/Y',
@@ -521,7 +522,7 @@ if (isPost()) {
         
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'cert_signature_font_size', 'war_room_banner_font_size',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_auto_ping_seconds',
             'admin_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
@@ -1108,6 +1109,12 @@ include __DIR__ . '/includes/header.php';
                         <input type="number" class="form-control" style="max-width:160px;" name="war_room_banner_font_size"
                                value="<?= h($settings['war_room_banner_font_size']) ?>" min="0.8" max="3" step="0.05">
                         <small class="text-muted">Μέγεθος του κυλιόμενου κειμένου συναγερμού (banner) στο Action Room, σε desktop οθόνες.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Συχνότητα Αυτόματου Στίγματος Action Room (δευτ.)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_auto_ping_seconds"
+                               value="<?= h($settings['war_room_auto_ping_seconds']) ?>" min="30" max="1800" step="10">
+                        <small class="text-muted">Πόσο συχνά στέλνεται αυτόματα το στίγμα GPS ενός εθελοντή όσο έχει ανοιχτό το Action Room. Λειτουργεί μόνο ενώ η σελίδα παραμένει ανοιχτή στο προσκήνιο — αν κλειδώσει η οθόνη ή αλλάξει εφαρμογή, το πρόγραμμα περιήγησης σταματά το αυτόματο στίγμα (περιορισμός των κινητών, όχι της εφαρμογής).</small>
                     </div>
                 </div>
             </div>

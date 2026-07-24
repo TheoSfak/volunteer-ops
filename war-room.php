@@ -606,10 +606,16 @@ $shifts = dbFetchAll(
     [$missionId]
 );
 
-$loadPins = function () use ($missionId, $hasFieldStatus) {
+// Always returns each participant's LATEST ping regardless of age — a hard
+// "last 2 hours" cutoff used to make someone silently vanish from the live
+// map the moment their last ping aged past it, even though Team Trail (which
+// has no such cutoff) still showed them. The map now shows every last-known
+// position always, marking it 'is_stale' (reusing the same $pingStaleThresholdSeconds
+// as the sidebar list) once it's past due, rather than hiding it outright.
+$loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds) {
     try {
         $field = $hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status';
-        return dbFetchAll(
+        $rawPins = dbFetchAll(
             "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.created_at, u.name, mt.color AS team_color{$field}
              FROM volunteer_pings vp
              JOIN shifts s ON s.id = vp.shift_id
@@ -618,11 +624,44 @@ $loadPins = function () use ($missionId, $hasFieldStatus) {
              LEFT JOIN mission_team_members mtm ON mtm.user_id = vp.user_id AND mtm.mission_id = s.mission_id
              LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
              WHERE s.mission_id = ?
-               AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
                AND vp.id = (SELECT MAX(vp2.id) FROM volunteer_pings vp2 WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id)
              ORDER BY vp.created_at DESC",
             [$missionId]
         );
+
+        $pins = [];
+        foreach ($rawPins as $pin) {
+            $pingTs = strtotime($pin['created_at']);
+            $isStale = $pingTs < (time() - $pingStaleThresholdSeconds);
+
+            // "Moving" = the previous ping for this same person+shift is recent
+            // enough to be meaningful (<=20 min gap) and far enough away (>=30m)
+            // to be real movement rather than stationary GPS jitter.
+            $isMoving = false;
+            $prevPing = dbFetchOne(
+                "SELECT lat, lng, created_at FROM volunteer_pings
+                 WHERE user_id = ? AND shift_id = ? AND created_at < ?
+                 ORDER BY created_at DESC LIMIT 1",
+                [$pin['user_id'], $pin['shift_id'], $pin['created_at']]
+            );
+            if ($prevPing) {
+                $secondsBetween = $pingTs - strtotime($prevPing['created_at']);
+                if ($secondsBetween > 0 && $secondsBetween <= 1200) {
+                    $isMoving = gpsDistanceMeters(
+                        (float) $prevPing['lat'], (float) $prevPing['lng'],
+                        (float) $pin['lat'], (float) $pin['lng']
+                    ) >= 30;
+                }
+            }
+
+            $pins[] = [
+                'lat' => (float) $pin['lat'], 'lng' => (float) $pin['lng'], 'name' => $pin['name'],
+                'status' => $pin['field_status'], 'team_color' => $pin['team_color'],
+                'time' => date('H:i', $pingTs),
+                'is_stale' => $isStale, 'is_moving' => $isMoving,
+            ];
+        }
+        return $pins;
     } catch (Exception $e) {
         return [];
     }
@@ -640,10 +679,7 @@ if (get('ajax') === '1') {
         [$missionId, $user['id']]
     );
 
-    $pins = array_map(fn($pin) => [
-        'lat' => (float)$pin['lat'], 'lng' => (float)$pin['lng'], 'name' => $pin['name'],
-        'status' => $pin['field_status'], 'team_color' => $pin['team_color'], 'time' => date('H:i', strtotime($pin['created_at']))
-    ], $loadPins());
+    $pins = $loadPins();
 
     // Every new banner-worthy notification since the client's last checkpoint
     // is returned (not just the latest) so concurrent alerts each get their
@@ -702,10 +738,7 @@ if (get('ajax') === '1') {
     exit;
 }
 
-$pins = array_map(fn($pin) => [
-    'lat' => (float)$pin['lat'], 'lng' => (float)$pin['lng'], 'name' => $pin['name'],
-    'status' => $pin['field_status'], 'team_color' => $pin['team_color'], 'time' => date('H:i', strtotime($pin['created_at']))
-], $loadPins());
+$pins = $loadPins();
 
 // Baseline for the live request banner: ignore anything sent before this page load,
 // only pop the banner for admin-initiated alerts (location requests, dispatch points, ...)
@@ -1957,9 +1990,20 @@ function renderPins(items) {
         const ring = pin.status === 'needs_help'
             ? 'border:3px solid #dc2626;animation:warRoomPulseRed 1s infinite;'
             : 'border:2px solid white;';
-        const icon = L.divIcon({className:'', html:`<span style="display:block;width:16px;height:16px;background:${color};${ring}border-radius:50%;box-shadow:0 1px 4px #0008"></span>`, iconSize:[16,16], iconAnchor:[8,8]});
+        // Stale = past due for a fresh ping but still their last-known
+        // position, so it stays on the map (never silently vanishes) just
+        // dimmed instead. Moving gets a small blue dot badge, same idea as a
+        // "live" indicator, not a full icon swap so the team-color dot itself
+        // still reads the same at a glance.
+        const opacity = pin.is_stale ? 'opacity:.45;' : '';
+        const movingBadge = pin.is_moving
+            ? '<span style="position:absolute;top:-3px;right:-3px;width:9px;height:9px;background:#0ea5e9;border:2px solid #fff;border-radius:50%;"></span>'
+            : '';
+        const icon = L.divIcon({className:'', html:`<span style="position:relative;display:block;width:16px;height:16px;background:${color};${ring}${opacity}border-radius:50%;box-shadow:0 1px 4px #0008">${movingBadge}</span>`, iconSize:[16,16], iconAnchor:[8,8]});
         const statusLine = pinStatusLabel(pin.status);
-        L.marker([pin.lat, pin.lng], {icon}).addTo(pinLayer).bindPopup(`<strong>${escapeHtml(pin.name)}</strong><br>${pin.time}${statusLine ? '<br>' + statusLine : ''}`);
+        const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
+            : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
+        L.marker([pin.lat, pin.lng], {icon}).addTo(pinLayer).bindPopup(`<strong>${escapeHtml(pin.name)}</strong><br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}`);
     });
     if (!hasFitPins && items.length) {
         hasFitPins = true;
@@ -2742,7 +2786,7 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
 // doesn't change send frequency — a separate local-only timer below still
 // decides when the ~3-minute cadence is actually due, preserving the exact
 // send/DB-write volume every existing source='auto' consumer already assumes.
-const AUTO_PING_CADENCE_MS = 180000;
+const AUTO_PING_CADENCE_MS = <?= (int) getSetting('war_room_auto_ping_seconds', '180') * 1000 ?>;
 let latestAutoPosition = null;
 let lastAutoPingSentAt = Date.now();
 
