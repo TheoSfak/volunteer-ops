@@ -10,8 +10,41 @@ if (!defined('VOLUNTEEROPS')) {
 /**
  * Start secure session
  */
+// Action Room (War Room) and everything it depends on (GPS ping, chat, dispatch,
+// SOS, etc.) are exempt from the idle-timeout below. Real incident: a mobile
+// phone's screen was kept on via the Keep Awake button the whole time, but the
+// OS still throttled background JS/network activity (Android Doze-style
+// battery optimization applies independently of a screen wake lock — the lock
+// only stops the screen from sleeping, it does not exempt the tab from
+// background throttling) for longer than session_timeout_minutes. The next
+// request after execution resumed found last_activity stale, force-logged the
+// volunteer out mid-mission, and GPS auto-ping silently started failing with
+// no warning to anyone. As long as the PHP session itself is still valid, one
+// of these pages never force-logs-out purely for elapsed time.
+define('WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS', [
+    'war-room.php', 'ping-location.php', 'volunteer-status.php',
+    'mission-chat.php', 'mission-photo.php', 'mission-photo-view.php',
+    'mission-dispatch.php', 'mission-order.php', 'mission-sos.php',
+    'mission-shortage.php', 'mission-history.php', 'mission-response-report.php',
+    'mission-track.php', 'geocode-address.php', 'api-push-subscribe.php',
+]);
+
 function initSession() {
     if (session_status() === PHP_SESSION_NONE) {
+        $currentScript = basename($_SERVER['SCRIPT_NAME'] ?? '');
+        $isWarRoomExempt = in_array($currentScript, WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS, true);
+
+        // Second layer of defense, independent of the app's own timeout check
+        // below: PHP's own session garbage collector can delete a session
+        // file server-side once it's gone untouched longer than
+        // session.gc_maxlifetime (a php.ini default, often far shorter than
+        // this app's own configurable timeout) — raise it generously for
+        // these pages specifically, set before session_start() so it actually
+        // takes effect for this session.
+        if ($isWarRoomExempt) {
+            ini_set('session.gc_maxlifetime', 86400); // 24 hours
+        }
+
         $isSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
         session_set_cookie_params([
             'lifetime' => SESSION_LIFETIME,
@@ -33,7 +66,7 @@ function initSession() {
         } catch (Exception $e) {
             // DB not ready yet (install phase), use constant
         }
-        if (isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeoutSeconds) {
+        if (!$isWarRoomExempt && isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeoutSeconds) {
             logout();
             session_start();
             setFlash('warning', 'Η συνεδρία σας έληξε. Παρακαλώ συνδεθείτε ξανά.');
