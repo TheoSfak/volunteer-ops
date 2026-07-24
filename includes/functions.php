@@ -954,6 +954,74 @@ function getMissionCommandStaffIds(int $missionId, ?int $responsibleUserId, int 
 }
 
 /**
+ * Guest Mission Debrief: one-time invite to every guest approved-participant
+ * of $missionId who doesn't already have a mission_guest_debriefs row for it.
+ * Call this from every place a mission's status first enters {CLOSED,
+ * COMPLETED} (see call sites in mission-view.php/war-room.php/
+ * ops-dashboard.php/dashboard.php) — the NOT EXISTS guard means calling it
+ * again for an already-notified/already-submitted guest is always a no-op,
+ * so callers don't need to track "have I already invited this guest" state
+ * themselves (this also absorbs the case where an admin manually reopens a
+ * CLOSED mission back to OPEN via mission-form.php and re-closes it later).
+ */
+function notifyGuestsMissionDebriefEligible(int $missionId): void {
+    $mission = dbFetchOne("SELECT title FROM missions WHERE id = ?", [$missionId]);
+    if (!$mission) return;
+
+    $guestIds = array_column(dbFetchAll(
+        "SELECT DISTINCT u.id
+         FROM participation_requests pr
+         JOIN shifts s ON s.id = pr.shift_id
+         JOIN users u ON u.id = pr.volunteer_id
+         WHERE s.mission_id = ? AND pr.status = ? AND u.is_external = 1
+           AND NOT EXISTS (
+               SELECT 1 FROM mission_guest_debriefs mgd
+               WHERE mgd.mission_id = ? AND mgd.user_id = u.id
+           )",
+        [$missionId, PARTICIPATION_APPROVED, $missionId]
+    ), 'id');
+    if (empty($guestIds)) return;
+
+    $url = rtrim(BASE_URL, '/') . '/mission-guest-debrief.php?mission_id=' . $missionId;
+    $langByUserId = getUserLanguages($guestIds);
+    foreach ($guestIds as $guestId) {
+        $lang = $langByUserId[$guestId] ?? DEFAULT_LANGUAGE;
+        sendNotification(
+            (int) $guestId,
+            t('notif.guest_debrief_invite_title', [], $lang),
+            t('notif.guest_debrief_invite_message', ['mission' => $mission['title']], $lang),
+            'info',
+            'mission_guest_debrief_invite',
+            ['url' => $url]
+        );
+    }
+}
+
+/**
+ * Guest Mission Debrief: quiet FYI to command staff when a guest submits
+ * their own feedback. Mirrors notifyPhotoReceived()'s (mission-photo.php)
+ * recipient-resolution shape.
+ */
+function notifyCommandStaffGuestDebriefSubmitted(int $missionId, ?int $responsibleUserId, int $guestId, string $guestName, string $missionTitle): void {
+    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $guestId);
+    if (empty($recipientIds)) return;
+
+    $url = rtrim(BASE_URL, '/') . '/mission-debrief.php?id=' . $missionId;
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        sendNotification(
+            $recipientId,
+            t('notif.guest_debrief_submitted_title', [], $lang),
+            t('notif.guest_debrief_submitted_message', ['name' => $guestName, 'mission' => $missionTitle], $lang),
+            'info',
+            'mission_guest_debrief_submitted',
+            ['url' => $url]
+        );
+    }
+}
+
+/**
  * War Room: unresolved shortage reports for the admin "Αναφορές Έλλειψης" card.
  * Caller MUST gate this behind $canManageWarRoom before calling — titles,
  * descriptions and reporter identity are sensitive, this function has no

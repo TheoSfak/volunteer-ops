@@ -182,6 +182,7 @@ if (isPost()) {
         } else {
             dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ? AND status = ?", [STATUS_CLOSED, $missionId, STATUS_OPEN]);
             logAudit('close_from_war_room', 'missions', $missionId, null, ['old_status' => STATUS_OPEN]);
+            notifyGuestsMissionDebriefEligible($missionId);
             setFlash('success', t('wr.mission_closed_success'));
             redirect('ops-dashboard.php');
         }

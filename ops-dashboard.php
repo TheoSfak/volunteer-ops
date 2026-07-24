@@ -89,6 +89,7 @@ if (isPost()) {
             } else {
                 dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_CLOSED, $missionId]);
                 logAudit('close_from_ops_dashboard', 'missions', $missionId, null, ['old_status' => STATUS_OPEN]);
+                notifyGuestsMissionDebriefEligible($missionId);
                 setFlash('success', 'Η αποστολή «' . $mission['title'] . '» έκλεισε και αφαιρέθηκε από το Επιχειρησιακό.');
             }
         }
