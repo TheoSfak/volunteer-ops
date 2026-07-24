@@ -59,7 +59,7 @@ if ($teamId !== null) {
             redirect('war-room.php?id=' . $missionId);
         }
     }
-    $roomLabel = $team['codename'] . ' ' . $team['team_number'];
+    $roomLabel = teamLabel($team['codename'], $team['team_number']);
 }
 
 $messages = dbFetchAll(

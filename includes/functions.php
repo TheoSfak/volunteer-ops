@@ -687,7 +687,7 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
     $acksByDispatch = [];
     foreach ($ackRows as $ack) {
         $acksByDispatch[(int) $ack['dispatch_id']][] = [
-            'team_label'     => $ack['team_id'] ? ($ack['codename'] . ' ' . $ack['team_number']) : null,
+            'team_label'     => $ack['team_id'] ? teamLabel($ack['codename'], $ack['team_number']) : null,
             'user_name'      => $ack['user_name'],
             'is_external'    => (bool) $ack['is_external'],
             'guest_org_name' => $ack['guest_org_name'],
@@ -730,7 +730,7 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'type'        => $row['type'],
             'geo'         => json_decode($row['geo'], true),
             'label'       => $row['label'],
-            'team_label'  => $teamId ? ($row['codename'] . ' ' . $row['team_number']) : t('common.all_teams'),
+            'team_label'  => $teamId ? teamLabel($row['codename'], $row['team_number']) : t('common.all_teams'),
             'team_color_bg' => $teamColorBg,
             'team_color_fg' => $teamColorFg,
             'can_delete'  => $canManageWarRoom,
@@ -832,7 +832,7 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
         'user_name'      => $row['user_name'],
         'is_external'    => (bool) $row['is_external'],
         'guest_org_name' => $row['guest_org_name'],
-        'team_label'     => $row['codename'] ? $row['codename'] . ' ' . $row['team_number'] : null,
+        'team_label'     => $row['codename'] ? teamLabel($row['codename'], $row['team_number']) : null,
         'time'           => date('d/m H:i', strtotime($row['created_at'])),
         'lat'            => $row['lat'] !== null ? (float) $row['lat'] : null,
         'lng'            => $row['lng'] !== null ? (float) $row['lng'] : null,
@@ -1049,7 +1049,7 @@ function loadUnresolvedShortageReportsForMission(int $missionId): array {
         'reporter_name'   => $row['reporter_name'],
         'is_external'     => (bool) $row['is_external'],
         'guest_org_name'  => $row['guest_org_name'],
-        'team_label'      => $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : t('history.no_team_capitalized'),
+        'team_label'      => $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized'),
         'created_at'      => date('d/m H:i', strtotime($row['created_at'])),
         'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
     ], $rows);
@@ -1085,7 +1085,7 @@ function loadOpenSosAlertsForMission(int $missionId): array {
         'user_name'       => $row['user_name'],
         'is_external'     => (bool) $row['is_external'],
         'guest_org_name'  => $row['guest_org_name'],
-        'team_label'      => h($row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : t('history.no_team_capitalized')),
+        'team_label'      => h($row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized')),
         'lat'             => $row['lat'] !== null ? (float) $row['lat'] : null,
         'lng'             => $row['lng'] !== null ? (float) $row['lng'] : null,
         'created_at'      => date('d/m H:i', strtotime($row['created_at'])),
@@ -1112,6 +1112,19 @@ function reportMinutesBetween(?string $from, ?string $to): ?float {
         return null;
     }
     return round((strtotime($to) - strtotime($from)) / 60, 1);
+}
+
+/**
+ * Mission team display label. team_number is nullable — a team given a
+ * custom name (instead of the auto NATO codename) never gets a number
+ * appended, per explicit request; the auto-assigned NATO codenames still
+ * always pair with their random 2-digit number as before.
+ */
+function teamLabel(?string $codename, $teamNumber): string {
+    if ($codename === null || $codename === '') {
+        return '';
+    }
+    return ($teamNumber !== null && $teamNumber !== '') ? ($codename . ' ' . $teamNumber) : $codename;
 }
 
 /**
@@ -1158,7 +1171,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
 
     $teamLabels = [];
     foreach (dbFetchAll("SELECT id, codename, team_number FROM mission_teams WHERE mission_id = ?", [$missionId]) as $t) {
-        $teamLabels[(int) $t['id']] = $t['codename'] . ' ' . $t['team_number'];
+        $teamLabels[(int) $t['id']] = teamLabel($t['codename'], $t['team_number']);
     }
 
     $detail = [];
@@ -2187,7 +2200,7 @@ function generateTeamComparisonNarrative(array $teams): string {
     if (count($teams) < 2) {
         return '';
     }
-    $label = fn($t) => $t['codename'] . ' ' . $t['team_number'];
+    $label = fn($t) => teamLabel($t['codename'], $t['team_number']);
     $sentences = [];
 
     // ── response speed (order acknowledgment) ───────────────────────────
@@ -2282,7 +2295,7 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         [$missionId]
     );
     foreach ($sentRows as $row) {
-        $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'όλες τις ομάδες';
+        $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'όλες τις ομάδες';
         $kind = $row['type'] === 'point' ? 'σημείο' : 'περιοχή';
         $events[] = [
             'icon' => '📍',
@@ -2302,7 +2315,7 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         [$missionId]
     );
     foreach ($receivedRows as $row) {
-        $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'όλες τις ομάδες';
+        $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'όλες τις ομάδες';
         $events[] = [
             'icon' => '🚩',
             'text' => h($row['actor_name']) . ' έλαβε εντολή προς ' . h($teamLabel)
@@ -2322,7 +2335,7 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         [$missionId]
     );
     foreach ($arrivedRows as $row) {
-        $teamLabel = $row['ack_team_id'] ? ($row['ack_codename'] . ' ' . $row['ack_team_number']) : null;
+        $teamLabel = $row['ack_team_id'] ? teamLabel($row['ack_codename'], $row['ack_team_number']) : null;
         $events[] = [
             'icon' => '✅',
             'text' => ($teamLabel ? 'Η ομάδα ' . h($teamLabel) : h($row['actor_name'])) . ' ανέφερε άφιξη'
@@ -2345,7 +2358,7 @@ function loadMissionActivityEventsForReport(int $missionId): array {
     );
     foreach ($orderRows as $row) {
         $icon = $orderTypeIcons[$row['order_type']] ?? '📋';
-        $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : 'χωρίς ομάδα';
+        $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'χωρίς ομάδα';
         $extra = '';
         if (in_array($row['order_type'], ['task', 'message'], true) && $row['task_text']) {
             $snippet = mb_strlen($row['task_text']) > 120 ? mb_substr($row['task_text'], 0, 117) . '…' : $row['task_text'];

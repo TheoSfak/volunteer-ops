@@ -93,7 +93,7 @@ if ($status === 'needs_help') {
 
         $teamId = getUserTeamIdForMission($missionId, $userId);
         $myTeam = $teamId ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$teamId]) : null;
-        $teamLabel = $myTeam ? ($myTeam['codename'] . ' ' . $myTeam['team_number']) : t('status.no_team_label');
+        $teamLabel = $myTeam ? teamLabel($myTeam['codename'], $myTeam['team_number']) : t('status.no_team_label');
 
         dbInsert(
             "INSERT INTO mission_sos_alerts (mission_id, user_id, pr_id, team_id, lat, lng, created_at)

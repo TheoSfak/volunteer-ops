@@ -43,8 +43,8 @@ if (!defined('MISSION_TEAM_CODENAMES')) {
  * Notify every team member (individually) about their team assignment.
  * $namesByUserId must map user_id => name for all ids in $memberIds/$leaderId.
  */
-function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $codename, int $teamNumber, array $memberIds, int $leaderId, array $namesByUserId): void {
-    $teamLabel = $codename . ' ' . $teamNumber;
+function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $codename, ?int $teamNumber, array $memberIds, int $leaderId, array $namesByUserId): void {
+    $teamLabel = teamLabel($codename, $teamNumber);
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     $leaderName = $namesByUserId[$leaderId] ?? '';
     $langByUserId = getUserLanguages($memberIds);
@@ -378,20 +378,29 @@ if (isPost()) {
         } else {
             $teamCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_teams WHERE mission_id = ?", [$missionId]);
             $customCodename = trim((string) post('custom_codename'));
-            $codename = $customCodename !== '' ? mb_substr($customCodename, 0, 20) : MISSION_TEAM_CODENAMES[$teamCount % count(MISSION_TEAM_CODENAMES)];
+            $isCustomName = $customCodename !== '';
+            $codename = $isCustomName ? mb_substr($customCodename, 0, 20) : MISSION_TEAM_CODENAMES[$teamCount % count(MISSION_TEAM_CODENAMES)];
             $teamColor = MISSION_TEAM_COLORS[$teamCount % count(MISSION_TEAM_COLORS)];
 
+            // A custom name never gets the random 2-digit suffix — that's
+            // only there to disambiguate the auto NATO codenames once a
+            // mission cycles past 26 teams and reuses one. An admin-chosen
+            // name is assumed to already be distinct on its own.
             $teamNumber = null;
-            for ($attempt = 0; $attempt < 50; $attempt++) {
-                $candidate = random_int(10, 99);
-                $exists = dbFetchValue(
-                    "SELECT COUNT(*) FROM mission_teams WHERE mission_id = ? AND team_number = ?",
-                    [$missionId, $candidate]
-                );
-                if (!$exists) { $teamNumber = $candidate; break; }
+            $numberGenerationFailed = false;
+            if (!$isCustomName) {
+                for ($attempt = 0; $attempt < 50; $attempt++) {
+                    $candidate = random_int(10, 99);
+                    $exists = dbFetchValue(
+                        "SELECT COUNT(*) FROM mission_teams WHERE mission_id = ? AND team_number = ?",
+                        [$missionId, $candidate]
+                    );
+                    if (!$exists) { $teamNumber = $candidate; break; }
+                }
+                $numberGenerationFailed = $teamNumber === null;
             }
 
-            if ($teamNumber === null) {
+            if ($numberGenerationFailed) {
                 setFlash('error', t('team.create.number_failed'));
             } else {
                 $teamId = dbInsert(
@@ -463,8 +472,8 @@ if (isPost()) {
             }
             dbExecute("UPDATE mission_teams SET leader_id = ?, updated_at = NOW() WHERE id = ?", [$leaderId, $teamId]);
             logAudit('update_mission_team', 'mission_teams', $teamId, ['member_ids' => $oldMemberIds], ['member_ids' => $memberIds, 'leader_id' => $leaderId]);
-            notifyMissionTeamMembers($missionId, $mission['title'], $team['codename'], (int)$team['team_number'], $memberIds, $leaderId, $namesByUserId);
-            setFlash('success', t('team.update.success_flash', ['team' => $team['codename'] . ' ' . $team['team_number']]));
+            notifyMissionTeamMembers($missionId, $mission['title'], $team['codename'], ($team['team_number'] !== null ? (int) $team['team_number'] : null), $memberIds, $leaderId, $namesByUserId);
+            setFlash('success', t('team.update.success_flash', ['team' => teamLabel($team['codename'], $team['team_number'])]));
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'delete_team') {
@@ -483,7 +492,7 @@ if (isPost()) {
             dbExecute("DELETE FROM mission_teams WHERE id = ?", [$teamId]);
             logAudit('delete_mission_team', 'mission_teams', $teamId, ['mission_id' => $missionId], null);
 
-            $teamLabel = $team['codename'] . ' ' . $team['team_number'];
+            $teamLabel = teamLabel($team['codename'], $team['team_number']);
             $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
             $formerMemberLangs = getUserLanguages(array_column($formerMembers, 'user_id'));
             foreach ($formerMembers as $member) {
@@ -673,7 +682,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
             $pins[] = [
                 'lat' => (float) $pin['lat'], 'lng' => (float) $pin['lng'], 'name' => $pin['name'],
                 'status' => $pin['field_status'], 'team_color' => $pin['team_color'],
-                'team_label' => $pin['codename'] ? ($pin['codename'] . ' ' . $pin['team_number']) : null,
+                'team_label' => $pin['codename'] ? teamLabel($pin['codename'], $pin['team_number']) : null,
                 'is_external' => (bool) $pin['is_external'], 'guest_org_name' => $pin['guest_org_name'],
                 'time' => date('H:i', $pingTs),
                 'is_stale' => $isStale, 'is_moving' => $isMoving,
@@ -822,7 +831,7 @@ foreach ($teamRows as $row) {
 $teamLabelByUserId = [];
 $teamColorByUserId = [];
 foreach ($teams as $team) {
-    $label = $team['codename'] . ' ' . $team['team_number'];
+    $label = teamLabel($team['codename'], $team['team_number']);
     foreach ($team['members'] as $member) {
         $teamLabelByUserId[$member['user_id']] = $label;
         $teamColorByUserId[$member['user_id']] = $team['color'];
@@ -1003,7 +1012,7 @@ include __DIR__ . '/includes/header.php';
                         <select class="form-select form-select-sm" id="trailTeamSelect">
                             <option value=""><?= t('common.all_teams') ?></option>
                             <?php foreach ($teams as $team): ?>
-                            <option value="<?= $team['id'] ?>"><?= h($team['codename'] . ' ' . $team['team_number']) ?></option>
+                            <option value="<?= $team['id'] ?>"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></option>
                             <?php endforeach; ?>
                         </select>
                     </div>
@@ -1086,7 +1095,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="list-group-item">
                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
                         <div>
-                            <span class="badge fs-6 me-2" style="background:<?= h($teamBg) ?>;color:<?= h($teamFg) ?>;"><?= h($team['codename'] . ' ' . $team['team_number']) ?></span>
+                            <span class="badge fs-6 me-2" style="background:<?= h($teamBg) ?>;color:<?= h($teamFg) ?>;"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
                             <?php if ($team['leader_name']): ?>
                             <span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i><?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_guest_org_name']) ?></span>
                             <?php endif; ?>
@@ -1099,7 +1108,7 @@ include __DIR__ . '/includes/header.php';
                         <?php if ($canManageWarRoom): ?>
                         <div class="d-flex gap-1">
                             <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editTeamModal-<?= $team['id'] ?>" title="<?= t('common.edit') ?>"><i class="bi bi-pencil"></i></button>
-                            <form method="post" onsubmit="return confirm('<?= h(addslashes(t('teams.delete_confirm', ['team' => $team['codename'] . ' ' . $team['team_number']]))) ?>')">
+                            <form method="post" onsubmit="return confirm('<?= h(addslashes(t('teams.delete_confirm', ['team' => teamLabel($team['codename'], $team['team_number'])]))) ?>')">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="delete_team">
                                 <input type="hidden" name="team_id" value="<?= $team['id'] ?>">
@@ -1402,7 +1411,7 @@ include __DIR__ . '/includes/header.php';
                 <select class="form-select mb-3" id="dispatchTeamSelect">
                     <option value=""><?= t('common.all_teams') ?></option>
                     <?php foreach ($teams as $team): ?>
-                    <option value="<?= $team['id'] ?>"><?= h($team['codename'] . ' ' . $team['team_number']) ?></option>
+                    <option value="<?= $team['id'] ?>"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></option>
                     <?php endforeach; ?>
                 </select>
                 <button type="button" class="btn btn-primary w-100 fw-semibold" data-bs-toggle="modal" data-bs-target="#dispatchMapModal">
@@ -1476,7 +1485,7 @@ include __DIR__ . '/includes/header.php';
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-pencil me-1"></i><?= h(t('teams.edit_modal_title', ['team' => $team['codename'] . ' ' . $team['team_number']])) ?></h5>
+                <h5 class="modal-title"><i class="bi bi-pencil me-1"></i><?= h(t('teams.edit_modal_title', ['team' => teamLabel($team['codename'], $team['team_number'])])) ?></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form method="post" class="team-form" data-leader-select="#editTeamLeader-<?= $team['id'] ?>">
@@ -1518,7 +1527,7 @@ include __DIR__ . '/includes/header.php';
             <ul class="dropdown-menu dropdown-menu-end">
                 <li><a class="dropdown-item" href="exports/export-mission-chat.php?mission_id=<?= $missionId ?>&team_id="><?= t('chat.general_room') ?></a></li>
                 <?php foreach ($chatTeams as $ct): ?>
-                <li><a class="dropdown-item" href="exports/export-mission-chat.php?mission_id=<?= $missionId ?>&team_id=<?= $ct['id'] ?>"><?= h($ct['codename'] . ' ' . $ct['team_number']) ?></a></li>
+                <li><a class="dropdown-item" href="exports/export-mission-chat.php?mission_id=<?= $missionId ?>&team_id=<?= $ct['id'] ?>"><?= h(teamLabel($ct['codename'], $ct['team_number'])) ?></a></li>
                 <?php endforeach; ?>
             </ul>
         </div>
@@ -1530,7 +1539,7 @@ include __DIR__ . '/includes/header.php';
             </li>
             <?php foreach ($chatTeams as $ct): ?>
             <li class="nav-item">
-                <button type="button" class="nav-link chat-room-tab" data-team-id="<?= $ct['id'] ?>"><?= h($ct['codename'] . ' ' . $ct['team_number']) ?></button>
+                <button type="button" class="nav-link chat-room-tab" data-team-id="<?= $ct['id'] ?>"><?= h(teamLabel($ct['codename'], $ct['team_number'])) ?></button>
             </li>
             <?php endforeach; ?>
         </ul>

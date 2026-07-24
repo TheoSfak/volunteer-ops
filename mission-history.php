@@ -71,7 +71,7 @@ $sentRows = dbFetchAll(
     [$missionId, $isAdminParam, $userId]
 );
 foreach ($sentRows as $row) {
-    $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : t('history.to_all_teams', [], $viewerLang);
+    $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.to_all_teams', [], $viewerLang);
     $kind = t($row['type'] === 'point' ? 'history.kind_point' : 'history.kind_area', [], $viewerLang);
     $labelSuffix = $row['label'] ? t('history.label_suffix_dash', ['label' => h($row['label'])], $viewerLang) : '';
     $events[] = [
@@ -93,7 +93,7 @@ $receivedRows = dbFetchAll(
     [$missionId, $isAdminParam, $userId]
 );
 foreach ($receivedRows as $row) {
-    $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : t('history.to_all_teams', [], $viewerLang);
+    $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.to_all_teams', [], $viewerLang);
     $labelSuffix = $row['label'] ? t('history.label_suffix_dash', ['label' => h($row['label'])], $viewerLang) : '';
     $events[] = [
         'icon' => '🚩',
@@ -115,7 +115,7 @@ $arrivedRows = dbFetchAll(
     [$missionId, $isAdminParam, $userId]
 );
 foreach ($arrivedRows as $row) {
-    $teamLabel = $row['ack_team_id'] ? ($row['ack_codename'] . ' ' . $row['ack_team_number']) : null;
+    $teamLabel = $row['ack_team_id'] ? teamLabel($row['ack_codename'], $row['ack_team_number']) : null;
     $labelSuffix = $row['dispatch_label'] ? t('history.label_suffix_at', ['label' => h($row['dispatch_label'])], $viewerLang) : '';
     $events[] = [
         'icon' => '✅',
@@ -141,7 +141,7 @@ $orderRows = dbFetchAll(
 );
 foreach ($orderRows as $row) {
     $icon = $orderTypeIcons[$row['order_type']] ?? '📋';
-    $teamLabel = $row['team_id'] ? ($row['codename'] . ' ' . $row['team_number']) : t('history.no_team', [], $viewerLang);
+    $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team', [], $viewerLang);
     $extra = '';
     if (in_array($row['order_type'], ['task', 'message'], true) && $row['task_text']) {
         $snippet = mb_strlen($row['task_text']) > 120 ? mb_substr($row['task_text'], 0, 117) . '…' : $row['task_text'];

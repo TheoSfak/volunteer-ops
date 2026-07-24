@@ -137,7 +137,7 @@ if ($action === 'receive') {
         if ($myTeamId) {
             $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$myTeamId]);
             if ($teamRow) {
-                $teamLabel = $teamRow['codename'] . ' ' . $teamRow['team_number'];
+                $teamLabel = teamLabel($teamRow['codename'], $teamRow['team_number']);
             }
         }
         notifyDispatchReceive($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $dispatch, $teamLabel, $user['name'], $userId);
@@ -182,7 +182,7 @@ if ($action === 'ack') {
         if ($myTeamId) {
             $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$myTeamId]);
             if ($teamRow) {
-                $teamLabel = $teamRow['codename'] . ' ' . $teamRow['team_number'];
+                $teamLabel = teamLabel($teamRow['codename'], $teamRow['team_number']);
             }
         }
         notifyDispatchArrival($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $dispatch, $teamLabel, $user['name'], $userId);

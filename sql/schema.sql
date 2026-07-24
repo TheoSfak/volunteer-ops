@@ -1782,7 +1782,7 @@ CREATE TABLE IF NOT EXISTS `mission_teams` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `mission_id` INT UNSIGNED NOT NULL,
     `codename` VARCHAR(20) NOT NULL,
-    `team_number` TINYINT UNSIGNED NOT NULL,
+    `team_number` TINYINT UNSIGNED NULL,
     `color` VARCHAR(7) NULL,
     `leader_id` INT UNSIGNED NULL,
     `created_by` INT UNSIGNED NOT NULL,

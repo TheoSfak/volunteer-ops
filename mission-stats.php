@@ -377,7 +377,7 @@ include __DIR__ . '/includes/header.php';
     <?php foreach ($score['teams'] as $t): ?>
         <div class="score-leaderboard-row" style="border-left-color:<?= h($t['color']) ?>;">
             <div class="score-leaderboard-rank"><?= $t['rank'] === 1 ? '🥇' : ($t['rank'] === 2 ? '🥈' : ($t['rank'] === 3 ? '🥉' : $t['rank'])) ?></div>
-            <span class="badge" style="background:<?= h($t['color']) ?>;color:#fff;"><?= h($t['codename'] . ' ' . $t['team_number']) ?></span>
+            <span class="badge" style="background:<?= h($t['color']) ?>;color:#fff;"><?= h(teamLabel($t['codename'], $t['team_number'])) ?></span>
             <div class="score-leaderboard-team"><?= h($t['tier'][1]) ?></div>
             <div class="score-leaderboard-score" style="color:<?= $scoreTierHex[$t['tier'][0]] ?>;"><?= number_format($t['score'], 1) ?></div>
         </div>
@@ -521,7 +521,7 @@ include __DIR__ . '/includes/header.php';
             <div class="roster-team-card">
                 <div class="roster-team-header">
                     <span class="roster-swatch" style="background:<?= h($team['color']) ?>;"></span>
-                    <span><?= h($team['codename'] . ' ' . $team['team_number']) ?></span>
+                    <span><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
                     <?php if ($team['leader_name']): ?><span class="text-muted fw-normal small">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_guest_org_name']) ?></span><?php endif; ?>
                 </div>
                 <?php if (empty($team['members'])): ?>

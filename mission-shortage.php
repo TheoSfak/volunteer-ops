@@ -66,7 +66,7 @@ function notifyShortageAffectedUsers(array $report, string $titleKey, string $me
         return;
     }
 
-    $teamLabel = $report['team_id'] ? ($report['codename'] . ' ' . $report['team_number']) : t('history.no_team_capitalized');
+    $teamLabel = $report['team_id'] ? teamLabel($report['codename'], $report['team_number']) : t('history.no_team_capitalized');
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $report['mission_id'];
     $langs = getUserLanguages($recipientIds);
     foreach ($recipientIds as $recipientId) {
