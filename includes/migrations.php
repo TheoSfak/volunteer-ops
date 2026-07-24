@@ -4973,6 +4973,23 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 102,
+            'description' => 'Add not_resolved_at/not_resolved_by/outcome_note to mission_shortage_reports (a third, explicit "looked into it but can\'t fix it" terminal state alongside resolved, with an explanation the reporter/team can see)',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_shortage_reports' AND COLUMN_NAME = 'not_resolved_at'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE mission_shortage_reports ADD COLUMN not_resolved_at TIMESTAMP NULL AFTER resolved_by");
+                    dbExecute("ALTER TABLE mission_shortage_reports ADD COLUMN not_resolved_by INT UNSIGNED NULL AFTER not_resolved_at");
+                    dbExecute("ALTER TABLE mission_shortage_reports ADD COLUMN outcome_note TEXT NULL AFTER not_resolved_by");
+                    dbExecute("ALTER TABLE mission_shortage_reports ADD CONSTRAINT fk_shortage_not_resolved_by FOREIGN KEY (not_resolved_by) REFERENCES users(id) ON DELETE SET NULL");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

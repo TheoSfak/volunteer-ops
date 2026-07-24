@@ -1034,7 +1034,7 @@ function loadUnresolvedShortageReportsForMission(int $missionId): array {
          FROM mission_shortage_reports r
          JOIN users u ON u.id = r.reporter_id
          LEFT JOIN mission_teams mt ON mt.id = r.team_id
-         WHERE r.mission_id = ? AND r.resolved_at IS NULL
+         WHERE r.mission_id = ? AND r.resolved_at IS NULL AND r.not_resolved_at IS NULL
          ORDER BY FIELD(r.severity, 'critical', 'high', 'medium', 'low'), r.created_at ASC",
         [$missionId]
     );
@@ -2392,7 +2392,7 @@ function loadMissionActivityEventsForReport(int $missionId): array {
     }
 
     $shortageEventRows = dbFetchAll(
-        "SELECT r.shortage_type, r.title, r.created_at, r.acknowledged_at, r.resolved_at, u.name AS actor_name
+        "SELECT r.shortage_type, r.title, r.created_at, r.acknowledged_at, r.resolved_at, r.not_resolved_at, r.outcome_note, u.name AS actor_name
          FROM mission_shortage_reports r
          JOIN users u ON u.id = r.reporter_id
          WHERE r.mission_id = ?",
@@ -2400,12 +2400,16 @@ function loadMissionActivityEventsForReport(int $missionId): array {
     );
     foreach ($shortageEventRows as $row) {
         $label = SHORTAGE_TYPE_LABELS[$row['shortage_type']] ?? $row['shortage_type'];
+        $noteSuffix = $row['outcome_note'] ? ' — «' . h($row['outcome_note']) . '»' : '';
         $events[] = ['icon' => '⚠️', 'text' => h($row['actor_name']) . ' ανέφερε έλλειψη (' . h($label) . ') — «' . h($row['title']) . '»', 'ts' => strtotime($row['created_at'])];
         if ($row['acknowledged_at']) {
             $events[] = ['icon' => '👁️', 'text' => 'Η αναφορά «' . h($row['title']) . '» ελέγχθηκε', 'ts' => strtotime($row['acknowledged_at'])];
         }
         if ($row['resolved_at']) {
-            $events[] = ['icon' => '✅', 'text' => 'Η αναφορά «' . h($row['title']) . '» λύθηκε', 'ts' => strtotime($row['resolved_at'])];
+            $events[] = ['icon' => '✅', 'text' => 'Η αναφορά «' . h($row['title']) . '» λύθηκε' . $noteSuffix, 'ts' => strtotime($row['resolved_at'])];
+        }
+        if ($row['not_resolved_at']) {
+            $events[] = ['icon' => '🚫', 'text' => 'Η αναφορά «' . h($row['title']) . '» δεν λύθηκε' . $noteSuffix, 'ts' => strtotime($row['not_resolved_at'])];
         }
     }
 
