@@ -120,7 +120,7 @@ if ($canAccessChat) {
 $availableVolunteers = [];
 if ($canManageMissions) {
     $availableVolunteers = dbFetchAll(
-        "SELECT id, name, email, role FROM users 
+        "SELECT id, name, email, role, is_external, guest_org_name FROM users
          WHERE is_active = 1
          ORDER BY name"
     );
@@ -1645,7 +1645,7 @@ document.querySelectorAll('.apply-btn').forEach(function(btn) {
                             <option value="">-- Επιλέξτε χρήστη --</option>
                             <?php foreach ($availableVolunteers as $vol): ?>
                                 <option value="<?= $vol['id'] ?>">
-                                    <?= h($vol['name']) ?> (<?= h($vol['email']) ?>) — <?= h(ROLE_LABELS[$vol['role']] ?? $vol['role']) ?>
+                                    <?= h($vol['name']) ?> (<?= h($vol['email']) ?>) — <?= h(ROLE_LABELS[$vol['role']] ?? $vol['role']) ?><?= !empty($vol['is_external']) ? ' — GUEST: ' . h($vol['guest_org_name'] ?: '—') : '' ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>

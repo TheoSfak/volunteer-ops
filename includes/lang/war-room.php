@@ -146,6 +146,8 @@ return [
         'hero.btn_full_view' => 'Πλήρης Προβολή',
         'hero.btn_field_mode' => 'Λειτουργία Πεδίου',
         'hero.btn_fullscreen' => 'Πλήρης Οθόνη',
+        'hero.btn_keep_awake' => 'Οθόνη Ενεργή',
+        'hero.btn_awake_active' => 'Οθόνη Ενεργή ✓',
         'hero.btn_back_ops' => 'Επιχειρησιακό',
 
         // Banner
@@ -229,6 +231,8 @@ return [
         // Team create/edit modals
         'teams.create_modal.select_note' => 'Επιλέξτε μέλη από τους διαθέσιμους (χωρίς ομάδα) εθελοντές.',
         'teams.create_modal.no_available' => 'Δεν υπάρχουν διαθέσιμοι εθελοντές.',
+        'teams.custom_name_label' => 'Όνομα Ομάδας (προαιρετικό)',
+        'teams.custom_name_placeholder' => 'Κενό = αυτόματο NATO όνομα (Alpha, Bravo, ...)',
         'teams.leader_label' => 'Υπεύθυνος ομάδας',
         'teams.select_members_first' => 'Επιλέξτε μέλη πρώτα…',
         'teams.edit_modal_title' => 'Επεξεργασία {team}',
@@ -731,6 +735,8 @@ return [
         'hero.btn_full_view' => 'Full View',
         'hero.btn_field_mode' => 'Field Mode',
         'hero.btn_fullscreen' => 'Fullscreen',
+        'hero.btn_keep_awake' => 'Keep Awake',
+        'hero.btn_awake_active' => 'Keep Awake ✓',
         'hero.btn_back_ops' => 'Operations',
 
         'banner.ack_btn' => 'Acknowledge',
@@ -801,6 +807,8 @@ return [
 
         'teams.create_modal.select_note' => 'Select members from the available (unassigned) volunteers.',
         'teams.create_modal.no_available' => 'There are no available volunteers.',
+        'teams.custom_name_label' => 'Team Name (optional)',
+        'teams.custom_name_placeholder' => 'Leave blank for auto NATO name (Alpha, Bravo, ...)',
         'teams.leader_label' => 'Team leader',
         'teams.select_members_first' => 'Select members first…',
         'teams.edit_modal_title' => 'Edit {team}',

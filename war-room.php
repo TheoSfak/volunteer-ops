@@ -377,7 +377,8 @@ if (isPost()) {
             setFlash('warning', t('team.leader_must_be_member'));
         } else {
             $teamCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_teams WHERE mission_id = ?", [$missionId]);
-            $codename = MISSION_TEAM_CODENAMES[$teamCount % count(MISSION_TEAM_CODENAMES)];
+            $customCodename = trim((string) post('custom_codename'));
+            $codename = $customCodename !== '' ? mb_substr($customCodename, 0, 20) : MISSION_TEAM_CODENAMES[$teamCount % count(MISSION_TEAM_CODENAMES)];
             $teamColor = MISSION_TEAM_COLORS[$teamCount % count(MISSION_TEAM_COLORS)];
 
             $teamNumber = null;
@@ -842,8 +843,9 @@ include __DIR__ . '/includes/header.php';
         /* Set on the track itself, not the span inside it — both tracks size
            their height in `em` relative to their own font-size, so bumping
            the span alone would grow the text without growing its container,
-           clipping it. Font-size set here is inherited by the span anyway. */
-        .war-room-banner-track, .sos-map-marquee-track { font-size: 1.35rem; }
+           clipping it. Font-size set here is inherited by the span anyway.
+           Value comes from Settings (war_room_banner_font_size), not hardcoded. */
+        .war-room-banner-track, .sos-map-marquee-track { font-size: <?= (float) getSetting('war_room_banner_font_size', '1.35') ?>rem; }
     }
     @keyframes warRoomPulseRed { 0%, 100% { box-shadow: 0 0 0 0 rgba(220,53,69,0); } 50% { box-shadow: 0 0 0 10px rgba(220,53,69,0.4); } }
     #sosOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
@@ -877,7 +879,7 @@ include __DIR__ . '/includes/header.php';
             <h1 class="h3 mb-2"><?= h($mission['title']) ?></h1>
             <div class="small opacity-75"><i class="bi bi-geo-alt me-1"></i><?= h($mission['location']) ?> · <?= formatDateTime($firstShift) ?> <?= t('hero.until') ?> <?= formatDateTime($lastShift) ?></div>
         </div>
-        <div class="d-flex gap-2 align-items-center">
+        <div class="d-flex gap-2 align-items-center flex-wrap justify-content-end">
             <span class="badge fs-6 <?= $timeState === 'active' ? 'bg-success' : ($timeState === 'upcoming' ? 'bg-info text-dark' : 'bg-warning text-dark') ?>">
                 <?= $timeState === 'active' ? t('hero.status_active') : ($timeState === 'upcoming' ? t('hero.status_upcoming') : t('hero.status_overdue')) ?>
             </span>
@@ -894,6 +896,7 @@ include __DIR__ . '/includes/header.php';
                 </button>
             </form>
             <button type="button" id="warRoomFocusToggle" class="btn btn-outline-light"><i class="bi bi-arrows-fullscreen me-1"></i><?= t('hero.btn_fullscreen') ?></button>
+            <button type="button" id="wakeLockToggle" class="btn btn-outline-light d-none"><i class="bi bi-sun me-1"></i><?= t('hero.btn_keep_awake') ?></button>
             <a href="ops-dashboard.php" class="btn btn-light"><i class="bi bi-arrow-left me-1"></i><?= t('hero.btn_back_ops') ?></a>
         </div>
     </div>
@@ -905,8 +908,11 @@ include __DIR__ . '/includes/header.php';
 
 <?php if ($canManageWarRoom): ?>
 <div id="sosOverlay"></div>
-<div id="returnToBaseOverlay"></div>
 <?php endif; ?>
+<!-- Unlike #sosOverlay (command-staff-only, since SOS is a field->command
+     incoming alert), this is command->field, so every approved participant
+     needs the element regardless of $canManageWarRoom. -->
+<div id="returnToBaseOverlay"></div>
 
 <?php if (!$fieldMode): ?>
 <div class="row g-4 mb-4">
@@ -1377,6 +1383,8 @@ include __DIR__ . '/includes/header.php';
                         <div class="text-muted small"><?= t('teams.create_modal.no_available') ?></div>
                         <?php endif; ?>
                     </div>
+                    <label class="form-label small fw-semibold"><?= t('teams.custom_name_label') ?></label>
+                    <input type="text" class="form-control mb-3" name="custom_codename" maxlength="20" placeholder="<?= t('teams.custom_name_placeholder') ?>">
                     <label class="form-label small fw-semibold"><?= t('teams.leader_label') ?></label>
                     <select class="form-select team-leader-select" name="leader_id" id="createTeamLeader" required>
                         <option value=""><?= t('teams.select_members_first') ?></option>
@@ -1753,7 +1761,12 @@ function renderDispatches(items) {
             layer.bindTooltip(dispatchTeamLabelHtml(item), {permanent:true, direction:'right', offset:[8,-8], className:'dispatch-team-label', interactive:false});
         } else if (item.type === 'polygon') {
             layer = L.polygon(item.geo, {color:'#7c3aed', fillOpacity:0.15}).addTo(dispatchLayer).bindPopup(popupHtml);
-            layer.bindTooltip(dispatchTeamLabelHtml(item), {permanent:true, direction:'center', className:'dispatch-team-label', interactive:false});
+            // direction:'center' anchors the label at the polygon's own
+            // centroid, which sits it right on top of the fill/border — use
+            // 'top' with a small upward offset instead, same "off to the
+            // side, not overlapping the shape" idea as the point marker's
+            // own direction:'right' label just above.
+            layer.bindTooltip(dispatchTeamLabelHtml(item), {permanent:true, direction:'top', offset:[0,-8], className:'dispatch-team-label', interactive:false});
         }
         if (layer) {
             layer.dispatchId = item.id;
@@ -2512,6 +2525,61 @@ function hideWarRoomBannerRow(id) {
     });
     document.addEventListener('fullscreenchange', () => {
         if (!document.fullscreenElement) setFocusMode(false);
+    });
+})();
+
+// Keep Phone Awake — Screen Wake Lock API. Available to everyone (not just
+// command staff), since field volunteers with the map/status open are the
+// main beneficiaries. Hidden entirely on browsers without the API instead of
+// showing a button that would just fail silently on click.
+(function() {
+    const wakeBtn = document.getElementById('wakeLockToggle');
+    if (!wakeBtn || !('wakeLock' in navigator)) return;
+    wakeBtn.classList.remove('d-none');
+
+    let wakeLock = null;
+    let wantsAwake = false;
+
+    function setWakeBtnState(active) {
+        wakeBtn.classList.toggle('btn-warning', active);
+        wakeBtn.classList.toggle('btn-outline-light', !active);
+        wakeBtn.innerHTML = active
+            ? '<i class="bi bi-sun-fill me-1"></i>' + t('hero.btn_awake_active')
+            : '<i class="bi bi-sun me-1"></i>' + t('hero.btn_keep_awake');
+    }
+
+    async function acquireWakeLock() {
+        try {
+            wakeLock = await navigator.wakeLock.request('screen');
+            setWakeBtnState(true);
+            wakeLock.addEventListener('release', () => {
+                wakeLock = null;
+                setWakeBtnState(false);
+            });
+        } catch (err) {
+            wantsAwake = false;
+            setWakeBtnState(false);
+        }
+    }
+
+    wakeBtn.addEventListener('click', async () => {
+        if (wakeLock) {
+            wantsAwake = false;
+            await wakeLock.release();
+        } else {
+            wantsAwake = true;
+            await acquireWakeLock();
+        }
+    });
+
+    // A wake lock is automatically released whenever the tab is hidden
+    // (backgrounded, screen locked) — re-acquire it once the tab is visible
+    // again if the user still wants it on, so switching apps briefly doesn't
+    // silently turn this back off.
+    document.addEventListener('visibilitychange', () => {
+        if (wantsAwake && !wakeLock && document.visibilityState === 'visible') {
+            acquireWakeLock();
+        }
     });
 })();
 

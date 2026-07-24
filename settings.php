@@ -32,6 +32,7 @@ $defaults = [
     'org_president_name' => '',
     'org_secretary_name' => '',
     'cert_signature_font_size' => '7',
+    'war_room_banner_font_size' => '1.35',
     'admin_email' => '',
     'timezone' => 'Europe/Athens',
     'date_format' => 'd/m/Y',
@@ -520,7 +521,7 @@ if (isPost()) {
         
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'cert_signature_font_size',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'cert_signature_font_size', 'war_room_banner_font_size',
             'admin_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
@@ -1101,6 +1102,12 @@ include __DIR__ . '/includes/header.php';
                         <input type="number" class="form-control" style="max-width:160px;" name="cert_signature_font_size"
                                value="<?= h($settings['cert_signature_font_size']) ?>" min="4" max="24" step="0.5">
                         <small class="text-muted">Μέγεθος γραμμάτων του ονόματος Προέδρου/Γεν. Γραμματέα πάνω από την υπογραφή στη Βεβαίωση Συμμετοχής.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Μέγεθος Κυλιόμενου Κειμένου Action Room (rem)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_banner_font_size"
+                               value="<?= h($settings['war_room_banner_font_size']) ?>" min="0.8" max="3" step="0.05">
+                        <small class="text-muted">Μέγεθος του κυλιόμενου κειμένου συναγερμού (banner) στο Action Room, σε desktop οθόνες.</small>
                     </div>
                 </div>
             </div>
