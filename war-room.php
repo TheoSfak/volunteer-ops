@@ -2237,8 +2237,10 @@ function renderShortageReports(items) {
             <div><span class="badge bg-${sevColor[r.severity] || 'secondary'}">${r.severity_label}</span> <strong>${r.type_label}</strong> — ${escapeHtml(r.title)}</div>
             <div class="small mt-1">${escapeHtml(r.description)}</div>
             <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.guest_org_name)} (${r.team_label}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
-            <div class="mt-1">${r.acknowledged_at
-                ? `<button type="button" class="btn btn-sm btn-success w-100 shortage-resolve-btn" data-report-id="${r.id}">${t('shortage.resolve_btn')}</button>`
+            ${r.acknowledged_at ? `<textarea class="form-control form-control-sm mt-1 shortage-note-input" data-report-id="${r.id}" rows="1" placeholder="${t('shortage.note_placeholder')}"></textarea>` : ''}
+            <div class="mt-1 d-flex gap-1">${r.acknowledged_at
+                ? `<button type="button" class="btn btn-sm btn-success flex-fill shortage-resolve-btn" data-report-id="${r.id}">${t('shortage.resolve_btn')}</button>
+                   <button type="button" class="btn btn-sm btn-outline-danger flex-fill shortage-not-resolved-btn" data-report-id="${r.id}">${t('shortage.not_resolved_btn')}</button>`
                 : `<button type="button" class="btn btn-sm btn-warning w-100 shortage-seen-btn" data-report-id="${r.id}">${t('shortage.seen_btn')}</button>`}</div>
         </div>
     `).join('');
@@ -2253,16 +2255,19 @@ function renderShortageReports(items) {
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
     }));
-    list.querySelectorAll('.shortage-resolve-btn').forEach(btn => btn.addEventListener('click', () => {
+    function submitShortageOutcome(btn, action) {
         btn.disabled = true;
-        const data = new URLSearchParams({csrf_token: csrfToken, action: 'resolve', report_id: btn.dataset.reportId});
+        const noteInput = list.querySelector(`.shortage-note-input[data-report-id="${btn.dataset.reportId}"]`);
+        const data = new URLSearchParams({csrf_token: csrfToken, action, report_id: btn.dataset.reportId, note: noteInput ? noteInput.value : ''});
         fetch('mission-shortage.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
             if (result.ok) {
                 shortageReports = shortageReports.filter(x => String(x.id) !== btn.dataset.reportId);
                 renderShortageReports(shortageReports);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
-    }));
+    }
+    list.querySelectorAll('.shortage-resolve-btn').forEach(btn => btn.addEventListener('click', () => submitShortageOutcome(btn, 'resolve')));
+    list.querySelectorAll('.shortage-not-resolved-btn').forEach(btn => btn.addEventListener('click', () => submitShortageOutcome(btn, 'not_resolved')));
 }
 
 function renderSosAlerts(items) {

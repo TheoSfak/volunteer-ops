@@ -1974,12 +1974,16 @@ CREATE TABLE IF NOT EXISTS `mission_shortage_reports` (
     `acknowledged_by` INT UNSIGNED NULL,
     `resolved_at` TIMESTAMP NULL,
     `resolved_by` INT UNSIGNED NULL,
+    `not_resolved_at` TIMESTAMP NULL,
+    `not_resolved_by` INT UNSIGNED NULL,
+    `outcome_note` TEXT NULL COMMENT 'Explanation shown to the reporter/team when resolved or marked not-resolved',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`reporter_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`acknowledged_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`resolved_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`not_resolved_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     INDEX `idx_shortage_mission` (`mission_id`, `resolved_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
