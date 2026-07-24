@@ -142,7 +142,7 @@ if ($action === 'upload') {
     if ($myTeamId) {
         $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$myTeamId]);
         if ($teamRow) {
-            $teamLabel = $teamRow['codename'] . ' ' . $teamRow['team_number'];
+            $teamLabel = teamLabel($teamRow['codename'], $teamRow['team_number']);
         }
     }
 

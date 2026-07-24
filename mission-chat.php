@@ -18,7 +18,7 @@ header('Content-Type: application/json');
  */
 function notifyMissionTeamChat(int $missionId, string $missionTitle, array $team, int $senderId, string $senderName, string $message, bool $senderIsAdmin, ?int $responsibleUserId = null): void {
     $teamId = (int) $team['id'];
-    $teamLabel = $team['codename'] . ' ' . $team['team_number'];
+    $teamLabel = teamLabel($team['codename'], $team['team_number']);
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     $preview = mb_strlen($message) > 120 ? mb_substr($message, 0, 117) . '…' : $message;
 

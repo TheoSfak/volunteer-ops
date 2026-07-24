@@ -5004,6 +5004,14 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 104,
+            'description' => 'Make mission_teams.team_number nullable (a custom-named team no longer gets the random 2-digit suffix that only exists to disambiguate the auto NATO codenames)',
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_teams MODIFY COLUMN team_number TINYINT UNSIGNED NULL");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

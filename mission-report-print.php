@@ -174,7 +174,7 @@ $teamRadarOmittedCount = count($score['teams']) - count($teamRadarTeams);
 // mission-wide pillars, which always have one regardless of availability.
 $teamRadarLabels = [$score['pillars']['response']['label'], $score['pillars']['completion']['label'], $score['pillars']['shortage']['label']];
 $teamRadarDatasets = array_map(fn($t) => [
-    'label' => $t['codename'] . ' ' . $t['team_number'],
+    'label' => teamLabel($t['codename'], $t['team_number']),
     'data' => [round($t['pillars']['response']['score'], 1), round($t['pillars']['completion']['score'], 1), round($t['pillars']['shortage']['score'], 1)],
     'borderColor' => $t['color'],
     'backgroundColor' => $t['color'] . '1A', // ~10% alpha
@@ -242,7 +242,7 @@ foreach ($rosterRows as $row) {
 $teamCount = count($roster);
 $teamColorByLabel = [];
 foreach ($roster as $team) {
-    $teamColorByLabel[$team['codename'] . ' ' . $team['team_number']] = $team['color'];
+    $teamColorByLabel[teamLabel($team['codename'], $team['team_number'])] = $team['color'];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -524,7 +524,7 @@ $printDate = date('d/m/Y H:i');
     <?php foreach ($score['teams'] as $t): ?>
         <div class="lb-row" style="border-left-color:<?= h($t['color']) ?>;">
             <div class="lb-rank"><?= $t['rank'] === 1 ? '🥇' : ($t['rank'] === 2 ? '🥈' : ($t['rank'] === 3 ? '🥉' : $t['rank'])) ?></div>
-            <span class="lb-team-badge" style="background:<?= h($t['color']) ?>;"><?= h($t['codename'] . ' ' . $t['team_number']) ?></span>
+            <span class="lb-team-badge" style="background:<?= h($t['color']) ?>;"><?= h(teamLabel($t['codename'], $t['team_number'])) ?></span>
             <div class="lb-tier"><?= h($t['tier'][1]) ?></div>
             <div class="lb-score" style="color:<?= $scoreTierHex[$t['tier'][0]] ?>;"><?= number_format($t['score'], 1) ?></div>
         </div>
@@ -700,7 +700,7 @@ $printDate = date('d/m/Y H:i');
         <div class="roster-team-card">
             <div class="roster-team-header">
                 <span class="roster-swatch" style="background:<?= h($team['color']) ?>;"></span>
-                <span><?= h($team['codename'] . ' ' . $team['team_number']) ?></span>
+                <span><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
                 <?php if ($team['leader_name']): ?><span style="color:#888; font-weight:400; font-size:8pt;">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_guest_org_name']) ?></span><?php endif; ?>
             </div>
             <?php if (empty($team['members'])): ?>
