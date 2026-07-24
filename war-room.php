@@ -2806,8 +2806,24 @@ function sendAutoPing(position) {
 // over a multi-hour mission is a real battery cost not worth paying twice.
 // Delayed a few seconds so the location-permission prompt doesn't fire the
 // instant the page renders, before anyone's read anything on it.
+//
+// getCurrentPosition() alongside watchPosition() (not just watchPosition
+// alone): watchPosition's very first fix can legitimately take anywhere from
+// seconds to several minutes on a real device depending on signal/GPS lock —
+// confirmed live, cadence set to 60s but first auto-ping took 3-8 minutes
+// across repeated tries, varying each time, consistent with first-fix
+// latency rather than a timer bug. Firing an explicit getCurrentPosition()
+// at the same time races both and seeds latestAutoPosition with whichever
+// resolves first, so the interval below always has something to send once
+// the configured cadence elapses instead of sitting blocked on
+// !latestAutoPosition for however long that first fix happens to take.
 setTimeout(() => {
     if (!navigator.geolocation || !document.querySelectorAll('.send-ping').length) return;
+    navigator.geolocation.getCurrentPosition(
+        position => { latestAutoPosition = position; },
+        () => {},
+        {enableHighAccuracy: false, maximumAge: 60000, timeout: 20000}
+    );
     navigator.geolocation.watchPosition(
         position => { latestAutoPosition = position; },
         () => {},
