@@ -235,6 +235,48 @@ include __DIR__ . '/includes/header.php';
                     </form>
                 </div>
             </div>
+
+            <?php
+            // Guest Mission Debrief — a completely separate, guest-submitted
+            // feedback table (mission_guest_debriefs), read-only here. Not
+            // merged with the official debrief above; a guest can only ever
+            // see/edit their own row, via mission-guest-debrief.php.
+            $guestDebriefs = dbFetchAll(
+                "SELECT mgd.*, u.name, u.is_external, u.guest_org_name
+                 FROM mission_guest_debriefs mgd
+                 JOIN users u ON u.id = mgd.user_id
+                 WHERE mgd.mission_id = ?
+                 ORDER BY mgd.updated_at DESC",
+                [$id]
+            );
+            if (!empty($guestDebriefs)):
+            ?>
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-chat-square-text text-success me-2"></i>Ανατροφοδότηση από Guests</h5>
+                </div>
+                <div class="card-body">
+                    <?php foreach ($guestDebriefs as $gd): ?>
+                        <div class="border rounded p-3 mb-3">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <strong><?= guestNameHtml($gd['name'], (bool) $gd['is_external'], $gd['guest_org_name']) ?></strong>
+                                <span class="badge bg-success-subtle text-success-emphasis"><?= (int) $gd['rating'] ?> / 5</span>
+                            </div>
+                            <?php if (!empty($gd['what_went_well'])): ?>
+                                <p class="mb-1"><strong>Τι πήγε καλά:</strong> <?= nl2br(h($gd['what_went_well'])) ?></p>
+                            <?php endif; ?>
+                            <?php if (!empty($gd['what_could_improve'])): ?>
+                                <p class="mb-1"><strong>Τι θα μπορούσε να βελτιωθεί:</strong> <?= nl2br(h($gd['what_could_improve'])) ?></p>
+                            <?php endif; ?>
+                            <?php if (!empty($gd['additional_notes'])): ?>
+                                <p class="mb-1"><strong>Σημειώσεις:</strong> <?= nl2br(h($gd['additional_notes'])) ?></p>
+                            <?php endif; ?>
+                            <small class="text-muted"><?= formatDateTime($gd['updated_at']) ?></small>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>

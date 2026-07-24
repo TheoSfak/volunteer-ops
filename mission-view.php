@@ -335,6 +335,7 @@ if (isPost()) {
             if (($canManageMissions || $isResponsible) && $mission['status'] === STATUS_OPEN) {
                 dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_CLOSED, $id]);
                 logAudit('close', 'missions', $id);
+                notifyGuestsMissionDebriefEligible($id);
                 setFlash('success', 'Η αποστολή έκλεισε.');
                 redirect('mission-view.php?id=' . $id);
             }

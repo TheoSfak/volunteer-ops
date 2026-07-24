@@ -1004,6 +1004,69 @@ $myMissionCertificates = dbFetchAll(
     </div>
 </div>
 
+<!-- Guest Mission Debrief — unlike the certificates card just above, this
+     feature is guest-only scope, so (unlike that card) it needs its OWN
+     explicit isExternalGuest() gate here, not just reliance on being placed
+     outside the broader exclusion block. -->
+<?php if (isExternalGuest()): ?>
+<?php
+$myGuestDebriefMissions = dbFetchAll(
+    "SELECT m.id AS mission_id, m.title, m.end_datetime,
+            mgd.id AS submission_id, mgd.updated_at AS submitted_at
+     FROM participation_requests pr
+     JOIN shifts s ON s.id = pr.shift_id
+     JOIN missions m ON m.id = s.mission_id AND m.deleted_at IS NULL
+     LEFT JOIN mission_guest_debriefs mgd ON mgd.mission_id = m.id AND mgd.user_id = pr.volunteer_id
+     WHERE pr.volunteer_id = ? AND pr.status = ?
+       AND m.status IN (?, ?)
+     GROUP BY m.id
+     ORDER BY m.end_datetime DESC",
+    [$user['id'], PARTICIPATION_APPROVED, STATUS_CLOSED, STATUS_COMPLETED]
+);
+?>
+<div class="card pp-card accent-success mb-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-chat-square-text text-success me-2"></i><?= t('profile.guest_debrief_title') ?></h5>
+    </div>
+    <div class="card-body">
+        <?php if (empty($myGuestDebriefMissions)): ?>
+            <p class="text-muted mb-0"><?= t('profile.guest_debrief_empty') ?></p>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th><?= t('profile.guest_debrief_col_mission') ?></th>
+                            <th><?= t('profile.guest_debrief_col_status') ?></th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($myGuestDebriefMissions as $gdm): ?>
+                        <tr>
+                            <td><?= h($gdm['title']) ?></td>
+                            <td>
+                                <?php if ($gdm['submission_id']): ?>
+                                    <span class="badge bg-success-subtle text-success-emphasis"><?= t('profile.guest_debrief_status_submitted') ?></span>
+                                <?php else: ?>
+                                    <span class="badge bg-warning-subtle text-warning-emphasis"><?= t('profile.guest_debrief_status_pending') ?></span>
+                                <?php endif; ?>
+                            </td>
+                            <td class="text-end">
+                                <a href="mission-guest-debrief.php?mission_id=<?= $gdm['mission_id'] ?>" class="btn btn-sm btn-outline-success">
+                                    <?= $gdm['submission_id'] ? t('profile.guest_debrief_edit_btn') : t('profile.guest_debrief_submit_btn') ?>
+                                </a>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- i18n scope: core account section resumes (translated via t() — hero above
      plus everything from here down: edit-profile form, booked equipment,
      password change, avatar upload). New user-facing strings in this stretch

@@ -80,6 +80,7 @@ if (isPost() && post('action') === 'bulk_complete_overdue') {
     $attendanceRows = 0;
     $pointsRows = 0;
     $completedRows = 0;
+    $newlyEligibleForDebriefMissionIds = [];
     $pdo = db();
     $pdo->beginTransaction();
     try {
@@ -147,6 +148,12 @@ if (isPost() && post('action') === 'bulk_complete_overdue') {
                 );
                 logAudit('bulk_complete_overdue', 'missions', $missionId, null, ['old_status' => $bulkMission['status']]);
                 $completedRows++;
+                // Only missions jumping straight OPEN->COMPLETED are newly
+                // entering the debrief-eligible set here — a mission that was
+                // already CLOSED was already notified when it became CLOSED.
+                if ($bulkMission['status'] === STATUS_OPEN) {
+                    $newlyEligibleForDebriefMissionIds[] = $missionId;
+                }
             }
         }
 
@@ -155,6 +162,12 @@ if (isPost() && post('action') === 'bulk_complete_overdue') {
         $pdo->rollBack();
         setFlash('error', 'Η μαζική ενέργεια απέτυχε: ' . $e->getMessage());
         redirect('dashboard.php');
+    }
+
+    // Notify only after the transaction commits, so a mid-batch failure can
+    // never send a notification for a row that ended up rolled back.
+    foreach ($newlyEligibleForDebriefMissionIds as $eligibleMissionId) {
+        notifyGuestsMissionDebriefEligible($eligibleMissionId);
     }
 
     setFlash(

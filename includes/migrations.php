@@ -4884,6 +4884,73 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 97,
+            'description' => 'Create mission_guest_debriefs table (guest-only self-service mission feedback — what went well/could improve/notes + rating — deliberately standalone from the admin-only mission_debriefs record)',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_guest_debriefs'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE mission_guest_debriefs (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            user_id INT UNSIGNED NOT NULL,
+                            rating TINYINT UNSIGNED NOT NULL,
+                            what_went_well TEXT NULL,
+                            what_could_improve TEXT NULL,
+                            additional_notes TEXT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            UNIQUE KEY unique_mission_guest_debrief (mission_id, user_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
+        [
+            'version'     => 98,
+            'description' => 'Register mission_guest_debrief_invite notification code (one-time invite to a guest when their joint-exercise mission becomes debrief-eligible)',
+            'up' => function () {
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_guest_debrief_invite'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_guest_debrief_invite',
+                            'Πρόσκληση Ανατροφοδότησης Αποστολής',
+                            'Πρόσκληση σε εξωτερικό συνεργάτη να μοιραστεί την εμπειρία του από μια αποστολή που μόλις έκλεισε/ολοκληρώθηκε',
+                        ]
+                    );
+                }
+            },
+        ],
+
+        [
+            'version'     => 99,
+            'description' => 'Register mission_guest_debrief_submitted notification code (quiet FYI to command staff when a guest submits their own mission feedback)',
+            'up' => function () {
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_guest_debrief_submitted'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_guest_debrief_submitted',
+                            'Υποβολή Ανατροφοδότησης από Guest',
+                            'Ένας εξωτερικός συνεργάτης υπέβαλε τη δική του ανατροφοδότηση για μια αποστολή',
+                        ]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -1924,6 +1924,25 @@ CREATE TABLE IF NOT EXISTS `mission_certificates` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- MISSION GUEST DEBRIEFS (guest-only self-service mission feedback —
+-- deliberately standalone from the single admin-only mission_debriefs record)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_guest_debriefs` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `rating` TINYINT UNSIGNED NOT NULL,
+    `what_went_well` TEXT NULL,
+    `what_could_improve` TEXT NULL,
+    `additional_notes` TEXT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY `unique_mission_guest_debrief` (`mission_id`, `user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- MISSION DISPATCH RECEIPTS (War Room order acknowledgment, before arrival)
 -- =============================================
 CREATE TABLE IF NOT EXISTS `mission_dispatch_receipts` (
