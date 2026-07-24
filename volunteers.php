@@ -6,8 +6,13 @@
 require_once __DIR__ . '/bootstrap.php';
 requirePermission('volunteers_manage');
 
-$pageTitle = 'Εθελοντές';
 $user = getCurrentUser();
+
+// Guests (partner-org accounts, is_external=1) tab — separates them from the
+// org's own volunteers, which is the default view (previously they were
+// mixed together undifferentiated in the same list).
+$isGuestTab = get('is_external', '') === '1';
+$pageTitle = $isGuestTab ? 'Επισκέπτες' : 'Εθελοντές';
 
 // Filters
 $search = get('search', '');
@@ -22,8 +27,8 @@ $perPage = (int) get('per_page', 50);
 if (!in_array($perPage, $allowedPerPage)) $perPage = 50;
 
 // Build query — always show active users that haven't been soft-deleted
-$where = ['u.is_active = 1', 'u.deleted_at IS NULL'];
-$params = [];
+$where = ['u.is_active = 1', 'u.deleted_at IS NULL', 'u.is_external = ?'];
+$params = [$isGuestTab ? 1 : 0];
 
 if ($search) {
     $where[] = "(u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)";
@@ -336,13 +341,13 @@ include __DIR__ . '/includes/header.php';
 
 <div class="d-flex justify-content-between align-items-center mb-4 volunteers-page-header">
     <h1 class="h3 mb-0">
-        <i class="bi bi-people me-2"></i>Εθελοντές
+        <i class="bi bi-people me-2"></i><?= h($pageTitle) ?>
     </h1>
     <div class="d-flex gap-2 volunteers-page-actions">
         <a href="import-volunteers.php" class="btn btn-outline-primary">
             <i class="bi bi-upload me-1"></i>Εισαγωγή CSV
         </a>
-        <a href="exports/export-volunteers.php?role=<?= h($role) ?>&department_id=<?= h($departmentId) ?>" 
+        <a href="exports/export-volunteers.php?role=<?= h($role) ?>&department_id=<?= h($departmentId) ?>&is_external=<?= $isGuestTab ? '1' : '0' ?>"
            class="btn btn-outline-success">
             <i class="bi bi-download me-1"></i>Εξαγωγή CSV
         </a>
@@ -351,6 +356,19 @@ include __DIR__ . '/includes/header.php';
         </a>
     </div>
 </div>
+
+<ul class="nav nav-tabs mb-4">
+    <li class="nav-item">
+        <a class="nav-link<?= !$isGuestTab ? ' active' : '' ?>" href="volunteers.php">
+            <i class="bi bi-people me-1"></i>Εθελοντές
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link<?= $isGuestTab ? ' active' : '' ?>" href="volunteers.php?is_external=1">
+            <i class="bi bi-globe2 me-1"></i>Επισκέπτες
+        </a>
+    </li>
+</ul>
 
 <?php if (!empty($pendingUsers)): ?>
 <!-- Pending Registration Approvals -->

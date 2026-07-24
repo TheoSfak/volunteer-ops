@@ -4959,6 +4959,20 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 101,
+            'description' => 'Add guest_country to users (partner rescue-team country for is_external accounts, defaults to Ελλάδα when not otherwise set)',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'guest_country'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN guest_country VARCHAR(100) NULL DEFAULT 'Ελλάδα' AFTER guest_org_name");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

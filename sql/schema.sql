@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `is_external` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Partner/guest rescue-team account — locked to Action Room for own missions only',
     `language` ENUM('el','en') NOT NULL DEFAULT 'el' COMMENT 'Action Room UI language for this user',
     `guest_org_name` VARCHAR(150) NULL COMMENT 'Partner rescue-team/organization name for is_external accounts, shown as a tooltip on their name throughout Action Room',
+    `guest_country` VARCHAR(100) NULL DEFAULT 'Ελλάδα' COMMENT 'Partner rescue-team country for is_external accounts',
     `total_points` INT DEFAULT 0,
     `monthly_points` INT DEFAULT 0,
     `email_verified_at` TIMESTAMP NULL,
