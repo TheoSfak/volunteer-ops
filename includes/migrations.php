@@ -4951,6 +4951,14 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 100,
+            'description' => 'Widen mission_orders.order_type ENUM to add return_to_base (End of Mission broadcast — same loud red-screen/siren treatment as SOS, but command-initiated and mission-wide instead of volunteer-initiated)',
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_orders MODIFY COLUMN order_type ENUM('location','photo','video','task','message','return_to_base') NOT NULL");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
