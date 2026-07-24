@@ -344,6 +344,32 @@ if (isPost()) {
         }
         redirect('volunteer-view.php?id=' . $id . '#certificates');
     }
+
+    // Mission Certificates (Βεβαιώσεις) — a completely separate table/feature
+    // from volunteer_certificates above (mission-participation attestations,
+    // not external-qualification tracking); deliberately its own action name
+    // so it can never collide with delete_certificate.
+    if ($action === 'delete_mission_certificate') {
+        if (!isAdmin()) {
+            setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
+            redirect('volunteer-view.php?id=' . $id);
+        }
+        $missionCertId = (int) post('mission_cert_id');
+        $missionCert = dbFetchOne(
+            "SELECT mc.*, m.title AS mission_title FROM mission_certificates mc
+             JOIN missions m ON m.id = mc.mission_id
+             WHERE mc.id = ? AND mc.recipient_user_id = ?",
+            [$missionCertId, $id]
+        );
+        if (!$missionCert) {
+            setFlash('error', 'Η βεβαίωση δεν βρέθηκε.');
+        } else {
+            dbExecute("DELETE FROM mission_certificates WHERE id = ?", [$missionCertId]);
+            logAudit('delete_mission_certificate', 'mission_certificates', $missionCertId);
+            setFlash('success', 'Η βεβαίωση για την αποστολή <strong>' . h($missionCert['mission_title']) . '</strong> διαγράφηκε.');
+        }
+        redirect('volunteer-view.php?id=' . $id . '#mission-certificates');
+    }
 }
 
 // Get profile
@@ -399,6 +425,17 @@ $certTypes = dbFetchAll("SELECT * FROM certificate_types WHERE is_active = 1 ORD
 
 // Certificate types already assigned to this volunteer (for filtering the dropdown)
 $assignedCertTypeIds = array_column($certificates, 'certificate_type_id');
+
+// Mission Certificates (Βεβαιώσεις) — separate feature/table from the
+// certificate_types/volunteer_certificates block above.
+$missionCertificates = dbFetchAll(
+    "SELECT mc.*, m.title AS mission_title
+     FROM mission_certificates mc
+     JOIN missions m ON m.id = mc.mission_id
+     WHERE mc.recipient_user_id = ?
+     ORDER BY mc.issued_at DESC",
+    [$id]
+);
 
 // Get achievements
 $achievements = [];
@@ -1204,6 +1241,56 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
             </div>
         </div>
 
+        <!-- Mission Certificates (Βεβαιώσεις) — separate from the qualification
+             certificates card above; lets an admin delete one directly from a
+             volunteer's own profile instead of having to find the right
+             mission's own Βεβαιώσεις page first. -->
+        <div class="card vp-card border-accent-success mb-4" id="mission-certificates">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-patch-check text-success me-2"></i>Βεβαιώσεις Αποστολών</h5>
+            </div>
+            <div class="card-body">
+                <?php if (empty($missionCertificates)): ?>
+                    <p class="text-muted mb-0">Δεν υπάρχουν βεβαιώσεις αποστολών.</p>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Αποστολή</th>
+                                    <th>Γλώσσα</th>
+                                    <th>Αριθμός</th>
+                                    <th>Ημ. Έκδοσης</th>
+                                    <?php if (isAdmin()): ?><th class="text-end">Ενέργειες</th><?php endif; ?>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($missionCertificates as $mc): ?>
+                                <tr>
+                                    <td class="fw-semibold"><?= h($mc['mission_title']) ?></td>
+                                    <td><?= $mc['language'] === 'en' ? 'English' : 'Ελληνικά' ?></td>
+                                    <td><code><?= h($mc['certificate_number']) ?></code></td>
+                                    <td><?= formatDateTime($mc['issued_at']) ?></td>
+                                    <?php if (isAdmin()): ?>
+                                    <td class="text-end">
+                                        <a href="mission-certificate-print.php?id=<?= $mc['id'] ?>" target="_blank" class="btn btn-sm btn-outline-success" title="Προβολή">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal"
+                                                data-bs-target="#deleteMissionCertModal<?= $mc['id'] ?>" title="Διαγραφή">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </td>
+                                    <?php endif; ?>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <!-- Participations -->
         <div class="card vp-card border-accent-success mb-4">
             <div class="card-header">
@@ -1842,6 +1929,35 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
 </div>
 <?php endforeach; ?>
 <?php endif; // isAdmin certificate modals ?>
+
+<!-- ════ DELETE MISSION CERTIFICATE MODALS ════════════════════════════════════ -->
+<?php if (isAdmin()): ?>
+<?php foreach ($missionCertificates as $mc): ?>
+<div class="modal fade" id="deleteMissionCertModal<?= $mc['id'] ?>" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="delete_mission_certificate">
+                <input type="hidden" name="mission_cert_id" value="<?= $mc['id'] ?>">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Διαγραφή Βεβαίωσης</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Πρόκειται να διαγράψετε τη βεβαίωση συμμετοχής στην αποστολή <strong><?= h($mc['mission_title']) ?></strong>
+                       του εθελοντή <strong><?= h($volunteer['name']) ?></strong>.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>Διαγραφή</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endforeach; ?>
+<?php endif; // isAdmin mission certificate modals ?>
 
 <script>
 // Auto-calculate expiry date when certificate type or issue date changes
