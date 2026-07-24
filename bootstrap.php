@@ -92,7 +92,7 @@ if (isLoggedIn() && isExternalGuest()) {
         'mission-track.php', 'ping-location.php', 'volunteer-status.php',
         'geocode-address.php', 'api-push-subscribe.php',
         'mission-certificate-print.php', 'certificate-verify.php',
-        'mission-guest-debrief.php',
+        'mission-guest-debrief.php', 'export-mission-activity.php', 'export-mission-chat.php',
     ];
     if (!in_array($__extScript, $__extAllowed, true)) {
         $__extMissionIds = getExternalGuestMissionIds(getCurrentUserId());

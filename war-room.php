@@ -616,7 +616,8 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
     try {
         $field = $hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status';
         $rawPins = dbFetchAll(
-            "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.created_at, u.name, mt.color AS team_color{$field}
+            "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.created_at, u.name,
+                    u.is_external, u.guest_org_name, mt.color AS team_color, mt.codename, mt.team_number{$field}
              FROM volunteer_pings vp
              JOIN shifts s ON s.id = vp.shift_id
              JOIN users u ON u.id = vp.user_id
@@ -635,11 +636,22 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
             $isStale = $pingTs < (time() - $pingStaleThresholdSeconds);
 
             // "Moving" = the previous ping for this same person+shift is recent
-            // enough to be meaningful (<=20 min gap) and far enough away (>=30m)
-            // to be real movement rather than stationary GPS jitter.
+            // enough to be meaningful (<=20 min gap) and far enough away to be
+            // real movement rather than GPS/network-location noise. A fixed 30m
+            // floor turned out to false-positive for a genuinely stationary
+            // phone — enableHighAccuracy:false (deliberate, for battery) can
+            // easily have 30-100m+ error on its own, so two noisy readings from
+            // a standing-still phone could "move" 30m+ between them with no
+            // real movement at all. Now uses each reading's own reported
+            // accuracy_meters (Geolocation API's own uncertainty radius): the
+            // required distance scales up to at least the combined uncertainty
+            // of both fixes, with a 30m floor for when both are already tight,
+            // and a more conservative fixed 75m when accuracy is missing
+            // entirely (older data, or a browser that didn't report it) rather
+            // than assuming the old, now-proven-too-loose 30m applies.
             $isMoving = false;
             $prevPing = dbFetchOne(
-                "SELECT lat, lng, created_at FROM volunteer_pings
+                "SELECT lat, lng, accuracy_meters, created_at FROM volunteer_pings
                  WHERE user_id = ? AND shift_id = ? AND created_at < ?
                  ORDER BY created_at DESC LIMIT 1",
                 [$pin['user_id'], $pin['shift_id'], $pin['created_at']]
@@ -647,16 +659,22 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
             if ($prevPing) {
                 $secondsBetween = $pingTs - strtotime($prevPing['created_at']);
                 if ($secondsBetween > 0 && $secondsBetween <= 1200) {
-                    $isMoving = gpsDistanceMeters(
+                    $distanceMeters = gpsDistanceMeters(
                         (float) $prevPing['lat'], (float) $prevPing['lng'],
                         (float) $pin['lat'], (float) $pin['lng']
-                    ) >= 30;
+                    );
+                    $requiredMeters = ($prevPing['accuracy_meters'] !== null && $pin['accuracy_meters'] !== null)
+                        ? max(30, (float) $prevPing['accuracy_meters'] + (float) $pin['accuracy_meters'])
+                        : 75;
+                    $isMoving = $distanceMeters >= $requiredMeters;
                 }
             }
 
             $pins[] = [
                 'lat' => (float) $pin['lat'], 'lng' => (float) $pin['lng'], 'name' => $pin['name'],
                 'status' => $pin['field_status'], 'team_color' => $pin['team_color'],
+                'team_label' => $pin['codename'] ? ($pin['codename'] . ' ' . $pin['team_number']) : null,
+                'is_external' => (bool) $pin['is_external'], 'guest_org_name' => $pin['guest_org_name'],
                 'time' => date('H:i', $pingTs),
                 'is_stale' => $isStale, 'is_moving' => $isMoving,
             ];
@@ -897,6 +915,15 @@ include __DIR__ . '/includes/header.php';
     .sos-map-marquee { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.75); padding: 6px 10px; overflow: hidden; z-index: 500; }
     .sos-map-marquee-track { white-space: nowrap; position: relative; height: 1.4em; }
     .sos-map-marquee-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #ff3b30; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; animation: warRoomBannerScroll 14s linear infinite; }
+    /* On narrow/mobile screens the scrolling text sweeps right through the
+       Leaflet OSM attribution corner (bottom-right) since the marquee spans
+       the full width flush against the map's bottom edge — lift it clear
+       instead of overlapping. Desktop has enough width that this wasn't
+       reported as an issue there, so scoped to mobile rather than changed
+       globally. */
+    @media (max-width: 991.98px) {
+        .sos-map-marquee { bottom: 22px; }
+    }
     /* Focus mode: reclaim the app's own left sidebar for more War Room room. */
     body.war-room-focus .sidebar,
     body.war-room-focus .sidebar-overlay,
@@ -1238,7 +1265,12 @@ include __DIR__ . '/includes/header.php';
         <div class="card shadow-sm mt-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-activity me-1"></i><?= t('activity.panel_title') ?></h5>
-                <small class="text-muted"><?= t('common.updated_label') ?> <span id="activityRefresh"></span></small>
+                <div class="d-flex align-items-center gap-2">
+                    <a href="exports/export-mission-activity.php?mission_id=<?= $missionId ?>" class="btn btn-sm btn-outline-secondary" title="<?= t('activity.export_btn') ?>">
+                        <i class="bi bi-file-earmark-excel me-1"></i><?= t('activity.export_btn') ?>
+                    </a>
+                    <small class="text-muted"><?= t('common.updated_label') ?> <span id="activityRefresh"></span></small>
+                </div>
             </div>
             <div class="card-body">
                 <div id="activityList" style="max-height:420px;overflow-y:auto;"><div class="text-muted small"><?= t('common.loading') ?></div></div>
@@ -1477,7 +1509,20 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 
 <div class="card shadow-sm mb-4">
-    <div class="card-header"><h5 class="mb-0"><i class="bi bi-chat-dots me-1"></i><?= t('chat.panel_title') ?></h5></div>
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-chat-dots me-1"></i><?= t('chat.panel_title') ?></h5>
+        <div class="dropdown">
+            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                <i class="bi bi-file-earmark-excel me-1"></i><?= t('chat.export_btn') ?>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="exports/export-mission-chat.php?mission_id=<?= $missionId ?>&team_id="><?= t('chat.general_room') ?></a></li>
+                <?php foreach ($chatTeams as $ct): ?>
+                <li><a class="dropdown-item" href="exports/export-mission-chat.php?mission_id=<?= $missionId ?>&team_id=<?= $ct['id'] ?>"><?= h($ct['codename'] . ' ' . $ct['team_number']) ?></a></li>
+                <?php endforeach; ?>
+            </ul>
+        </div>
+    </div>
     <div class="card-body">
         <ul class="nav nav-pills mb-3 flex-wrap" id="chatRoomTabs">
             <li class="nav-item">
@@ -2003,7 +2048,8 @@ function renderPins(items) {
         const statusLine = pinStatusLabel(pin.status);
         const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
             : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
-        L.marker([pin.lat, pin.lng], {icon}).addTo(pinLayer).bindPopup(`<strong>${escapeHtml(pin.name)}</strong><br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}`);
+        const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
+        L.marker([pin.lat, pin.lng], {icon}).addTo(pinLayer).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.guest_org_name)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}`);
     });
     if (!hasFitPins && items.length) {
         hasFitPins = true;
@@ -2224,9 +2270,22 @@ function renderPingStaleness(staleness) {
     });
 }
 
+let shortageReportsRenderedSig = null;
 function renderShortageReports(items) {
     const list = document.getElementById('shortageReportsList');
     if (!list) return;
+    // This whole card gets fed a fresh array every 5s poll tick regardless of
+    // whether anything actually changed — rebuilding list.innerHTML every
+    // single time destroys any note textarea an admin is mid-typing into
+    // (value AND focus/cursor, since it's a brand new DOM node each time).
+    // Skip the rebuild entirely when the set of reports + their seen-state
+    // is identical to what's already on screen, so routine polling never
+    // interrupts someone actively writing a note. A real change (new report,
+    // someone else marks one seen/resolved) still re-renders normally.
+    const sig = items.map(r => r.id + ':' + (r.acknowledged_at ? '1' : '0')).join(',');
+    if (sig === shortageReportsRenderedSig) return;
+    shortageReportsRenderedSig = sig;
+
     if (!items.length) {
         list.innerHTML = '<p class="text-muted mb-0">' + t('shortage.empty_list') + '</p>';
         return;
@@ -2775,7 +2834,7 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
     if (!navigator.geolocation) { status.textContent = t('myping.gps_unsupported'); return; }
     button.disabled = true; status.textContent = t('myping.locating');
     navigator.geolocation.getCurrentPosition(position => {
-        const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude});
+        const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || ''});
         fetch('ping-location.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
             status.textContent = result.ok ? t('myping.ping_sent_prefix', {time: result.ts}) : result.error;
             status.className = 'small mb-2 ' + (result.ok ? 'text-success' : 'text-danger');
@@ -2800,7 +2859,7 @@ function sendAutoPing(position) {
     if (!buttons.length) return;
     lastAutoPingSentAt = Date.now();
     buttons.forEach(button => {
-        const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, source: 'auto'});
+        const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || '', source: 'auto'});
         fetch('ping-location.php', {method: 'POST', body: data}).catch(() => {});
     });
 }

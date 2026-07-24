@@ -50,12 +50,21 @@ if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', 
     exit;
 }
 
-$userId  = getCurrentUserId();
-$user    = getCurrentUser();
-$shiftId = (int) post('shift_id');
-$lat     = (float) post('lat');
-$lng     = (float) post('lng');
-$source  = post('source') === 'auto' ? 'auto' : 'manual';
+$userId   = getCurrentUserId();
+$user     = getCurrentUser();
+$shiftId  = (int) post('shift_id');
+$lat      = (float) post('lat');
+$lng      = (float) post('lng');
+$source   = post('source') === 'auto' ? 'auto' : 'manual';
+// Geolocation API accuracy radius in meters — optional (older clients/cached
+// pages won't send it), used to keep "is moving" detection honest about how
+// precise this particular fix actually was, rather than a fixed distance
+// guessing at it. Sanity-capped so a garbage/huge value can't silently
+// suppress movement detection entirely.
+$rawAccuracy = post('accuracy');
+$accuracy = ($rawAccuracy !== null && $rawAccuracy !== '' && is_numeric($rawAccuracy))
+    ? min((float) $rawAccuracy, 5000)
+    : null;
 
 // Validate coordinates
 if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180 || ($lat == 0 && $lng == 0)) {
@@ -81,8 +90,8 @@ if (!$pr) {
 // Insert ping
 try {
     dbInsert(
-        "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, source, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
-        [$userId, $shiftId, $lat, $lng, $source]
+        "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, source, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+        [$userId, $shiftId, $lat, $lng, $accuracy, $source]
     );
 } catch (Exception $e) {
     echo json_encode(['ok' => false, 'error' => t('ping.gps_unavailable_migration')]);

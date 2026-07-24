@@ -1351,6 +1351,7 @@ CREATE TABLE IF NOT EXISTS `volunteer_pings` (
     `shift_id` INT UNSIGNED NOT NULL,
     `lat` DECIMAL(10, 8) NOT NULL,
     `lng` DECIMAL(11, 8) NOT NULL,
+    `accuracy_meters` DECIMAL(8, 2) NULL COMMENT 'Geolocation API accuracy radius, meters',
     `source` ENUM('manual','auto') NOT NULL DEFAULT 'manual',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
