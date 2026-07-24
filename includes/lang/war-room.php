@@ -32,6 +32,8 @@ return [
 
         // Access / mission-state gates
         'wr.access_denied' => 'Έχετε πρόσβαση στο Action Room μόνο για αποστολές στις οποίες είστε εγκεκριμένος/η.',
+        'wr.session_expired_warning' => 'Η σύνδεσή σας έληξε — το στίγμα GPS σταμάτησε να στέλνεται. Πατήστε "Ανανέωση" και συνδεθείτε ξανά.',
+        'wr.reload_btn' => 'Ανανέωση',
         'wr.mission_not_active' => 'Η αποστολή δεν είναι ενεργή στο Επιχειρησιακό.',
         'wr.perm.close_mission' => 'Δεν έχετε δικαίωμα να κλείσετε αυτή την αποστολή.',
         'wr.mission_closed_success' => 'Η αποστολή έκλεισε και αφαιρέθηκε από το Επιχειρησιακό.',
@@ -638,6 +640,8 @@ return [
         'common.loading' => 'Loading…',
 
         'wr.access_denied' => 'You only have access to Action Room for missions you are an approved participant of.',
+        'wr.session_expired_warning' => 'Your session expired — GPS ping has stopped sending. Click "Reload" and log in again.',
+        'wr.reload_btn' => 'Reload',
         'wr.mission_not_active' => 'This mission is not active in Operations.',
         'wr.perm.close_mission' => 'You do not have permission to close this mission.',
         'wr.mission_closed_success' => 'The mission was closed and removed from Operations.',

@@ -2829,13 +2829,46 @@ if (reportModalEl) {
     });
 }
 
+// Safety net for a real incident: a redirect-to-login response (expired/
+// invalidated session) used to fail completely silently here — fetch()
+// treats "got redirected then received a 200 HTML login page" as a normal
+// successful request, so a bare .catch(() => {}) never fires and nothing
+// ever told the user their GPS pings had silently stopped being saved.
+// response.redirected (or a non-JSON content-type, belt-and-braces) now
+// surfaces a loud, persistent banner instead of failing quietly.
+let sessionExpiredWarningShown = false;
+function checkSessionAlive(response) {
+    const contentType = response.headers.get('content-type') || '';
+    if (response.redirected || !contentType.includes('json')) {
+        if (!sessionExpiredWarningShown) {
+            sessionExpiredWarningShown = true;
+            const bar = document.createElement('div');
+            bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:14px 16px;text-align:center;font-weight:700;box-shadow:0 2px 8px #0006;';
+            bar.innerHTML = '<span>' + t('wr.session_expired_warning') + '</span>';
+            const reloadBtn = document.createElement('button');
+            reloadBtn.type = 'button';
+            reloadBtn.className = 'btn btn-light btn-sm ms-3';
+            reloadBtn.textContent = t('wr.reload_btn');
+            reloadBtn.onclick = () => location.reload();
+            bar.appendChild(reloadBtn);
+            document.body.prepend(bar);
+        }
+        return false;
+    }
+    return true;
+}
+
 document.querySelectorAll('.send-ping').forEach(button => button.addEventListener('click', () => {
     const status = document.getElementById('pingStatus-' + button.dataset.prId);
     if (!navigator.geolocation) { status.textContent = t('myping.gps_unsupported'); return; }
     button.disabled = true; status.textContent = t('myping.locating');
     navigator.geolocation.getCurrentPosition(position => {
         const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || ''});
-        fetch('ping-location.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
+        fetch('ping-location.php', {method:'POST', body:data}).then(response => {
+            if (!checkSessionAlive(response)) { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; return null; }
+            return response.json();
+        }).then(result => {
+            if (!result) return;
             status.textContent = result.ok ? t('myping.ping_sent_prefix', {time: result.ts}) : result.error;
             status.className = 'small mb-2 ' + (result.ok ? 'text-success' : 'text-danger');
         }).catch(() => { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; }).finally(() => button.disabled = false);
@@ -2860,7 +2893,7 @@ function sendAutoPing(position) {
     lastAutoPingSentAt = Date.now();
     buttons.forEach(button => {
         const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || '', source: 'auto'});
-        fetch('ping-location.php', {method: 'POST', body: data}).catch(() => {});
+        fetch('ping-location.php', {method: 'POST', body: data}).then(checkSessionAlive).catch(() => {});
     });
 }
 
@@ -2965,7 +2998,11 @@ function setFieldStatus(btn, prId, status) {
     }
 }
 
-setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => response.json()).then(data => {
+setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => {
+    if (!checkSessionAlive(response)) return null;
+    return response.json();
+}).then(data => {
+    if (!data) return;
     if (!fieldMode) {
         renderPins(pins = data.pins || []);
         if (data.dispatches) renderDispatches(dispatches = data.dispatches);
