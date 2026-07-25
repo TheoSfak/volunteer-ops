@@ -342,6 +342,13 @@ return [
         'route.photo_btn' => 'Φωτογραφία',
         'route.video_btn' => 'Βίντεο',
         'route.note_flag_label' => '📝 Σημείωση',
+        // Deliverable enforcement — "complete" is blocked (client- and
+        // server-side) until every checkbox the admin ticked on this
+        // waypoint is actually fulfilled.
+        'route.deliverable_photo' => 'φωτογραφία',
+        'route.deliverable_video' => 'βίντεο',
+        'route.deliverable_note' => 'σημείωση',
+        'route.missing_deliverables' => 'Λείπει: {items}. Προσθέστε τα πριν πατήσετε «Ολοκληρώθηκε».',
         'route.note_placeholder' => 'Σημείωση…',
         'route.note_hint' => 'Θα αποθηκευτεί μαζί με το «Ολοκληρώθηκε».',
         'route.confirm_out_of_sequence' => 'Αυτό δεν είναι το τρέχον σημείο της πορείας. Θέλετε να προχωρήσετε εκτός σειράς;',
@@ -1014,6 +1021,13 @@ return [
         'route.photo_btn' => 'Photo',
         'route.video_btn' => 'Video',
         'route.note_flag_label' => '📝 Note',
+        // Deliverable enforcement — "complete" is blocked (client- and
+        // server-side) until every checkbox the admin ticked on this
+        // waypoint is actually fulfilled.
+        'route.deliverable_photo' => 'photo',
+        'route.deliverable_video' => 'video',
+        'route.deliverable_note' => 'note',
+        'route.missing_deliverables' => 'Missing: {items}. Add them before tapping "Complete".',
         'route.note_placeholder' => 'Note…',
         'route.note_hint' => 'Saved together with "Completed".',
         'route.confirm_out_of_sequence' => 'This isn\'t the route\'s current stop. Proceed out of sequence anyway?',
