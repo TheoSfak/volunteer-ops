@@ -119,12 +119,33 @@ if ($action === 'upload') {
     $lat = ($latRaw !== '' && $latRaw !== null && is_numeric($latRaw)) ? (float) $latRaw : null;
     $lng = ($lngRaw !== '' && $lngRaw !== null && is_numeric($lngRaw)) ? (float) $lngRaw : null;
 
+    // Optional: this upload is the photo/video deliverable for one Route Order
+    // waypoint (war-room.php's "Η Πορεία μου" card — field mode has no map/media
+    // panel, so that card ships its own upload button hitting this same action).
+    // Validated against the uploader's own team so a stray/forged id can't
+    // attach someone else's field media to a waypoint, mirroring mission-route.php's
+    // "only your team can act on your route" rule.
+    $routeWaypointId = null;
+    $routeWaypointIdRaw = post('route_waypoint_id');
+    if ($routeWaypointIdRaw !== '' && $routeWaypointIdRaw !== null) {
+        $myTeamIdForWaypoint = getUserTeamIdForMission($missionId, $userId);
+        $waypointRoute = dbFetchOne(
+            "SELECT w.id, r.team_id FROM mission_route_waypoints w
+             JOIN mission_routes r ON r.id = w.route_id
+             WHERE w.id = ? AND r.mission_id = ?",
+            [(int) $routeWaypointIdRaw, $missionId]
+        );
+        if ($waypointRoute && ($canManageWarRoom || (int) $waypointRoute['team_id'] === $myTeamIdForWaypoint)) {
+            $routeWaypointId = (int) $waypointRoute['id'];
+        }
+    }
+
     $photoId = dbInsert(
-        "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, original_name, mime_type, file_size, lat, lng, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $userId, $mediaType, $storedName, $origName, $mime, (int) $file['size'], $lat, $lng]
+        "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, original_name, mime_type, file_size, lat, lng, route_waypoint_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $userId, $mediaType, $storedName, $origName, $mime, (int) $file['size'], $lat, $lng, $routeWaypointId]
     );
-    logAudit('upload_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId, 'media_type' => $mediaType]);
+    logAudit('upload_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId, 'media_type' => $mediaType, 'route_waypoint_id' => $routeWaypointId]);
 
     // Auto-fulfill any outstanding War Room "send a photo/video" orders of this type for this user.
     dbExecute(

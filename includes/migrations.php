@@ -5012,6 +5012,173 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 105,
+            'description' => 'Create the Route Order tables (mission_routes / _waypoints / _progress) — a multi-stop ordered patrol assigned to one team, where each stop carries its own instructions, dwell time and required deliverables. This is the join of what mission_dispatch_points (the "where") and mission_orders (the "what") each did alone, plus sequence and time; both of those stay untouched for their own one-shot uses.',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_routes'"
+                );
+                if (!$table) {
+                    // order_id is the mission_orders row this route rides on: creating a route
+                    // also creates one 'route' order + a recipient row per team member, which is
+                    // what earns the push/banner/"Ελήφθη"/audit plumbing for free. ON DELETE SET
+                    // NULL (not CASCADE) so pruning orders can never silently drop a route's
+                    // waypoint history.
+                    dbExecute(
+                        "CREATE TABLE mission_routes (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            team_id INT UNSIGNED NOT NULL,
+                            order_id INT UNSIGNED NULL,
+                            title VARCHAR(255) NULL,
+                            created_by INT UNSIGNED NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            completed_at TIMESTAMP NULL,
+                            cancelled_at TIMESTAMP NULL,
+                            cancelled_by INT UNSIGNED NULL,
+                            cancel_reason VARCHAR(255) NULL,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE CASCADE,
+                            FOREIGN KEY (order_id) REFERENCES mission_orders(id) ON DELETE SET NULL,
+                            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+                            FOREIGN KEY (cancelled_by) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_route_mission (mission_id, team_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_route_waypoints'"
+                );
+                if (!$table) {
+                    // dwell_minutes NULL is meaningful, not missing data: it's the "μένετε εκεί
+                    // μέχρι νεότερης εντολής" final stop, which has no countdown and doesn't
+                    // auto-close the route. UNIQUE(route_id, seq) is safe because a sent route
+                    // is append-only (new stops take MAX(seq)+1) — see mission-route.php.
+                    dbExecute(
+                        "CREATE TABLE mission_route_waypoints (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            route_id INT UNSIGNED NOT NULL,
+                            seq SMALLINT UNSIGNED NOT NULL,
+                            lat DECIMAL(10,7) NOT NULL,
+                            lng DECIMAL(10,7) NOT NULL,
+                            label VARCHAR(255) NULL,
+                            instructions TEXT NULL,
+                            dwell_minutes SMALLINT UNSIGNED NULL,
+                            require_photo TINYINT(1) NOT NULL DEFAULT 0,
+                            require_video TINYINT(1) NOT NULL DEFAULT 0,
+                            require_note TINYINT(1) NOT NULL DEFAULT 0,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (route_id) REFERENCES mission_routes(id) ON DELETE CASCADE,
+                            UNIQUE KEY uniq_route_seq (route_id, seq)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_route_progress'"
+                );
+                if (!$table) {
+                    // Progress is TEAM state, not per-user: UNIQUE(waypoint_id) means the first
+                    // member to report advances the whole team, and *_by columns record who did.
+                    // (A route belongs to exactly one team, so one waypoint has one progress row.)
+                    // arrived_distance_m is the advisory "you reported arrival 340m from the pin"
+                    // flag — captured, shown to command, never blocking.
+                    // reported_at is the client's own clock for the latest event, stored from day
+                    // one so the phase-2 offline queue can replay a lost POST without a migration.
+                    dbExecute(
+                        "CREATE TABLE mission_route_progress (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            waypoint_id INT UNSIGNED NOT NULL,
+                            route_id INT UNSIGNED NOT NULL,
+                            team_id INT UNSIGNED NOT NULL,
+                            departed_at TIMESTAMP NULL,
+                            departed_by INT UNSIGNED NULL,
+                            arrived_at TIMESTAMP NULL,
+                            arrived_by INT UNSIGNED NULL,
+                            arrived_lat DECIMAL(10,7) NULL,
+                            arrived_lng DECIMAL(10,7) NULL,
+                            arrived_accuracy_m DECIMAL(8,2) NULL,
+                            arrived_distance_m INT UNSIGNED NULL,
+                            completed_at TIMESTAMP NULL,
+                            completed_by INT UNSIGNED NULL,
+                            skipped_at TIMESTAMP NULL,
+                            skipped_by INT UNSIGNED NULL,
+                            skip_reason VARCHAR(255) NULL,
+                            note TEXT NULL,
+                            out_of_sequence TINYINT(1) NOT NULL DEFAULT 0,
+                            reported_at TIMESTAMP NULL,
+                            UNIQUE KEY uniq_waypoint (waypoint_id),
+                            FOREIGN KEY (waypoint_id) REFERENCES mission_route_waypoints(id) ON DELETE CASCADE,
+                            FOREIGN KEY (route_id) REFERENCES mission_routes(id) ON DELETE CASCADE,
+                            FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE CASCADE,
+                            FOREIGN KEY (departed_by) REFERENCES users(id) ON DELETE SET NULL,
+                            FOREIGN KEY (arrived_by) REFERENCES users(id) ON DELETE SET NULL,
+                            FOREIGN KEY (completed_by) REFERENCES users(id) ON DELETE SET NULL,
+                            FOREIGN KEY (skipped_by) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_progress_route (route_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                // A route is an order like any other, so it gets its own order_type rather than
+                // being smuggled in as 'task' — mission-order.php's `complete` action deliberately
+                // only accepts 'task', and a route must not be completable that way (its
+                // fulfilled_at is stamped by the last waypoint closing, in mission-route.php).
+                dbExecute("ALTER TABLE mission_orders MODIFY COLUMN order_type ENUM('location','photo','video','task','message','return_to_base','route') NOT NULL");
+
+                // Ties a field photo/video to the stop it was taken for, so the waypoint card can
+                // show its own thumbnail and the debrief can print deliverables per stop. NULL for
+                // every ordinary (non-route) upload, which is all of them until now.
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_photos' AND COLUMN_NAME = 'route_waypoint_id'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE mission_photos ADD COLUMN route_waypoint_id INT UNSIGNED NULL AFTER lng");
+                    dbExecute("ALTER TABLE mission_photos ADD CONSTRAINT fk_photo_route_waypoint FOREIGN KEY (route_waypoint_id) REFERENCES mission_route_waypoints(id) ON DELETE SET NULL");
+                }
+
+                // Command-staff notifications. The route assignment itself goes out via
+                // createMissionOrderAndNotify() with an empty code (mandatory — an order must
+                // always reach the field), so only these three are configurable.
+                $codes = [
+                    ['mission_route_arrival',   'Άφιξη Ομάδας σε Σημείο Πορείας', 'Μια ομάδα δήλωσε άφιξη σε σημείο της Εντολής Πορείας — ειδοποιεί το επιτελείο (μόνο push/εντός εφαρμογής, όχι email)'],
+                    ['mission_route_skipped',   'Παράλειψη Σημείου Πορείας',      'Ο υπεύθυνος παρέλειψε σημείο της Εντολής Πορείας για μια ομάδα — ειδοποιεί την ομάδα να προχωρήσει (μόνο push/εντός εφαρμογής, όχι email)'],
+                    ['mission_route_completed', 'Ολοκλήρωση Εντολής Πορείας',     'Μια ομάδα ολοκλήρωσε όλα τα σημεία της Εντολής Πορείας — ειδοποιεί το επιτελείο (μόνο push/εντός εφαρμογής, όχι email)'],
+                    ['mission_route_cancelled', 'Ακύρωση Εντολής Πορείας',        'Ο υπεύθυνος ακύρωσε μια Εντολή Πορείας εν εξελίξει — ειδοποιεί την ομάδα να σταματήσει (μόνο push/εντός εφαρμογής, όχι email)'],
+                ];
+                foreach ($codes as [$code, $name, $description]) {
+                    $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = ?", [$code]);
+                    if (!$ns) {
+                        dbInsert(
+                            "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                             VALUES (?, ?, ?, 1, NULL)",
+                            [$code, $name, $description]
+                        );
+                    }
+                }
+            },
+        ],
+
+        [
+            'version'     => 106,
+            'description' => 'Add mission_routes.is_closed_loop — the Route composer\'s "click near the first point to close the shape" gesture (same as the dispatch polygon tool) is purely a map-rendering hint, not an extra waypoint: it never changes what the field team walks (still just seq 1..N in order), only whether the connecting line on the live map draws as a closed loop back to point 1 after the route is sent, matching what the admin saw while drawing it.',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_routes' AND COLUMN_NAME = 'is_closed_loop'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE mission_routes ADD COLUMN is_closed_loop TINYINT(1) NOT NULL DEFAULT 0 AFTER title");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

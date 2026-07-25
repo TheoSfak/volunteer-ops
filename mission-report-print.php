@@ -303,6 +303,18 @@ if (!empty($shortageSummary)) $expectedReady += 2; // shortageSeverity pie + com
 if (!empty($lastPings) || !empty($dispatchGeo) || !empty($photoPoints)) $expectedReady++; // map tiles
 $expectedReady += count($photos); // gallery thumbnails — see the img wireup near the closing script
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. Route Orders — reused via the same loader war-room.php's live panel
+//    uses (loadRoutesForUser()), $canManageWarRoom already confirmed true by
+//    the gate above so this returns every route of the mission, not just the
+//    viewer's own team's. The generic order/activity/photo sections above
+//    already surface a route's *existence* (task_text summary, ack/fulfilled
+//    timestamps) and its individual depart/arrive/complete/skip log lines —
+//    this is the purpose-built per-waypoint table that groups them by route
+//    instead of scattering them across those three sections.
+// ═══════════════════════════════════════════════════════════════════════════
+$routes = loadRoutesForUser($missionId, $userId, true);
+
 $orgName = getSetting('org_name', 'VolunteerOps');
 $appLogo = getSetting('app_logo', '');
 $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLogo);
@@ -408,6 +420,13 @@ $printDate = date('d/m/Y H:i');
         .badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 7.5pt; color: #fff; font-weight: 600; }
         .badge-secondary { background: #6c757d; } .badge-info { background: #0dcaf0; color: #000; }
         .badge-warning { background: #ffc107; color: #000; } .badge-danger { background: #dc3545; }
+        .badge-success { background: #198754; }
+
+        .route-card { border: 1px solid #eee; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; page-break-inside: avoid; }
+        .route-card h3 { display: flex; align-items: center; gap: 8px; }
+        .route-card table { font-size: 7.8pt; }
+        .route-card th, .route-card td { text-align: left; padding: 3px 6px; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+        .route-card .wp-sub { color: #888; font-size: 7pt; }
 
         .media-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
         .media-item { width: 140px; font-size: 7.5pt; text-align: center; page-break-inside: avoid; }
@@ -800,6 +819,64 @@ $printDate = date('d/m/Y H:i');
         <div class="event-row">
             <div><?= $d['type_label'] ?> <strong><?= h($d['team_label']) ?></strong> — <?= h($d['user_name']) ?><?= $d['label'] ? ' («' . h($d['label']) . '»)' : '' ?></div>
             <div class="event-time">Στάλθηκε <?= $d['sent_at'] ?> · Ελήφθη <?= $d['ack_at'] ? $d['ack_at'] . ' (' . $d['ack_minutes'] . ' λεπ.)' : '—' ?> · Ολοκληρώθηκε <?= $d['fulfill_at'] ? $d['fulfill_at'] . ' (' . $d['fulfill_minutes'] . ' λεπ.)' : '—' ?></div>
+        </div>
+        <?php endforeach; ?>
+    <?php endif; ?>
+</div>
+
+<div class="pr-card">
+    <h2>🗺️ Εντολές Πορείας</h2>
+    <?php if (empty($routes)): ?>
+        <p class="pr-empty">Δεν έχουν σταλεί εντολές πορείας σε αυτή την αποστολή.</p>
+    <?php else: ?>
+        <?php foreach ($routes as $route):
+            $statusLabel = $route['status'] === 'completed' ? 'Ολοκληρώθηκε' : ($route['status'] === 'cancelled' ? 'Ακυρώθηκε' : 'Ενεργή');
+            $statusBadge = $route['status'] === 'completed' ? 'success' : ($route['status'] === 'cancelled' ? 'secondary' : 'info');
+        ?>
+        <div class="route-card">
+            <h3>
+                <span><?= h($route['team_label'] ?? 'Χωρίς ομάδα') ?><?= $route['title'] ? ' — ' . h($route['title']) : '' ?></span>
+                <span class="badge badge-<?= $statusBadge ?>"><?= $statusLabel ?></span>
+                <span class="wp-sub">Στάλθηκε από <?= h($route['created_by_name']) ?>, <?= h($route['created_at_display']) ?></span>
+            </h3>
+            <?php if ($route['status'] === 'cancelled' && $route['cancel_reason']): ?>
+                <p class="wp-sub">Λόγος ακύρωσης: <?= h($route['cancel_reason']) ?></p>
+            <?php endif; ?>
+            <table>
+                <thead><tr><th>#</th><th>Σημείο</th><th>Ξεκίνησε</th><th>Έφτασε</th><th>Έκβαση</th><th>Παραδοτέα</th></tr></thead>
+                <tbody>
+                    <?php foreach ($route['waypoints'] as $wp): ?>
+                    <tr>
+                        <td><?= $wp['seq'] ?></td>
+                        <td>
+                            <?= h($wp['label'] ?: ('Σημείο ' . $wp['seq'])) ?>
+                            <?php if ($wp['instructions']): ?><br><span class="wp-sub"><?= h($wp['instructions']) ?></span><?php endif; ?>
+                        </td>
+                        <td><?= $wp['departed_at_display'] ?: '—' ?></td>
+                        <td>
+                            <?= $wp['arrived_at_display'] ?: '—' ?>
+                            <?php if ($wp['arrived_distance_m'] !== null): ?><br><span class="wp-sub">~<?= (int) $wp['arrived_distance_m'] ?>μ. από το σημείο</span><?php endif; ?>
+                        </td>
+                        <td>
+                            <?php if ($wp['skipped_at_display']): ?>
+                                <span class="badge badge-warning">Παραλείφθηκε</span>
+                                <?php if ($wp['skip_reason']): ?><br><span class="wp-sub"><?= h($wp['skip_reason']) ?></span><?php endif; ?>
+                            <?php elseif ($wp['completed_at_display']): ?>
+                                <?= $wp['completed_at_display'] ?>
+                            <?php else: ?>
+                                —
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php if ($wp['require_photo']): ?><?= $wp['photo'] ? '📷✓' : '📷✗' ?><br><?php endif; ?>
+                            <?php if ($wp['require_video']): ?><?= $wp['video'] ? '🎥✓' : '🎥✗' ?><br><?php endif; ?>
+                            <?php if ($wp['require_note']): ?><?= $wp['note'] ? '📝✓' : '📝✗' ?><?php endif; ?>
+                            <?php if ($wp['note']): ?><br><span class="wp-sub">"<?= h($wp['note']) ?>"</span><?php endif; ?>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
         </div>
         <?php endforeach; ?>
     <?php endif; ?>
