@@ -55,7 +55,15 @@ $appLogo = getSetting('app_logo', '');
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
     <style>
         body {
-            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            /* Team photo as backdrop, with the same blue gradient laid on top
+               at partial opacity — dims the photo just enough that the
+               footer text (outside the opaque login card below) stays
+               readable over any part of it, bright sky included, without
+               hiding the photo itself. No background-attachment:fixed —
+               that renders badly on mobile Safari. */
+            background:
+                linear-gradient(135deg, rgba(44,62,80,0.82) 0%, rgba(52,152,219,0.82) 100%),
+                url('assets/images/login-bg.jpg') center/cover no-repeat;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
@@ -65,7 +73,7 @@ $appLogo = getSetting('app_logo', '');
         .login-card {
             background: white;
             border-radius: 1rem;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.35);
             max-width: 400px;
             width: 100%;
         }
