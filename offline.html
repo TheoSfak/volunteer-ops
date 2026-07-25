@@ -22,9 +22,101 @@
             color: #fff;
             padding: 2rem;
         }
+        /* With a field snapshot to show, this stops being a centred splash and
+           becomes a scrollable document. */
+        body.has-snapshot {
+            display: block;
+            padding: 1.25rem 1rem 3rem;
+        }
         .offline-container {
             text-align: center;
             max-width: 480px;
+        }
+        body.has-snapshot .offline-container {
+            max-width: 620px;
+            margin: 0 auto;
+        }
+        body.has-snapshot .offline-icon { font-size: 46px; margin-bottom: .75rem; }
+        body.has-snapshot h1 { font-size: 1.35rem; }
+        body.has-snapshot p { margin-bottom: 1.25rem; font-size: .92rem; }
+
+        .snap { max-width: 620px; margin: 1.5rem auto 0; text-align: left; }
+        .snap-age {
+            background: rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 10px;
+            padding: .55rem .8rem;
+            font-size: .8rem;
+            color: rgba(255, 255, 255, 0.85);
+            margin-bottom: 1rem;
+        }
+        .snap-mission { font-size: 1rem; font-weight: 700; margin-bottom: .15rem; }
+        .snap-mission-loc { font-size: .82rem; color: rgba(255,255,255,.7); margin-bottom: 1rem; }
+        .snap-section-title {
+            font-size: .78rem;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+            color: rgba(255, 255, 255, 0.6);
+            margin: 1.4rem 0 .5rem;
+            font-weight: 700;
+        }
+        .snap-card {
+            background: rgba(255, 255, 255, 0.09);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 12px;
+            padding: .7rem .85rem;
+            margin-bottom: .55rem;
+        }
+        .snap-card.done { opacity: .5; }
+        .snap-wp-head { display: flex; align-items: baseline; gap: .5rem; font-weight: 600; font-size: .95rem; }
+        .snap-seq {
+            background: rgba(255,255,255,.18);
+            border-radius: 6px;
+            padding: .05rem .45rem;
+            font-size: .78rem;
+            font-weight: 700;
+            flex: none;
+        }
+        .snap-note { font-size: .82rem; color: rgba(255,255,255,.78); margin-top: .35rem; line-height: 1.45; }
+        .snap-links { margin-top: .45rem; display: flex; flex-wrap: wrap; gap: .4rem; }
+        .snap-link {
+            display: inline-block;
+            padding: .3rem .7rem;
+            background: rgba(255,255,255,.16);
+            border: 1px solid rgba(255,255,255,.28);
+            border-radius: 8px;
+            color: #fff;
+            text-decoration: none;
+            font-size: .8rem;
+            font-weight: 600;
+        }
+        .snap-contact {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .6rem;
+        }
+        .snap-contact-name { font-size: .9rem; font-weight: 600; }
+        .snap-contact-role { font-size: .76rem; color: rgba(255,255,255,.65); }
+        .snap-call {
+            flex: none;
+            background: #16a34a;
+            border: none;
+            color: #fff;
+            padding: .45rem .95rem;
+            border-radius: 9px;
+            font-size: .85rem;
+            font-weight: 700;
+            text-decoration: none;
+        }
+        .snap-queue {
+            background: rgba(220, 38, 38, .3);
+            border: 1px solid rgba(248, 113, 113, .6);
+            border-radius: 10px;
+            padding: .6rem .8rem;
+            font-size: .84rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
         }
         .offline-icon {
             font-size: 80px;
@@ -88,24 +180,177 @@
 <body>
     <div class="offline-container">
         <div class="offline-icon">📡</div>
-        <h1>Εκτός Σύνδεσης</h1>
-        <p>
+        <h1 id="offTitle">Εκτός Σύνδεσης</h1>
+        <p id="offBody">
             Δεν υπάρχει σύνδεση στο διαδίκτυο αυτή τη στιγμή.
             Ελέγξτε τη σύνδεσή σας και δοκιμάστε ξανά.
         </p>
-        <a href="javascript:location.reload()" class="retry-btn">
+        <a href="javascript:location.reload()" class="retry-btn" id="offRetry">
             🔄 Δοκιμή Ξανά
         </a>
         <div class="status-text">
             <span class="status-dot"></span>
-            VolunteerOps — Αναμονή σύνδεσης...
+            VolunteerOps — <span id="offWaiting">Αναμονή σύνδεσης...</span>
         </div>
     </div>
+
+    <!-- Field snapshot, rendered only when war-room.php has left one behind. -->
+    <div class="snap" id="snap" hidden></div>
+
     <script>
+    (function() {
         // Auto-reload when back online
-        window.addEventListener('online', function() {
-            location.reload();
+        window.addEventListener('online', function() { location.reload(); });
+
+        var STRINGS = {
+            el: {
+                title: 'Εκτός Σύνδεσης — Τα στοιχεία της αποστολής σας',
+                body: 'Δεν υπάρχει σύνδεση. Παρακάτω είναι τα τελευταία στοιχεία που προλάβατε να κατεβάσετε — μπορείτε ακόμα να τηλεφωνήσετε.',
+                waiting: 'Αναμονή σύνδεσης...',
+                savedAt: 'Τελευταία ενημέρωση στοιχείων: {time} ({ago})',
+                stale: '⚠️ Προσοχή: τα στοιχεία είναι παλιά. Μπορεί να έχουν αλλάξει.',
+                route: 'Η Πορεία μου',
+                tasks: 'Οι Εντολές μου',
+                contacts: 'Τηλέφωνα',
+                call: '📞 Κλήση',
+                navigate: '🧭 Πλοήγηση',
+                done: 'Ολοκληρώθηκε',
+                skipped: 'Παραλείφθηκε',
+                arrived: 'Άφιξη',
+                queued_one: 'Εκκρεμεί 1 ενέργεια πεδίου — θα σταλεί μόλις επανέλθει το δίκτυο.',
+                queued: 'Εκκρεμούν {n} ενέργειες πεδίου — θα σταλούν μόλις επανέλθει το δίκτυο.',
+                queuedSos: '🆘 Το SOS σας ΔΕΝ έχει φύγει ακόμα. Τηλεφωνήστε αν μπορείτε.',
+                minutesAgo: 'πριν {n} λεπτά', hoursAgo: 'πριν {n} ώρες', justNow: 'μόλις τώρα'
+            },
+            en: {
+                title: 'Offline — Your mission details',
+                body: 'No connection. Below is the last data you managed to download — you can still make phone calls.',
+                waiting: 'Waiting for connection...',
+                savedAt: 'Data last updated: {time} ({ago})',
+                stale: '⚠️ Warning: this data is old and may have changed.',
+                route: 'My Route',
+                tasks: 'My Orders',
+                contacts: 'Phone numbers',
+                call: '📞 Call',
+                navigate: '🧭 Navigate',
+                done: 'Completed',
+                skipped: 'Skipped',
+                arrived: 'Arrived',
+                queued_one: '1 field action pending — will send once the network returns.',
+                queued: '{n} field actions pending — will send once the network returns.',
+                queuedSos: '🆘 Your SOS has NOT been sent yet. Call if you can.',
+                minutesAgo: '{n} minutes ago', hoursAgo: '{n} hours ago', justNow: 'just now'
+            }
+        };
+
+        function esc(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        var snapshot = null;
+        try { snapshot = JSON.parse(localStorage.getItem('wr_field_snapshot') || 'null'); } catch (e) {}
+        if (!snapshot || !snapshot.mission) return;
+
+        var T = STRINGS[snapshot.lang] || STRINGS.el;
+        function t(key, vars) {
+            var s = T[key] || key;
+            for (var k in (vars || {})) s = s.split('{' + k + '}').join(vars[k]);
+            return s;
+        }
+
+        var ageMs = Date.now() - (snapshot.savedAt || 0);
+        var ageMin = Math.round(ageMs / 60000);
+        var ago = ageMin < 1 ? t('justNow')
+                : ageMin < 60 ? t('minutesAgo', {n: ageMin})
+                : t('hoursAgo', {n: Math.round(ageMin / 60)});
+        var savedDate = new Date(snapshot.savedAt || Date.now());
+        var hhmm = ('0' + savedDate.getHours()).slice(-2) + ':' + ('0' + savedDate.getMinutes()).slice(-2);
+
+        var html = '';
+
+        // Anything the volunteer tapped that hasn't reached the server yet is
+        // the most urgent thing on this page, so it goes first.
+        var queue = [];
+        try {
+            queue = JSON.parse(localStorage.getItem('wr_offline_queue_' + snapshot.mission.id) || '[]');
+        } catch (e) {}
+        if (queue.length) {
+            var hasSos = queue.some(function(i) { return i.kind === 'status' && i.status === 'needs_help'; });
+            var queuedText = queue.length === 1 ? t('queued_one') : t('queued', {n: queue.length});
+            html += '<div class="snap-queue">' + esc(queuedText);
+            if (hasSos) html += '<div style="margin-top:.35rem;">' + esc(t('queuedSos')) + '</div>';
+            html += '</div>';
+        }
+
+        html += '<div class="snap-age">' + esc(t('savedAt', {time: hhmm, ago: ago}));
+        if (ageMs > 30 * 60000) html += '<div style="margin-top:.3rem;">' + esc(t('stale')) + '</div>';
+        html += '</div>';
+
+        html += '<div class="snap-mission">' + esc(snapshot.mission.title) + '</div>';
+        if (snapshot.mission.location) {
+            html += '<div class="snap-mission-loc">📍 ' + esc(snapshot.mission.location) + '</div>';
+        }
+
+        (snapshot.routes || []).forEach(function(route) {
+            html += '<div class="snap-section-title">' + esc(t('route'));
+            if (route.title) html += ' — ' + esc(route.title);
+            html += '</div>';
+            (route.waypoints || []).forEach(function(wp) {
+                // skipped has no raw field client-side, only *_display
+                var closed = wp.completed_at || wp.skipped_at_display;
+                html += '<div class="snap-card' + (closed ? ' done' : '') + '">';
+                html += '<div class="snap-wp-head"><span class="snap-seq">' + esc(wp.seq) + '</span>'
+                     +  '<span>' + esc(wp.label || '') + '</span></div>';
+                if (wp.instructions) html += '<div class="snap-note">' + esc(wp.instructions) + '</div>';
+                var state = wp.completed_at ? t('done') : wp.skipped_at_display ? t('skipped') : wp.arrived_at ? t('arrived') : '';
+                if (state) html += '<div class="snap-note">✔ ' + esc(state) + '</div>';
+                if (wp.lat && wp.lng) {
+                    // geo: is handled by the phone's own map app and works with
+                    // offline maps; the https link is the fallback for later.
+                    html += '<div class="snap-links">'
+                         +  '<a class="snap-link" href="geo:' + esc(wp.lat) + ',' + esc(wp.lng) + '">' + esc(t('navigate')) + '</a>'
+                         +  '<span class="snap-link">' + esc(Number(wp.lat).toFixed(5)) + ', ' + esc(Number(wp.lng).toFixed(5)) + '</span>'
+                         +  '</div>';
+                }
+                html += '</div>';
+            });
         });
+
+        if ((snapshot.tasks || []).length) {
+            html += '<div class="snap-section-title">' + esc(t('tasks')) + '</div>';
+            snapshot.tasks.forEach(function(task) {
+                // Shape comes from loadMyTaskOrdersForUser(): task_text/sent_at,
+                // not title/body.
+                html += '<div class="snap-card"><div class="snap-note" style="margin-top:0;">'
+                     +  esc(task.task_text || '') + '</div>';
+                if (task.sent_at) {
+                    html += '<div class="snap-contact-role" style="margin-top:.3rem;">' + esc(task.sent_at) + '</div>';
+                }
+                html += '</div>';
+            });
+        }
+
+        if ((snapshot.contacts || []).length) {
+            html += '<div class="snap-section-title">' + esc(t('contacts')) + '</div>';
+            snapshot.contacts.forEach(function(c) {
+                html += '<div class="snap-card snap-contact">'
+                     +  '<div><div class="snap-contact-name">' + esc(c.name) + '</div>'
+                     +  (c.role ? '<div class="snap-contact-role">' + esc(c.role) + '</div>' : '')
+                     +  '</div>'
+                     +  '<a class="snap-call" href="tel:' + esc(String(c.phone).replace(/[^\d+]/g, '')) + '">' + esc(t('call')) + '</a>'
+                     +  '</div>';
+            });
+        }
+
+        document.getElementById('snap').innerHTML = html;
+        document.getElementById('snap').hidden = false;
+        document.body.classList.add('has-snapshot');
+        document.getElementById('offTitle').textContent = t('title');
+        document.getElementById('offBody').textContent = t('body');
+        document.getElementById('offWaiting').textContent = t('waiting');
+    })();
     </script>
 </body>
 </html>

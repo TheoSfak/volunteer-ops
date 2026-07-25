@@ -25,6 +25,11 @@ return [
         'common.close' => 'Κλείσιμο',
         'common.edit' => 'Επεξεργασία',
         'common.updated_label' => 'Ενημέρωση:',
+        // Live-data staleness banner
+        'poll.stale_title' => 'Τα στοιχεία δεν ανανεώνονται — ό,τι βλέπετε είναι {age}.',
+        'poll.stale_help' => 'Χάρτης, στίγματα και ειδοποιήσεις μπορεί να έχουν αλλάξει. Ελέγξτε τη σύνδεσή σας.',
+        'poll.stale_seconds' => 'από πριν {n} δευτερόλεπτα',
+        'poll.stale_minutes' => 'από πριν {n} λεπτά',
         'common.all_teams' => 'Όλες οι ομάδες',
         'common.online' => 'Online',
         'common.offline' => 'Offline',
@@ -210,6 +215,8 @@ return [
         'status.self_on_site' => '✅ Επί Τόπου',
         'status.self_sos' => '🆘 SOS',
         'status.self_none' => '— Χωρίς κατάσταση',
+        'status.queued_pending' => '{status} — σε αναμονή αποστολής (εκτός σύνδεσης)',
+        'status.sos_queued_alert' => '⚠️ ΠΡΟΣΟΧΗ: Δεν υπάρχει σύνδεση. Το SOS αποθηκεύτηκε και θα σταλεί αυτόματα μόλις επανέλθει το δίκτυο, με την πραγματική ώρα που το πατήσατε. ΔΕΝ έχει ειδοποιηθεί ακόμα το κέντρο επιχειρήσεων — αν μπορείτε, καλέστε τηλεφωνικά.',
 
         // My tasks
         'mytasks.panel_title' => 'Οι Εντολές μου',
@@ -372,8 +379,11 @@ return [
         'route.distance_accuracy_suffix' => '(±{accuracy}μ. ακρίβεια GPS)',
         'route.move_up_title' => 'Μετακίνηση πάνω',
         'route.move_down_title' => 'Μετακίνηση κάτω',
-        'route.queue_pending' => 'Εκκρεμούν {count} ενέργειες πορείας — θα σταλούν αυτόματα μόλις επανέλθει το δίκτυο.',
-        'route.queue_failed' => 'Μια ενέργεια πορείας απέτυχε οριστικά: {error}',
+        // Offline queue (route actions + field status/SOS)
+        'queue.pending_one' => 'Εκκρεμεί 1 ενέργεια πεδίου — θα σταλεί αυτόματα μόλις επανέλθει το δίκτυο.',
+        'queue.pending' => 'Εκκρεμούν {count} ενέργειες πεδίου — θα σταλούν αυτόματα μόλις επανέλθει το δίκτυο.',
+        'queue.failed' => 'Μια ενέργεια πεδίου απέτυχε οριστικά: {error}',
+        'queue.sos_pending' => 'Το SOS σας ΔΕΝ έχει φτάσει ακόμα στο κέντρο επιχειρήσεων. Αν μπορείτε, ειδοποιήστε και τηλεφωνικά.',
         'shortage.empty_list' => 'Δεν υπάρχουν ανοιχτές αναφορές έλλειψης.',
         'shortage.seen_at_prefix' => ' · Είδατε: {time}',
         'shortage.resolve_btn' => 'Λύθηκε',
@@ -713,6 +723,11 @@ return [
         'common.close' => 'Close',
         'common.edit' => 'Edit',
         'common.updated_label' => 'Updated:',
+        // Live-data staleness banner
+        'poll.stale_title' => 'Data is not refreshing — what you see is {age}.',
+        'poll.stale_help' => 'Map, positions and alerts may have changed. Check your connection.',
+        'poll.stale_seconds' => '{n} seconds old',
+        'poll.stale_minutes' => '{n} minutes old',
         'common.all_teams' => 'All teams',
         'common.online' => 'Online',
         'common.offline' => 'Offline',
@@ -882,6 +897,8 @@ return [
         'status.self_on_site' => '✅ On site',
         'status.self_sos' => '🆘 SOS',
         'status.self_none' => '— No status',
+        'status.queued_pending' => '{status} — waiting to be sent (offline)',
+        'status.sos_queued_alert' => '⚠️ WARNING: No connection. Your SOS has been saved and will be sent automatically once the network returns, stamped with the time you actually pressed it. The operations centre has NOT been alerted yet — if you can, call them.',
 
         'mytasks.panel_title' => 'My Tasks',
 
@@ -1034,8 +1051,11 @@ return [
         'route.distance_accuracy_suffix' => '(±{accuracy}m GPS accuracy)',
         'route.move_up_title' => 'Move up',
         'route.move_down_title' => 'Move down',
-        'route.queue_pending' => '{count} route action(s) pending — will send automatically once the connection returns.',
-        'route.queue_failed' => 'A route action permanently failed: {error}',
+        // Offline queue (route actions + field status/SOS)
+        'queue.pending_one' => '1 field action pending — will send automatically once the connection returns.',
+        'queue.pending' => '{count} field actions pending — will send automatically once the connection returns.',
+        'queue.failed' => 'A field action permanently failed: {error}',
+        'queue.sos_pending' => 'Your SOS has NOT reached the operations centre yet. If you can, call them as well.',
         'shortage.empty_list' => 'There are no open shortage reports.',
         'shortage.seen_at_prefix' => ' · Seen: {time}',
         'shortage.resolve_btn' => 'Resolved',

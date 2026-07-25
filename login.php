@@ -160,6 +160,17 @@ $appLogo = getSetting('app_logo', '');
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
+    <script>
+    // Reaching the login page means nobody is signed in on this device, so the
+    // Action Room's offline field snapshot (teammates' names and phone
+    // numbers, waypoint addresses) must not survive here — a shared or lost
+    // phone would otherwise keep showing it to whoever opens the app next.
+    // The pending-action queues are deliberately NOT touched: those are
+    // unsent field reports, they carry no roster data, and a volunteer whose
+    // session merely expired mid-mission must not lose them by landing here.
+    try { localStorage.removeItem('wr_field_snapshot'); } catch (e) {}
+    </script>
+
     <footer class="text-center mt-4 pb-3" style="color:rgba(255,255,255,0.7);font-size:0.82rem">
         <div>&copy; <?= date('Y') ?> <?= h($appName) ?>. Με επιφύλαξη παντός δικαιώματος.</div>
         <div class="mt-1">Made with <span style="color:#e74c3c">&hearts;</span> by <strong>Theodore Sfakianakis</strong> &bull; Powered by <a href="https://activeweb.gr" target="_blank" rel="noopener" style="color:rgba(255,255,255,0.85)">ActiveWeb</a></div>

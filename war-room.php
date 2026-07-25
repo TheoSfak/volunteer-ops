@@ -759,11 +759,13 @@ foreach ($teamRows as $row) {
 
 $teamLabelByUserId = [];
 $teamColorByUserId = [];
+$teamIdByUserId = [];
 foreach ($teams as $team) {
     $label = teamLabel($team['codename'], $team['team_number']);
     foreach ($team['members'] as $member) {
         $teamLabelByUserId[$member['user_id']] = $label;
         $teamColorByUserId[$member['user_id']] = $team['color'];
+        $teamIdByUserId[$member['user_id']] = $team['id'];
     }
 }
 
@@ -791,6 +793,43 @@ foreach ($teams as $team) {
 $chatTeams = $canManageWarRoom
     ? array_values($teams)
     : array_values(array_filter($teams, fn($t) => $t['id'] === $myTeamId));
+
+// ── Offline field snapshot: contacts ────────────────────────────────────────
+// A phone call is the one channel that usually still works when data does
+// not, so the offline fallback page (offline.html) shows tappable tel: links
+// rather than only a "no connection" message. Scope mirrors what the viewer
+// can already see on this page: a regular member gets their own team, command
+// staff — who may genuinely need to reach anyone — get every participant.
+// The mission's responsible user is always first, since they're who you call
+// when something has gone wrong.
+$offlineContacts = [];
+$seenContactIds = [];
+if (!empty($mission['responsible_user_id'])) {
+    $responsible = dbFetchOne("SELECT id, name, phone FROM users WHERE id = ?", [(int) $mission['responsible_user_id']]);
+    if ($responsible && !empty($responsible['phone']) && (int) $responsible['id'] !== (int) $user['id']) {
+        $seenContactIds[(int) $responsible['id']] = true;
+        $offlineContacts[] = [
+            'name'  => $responsible['name'],
+            'phone' => $responsible['phone'],
+            'role'  => t('offline.contact_responsible'),
+        ];
+    }
+}
+foreach ($participants as $participant) {
+    $vid = (int) $participant['volunteer_id'];
+    if ($vid === (int) $user['id'] || isset($seenContactIds[$vid]) || empty($participant['phone'])) {
+        continue;
+    }
+    if (!$canManageWarRoom && (!$myTeamId || ($teamIdByUserId[$vid] ?? null) !== $myTeamId)) {
+        continue;
+    }
+    $seenContactIds[$vid] = true;
+    $offlineContacts[] = [
+        'name'  => $participant['name'],
+        'phone' => $participant['phone'],
+        'role'  => $teamLabelByUserId[$vid] ?? '',
+    ];
+}
 
 $pageTitle = 'Action Room — ' . $mission['title'];
 $currentPage = 'war-room';
@@ -911,6 +950,15 @@ include __DIR__ . '/includes/header.php';
      incoming alert), this is command->field, so every approved participant
      needs the element regardless of $canManageWarRoom. -->
 <div id="returnToBaseOverlay"></div>
+
+<!-- Live-data staleness. The footer's generic offline bar only reacts to
+     navigator.onLine, which stays true for the genuinely dangerous cases: a
+     captive portal, a dropped VPN, Apache down, a phone holding a useless
+     bar of signal. In all of those the 5s poll below was failing into a bare
+     .catch(() => {}) while the map kept showing pins frozen minutes ago with
+     nothing on screen saying so — on an ops console that is worse than an
+     obvious error. -->
+<div id="pollStaleBanner" class="alert alert-warning d-flex align-items-center gap-2 py-2 px-3 mb-3 d-none" role="status" aria-live="polite"></div>
 
 <?php if (!$fieldMode): ?>
 <div class="row g-4 mb-4">
@@ -1218,6 +1266,13 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
 
     <div class="<?= $fieldMode ? 'col-lg-6 mx-auto' : 'col-lg-4' ?>">
+        <!-- Offline queue status. Sits above every field card rather than inside
+             the Route Order one (where it used to live) because the queue now
+             also carries field-status/SOS taps, which are reported from the
+             card below and can happen on a mission with no route at all. -->
+        <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
+        <div id="offlineQueueFailures"></div>
+
         <div class="card shadow-sm mb-4 border-primary">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-geo-alt-fill me-1"></i><?= t('myping.panel_title') ?></h5></div>
             <div class="card-body">
@@ -1248,8 +1303,6 @@ include __DIR__ . '/includes/header.php';
         <div class="card shadow-sm mb-4 border-primary">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-signpost-split-fill me-1"></i><?= t('route.my_panel_title') ?></h5></div>
             <div class="card-body">
-                <div id="routeQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
-                <div id="routeQueueFailures"></div>
                 <div id="myRoutesList"><p class="text-muted mb-0"><?= t('route.my_empty') ?></p></div>
             </div>
         </div>
@@ -2328,59 +2381,103 @@ function postRouteAction(action, id, extra) {
     // displaying it.
 }
 
-// ── Offline queue (field depart/arrive/complete only — see mission-route.php's
-// resolveEventTimestamp()) ───────────────────────────────────────────────────
+// ── Offline queue (field reports only) ──────────────────────────────────────
 // A team member losing signal mid-mission must never just lose the tap: it's
 // queued locally and replayed once connectivity returns, with the server
 // recording the *actual* field time (reported_at) rather than whenever the
-// network happened to come back. Desk-side admin actions (cancel/skip/
-// edit_waypoint/create) deliberately do NOT go through this — they're not
-// the ones losing signal in the field, and postRouteAction's own networkError
-// already surfaces a clear error for them same as before.
-const ROUTE_QUEUE_KEY = 'wr_route_queue_<?= $missionId ?>';
+// network happened to come back — see resolveEventTimestamp() in
+// includes/functions.php, which both replayed endpoints share.
+//
+// Two kinds ride this queue:
+//   kind:'route'  → mission-route.php  (depart/arrive/complete)
+//   kind:'status' → volunteer-status.php (on_way/on_site/needs_help, i.e. SOS)
+//
+// Desk-side admin actions (cancel/skip/edit_waypoint/create, SOS acknowledge/
+// resolve) deliberately do NOT go through this — they're not the ones losing
+// signal in the field, and their own networkError already surfaces a clear
+// error for them same as before.
+const OFFLINE_QUEUE_KEY = 'wr_offline_queue_<?= $missionId ?>';
+const LEGACY_ROUTE_QUEUE_KEY = 'wr_route_queue_<?= $missionId ?>';
 
-function loadRouteQueue() {
-    try { return JSON.parse(localStorage.getItem(ROUTE_QUEUE_KEY) || '[]'); } catch (e) { return []; }
+function loadQueue() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) { return []; }
 }
-function saveRouteQueue(queue) {
-    try { localStorage.setItem(ROUTE_QUEUE_KEY, JSON.stringify(queue)); } catch (e) {}
-}
-function enqueueRouteAction(action, id, extra) {
-    const queue = loadRouteQueue();
-    queue.push({action, id: String(id), extra: extra || {}});
-    saveRouteQueue(queue);
-    renderRouteQueueStatus();
+function saveQueue(queue) {
+    try { localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue)); } catch (e) {}
 }
 
-function renderRouteQueueStatus() {
-    const el = document.getElementById('routeQueueBanner');
+// Before this release the queue was route-only, under its own key, with no
+// `kind` field. A phone can still be carrying items from its last session —
+// adopting them beats orphaning real field reports, so they're folded in
+// (tagged as what they always were) and the old key is retired.
+(function migrateLegacyRouteQueue() {
+    let legacy;
+    try { legacy = JSON.parse(localStorage.getItem(LEGACY_ROUTE_QUEUE_KEY) || '[]'); } catch (e) { legacy = []; }
+    if (!Array.isArray(legacy) || !legacy.length) {
+        try { localStorage.removeItem(LEGACY_ROUTE_QUEUE_KEY); } catch (e) {}
+        return;
+    }
+    saveQueue(loadQueue().concat(legacy.map(item => Object.assign({kind: 'route'}, item))));
+    try { localStorage.removeItem(LEGACY_ROUTE_QUEUE_KEY); } catch (e) {}
+})();
+
+function enqueueAction(item) {
+    const queue = loadQueue();
+    // Someone who needs help taps SOS again, and again, and again — that must
+    // not become five identical queued alerts all replaying at once. An
+    // already-queued identical status is left exactly as it is rather than
+    // replaced, so the queued reported_at stays the moment help was FIRST
+    // asked for, which is the time command staff needs to see. Different
+    // statuses for the same person are never collapsed: on_way → needs_help
+    // → on_site is a real sequence and replays in order.
+    if (item.kind === 'status' &&
+        queue.some(q => q.kind === 'status' && q.prId === item.prId && q.status === item.status)) {
+        renderQueueStatus();
+        return;
+    }
+    queue.push(item);
+    saveQueue(queue);
+    renderQueueStatus();
+}
+
+function renderQueueStatus() {
+    const el = document.getElementById('offlineQueueBanner');
     if (!el) return;
-    const count = loadRouteQueue().length;
-    if (!count) { el.classList.add('d-none'); el.innerHTML = ''; return; }
+    const queue = loadQueue();
+    if (!queue.length) { el.classList.add('d-none'); el.innerHTML = ''; return; }
     el.classList.remove('d-none');
-    el.innerHTML = `<i class="bi bi-wifi-off me-1"></i>${t('route.queue_pending', {count})}`;
+    // An SOS sitting in the queue is a different situation from a pending
+    // arrival and gets said out loud, not folded into a generic count.
+    const sosPending = queue.some(item => item.kind === 'status' && item.status === 'needs_help');
+    el.className = 'alert py-1 px-2 small mb-2 ' + (sosPending ? 'alert-danger' : 'alert-warning');
+    const pendingText = queue.length === 1 ? t('queue.pending_one') : t('queue.pending', {count: queue.length});
+    el.innerHTML = `<i class="bi bi-wifi-off me-1"></i>${pendingText}` +
+        (sosPending ? `<div class="fw-bold mt-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>${t('queue.sos_pending')}</div>` : '');
 }
 
 // In-memory only (not localStorage) — a permanent failure should be seen and
 // dismissed in the session it happened, not resurface as a stale warning
 // after a later, unrelated reload.
-let routeQueueFailures = [];
-function showRouteQueueFailureNotice(error) {
-    routeQueueFailures.push(error || t('common.failed'));
-    renderRouteQueueFailures();
+let queueFailures = [];
+function showQueueFailureNotice(error) {
+    queueFailures.push(error || t('common.failed'));
+    renderQueueFailures();
 }
-function renderRouteQueueFailures() {
-    const el = document.getElementById('routeQueueFailures');
+function renderQueueFailures() {
+    const el = document.getElementById('offlineQueueFailures');
     if (!el) return;
-    el.innerHTML = routeQueueFailures.map((error, i) => `
+    el.innerHTML = queueFailures.map((error, i) => `
         <div class="alert alert-danger py-1 px-2 small mb-1 d-flex justify-content-between align-items-center">
-            <span><i class="bi bi-exclamation-triangle-fill me-1"></i>${t('route.queue_failed', {error: escapeHtml(error)})}</span>
-            <button type="button" class="btn-close route-queue-dismiss" style="font-size:.65rem;" data-i="${i}"></button>
+            <span><i class="bi bi-exclamation-triangle-fill me-1"></i>${t('queue.failed', {error: escapeHtml(error)})}</span>
+            <button type="button" class="btn-close offline-queue-dismiss" style="font-size:.65rem;" data-i="${i}"></button>
         </div>
     `).join('');
-    el.querySelectorAll('.route-queue-dismiss').forEach(btn => btn.addEventListener('click', () => {
-        routeQueueFailures.splice(+btn.dataset.i, 1);
-        renderRouteQueueFailures();
+    el.querySelectorAll('.offline-queue-dismiss').forEach(btn => btn.addEventListener('click', () => {
+        queueFailures.splice(+btn.dataset.i, 1);
+        renderQueueFailures();
     }));
 }
 
@@ -2391,47 +2488,157 @@ function renderRouteQueueFailures() {
 function postRouteActionQueueable(action, id, extra) {
     const payload = Object.assign({}, extra || {}, {reported_at: new Date().toISOString()});
     return postRouteAction(action, id, payload).then(result => {
-        if (result && result.networkError) {
-            enqueueRouteAction(action, id, payload);
+        if (!result || result.networkError) {
+            enqueueAction({kind: 'route', action, id: String(id), extra: payload});
             return {ok: true, queued: true};
         }
         return result;
     });
 }
 
-let routeQueueFlushInFlight = false;
-function flushRouteQueue() {
-    if (routeQueueFlushInFlight) return;
-    const queue = loadRouteQueue();
-    if (!queue.length) return;
-    routeQueueFlushInFlight = true;
-    const item = queue[0];
+function sendQueuedItem(item) {
+    if (item.kind === 'status') {
+        return postFieldStatus(item.prId, item.status, item.extra || {}).then(result => {
+            // markFieldStatusQueued() left the badge saying "not sent yet".
+            // Nothing else on this page re-renders that badge, so replace it
+            // here with what the server actually recorded — otherwise a
+            // delivered status would keep claiming it was still pending.
+            if (result && result.ok && result.label) {
+                const badge = document.getElementById('statusBadge-' + item.prId);
+                if (badge) badge.textContent = result.label;
+            }
+            return result;
+        });
+    }
     // Auto-confirm out-of-sequence on every replay, no popup: the volunteer
     // already expressed clear intent by tapping the button once, in the
     // field — a queued retry has no user present to re-ask, and asking them
     // to remember "was that out of sequence?" after the fact adds confusion,
     // not safety. If it's not actually out of sequence this is simply unused.
-    const extra = Object.assign({}, item.extra, {confirm_out_of_sequence: '1'});
-    postRouteAction(item.action, item.id, extra).then(result => {
-        if (result && result.networkError) {
-            return; // still offline — leave it queued, next timer/online event retries
-        }
+    return postRouteAction(item.action, item.id, Object.assign({}, item.extra, {confirm_out_of_sequence: '1'}));
+}
+
+// The queue lives in localStorage, which is shared by every tab on this
+// origin — so `queueFlushInFlight` alone (a per-page variable) does not stop
+// two open Action Room tabs from replaying the SAME queued item at the same
+// moment. Seen for real in testing: one queued SOS produced two simultaneous
+// POSTs and two audit rows, saved from becoming two alerts only by the
+// server's duplicate guard. This lock is cross-tab. It carries a timestamp
+// rather than a bare flag so a tab that dies mid-flush (phone kills the
+// browser — the exact scenario this whole feature exists for) can't wedge the
+// queue shut forever.
+const QUEUE_LOCK_KEY = 'wr_queue_lock_<?= $missionId ?>';
+const QUEUE_LOCK_TTL_MS = 30000;
+
+function acquireQueueLock() {
+    try {
+        const held = parseInt(localStorage.getItem(QUEUE_LOCK_KEY) || '0', 10);
+        if (held && Date.now() - held < QUEUE_LOCK_TTL_MS) return false;
+        localStorage.setItem(QUEUE_LOCK_KEY, String(Date.now()));
+        return true;
+    } catch (e) {
+        return true; // storage unavailable — better to send twice than never
+    }
+}
+function releaseQueueLock() {
+    try { localStorage.removeItem(QUEUE_LOCK_KEY); } catch (e) {}
+}
+
+let queueFlushInFlight = false;
+function flushQueue() {
+    if (queueFlushInFlight) return;
+    const queue = loadQueue();
+    if (!queue.length) return;
+    if (!acquireQueueLock()) return; // another tab is already sending this
+    queueFlushInFlight = true;
+    const item = queue[0];
+    let progressed = false;
+    sendQueuedItem(item).then(result => {
+        // Two retryable outcomes, both of which must LEAVE the item queued:
+        //   networkError → still no signal
+        //   null         → checkSessionAlive() saw a redirect to login, i.e.
+        //                  the session expired while this device was offline
+        // The second used to fall through to the drop below, which silently
+        // destroyed genuine field reports (including an SOS) after exactly
+        // the kind of long outage the queue exists for. It now survives until
+        // the volunteer logs back in and the next flush carries it through.
+        if (!result || result.networkError) return;
+        progressed = true;
         // Either it succeeded, or it came back with a real, permanent server
         // error (e.g. the route was cancelled while this volunteer was
         // offline) — retrying won't fix the latter either, so either way this
         // item is done: drop it and move to the next queued one.
-        saveRouteQueue(loadRouteQueue().slice(1));
-        renderRouteQueueStatus();
-        if (!result || !result.ok) {
-            showRouteQueueFailureNotice(result ? result.error : t('common.failed'));
+        saveQueue(loadQueue().slice(1));
+        renderQueueStatus();
+        if (!result.ok) {
+            showQueueFailureNotice(result.error);
         }
     }).finally(() => {
-        routeQueueFlushInFlight = false;
-        if (loadRouteQueue().length) setTimeout(flushRouteQueue, 500);
+        queueFlushInFlight = false;
+        releaseQueueLock();
+        // Only chain straight into the next item when this one actually
+        // cleared. Without that guard a stuck head (offline, or an expired
+        // session) would re-fire every 500ms forever instead of waiting for
+        // the 15s timer / the next `online` event.
+        if (progressed && loadQueue().length) setTimeout(flushQueue, 500);
     });
 }
-window.addEventListener('online', flushRouteQueue);
-setInterval(flushRouteQueue, 15000);
+window.addEventListener('online', flushQueue);
+setInterval(flushQueue, 15000);
+
+// ── Offline field snapshot ──────────────────────────────────────────────────
+// The queue above saves what the volunteer *sends*. This saves what they need
+// to *read*: reload the page (or have the OS kill the tab, which it will over
+// a multi-hour mission) with no signal and every .php request falls back to
+// offline.html — previously a bare "no connection" screen, so the volunteer
+// lost even the address of their next waypoint. offline.html now reads this
+// snapshot and renders the route, the orders, and tappable phone numbers.
+//
+// localStorage, not the Cache API: offline.html is a static file served by the
+// service worker, which cannot read a cached authenticated PHP response, but
+// it CAN read same-origin localStorage from the page context.
+const SNAPSHOT_KEY = 'wr_field_snapshot';
+const OFFLINE_CONTACTS = <?= json_encode($offlineContacts, JSON_UNESCAPED_UNICODE) ?>;
+const SNAPSHOT_MISSION = <?= json_encode(['id' => $missionId, 'title' => $mission['title'], 'location' => $mission['location'] ?? ''], JSON_UNESCAPED_UNICODE) ?>;
+const SNAPSHOT_LANG = <?= json_encode($__viewerLang) ?>;
+
+let lastSnapshotSignature = '';
+function saveFieldSnapshot() {
+    // Cancelled routes are noise on a screen someone is reading in the field,
+    // and only my own team's routes belong on a phone at all — command staff
+    // load every team's, and copying all of them into offline storage is both
+    // clutter and needless exposure of other teams' movements. A viewer with
+    // no team of their own (desk-side command staff) still gets the active
+    // ones, since an empty snapshot would help nobody.
+    //
+    // NOTE: the client-side route shape has no `cancelled_at` — the server
+    // collapses it into `status` ('active'|'completed'|'cancelled') and only
+    // ships `cancelled_at_display`. Filtering on `cancelled_at` here silently
+    // matched everything (undefined is falsy); caught by inspecting the real
+    // payload in the browser rather than by reading the query.
+    const activeRoutes = routes.filter(r => r.status !== 'cancelled');
+    const myTeamRoutes = activeRoutes.filter(r => r.is_my_team);
+    const snapRoutes = myTeamRoutes.length ? myTeamRoutes : activeRoutes;
+    const signature = JSON.stringify([snapRoutes, myTasks]);
+    if (signature === lastSnapshotSignature) return;
+    lastSnapshotSignature = signature;
+    try {
+        localStorage.setItem(SNAPSHOT_KEY, JSON.stringify({
+            savedAt: Date.now(),
+            lang: SNAPSHOT_LANG,
+            mission: SNAPSHOT_MISSION,
+            routes: snapRoutes,
+            tasks: myTasks,
+            contacts: OFFLINE_CONTACTS
+        }));
+    } catch (e) {
+        // Quota exceeded on a phone with a full origin: the snapshot is a
+        // nice-to-have, the queue in the same storage is not. Drop the
+        // snapshot rather than let a failed write bubble anywhere near the
+        // field-report path.
+        try { localStorage.removeItem(SNAPSHOT_KEY); } catch (e2) {}
+    }
+}
 
 // Shared by depart/arrive/complete: on a needs_confirm response, ask once and
 // replay the exact same call with confirm_out_of_sequence=1. The primary path
@@ -2870,8 +3077,9 @@ setTimeout(() => {
     // Anything still queued from a previous visit (closed the tab while
     // offline, reopened later) — the banner reflects it immediately, and a
     // flush is attempted right away rather than waiting for the first 15s tick.
-    renderRouteQueueStatus();
-    flushRouteQueue();
+    renderQueueStatus();
+    flushQueue();
+    saveFieldSnapshot();
 }, 200);
 
 let bannerAfterId = <?= $bannerSinceId ?>;
@@ -3400,14 +3608,51 @@ document.addEventListener('visibilitychange', () => {
     );
 });
 
+const FIELD_STATUS_LABEL_KEYS = {on_way: 'status.self_on_way', on_site: 'status.self_on_site', needs_help: 'status.self_sos'};
+
+// Same contract as postRouteAction(): resolves to the server's JSON, to
+// {networkError:true} when the server is unreachable, or to null when
+// checkSessionAlive() spotted a redirect to login. The queue below relies on
+// being able to tell those three apart.
+function postFieldStatus(prId, status, extra) {
+    const params = Object.assign({csrf_token: csrfToken, pr_id: prId, status: status}, extra || {});
+    return fetch('volunteer-status.php', {method: 'POST', body: new URLSearchParams(params)}).then(response => {
+        if (!checkSessionAlive(response)) return null;
+        return response.json();
+    }).catch(() => ({ok: false, error: t('common.network_error'), networkError: true}));
+}
+
+// Shows the truth while a status tap waits in the queue: NOT "you are now
+// on site", but "this hasn't reached command yet". Overwritten by the real
+// label as soon as the replay succeeds and the next poll re-renders.
+function markFieldStatusQueued(prId, status) {
+    const badge = document.getElementById('statusBadge-' + prId);
+    if (!badge) return;
+    const label = t(FIELD_STATUS_LABEL_KEYS[status] || 'status.badge_none');
+    badge.innerHTML = `<span class="text-danger fw-semibold"><i class="bi bi-clock-history me-1"></i>${escapeHtml(t('status.queued_pending', {status: label}))}</span>`;
+}
+
 function setFieldStatus(btn, prId, status) {
     const group = document.getElementById('statusBtns-' + prId);
     if (group) group.querySelectorAll('button').forEach(b => b.disabled = true);
 
     const send = (lat, lng) => {
-        const params = {csrf_token: csrfToken, pr_id: prId, status: status};
-        if (lat !== null) { params.lat = lat; params.lng = lng; }
-        fetch('volunteer-status.php', {method: 'POST', body: new URLSearchParams(params)}).then(r => r.json()).then(result => {
+        const extra = {reported_at: new Date().toISOString()};
+        if (lat !== null) { extra.lat = lat; extra.lng = lng; }
+        postFieldStatus(prId, status, extra).then(result => {
+            // No signal, or a session that expired mid-mission. This used to
+            // do nothing at all beyond re-enabling the buttons — the SOS
+            // button in particular looked like it had worked while nothing
+            // had been sent and nothing was ever going to be. Queue it, say
+            // so, and (for an SOS) say so loudly: the volunteer has to know
+            // help has not actually been called yet.
+            if (!result || result.networkError) {
+                enqueueAction({kind: 'status', prId: String(prId), status: status, extra: extra});
+                markFieldStatusQueued(prId, status);
+                if (group) group.querySelectorAll('button').forEach(b => b.disabled = false);
+                if (status === 'needs_help') alert(t('status.sos_queued_alert'));
+                return;
+            }
             if (result.ok) {
                 const badge = document.getElementById('statusBadge-' + prId);
                 if (badge) badge.textContent = result.label;
@@ -3443,11 +3688,44 @@ function setFieldStatus(btn, prId, status) {
     }
 }
 
+// ── Live-data staleness ─────────────────────────────────────────────────────
+// Everything on this page is polled. When the poll stops succeeding, every
+// number and pin on screen silently becomes a historical record that still
+// looks live. Four consecutive misses (~20s) is past any normal jitter, so
+// past that the page says out loud how old what you're looking at actually is.
+let lastPollOkAt = Date.now();
+const POLL_STALE_MS = 20000;
+
+function renderPollStaleness() {
+    const el = document.getElementById('pollStaleBanner');
+    if (!el) return;
+    const ageMs = Date.now() - lastPollOkAt;
+    if (ageMs < POLL_STALE_MS) {
+        el.classList.add('d-none');
+        el.innerHTML = '';
+        return;
+    }
+    const mins = Math.floor(ageMs / 60000);
+    const age = mins >= 1 ? t('poll.stale_minutes', {n: mins}) : t('poll.stale_seconds', {n: Math.round(ageMs / 1000)});
+    // Escalates once it's been long enough that the picture could have
+    // changed materially — a 25-second gap is a hiccup, three minutes is not.
+    const severe = ageMs > 180000;
+    el.className = 'alert d-flex align-items-center gap-2 py-2 px-3 mb-3 ' + (severe ? 'alert-danger' : 'alert-warning');
+    el.innerHTML = `<i class="bi bi-exclamation-triangle-fill"></i><div><strong>${escapeHtml(t('poll.stale_title', {age}))}</strong>`
+        + `<div class="small">${escapeHtml(t('poll.stale_help'))}</div></div>`;
+}
+// Its own timer, not just the poll's: when the poll is failing its .then()
+// never runs, so without this the "4 minutes ago" would freeze at whatever it
+// said when the connection first died.
+setInterval(renderPollStaleness, 5000);
+
 setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => {
     if (!checkSessionAlive(response)) return null;
     return response.json();
 }).then(data => {
     if (!data) return;
+    lastPollOkAt = Date.now();
+    renderPollStaleness();
     if (!fieldMode) {
         renderPins(pins = data.pins || []);
         if (data.dispatches) renderDispatches(dispatches = data.dispatches);
@@ -3480,7 +3758,12 @@ setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after='
             showWarRoomBanner(b.id, b.message, b.orderId, b.alarmStyle);
         });
     }
-}).catch(() => {}), 5000);
+    // Keep the offline fallback's copy of the route/orders current. Cheap:
+    // saveFieldSnapshot() compares a signature first and only writes when
+    // something actually changed, so a quiet mission doesn't rewrite
+    // localStorage every 5 seconds.
+    saveFieldSnapshot();
+}).catch(() => { renderPollStaleness(); }), 5000);
 
 document.querySelectorAll('.team-form').forEach(form => {
     const leaderSelect = form.querySelector(form.dataset.leaderSelect);

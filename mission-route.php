@@ -103,41 +103,10 @@ function currentWaypointSeq(int $routeId): ?int {
     return ($seq !== false && $seq !== null) ? (int) $seq : null;
 }
 
-/**
- * Resolves the timestamp a depart/arrive/complete/skip action should actually
- * be recorded at. The client optionally sends `reported_at` (its own clock,
- * captured the moment the volunteer tapped the button) — this is what makes
- * the offline queue work: an "arrive" that only physically reaches this
- * server 20 minutes later (once signal comes back) still records the real
- * arrival time instead of whenever the network happened to recover.
- * Returns [$eventTimestamp, $reportedAtTimestamp] as MySQL DATETIME strings:
- * $eventTimestamp is what departed_at/arrived_at/completed_at/skipped_at
- * actually gets set to; $reportedAtTimestamp is the client's raw claim,
- * always stored in mission_route_progress.reported_at for the audit trail
- * even on the rare path below where it wasn't trusted for the real column.
- * Only accepted within a plausible field-offline window (not in the future,
- * not implausibly old) — this is a self-reported client clock, not
- * authenticated, so an unbounded value is never trusted outright; outside
- * that window it silently falls back to server NOW() rather than rejecting
- * the whole action (a wrong client clock must never block a field report).
- */
-function resolveEventTimestamp(): array {
-    $now = date('Y-m-d H:i:s');
-    $reportedAtRaw = post('reported_at');
-    if ($reportedAtRaw === '' || $reportedAtRaw === null) {
-        return [$now, $now];
-    }
-    $ts = strtotime($reportedAtRaw);
-    if ($ts === false) {
-        return [$now, $now];
-    }
-    $reportedAtTimestamp = date('Y-m-d H:i:s', $ts);
-    $nowTs = time();
-    if ($ts <= $nowTs && $ts >= $nowTs - 86400) {
-        return [$reportedAtTimestamp, $reportedAtTimestamp];
-    }
-    return [$now, $reportedAtTimestamp];
-}
+// resolveEventTimestamp() — the offline-queue replay clock — now lives in
+// includes/functions.php, since volunteer-status.php (field status / SOS)
+// replays through the same queue and needs the identical rules. Behaviour
+// here is unchanged.
 
 /**
  * Whether every waypoint of $routeId is now closed (completed or skipped) —

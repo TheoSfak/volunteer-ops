@@ -243,8 +243,25 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
 <script>
 (function() {
     // ── Service Worker Registration ──
+    // ?v=APP_VERSION is a defensive cache-buster against any HTTP-level cache
+    // sitting in front of this static file (a corporate/carrier proxy, etc.)
+    // — NOT what makes the browser detect a changed sw.js; that already
+    // happens on its own. Confirmed directly: the browser's own update
+    // algorithm re-fetches sw.js and does a byte comparison against the
+    // installed worker on every registration call and on reg.update() (the
+    // hourly timer below already does this), regardless of query string —
+    // bumping only CACHE_VERSION, with no URL change at all, was independently
+    // verified to fire `updatefound` correctly.
+    // The real bug this release fixed was elsewhere: sw.js's own internal
+    // CACHE_VERSION had silently drifted from the app (stuck at v3.71.3 while
+    // the app shipped v3.124) simply because nobody had touched this file in
+    // ~50 releases, and separately, precaching used a plain cache.add() that
+    // could itself be served from the HTTP cache — fixed via {cache:'reload'}
+    // in the install handler above. Bumping APP_VERSION alone does not
+    // require touching sw.js; CACHE_VERSION must still be bumped by hand
+    // whenever sw.js's own cached content changes.
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('<?= rtrim(BASE_URL, '/') ?>/sw.js')
+        navigator.serviceWorker.register('<?= rtrim(BASE_URL, '/') ?>/sw.js?v=<?= APP_VERSION ?>')
             .then(function(reg) {
                 // Check for updates periodically
                 setInterval(function() { reg.update(); }, 60 * 60 * 1000); // hourly
@@ -364,15 +381,16 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
 (function() {
     var bar = document.getElementById('vo-offline-bar');
     var barText = document.getElementById('vo-offline-bar-text');
-    // War Room's Route Order actions (depart/arrive/complete) queue locally
-    // and sync automatically once back online — see war-room.php's
-    // flushRouteQueue(). Everything else on this bar's generic message still
-    // applies there too (photos/videos/dispatch/chat are NOT queued), so the
-    // text is amended, not replaced, and only on that page — every other
-    // page's warning stays exactly as before.
+    // War Room's field reports — Route Order actions (depart/arrive/complete)
+    // AND field status incl. the SOS button — queue locally and sync
+    // automatically once back online (see war-room.php's flushQueue()).
+    // Everything else on this bar's generic message still applies there too
+    // (photos/videos/dispatch/chat are NOT queued), so the text is amended,
+    // not replaced, and only on that page — every other page's warning stays
+    // exactly as before.
     var isWarRoom = /\/war-room\.php/.test(window.location.pathname);
     if (isWarRoom && barText) {
-        barText.textContent = 'Εκτός σύνδεσης — Οι ενέργειες Πορείας αποθηκεύονται και θα σταλούν αυτόματα μόλις επανέλθει το δίκτυο. Άλλες ενέργειες (φωτογραφίες, μηνύματα) όχι.';
+        barText.textContent = 'Εκτός σύνδεσης — Πορεία και κατάσταση πεδίου (και το SOS) αποθηκεύονται και θα σταλούν αυτόματα μόλις επανέλθει το δίκτυο. Φωτογραφίες και μηνύματα όχι.';
     }
     function update() {
         var offline = !navigator.onLine;
