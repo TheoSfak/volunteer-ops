@@ -1926,7 +1926,16 @@ function renderDispatches(items) {
         }
         const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}&travelmode=driving`;
         const directionsHtml = `<br><a href="${directionsUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-success mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
-        const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + acksHtml + receiveHtml + ackHtml + directionsHtml +
+        // Live ETA — only ever present for a point sent to one specific team
+        // (see computeDispatchEta()'s own scoping); null means either that
+        // doesn't apply here, or the team hasn't sent a single GPS ping yet,
+        // in which case this silently shows nothing rather than a fake "0".
+        const etaHtml = item.eta
+            ? `<div class="small mt-1">${escapeHtml(item.eta.minutes < 1 ? t('dispatch.eta_lt_1min') : t('dispatch.eta_minutes', {n: item.eta.minutes}))}` +
+              `${item.eta.source === 'straight_line' ? ' ' + escapeHtml(t('dispatch.eta_straight_line_suffix')) : ''}` +
+              `${item.eta.is_stale ? ' ' + escapeHtml(t('dispatch.eta_stale_suffix')) : ''}</div>`
+            : '';
+        const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + etaHtml + acksHtml + receiveHtml + ackHtml + directionsHtml +
             (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">${t('common.delete')}</button>` : '');
         let layer = null;
         if (item.type === 'point') {

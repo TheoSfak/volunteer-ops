@@ -1824,6 +1824,27 @@ CREATE TABLE IF NOT EXISTS `mission_dispatch_points` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- DISPATCH ETA CACHE (Live ETA for a team travelling to a dispatch point)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `dispatch_eta_cache` (
+    `dispatch_id` INT UNSIGNED NOT NULL PRIMARY KEY,
+    `minutes` SMALLINT UNSIGNED NOT NULL,
+    `source` ENUM('osrm','straight_line') NOT NULL,
+    `ping_lat` DECIMAL(10, 8) NOT NULL,
+    `ping_lng` DECIMAL(11, 8) NOT NULL,
+    -- DATETIME, not TIMESTAMP: this must hold exactly the value we insert
+    -- (the source ping's own created_at, for change-detection) with no
+    -- auto-init/auto-update magic. Confirmed live this actually matters —
+    -- MySQL's legacy behavior silently gives the first TIMESTAMP column in a
+    -- table an implicit DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    -- when it has no explicit default of its own, which would have made
+    -- every cache write stamp "now" instead of the ping's real time here.
+    `ping_created_at` DATETIME NOT NULL,
+    `fetched_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`dispatch_id`) REFERENCES `mission_dispatch_points`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- MISSION ANNOTATIONS (Action Room shared battle-map freehand/arrow/text sketches)
 -- =============================================
 CREATE TABLE IF NOT EXISTS `mission_annotations` (

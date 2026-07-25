@@ -724,11 +724,20 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
         }
         $myReceipt = $receiptsByDispatch[$dispatchId][$userId] ?? null;
         [$teamColorBg, $teamColorFg] = teamBadgeColors($teamId ? $row['color'] : null);
+        $geo = json_decode($row['geo'], true);
+
+        // ETA only makes sense for a single point sent to one specific team —
+        // a polygon zone has no one destination, and a broadcast to "all
+        // teams" (team_id null) has no one team's position to measure from.
+        $eta = ($row['type'] === 'point' && $teamId !== null)
+            ? computeDispatchEta($dispatchId, $teamId, (float) $geo['lat'], (float) $geo['lng'])
+            : null;
 
         return [
             'id'          => $dispatchId,
             'type'        => $row['type'],
-            'geo'         => json_decode($row['geo'], true),
+            'geo'         => $geo,
+            'eta'         => $eta,
             'label'       => $row['label'],
             'team_label'  => $teamId ? teamLabel($row['codename'], $row['team_number']) : t('common.all_teams'),
             'team_color_bg' => $teamColorBg,
@@ -1357,6 +1366,132 @@ function teamLabel(?string $codename, $teamNumber): string {
         return '';
     }
     return ($teamNumber !== null && $teamNumber !== '') ? ($codename . ' ' . $teamNumber) : $codename;
+}
+
+/**
+ * Live ETA for a team travelling to a point-type dispatch (a polygon zone
+ * has no single destination, so this is never called for those). "The
+ * team's position" is whichever member's GPS ping is most recent — same
+ * one-team-is-one-unit convention Route Order already uses for
+ * depart/arrive/complete, rather than tracking N separate per-member ETAs.
+ *
+ * Routed via OSRM's public router — same free, no-API-key OSM-ecosystem
+ * service this app already talks to for geocoding (geocode-address.php's
+ * Nominatim call), same cURL shape. Falls back to straight-line distance at
+ * an assumed average speed if OSRM is unreachable or the response is
+ * unusable — advisory only, exactly like every other GPS-derived number
+ * this app already shows (dwell time, arrival distance): never blocks
+ * anything, just may be a rougher estimate, and says so.
+ *
+ * Cached in dispatch_eta_cache, keyed to the ping it was computed from —
+ * this poll's caller (loadMissionDispatchesForUser(), hit every 5s by every
+ * open War Room tab) only triggers a fresh OSRM call once the team's
+ * underlying ping actually changes (roughly the ~3min auto-ping cadence),
+ * not on every poll tick.
+ *
+ * Returns null if this team has sent no GPS ping at all yet.
+ */
+function computeDispatchEta(int $dispatchId, int $teamId, float $destLat, float $destLng): ?array {
+    $ping = dbFetchOne(
+        "SELECT vp.lat, vp.lng, vp.created_at
+         FROM volunteer_pings vp
+         JOIN mission_team_members mtm ON mtm.user_id = vp.user_id
+         JOIN shifts s ON s.id = vp.shift_id AND s.mission_id = mtm.mission_id
+         WHERE mtm.team_id = ?
+         ORDER BY vp.created_at DESC LIMIT 1",
+        [$teamId]
+    );
+    if (!$ping) {
+        return null;
+    }
+
+    $pingLat = (float) $ping['lat'];
+    $pingLng = (float) $ping['lng'];
+    $pingCreatedAt = $ping['created_at'];
+    $pingAgeSeconds = time() - strtotime($pingCreatedAt);
+    // 540s = 9min, mirrors war-room.php's own $pingStaleThresholdSeconds for
+    // the person-pin staleness badge — not a shared constant today (that one
+    // is a local variable in a different file), just the same number kept
+    // deliberately in sync; if that value ever changes, update this too.
+    $isStale = $pingAgeSeconds > 540;
+
+    $cached = dbFetchOne(
+        "SELECT minutes, source, ping_created_at FROM dispatch_eta_cache WHERE dispatch_id = ?",
+        [$dispatchId]
+    );
+    if ($cached && $cached['ping_created_at'] === $pingCreatedAt) {
+        return [
+            'minutes' => (int) $cached['minutes'], 'source' => $cached['source'],
+            'ping_age_seconds' => $pingAgeSeconds, 'is_stale' => $isStale,
+        ];
+    }
+
+    $osrm = fetchOsrmEtaMinutes($pingLat, $pingLng, $destLat, $destLng);
+    [$minutes, $source] = $osrm ?? [straightLineEtaMinutes($pingLat, $pingLng, $destLat, $destLng), 'straight_line'];
+
+    dbExecute(
+        "INSERT INTO dispatch_eta_cache (dispatch_id, minutes, source, ping_lat, ping_lng, ping_created_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE minutes = VALUES(minutes), source = VALUES(source),
+             ping_lat = VALUES(ping_lat), ping_lng = VALUES(ping_lng), ping_created_at = VALUES(ping_created_at)",
+        [$dispatchId, $minutes, $source, $pingLat, $pingLng, $pingCreatedAt]
+    );
+
+    return ['minutes' => $minutes, 'source' => $source, 'ping_age_seconds' => $pingAgeSeconds, 'is_stale' => $isStale];
+}
+
+/**
+ * OSRM's public demo router — free, no API key, but explicitly a
+ * lightweight demo service with no uptime guarantee, so this is a single
+ * short-timeout attempt with no retry: a slow/down OSRM must not stall the
+ * shared 5s War Room poll every open tab hits. 3s, not the 8s
+ * geocode-address.php uses for its Nominatim call — that one is a one-off
+ * lookup a user explicitly triggered and is actively waiting on; this one
+ * runs unattended inside a background poll loop and needs to fail fast.
+ * Returns null (triggering the straight-line fallback above) on any
+ * failure — unreachable, timeout, non-OK response, or an unexpected shape.
+ */
+function fetchOsrmEtaMinutes(float $lat1, float $lng1, float $lat2, float $lng2): ?array {
+    if (!function_exists('curl_init')) {
+        return null;
+    }
+    $url = sprintf(
+        'https://router.project-osrm.org/route/v1/driving/%s,%s;%s,%s?overview=false',
+        sprintf('%.6f', $lng1), sprintf('%.6f', $lat1), sprintf('%.6f', $lng2), sprintf('%.6f', $lat2)
+    );
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 3,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; VolunteerOps/' . APP_VERSION . ')',
+    ]);
+    $response = curl_exec($ch);
+    $error = curl_error($ch);
+    curl_close($ch);
+    if ($error || empty($response)) {
+        return null;
+    }
+    $data = json_decode($response, true);
+    if (($data['code'] ?? '') !== 'Ok' || !isset($data['routes'][0]['duration'])) {
+        return null;
+    }
+    return [(int) round($data['routes'][0]['duration'] / 60), 'osrm'];
+}
+
+/**
+ * Straight-line ETA fallback for when OSRM is unreachable — deliberately
+ * rough (no road network, no terrain), so the caller always tags this as
+ * 'straight_line' and the UI discloses it as an estimate rather than
+ * presenting it with the same confidence as a real routed ETA. 30 km/h is a
+ * generic mixed rural/urban driving average, not tuned to this app's actual
+ * terrain (Cretan backroads, search areas partly on foot) — a placeholder
+ * until real usage shows it needs adjusting.
+ */
+function straightLineEtaMinutes(float $lat1, float $lng1, float $lat2, float $lng2): int {
+    $meters = gpsDistanceMeters($lat1, $lng1, $lat2, $lng2);
+    $metersPerMinute = (30 * 1000) / 60;
+    return max(1, (int) round($meters / $metersPerMinute));
 }
 
 /**

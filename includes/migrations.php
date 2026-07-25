@@ -5179,6 +5179,31 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 107,
+            'description' => 'Add dispatch_eta_cache — caches the live driving-ETA computed for a team travelling to a point-type dispatch, keyed to the GPS ping it was computed from so a new external routing call only happens once that ping actually changes, not on every 5s poll.',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'dispatch_eta_cache'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE dispatch_eta_cache (
+                            dispatch_id INT UNSIGNED NOT NULL PRIMARY KEY,
+                            minutes SMALLINT UNSIGNED NOT NULL,
+                            source ENUM('osrm','straight_line') NOT NULL,
+                            ping_lat DECIMAL(10, 8) NOT NULL,
+                            ping_lng DECIMAL(11, 8) NOT NULL,
+                            ping_created_at DATETIME NOT NULL,
+                            fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            FOREIGN KEY (dispatch_id) REFERENCES mission_dispatch_points(id) ON DELETE CASCADE
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

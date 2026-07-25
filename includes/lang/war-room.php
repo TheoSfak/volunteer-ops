@@ -290,6 +290,11 @@ return [
         'dispatch.arrival_btn' => 'Άφιξη',
         'dispatch.arrived_at_prefix' => '✓ Αφίξατε στις {time}',
         'dispatch.directions_btn' => 'Οδηγίες',
+        // Live ETA (dispatch popup)
+        'dispatch.eta_minutes' => '🚗 ETA ~{n} λεπτά',
+        'dispatch.eta_lt_1min' => '🚗 ETA <1 λεπτό',
+        'dispatch.eta_straight_line_suffix' => '(κατ\' εκτίμηση — ευθεία απόσταση)',
+        'dispatch.eta_stale_suffix' => '· βάσει παλιότερου στίγματος',
         'dispatch.delete_confirm' => 'Διαγραφή αυτού του σημείου/περιοχής;',
         'map.mission_point_label' => 'Σημείο αποστολής',
         'map.pin_stale' => 'Παλιό στίγμα',
@@ -969,6 +974,11 @@ return [
         'dispatch.arrival_btn' => 'Arrival',
         'dispatch.arrived_at_prefix' => '✓ Arrived at {time}',
         'dispatch.directions_btn' => 'Directions',
+        // Live ETA (dispatch popup)
+        'dispatch.eta_minutes' => '🚗 ETA ~{n} min',
+        'dispatch.eta_lt_1min' => '🚗 ETA <1 min',
+        'dispatch.eta_straight_line_suffix' => '(estimate — straight-line distance)',
+        'dispatch.eta_stale_suffix' => '· based on an older ping',
         'dispatch.delete_confirm' => 'Delete this point/area?',
         'map.mission_point_label' => 'Mission point',
         'map.pin_stale' => 'Old ping',
