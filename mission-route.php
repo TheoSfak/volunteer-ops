@@ -80,8 +80,9 @@ function notifyRouteTeam(int $missionId, int $teamId, int $excludeUserId, string
 function loadWaypointForAction(int $waypointId, int $missionId): ?array {
     $row = dbFetchOne(
         "SELECT w.id, w.route_id, w.seq, w.lat, w.lng, w.label,
+                w.require_photo, w.require_video, w.require_note,
                 r.mission_id, r.team_id, r.completed_at AS route_completed_at, r.cancelled_at AS route_cancelled_at,
-                p.departed_at, p.arrived_at, p.completed_at, p.skipped_at, p.out_of_sequence
+                p.departed_at, p.arrived_at, p.completed_at, p.skipped_at, p.out_of_sequence, p.note
          FROM mission_route_waypoints w
          JOIN mission_routes r ON r.id = w.route_id
          LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
@@ -89,6 +90,35 @@ function loadWaypointForAction(int $waypointId, int $missionId): ?array {
         [$waypointId, $missionId]
     );
     return $row ?: null;
+}
+
+/**
+ * Whichever of require_photo/require_video/require_note the admin set for
+ * this waypoint but which "complete" would otherwise leave unfulfilled —
+ * checked against what's already on record (an earlier upload, an earlier
+ * saved note) UNION what this exact request is submitting, since the note
+ * textarea and "Complete" are one and the same tap in the field UI.
+ * Returns translated labels, empty if nothing is missing.
+ */
+function missingRouteDeliverables(array $wp, ?string $submittedNote): array {
+    $missing = [];
+    if ($wp['require_photo'] && !dbFetchValue(
+        "SELECT 1 FROM mission_photos WHERE route_waypoint_id = ? AND media_type = 'photo' LIMIT 1", [$wp['id']]
+    )) {
+        $missing[] = t('route.deliverable_photo');
+    }
+    if ($wp['require_video'] && !dbFetchValue(
+        "SELECT 1 FROM mission_photos WHERE route_waypoint_id = ? AND media_type = 'video' LIMIT 1", [$wp['id']]
+    )) {
+        $missing[] = t('route.deliverable_video');
+    }
+    if ($wp['require_note']) {
+        $effectiveNote = $submittedNote !== null ? $submittedNote : ($wp['note'] ?? null);
+        if ($effectiveNote === null || trim($effectiveNote) === '') {
+            $missing[] = t('route.deliverable_note');
+        }
+    }
+    return $missing;
 }
 
 /** The lowest seq in $routeId that isn't closed yet (completed or skipped), or null if none. */
@@ -415,6 +445,24 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
     } else { // complete
         $note = trim((string) post('note'));
         $note = $note !== '' ? mb_substr($note, 0, 2000) : null;
+
+        // Hard block, not just a UI hint: an admin who ticked "photo
+        // required" on this waypoint needs that to actually mean something.
+        // Checked here rather than only client-side because the offline
+        // queue (war-room.php) replays this exact same action later with no
+        // user present to catch a client-side warning — the one place this
+        // can actually be enforced is the request that tries to persist
+        // completed_at.
+        $missingDeliverables = missingRouteDeliverables($wp, $note);
+        if (!empty($missingDeliverables)) {
+            echo json_encode([
+                'ok' => false,
+                'error' => t('route.missing_deliverables', ['items' => implode(', ', $missingDeliverables)]),
+                'missing_deliverables' => true,
+            ]);
+            exit;
+        }
+
         dbExecute(
             "UPDATE mission_route_progress
              SET completed_at = ?, completed_by = ?, note = COALESCE(?, note),

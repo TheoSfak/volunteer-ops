@@ -810,17 +810,30 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
     // the moment the second one was sent. ORDER BY created_at ASC so the
     // foreach's natural overwrite deterministically keeps the latest of each
     // type (last-wins is only meaningful if the scan order is fixed).
+    //
+    // Bound against WAYPOINT ids, not $routeIds/$placeholders (route ids) —
+    // route_waypoint_id is a waypoint id column, so binding route ids here
+    // silently returned the wrong rows (or none) for every waypoint whose id
+    // didn't happen to also be a valid route id for this mission. Confirmed
+    // live: a route with 5 waypoints only ever showed a photo for whichever
+    // one's id coincided with a route id (here, seq-1's id 8 == a route id
+    // 8), every other waypoint's already-uploaded photo silently never
+    // rendered. Present since this query was introduced (v3.124.0).
     $photosByWaypoint = [];
     $videosByWaypoint = [];
-    foreach (dbFetchAll(
-        "SELECT route_waypoint_id, id, media_type, created_at FROM mission_photos WHERE route_waypoint_id IN ($placeholders) ORDER BY created_at ASC",
-        $routeIds
-    ) as $ph) {
-        $entry = ['id' => (int) $ph['id'], 'time' => date('d/m H:i', strtotime($ph['created_at']))];
-        if ($ph['media_type'] === 'video') {
-            $videosByWaypoint[(int) $ph['route_waypoint_id']] = $entry;
-        } else {
-            $photosByWaypoint[(int) $ph['route_waypoint_id']] = $entry;
+    $waypointIds = array_map(fn($w) => (int) $w['id'], $waypointRows);
+    if (!empty($waypointIds)) {
+        $wpPlaceholders = implode(',', array_fill(0, count($waypointIds), '?'));
+        foreach (dbFetchAll(
+            "SELECT route_waypoint_id, id, media_type, created_at FROM mission_photos WHERE route_waypoint_id IN ($wpPlaceholders) ORDER BY created_at ASC",
+            $waypointIds
+        ) as $ph) {
+            $entry = ['id' => (int) $ph['id'], 'time' => date('d/m H:i', strtotime($ph['created_at']))];
+            if ($ph['media_type'] === 'video') {
+                $videosByWaypoint[(int) $ph['route_waypoint_id']] = $entry;
+            } else {
+                $photosByWaypoint[(int) $ph['route_waypoint_id']] = $entry;
+            }
         }
     }
 

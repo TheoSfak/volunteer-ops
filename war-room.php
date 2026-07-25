@@ -2676,10 +2676,45 @@ function routeArrive(waypointId, confirmed) {
     }
 }
 
+// Checked against the already-polled `routes` array — no network round-trip,
+// so this catches a missing deliverable even while fully offline. That
+// matters specifically because "complete" is queueable: without this,
+// tapping Complete with no signal would queue silently (looks like it
+// worked) and only surface the missing-photo rejection once back online,
+// possibly hours later and long past the point where retaking that photo is
+// still practical. The server enforces the same rule independently (see
+// mission-route.php's missingRouteDeliverables()) for the offline-queue
+// replay path itself, where naturally no user is present to see this alert.
+function findRouteWaypointById(waypointId) {
+    for (const route of routes) {
+        const wp = route.waypoints.find(w => String(w.id) === String(waypointId));
+        if (wp) return wp;
+    }
+    return null;
+}
+function missingRouteDeliverablesClientSide(wp, noteValue) {
+    const missing = [];
+    if (wp.require_photo && !wp.photo) missing.push(t('route.deliverable_photo'));
+    if (wp.require_video && !wp.video) missing.push(t('route.deliverable_video'));
+    if (wp.require_note && !(noteValue || wp.note || '').trim()) missing.push(t('route.deliverable_note'));
+    return missing;
+}
+
 function routeComplete(waypointId, confirmed) {
     const noteInput = document.querySelector(`.route-note-input[data-id="${waypointId}"]`);
+    const noteValue = noteInput ? noteInput.value.trim() : '';
+    const wp = findRouteWaypointById(waypointId);
+    if (wp) {
+        const missing = missingRouteDeliverablesClientSide(wp, noteValue);
+        if (missing.length) {
+            alert(t('route.missing_deliverables', {items: missing.join(', ')}));
+            const group = document.querySelector(`.route-complete-btn[data-id="${waypointId}"]`);
+            if (group) group.disabled = false;
+            return;
+        }
+    }
     const extra = {};
-    if (noteInput && noteInput.value.trim() !== '') extra.note = noteInput.value.trim();
+    if (noteValue !== '') extra.note = noteValue;
     if (confirmed) extra.confirm_out_of_sequence = '1';
     postRouteActionQueueable('complete', waypointId, extra)
         .then(result => handleRouteActionResult(result, () => routeComplete(waypointId, true)));
