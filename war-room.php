@@ -69,80 +69,6 @@ function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $
 }
 
 /**
- * War Room: persist a trackable order (mission_orders + one mission_order_recipients
- * row per recipient, snapshotting each recipient's team) then notify them, threading
- * orderId into the pushData so the alert banner can offer an "Ελήφθη" button. Shared
- * by request_location/request_photo/request_video — the only difference between them
- * is order_type + notification copy.
- */
-function createMissionOrderAndNotify(
-    int $missionId, string $missionTitle, string $orderType, int $createdBy, array $recipientIds,
-    string $titleKey, array $titleVars, ?string $rawMessage, string $messageKey, array $messageVars,
-    string $broadcastKey, array $broadcastVars, ?string $taskText = null, ?string $alarmStyle = null
-): int {
-    $orderId = dbInsert(
-        "INSERT INTO mission_orders (mission_id, order_type, task_text, created_by, created_at) VALUES (?, ?, ?, ?, NOW())",
-        [$missionId, $orderType, $taskText, $createdBy]
-    );
-
-    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $recipientLangs = getUserLanguages($recipientIds);
-    foreach ($recipientIds as $recipientId) {
-        $lang = $recipientLangs[$recipientId] ?? DEFAULT_LANGUAGE;
-        $teamId = getUserTeamIdForMission($missionId, $recipientId);
-        dbInsert(
-            "INSERT INTO mission_order_recipients (order_id, user_id, team_id) VALUES (?, ?, ?)",
-            [$orderId, $recipientId, $teamId]
-        );
-        // Free-form task/broadcast text ($rawMessage) is never translated — it's
-        // exactly what the admin typed, per the "free text stays as typed" rule.
-        $message = $rawMessage ?? t($messageKey, $messageVars, $lang);
-        $pushData = [
-            'url' => $warRoomUrl,
-            'tag' => $orderType . '-request-mission-' . $missionId,
-            'vibrate' => [300, 100, 300, 100, 500],
-            'bannerMission' => $missionId,
-            'orderId' => (int) $orderId,
-        ];
-        if ($alarmStyle) {
-            $pushData['alarmStyle'] = $alarmStyle;
-        }
-        sendNotification($recipientId, t($titleKey, $titleVars, $lang), $message, 'warning', '', $pushData);
-    }
-
-    // Every order also scrolls as a banner for every other approved participant of the
-    // mission, not just whoever it was actually addressed to, so the whole mission stays
-    // aware of what's being asked. No orderId here — no order row, no "Ελήφθη" button —
-    // this is informational only, unlike the real recipients notified above.
-    $allApproved = dbFetchAll(
-        "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
-         JOIN shifts s ON s.id = pr.shift_id
-         WHERE s.mission_id = ? AND pr.status = ?",
-        [$missionId, PARTICIPATION_APPROVED]
-    );
-    $bystanderIds = array_diff(
-        array_map('intval', array_column($allApproved, 'volunteer_id')),
-        $recipientIds,
-        [$createdBy]
-    );
-    $bystanderLangs = getUserLanguages($bystanderIds);
-    foreach ($bystanderIds as $bystanderId) {
-        $lang = $bystanderLangs[$bystanderId] ?? DEFAULT_LANGUAGE;
-        $bystanderPushData = [
-            'url' => $warRoomUrl,
-            'tag' => $orderType . '-request-mission-' . $missionId,
-            'bannerMission' => $missionId,
-        ];
-        if ($alarmStyle) {
-            $bystanderPushData['alarmStyle'] = $alarmStyle;
-        }
-        sendNotification($bystanderId, t($titleKey, $titleVars, $lang), t($broadcastKey, $broadcastVars, $lang), 'info', '', $bystanderPushData);
-    }
-
-    return (int) $orderId;
-}
-
-/**
  * War Room: resolve which active-shift volunteers a location/photo/video/task
  * request targets — either every currently-active participant, or just the
  * ones the admin checked. Shared by the 4 near-identical request_* handlers
@@ -744,6 +670,7 @@ if (get('ajax') === '1') {
     $dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
     $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $myTasks = loadMyTaskOrdersForUser($missionId, (int)$user['id']);
+    $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
     $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
     $onlinePresence = loadOnlinePresenceUserIds($missionId);
@@ -756,6 +683,7 @@ if (get('ajax') === '1') {
         'dispatches' => $dispatches,
         'media' => $photos,
         'myTasks' => $myTasks,
+        'routes' => $routes,
         'shortageReports' => $shortageReports,
         'sosAlerts' => $sosAlerts,
         'onlinePresence' => $onlinePresence,
@@ -779,6 +707,7 @@ $bannerSinceId = (int) dbFetchValue(
 $dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
 $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $myTasks = loadMyTaskOrdersForUser($missionId, (int)$user['id']);
+$routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $annotations = loadMissionAnnotationsForMission($missionId);
@@ -1317,6 +1246,15 @@ include __DIR__ . '/includes/header.php';
         </div>
 
         <div class="card shadow-sm mb-4 border-primary">
+            <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-signpost-split-fill me-1"></i><?= t('route.my_panel_title') ?></h5></div>
+            <div class="card-body">
+                <div id="routeQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
+                <div id="routeQueueFailures"></div>
+                <div id="myRoutesList"><p class="text-muted mb-0"><?= t('route.my_empty') ?></p></div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4 border-primary">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-clipboard-check me-1"></i><?= t('mytasks.panel_title') ?></h5></div>
             <div class="card-body">
                 <div id="myTasksList"></div>
@@ -1419,6 +1357,31 @@ include __DIR__ . '/includes/header.php';
                 </button>
             </div>
         </div>
+
+        <?php if (!empty($teams)): ?>
+        <div class="card shadow-sm mb-4 border-primary">
+            <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-signpost-split-fill me-1"></i><?= t('route.card_title') ?></h5></div>
+            <div class="card-body">
+                <p class="small text-muted"><?= t('route.note') ?></p>
+                <label class="form-label small fw-semibold"><?= t('route.recipients_label') ?></label>
+                <select class="form-select mb-3" id="routeTeamSelect">
+                    <?php foreach ($teams as $team): ?>
+                    <option value="<?= $team['id'] ?>"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <button type="button" class="btn btn-primary w-100 fw-semibold" data-bs-toggle="modal" data-bs-target="#routeComposerModal">
+                    <i class="bi bi-signpost-split-fill me-1"></i><?= t('route.send_btn') ?>
+                </button>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4 border-primary">
+            <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-list-check me-1"></i><?= t('route.admin_panel_title') ?></h5></div>
+            <div class="card-body">
+                <div id="routesAdminList"><p class="text-muted mb-0"><?= t('route.admin_empty') ?></p></div>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <div class="card border-danger shadow-sm">
             <div class="card-body"><h6><i class="bi bi-shield-exclamation text-danger me-1"></i><?= t('admin.mission_mgmt_title') ?></h6>
@@ -1632,6 +1595,72 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<div class="modal fade" id="routeComposerModal" tabindex="-1">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h5 class="modal-title"><i class="bi bi-signpost-split-fill me-1"></i><?= t('route.composer_title') ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0 d-flex flex-column">
+                <div class="p-2 border-bottom d-flex flex-wrap gap-2 align-items-center bg-light">
+                    <input type="text" id="routeTitleInput" class="form-control" style="max-width:240px;" maxlength="255" placeholder="<?= t('route.title_placeholder') ?>">
+                    <input type="text" id="routeAddressInput" class="form-control" style="max-width:260px;" placeholder="<?= t('dispatch.address_placeholder') ?>">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="routeAddressSearch"><i class="bi bi-search me-1"></i><?= t('dispatch.search_btn') ?></button>
+                    <span class="text-muted small" id="routeAddressStatus"></span>
+                    <div class="ms-auto d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="routeClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
+                        <button type="button" class="btn btn-success btn-sm" id="routeSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('route.send_btn') ?></button>
+                    </div>
+                </div>
+                <div class="small text-muted px-2 py-1 bg-light border-bottom"><?= t('route.map_instructions') ?></div>
+                <div class="d-flex flex-grow-1" style="min-height:0;">
+                    <div id="routeMap" style="flex:1;min-height:0;"></div>
+                    <div id="routeWaypointPanel" style="width:360px;min-width:280px;overflow-y:auto;border-left:1px solid #dee2e6;padding:.5rem;background:#fff;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="routeWaypointEditModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h5 class="modal-title"><?= t('route.edit_waypoint_title') ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label small fw-semibold"><?= t('route.label_placeholder') ?></label>
+                <input type="text" id="routeEditLabel" class="form-control mb-2" maxlength="255">
+                <label class="form-label small fw-semibold"><?= t('route.instructions_placeholder') ?></label>
+                <textarea id="routeEditInstructions" class="form-control mb-2" rows="3" maxlength="2000"></textarea>
+                <label class="form-label small fw-semibold"><?= t('route.dwell_label') ?></label>
+                <input type="number" id="routeEditDwell" class="form-control mb-2" min="0" max="600" style="max-width:120px;" placeholder="<?= t('route.dwell_unlimited_placeholder') ?>">
+                <div class="d-flex gap-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="routeEditPhoto">
+                        <label class="form-check-label small" for="routeEditPhoto"><?= t('route.photo_btn') ?></label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="routeEditVideo">
+                        <label class="form-check-label small" for="routeEditVideo"><?= t('route.video_btn') ?></label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="routeEditNote">
+                        <label class="form-check-label small" for="routeEditNote"><?= t('route.note_flag_label') ?></label>
+                    </div>
+                </div>
+                <div class="small text-danger mt-2 d-none" id="routeEditError"></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= t('common.cancel') ?></button>
+                <button type="button" class="btn btn-primary btn-sm" id="routeEditSaveBtn"><?= t('common.save') ?></button>
+            </div>
+        </div>
+    </div>
+</div>
 <?php endif; ?>
 
 <div class="modal fade" id="mediaViewModal" tabindex="-1">
@@ -1671,6 +1700,7 @@ let media = <?= json_encode($photos) ?>;
 // list is byte-for-byte the same.
 let mediaSignature = JSON.stringify(media);
 let myTasks = <?= json_encode($myTasks) ?>;
+let routes = <?= json_encode($routes) ?>;
 let shortageReports = <?= json_encode($shortageReports) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
 
@@ -1696,7 +1726,7 @@ if (fieldMode) {
         if (document.visibilityState === 'visible') requestWarRoomWakeLock();
     });
 }
-let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null;
+let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
@@ -1722,6 +1752,10 @@ if (!fieldMode) {
     map.getPane('annotationPane').style.zIndex = 610;
     annotationLayer = L.featureGroup().addTo(map);
     annotationDrawLayer = L.layerGroup().addTo(map);
+    // FeatureGroup so popup events propagate the same way dispatchLayer's do
+    // (not used for buttons today, but keeps the two "War Room order" layers
+    // consistent in case a future popup action needs it).
+    routeLayer = L.featureGroup().addTo(map);
 }
 const ANNOTATION_COLOR = '#1f2937';
 // Battle-map annotation tool state — a plain toggle over the same live map
@@ -2261,6 +2295,402 @@ function renderMyTasks(items) {
     }));
 }
 
+// ── Route Orders ("Εντολή Πορείας") ─────────────────────────────────────────
+// One team-scoped multi-waypoint patrol. Field mode has no map/media panel at
+// all (see the `!fieldMode`-gated block above), so this card is fully
+// self-contained: its own directions links, its own photo/video capture
+// (hits mission-photo.php directly with route_waypoint_id), its own GPS
+// capture for "arrive". Every mutating call POSTs to mission-route.php and
+// gets the full routes[] back, which is what's re-rendered — same
+// "server is the source of truth, re-render from its response" pattern the
+// rest of this page already uses (renderMyTasks, dispatch ack/receive, ...).
+
+function postRouteAction(action, id, extra) {
+    const data = new URLSearchParams(Object.assign({csrf_token: csrfToken, mission_id: '<?= $missionId ?>', action, id: String(id)}, extra || {}));
+    return fetch('mission-route.php', {method: 'POST', body: data}).then(response => {
+        if (!checkSessionAlive(response)) return null;
+        return response.json();
+    }).then(result => {
+        if (result && result.ok && result.routes) {
+            routes = result.routes;
+            renderMyRoutes(routes);
+            if (!fieldMode) { renderRoutesAdmin(routes); renderRouteLayer(routes); }
+        }
+        return result;
+    }).catch(() => ({ok: false, error: t('common.network_error'), networkError: true}));
+    // The .catch() above turns an unreachable-server rejection into a normal
+    // resolved {ok:false} — every existing caller already handles that shape
+    // (shows the error, re-enables its button) instead of the promise
+    // silently rejecting with no handler anywhere, which is what used to
+    // happen: a lost connection left the just-clicked button permanently
+    // disabled with no feedback at all. postRouteActionQueueable() below is
+    // the one caller that treats `networkError` specially instead of just
+    // displaying it.
+}
+
+// ── Offline queue (field depart/arrive/complete only — see mission-route.php's
+// resolveEventTimestamp()) ───────────────────────────────────────────────────
+// A team member losing signal mid-mission must never just lose the tap: it's
+// queued locally and replayed once connectivity returns, with the server
+// recording the *actual* field time (reported_at) rather than whenever the
+// network happened to come back. Desk-side admin actions (cancel/skip/
+// edit_waypoint/create) deliberately do NOT go through this — they're not
+// the ones losing signal in the field, and postRouteAction's own networkError
+// already surfaces a clear error for them same as before.
+const ROUTE_QUEUE_KEY = 'wr_route_queue_<?= $missionId ?>';
+
+function loadRouteQueue() {
+    try { return JSON.parse(localStorage.getItem(ROUTE_QUEUE_KEY) || '[]'); } catch (e) { return []; }
+}
+function saveRouteQueue(queue) {
+    try { localStorage.setItem(ROUTE_QUEUE_KEY, JSON.stringify(queue)); } catch (e) {}
+}
+function enqueueRouteAction(action, id, extra) {
+    const queue = loadRouteQueue();
+    queue.push({action, id: String(id), extra: extra || {}});
+    saveRouteQueue(queue);
+    renderRouteQueueStatus();
+}
+
+function renderRouteQueueStatus() {
+    const el = document.getElementById('routeQueueBanner');
+    if (!el) return;
+    const count = loadRouteQueue().length;
+    if (!count) { el.classList.add('d-none'); el.innerHTML = ''; return; }
+    el.classList.remove('d-none');
+    el.innerHTML = `<i class="bi bi-wifi-off me-1"></i>${t('route.queue_pending', {count})}`;
+}
+
+// In-memory only (not localStorage) — a permanent failure should be seen and
+// dismissed in the session it happened, not resurface as a stale warning
+// after a later, unrelated reload.
+let routeQueueFailures = [];
+function showRouteQueueFailureNotice(error) {
+    routeQueueFailures.push(error || t('common.failed'));
+    renderRouteQueueFailures();
+}
+function renderRouteQueueFailures() {
+    const el = document.getElementById('routeQueueFailures');
+    if (!el) return;
+    el.innerHTML = routeQueueFailures.map((error, i) => `
+        <div class="alert alert-danger py-1 px-2 small mb-1 d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-exclamation-triangle-fill me-1"></i>${t('route.queue_failed', {error: escapeHtml(error)})}</span>
+            <button type="button" class="btn-close route-queue-dismiss" style="font-size:.65rem;" data-i="${i}"></button>
+        </div>
+    `).join('');
+    el.querySelectorAll('.route-queue-dismiss').forEach(btn => btn.addEventListener('click', () => {
+        routeQueueFailures.splice(+btn.dataset.i, 1);
+        renderRouteQueueFailures();
+    }));
+}
+
+// depart/arrive/complete's own wrapper: queues on a real networkError instead
+// of surfacing it, everything else (success, needs_confirm, a real server
+// error like "route already closed") behaves exactly like a plain
+// postRouteAction call.
+function postRouteActionQueueable(action, id, extra) {
+    const payload = Object.assign({}, extra || {}, {reported_at: new Date().toISOString()});
+    return postRouteAction(action, id, payload).then(result => {
+        if (result && result.networkError) {
+            enqueueRouteAction(action, id, payload);
+            return {ok: true, queued: true};
+        }
+        return result;
+    });
+}
+
+let routeQueueFlushInFlight = false;
+function flushRouteQueue() {
+    if (routeQueueFlushInFlight) return;
+    const queue = loadRouteQueue();
+    if (!queue.length) return;
+    routeQueueFlushInFlight = true;
+    const item = queue[0];
+    // Auto-confirm out-of-sequence on every replay, no popup: the volunteer
+    // already expressed clear intent by tapping the button once, in the
+    // field — a queued retry has no user present to re-ask, and asking them
+    // to remember "was that out of sequence?" after the fact adds confusion,
+    // not safety. If it's not actually out of sequence this is simply unused.
+    const extra = Object.assign({}, item.extra, {confirm_out_of_sequence: '1'});
+    postRouteAction(item.action, item.id, extra).then(result => {
+        if (result && result.networkError) {
+            return; // still offline — leave it queued, next timer/online event retries
+        }
+        // Either it succeeded, or it came back with a real, permanent server
+        // error (e.g. the route was cancelled while this volunteer was
+        // offline) — retrying won't fix the latter either, so either way this
+        // item is done: drop it and move to the next queued one.
+        saveRouteQueue(loadRouteQueue().slice(1));
+        renderRouteQueueStatus();
+        if (!result || !result.ok) {
+            showRouteQueueFailureNotice(result ? result.error : t('common.failed'));
+        }
+    }).finally(() => {
+        routeQueueFlushInFlight = false;
+        if (loadRouteQueue().length) setTimeout(flushRouteQueue, 500);
+    });
+}
+window.addEventListener('online', flushRouteQueue);
+setInterval(flushRouteQueue, 15000);
+
+// Shared by depart/arrive/complete: on a needs_confirm response, ask once and
+// replay the exact same call with confirm_out_of_sequence=1. The primary path
+// never hits this — renderMyRoutes() only shows a plain action button on the
+// current waypoint and a separate confirm-first "jump" button on later ones —
+// this is defense-in-depth for stale client state (see mission-route.php).
+// A `queued` result (offline queue above) is left untouched here — it's
+// already ok:true, and the queue banner is the feedback for that case, not
+// an alert.
+function handleRouteActionResult(result, retry) {
+    if (!result) return;
+    if (!result.ok && result.needs_confirm) {
+        if (confirm(result.error)) retry();
+    } else if (!result.ok) {
+        alert(result.error || t('common.failed'));
+    }
+}
+
+function routeDepart(waypointId, confirmed) {
+    postRouteActionQueueable('depart', waypointId, confirmed ? {confirm_out_of_sequence: '1'} : {})
+        .then(result => handleRouteActionResult(result, () => routeDepart(waypointId, true)));
+}
+
+function routeArrive(waypointId, confirmed) {
+    const post = (lat, lng, accuracy) => {
+        const extra = {lat: lat ?? '', lng: lng ?? '', accuracy: accuracy ?? ''};
+        if (confirmed) extra.confirm_out_of_sequence = '1';
+        postRouteActionQueueable('arrive', waypointId, extra)
+            .then(result => handleRouteActionResult(result, () => routeArrive(waypointId, true)));
+    };
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(pos => post(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy), () => post(null, null, null), {enableHighAccuracy: true, timeout: 10000});
+    } else {
+        post(null, null, null);
+    }
+}
+
+function routeComplete(waypointId, confirmed) {
+    const noteInput = document.querySelector(`.route-note-input[data-id="${waypointId}"]`);
+    const extra = {};
+    if (noteInput && noteInput.value.trim() !== '') extra.note = noteInput.value.trim();
+    if (confirmed) extra.confirm_out_of_sequence = '1';
+    postRouteActionQueueable('complete', waypointId, extra)
+        .then(result => handleRouteActionResult(result, () => routeComplete(waypointId, true)));
+}
+
+function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
+    if (statusEl) { statusEl.textContent = t('media.uploading'); statusEl.className = 'small text-muted'; }
+    const send = (lat, lng) => {
+        const data = new FormData();
+        data.append('csrf_token', csrfToken);
+        data.append('action', 'upload');
+        data.append('mission_id', '<?= $missionId ?>');
+        data.append('media', file);
+        data.append('route_waypoint_id', String(waypointId));
+        if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
+        fetch('mission-photo.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                for (const r of routes) {
+                    const wp = r.waypoints.find(w => w.id === waypointId);
+                    if (wp) {
+                        const entry = {id: result.media.id, time: result.media.time};
+                        if (result.media.media_type === 'video') wp.video = entry; else wp.photo = entry;
+                        break;
+                    }
+                }
+                renderMyRoutes(routes);
+            } else {
+                if (statusEl) { statusEl.textContent = result.error || t('common.send_failed'); statusEl.className = 'small text-danger'; }
+            }
+        }).catch(() => { if (statusEl) { statusEl.textContent = t('common.send_failed'); statusEl.className = 'small text-danger'; } });
+    };
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(pos => send(pos.coords.latitude, pos.coords.longitude), () => send(null, null), {enableHighAccuracy: true, timeout: 8000});
+    } else {
+        send(null, null);
+    }
+}
+
+function triggerWaypointUpload(waypointId, mediaType, statusEl) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = mediaType === 'video' ? 'video/*' : 'image/*';
+    input.setAttribute('capture', 'environment');
+    input.addEventListener('change', () => { if (input.files[0]) uploadWaypointMedia(waypointId, input.files[0], mediaType, statusEl); });
+    input.click();
+}
+
+function routeWaypointDirectionsUrl(wp) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${wp.lat},${wp.lng}&travelmode=driving`;
+}
+
+function routeDwellCountdownHtml(wp) {
+    if (!wp.arrived_at || wp.dwell_minutes === null) return '';
+    const deadlineMs = Date.parse(wp.arrived_at) + wp.dwell_minutes * 60000;
+    return `<div class="small mt-1"><i class="bi bi-hourglass-split me-1"></i><span class="route-countdown" data-deadline="${deadlineMs}" data-waypoint-id="${wp.id}"></span></div>`;
+}
+
+// A waypoint's dwell time is advisory (see mission-route.php's docblock — this
+// never blocks or auto-completes anything), but the person standing there
+// should still get a clear one-time heads-up the moment it elapses, the same
+// alert sound every other War Room order already uses. Fires once per
+// waypoint (tracked here, not server-side) since updateRouteCountdowns() below
+// re-runs every second for as long as the countdown element stays on screen.
+const routeOverdueAlerted = new Set();
+
+function renderRouteWaypointCurrent(wp) {
+    const label = wp.label ? escapeHtml(wp.label) : t('route.waypoint_fallback_label', {seq: wp.seq});
+    let statusLine, actionHtml = '';
+    if (!wp.departed_at) {
+        statusLine = '';
+        actionHtml = `<button type="button" class="btn btn-sm btn-primary route-depart-btn" data-id="${wp.id}"><i class="bi bi-play-fill me-1"></i>${t('route.depart_btn')}</button>`;
+    } else if (!wp.arrived_at) {
+        statusLine = `<div class="small text-warning mt-1"><i class="bi bi-car-front-fill me-1"></i>${t('route.enroute_since_prefix', {time: wp.departed_at_display})}</div>`;
+        actionHtml = `<button type="button" class="btn btn-sm btn-success route-arrive-btn" data-id="${wp.id}"><i class="bi bi-geo-alt-fill me-1"></i>${t('route.arrive_btn')}</button>`;
+    } else {
+        const distanceHtml = routeDistanceBadgeHtml(wp);
+        statusLine = `<div class="small text-success mt-1"><i class="bi bi-check-circle-fill me-1"></i>${t('route.onsite_since_prefix', {time: wp.arrived_at_display})}</div>`
+            + (distanceHtml ? `<div class="small mt-1">${distanceHtml}</div>` : '')
+            + routeDwellCountdownHtml(wp);
+        const deliverables = [];
+        if (wp.require_photo) {
+            deliverables.push(wp.photo
+                ? `<span class="badge bg-success"><i class="bi bi-camera-fill me-1"></i>${t('route.photo_btn')} ✓</span>`
+                : `<button type="button" class="btn btn-sm btn-outline-primary route-media-btn" data-id="${wp.id}" data-media-type="photo"><i class="bi bi-camera-fill me-1"></i>${t('route.photo_btn')}</button>`);
+        }
+        if (wp.require_video) {
+            deliverables.push(wp.video
+                ? `<span class="badge bg-success"><i class="bi bi-camera-reels-fill me-1"></i>${t('route.video_btn')} ✓</span>`
+                : `<button type="button" class="btn btn-sm btn-outline-primary route-media-btn" data-id="${wp.id}" data-media-type="video"><i class="bi bi-camera-reels-fill me-1"></i>${t('route.video_btn')}</button>`);
+        }
+        const deliverablesHtml = deliverables.length
+            ? `<div class="d-flex flex-wrap gap-2 mt-2">${deliverables.join('')}</div><div class="small route-media-status mt-1"></div>`
+            : '';
+        const noteHtml = wp.require_note
+            ? `<textarea class="form-control form-control-sm route-note-input mt-2" data-id="${wp.id}" rows="2" maxlength="2000" placeholder="${escapeHtml(t('route.note_placeholder'))}">${wp.note ? escapeHtml(wp.note) : ''}</textarea><div class="small text-muted">${t('route.note_hint')}</div>`
+            : '';
+        actionHtml = deliverablesHtml + noteHtml + `<button type="button" class="btn btn-sm btn-success w-100 mt-2 route-complete-btn" data-id="${wp.id}"><i class="bi bi-check-lg me-1"></i>${t('route.complete_btn')}</button>`;
+    }
+    return `<div class="border rounded p-2 mb-2 border-primary">
+        <div class="d-flex justify-content-between align-items-start">
+            <strong class="small">${wp.seq}. ${label}</strong>
+            <a href="${routeWaypointDirectionsUrl(wp)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success py-0 px-1" title="${t('dispatch.directions_btn')}"><i class="bi bi-signpost-2-fill"></i></a>
+        </div>
+        ${wp.instructions ? `<div class="small mt-1">${escapeHtml(wp.instructions)}</div>` : ''}
+        ${statusLine}
+        ${actionHtml}
+    </div>`;
+}
+
+// Advisory GPS-vs-pin distance, captured once at "arrive" and never used to
+// block anything (see mission-route.php's docblock) — just surfaced so
+// whoever's reviewing can see "arrival was reported 340m from the pin"
+// instead of taking a self-report at face value with no corroboration.
+function routeDistanceBadgeHtml(wp) {
+    if (wp.arrived_distance_m === null || wp.arrived_distance_m === undefined) return '';
+    const accSuffix = (wp.arrived_accuracy_m !== null && wp.arrived_accuracy_m !== undefined)
+        ? ' ' + t('route.distance_accuracy_suffix', {accuracy: Math.round(wp.arrived_accuracy_m)})
+        : '';
+    return `<span class="text-muted"><i class="bi bi-rulers me-1"></i>${t('route.distance_from_point', {m: wp.arrived_distance_m})}${accSuffix}</span>`;
+}
+
+function renderRouteWaypointClosed(wp) {
+    const label = wp.label ? escapeHtml(wp.label) : t('route.waypoint_fallback_label', {seq: wp.seq});
+    if (wp.skipped_at) {
+        return `<div class="border rounded p-2 mb-2 bg-light">
+            <div class="small text-muted"><i class="bi bi-skip-forward-fill me-1"></i>${wp.seq}. ${label} — <span class="text-warning">${t('route.skipped_prefix')}</span>${wp.skip_reason ? ' (' + escapeHtml(wp.skip_reason) + ')' : ''}</div>
+        </div>`;
+    }
+    const mediaHtml = (wp.photo || wp.video)
+        ? `<div class="d-flex gap-2 mt-1">
+            ${wp.photo ? `<img src="mission-photo-view.php?id=${wp.photo.id}" style="max-height:70px;border-radius:4px;">` : ''}
+            ${wp.video ? `<video src="mission-photo-view.php?id=${wp.video.id}" style="max-height:70px;border-radius:4px;" muted></video>` : ''}
+          </div>`
+        : '';
+    const distanceHtml = routeDistanceBadgeHtml(wp);
+    return `<div class="border rounded p-2 mb-2 bg-light">
+        <div class="small text-muted"><i class="bi bi-check-circle-fill text-success me-1"></i>${wp.seq}. ${label} — ${t('route.completed_at_prefix', {time: wp.completed_at_display})}</div>
+        ${distanceHtml ? `<div class="small mt-1">${distanceHtml}</div>` : ''}
+        ${wp.note ? `<div class="small fst-italic mt-1">"${escapeHtml(wp.note)}"</div>` : ''}
+        ${mediaHtml}
+    </div>`;
+}
+
+function renderRouteWaypointUpcoming(wp) {
+    const label = wp.label ? escapeHtml(wp.label) : t('route.waypoint_fallback_label', {seq: wp.seq});
+    return `<div class="border rounded p-2 mb-2" style="opacity:.65;">
+        <div class="d-flex justify-content-between align-items-center">
+            <span class="small"><i class="bi bi-lock-fill me-1"></i>${wp.seq}. ${label}</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 route-jump-btn" data-id="${wp.id}">${t('route.jump_btn')}</button>
+        </div>
+    </div>`;
+}
+
+function renderMyRoutes(allRoutes) {
+    const list = document.getElementById('myRoutesList');
+    const myRoutes = (allRoutes || []).filter(r => r.is_my_team);
+    if (!myRoutes.length) {
+        list.innerHTML = '<p class="text-muted mb-0">' + t('route.my_empty') + '</p>';
+        return;
+    }
+    list.innerHTML = myRoutes.map(route => {
+        const done = route.waypoints.filter(w => w.completed_at || w.skipped_at).length;
+        const currentSeq = (route.waypoints.find(w => !w.completed_at && !w.skipped_at) || {}).seq;
+        const statusBadge = route.status === 'cancelled'
+            ? `<span class="badge bg-secondary">${t('route.status_cancelled')}</span>`
+            : route.status === 'completed'
+                ? `<span class="badge bg-success">${t('route.status_completed')}</span>`
+                : `<span class="badge bg-primary">${done}/${route.waypoints.length}</span>`;
+        const waypointsHtml = route.status === 'cancelled'
+            ? `<div class="small text-muted">${t('route.cancelled_reason_prefix')}${route.cancel_reason ? ' — ' + escapeHtml(route.cancel_reason) : ''}</div>`
+            : route.waypoints.map(wp => {
+                if (wp.completed_at || wp.skipped_at) return renderRouteWaypointClosed(wp);
+                if (wp.seq === currentSeq) return renderRouteWaypointCurrent(wp);
+                return renderRouteWaypointUpcoming(wp);
+            }).join('');
+        return `<div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <strong class="small text-uppercase">${route.title ? escapeHtml(route.title) : t('route.default_title')}</strong>
+                ${statusBadge}
+            </div>
+            ${waypointsHtml}
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.route-depart-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeDepart(btn.dataset.id, false); }));
+    list.querySelectorAll('.route-arrive-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeArrive(btn.dataset.id, false); }));
+    list.querySelectorAll('.route-complete-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeComplete(btn.dataset.id, false); }));
+    list.querySelectorAll('.route-jump-btn').forEach(btn => btn.addEventListener('click', () => {
+        if (confirm(t('route.confirm_out_of_sequence'))) routeDepart(btn.dataset.id, true);
+    }));
+    list.querySelectorAll('.route-media-btn').forEach(btn => btn.addEventListener('click', () => {
+        const statusEl = btn.closest('.d-flex').nextElementSibling;
+        triggerWaypointUpload(btn.dataset.id, btn.dataset.mediaType, statusEl);
+    }));
+    updateRouteCountdowns();
+}
+
+function updateRouteCountdowns() {
+    const now = Date.now();
+    document.querySelectorAll('.route-countdown[data-deadline]').forEach(el => {
+        const diffMs = parseInt(el.dataset.deadline, 10) - now;
+        if (diffMs <= 0) {
+            el.textContent = t('route.dwell_overdue');
+            el.classList.add('text-danger');
+            const waypointId = el.dataset.waypointId;
+            if (waypointId && !routeOverdueAlerted.has(waypointId)) {
+                routeOverdueAlerted.add(waypointId);
+                playWarRoomAlertSound();
+            }
+        } else {
+            const mins = Math.floor(diffMs / 60000);
+            const secs = Math.floor((diffMs % 60000) / 1000);
+            el.textContent = t('route.dwell_remaining', {time: mins + ':' + String(secs).padStart(2, '0')});
+        }
+    });
+}
+setInterval(updateRouteCountdowns, 1000);
+
 function renderPresence(onlineIds) {
     const onlineSet = new Set((onlineIds || []).map(String));
     document.querySelectorAll('[id^="presence-"]').forEach(el => {
@@ -2431,11 +2861,17 @@ wireMediaInput('videoCaptureInput', t('media.video_label'));
 wireMediaInput('videoGalleryInput', t('media.video_label'));
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); }
     renderMyTasks(myTasks);
+    renderMyRoutes(routes);
     renderShortageReports(shortageReports);
     renderSosAlerts(sosAlerts);
     if (!fieldMode) updateSosAlarmState(sosAlerts);
+    // Anything still queued from a previous visit (closed the tab while
+    // offline, reopened later) — the banner reflects it immediately, and a
+    // flush is attempted right away rather than waiting for the first 15s tick.
+    renderRouteQueueStatus();
+    flushRouteQueue();
 }, 200);
 
 let bannerAfterId = <?= $bannerSinceId ?>;
@@ -3025,6 +3461,11 @@ setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after='
         }
     }
     if (data.myTasks) renderMyTasks(myTasks = data.myTasks);
+    if (data.routes) {
+        routes = data.routes;
+        renderMyRoutes(routes);
+        if (!fieldMode) { renderRoutesAdmin(routes); renderRouteLayer(routes); }
+    }
     if (data.shortageReports) renderShortageReports(shortageReports = data.shortageReports);
     if (data.sosAlerts) {
         renderSosAlerts(sosAlerts = data.sosAlerts);
@@ -3313,6 +3754,445 @@ document.querySelectorAll('.team-form').forEach(form => {
                 sendBtn.disabled = false;
             }
         }).catch(() => { alert(t('common.send_failed')); sendBtn.disabled = false; });
+    });
+})();
+
+// ── Route Order map layer (main live map) ───────────────────────────────────
+function routeWaypointColor(wp, isCurrent) {
+    if (wp.skipped_at) return '#dc3545';
+    if (wp.completed_at) return '#198754';
+    if (wp.arrived_at) return '#0d6efd';
+    if (wp.departed_at) return '#f59e0b';
+    return isCurrent ? '#6c757d' : '#adb5bd';
+}
+
+function renderRouteLayer(allRoutes) {
+    if (!routeLayer) return;
+    routeLayer.clearLayers();
+    (allRoutes || []).filter(r => r.status !== 'cancelled').forEach(route => {
+        if (!route.waypoints.length) return;
+        const currentSeq = (route.waypoints.find(w => !w.completed_at && !w.skipped_at) || {}).seq;
+        route.waypoints.forEach(wp => {
+            const color = routeWaypointColor(wp, wp.seq === currentSeq);
+            const icon = L.divIcon({
+                className: '',
+                html: `<div style="background:${color};color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;border:2px solid #fff;box-shadow:0 1px 4px #0008;">${wp.seq}</div>`,
+                iconSize: [24, 24], iconAnchor: [12, 12],
+            });
+            const statusText = wp.skipped_at ? t('route.skipped_prefix')
+                : wp.completed_at ? t('route.completed_at_prefix', {time: wp.completed_at_display})
+                : wp.arrived_at ? t('route.onsite_since_prefix', {time: wp.arrived_at_display})
+                : wp.departed_at ? t('route.enroute_since_prefix', {time: wp.departed_at_display})
+                : '';
+            const label = wp.label ? escapeHtml(wp.label) : t('route.waypoint_fallback_label', {seq: wp.seq});
+            const popupHtml = `<strong>${escapeHtml(route.team_label || '')} — ${wp.seq}. ${label}</strong>` +
+                (wp.instructions ? `<br><span class="small">${escapeHtml(wp.instructions)}</span>` : '') +
+                (statusText ? `<br><span class="small text-muted">${statusText}</span>` : '');
+            L.marker([wp.lat, wp.lng], {icon}).addTo(routeLayer).bindPopup(popupHtml);
+        });
+        const coords = route.waypoints.map(w => [w.lat, w.lng]);
+        if (route.is_closed_loop && coords.length >= 3) {
+            // Matches what the admin saw while composing: L.polygon draws the
+            // implicit last→first segment, fillOpacity:0 keeps it a closed
+            // path rather than a shaded zone.
+            L.polygon(coords, {color: route.team_color_bg || '#0d6efd', weight: 3, opacity: 0.7, dashArray: '6,6', fillOpacity: 0}).addTo(routeLayer);
+        } else if (coords.length >= 2) {
+            L.polyline(coords, {color: route.team_color_bg || '#0d6efd', weight: 3, opacity: 0.7, dashArray: '6,6'}).addTo(routeLayer);
+        }
+    });
+}
+
+// ── Route Order admin sidebar list (every team's routes, cancel/skip) ───────
+// Which routes are expanded in the admin panel — module-level so the 5s poll's
+// renderRoutesAdmin() re-render doesn't collapse a route the admin just opened
+// (same class of "poll wipes UI state" bug fixed elsewhere in this file for the
+// shortage-report textarea; sidestepped here at the root instead of a
+// signature-skip guard, since collapse/expand state has to survive anyway).
+let expandedRouteIds = new Set();
+
+function routeAdminWaypointStatusHtml(wp) {
+    const distanceHtml = wp.arrived_at ? routeDistanceBadgeHtml(wp) : '';
+    const distanceSuffix = distanceHtml ? ` · ${distanceHtml}` : '';
+    if (wp.skipped_at) return `<span class="text-warning">${t('route.skipped_prefix')}</span>`;
+    if (wp.completed_at) return `<span class="text-success">${t('route.completed_at_prefix', {time: wp.completed_at_display})}</span>${distanceSuffix}`;
+    if (wp.arrived_at) {
+        // Passive visibility for command staff — no sound here (that's the
+        // field volunteer's own card, see updateRouteCountdowns()), just
+        // flagging that this team has been sitting past the planned time.
+        const isOverdue = wp.dwell_minutes !== null && (Date.parse(wp.arrived_at) + wp.dwell_minutes * 60000) < Date.now();
+        const onsiteHtml = `<span class="${isOverdue ? 'text-danger' : 'text-primary'}">${t('route.onsite_since_prefix', {time: wp.arrived_at_display})}${isOverdue ? ' ⏰' : ''}</span>`;
+        return onsiteHtml + distanceSuffix;
+    }
+    if (wp.departed_at) return `<span class="text-warning">${t('route.enroute_since_prefix', {time: wp.departed_at_display})}</span>`;
+    return `<span class="text-muted">${t('route.status_pending')}</span>`;
+}
+
+function renderRouteAdminWaypointsList(route) {
+    const rows = route.waypoints.map(wp => {
+        const label = wp.label ? escapeHtml(wp.label) : t('route.waypoint_fallback_label', {seq: wp.seq});
+        const isOpen = route.status === 'active' && !wp.completed_at && !wp.skipped_at;
+        const mediaHtml = (wp.photo || wp.video)
+            ? `<div class="d-flex gap-2 mt-1">
+                ${wp.photo ? `<img src="mission-photo-view.php?id=${wp.photo.id}" class="route-media-view" data-id="${wp.photo.id}" data-media-type="photo" style="max-height:50px;border-radius:4px;cursor:pointer;">` : ''}
+                ${wp.video ? `<video src="mission-photo-view.php?id=${wp.video.id}" class="route-media-view" data-id="${wp.video.id}" data-media-type="video" style="max-height:50px;border-radius:4px;cursor:pointer;" muted></video>` : ''}
+              </div>`
+            : '';
+        const noteHtml = wp.note ? `<div class="small fst-italic mt-1">"${escapeHtml(wp.note)}"</div>` : '';
+        return `<div class="py-1 border-bottom">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="small">${wp.seq}. ${label}${wp.out_of_sequence ? ' ⚠️' : ''}<br>${routeAdminWaypointStatusHtml(wp)}</div>
+                <div class="d-flex gap-1">
+                    ${route.status === 'active' ? `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 route-edit-btn" data-id="${wp.id}" title="${t('common.edit')}"><i class="bi bi-pencil"></i></button>` : ''}
+                    ${isOpen ? `<button type="button" class="btn btn-sm btn-outline-warning py-0 px-1 route-skip-btn" data-id="${wp.id}" title="${t('route.skip_btn')}"><i class="bi bi-skip-forward-fill"></i></button>` : ''}
+                </div>
+            </div>
+            ${noteHtml}
+            ${mediaHtml}
+        </div>`;
+    }).join('');
+    const footerHtml = route.status === 'active'
+        ? `<div class="d-flex gap-1 mt-2 flex-wrap">
+            <button type="button" class="btn btn-sm btn-outline-danger py-0 route-cancel-btn" data-id="${route.id}">${t('route.cancel_btn')}</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0 route-zoom-btn" data-id="${route.id}"><i class="bi bi-geo-alt me-1"></i>${t('route.zoom_btn')}</button>
+          </div>`
+        : `<button type="button" class="btn btn-sm btn-outline-secondary py-0 mt-2 route-zoom-btn" data-id="${route.id}"><i class="bi bi-geo-alt me-1"></i>${t('route.zoom_btn')}</button>`;
+    return rows + footerHtml;
+}
+
+function renderRoutesAdmin(allRoutes) {
+    const list = document.getElementById('routesAdminList');
+    if (!list) return;
+    if (!allRoutes.length) {
+        list.innerHTML = '<p class="text-muted mb-0">' + t('route.admin_empty') + '</p>';
+        return;
+    }
+    list.innerHTML = allRoutes.map(route => {
+        const done = route.waypoints.filter(w => w.completed_at || w.skipped_at).length;
+        const statusBadge = route.status === 'cancelled'
+            ? `<span class="badge bg-secondary">${t('route.status_cancelled')}</span>`
+            : route.status === 'completed'
+                ? `<span class="badge bg-success">${t('route.status_completed')}</span>`
+                : `<span class="badge" style="background:${route.team_color_bg};color:${route.team_color_fg};">${done}/${route.waypoints.length}</span>`;
+        const isExpanded = expandedRouteIds.has(route.id);
+        return `<div class="border rounded mb-2">
+            <div class="p-2 d-flex justify-content-between align-items-center route-admin-toggle" data-id="${route.id}" style="cursor:pointer;">
+                <div>
+                    <span class="badge me-1" style="background:${route.team_color_bg};color:${route.team_color_fg};">${escapeHtml(route.team_label || '')}</span>
+                    <strong class="small">${route.title ? escapeHtml(route.title) : t('route.default_title')}</strong>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    ${statusBadge}
+                    <i class="bi bi-chevron-${isExpanded ? 'up' : 'down'}"></i>
+                </div>
+            </div>
+            ${isExpanded ? `<div class="border-top p-2">${renderRouteAdminWaypointsList(route)}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.route-admin-toggle').forEach(el => el.addEventListener('click', () => {
+        const id = +el.dataset.id;
+        if (expandedRouteIds.has(id)) expandedRouteIds.delete(id); else expandedRouteIds.add(id);
+        renderRoutesAdmin(allRoutes);
+    }));
+    list.querySelectorAll('.route-cancel-btn').forEach(btn => btn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (!confirm(t('route.cancel_confirm'))) return;
+        btn.disabled = true;
+        postRouteAction('cancel', btn.dataset.id, {}).then(result => { if (result && !result.ok) { alert(result.error || t('common.failed')); btn.disabled = false; } });
+    }));
+    list.querySelectorAll('.route-skip-btn').forEach(btn => btn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (!confirm(t('route.skip_confirm'))) return;
+        btn.disabled = true;
+        postRouteAction('skip', btn.dataset.id, {}).then(result => { if (result && !result.ok) { alert(result.error || t('common.failed')); btn.disabled = false; } });
+    }));
+    list.querySelectorAll('.route-zoom-btn').forEach(btn => btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const route = allRoutes.find(r => String(r.id) === btn.dataset.id);
+        if (route && route.waypoints.length && map) {
+            map.fitBounds(L.latLngBounds(route.waypoints.map(w => [w.lat, w.lng])), {padding: [40, 40]});
+        }
+    }));
+    list.querySelectorAll('.route-edit-btn').forEach(btn => btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const waypoint = allRoutes.flatMap(r => r.waypoints).find(w => String(w.id) === btn.dataset.id);
+        if (waypoint) openWaypointEditModal(waypoint);
+    }));
+    list.querySelectorAll('.route-media-view').forEach(el => el.addEventListener('click', e => {
+        e.stopPropagation();
+        openMediaViewModal(el.dataset.id, el.dataset.mediaType);
+    }));
+}
+
+// ── Edit an existing (already-sent) waypoint's label/instructions/dwell/
+// deliverables. A separate modal (not inline in #routesAdminList) on purpose:
+// that list's innerHTML gets fully rebuilt by renderRoutesAdmin() on every 5s
+// poll tick, which would otherwise wipe out whatever the admin is mid-typing —
+// living outside it sidesteps that instead of needing a signature-skip guard.
+let routeEditWaypointId = null;
+
+function openWaypointEditModal(waypoint) {
+    routeEditWaypointId = waypoint.id;
+    document.getElementById('routeEditLabel').value = waypoint.label || '';
+    document.getElementById('routeEditInstructions').value = waypoint.instructions || '';
+    document.getElementById('routeEditDwell').value = waypoint.dwell_minutes ?? '';
+    document.getElementById('routeEditPhoto').checked = !!waypoint.require_photo;
+    document.getElementById('routeEditVideo').checked = !!waypoint.require_video;
+    document.getElementById('routeEditNote').checked = !!waypoint.require_note;
+    document.getElementById('routeEditError').classList.add('d-none');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('routeWaypointEditModal')).show();
+}
+
+(function() {
+    const modalEl = document.getElementById('routeWaypointEditModal');
+    if (!modalEl) return;
+    const saveBtn = document.getElementById('routeEditSaveBtn');
+    const errorEl = document.getElementById('routeEditError');
+
+    saveBtn.addEventListener('click', () => {
+        if (!routeEditWaypointId) return;
+        const extra = {
+            label: document.getElementById('routeEditLabel').value.trim(),
+            instructions: document.getElementById('routeEditInstructions').value.trim(),
+            dwell_minutes: document.getElementById('routeEditDwell').value,
+            require_photo: document.getElementById('routeEditPhoto').checked ? '1' : '0',
+            require_video: document.getElementById('routeEditVideo').checked ? '1' : '0',
+            require_note: document.getElementById('routeEditNote').checked ? '1' : '0',
+        };
+        saveBtn.disabled = true;
+        postRouteAction('edit_waypoint', routeEditWaypointId, extra).then(result => {
+            saveBtn.disabled = false;
+            if (result && result.ok) {
+                bootstrap.Modal.getInstance(modalEl).hide();
+            } else {
+                errorEl.textContent = (result && result.error) || t('common.failed');
+                errorEl.classList.remove('d-none');
+            }
+        });
+    });
+})();
+
+// ── Route Order composer modal (admin: build a numbered, ordered patrol) ────
+let routeWaypoints = [];
+let routeClosed = false; // click near point 1 (see routeMap's click handler) sets this — same gesture as the dispatch polygon tool
+let routeMap = null, routeMarkers = [], routeLine = null;
+
+function updateRouteSendState() {
+    const sendBtn = document.getElementById('routeSendBtn');
+    if (sendBtn) sendBtn.disabled = routeWaypoints.length < 1;
+}
+
+function renderRouteComposerMap() {
+    if (!routeMap) return;
+    routeMarkers.forEach(m => routeMap.removeLayer(m));
+    routeMarkers = [];
+    if (routeLine) { routeMap.removeLayer(routeLine); routeLine = null; }
+    routeWaypoints.forEach((wp, i) => {
+        const icon = L.divIcon({
+            className: '',
+            html: `<div style="background:#0d6efd;color:#fff;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #fff;box-shadow:0 1px 4px #0008;">${i + 1}</div>`,
+            iconSize: [26, 26], iconAnchor: [13, 13],
+        });
+        const marker = L.marker([wp.lat, wp.lng], {icon, draggable: true}).addTo(routeMap);
+        marker.on('dragend', ev => {
+            const pos = ev.target.getLatLng();
+            routeWaypoints[i].lat = pos.lat;
+            routeWaypoints[i].lng = pos.lng;
+        });
+        routeMarkers.push(marker);
+    });
+    if (routeClosed && routeWaypoints.length >= 3) {
+        // Closed loop: same technique as mission-dispatch.php's polygon preview
+        // (L.polygon draws the implicit last→first segment for free), but
+        // fillOpacity:0 so it reads as a closed path, not a shaded area/zone.
+        routeLine = L.polygon(routeWaypoints.map(wp => [wp.lat, wp.lng]), {color: '#0d6efd', weight: 3, dashArray: '6,6', fillOpacity: 0}).addTo(routeMap);
+    } else if (routeWaypoints.length >= 2) {
+        routeLine = L.polyline(routeWaypoints.map(wp => [wp.lat, wp.lng]), {color: '#0d6efd', weight: 3, dashArray: '6,6'}).addTo(routeMap);
+    }
+}
+
+function resetRouteComposer() {
+    routeWaypoints = [];
+    routeClosed = false;
+    renderRouteComposerMap();
+    renderWaypointPanel();
+    updateRouteSendState();
+}
+
+function renderWaypointPanel() {
+    const panel = document.getElementById('routeWaypointPanel');
+    if (!panel) return;
+    if (!routeWaypoints.length) {
+        panel.innerHTML = `<p class="text-muted small">${t('route.panel_empty')}</p>`;
+        return;
+    }
+    const closedNoticeHtml = routeClosed
+        ? `<div class="alert alert-primary py-1 px-2 small mb-2"><i class="bi bi-arrow-repeat me-1"></i>${t('route.closed_loop_note')}</div>`
+        : '';
+    panel.innerHTML = closedNoticeHtml + routeWaypoints.map((wp, i) => `
+        <div class="border rounded p-2 mb-2">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <strong class="small">${t('route.waypoint_fallback_label', {seq: i + 1})}</strong>
+                <div class="d-flex gap-1">
+                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 route-wp-up" data-i="${i}" ${i === 0 ? 'disabled' : ''} title="${t('route.move_up_title')}"><i class="bi bi-arrow-up"></i></button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 route-wp-down" data-i="${i}" ${i === routeWaypoints.length - 1 ? 'disabled' : ''} title="${t('route.move_down_title')}"><i class="bi bi-arrow-down"></i></button>
+                    <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 route-wp-remove" data-i="${i}" title="${t('common.delete')}"><i class="bi bi-trash"></i></button>
+                </div>
+            </div>
+            <input type="text" class="form-control form-control-sm mb-1 route-wp-label" data-i="${i}" maxlength="255" placeholder="${escapeHtml(t('route.label_placeholder'))}" value="${escapeHtml(wp.label)}">
+            <textarea class="form-control form-control-sm mb-1 route-wp-instructions" data-i="${i}" rows="2" maxlength="2000" placeholder="${escapeHtml(t('route.instructions_placeholder'))}">${escapeHtml(wp.instructions)}</textarea>
+            <div class="d-flex align-items-center gap-2 mb-1">
+                <label class="small text-muted mb-0">${t('route.dwell_label')}</label>
+                <input type="number" class="form-control form-control-sm route-wp-dwell" data-i="${i}" min="0" max="600" style="width:80px;" value="${wp.dwell_minutes ?? ''}" placeholder="${t('route.dwell_unlimited_placeholder')}">
+            </div>
+            <div class="d-flex gap-3 small">
+                <div class="form-check">
+                    <input class="form-check-input route-wp-flag" type="checkbox" data-i="${i}" data-flag="require_photo" id="wpPhoto${i}" ${wp.require_photo ? 'checked' : ''}>
+                    <label class="form-check-label" for="wpPhoto${i}">${t('route.photo_btn')}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input route-wp-flag" type="checkbox" data-i="${i}" data-flag="require_video" id="wpVideo${i}" ${wp.require_video ? 'checked' : ''}>
+                    <label class="form-check-label" for="wpVideo${i}">${t('route.video_btn')}</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input route-wp-flag" type="checkbox" data-i="${i}" data-flag="require_note" id="wpNote${i}" ${wp.require_note ? 'checked' : ''}>
+                    <label class="form-check-label" for="wpNote${i}">${t('route.note_flag_label')}</label>
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    panel.querySelectorAll('.route-wp-label').forEach(el => el.addEventListener('input', () => { routeWaypoints[+el.dataset.i].label = el.value; }));
+    panel.querySelectorAll('.route-wp-instructions').forEach(el => el.addEventListener('input', () => { routeWaypoints[+el.dataset.i].instructions = el.value; }));
+    panel.querySelectorAll('.route-wp-dwell').forEach(el => el.addEventListener('input', () => { routeWaypoints[+el.dataset.i].dwell_minutes = el.value === '' ? null : Math.max(0, parseInt(el.value, 10) || 0); }));
+    panel.querySelectorAll('.route-wp-flag').forEach(el => el.addEventListener('change', () => { routeWaypoints[+el.dataset.i][el.dataset.flag] = el.checked; }));
+    panel.querySelectorAll('.route-wp-remove').forEach(btn => btn.addEventListener('click', () => {
+        routeWaypoints.splice(+btn.dataset.i, 1);
+        // A closed loop needs at least 3 points to mean anything (mirrors the
+        // dispatch polygon tool's own >=3 gate) — dropping below that reopens
+        // it automatically rather than leaving a "closed" 2-point line.
+        if (routeWaypoints.length < 3) routeClosed = false;
+        renderWaypointPanel();
+        renderRouteComposerMap();
+        updateRouteSendState();
+    }));
+    // Up/down buttons rather than drag-and-drop: identical outcome (reorder
+    // the sequence), but works the same on a touch screen as a mouse — no
+    // HTML5 drag-and-drop polyfill needed for mobile, which native DnD
+    // doesn't support at all without one.
+    panel.querySelectorAll('.route-wp-up').forEach(btn => btn.addEventListener('click', () => {
+        const i = +btn.dataset.i;
+        if (i > 0) {
+            [routeWaypoints[i - 1], routeWaypoints[i]] = [routeWaypoints[i], routeWaypoints[i - 1]];
+            renderWaypointPanel();
+            renderRouteComposerMap();
+        }
+    }));
+    panel.querySelectorAll('.route-wp-down').forEach(btn => btn.addEventListener('click', () => {
+        const i = +btn.dataset.i;
+        if (i < routeWaypoints.length - 1) {
+            [routeWaypoints[i], routeWaypoints[i + 1]] = [routeWaypoints[i + 1], routeWaypoints[i]];
+            renderWaypointPanel();
+            renderRouteComposerMap();
+        }
+    }));
+}
+
+(function() {
+    const modalEl = document.getElementById('routeComposerModal');
+    if (!modalEl) return;
+
+    const titleInput = document.getElementById('routeTitleInput');
+    const addressInput = document.getElementById('routeAddressInput');
+    const addressSearchBtn = document.getElementById('routeAddressSearch');
+    const addressStatus = document.getElementById('routeAddressStatus');
+    const clearBtn = document.getElementById('routeClearBtn');
+    const sendBtn = document.getElementById('routeSendBtn');
+    const teamSelect = document.getElementById('routeTeamSelect');
+
+    // routeMap/routeWaypoints and the render/reset functions are module-level
+    // (declared above renderWaypointPanel) rather than local to this IIFE,
+    // since renderWaypointPanel's own per-waypoint "remove" button needs to
+    // call back into the map redraw — one shared state, whichever caller
+    // touches it first.
+    modalEl.addEventListener('shown.bs.modal', () => {
+        if (!routeMap) {
+            const center = missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73];
+            routeMap = L.map('routeMap').setView(center, missionLocation.lat ? 13 : 7);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(routeMap);
+            routeMap.on('click', e => {
+                if (routeClosed) return;
+                // Same "click near point 1 closes the shape" gesture as the
+                // dispatch polygon tool (mission-dispatch.php's onMapClick) —
+                // >=3 points placed, and the click lands within 16px (screen
+                // space, so it stays easy to hit regardless of zoom level) of
+                // point 1's current position.
+                if (routeWaypoints.length >= 3) {
+                    const firstPoint = routeMap.latLngToContainerPoint(L.latLng(routeWaypoints[0].lat, routeWaypoints[0].lng));
+                    const clickPoint = routeMap.latLngToContainerPoint(e.latlng);
+                    if (firstPoint.distanceTo(clickPoint) < 16) {
+                        routeClosed = true;
+                        renderRouteComposerMap();
+                        renderWaypointPanel();
+                        return;
+                    }
+                }
+                routeWaypoints.push({lat: e.latlng.lat, lng: e.latlng.lng, label: '', instructions: '', dwell_minutes: 10, require_photo: false, require_video: false, require_note: false});
+                renderRouteComposerMap();
+                renderWaypointPanel();
+                updateRouteSendState();
+            });
+        }
+        setTimeout(() => routeMap.invalidateSize(), 100);
+    });
+
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        resetRouteComposer();
+        titleInput.value = '';
+        addressInput.value = '';
+        addressStatus.textContent = '';
+    });
+
+    clearBtn.addEventListener('click', resetRouteComposer);
+
+    addressSearchBtn.addEventListener('click', () => {
+        const q = addressInput.value.trim();
+        if (!q) return;
+        addressStatus.textContent = t('dispatch.searching');
+        fetch('geocode-address.php?q=' + encodeURIComponent(q)).then(response => response.json()).then(result => {
+            if (result.ok) {
+                routeMap.setView([result.lat, result.lng], 16);
+                addressStatus.textContent = '✓ ' + (result.display_name || q);
+            } else {
+                addressStatus.textContent = result.error || t('dispatch.address_not_found');
+            }
+        }).catch(() => { addressStatus.textContent = t('dispatch.search_failed'); });
+    });
+
+    sendBtn.addEventListener('click', () => {
+        if (!routeWaypoints.length) return;
+        const payload = routeWaypoints.map(wp => ({
+            lat: wp.lat, lng: wp.lng, label: wp.label, instructions: wp.instructions,
+            dwell_minutes: wp.dwell_minutes, require_photo: wp.require_photo ? 1 : 0,
+            require_video: wp.require_video ? 1 : 0, require_note: wp.require_note ? 1 : 0,
+        }));
+        const data = new URLSearchParams({
+            csrf_token: csrfToken, action: 'create', mission_id: '<?= $missionId ?>',
+            team_id: teamSelect.value, title: titleInput.value.trim(), waypoints: JSON.stringify(payload),
+            is_closed_loop: routeClosed ? '1' : '0',
+        });
+        sendBtn.disabled = true;
+        fetch('mission-route.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                bootstrap.Modal.getInstance(modalEl).hide();
+                routes = result.routes;
+                renderMyRoutes(routes);
+                renderRoutesAdmin(routes);
+                renderRouteLayer(routes);
+            } else {
+                alert(result.error || t('common.send_failed'));
+            }
+        }).catch(() => alert(t('common.send_failed'))).finally(() => { sendBtn.disabled = false; });
     });
 })();
 </script>

@@ -1869,9 +1869,11 @@ CREATE TABLE IF NOT EXISTS `mission_photos` (
     `file_size` INT UNSIGNED NOT NULL,
     `lat` DECIMAL(10,7) NULL,
     `lng` DECIMAL(10,7) NULL,
+    `route_waypoint_id` INT UNSIGNED NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`route_waypoint_id`) REFERENCES `mission_route_waypoints`(`id`) ON DELETE SET NULL,
     INDEX `idx_photo_mission` (`mission_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -1881,7 +1883,7 @@ CREATE TABLE IF NOT EXISTS `mission_photos` (
 CREATE TABLE IF NOT EXISTS `mission_orders` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `mission_id` INT UNSIGNED NOT NULL,
-    `order_type` ENUM('location','photo','video','task','message','return_to_base') NOT NULL,
+    `order_type` ENUM('location','photo','video','task','message','return_to_base','route') NOT NULL,
     `task_text` TEXT NULL,
     `created_by` INT UNSIGNED NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1901,6 +1903,89 @@ CREATE TABLE IF NOT EXISTS `mission_order_recipients` (
     FOREIGN KEY (`order_id`) REFERENCES `mission_orders`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- MISSION ROUTES (War Room "Route Order" — ordered multi-waypoint patrol
+-- assigned to one team; the join of mission_dispatch_points' "where" and
+-- mission_orders' "what", plus sequence and dwell time)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_routes` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `team_id` INT UNSIGNED NOT NULL,
+    `order_id` INT UNSIGNED NULL,
+    `title` VARCHAR(255) NULL,
+    `is_closed_loop` TINYINT(1) NOT NULL DEFAULT 0,
+    `created_by` INT UNSIGNED NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `completed_at` TIMESTAMP NULL,
+    `cancelled_at` TIMESTAMP NULL,
+    `cancelled_by` INT UNSIGNED NULL,
+    `cancel_reason` VARCHAR(255) NULL,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`order_id`) REFERENCES `mission_orders`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`cancelled_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_route_mission` (`mission_id`, `team_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- MISSION ROUTE WAYPOINTS (ordered stops; dwell_minutes NULL = stay until
+-- further orders, the final "menete ekei" stop)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_route_waypoints` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `route_id` INT UNSIGNED NOT NULL,
+    `seq` SMALLINT UNSIGNED NOT NULL,
+    `lat` DECIMAL(10,7) NOT NULL,
+    `lng` DECIMAL(10,7) NOT NULL,
+    `label` VARCHAR(255) NULL,
+    `instructions` TEXT NULL,
+    `dwell_minutes` SMALLINT UNSIGNED NULL,
+    `require_photo` TINYINT(1) NOT NULL DEFAULT 0,
+    `require_video` TINYINT(1) NOT NULL DEFAULT 0,
+    `require_note` TINYINT(1) NOT NULL DEFAULT 0,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`route_id`) REFERENCES `mission_routes`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY `uniq_route_seq` (`route_id`, `seq`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- MISSION ROUTE PROGRESS (one row per waypoint — TEAM state, not per-user:
+-- first member to report an event advances the whole team, *_by records who)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_route_progress` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `waypoint_id` INT UNSIGNED NOT NULL,
+    `route_id` INT UNSIGNED NOT NULL,
+    `team_id` INT UNSIGNED NOT NULL,
+    `departed_at` TIMESTAMP NULL,
+    `departed_by` INT UNSIGNED NULL,
+    `arrived_at` TIMESTAMP NULL,
+    `arrived_by` INT UNSIGNED NULL,
+    `arrived_lat` DECIMAL(10,7) NULL,
+    `arrived_lng` DECIMAL(10,7) NULL,
+    `arrived_accuracy_m` DECIMAL(8,2) NULL,
+    `arrived_distance_m` INT UNSIGNED NULL,
+    `completed_at` TIMESTAMP NULL,
+    `completed_by` INT UNSIGNED NULL,
+    `skipped_at` TIMESTAMP NULL,
+    `skipped_by` INT UNSIGNED NULL,
+    `skip_reason` VARCHAR(255) NULL,
+    `note` TEXT NULL,
+    `out_of_sequence` TINYINT(1) NOT NULL DEFAULT 0,
+    `reported_at` TIMESTAMP NULL,
+    UNIQUE KEY `uniq_waypoint` (`waypoint_id`),
+    FOREIGN KEY (`waypoint_id`) REFERENCES `mission_route_waypoints`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`route_id`) REFERENCES `mission_routes`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`departed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`arrived_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`completed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`skipped_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_progress_route` (`route_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================

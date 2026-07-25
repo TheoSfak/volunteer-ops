@@ -128,7 +128,7 @@ foreach ($arrivedRows as $row) {
 }
 
 // ── orders (location/photo/video/task): sent / acknowledged / fulfilled ───────
-$orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢'];
+$orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'route' => '🧭'];
 $orderRows = dbFetchAll(
     "SELECT o.order_type, o.task_text, o.created_at AS sent_at, r.team_id, r.acknowledged_at, r.fulfilled_at,
             u.name AS actor_name, mt.codename, mt.team_number
@@ -143,7 +143,7 @@ foreach ($orderRows as $row) {
     $icon = $orderTypeIcons[$row['order_type']] ?? '📋';
     $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team', [], $viewerLang);
     $extra = '';
-    if (in_array($row['order_type'], ['task', 'message'], true) && $row['task_text']) {
+    if (in_array($row['order_type'], ['task', 'message', 'route'], true) && $row['task_text']) {
         $snippet = mb_strlen($row['task_text']) > 120 ? mb_substr($row['task_text'], 0, 117) . '…' : $row['task_text'];
         $extra = t('history.label_suffix_dash', ['label' => h($snippet)], $viewerLang);
     }
@@ -167,6 +167,65 @@ foreach ($orderRows as $row) {
             'text' => t('history.order_fulfilled', ['actor' => h($row['actor_name']), 'team' => h($teamLabel), 'extra' => $extra], $viewerLang),
             'time' => date('d/m H:i', strtotime($row['fulfilled_at'])),
             'ts'   => strtotime($row['fulfilled_at']),
+        ];
+    }
+}
+
+// ── Route Order waypoints: depart / arrive / complete / skip ──────────────────
+// team_id here is the route's own assigned team (predicate 2 — same as
+// statusRows/pingRows/shortageRows below), never NULL for an existing route.
+$routeProgressRows = dbFetchAll(
+    "SELECT p.departed_at, p.arrived_at, p.completed_at, p.skipped_at, p.skip_reason, p.arrived_distance_m,
+            w.seq, w.label, r.team_id, mt.codename, mt.team_number,
+            du.name AS departed_by_name, au.name AS arrived_by_name, cu.name AS completed_by_name, su.name AS skipped_by_name
+     FROM mission_route_progress p
+     JOIN mission_route_waypoints w ON w.id = p.waypoint_id
+     JOIN mission_routes r ON r.id = p.route_id
+     LEFT JOIN mission_teams mt ON mt.id = r.team_id
+     LEFT JOIN users du ON du.id = p.departed_by
+     LEFT JOIN users au ON au.id = p.arrived_by
+     LEFT JOIN users cu ON cu.id = p.completed_by
+     LEFT JOIN users su ON su.id = p.skipped_by
+     WHERE r.mission_id = ? AND (? = 1 OR p.team_id = ?)",
+    [$missionId, $isAdminParam, $viewerTeamId]
+);
+foreach ($routeProgressRows as $row) {
+    $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team', [], $viewerLang);
+    $pointLabel = $row['label'] !== null && $row['label'] !== '' ? $row['label'] : t('route.waypoint_fallback_label', ['seq' => $row['seq']], $viewerLang);
+    if ($row['departed_at']) {
+        $events[] = [
+            'icon' => '🚶',
+            'text' => t('history.route_departed', ['team' => h($teamLabel), 'label' => h($pointLabel), 'actor' => h($row['departed_by_name'] ?? '')], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row['departed_at'])),
+            'ts'   => strtotime($row['departed_at']),
+        ];
+    }
+    if ($row['arrived_at']) {
+        $distanceSuffix = $row['arrived_distance_m'] !== null
+            ? ' — ' . t('route.distance_from_point', ['m' => (int) $row['arrived_distance_m']], $viewerLang)
+            : '';
+        $events[] = [
+            'icon' => '📍',
+            'text' => t('history.route_arrived', ['team' => h($teamLabel), 'label' => h($pointLabel), 'distance_suffix' => $distanceSuffix, 'actor' => h($row['arrived_by_name'] ?? '')], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row['arrived_at'])),
+            'ts'   => strtotime($row['arrived_at']),
+        ];
+    }
+    if ($row['completed_at']) {
+        $events[] = [
+            'icon' => '✅',
+            'text' => t('history.route_completed', ['team' => h($teamLabel), 'label' => h($pointLabel), 'actor' => h($row['completed_by_name'] ?? '')], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row['completed_at'])),
+            'ts'   => strtotime($row['completed_at']),
+        ];
+    }
+    if ($row['skipped_at']) {
+        $reasonSuffix = $row['skip_reason'] ? t('history.label_suffix_dash', ['label' => h($row['skip_reason'])], $viewerLang) : '';
+        $events[] = [
+            'icon' => '⏭',
+            'text' => t('history.route_skipped', ['team' => h($teamLabel), 'label' => h($pointLabel), 'reason_suffix' => $reasonSuffix, 'actor' => h($row['skipped_by_name'] ?? '')], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row['skipped_at'])),
+            'ts'   => strtotime($row['skipped_at']),
         ];
     }
 }

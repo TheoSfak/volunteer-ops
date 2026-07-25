@@ -747,6 +747,148 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
 }
 
 /**
+ * War Room "Εντολή Πορείας": load routes visible to $userId — every route of
+ * the mission for command staff (the live admin panel needs the full
+ * picture, including closed ones), or just their own team's route(s) for an
+ * ordinary participant. Shared by war-room.php (initial render) and
+ * mission-route.php (AJAX poll + the return value of every mutating action),
+ * same "one loader, every caller" pattern as loadMissionDispatchesForUser()
+ * above. See includes/migrations.php v105 for the underlying table shapes.
+ */
+function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom): array {
+    $myTeamId = getUserTeamIdForMission($missionId, $userId);
+    if (!$canManageWarRoom && !$myTeamId) {
+        return [];
+    }
+
+    $params = [$missionId];
+    $teamFilter = '';
+    if (!$canManageWarRoom) {
+        $teamFilter = ' AND r.team_id = ?';
+        $params[] = $myTeamId;
+    }
+
+    $routes = dbFetchAll(
+        "SELECT r.id, r.team_id, r.title, r.is_closed_loop, r.created_at, r.completed_at, r.cancelled_at, r.cancel_reason,
+                mt.codename, mt.team_number, mt.color, cu.name AS created_by_name
+         FROM mission_routes r
+         LEFT JOIN mission_teams mt ON mt.id = r.team_id
+         JOIN users cu ON cu.id = r.created_by
+         WHERE r.mission_id = ?$teamFilter
+         ORDER BY r.created_at DESC",
+        $params
+    );
+    if (empty($routes)) {
+        return [];
+    }
+
+    $routeIds = array_map(fn($r) => (int) $r['id'], $routes);
+    $placeholders = implode(',', array_fill(0, count($routeIds), '?'));
+
+    $waypointRows = dbFetchAll(
+        "SELECT w.id, w.route_id, w.seq, w.lat, w.lng, w.label, w.instructions, w.dwell_minutes,
+                w.require_photo, w.require_video, w.require_note,
+                p.departed_at, du.name AS departed_by_name,
+                p.arrived_at, au.name AS arrived_by_name, p.arrived_distance_m, p.arrived_accuracy_m,
+                p.completed_at, cu2.name AS completed_by_name,
+                p.skipped_at, su.name AS skipped_by_name, p.skip_reason, p.note, p.out_of_sequence
+         FROM mission_route_waypoints w
+         LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
+         LEFT JOIN users du ON du.id = p.departed_by
+         LEFT JOIN users au ON au.id = p.arrived_by
+         LEFT JOIN users cu2 ON cu2.id = p.completed_by
+         LEFT JOIN users su ON su.id = p.skipped_by
+         WHERE w.route_id IN ($placeholders)
+         ORDER BY w.route_id, w.seq",
+        $routeIds
+    );
+
+    // One photo thumbnail AND one video thumbnail per waypoint, tracked in
+    // separate slots — a waypoint can require both at once (independent
+    // checkboxes in the composer), so collapsing them into a single "latest
+    // upload" slot would make whichever came first disappear from the card
+    // the moment the second one was sent. ORDER BY created_at ASC so the
+    // foreach's natural overwrite deterministically keeps the latest of each
+    // type (last-wins is only meaningful if the scan order is fixed).
+    $photosByWaypoint = [];
+    $videosByWaypoint = [];
+    foreach (dbFetchAll(
+        "SELECT route_waypoint_id, id, media_type, created_at FROM mission_photos WHERE route_waypoint_id IN ($placeholders) ORDER BY created_at ASC",
+        $routeIds
+    ) as $ph) {
+        $entry = ['id' => (int) $ph['id'], 'time' => date('d/m H:i', strtotime($ph['created_at']))];
+        if ($ph['media_type'] === 'video') {
+            $videosByWaypoint[(int) $ph['route_waypoint_id']] = $entry;
+        } else {
+            $photosByWaypoint[(int) $ph['route_waypoint_id']] = $entry;
+        }
+    }
+
+    $waypointsByRoute = [];
+    foreach ($waypointRows as $w) {
+        $waypointId = (int) $w['id'];
+        $waypointsByRoute[(int) $w['route_id']][] = [
+            'id'                    => $waypointId,
+            'seq'                   => (int) $w['seq'],
+            'lat'                   => (float) $w['lat'],
+            'lng'                   => (float) $w['lng'],
+            'label'                 => $w['label'],
+            'instructions'          => $w['instructions'],
+            'dwell_minutes'         => $w['dwell_minutes'] !== null ? (int) $w['dwell_minutes'] : null,
+            'require_photo'         => (bool) $w['require_photo'],
+            'require_video'         => (bool) $w['require_video'],
+            'require_note'          => (bool) $w['require_note'],
+            // *_at is ISO 8601 (parses reliably with JS `new Date()` cross-browser,
+            // unlike MySQL's raw "Y-m-d H:i:s") for the live dwell-time countdown;
+            // *_at_display is the pre-formatted H:i string every other loader here
+            // already returns, for plain display.
+            'departed_at'           => $w['departed_at'] ? date('c', strtotime($w['departed_at'])) : null,
+            'departed_at_display'   => $w['departed_at'] ? date('H:i', strtotime($w['departed_at'])) : null,
+            'departed_by_name'      => $w['departed_by_name'],
+            'arrived_at'            => $w['arrived_at'] ? date('c', strtotime($w['arrived_at'])) : null,
+            'arrived_at_display'    => $w['arrived_at'] ? date('H:i', strtotime($w['arrived_at'])) : null,
+            'arrived_by_name'       => $w['arrived_by_name'],
+            'arrived_distance_m'    => $w['arrived_distance_m'] !== null ? (int) $w['arrived_distance_m'] : null,
+            'arrived_accuracy_m'    => $w['arrived_accuracy_m'] !== null ? (float) $w['arrived_accuracy_m'] : null,
+            'completed_at'          => $w['completed_at'] ? date('c', strtotime($w['completed_at'])) : null,
+            'completed_at_display'  => $w['completed_at'] ? date('H:i', strtotime($w['completed_at'])) : null,
+            'completed_by_name'     => $w['completed_by_name'],
+            'skipped_at_display'    => $w['skipped_at'] ? date('H:i', strtotime($w['skipped_at'])) : null,
+            'skipped_by_name'       => $w['skipped_by_name'],
+            'skip_reason'           => $w['skip_reason'],
+            'note'                  => $w['note'],
+            'out_of_sequence'       => (bool) $w['out_of_sequence'],
+            'photo'                 => $photosByWaypoint[$waypointId] ?? null,
+            'video'                 => $videosByWaypoint[$waypointId] ?? null,
+        ];
+    }
+
+    return array_map(function ($r) use ($waypointsByRoute, $canManageWarRoom, $myTeamId) {
+        $routeId = (int) $r['id'];
+        $teamId = $r['team_id'] ? (int) $r['team_id'] : null;
+        [$teamColorBg, $teamColorFg] = teamBadgeColors($teamId ? $r['color'] : null);
+        return [
+            'id'                    => $routeId,
+            'team_id'               => $teamId,
+            'team_label'            => $teamId ? teamLabel($r['codename'], $r['team_number']) : null,
+            'team_color_bg'         => $teamColorBg,
+            'team_color_fg'         => $teamColorFg,
+            'title'                 => $r['title'],
+            'is_closed_loop'        => (bool) $r['is_closed_loop'],
+            'status'                => $r['cancelled_at'] ? 'cancelled' : ($r['completed_at'] ? 'completed' : 'active'),
+            'created_at_display'    => date('d/m H:i', strtotime($r['created_at'])),
+            'created_by_name'       => $r['created_by_name'],
+            'completed_at_display'  => $r['completed_at'] ? date('d/m H:i', strtotime($r['completed_at'])) : null,
+            'cancelled_at_display'  => $r['cancelled_at'] ? date('d/m H:i', strtotime($r['cancelled_at'])) : null,
+            'cancel_reason'         => $r['cancel_reason'],
+            'can_manage'            => $canManageWarRoom,
+            'is_my_team'            => $teamId !== null && $teamId === $myTeamId,
+            'waypoints'             => $waypointsByRoute[$routeId] ?? [],
+        ];
+    }, $routes);
+}
+
+/**
  * War Room "Πορεία Ομάδων": full historical GPS trail per volunteer for a
  * mission (not just the latest ping like the live map's $loadPins), grouped
  * by user_id (not user+shift — a volunteer has at most one team per mission
@@ -951,6 +1093,83 @@ function getMissionCommandStaffIds(int $missionId, ?int $responsibleUserId, int 
         $ids[] = (int) $responsibleUserId;
     }
     return array_values(array_unique(array_diff($ids, [$excludeUserId])));
+}
+
+/**
+ * War Room: persist a trackable order (mission_orders + one mission_order_recipients
+ * row per recipient, snapshotting each recipient's team) then notify them, threading
+ * orderId into the pushData so the alert banner can offer an "Ελήφθη" button. Shared
+ * by request_location/request_photo/request_video/task (war-room.php) and the Route
+ * Order composer (mission-route.php) — the only difference between them is
+ * order_type + notification copy. Lives here (not war-room.php, where it was first
+ * written) specifically so a standalone endpoint like mission-route.php — which only
+ * requires bootstrap.php, never war-room.php itself — can call it too.
+ */
+function createMissionOrderAndNotify(
+    int $missionId, string $missionTitle, string $orderType, int $createdBy, array $recipientIds,
+    string $titleKey, array $titleVars, ?string $rawMessage, string $messageKey, array $messageVars,
+    string $broadcastKey, array $broadcastVars, ?string $taskText = null, ?string $alarmStyle = null
+): int {
+    $orderId = dbInsert(
+        "INSERT INTO mission_orders (mission_id, order_type, task_text, created_by, created_at) VALUES (?, ?, ?, ?, NOW())",
+        [$missionId, $orderType, $taskText, $createdBy]
+    );
+
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $recipientLangs = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $recipientLangs[$recipientId] ?? DEFAULT_LANGUAGE;
+        $teamId = getUserTeamIdForMission($missionId, $recipientId);
+        dbInsert(
+            "INSERT INTO mission_order_recipients (order_id, user_id, team_id) VALUES (?, ?, ?)",
+            [$orderId, $recipientId, $teamId]
+        );
+        // Free-form task/broadcast text ($rawMessage) is never translated — it's
+        // exactly what the admin typed, per the "free text stays as typed" rule.
+        $message = $rawMessage ?? t($messageKey, $messageVars, $lang);
+        $pushData = [
+            'url' => $warRoomUrl,
+            'tag' => $orderType . '-request-mission-' . $missionId,
+            'vibrate' => [300, 100, 300, 100, 500],
+            'bannerMission' => $missionId,
+            'orderId' => (int) $orderId,
+        ];
+        if ($alarmStyle) {
+            $pushData['alarmStyle'] = $alarmStyle;
+        }
+        sendNotification($recipientId, t($titleKey, $titleVars, $lang), $message, 'warning', '', $pushData);
+    }
+
+    // Every order also scrolls as a banner for every other approved participant of the
+    // mission, not just whoever it was actually addressed to, so the whole mission stays
+    // aware of what's being asked. No orderId here — no order row, no "Ελήφθη" button —
+    // this is informational only, unlike the real recipients notified above.
+    $allApproved = dbFetchAll(
+        "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
+         JOIN shifts s ON s.id = pr.shift_id
+         WHERE s.mission_id = ? AND pr.status = ?",
+        [$missionId, PARTICIPATION_APPROVED]
+    );
+    $bystanderIds = array_diff(
+        array_map('intval', array_column($allApproved, 'volunteer_id')),
+        $recipientIds,
+        [$createdBy]
+    );
+    $bystanderLangs = getUserLanguages($bystanderIds);
+    foreach ($bystanderIds as $bystanderId) {
+        $lang = $bystanderLangs[$bystanderId] ?? DEFAULT_LANGUAGE;
+        $bystanderPushData = [
+            'url' => $warRoomUrl,
+            'tag' => $orderType . '-request-mission-' . $missionId,
+            'bannerMission' => $missionId,
+        ];
+        if ($alarmStyle) {
+            $bystanderPushData['alarmStyle'] = $alarmStyle;
+        }
+        sendNotification($bystanderId, t($titleKey, $titleVars, $lang), t($broadcastKey, $broadcastVars, $lang), 'info', '', $bystanderPushData);
+    }
+
+    return (int) $orderId;
 }
 
 /**
@@ -1167,6 +1386,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
         'message'  => t('report.type_message', [], $lang),
         'dispatch' => t('report.type_dispatch', [], $lang),
         'return_to_base' => t('report.type_return_to_base', [], $lang),
+        'route'    => t('report.type_route', [], $lang),
     ];
 
     $teamLabels = [];
@@ -1196,7 +1416,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
             'team_label'  => $teamId ? ($teamLabels[$teamId] ?? '—') : t('history.no_team_capitalized', [], $lang),
             'user_id'     => (int) $row['user_id'],
             'user_name'   => $row['user_name'],
-            'label'       => in_array($row['order_type'], ['task', 'message'], true) ? $row['task_text'] : null,
+            'label'       => in_array($row['order_type'], ['task', 'message', 'route'], true) ? $row['task_text'] : null,
             'sent_at'     => $row['sent_at'],
             'ack_at'      => $row['acknowledged_at'],
             'fulfill_at'  => $row['fulfilled_at'],
@@ -2345,7 +2565,7 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         ];
     }
 
-    $orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'return_to_base' => '🏁'];
+    $orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'return_to_base' => '🏁', 'route' => '🧭'];
     $orderRows = dbFetchAll(
         "SELECT o.order_type, o.task_text, o.created_at AS sent_at, r.team_id, r.acknowledged_at, r.fulfilled_at,
                 u.name AS actor_name, mt.codename, mt.team_number
@@ -2360,7 +2580,7 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         $icon = $orderTypeIcons[$row['order_type']] ?? '📋';
         $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'χωρίς ομάδα';
         $extra = '';
-        if (in_array($row['order_type'], ['task', 'message'], true) && $row['task_text']) {
+        if (in_array($row['order_type'], ['task', 'message', 'route'], true) && $row['task_text']) {
             $snippet = mb_strlen($row['task_text']) > 120 ? mb_substr($row['task_text'], 0, 117) . '…' : $row['task_text'];
             $extra = ' — «' . h($snippet) . '»';
         }
@@ -2370,6 +2590,59 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         }
         if ($row['fulfilled_at']) {
             $events[] = ['icon' => '✅', 'text' => h($row['actor_name']) . ' ολοκλήρωσε εντολή (' . h($teamLabel) . ')' . $extra, 'ts' => strtotime($row['fulfilled_at'])];
+        }
+    }
+
+    // Per-waypoint Route Order events — the $orderRows block above only covers
+    // the order's own lifecycle (sent/acknowledged/route-fulfilled-as-a-whole);
+    // this is the actual stop-by-stop journey (depart/arrive/complete/skip)
+    // within it, one row of mission_route_progress per waypoint.
+    $routeProgressRows = dbFetchAll(
+        "SELECT p.departed_at, p.arrived_at, p.completed_at, p.skipped_at, p.skip_reason, p.arrived_distance_m,
+                w.seq, w.label, r.team_id, mt.codename, mt.team_number,
+                du.name AS departed_by_name, au.name AS arrived_by_name, cu.name AS completed_by_name, su.name AS skipped_by_name
+         FROM mission_route_progress p
+         JOIN mission_route_waypoints w ON w.id = p.waypoint_id
+         JOIN mission_routes r ON r.id = p.route_id
+         LEFT JOIN mission_teams mt ON mt.id = r.team_id
+         LEFT JOIN users du ON du.id = p.departed_by
+         LEFT JOIN users au ON au.id = p.arrived_by
+         LEFT JOIN users cu ON cu.id = p.completed_by
+         LEFT JOIN users su ON su.id = p.skipped_by
+         WHERE r.mission_id = ?",
+        [$missionId]
+    );
+    foreach ($routeProgressRows as $row) {
+        $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'χωρίς ομάδα';
+        $pointLabel = $row['label'] !== null && $row['label'] !== '' ? $row['label'] : ('Σημείο ' . $row['seq']);
+        if ($row['departed_at']) {
+            $events[] = [
+                'icon' => '🚶',
+                'text' => 'Η ομάδα ' . h($teamLabel) . ' ξεκίνησε για «' . h($pointLabel) . '»' . ($row['departed_by_name'] ? ' (' . h($row['departed_by_name']) . ')' : ''),
+                'ts'   => strtotime($row['departed_at']),
+            ];
+        }
+        if ($row['arrived_at']) {
+            $distanceSuffix = $row['arrived_distance_m'] !== null ? ' — ~' . (int) $row['arrived_distance_m'] . 'μ. από το σημείο' : '';
+            $events[] = [
+                'icon' => '📍',
+                'text' => 'Η ομάδα ' . h($teamLabel) . ' έφτασε στο «' . h($pointLabel) . '»' . ($row['arrived_by_name'] ? ' (' . h($row['arrived_by_name']) . ')' : '') . $distanceSuffix,
+                'ts'   => strtotime($row['arrived_at']),
+            ];
+        }
+        if ($row['completed_at']) {
+            $events[] = [
+                'icon' => '✅',
+                'text' => 'Η ομάδα ' . h($teamLabel) . ' ολοκλήρωσε το «' . h($pointLabel) . '»' . ($row['completed_by_name'] ? ' (' . h($row['completed_by_name']) . ')' : ''),
+                'ts'   => strtotime($row['completed_at']),
+            ];
+        }
+        if ($row['skipped_at']) {
+            $events[] = [
+                'icon' => '⏭',
+                'text' => 'Παραλείφθηκε το «' . h($pointLabel) . '» της ομάδας ' . h($teamLabel) . ($row['skip_reason'] ? ' — ' . h($row['skip_reason']) : '') . ($row['skipped_by_name'] ? ' (' . h($row['skipped_by_name']) . ')' : ''),
+                'ts'   => strtotime($row['skipped_at']),
+            ];
         }
     }
 

@@ -358,11 +358,22 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
 <?php endif; ?>
 <!-- Online/Offline Indicator -->
 <div id="vo-offline-bar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc3545;color:#fff;text-align:center;padding:8px 12px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.2);transition:transform .3s ease;">
-    <i class="bi bi-wifi-off"></i> Εκτός σύνδεσης — Μπορείτε μόνο να βλέπετε σελίδες που έχουν ήδη φορτωθεί
+    <i class="bi bi-wifi-off"></i> <span id="vo-offline-bar-text">Εκτός σύνδεσης — Μπορείτε μόνο να βλέπετε σελίδες που έχουν ήδη φορτωθεί</span>
 </div>
 <script>
 (function() {
     var bar = document.getElementById('vo-offline-bar');
+    var barText = document.getElementById('vo-offline-bar-text');
+    // War Room's Route Order actions (depart/arrive/complete) queue locally
+    // and sync automatically once back online — see war-room.php's
+    // flushRouteQueue(). Everything else on this bar's generic message still
+    // applies there too (photos/videos/dispatch/chat are NOT queued), so the
+    // text is amended, not replaced, and only on that page — every other
+    // page's warning stays exactly as before.
+    var isWarRoom = /\/war-room\.php/.test(window.location.pathname);
+    if (isWarRoom && barText) {
+        barText.textContent = 'Εκτός σύνδεσης — Οι ενέργειες Πορείας αποθηκεύονται και θα σταλούν αυτόματα μόλις επανέλθει το δίκτυο. Άλλες ενέργειες (φωτογραφίες, μηνύματα) όχι.';
+    }
     function update() {
         var offline = !navigator.onLine;
         bar.style.display = offline ? 'block' : 'none';
