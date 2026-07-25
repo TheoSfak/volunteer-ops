@@ -32,6 +32,13 @@ $lngRaw = post('lng');
 $lat = ($latRaw !== '' && $latRaw !== null && is_numeric($latRaw)) ? (float) $latRaw : null;
 $lng = ($lngRaw !== '' && $lngRaw !== null && is_numeric($lngRaw)) ? (float) $lngRaw : null;
 
+// The War Room offline queue replays this endpoint, so a status change (and
+// especially an SOS) that only reaches the server once signal returns must be
+// recorded at the time the volunteer actually tapped it, not on arrival. Same
+// rules and same plausibility window as mission-route.php — see
+// resolveEventTimestamp() in includes/functions.php.
+[$eventTs, $reportedAtTs] = resolveEventTimestamp();
+
 $allowedStatuses = ['on_way', 'on_site', 'needs_help'];
 if (!in_array($status, $allowedStatuses, true)) {
     echo json_encode(['ok' => false, 'error' => t('status.invalid_status')]);
@@ -57,8 +64,8 @@ if (!$pr) {
 // Update field status
 try {
     dbExecute(
-        "UPDATE participation_requests SET field_status = ?, field_status_updated_at = NOW() WHERE id = ?",
-        [$status, $prId]
+        "UPDATE participation_requests SET field_status = ?, field_status_updated_at = ? WHERE id = ?",
+        [$status, $eventTs, $prId]
     );
 } catch (Exception $e) {
     echo json_encode(['ok' => false, 'error' => t('status.feature_unavailable_migration')]);
@@ -71,7 +78,20 @@ try {
 $auditActionByStatus = [
     'on_way' => 'field_status_on_way', 'on_site' => 'field_status_on_site', 'needs_help' => 'needs_help',
 ];
-logAudit($auditActionByStatus[$status], 'participation_requests', $prId);
+// A delayed offline replay is recorded at its true field time above, which
+// would otherwise make it indistinguishable from a normal live tap — the raw
+// client claim and the actual arrival time go in the audit notes so the
+// delay stays visible after the fact. Nothing is added on the live path.
+//
+// 5 seconds, not a minute: on the live path the client stamps reported_at
+// immediately before the fetch (after any GPS wait, not before it), so the
+// gap there is sub-second. A minute-wide threshold quietly failed to mark
+// real queued replays — confirmed live with an SOS that sat in the queue for
+// 54s and logged as if it had been a normal tap.
+$auditNotes = ($reportedAtTs !== $eventTs || strtotime($eventTs) < time() - 5)
+    ? ['reported_at' => $reportedAtTs, 'received_at' => date('Y-m-d H:i:s'), 'offline_replay' => true]
+    : null;
+logAudit($auditActionByStatus[$status], 'participation_requests', $prId, $auditNotes);
 
 // If needs_help → this IS the SOS button: open (or refresh) a War Room SOS
 // alert ticket and alert command staff. A duplicate-open-alert guard stops
@@ -95,10 +115,15 @@ if ($status === 'needs_help') {
         $myTeam = $teamId ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$teamId]) : null;
         $teamLabel = $myTeam ? teamLabel($myTeam['codename'], $myTeam['team_number']) : t('status.no_team_label');
 
+        // created_at is the resolved field time, not NOW(): an SOS queued
+        // offline and replayed 20 minutes later must show command staff when
+        // the volunteer actually called for help. It still surfaces as a new
+        // unacknowledged alert (siren + push fire below regardless), it just
+        // sorts and reads by its true time.
         dbInsert(
             "INSERT INTO mission_sos_alerts (mission_id, user_id, pr_id, team_id, lat, lng, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, NOW())",
-            [$missionId, $userId, $prId, $teamId, $lat, $lng]
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [$missionId, $userId, $prId, $teamId, $lat, $lng, $eventTs]
         );
 
         $recipientIds = getMissionCommandStaffIds(

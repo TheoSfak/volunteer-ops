@@ -2702,3 +2702,47 @@ function loadMissionActivityEventsForReport(int $missionId): array {
     usort($events, fn($a, $b) => $b['ts'] <=> $a['ts']);
     return $events;
 }
+
+/**
+ * Resolves the timestamp a queued-offline field action should actually be
+ * recorded at. The client optionally sends `reported_at` (its own clock,
+ * captured the moment the volunteer tapped the button) — this is what makes
+ * the War Room offline queue work: an "arrive", or an SOS, that only
+ * physically reaches this server 20 minutes later (once signal comes back)
+ * still records the real field time instead of whenever the network happened
+ * to recover.
+ *
+ * Returns [$eventTimestamp, $reportedAtTimestamp] as MySQL DATETIME strings:
+ * $eventTimestamp is what the real column (departed_at/arrived_at/
+ * completed_at/skipped_at, field_status_updated_at, sos created_at) gets set
+ * to; $reportedAtTimestamp is the client's raw claim, kept for the audit
+ * trail even on the rare path below where it wasn't trusted for the real
+ * column.
+ *
+ * Only accepted within a plausible field-offline window (not in the future,
+ * not implausibly old) — this is a self-reported client clock, not
+ * authenticated, so an unbounded value is never trusted outright; outside
+ * that window it silently falls back to server NOW() rather than rejecting
+ * the whole action (a wrong client clock must never block a field report,
+ * least of all an SOS).
+ *
+ * Shared by mission-route.php and volunteer-status.php: both are replayed by
+ * the same client-side queue, so they must agree on these rules exactly.
+ */
+function resolveEventTimestamp(): array {
+    $now = date('Y-m-d H:i:s');
+    $reportedAtRaw = post('reported_at');
+    if ($reportedAtRaw === '' || $reportedAtRaw === null) {
+        return [$now, $now];
+    }
+    $ts = strtotime($reportedAtRaw);
+    if ($ts === false) {
+        return [$now, $now];
+    }
+    $reportedAtTimestamp = date('Y-m-d H:i:s', $ts);
+    $nowTs = time();
+    if ($ts <= $nowTs && $ts >= $nowTs - 86400) {
+        return [$reportedAtTimestamp, $reportedAtTimestamp];
+    }
+    return [$now, $reportedAtTimestamp];
+}
