@@ -1526,6 +1526,9 @@ include __DIR__ . '/includes/header.php';
                     <?php foreach ($teams as $team): ?>
                     <option value="<?= $team['id'] ?>"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></option>
                     <?php endforeach; ?>
+                    <?php if (count($teams) >= 2): ?>
+                    <option value=""><?= t('route.cross_team_option') ?></option>
+                    <?php endif; ?>
                 </select>
                 <div class="mb-3">
                     <label class="form-label small fw-semibold mb-1"><?= t('route.members_label') ?></label>
@@ -1871,6 +1874,14 @@ const missionTeamsForRoute = <?= json_encode(array_values(array_map(fn($t) => [
     'label' => teamLabel($t['codename'], $t['team_number']),
     'members' => array_map(fn($m) => ['id' => $m['user_id'], 'name' => $m['name']], $t['members']),
 ], $teams)), JSON_UNESCAPED_UNICODE) ?>;
+// Every approved participant of the mission, with their current team label
+// (or none) — feeds the composer's cross-team picker mode, where a route
+// can be assembled from specific individuals across two or more different
+// teams instead of always one nominal team. See includes/migrations.php v110.
+const allApprovedForRoute = <?= json_encode(array_values(array_map(
+    fn($p) => ['id' => $p['user_id'], 'name' => $p['name'], 'team_label' => $teamLabelByUserId[$p['user_id']] ?? null],
+    $distinctApprovedById
+)), JSON_UNESCAPED_UNICODE) ?>;
 let shortageReports = <?= json_encode($shortageReports) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
 
@@ -4584,10 +4595,16 @@ function renderRoutesAdmin(allRoutes) {
         const membersSuffix = isSubset
             ? ` <span class="small text-muted">(${route.members.map(m => escapeHtml(m.name)).join(', ')})</span>`
             : '';
+        // No single nominal team (cross-team route, migration v110) — the
+        // badge already shows the members' names (team_label falls back to
+        // them server-side) in the neutral color teamBadgeColors(null)
+        // picks; a people icon just makes "this isn't a real team" legible
+        // at a glance alongside a real colored team badge.
+        const teamBadgeIcon = route.team_id === null ? '<i class="bi bi-people-fill me-1"></i>' : '';
         return `<div class="border rounded mb-2">
             <div class="p-2 d-flex justify-content-between align-items-center route-admin-toggle" data-id="${route.id}" style="cursor:pointer;">
                 <div>
-                    <span class="badge me-1" style="background:${route.team_color_bg};color:${route.team_color_fg};">${escapeHtml(route.team_label || '')}</span>
+                    <span class="badge me-1" style="background:${route.team_color_bg};color:${route.team_color_fg};">${teamBadgeIcon}${escapeHtml(route.team_label || '')}</span>
                     <strong class="small">${route.title ? escapeHtml(route.title) : t('route.default_title')}</strong>${membersSuffix}
                 </div>
                 <div class="d-flex align-items-center gap-2">
@@ -4825,6 +4842,29 @@ function renderWaypointPanel() {
     // defaults to everyone (old whole-team behavior unless the admin
     // unchecks someone), see includes/migrations.php v109.
     function renderRouteMemberPicker() {
+        // Empty value = cross-team mode (migration v110): list every
+        // approved participant of the mission, grouped by their current
+        // team, none pre-checked — unlike single-team mode there is no
+        // sensible "whole team" default to start from, the admin must
+        // deliberately assemble the group.
+        if (teamSelect.value === '') {
+            const byTeam = new Map();
+            allApprovedForRoute.forEach(p => {
+                const key = p.team_label || t('route.no_team_group');
+                if (!byTeam.has(key)) byTeam.set(key, []);
+                byTeam.get(key).push(p);
+            });
+            memberPicker.innerHTML = [...byTeam.entries()].map(([label, people]) => `
+                <div class="w-100 small text-muted fw-semibold mt-1">${escapeHtml(label)}</div>
+                ${people.map(p => `
+                    <label class="form-check form-check-inline me-2 mb-1">
+                        <input type="checkbox" class="form-check-input route-member-check" value="${p.id}">
+                        <span class="form-check-label">${escapeHtml(p.name)}</span>
+                    </label>
+                `).join('')}
+            `).join('') || `<span class="text-muted">${t('route.team_has_no_members')}</span>`;
+            return;
+        }
         const team = missionTeamsForRoute.find(t => String(t.id) === teamSelect.value);
         const members = team ? team.members : [];
         memberPicker.innerHTML = members.map(m => `
@@ -4904,7 +4944,10 @@ function renderWaypointPanel() {
             require_video: wp.require_video ? 1 : 0, require_note: wp.require_note ? 1 : 0,
         }));
         const memberIds = [...memberPicker.querySelectorAll('.route-member-check:checked')].map(cb => cb.value);
-        if (!memberIds.length) { alert(t('route.team_has_no_members')); return; }
+        if (!memberIds.length) {
+            alert(teamSelect.value === '' ? t('route.select_at_least_one_member') : t('route.team_has_no_members'));
+            return;
+        }
         const data = new URLSearchParams({
             csrf_token: csrfToken, action: 'create', mission_id: '<?= $missionId ?>',
             team_id: teamSelect.value, title: titleInput.value.trim(), waypoints: JSON.stringify(payload),

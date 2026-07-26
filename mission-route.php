@@ -181,8 +181,8 @@ function maybeCompleteRoute(int $routeId, int $actorId): bool {
     }
 
     $mission = dbFetchOne("SELECT title, responsible_user_id FROM missions WHERE id = ?", [$route['mission_id']]);
-    $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$route['team_id']]);
-    $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : '';
+    $teamRow = $route['team_id'] ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$route['team_id']]) : null;
+    $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : routeMixedTeamLabel($routeId);
     notifyRouteCommandStaff(
         (int) $route['mission_id'], $mission['title'] ?? '', $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $actorId,
         'mission_route_completed', 'route.notify_completed_title', [],
@@ -238,11 +238,18 @@ if ($action === 'create') {
         exit;
     }
 
-    $teamId = (int) post('team_id');
-    $team = dbFetchOne("SELECT id, codename, team_number FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
-    if (!$team) {
-        echo json_encode(['ok' => false, 'error' => t('common.team_not_found')]);
-        exit;
+    // team_id is optional (migration v110): a route can be assembled from
+    // specific individuals across two or more different teams instead of
+    // always belonging to one nominal team — see the cross-team branch below.
+    $teamIdRaw = post('team_id');
+    $teamId = ($teamIdRaw !== '' && $teamIdRaw !== null) ? (int) $teamIdRaw : null;
+    $team = null;
+    if ($teamId !== null) {
+        $team = dbFetchOne("SELECT id, codename, team_number FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
+        if (!$team) {
+            echo json_encode(['ok' => false, 'error' => t('common.team_not_found')]);
+            exit;
+        }
     }
 
     $title = trim((string) post('title'));
@@ -288,26 +295,56 @@ if ($action === 'create') {
         ];
     }
 
-    $teamRoster = array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]), 'user_id'));
-    if (empty($teamRoster)) {
-        echo json_encode(['ok' => false, 'error' => t('route.team_has_no_members')]);
-        exit;
-    }
-
-    // Optional subset of the team this specific route actually applies to
-    // (e.g. only 2 of 4 members sent on a temporary task) — see migration
-    // v109. Every submitted id is intersected against the team's real
-    // roster: a forged member_ids array must never be able to add a
-    // recipient/actor who isn't even on this team, since this list becomes
-    // both who gets notified and who is authorized to report on the route.
-    // No subset submitted (or nothing survives the intersection) falls back
-    // to the whole team — the composer's default, unchanged old behavior.
     $memberIdsRaw = json_decode((string) post('member_ids'), true);
-    $recipientIds = (is_array($memberIdsRaw) && !empty($memberIdsRaw))
-        ? array_values(array_intersect($teamRoster, array_map('intval', $memberIdsRaw)))
-        : $teamRoster;
-    if (empty($recipientIds)) {
-        $recipientIds = $teamRoster;
+    $submittedMemberIds = is_array($memberIdsRaw) ? array_map('intval', $memberIdsRaw) : [];
+
+    if ($teamId !== null) {
+        // Single-team mode. Optional subset of the team this specific route
+        // actually applies to (e.g. only 2 of 4 members sent on a temporary
+        // task) — see migration v109. Every submitted id is intersected
+        // against the team's real roster: a forged member_ids array must
+        // never be able to add a recipient/actor who isn't even on this
+        // team. No subset submitted (or nothing survives the intersection)
+        // falls back to the whole team — the composer's default, unchanged
+        // old behavior.
+        $teamRoster = array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]), 'user_id'));
+        if (empty($teamRoster)) {
+            echo json_encode(['ok' => false, 'error' => t('route.team_has_no_members')]);
+            exit;
+        }
+        $recipientIds = !empty($submittedMemberIds)
+            ? array_values(array_intersect($teamRoster, $submittedMemberIds))
+            : $teamRoster;
+        if (empty($recipientIds)) {
+            $recipientIds = $teamRoster;
+        }
+        $teamLbl = teamLabel($team['codename'], $team['team_number']);
+    } else {
+        // Cross-team mode (migration v110): no single team, so there's no
+        // "whole roster" to fall back to — the admin must explicitly pick
+        // who this route applies to. Validated against every approved
+        // participant of the MISSION (not just one team), so a forged id
+        // still can't add a recipient/actor who isn't even on this mission.
+        $approvedIds = array_map('intval', array_column(dbFetchAll(
+            "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             WHERE s.mission_id = ? AND pr.status = ?",
+            [$missionId, PARTICIPATION_APPROVED]
+        ), 'volunteer_id'));
+        $recipientIds = array_values(array_intersect($approvedIds, $submittedMemberIds));
+        if (empty($recipientIds)) {
+            echo json_encode(['ok' => false, 'error' => t('route.select_at_least_one_member')]);
+            exit;
+        }
+        // No team codename exists for a cross-team route — the members'
+        // own names stand in for it wherever {team} is substituted into a
+        // notification template (see routeMixedTeamLabel()'s docblock for
+        // why this must stay untranslated/language-neutral).
+        $memberNamePlaceholders = implode(',', array_fill(0, count($recipientIds), '?'));
+        $teamLbl = implode(', ', array_column(dbFetchAll(
+            "SELECT name FROM users WHERE id IN ($memberNamePlaceholders) ORDER BY name",
+            $recipientIds
+        ), 'name'));
     }
 
     // Purely a map-rendering hint (draw the connecting line back to point 1) —
@@ -315,8 +352,6 @@ if ($action === 'create') {
     // under 3 points, so silently ignore rather than reject a 1-2 point route
     // that happened to send it (e.g. a stale composer click before points were added).
     $isClosedLoop = (post('is_closed_loop') === '1' && count($waypoints) >= 3) ? 1 : 0;
-
-    $teamLbl = teamLabel($team['codename'], $team['team_number']);
 
     $routeId = dbInsert(
         "INSERT INTO mission_routes (mission_id, team_id, title, is_closed_loop, created_by, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
@@ -493,8 +528,8 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
             if ($rows > 0) {
                 logAudit('arrive_route_waypoint', 'mission_route_waypoints', $waypointId, null, ['mission_id' => $missionId, 'distance_m' => $distance]);
 
-                $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$wp['team_id']]);
-                $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : '';
+                $teamRow = $wp['team_id'] ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$wp['team_id']]) : null;
+                $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : routeMixedTeamLabel((int) $wp['route_id']);
                 $label = $wp['label'] !== null && $wp['label'] !== '' ? $wp['label'] : t('route.waypoint_fallback_label', ['seq' => $wp['seq']]);
                 notifyRouteCommandStaff(
                     $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,

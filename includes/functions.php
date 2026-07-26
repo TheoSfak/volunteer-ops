@@ -913,7 +913,10 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
         return [
             'id'                    => $routeId,
             'team_id'               => $teamId,
-            'team_label'            => $teamId ? teamLabel($r['codename'], $r['team_number']) : null,
+            // No single nominal team (cross-team route, migration v110) —
+            // the member names ($members, already loaded above) stand in
+            // for a team label instead of a generic "mixed" placeholder.
+            'team_label'            => $teamId ? teamLabel($r['codename'], $r['team_number']) : implode(', ', array_column($members, 'name')),
             'team_color_bg'         => $teamColorBg,
             'team_color_fg'         => $teamColorFg,
             'title'                 => $r['title'],
@@ -1411,6 +1414,24 @@ function teamLabel(?string $codename, $teamNumber): string {
         return '';
     }
     return ($teamNumber !== null && $teamNumber !== '') ? ($codename . ' ' . $teamNumber) : $codename;
+}
+
+/**
+ * Display label for a Route Order with no single nominal team (team_id
+ * NULL — a cross-team route assembled from specific individuals across 2+
+ * teams rather than one team's roster, see migration v110). Falls back to
+ * a comma-joined list of the route's actual members' names instead of a
+ * generic "mixed team" string, since names are proper nouns and need no
+ * per-recipient translation — unlike a translated placeholder would, in
+ * the several call sites that reuse this value as a {team} substitution
+ * across a notification sent to recipients in different languages.
+ */
+function routeMixedTeamLabel(int $routeId): string {
+    $names = array_column(dbFetchAll(
+        "SELECT u.name FROM mission_route_members rm JOIN users u ON u.id = rm.user_id WHERE rm.route_id = ? ORDER BY u.name",
+        [$routeId]
+    ), 'name');
+    return implode(', ', $names);
 }
 
 /**
