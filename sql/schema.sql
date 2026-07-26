@@ -2017,6 +2017,24 @@ CREATE TABLE IF NOT EXISTS `mission_route_progress` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- MISSION ROUTE MEMBERS (the specific subset of a team's members a given
+-- Route Order actually applies to — independent of the full
+-- mission_team_members roster. Sole authorization boundary for
+-- depart/arrive/complete/skip; mission_routes.team_id stays the nominal team
+-- for badges/history only.)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_route_members` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `route_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `added_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`route_id`) REFERENCES `mission_routes`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY `uniq_route_user` (`route_id`, `user_id`),
+    INDEX `idx_route_members_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- MISSION CERTIFICATES (bilingual mission-participation certificates, signed
 -- by President/Secretary — standalone from certificate_types/volunteer_certificates
 -- and citizen_certificate_types/citizen_certificates, which model something else)

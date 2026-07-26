@@ -50,16 +50,17 @@ function notifyRouteCommandStaff(int $missionId, string $missionTitle, ?int $res
 }
 
 /**
- * Notify every member of a route's team about a route-level event — used for
- * "point skipped" and "route cancelled", the two admin-initiated events the
- * field team itself must be pushed (per the noise-reduction rule: push only
- * on arrival/skip/cancel/route-completion, everything else rides the silent
- * 5s poll).
+ * Notify every member actually assigned to a route about a route-level event
+ * — used for "point skipped" and "route cancelled", the two admin-initiated
+ * events the field team itself must be pushed (per the noise-reduction rule:
+ * push only on arrival/skip/cancel/route-completion, everything else rides
+ * the silent 5s poll). Keyed on route_id (mission_route_members), not
+ * team_id — a route may only involve a subset of its nominal team.
  */
-function notifyRouteTeam(int $missionId, int $teamId, int $excludeUserId, string $code, string $titleKey, array $titleVars, string $messageKey, array $messageVars): void {
+function notifyRouteTeam(int $missionId, int $routeId, int $excludeUserId, string $code, string $titleKey, array $titleVars, string $messageKey, array $messageVars): void {
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     $memberIds = array_values(array_diff(
-        array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]), 'user_id')),
+        array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_route_members WHERE route_id = ?", [$routeId]), 'user_id')),
         [$excludeUserId]
     ));
     $langByUserId = getUserLanguages($memberIds);
@@ -76,18 +77,22 @@ function notifyRouteTeam(int $missionId, int $teamId, int $excludeUserId, string
 /**
  * A waypoint plus enough of its parent route/progress to authorize and act
  * on it in one query. Returns null if the waypoint doesn't belong to $missionId.
+ * is_route_member reflects mission_route_members for $userId — the sole
+ * authorization boundary for depart/arrive/complete/skip, independent of
+ * current mission_team_members roster (see migration v109).
  */
-function loadWaypointForAction(int $waypointId, int $missionId): ?array {
+function loadWaypointForAction(int $waypointId, int $missionId, int $userId): ?array {
     $row = dbFetchOne(
         "SELECT w.id, w.route_id, w.seq, w.lat, w.lng, w.label,
                 w.require_photo, w.require_video, w.require_note,
                 r.mission_id, r.team_id, r.completed_at AS route_completed_at, r.cancelled_at AS route_cancelled_at,
-                p.departed_at, p.arrived_at, p.completed_at, p.skipped_at, p.out_of_sequence, p.note
+                p.departed_at, p.arrived_at, p.completed_at, p.skipped_at, p.out_of_sequence, p.note,
+                EXISTS (SELECT 1 FROM mission_route_members rm WHERE rm.route_id = r.id AND rm.user_id = ?) AS is_route_member
          FROM mission_route_waypoints w
          JOIN mission_routes r ON r.id = w.route_id
          LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
          WHERE w.id = ? AND r.mission_id = ?",
-        [$waypointId, $missionId]
+        [$userId, $waypointId, $missionId]
     );
     return $row ?: null;
 }
@@ -226,7 +231,6 @@ if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', 
 }
 
 $action = post('action');
-$myTeamId = getUserTeamIdForMission($missionId, $userId);
 
 if ($action === 'create') {
     if (!$canManageWarRoom) {
@@ -284,10 +288,26 @@ if ($action === 'create') {
         ];
     }
 
-    $recipientIds = array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]), 'user_id'));
-    if (empty($recipientIds)) {
+    $teamRoster = array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]), 'user_id'));
+    if (empty($teamRoster)) {
         echo json_encode(['ok' => false, 'error' => t('route.team_has_no_members')]);
         exit;
+    }
+
+    // Optional subset of the team this specific route actually applies to
+    // (e.g. only 2 of 4 members sent on a temporary task) — see migration
+    // v109. Every submitted id is intersected against the team's real
+    // roster: a forged member_ids array must never be able to add a
+    // recipient/actor who isn't even on this team, since this list becomes
+    // both who gets notified and who is authorized to report on the route.
+    // No subset submitted (or nothing survives the intersection) falls back
+    // to the whole team — the composer's default, unchanged old behavior.
+    $memberIdsRaw = json_decode((string) post('member_ids'), true);
+    $recipientIds = (is_array($memberIdsRaw) && !empty($memberIdsRaw))
+        ? array_values(array_intersect($teamRoster, array_map('intval', $memberIdsRaw)))
+        : $teamRoster;
+    if (empty($recipientIds)) {
+        $recipientIds = $teamRoster;
     }
 
     // Purely a map-rendering hint (draw the connecting line back to point 1) —
@@ -302,6 +322,9 @@ if ($action === 'create') {
         "INSERT INTO mission_routes (mission_id, team_id, title, is_closed_loop, created_by, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
         [$missionId, $teamId, $title, $isClosedLoop, $userId]
     );
+    foreach ($recipientIds as $memberId) {
+        dbInsert("INSERT INTO mission_route_members (route_id, user_id, added_at) VALUES (?, ?, NOW())", [$routeId, $memberId]);
+    }
 
     // task_text on the underlying order is just a compact summary — the real
     // per-waypoint content lives in mission_route_waypoints and is what the
@@ -331,7 +354,7 @@ if ($action === 'create') {
         $seq++;
     }
 
-    logAudit('create_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'waypoints' => count($waypoints)]);
+    logAudit('create_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'member_ids' => $recipientIds, 'waypoints' => count($waypoints)]);
 
     echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
     exit;
@@ -364,7 +387,7 @@ if ($action === 'cancel') {
         dbExecute("UPDATE mission_order_recipients SET fulfilled_at = NOW() WHERE order_id = ? AND fulfilled_at IS NULL", [$route['order_id']]);
     }
 
-    notifyRouteTeam($missionId, (int) $route['team_id'], $userId, 'mission_route_cancelled', 'route.notify_cancelled_title', [], 'route.notify_cancelled_message', ['mission' => $mission['title']]);
+    notifyRouteTeam($missionId, $routeId, $userId, 'mission_route_cancelled', 'route.notify_cancelled_title', [], 'route.notify_cancelled_message', ['mission' => $mission['title']]);
     logAudit('cancel_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $missionId, 'reason' => $reason]);
 
     echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
@@ -377,7 +400,7 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
         exit;
     }
     $waypointId = (int) post('id');
-    $wp = loadWaypointForAction($waypointId, $missionId);
+    $wp = loadWaypointForAction($waypointId, $missionId, $userId);
     if (!$wp) {
         echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
@@ -386,11 +409,12 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
         echo json_encode(['ok' => false, 'error' => t('route.already_closed')]);
         exit;
     }
-    // Field actions are proof-of-presence — only a member of the team this
-    // route was sent to can report on it, admin privileges don't substitute
+    // Field actions are proof-of-presence — only a person this specific route
+    // was actually assigned to (mission_route_members, not just "any member of
+    // the nominal team") can report on it, admin privileges don't substitute
     // (mirrors mission-dispatch.php's ack/receive: "not_your_team" applies
-    // even to command staff unless they're also embedded in the team).
-    if (!$myTeamId || $myTeamId !== (int) $wp['team_id']) {
+    // even to command staff unless they're also an assigned route member).
+    if (!$wp['is_route_member']) {
         echo json_encode(['ok' => false, 'error' => t('dispatch.not_your_team')]);
         exit;
     }
@@ -533,7 +557,7 @@ if ($action === 'skip') {
         exit;
     }
     $waypointId = (int) post('id');
-    $wp = loadWaypointForAction($waypointId, $missionId);
+    $wp = loadWaypointForAction($waypointId, $missionId, $userId);
     if (!$wp) {
         echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
@@ -555,7 +579,7 @@ if ($action === 'skip') {
     logAudit('skip_route_waypoint', 'mission_route_waypoints', $waypointId, null, ['mission_id' => $missionId, 'reason' => $reason]);
 
     $label = $wp['label'] !== null && $wp['label'] !== '' ? $wp['label'] : t('route.waypoint_fallback_label', ['seq' => $wp['seq']]);
-    notifyRouteTeam($missionId, (int) $wp['team_id'], $userId, 'mission_route_skipped', 'route.notify_skipped_title', [], 'route.notify_skipped_message', ['label' => $label, 'mission' => $mission['title']]);
+    notifyRouteTeam($missionId, (int) $wp['route_id'], $userId, 'mission_route_skipped', 'route.notify_skipped_title', [], 'route.notify_skipped_message', ['label' => $label, 'mission' => $mission['title']]);
 
     maybeCompleteRoute((int) $wp['route_id'], $userId);
 
@@ -569,7 +593,7 @@ if ($action === 'edit_waypoint') {
         exit;
     }
     $waypointId = (int) post('id');
-    $wp = loadWaypointForAction($waypointId, $missionId);
+    $wp = loadWaypointForAction($waypointId, $missionId, $userId);
     if (!$wp) {
         echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;

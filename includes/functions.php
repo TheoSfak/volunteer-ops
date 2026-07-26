@@ -766,15 +766,19 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
  */
 function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom): array {
     $myTeamId = getUserTeamIdForMission($missionId, $userId);
-    if (!$canManageWarRoom && !$myTeamId) {
-        return [];
-    }
 
     $params = [$missionId];
     $teamFilter = '';
     if (!$canManageWarRoom) {
-        $teamFilter = ' AND r.team_id = ?';
-        $params[] = $myTeamId;
+        // Visibility (and, in mission-route.php, authorization to act) is
+        // purely mission_route_members — a route may only involve a subset
+        // of its nominal team (see migration v109), so filtering on
+        // r.team_id alone would show/hide the wrong set of routes for a
+        // subset assignment. No $myTeamId-based early return above either:
+        // a teamless participant could in principle still be an
+        // individually assigned route member.
+        $teamFilter = ' AND EXISTS (SELECT 1 FROM mission_route_members rm WHERE rm.route_id = r.id AND rm.user_id = ?)';
+        $params[] = $userId;
     }
 
     $routes = dbFetchAll(
@@ -846,6 +850,22 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
         }
     }
 
+    // Route members: who this specific route actually applies to (a subset
+    // of the nominal team, or the whole team — see migration v109). Drives
+    // both is_route_member (actionability, replacing the old is_my_team
+    // gate) and members (so command staff can see "this route only involves
+    // Γ, Δ" instead of assuming the whole team is out).
+    $membersByRoute = [];
+    foreach (dbFetchAll(
+        "SELECT rm.route_id, rm.user_id, u.name FROM mission_route_members rm
+         JOIN users u ON u.id = rm.user_id
+         WHERE rm.route_id IN ($placeholders)
+         ORDER BY u.name",
+        $routeIds
+    ) as $rm) {
+        $membersByRoute[(int) $rm['route_id']][] = ['id' => (int) $rm['user_id'], 'name' => $rm['name']];
+    }
+
     $waypointsByRoute = [];
     foreach ($waypointRows as $w) {
         $waypointId = (int) $w['id'];
@@ -885,10 +905,11 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
         ];
     }
 
-    return array_map(function ($r) use ($waypointsByRoute, $canManageWarRoom, $myTeamId) {
+    return array_map(function ($r) use ($waypointsByRoute, $membersByRoute, $canManageWarRoom, $myTeamId, $userId) {
         $routeId = (int) $r['id'];
         $teamId = $r['team_id'] ? (int) $r['team_id'] : null;
         [$teamColorBg, $teamColorFg] = teamBadgeColors($teamId ? $r['color'] : null);
+        $members = $membersByRoute[$routeId] ?? [];
         return [
             'id'                    => $routeId,
             'team_id'               => $teamId,
@@ -904,7 +925,13 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
             'cancelled_at_display'  => $r['cancelled_at'] ? date('d/m H:i', strtotime($r['cancelled_at'])) : null,
             'cancel_reason'         => $r['cancel_reason'],
             'can_manage'            => $canManageWarRoom,
+            // Kept for team-badge context, but no longer read for
+            // actionability anywhere (see is_route_member below).
             'is_my_team'            => $teamId !== null && $teamId === $myTeamId,
+            // The real authorization/visibility signal for "is this route
+            // mine to act on" — mission_route_members, not team membership.
+            'is_route_member'       => in_array($userId, array_column($members, 'id'), true),
+            'members'               => $members,
             'waypoints'             => $waypointsByRoute[$routeId] ?? [],
         ];
     }, $routes);

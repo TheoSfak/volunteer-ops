@@ -1527,6 +1527,10 @@ include __DIR__ . '/includes/header.php';
                     <option value="<?= $team['id'] ?>"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></option>
                     <?php endforeach; ?>
                 </select>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold mb-1"><?= t('route.members_label') ?></label>
+                    <div id="routeMemberPicker" class="d-flex flex-wrap gap-2 small"></div>
+                </div>
                 <button type="button" class="btn btn-primary w-100 fw-semibold" data-bs-toggle="modal" data-bs-target="#routeComposerModal">
                     <i class="bi bi-signpost-split-fill me-1"></i><?= t('route.send_btn') ?>
                 </button>
@@ -1859,6 +1863,14 @@ let media = <?= json_encode($photos) ?>;
 let mediaSignature = JSON.stringify(media);
 let myTasks = <?= json_encode($myTasks) ?>;
 let routes = <?= json_encode($routes) ?>;
+// Team rosters for the Route Order composer's member picker — lets an admin
+// narrow a route to a subset of a team (e.g. 2 of 4) instead of always the
+// whole team. See includes/migrations.php v109.
+const missionTeamsForRoute = <?= json_encode(array_values(array_map(fn($t) => [
+    'id' => $t['id'],
+    'label' => teamLabel($t['codename'], $t['team_number']),
+    'members' => array_map(fn($m) => ['id' => $m['user_id'], 'name' => $m['name']], $t['members']),
+], $teams)), JSON_UNESCAPED_UNICODE) ?>;
 let shortageReports = <?= json_encode($shortageReports) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
 
@@ -2866,7 +2878,7 @@ function saveFieldSnapshot() {
     // matched everything (undefined is falsy); caught by inspecting the real
     // payload in the browser rather than by reading the query.
     const activeRoutes = routes.filter(r => r.status !== 'cancelled');
-    const myTeamRoutes = activeRoutes.filter(r => r.is_my_team);
+    const myTeamRoutes = activeRoutes.filter(r => r.is_route_member);
     const snapRoutes = myTeamRoutes.length ? myTeamRoutes : activeRoutes;
     const signature = JSON.stringify([snapRoutes, myTasks]);
     if (signature === lastSnapshotSignature) return;
@@ -3130,7 +3142,7 @@ function renderMyRoutes(allRoutes) {
     myRoutesRenderedSig = sig;
 
     const list = document.getElementById('myRoutesList');
-    const myRoutes = (allRoutes || []).filter(r => r.is_my_team);
+    const myRoutes = (allRoutes || []).filter(r => r.is_route_member);
     if (!myRoutes.length) {
         list.innerHTML = '<p class="text-muted mb-0">' + t('route.my_empty') + '</p>';
         return;
@@ -4561,11 +4573,19 @@ function renderRoutesAdmin(allRoutes) {
                 ? `<span class="badge bg-success">${t('route.status_completed')}</span>`
                 : `<span class="badge" style="background:${route.team_color_bg};color:${route.team_color_fg};">${done}/${route.waypoints.length}</span>`;
         const isExpanded = expandedRouteIds.has(route.id);
+        // A route's members are only a proper subset of its nominal team
+        // some of the time (e.g. 2 of 4 sent on a temporary task) — flag it
+        // so command staff doesn't assume the whole team is out.
+        const fullTeam = missionTeamsForRoute.find(t => t.id === route.team_id);
+        const isSubset = fullTeam && route.members && route.members.length < fullTeam.members.length;
+        const membersSuffix = isSubset
+            ? ` <span class="small text-muted">(${route.members.map(m => escapeHtml(m.name)).join(', ')})</span>`
+            : '';
         return `<div class="border rounded mb-2">
             <div class="p-2 d-flex justify-content-between align-items-center route-admin-toggle" data-id="${route.id}" style="cursor:pointer;">
                 <div>
                     <span class="badge me-1" style="background:${route.team_color_bg};color:${route.team_color_fg};">${escapeHtml(route.team_label || '')}</span>
-                    <strong class="small">${route.title ? escapeHtml(route.title) : t('route.default_title')}</strong>
+                    <strong class="small">${route.title ? escapeHtml(route.title) : t('route.default_title')}</strong>${membersSuffix}
                 </div>
                 <div class="d-flex align-items-center gap-2">
                     ${statusBadge}
@@ -4796,6 +4816,23 @@ function renderWaypointPanel() {
     const clearBtn = document.getElementById('routeClearBtn');
     const sendBtn = document.getElementById('routeSendBtn');
     const teamSelect = document.getElementById('routeTeamSelect');
+    const memberPicker = document.getElementById('routeMemberPicker');
+
+    // Which of the selected team's members this route actually applies to —
+    // defaults to everyone (old whole-team behavior unless the admin
+    // unchecks someone), see includes/migrations.php v109.
+    function renderRouteMemberPicker() {
+        const team = missionTeamsForRoute.find(t => String(t.id) === teamSelect.value);
+        const members = team ? team.members : [];
+        memberPicker.innerHTML = members.map(m => `
+            <label class="form-check form-check-inline me-2 mb-1">
+                <input type="checkbox" class="form-check-input route-member-check" value="${m.id}" checked>
+                <span class="form-check-label">${escapeHtml(m.name)}</span>
+            </label>
+        `).join('') || `<span class="text-muted">${t('route.team_has_no_members')}</span>`;
+    }
+    renderRouteMemberPicker();
+    teamSelect.addEventListener('change', renderRouteMemberPicker);
 
     // routeMap/routeWaypoints and the render/reset functions are module-level
     // (declared above renderWaypointPanel) rather than local to this IIFE,
@@ -4863,10 +4900,12 @@ function renderWaypointPanel() {
             dwell_minutes: wp.dwell_minutes, require_photo: wp.require_photo ? 1 : 0,
             require_video: wp.require_video ? 1 : 0, require_note: wp.require_note ? 1 : 0,
         }));
+        const memberIds = [...memberPicker.querySelectorAll('.route-member-check:checked')].map(cb => cb.value);
+        if (!memberIds.length) { alert(t('route.team_has_no_members')); return; }
         const data = new URLSearchParams({
             csrf_token: csrfToken, action: 'create', mission_id: '<?= $missionId ?>',
             team_id: teamSelect.value, title: titleInput.value.trim(), waypoints: JSON.stringify(payload),
-            is_closed_loop: routeClosed ? '1' : '0',
+            is_closed_loop: routeClosed ? '1' : '0', member_ids: JSON.stringify(memberIds),
         });
         sendBtn.disabled = true;
         fetch('mission-route.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
