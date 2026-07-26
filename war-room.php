@@ -3124,7 +3124,10 @@ function renderRouteWaypointUpcoming(wp) {
     return `<div class="border rounded p-2 mb-2" style="opacity:.65;">
         <div class="d-flex justify-content-between align-items-center">
             <span class="small"><i class="bi bi-lock-fill me-1"></i>${wp.seq}. ${label}</span>
-            <button type="button" class="btn btn-sm btn-outline-secondary py-0 route-jump-btn" data-id="${wp.id}">${t('route.jump_btn')}</button>
+            <div class="d-flex gap-1">
+                <a href="${routeWaypointDirectionsUrl(wp)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success py-0 px-1" title="${t('dispatch.directions_btn')}"><i class="bi bi-signpost-2-fill"></i></a>
+                <button type="button" class="btn btn-sm btn-outline-secondary py-0 route-jump-btn" data-id="${wp.id}">${t('route.jump_btn')}</button>
+            </div>
         </div>
     </div>`;
 }
