@@ -8,16 +8,23 @@
  * normalized, then merged+sorted+capped in PHP (same technique this file
  * already used for dispatch-only, and mission-response-report.php reused).
  *
- * Visibility uses two different predicates depending on what team_id means
- * for that source:
+ * Visibility uses three different predicates depending on what team_id (or
+ * membership) means for that source:
  *  - Dispatch family: team_id is the point's deliberate TARGET — NULL means
  *    "sent to all teams", so it's visible to everyone. ($dispatchScopeSql,
  *    unchanged from the original dispatch-only version of this file.)
- *  - Everything else: team_id is the ACTOR's own team membership — NULL
- *    means "this person currently has no team", so it must be private to
- *    them + admin, NOT broadcast to every other team. Using the dispatch
- *    predicate here would leak a teamless volunteer's pings/status/reports
- *    to every other team. Predicate 2 never has a "team_id IS NULL" clause.
+ *  - Status/pings/shortage reports: team_id is the ACTOR's own team
+ *    membership — NULL means "this person currently has no team", so it
+ *    must be private to them + admin, NOT broadcast to every other team.
+ *    Using the dispatch predicate here would leak a teamless volunteer's
+ *    pings/status/reports to every other team. Predicate 2 never has a
+ *    "team_id IS NULL" clause.
+ *  - Route Order waypoints: a route may only involve a SUBSET of its
+ *    nominal team (mission_route_members, see includes/migrations.php
+ *    v109) — predicate 2 (current team membership) would leak an excluded
+ *    teammate's sub-route detail and hide it from a loaned-in member, so
+ *    this source uses predicate 3: viewer must be an assigned member of
+ *    THIS SPECIFIC route.
  *
  * GET only, AJAX.
  */
@@ -183,8 +190,13 @@ foreach ($orderRows as $row) {
 }
 
 // ── Route Order waypoints: depart / arrive / complete / skip ──────────────────
-// team_id here is the route's own assigned team (predicate 2 — same as
-// statusRows/pingRows/shortageRows below), never NULL for an existing route.
+// NOT predicate 2 (team_id) — a route may only involve a subset of its
+// nominal team (mission_route_members, see includes/migrations.php v109), so
+// gating this on the viewer's own current team would leak a sub-route's
+// waypoint-level detail (GPS distance, skip reasons) to teammates who were
+// deliberately excluded from it, while hiding it from a member loaned in from
+// another team. Predicate 3: viewer must actually be an assigned member of
+// THIS route.
 $routeProgressRows = dbFetchAll(
     "SELECT p.departed_at, p.arrived_at, p.completed_at, p.skipped_at, p.skip_reason, p.arrived_distance_m,
             w.seq, w.label, r.team_id, mt.codename, mt.team_number,
@@ -197,12 +209,12 @@ $routeProgressRows = dbFetchAll(
      LEFT JOIN users au ON au.id = p.arrived_by
      LEFT JOIN users cu ON cu.id = p.completed_by
      LEFT JOIN users su ON su.id = p.skipped_by
-     WHERE r.mission_id = ? AND (? = 1 OR p.team_id = ?)
+     WHERE r.mission_id = ? AND (? = 1 OR EXISTS (SELECT 1 FROM mission_route_members rm WHERE rm.route_id = r.id AND rm.user_id = ?))
      ORDER BY GREATEST(
          COALESCE(p.departed_at, '1970-01-01'), COALESCE(p.arrived_at, '1970-01-01'),
          COALESCE(p.completed_at, '1970-01-01'), COALESCE(p.skipped_at, '1970-01-01')
      ) DESC LIMIT 200",
-    [$missionId, $isAdminParam, $viewerTeamId]
+    [$missionId, $isAdminParam, $userId]
 );
 foreach ($routeProgressRows as $row) {
     $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team', [], $viewerLang);

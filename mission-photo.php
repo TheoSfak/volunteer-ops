@@ -122,21 +122,30 @@ if ($action === 'upload') {
     // Optional: this upload is the photo/video deliverable for one Route Order
     // waypoint (war-room.php's "Η Πορεία μου" card — field mode has no map/media
     // panel, so that card ships its own upload button hitting this same action).
-    // Validated against the uploader's own team so a stray/forged id can't
-    // attach someone else's field media to a waypoint, mirroring mission-route.php's
-    // "only your team can act on your route" rule.
+    // Validated against mission_route_members (not team membership) so a
+    // stray/forged id can't attach someone else's field media to a waypoint —
+    // mirrors mission-route.php's depart/arrive/complete gate exactly: a route
+    // may only involve a subset of its nominal team (migration v109), so a
+    // team-membership check here would let an excluded team member satisfy a
+    // sub-route's require_photo/require_video anyway, defeating the whole
+    // point of assigning it to only 2 of 4 people.
     $routeWaypointId = null;
     $routeWaypointIdRaw = post('route_waypoint_id');
     if ($routeWaypointIdRaw !== '' && $routeWaypointIdRaw !== null) {
-        $myTeamIdForWaypoint = getUserTeamIdForMission($missionId, $userId);
         $waypointRoute = dbFetchOne(
-            "SELECT w.id, r.team_id FROM mission_route_waypoints w
+            "SELECT w.id, r.id AS route_id FROM mission_route_waypoints w
              JOIN mission_routes r ON r.id = w.route_id
              WHERE w.id = ? AND r.mission_id = ?",
             [(int) $routeWaypointIdRaw, $missionId]
         );
-        if ($waypointRoute && ($canManageWarRoom || (int) $waypointRoute['team_id'] === $myTeamIdForWaypoint)) {
-            $routeWaypointId = (int) $waypointRoute['id'];
+        if ($waypointRoute) {
+            $isRouteMember = (bool) dbFetchValue(
+                "SELECT 1 FROM mission_route_members WHERE route_id = ? AND user_id = ?",
+                [$waypointRoute['route_id'], $userId]
+            );
+            if ($canManageWarRoom || $isRouteMember) {
+                $routeWaypointId = (int) $waypointRoute['id'];
+            }
         }
     }
 

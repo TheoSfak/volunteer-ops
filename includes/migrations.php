@@ -5222,6 +5222,47 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 109,
+            'description' => 'Create mission_route_members — the specific subset of a team\'s members a given Route Order actually applies to (e.g. only 2 of a 4-person team sent to carry a stretcher to another team\'s position), independent of the full mission_team_members roster. Backfilled with every existing route\'s full team roster so pre-existing routes keep working exactly as before — authorization for depart/arrive/complete/skip is now purely this table, no whole-team fallback.',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_route_members'"
+                );
+                if (!$table) {
+                    // No FK/constraint tying user_id to the route's team_id — team_id
+                    // on mission_routes stays the nominal/default team (badge, history
+                    // filter) while this table is the sole authorization boundary. This
+                    // is what lets a temporarily-loaned volunteer from another team
+                    // remain a valid actor on a route without another migration.
+                    dbExecute(
+                        "CREATE TABLE mission_route_members (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            route_id INT UNSIGNED NOT NULL,
+                            user_id INT UNSIGNED NOT NULL,
+                            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (route_id) REFERENCES mission_routes(id) ON DELETE CASCADE,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            UNIQUE KEY uniq_route_user (route_id, user_id),
+                            INDEX idx_route_members_user (user_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+
+                    // Every route created before this migration implicitly applied to
+                    // its team's full roster — make that explicit so authorization
+                    // (now purely this table) doesn't change behavior for a single
+                    // pre-existing route.
+                    dbExecute(
+                        "INSERT INTO mission_route_members (route_id, user_id, added_at)
+                         SELECT r.id, tm.user_id, NOW()
+                         FROM mission_routes r
+                         JOIN mission_team_members tm ON tm.team_id = r.team_id"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
