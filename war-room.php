@@ -2290,7 +2290,9 @@ function renderPins(items) {
         const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
             : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
         const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
-        L.marker([pin.lat, pin.lng], {icon}).addTo(pinLayer).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.guest_org_name)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}`);
+        const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${pin.lat},${pin.lng}&travelmode=driving`;
+        const navLine = `<br><a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-1">${t('map.navigate_btn')}</a>`;
+        L.marker([pin.lat, pin.lng], {icon}).addTo(pinLayer).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.guest_org_name)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${navLine}`);
     });
     if (!hasFitPins && items.length) {
         hasFitPins = true;
