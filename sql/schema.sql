@@ -1941,7 +1941,9 @@ CREATE TABLE IF NOT EXISTS `mission_order_recipients` (
 CREATE TABLE IF NOT EXISTS `mission_routes` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `mission_id` INT UNSIGNED NOT NULL,
-    `team_id` INT UNSIGNED NOT NULL,
+    -- NULL = no single nominal team (a cross-team route assembled from
+    -- specific individuals across 2+ teams) — see migration v110.
+    `team_id` INT UNSIGNED NULL,
     `order_id` INT UNSIGNED NULL,
     `title` VARCHAR(255) NULL,
     `is_closed_loop` TINYINT(1) NOT NULL DEFAULT 0,
@@ -1988,7 +1990,7 @@ CREATE TABLE IF NOT EXISTS `mission_route_progress` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `waypoint_id` INT UNSIGNED NOT NULL,
     `route_id` INT UNSIGNED NOT NULL,
-    `team_id` INT UNSIGNED NOT NULL,
+    `team_id` INT UNSIGNED NULL,
     `departed_at` TIMESTAMP NULL,
     `departed_by` INT UNSIGNED NULL,
     `arrived_at` TIMESTAMP NULL,

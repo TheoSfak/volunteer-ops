@@ -5263,6 +5263,27 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 110,
+            'description' => 'Make mission_routes.team_id and mission_route_progress.team_id nullable — a Route Order can now be assembled from specific individuals across two or more different teams (e.g. one person loaned from each of Team A/B/C for a one-off joint task), not just a subset within a single team. NULL team_id means "no single nominal team"; authorization/visibility already runs purely through mission_route_members (migration v109) so this needs no further change there — only display code that assumed team_id was always present needs a "mixed" fallback.',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_routes' AND COLUMN_NAME = 'team_id'"
+                );
+                if ($col && $col['IS_NULLABLE'] === 'NO') {
+                    dbExecute("ALTER TABLE mission_routes MODIFY COLUMN team_id INT UNSIGNED NULL");
+                }
+                $col2 = dbFetchOne(
+                    "SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_route_progress' AND COLUMN_NAME = 'team_id'"
+                );
+                if ($col2 && $col2['IS_NULLABLE'] === 'NO') {
+                    dbExecute("ALTER TABLE mission_route_progress MODIFY COLUMN team_id INT UNSIGNED NULL");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
