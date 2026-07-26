@@ -106,7 +106,19 @@ if ($mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
     redirect('mission-view.php?id=' . $missionId);
 }
 
-$fieldMode = ($_COOKIE['wr_field_mode'] ?? '') === '1';
+// A volunteer's own explicit choice (the toggle button below, which sets
+// this cookie) always wins and is remembered from then on. Only on the
+// very first visit, with no cookie yet, do we need a default — and that
+// default should NOT be the desktop command view (map, media panel, full
+// Teams/Participants lists) for someone opening this on their phone for
+// the first time, mid-mission, needing the SOS button without first
+// discovering and tapping a toggle they don't know exists. A simple
+// User-Agent sniff is good enough for a default with a one-tap escape
+// hatch already in place either way — a wrong guess here just costs one
+// extra tap on the existing toggle, never a dead end.
+$fieldMode = isset($_COOKIE['wr_field_mode'])
+    ? $_COOKIE['wr_field_mode'] === '1'
+    : (bool) preg_match('/Mobi|Android|iPhone|iPad|iPod/i', $_SERVER['HTTP_USER_AGENT'] ?? '');
 
 if (isPost()) {
     verifyCsrf();
@@ -502,44 +514,32 @@ $hasFieldStatus = (bool)dbFetchValue(
     "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'participation_requests' AND COLUMN_NAME = 'field_status'"
 );
-$fieldStatusColumns = $hasFieldStatus ? ', pr.field_status, pr.field_status_updated_at' : ', NULL AS field_status, NULL AS field_status_updated_at';
-$participants = dbFetchAll(
-    "SELECT pr.id AS pr_id, pr.volunteer_id, pr.attended{$fieldStatusColumns},
-            u.name, u.phone, u.is_external, u.guest_org_name, s.id AS shift_id, s.start_time, s.end_time,
-            (SELECT MAX(vp.created_at) FROM volunteer_pings vp WHERE vp.user_id = pr.volunteer_id AND vp.shift_id = pr.shift_id) AS last_ping_at
-     FROM participation_requests pr
-     JOIN users u ON u.id = pr.volunteer_id
-     JOIN shifts s ON s.id = pr.shift_id
-     WHERE s.mission_id = ? AND pr.status = ?
-     ORDER BY s.start_time, u.name",
-    [$missionId, PARTICIPATION_APPROVED]
-);
-$myAssignments = array_values(array_filter($participants, fn($participant) => (int)$participant['volunteer_id'] === (int)$user['id']));
-$onlinePresenceIds = loadOnlinePresenceUserIds($missionId);
 
 // A participant's GPS ping (manual or auto) is flagged stale past 3x the
 // passive auto-ping cadence (3 min) — enough headroom to not cry wolf over
 // one missed tick's jitter, but still an honest signal once the gap is real
 // (e.g. the tab got backgrounded/suspended, or geolocation permission was
 // revoked). Shared by the full render and the ajax poll below so both agree.
+//
+// Computed via its own lightweight query (volunteer_id + last_ping_at only)
+// rather than by reusing the full $participants query below — that query
+// (with its name/phone/is_external/guest_org_name/shift-time joins) only
+// exists for the Participants-list UI, which the ajax poll never renders,
+// but every open tab hits this exact computation every 5s regardless.
 $pingStaleThresholdSeconds = 540;
 $pingIsStaleByVolunteerId = [];
-foreach ($participants as $participant) {
-    $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']] =
-        $participant['last_ping_at'] !== null
-        && strtotime($participant['last_ping_at']) < (time() - $pingStaleThresholdSeconds);
+foreach (dbFetchAll(
+    "SELECT pr.volunteer_id,
+            (SELECT MAX(vp.created_at) FROM volunteer_pings vp WHERE vp.user_id = pr.volunteer_id AND vp.shift_id = pr.shift_id) AS last_ping_at
+     FROM participation_requests pr
+     JOIN shifts s ON s.id = pr.shift_id
+     WHERE s.mission_id = ? AND pr.status = ?",
+    [$missionId, PARTICIPATION_APPROVED]
+) as $pingRow) {
+    $pingIsStaleByVolunteerId[(int)$pingRow['volunteer_id']] =
+        $pingRow['last_ping_at'] !== null
+        && strtotime($pingRow['last_ping_at']) < (time() - $pingStaleThresholdSeconds);
 }
-
-$shifts = dbFetchAll(
-    "SELECT s.*, COUNT(CASE WHEN pr.status = '" . PARTICIPATION_APPROVED . "' THEN 1 END) AS approved_count,
-            COUNT(CASE WHEN pr.status = '" . PARTICIPATION_PENDING . "' THEN 1 END) AS pending_count
-     FROM shifts s
-     LEFT JOIN participation_requests pr ON pr.shift_id = s.id
-     WHERE s.mission_id = ?
-     GROUP BY s.id
-     ORDER BY s.start_time",
-    [$missionId]
-);
 
 // Always returns each participant's LATEST ping regardless of age — a hard
 // "last 2 hours" cutoff used to make someone silently vanish from the live
@@ -623,6 +623,18 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
 if (get('ajax') === '1') {
     header('Content-Type: application/json');
 
+    // Releases the PHP session file lock immediately — nothing below this
+    // point reads or writes $_SESSION (confirmed: $user and every flag used
+    // here were already resolved above). Without this, PHP's default
+    // session handler holds an exclusive lock on this session's file for the
+    // whole request, and computeDispatchEta() below can make a real,
+    // unbounded-by-us external HTTP call per point-dispatch (3s timeout
+    // each, sequential) — a slow/unreachable OSRM would otherwise stall
+    // every OTHER concurrent request from the same session (e.g. the same
+    // browser tab tapping "Arrive" while this poll is still in flight)
+    // behind this one, not just slow down this poll's own response.
+    session_write_close();
+
     // Live-presence heartbeat: every open War Room tab hits this branch every
     // 15s, so it doubles as the "I'm still here" signal — no separate endpoint
     // or client timer needed.
@@ -692,6 +704,40 @@ if (get('ajax') === '1') {
     ]);
     exit;
 }
+
+// Everything below here is reached only by the full (non-ajax) page render —
+// $participants (with its name/phone/shift-time joins), $myAssignments, the
+// first loadOnlinePresenceUserIds() call, and $shifts all exist purely for
+// this render's own UI (Participants list, My Ping panel, Shift list) and
+// were previously computed unconditionally above, before the ajax branch's
+// own exit — meaning every 5s poll from every open tab paid for all of it
+// and used none of it. loadOnlinePresenceUserIds() in particular was being
+// called a second time, identically, further down for the ajax response.
+$fieldStatusColumns = $hasFieldStatus ? ', pr.field_status, pr.field_status_updated_at' : ', NULL AS field_status, NULL AS field_status_updated_at';
+$participants = dbFetchAll(
+    "SELECT pr.id AS pr_id, pr.volunteer_id, pr.attended{$fieldStatusColumns},
+            u.name, u.phone, u.is_external, u.guest_org_name, s.id AS shift_id, s.start_time, s.end_time,
+            (SELECT MAX(vp.created_at) FROM volunteer_pings vp WHERE vp.user_id = pr.volunteer_id AND vp.shift_id = pr.shift_id) AS last_ping_at
+     FROM participation_requests pr
+     JOIN users u ON u.id = pr.volunteer_id
+     JOIN shifts s ON s.id = pr.shift_id
+     WHERE s.mission_id = ? AND pr.status = ?
+     ORDER BY s.start_time, u.name",
+    [$missionId, PARTICIPATION_APPROVED]
+);
+$myAssignments = array_values(array_filter($participants, fn($participant) => (int)$participant['volunteer_id'] === (int)$user['id']));
+$onlinePresenceIds = loadOnlinePresenceUserIds($missionId);
+
+$shifts = dbFetchAll(
+    "SELECT s.*, COUNT(CASE WHEN pr.status = '" . PARTICIPATION_APPROVED . "' THEN 1 END) AS approved_count,
+            COUNT(CASE WHEN pr.status = '" . PARTICIPATION_PENDING . "' THEN 1 END) AS pending_count
+     FROM shifts s
+     LEFT JOIN participation_requests pr ON pr.shift_id = s.id
+     WHERE s.mission_id = ?
+     GROUP BY s.id
+     ORDER BY s.start_time",
+    [$missionId]
+);
 
 $pins = $loadPins();
 
@@ -838,6 +884,14 @@ include __DIR__ . '/includes/header.php';
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
+    /* Field-safety touch targets: the SOS/field-status buttons and the
+       route depart/arrive/complete/photo/video buttons are what a volunteer
+       actually taps, repeatedly, sometimes one-handed/under stress/with
+       gloves — Bootstrap's plain .btn-sm (~30px tall) sits below the ~44px
+       accessibility minimum. Applied everywhere (not just a mobile media
+       query) since a bigger, easier-to-hit button is strictly better on
+       desktop too, not just harmless there. */
+    .wr-touch-btn { min-height: 44px; padding-top: .55rem; padding-bottom: .55rem; font-size: .95rem; }
     #warRoomMap { height: 520px; border-radius: 12px; }
     #mapCard.map-fullscreen-active { position: fixed; inset: 0; z-index: 1040; border-radius: 0; }
     #mapCard.map-fullscreen-active #warRoomMap { height: 100%; border-radius: 0; }
@@ -1290,9 +1344,9 @@ include __DIR__ . '/includes/header.php';
                         <?= $myFieldStatus ? h(['on_way' => t('status.self_on_way'), 'on_site' => t('status.self_on_site'), 'needs_help' => t('status.self_sos')][$myFieldStatus] ?? '') : t('status.self_none') ?>
                     </div>
                     <div class="btn-group w-100 mb-3" role="group" id="statusBtns-<?= $assignment['pr_id'] ?>">
-                        <button type="button" class="btn btn-sm <?= $myFieldStatus === 'on_way' ? 'btn-warning' : 'btn-outline-warning' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_way')"><?= t('myping.btn_on_way') ?></button>
-                        <button type="button" class="btn btn-sm <?= $myFieldStatus === 'on_site' ? 'btn-success' : 'btn-outline-success' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_site')"><?= t('myping.btn_on_site') ?></button>
-                        <button type="button" class="btn btn-sm <?= $myFieldStatus === 'needs_help' ? 'btn-danger' : 'btn-outline-danger' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'needs_help')"><?= t('myping.btn_sos') ?></button>
+                        <button type="button" class="btn btn-sm wr-touch-btn <?= $myFieldStatus === 'on_way' ? 'btn-warning' : 'btn-outline-warning' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_way')"><?= t('myping.btn_on_way') ?></button>
+                        <button type="button" class="btn btn-sm wr-touch-btn <?= $myFieldStatus === 'on_site' ? 'btn-success' : 'btn-outline-success' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_site')"><?= t('myping.btn_on_site') ?></button>
+                        <button type="button" class="btn btn-sm wr-touch-btn <?= $myFieldStatus === 'needs_help' ? 'btn-danger' : 'btn-outline-danger' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'needs_help')"><?= t('myping.btn_sos') ?></button>
                     </div>
                     <?php endforeach; ?>
                     <p class="small text-muted mb-0"><?= t('myping.auto_note') ?></p>
@@ -1902,7 +1956,7 @@ function renderDispatches(items) {
     let reopenLayer = null;
     items.forEach(item => {
         const acksHtml = item.acks.length
-            ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? a.team_label + ' — ' : ''}${guestNameHtml(a.user_name, a.is_external, a.guest_org_name)} (${a.time})`).join('<br>') + '</div>'
+            ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? escapeHtml(a.team_label) + ' — ' : ''}${guestNameHtml(a.user_name, a.is_external, a.guest_org_name)} (${a.time})`).join('<br>') + '</div>'
             : '';
         const receiveHtml = item.can_receive
             ? `<br><button type="button" class="btn btn-sm btn-warning mt-1 dispatch-receive-btn" data-id="${item.id}"><i class="bi bi-flag me-1"></i>${t('banner.ack_btn')}</button>`
@@ -1935,7 +1989,7 @@ function renderDispatches(items) {
               `${item.eta.source === 'straight_line' ? ' ' + escapeHtml(t('dispatch.eta_straight_line_suffix')) : ''}` +
               `${item.eta.is_stale ? ' ' + escapeHtml(t('dispatch.eta_stale_suffix')) : ''}</div>`
             : '';
-        const popupHtml = `<strong>${item.team_label}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + etaHtml + acksHtml + receiveHtml + ackHtml + directionsHtml +
+        const popupHtml = `<strong>${escapeHtml(item.team_label)}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + etaHtml + acksHtml + receiveHtml + ackHtml + directionsHtml +
             (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">${t('common.delete')}</button>` : '');
         let layer = null;
         if (item.type === 'point') {
@@ -2794,10 +2848,10 @@ function renderRouteWaypointCurrent(wp) {
     let statusLine, actionHtml = '';
     if (!wp.departed_at) {
         statusLine = '';
-        actionHtml = `<button type="button" class="btn btn-sm btn-primary route-depart-btn" data-id="${wp.id}"><i class="bi bi-play-fill me-1"></i>${t('route.depart_btn')}</button>`;
+        actionHtml = `<button type="button" class="btn btn-sm wr-touch-btn w-100 btn-primary route-depart-btn" data-id="${wp.id}"><i class="bi bi-play-fill me-1"></i>${t('route.depart_btn')}</button>`;
     } else if (!wp.arrived_at) {
         statusLine = `<div class="small text-warning mt-1"><i class="bi bi-car-front-fill me-1"></i>${t('route.enroute_since_prefix', {time: wp.departed_at_display})}</div>`;
-        actionHtml = `<button type="button" class="btn btn-sm btn-success route-arrive-btn" data-id="${wp.id}"><i class="bi bi-geo-alt-fill me-1"></i>${t('route.arrive_btn')}</button>`;
+        actionHtml = `<button type="button" class="btn btn-sm wr-touch-btn w-100 btn-success route-arrive-btn" data-id="${wp.id}"><i class="bi bi-geo-alt-fill me-1"></i>${t('route.arrive_btn')}</button>`;
     } else {
         const distanceHtml = routeDistanceBadgeHtml(wp);
         statusLine = `<div class="small text-success mt-1"><i class="bi bi-check-circle-fill me-1"></i>${t('route.onsite_since_prefix', {time: wp.arrived_at_display})}</div>`
@@ -2807,12 +2861,12 @@ function renderRouteWaypointCurrent(wp) {
         if (wp.require_photo) {
             deliverables.push(wp.photo
                 ? `<span class="badge bg-success"><i class="bi bi-camera-fill me-1"></i>${t('route.photo_btn')} ✓</span>`
-                : `<button type="button" class="btn btn-sm btn-outline-primary route-media-btn" data-id="${wp.id}" data-media-type="photo"><i class="bi bi-camera-fill me-1"></i>${t('route.photo_btn')}</button>`);
+                : `<button type="button" class="btn btn-sm wr-touch-btn btn-outline-primary route-media-btn" data-id="${wp.id}" data-media-type="photo"><i class="bi bi-camera-fill me-1"></i>${t('route.photo_btn')}</button>`);
         }
         if (wp.require_video) {
             deliverables.push(wp.video
                 ? `<span class="badge bg-success"><i class="bi bi-camera-reels-fill me-1"></i>${t('route.video_btn')} ✓</span>`
-                : `<button type="button" class="btn btn-sm btn-outline-primary route-media-btn" data-id="${wp.id}" data-media-type="video"><i class="bi bi-camera-reels-fill me-1"></i>${t('route.video_btn')}</button>`);
+                : `<button type="button" class="btn btn-sm wr-touch-btn btn-outline-primary route-media-btn" data-id="${wp.id}" data-media-type="video"><i class="bi bi-camera-reels-fill me-1"></i>${t('route.video_btn')}</button>`);
         }
         const deliverablesHtml = deliverables.length
             ? `<div class="d-flex flex-wrap gap-2 mt-2">${deliverables.join('')}</div><div class="small route-media-status mt-1"></div>`
@@ -2820,7 +2874,7 @@ function renderRouteWaypointCurrent(wp) {
         const noteHtml = wp.require_note
             ? `<textarea class="form-control form-control-sm route-note-input mt-2" data-id="${wp.id}" rows="2" maxlength="2000" placeholder="${escapeHtml(t('route.note_placeholder'))}">${wp.note ? escapeHtml(wp.note) : ''}</textarea><div class="small text-muted">${t('route.note_hint')}</div>`
             : '';
-        actionHtml = deliverablesHtml + noteHtml + `<button type="button" class="btn btn-sm btn-success w-100 mt-2 route-complete-btn" data-id="${wp.id}"><i class="bi bi-check-lg me-1"></i>${t('route.complete_btn')}</button>`;
+        actionHtml = deliverablesHtml + noteHtml + `<button type="button" class="btn btn-sm wr-touch-btn btn-success w-100 mt-2 route-complete-btn" data-id="${wp.id}"><i class="bi bi-check-lg me-1"></i>${t('route.complete_btn')}</button>`;
     }
     return `<div class="border rounded p-2 mb-2 border-primary">
         <div class="d-flex justify-content-between align-items-start">
@@ -2985,7 +3039,7 @@ function renderShortageReports(items) {
         <div class="border rounded p-2 mb-2">
             <div><span class="badge bg-${sevColor[r.severity] || 'secondary'}">${r.severity_label}</span> <strong>${r.type_label}</strong> — ${escapeHtml(r.title)}</div>
             <div class="small mt-1">${escapeHtml(r.description)}</div>
-            <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.guest_org_name)} (${r.team_label}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
+            <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.guest_org_name)} (${escapeHtml(r.team_label)}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
             ${r.acknowledged_at ? `<textarea class="form-control form-control-sm mt-1 shortage-note-input" data-report-id="${r.id}" rows="1" placeholder="${t('shortage.note_placeholder')}"></textarea>` : ''}
             <div class="mt-1 d-flex gap-1">${r.acknowledged_at
                 ? `<button type="button" class="btn btn-sm btn-success flex-fill shortage-resolve-btn" data-report-id="${r.id}">${t('shortage.resolve_btn')}</button>
@@ -3026,6 +3080,12 @@ function renderSosAlerts(items) {
         list.innerHTML = '<p class="text-muted mb-0">' + t('sos.empty') + '</p>';
         return;
     }
+    // a.team_label arrives ALREADY escaped — loadOpenSosAlertsForMission()
+    // (includes/functions.php) wraps it in h() server-side, unlike every
+    // other team_label source in this file. Do not add escapeHtml() here:
+    // confirmed live that doing so double-escapes to "&amp;lt;" instead of
+    // neutralizing the payload, while still being fully inert either way —
+    // this is a display-correctness note, not a security one.
     list.innerHTML = items.map(a => `
         <div class="border border-danger rounded p-2 mb-2">
             <div><strong>🆘 ${a.team_label}</strong> — ${guestNameHtml(a.user_name, a.is_external, a.guest_org_name)}</div>
@@ -3471,7 +3531,7 @@ if (reportModalEl) {
 
             summaryBody.innerHTML = data.summary.length ? data.summary.map(s => `
                 <tr>
-                    <td>${s.team_label}</td>
+                    <td>${escapeHtml(s.team_label)}</td>
                     <td class="text-end">${s.order_count}</td>
                     <td class="text-end">${s.ack_rate}%</td>
                     <td class="text-end">${s.fulfill_rate}%</td>
@@ -3484,7 +3544,7 @@ if (reportModalEl) {
                 <div class="list-group-item d-flex justify-content-between align-items-start gap-3">
                     <div>
                         <span class="me-1">${d.type_label}</span>
-                        <strong>${d.team_label}</strong> — ${escapeHtml(d.user_name)}
+                        <strong>${escapeHtml(d.team_label)}</strong> — ${escapeHtml(d.user_name)}
                         ${d.label ? ' («' + escapeHtml(d.label) + '»)' : ''}
                         <div class="small text-muted">
                             ${t('mytasks.sent_prefix', {time: d.sent_at})}
@@ -3510,7 +3570,7 @@ if (reportModalEl) {
                 <div class="list-group-item d-flex justify-content-between align-items-start gap-3">
                     <div>
                         <span class="badge bg-${({low:'secondary',medium:'info',high:'warning',critical:'danger'})[d.severity] || 'secondary'} me-1">${d.severity_label}</span>
-                        <strong>${d.team_label}</strong> — ${escapeHtml(d.reporter_name)}
+                        <strong>${escapeHtml(d.team_label)}</strong> — ${escapeHtml(d.reporter_name)}
                         («${escapeHtml(d.title)}»)
                         <div class="small text-muted">
                             ${t('mytasks.sent_prefix', {time: d.sent_at})}
@@ -3974,7 +4034,7 @@ document.querySelectorAll('.team-form').forEach(form => {
                 .bindTooltip(escapeHtml(pin.name));
         });
         dispatches.forEach(item => {
-            const tooltip = item.label ? escapeHtml(item.label) : item.team_label;
+            const tooltip = item.label ? escapeHtml(item.label) : escapeHtml(item.team_label);
             if (item.type === 'point') {
                 const icon = L.divIcon({className:'', html:'<i class="bi bi-geo-alt-fill" style="font-size:22px;color:#7c3aed;opacity:0.55;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[22,22], iconAnchor:[11,20]});
                 L.marker([item.geo.lat, item.geo.lng], {icon}).addTo(refLayer).bindTooltip(tooltip);

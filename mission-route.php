@@ -160,7 +160,17 @@ function maybeCompleteRoute(int $routeId, int $actorId): bool {
         return false;
     }
 
-    dbExecute("UPDATE mission_routes SET completed_at = NOW() WHERE id = ?", [$routeId]);
+    // AND completed_at IS NULL: this function is called from depart/arrive/
+    // complete/skip, so two waypoints of the same route closing within the
+    // same instant (or a live tap racing an offline-queue replay) can both
+    // reach here having both seen $route['completed_at'] as still null. The
+    // WHERE guard + rowCount() check ensures only one of them actually
+    // stamps the route complete and fires the "route completed"
+    // notification — without it, both would.
+    $rows = dbExecute("UPDATE mission_routes SET completed_at = NOW() WHERE id = ? AND completed_at IS NULL", [$routeId]);
+    if ($rows === 0) {
+        return false;
+    }
     if ($route['order_id']) {
         dbExecute("UPDATE mission_order_recipients SET fulfilled_at = NOW() WHERE order_id = ? AND fulfilled_at IS NULL", [$route['order_id']]);
     }
@@ -424,23 +434,33 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
             $acc = ($accRaw !== '' && is_numeric($accRaw)) ? (float) $accRaw : null;
             $distance = ($lat !== null && $lng !== null) ? (int) round(gpsDistanceMeters((float) $wp['lat'], (float) $wp['lng'], $lat, $lng)) : null;
 
-            dbExecute(
+            // AND arrived_at IS NULL closes a real race: the check above reads
+            // a snapshot taken before this UPDATE runs, so two team members
+            // tapping "arrive" within the same instant both pass it. Without
+            // this guard the later UPDATE silently overwrites the earlier
+            // one's GPS/who-arrived data and command staff gets a duplicate
+            // arrival notification. rowCount() tells us which request (if
+            // either) actually won the race — only that one logs/notifies.
+            $rows = dbExecute(
                 "UPDATE mission_route_progress
                  SET arrived_at = ?, arrived_by = ?, arrived_lat = ?, arrived_lng = ?, arrived_accuracy_m = ?, arrived_distance_m = ?,
                      departed_at = COALESCE(departed_at, ?), departed_by = COALESCE(departed_by, ?), out_of_sequence = ?, reported_at = ?
-                 WHERE waypoint_id = ?",
+                 WHERE waypoint_id = ? AND arrived_at IS NULL",
                 [$eventTs, $userId, $lat, $lng, $acc, $distance, $eventTs, $userId, $outOfSequence, $reportedAtTs, $waypointId]
             );
-            logAudit('arrive_route_waypoint', 'mission_route_waypoints', $waypointId, null, ['mission_id' => $missionId, 'distance_m' => $distance]);
 
-            $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$wp['team_id']]);
-            $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : '';
-            $label = $wp['label'] !== null && $wp['label'] !== '' ? $wp['label'] : t('route.waypoint_fallback_label', ['seq' => $wp['seq']]);
-            notifyRouteCommandStaff(
-                $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
-                'mission_route_arrival', 'route.notify_arrival_title', [],
-                'route.notify_arrival_message', ['team' => $teamLbl, 'label' => $label, 'mission' => $mission['title']]
-            );
+            if ($rows > 0) {
+                logAudit('arrive_route_waypoint', 'mission_route_waypoints', $waypointId, null, ['mission_id' => $missionId, 'distance_m' => $distance]);
+
+                $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$wp['team_id']]);
+                $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : '';
+                $label = $wp['label'] !== null && $wp['label'] !== '' ? $wp['label'] : t('route.waypoint_fallback_label', ['seq' => $wp['seq']]);
+                notifyRouteCommandStaff(
+                    $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
+                    'mission_route_arrival', 'route.notify_arrival_title', [],
+                    'route.notify_arrival_message', ['team' => $teamLbl, 'label' => $label, 'mission' => $mission['title']]
+                );
+            }
         }
     } else { // complete
         $note = trim((string) post('note'));
@@ -463,17 +483,27 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
             exit;
         }
 
-        dbExecute(
+        // AND completed_at IS NULL — same race as "arrive" above: the
+        // "already closed" check higher up reads a snapshot taken before
+        // this UPDATE runs, so two near-simultaneous completes (e.g. a live
+        // tap racing an offline-queue replay landing at the same moment)
+        // could otherwise both pass it and both fire this UPDATE, both log,
+        // and both trigger maybeCompleteRoute()'s "route completed"
+        // notification. rowCount() tells us whether THIS request actually
+        // won.
+        $rows = dbExecute(
             "UPDATE mission_route_progress
              SET completed_at = ?, completed_by = ?, note = COALESCE(?, note),
                  arrived_at = COALESCE(arrived_at, ?), arrived_by = COALESCE(arrived_by, ?),
                  departed_at = COALESCE(departed_at, ?), departed_by = COALESCE(departed_by, ?),
                  out_of_sequence = ?, reported_at = ?
-             WHERE waypoint_id = ?",
+             WHERE waypoint_id = ? AND completed_at IS NULL",
             [$eventTs, $userId, $note, $eventTs, $userId, $eventTs, $userId, $outOfSequence, $reportedAtTs, $waypointId]
         );
-        logAudit('complete_route_waypoint', 'mission_route_waypoints', $waypointId, null, ['mission_id' => $missionId]);
-        maybeCompleteRoute((int) $wp['route_id'], $userId);
+        if ($rows > 0) {
+            logAudit('complete_route_waypoint', 'mission_route_waypoints', $waypointId, null, ['mission_id' => $missionId]);
+            maybeCompleteRoute((int) $wp['route_id'], $userId);
+        }
     }
 
     echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
