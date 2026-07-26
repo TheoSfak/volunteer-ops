@@ -949,6 +949,17 @@ include __DIR__ . '/includes/header.php';
     #sosOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
     #sosOverlay.sos-active { display: block; animation: sosPulseCorners 1s ease-in-out infinite; }
     #sosOverlay.sos-calm { display: block; animation: none; box-shadow: inset 0 0 120px 40px rgba(220,38,38,.35); }
+    /* Sits above #sosOverlay's own z-index (2000) so it's always clickable
+       even while the corners are pulsing — #sosOverlay itself is
+       pointer-events:none, so there's no overlap-blocking risk either way. */
+    #sosMuteBtn {
+        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+        z-index: 2001; border: none; border-radius: 999px; padding: .6rem 1.4rem;
+        font-weight: 700; font-size: .95rem; box-shadow: 0 4px 16px rgba(0,0,0,.4);
+        cursor: pointer;
+    }
+    #sosMuteBtn.sos-mute-offer { background: #fff; color: #dc2626; }
+    #sosMuteBtn.sos-mute-active { background: #dc2626; color: #fff; }
     /* End of Mission / Return to Base — a separate overlay from #sosOverlay
        (own element, own class) so it never interferes with real SOS alert
        state; reuses the same sosPulseCorners keyframe for the same visual
@@ -1015,6 +1026,14 @@ include __DIR__ . '/includes/header.php';
 
 <?php if ($canManageWarRoom): ?>
 <div id="sosOverlay"></div>
+<!-- Local-only siren mute — silences the audio on THIS device for 5 minutes
+     without touching the alert itself (no ack/resolve), for the real case of
+     "I'm in a meeting/on a call, I can see the SOS is still active on
+     screen, I just need it quiet for a few minutes." The visual (pulsing
+     corners + marquee) deliberately keeps running even while muted — only
+     the sound is ever affected, and only on this one device/tab, not for
+     any other command-staff member watching the same mission. -->
+<button type="button" id="sosMuteBtn" class="d-none"></button>
 <?php endif; ?>
 <!-- Unlike #sosOverlay (command-staff-only, since SOS is a field->command
      incoming alert), this is command->field, so every approved participant
@@ -1075,6 +1094,22 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div class="col-12 col-md-4">
                         <button type="button" class="btn btn-sm btn-primary w-100" id="trailApplyBtn"><i class="bi bi-funnel-fill me-1"></i><?= t('trail.apply_btn') ?></button>
+                    </div>
+                </div>
+                <!-- Replay scrubber — hidden until a trail with at least 2
+                     distinct timestamps actually loads (a single-point or
+                     empty trail has nothing to scrub through). Reuses the
+                     exact same $canManageWarRoom-only visibility as the rest
+                     of #trailFilterBar; no separate gate needed. -->
+                <div class="row g-2 align-items-center mt-1 d-none" id="trailReplayBar">
+                    <div class="col-auto">
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="trailPlayBtn" style="width:38px;"><i class="bi bi-play-fill"></i></button>
+                    </div>
+                    <div class="col">
+                        <input type="range" class="form-range" id="trailScrubber" min="0" max="100" value="100">
+                    </div>
+                    <div class="col-auto">
+                        <span class="small text-muted" id="trailScrubberTime" style="white-space:nowrap;"></span>
                     </div>
                 </div>
             </div>
@@ -2275,18 +2310,33 @@ function renderPins(items) {
 // deliberately not sharing hasFitPins above (that flag is one-shot for the
 // initial live view and reusing it here would break one view or the other).
 let trailModeActive = false;
-function renderTrail(trails) {
+// Everything currently loaded (unfiltered) — kept so the scrubber can
+// re-render at any chosen instant without re-fetching, and so switching
+// filters (team/include-auto) via "Εμφάνιση" naturally replaces it.
+let currentTrails = [];
+
+// Shared by both the plain full-trail view and the replay scrubber: cutoffTs
+// = Infinity reproduces the original "show everything" behavior exactly
+// (every point renders, the true last point is the highlighted marker).
+// A real cutoff instead filters each trail down to points at-or-before that
+// instant first — the highlighted marker then naturally becomes "wherever
+// this person was AT that point in the replay," which is exactly the
+// animated current-position behavior a scrubber needs, for free, with no
+// separate marker-position logic.
+function renderTrailUpTo(trails, cutoffTs) {
     trailLayer.clearLayers();
     const bounds = [];
     trails.forEach(trail => {
         const color = trail.team_color || '#2563eb';
-        const latlngs = trail.points.map(p => [p.lat, p.lng]);
+        const points = cutoffTs === Infinity ? trail.points : trail.points.filter(p => p.ts <= cutoffTs);
+        if (!points.length) return;
+        const latlngs = points.map(p => [p.lat, p.lng]);
         if (latlngs.length > 1) {
             L.polyline(latlngs, {color, weight: 3, opacity: 0.8}).addTo(trailLayer);
         }
-        trail.points.forEach((point, i) => {
-            const isLast = i === trail.points.length - 1;
-            const isFirst = i === 0 && trail.points.length > 1;
+        points.forEach((point, i) => {
+            const isLast = i === points.length - 1;
+            const isFirst = i === 0 && points.length > 1;
             let marker;
             if (isLast) {
                 const icon = L.divIcon({className:'', html:`<span style="display:block;width:16px;height:16px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 4px #0008"></span>`, iconSize:[16,16], iconAnchor:[8,8]});
@@ -2304,6 +2354,89 @@ function renderTrail(trails) {
         map.fitBounds(L.latLngBounds(bounds), {padding: [40, 40]});
     }
 }
+function renderTrail(trails) {
+    renderTrailUpTo(trails, Infinity);
+}
+
+// ── Replay scrubber ──────────────────────────────────────────────────────
+const TRAIL_REPLAY_STEPS = 60;
+const TRAIL_REPLAY_TICK_MS = 400; // ~24s to play a trail of any real length
+let trailReplayTimer = null;
+let trailMinTs = null, trailMaxTs = null;
+
+function setupTrailReplay(trails) {
+    const bar = document.getElementById('trailReplayBar');
+    const scrubber = document.getElementById('trailScrubber');
+    stopTrailReplay();
+    const allTs = trails.flatMap(t => t.points.map(p => p.ts)).filter(ts => ts !== null && ts !== undefined);
+    trailMinTs = allTs.length ? Math.min(...allTs) : null;
+    trailMaxTs = allTs.length ? Math.max(...allTs) : null;
+    // A single instant (or no points at all) has nothing to scrub between —
+    // the plain full-trail view above already shows the one thing there is
+    // to see, so the bar stays hidden rather than offering a slider with
+    // nowhere to go.
+    if (trailMinTs === null || trailMinTs === trailMaxTs) {
+        bar.classList.add('d-none');
+        return;
+    }
+    bar.classList.remove('d-none');
+    scrubber.min = trailMinTs;
+    scrubber.max = trailMaxTs;
+    scrubber.value = trailMaxTs;
+    updateTrailScrubberLabel(trailMaxTs);
+    setTrailPlayIcon(false);
+}
+
+function updateTrailScrubberLabel(ts) {
+    const label = document.getElementById('trailScrubberTime');
+    if (!label) return;
+    label.textContent = new Date(ts * 1000).toLocaleString(jsLocale, {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+}
+
+function setTrailPlayIcon(isPlaying) {
+    const btn = document.getElementById('trailPlayBtn');
+    if (btn) btn.innerHTML = isPlaying ? '<i class="bi bi-pause-fill"></i>' : '<i class="bi bi-play-fill"></i>';
+}
+
+function stopTrailReplay() {
+    if (trailReplayTimer) { clearInterval(trailReplayTimer); trailReplayTimer = null; }
+    setTrailPlayIcon(false);
+}
+
+document.getElementById('trailScrubber')?.addEventListener('input', function() {
+    stopTrailReplay();
+    const ts = Number(this.value);
+    renderTrailUpTo(currentTrails, ts);
+    updateTrailScrubberLabel(ts);
+});
+
+document.getElementById('trailPlayBtn')?.addEventListener('click', function() {
+    if (trailReplayTimer) { stopTrailReplay(); return; }
+    const scrubber = document.getElementById('trailScrubber');
+    // Restart from the beginning if play is pressed at (or very near) the
+    // end — matches how every ordinary media player's play/pause behaves,
+    // rather than doing nothing because there's no time left to advance.
+    if (Number(scrubber.value) >= trailMaxTs - 1) {
+        scrubber.value = trailMinTs;
+        renderTrailUpTo(currentTrails, trailMinTs);
+        updateTrailScrubberLabel(trailMinTs);
+    }
+    setTrailPlayIcon(true);
+    const stepMs = Math.max(1, Math.round((trailMaxTs - trailMinTs) / TRAIL_REPLAY_STEPS));
+    trailReplayTimer = setInterval(() => {
+        const next = Number(scrubber.value) + stepMs;
+        if (next >= trailMaxTs) {
+            scrubber.value = trailMaxTs;
+            renderTrailUpTo(currentTrails, trailMaxTs);
+            updateTrailScrubberLabel(trailMaxTs);
+            stopTrailReplay();
+            return;
+        }
+        scrubber.value = next;
+        renderTrailUpTo(currentTrails, next);
+        updateTrailScrubberLabel(next);
+    }, TRAIL_REPLAY_TICK_MS);
+});
 function enterTrailMode() {
     const teamId = document.getElementById('trailTeamSelect').value || '0';
     const includeAuto = document.getElementById('trailIncludeAuto').checked ? '1' : '0';
@@ -2318,10 +2451,14 @@ function enterTrailMode() {
         }
         if (includeAdmin) { if (!map.hasLayer(dispatchLayer)) dispatchLayer.addTo(map); }
         else if (map.hasLayer(dispatchLayer)) { map.removeLayer(dispatchLayer); }
-        renderTrail(result.trails);
+        currentTrails = result.trails;
+        renderTrail(currentTrails);
+        setupTrailReplay(currentTrails);
     }).catch(() => alert(t('trail.load_failed')));
 }
 function exitTrailMode() {
+    stopTrailReplay();
+    document.getElementById('trailReplayBar')?.classList.add('d-none');
     trailModeActive = false;
     trailLayer.clearLayers();
     if (map.hasLayer(trailLayer)) map.removeLayer(trailLayer);
@@ -3327,24 +3464,79 @@ function stopSosSiren() {
     if (sosSirenGain) { sosSirenGain.disconnect(); sosSirenGain = null; }
 }
 
+// Local-only siren mute (this device/tab, this browser session — a page
+// reload clears it): for "I'm in a meeting/on a call, I can see the SOS is
+// still active on screen, I just need it quiet for a few minutes", not a
+// substitute for acknowledging/resolving the real alert. Two deliberate
+// safety limits so this can't become a way to accidentally go deaf to SOS
+// entirely: (1) it's keyed to the SPECIFIC alert ids active when muted, so
+// a NEW, different SOS arriving afterward is never muted by a stale earlier
+// mute; (2) it always expires on its own (5 min) even if nobody remembers
+// to unmute, so an alert that's still open resumes making noise as a
+// reminder rather than staying silent indefinitely.
+const SOS_MUTE_DURATION_MS = 5 * 60 * 1000;
+let sosMutedAlertIds = new Set();
+let sosMuteExpiresAt = 0;
+function isSosMuteActive() {
+    return sosMuteExpiresAt > Date.now();
+}
+function muteSosAlerts(alertIds) {
+    sosMutedAlertIds = new Set(alertIds);
+    sosMuteExpiresAt = Date.now() + SOS_MUTE_DURATION_MS;
+    stopSosSiren();
+    updateSosAlarmState(sosAlerts);
+}
+function unmuteSosAlerts() {
+    sosMutedAlertIds = new Set();
+    sosMuteExpiresAt = 0;
+    updateSosAlarmState(sosAlerts);
+}
+document.getElementById('sosMuteBtn')?.addEventListener('click', () => {
+    if (isSosMuteActive()) {
+        unmuteSosAlerts();
+    } else {
+        muteSosAlerts(sosAlerts.filter(a => !a.acknowledged_at).map(a => a.id));
+    }
+});
+
 // Drives the full-viewport red corner overlay + map marquee from the current
-// sosAlerts list. Any unacknowledged alert = siren + pulsing corners; all
+// sosAlerts list. Any unacknowledged alert = pulsing corners; all
 // acknowledged-but-unresolved = calm static red; no open alerts = fully off.
+// The VISUAL state is never affected by the local mute above — only the
+// siren audio itself is; muting must never look like "no SOS is happening."
 function updateSosAlarmState(items) {
     const overlay = document.getElementById('sosOverlay');
     if (!overlay) return;
-    const anyUnacked = items.some(a => !a.acknowledged_at);
+    const unacked = items.filter(a => !a.acknowledged_at);
+    const anyUnacked = unacked.length > 0;
+    const muteStillValid = isSosMuteActive() && unacked.every(a => sosMutedAlertIds.has(a.id));
     if (!items.length) {
         overlay.classList.remove('sos-active', 'sos-calm');
         stopSosSiren();
+        // A fresh SOS later must never inherit today's stale mute state.
+        sosMutedAlertIds = new Set();
+        sosMuteExpiresAt = 0;
     } else if (anyUnacked) {
         overlay.classList.add('sos-active');
         overlay.classList.remove('sos-calm');
-        playSosSiren();
+        if (muteStillValid) { stopSosSiren(); } else { playSosSiren(); }
     } else {
         overlay.classList.remove('sos-active');
         overlay.classList.add('sos-calm');
         stopSosSiren();
+    }
+    const muteBtn = document.getElementById('sosMuteBtn');
+    if (muteBtn) {
+        if (!anyUnacked) {
+            muteBtn.className = 'd-none';
+        } else if (muteStillValid) {
+            const minutesLeft = Math.max(1, Math.ceil((sosMuteExpiresAt - Date.now()) / 60000));
+            muteBtn.className = 'sos-mute-active';
+            muteBtn.innerHTML = `<i class="bi bi-volume-mute-fill me-1"></i>${escapeHtml(t('sos.muted_btn', {minutes: minutesLeft}))}`;
+        } else {
+            muteBtn.className = 'sos-mute-offer';
+            muteBtn.innerHTML = `<i class="bi bi-volume-mute me-1"></i>${escapeHtml(t('sos.mute_btn'))}`;
+        }
     }
     const marquee = document.getElementById('sosMapMarquee');
     if (marquee) {
