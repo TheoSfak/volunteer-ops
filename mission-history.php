@@ -62,12 +62,20 @@ $dispatchScopeSql = "(d.team_id IS NULL OR ? = 1 OR d.team_id IN (SELECT team_id
 $events = [];
 
 // ── dispatch sent ────────────────────────────────────────────────────────────
+// Every source query below is capped at 200 rows (matching pingRows' own
+// pre-existing LIMIT) — the final merged+sorted feed is itself sliced to the
+// 200 most recent events across ALL sources combined (see usort+array_slice
+// below), so no single source ever needed more than that many rows in the
+// first place; this just stops fetching (and translating/formatting) far
+// more than could ever survive the final cut on a mission that's been
+// running long enough to accumulate thousands of rows in one table.
 $sentRows = dbFetchAll(
     "SELECT d.id, d.type, d.label, d.created_at, d.team_id, mt.codename, mt.team_number, u.name AS actor_name
      FROM mission_dispatch_points d
      LEFT JOIN mission_teams mt ON mt.id = d.team_id
      JOIN users u ON u.id = d.created_by
-     WHERE d.mission_id = ? AND $dispatchScopeSql",
+     WHERE d.mission_id = ? AND $dispatchScopeSql
+     ORDER BY d.created_at DESC LIMIT 200",
     [$missionId, $isAdminParam, $userId]
 );
 foreach ($sentRows as $row) {
@@ -89,7 +97,8 @@ $receivedRows = dbFetchAll(
      JOIN mission_dispatch_points d ON d.id = rc.dispatch_id
      LEFT JOIN mission_teams mt ON mt.id = d.team_id
      JOIN users u ON u.id = rc.user_id
-     WHERE d.mission_id = ? AND $dispatchScopeSql",
+     WHERE d.mission_id = ? AND $dispatchScopeSql
+     ORDER BY rc.created_at DESC LIMIT 200",
     [$missionId, $isAdminParam, $userId]
 );
 foreach ($receivedRows as $row) {
@@ -111,7 +120,8 @@ $arrivedRows = dbFetchAll(
      JOIN mission_dispatch_points d ON d.id = a.dispatch_id
      JOIN users au ON au.id = a.user_id
      LEFT JOIN mission_teams amt ON amt.id = a.team_id
-     WHERE d.mission_id = ? AND $dispatchScopeSql",
+     WHERE d.mission_id = ? AND $dispatchScopeSql
+     ORDER BY a.created_at DESC LIMIT 200",
     [$missionId, $isAdminParam, $userId]
 );
 foreach ($arrivedRows as $row) {
@@ -136,7 +146,8 @@ $orderRows = dbFetchAll(
      JOIN mission_orders o ON o.id = r.order_id
      JOIN users u ON u.id = r.user_id
      LEFT JOIN mission_teams mt ON mt.id = r.team_id
-     WHERE o.mission_id = ? AND (? = 1 OR r.user_id = ? OR r.team_id = ?)",
+     WHERE o.mission_id = ? AND (? = 1 OR r.user_id = ? OR r.team_id = ?)
+     ORDER BY o.created_at DESC LIMIT 200",
     [$missionId, $isAdminParam, $userId, $viewerTeamId]
 );
 foreach ($orderRows as $row) {
@@ -186,7 +197,11 @@ $routeProgressRows = dbFetchAll(
      LEFT JOIN users au ON au.id = p.arrived_by
      LEFT JOIN users cu ON cu.id = p.completed_by
      LEFT JOIN users su ON su.id = p.skipped_by
-     WHERE r.mission_id = ? AND (? = 1 OR p.team_id = ?)",
+     WHERE r.mission_id = ? AND (? = 1 OR p.team_id = ?)
+     ORDER BY GREATEST(
+         COALESCE(p.departed_at, '1970-01-01'), COALESCE(p.arrived_at, '1970-01-01'),
+         COALESCE(p.completed_at, '1970-01-01'), COALESCE(p.skipped_at, '1970-01-01')
+     ) DESC LIMIT 200",
     [$missionId, $isAdminParam, $viewerTeamId]
 );
 foreach ($routeProgressRows as $row) {
@@ -250,7 +265,7 @@ $statusRows = dbFetchAll(
      WHERE al.table_name = 'participation_requests'
        AND al.action IN ('field_status_on_way', 'field_status_on_site', 'needs_help')
        AND s.mission_id = ? AND (? = 1 OR pr.volunteer_id = ? OR mtm.team_id = ?)
-     ORDER BY al.created_at DESC",
+     ORDER BY al.created_at DESC LIMIT 200",
     [$missionId, $isAdminParam, $userId, $viewerTeamId]
 );
 foreach ($statusRows as $row) {
@@ -290,7 +305,8 @@ $shortageRows = dbFetchAll(
     "SELECT r.shortage_type, r.title, r.created_at, r.acknowledged_at, r.resolved_at, u.name AS actor_name
      FROM mission_shortage_reports r
      JOIN users u ON u.id = r.reporter_id
-     WHERE r.mission_id = ? AND (? = 1 OR r.reporter_id = ? OR r.team_id = ?)",
+     WHERE r.mission_id = ? AND (? = 1 OR r.reporter_id = ? OR r.team_id = ?)
+     ORDER BY r.created_at DESC LIMIT 200",
     [$missionId, $isAdminParam, $userId, $viewerTeamId]
 );
 foreach ($shortageRows as $row) {

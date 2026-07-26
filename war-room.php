@@ -585,6 +585,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
             // entirely (older data, or a browser that didn't report it) rather
             // than assuming the old, now-proven-too-loose 30m applies.
             $isMoving = false;
+            $headingDeg = null;
             $prevPing = dbFetchOne(
                 "SELECT lat, lng, accuracy_meters, created_at FROM volunteer_pings
                  WHERE user_id = ? AND shift_id = ? AND created_at < ?
@@ -602,6 +603,16 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                         ? max(30, (float) $prevPing['accuracy_meters'] + (float) $pin['accuracy_meters'])
                         : 75;
                     $isMoving = $distanceMeters >= $requiredMeters;
+                    // Heading only means something once we've already decided
+                    // this is real movement, not GPS jitter — a bearing
+                    // computed between two noisy-but-stationary fixes would
+                    // point in a meaningless, randomly-flipping direction.
+                    if ($isMoving) {
+                        $headingDeg = gpsBearingDegrees(
+                            (float) $prevPing['lat'], (float) $prevPing['lng'],
+                            (float) $pin['lat'], (float) $pin['lng']
+                        );
+                    }
                 }
             }
 
@@ -611,7 +622,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 'team_label' => $pin['codename'] ? teamLabel($pin['codename'], $pin['team_number']) : null,
                 'is_external' => (bool) $pin['is_external'], 'guest_org_name' => $pin['guest_org_name'],
                 'time' => date('H:i', $pingTs),
-                'is_stale' => $isStale, 'is_moving' => $isMoving,
+                'is_stale' => $isStale, 'is_moving' => $isMoving, 'heading_deg' => $headingDeg,
             ];
         }
         return $pins;
@@ -653,8 +664,13 @@ if (get('ajax') === '1') {
     // the client prepends each row in turn, so the last one processed (the
     // newest) ends up on top, same as if they'd arrived one at a time.
     $bannerAfterId = (int) get('banner_after');
+    // banner_mission_id is a generated column (see migrations.php v108)
+    // mirroring data's own 'bannerMission' JSON field — indexed, unlike the
+    // JSON_EXTRACT expression this used to filter on directly, which forced a
+    // full scan of every notification this user has ever received on every
+    // single poll tick and every full page load.
     $bannerRows = dbFetchAll(
-        "SELECT id, message, data FROM notifications WHERE user_id = ? AND id > ? AND JSON_EXTRACT(data, '$.bannerMission') = ? ORDER BY id ASC",
+        "SELECT id, message, data FROM notifications WHERE user_id = ? AND id > ? AND banner_mission_id = ? ORDER BY id ASC",
         [$user['id'], $bannerAfterId, $missionId]
     );
     $banners = [];
@@ -746,7 +762,7 @@ $pins = $loadPins();
 // that arrive from now on. Any sendNotification() pushData with 'bannerMission' => $missionId
 // qualifies, so future request types (photo/video/relocate) plug in without changes here.
 $bannerSinceId = (int) dbFetchValue(
-    "SELECT COALESCE(MAX(id), 0) FROM notifications WHERE user_id = ? AND JSON_EXTRACT(data, '$.bannerMission') = ?",
+    "SELECT COALESCE(MAX(id), 0) FROM notifications WHERE user_id = ? AND banner_mission_id = ?",
     [$user['id'], $missionId]
 );
 
@@ -1016,7 +1032,7 @@ include __DIR__ . '/includes/header.php';
 
 <?php if (!$fieldMode): ?>
 <div class="row g-4 mb-4">
-    <div class="col-lg-8">
+    <div class="col-12 col-lg-8">
         <div class="card shadow-sm h-100" id="mapCard">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-map me-1"></i><?= t('map.title') ?></h5>
@@ -1074,7 +1090,7 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 
-    <div class="col-lg-4">
+    <div class="col-12 col-lg-4">
         <div class="card shadow-sm h-100">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('media.panel_title') ?></h5></div>
             <div class="card-body d-flex flex-column" style="height:520px;">
@@ -1110,7 +1126,7 @@ include __DIR__ . '/includes/header.php';
 
 <div class="row g-4">
     <?php if (!$fieldMode): ?>
-    <div class="col-lg-8">
+    <div class="col-12 col-lg-8">
         <div class="card shadow-sm mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-diagram-3 me-1"></i><?= t('teams.panel_title') ?></h5>
@@ -1174,7 +1190,7 @@ include __DIR__ . '/includes/header.php';
 
         <?php if ($canManageWarRoom): ?>
         <div class="row g-4 mt-0">
-            <div class="col-md-6">
+            <div class="col-12 col-md-6">
                 <div class="card shadow-sm h-100 border-warning">
                     <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-bell-fill me-1"></i><?= t('request.location.card_title') ?></h5></div>
                     <div class="card-body">
@@ -1206,7 +1222,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
 
-            <div class="col-md-6">
+            <div class="col-12 col-md-6">
                 <div class="card shadow-sm h-100 border-warning">
                     <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('request.photo.card_title') ?></h5></div>
                     <div class="card-body">
@@ -1237,7 +1253,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
 
-            <div class="col-md-6">
+            <div class="col-12 col-md-6">
                 <div class="card shadow-sm h-100 border-warning">
                     <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-reels-fill me-1"></i><?= t('request.video.card_title') ?></h5></div>
                     <div class="card-body">
@@ -1268,7 +1284,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
 
-            <div class="col-md-6">
+            <div class="col-12 col-md-6">
                 <div class="card shadow-sm h-100 border-warning">
                     <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-clipboard-check-fill me-1"></i><?= t('request.task.card_title') ?></h5></div>
                     <div class="card-body">
@@ -1319,7 +1335,7 @@ include __DIR__ . '/includes/header.php';
     </div>
     <?php endif; ?>
 
-    <div class="<?= $fieldMode ? 'col-lg-6 mx-auto' : 'col-lg-4' ?>">
+    <div class="<?= $fieldMode ? 'col-12 col-lg-6 mx-auto' : 'col-12 col-lg-4' ?>">
         <!-- Offline queue status. Sits above every field card rather than inside
              the Route Order one (where it used to live) because the queue now
              also carries field-status/SOS taps, which are reported from the
@@ -1937,7 +1953,16 @@ function guestNameHtml(name, isExternal, orgName) {
 function dispatchTeamLabelHtml(item) {
     return `<span style="background:${item.team_color_bg};color:${item.team_color_fg};padding:2px 8px;border-radius:10px;font-weight:700;font-size:.72rem;white-space:nowrap;box-shadow:0 1px 3px #0006;">${escapeHtml(item.team_label)}</span>`;
 }
+// Same whole-array-JSON signature technique as renderPins/mediaSignature —
+// skips the rebuild (and the open-popup-preservation dance below, which
+// itself isn't free) on a poll tick where literally nothing about any
+// dispatch changed, including its live ETA.
+let dispatchesRenderedSig = null;
 function renderDispatches(items) {
+    const sig = JSON.stringify(items);
+    if (sig === dispatchesRenderedSig) return;
+    dispatchesRenderedSig = sig;
+
     // A live poll can re-run this while an admin has a dispatch popup open
     // (very plausible for an area — there's more to read before deciding to
     // click "Διαγραφή" than for a simple point). clearLayers() below destroys
@@ -2181,7 +2206,19 @@ let hasFitPins = false;
 function pinStatusLabel(status) {
     return {needs_help: t('status.badge_needs_help'), on_site: t('status.badge_on_site'), on_way: t('status.badge_on_way')}[status] || '';
 }
+// Whole-array JSON.stringify as the change-detection signature — same
+// technique this file already uses for media (mediaSignature) — rather than
+// hand-picking which fields matter: on a list this small, the string
+// compare is cheap, and there's no risk of a hand-picked field list quietly
+// missing something that actually changed (a real concern here specifically,
+// since a missed field could mean a genuine needs_help/position update
+// silently fails to redraw).
+let pinsRenderedSig = null;
 function renderPins(items) {
+    const sig = JSON.stringify(items);
+    if (sig === pinsRenderedSig) return;
+    pinsRenderedSig = sig;
+
     pinLayer.clearLayers();
     const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
     items.forEach(pin => {
@@ -2196,14 +2233,24 @@ function renderPins(items) {
             : 'border:2px solid white;';
         // Stale = past due for a fresh ping but still their last-known
         // position, so it stays on the map (never silently vanishes) just
-        // dimmed instead. Moving gets a small blue dot badge, same idea as a
-        // "live" indicator, not a full icon swap so the team-color dot itself
-        // still reads the same at a glance.
+        // dimmed instead. Moving gets a small running-person badge (not a
+        // full icon swap, so the team-color dot itself still reads the same
+        // at a glance) plus, when the server could compute one (see
+        // $loadPins's gpsBearingDegrees() call — only once two real,
+        // non-jitter fixes are available), a small arrow rotated to the
+        // compass heading of travel.
         const opacity = pin.is_stale ? 'opacity:.45;' : '';
         const movingBadge = pin.is_moving
-            ? '<span style="position:absolute;top:-3px;right:-3px;width:9px;height:9px;background:#0ea5e9;border:2px solid #fff;border-radius:50%;"></span>'
+            ? '<span style="position:absolute;top:-4px;right:-4px;width:14px;height:14px;background:#0ea5e9;border:2px solid #fff;border-radius:50%;font-size:8px;line-height:11px;text-align:center;">🏃</span>'
             : '';
-        const icon = L.divIcon({className:'', html:`<span style="position:relative;display:block;width:16px;height:16px;background:${color};${ring}${opacity}border-radius:50%;box-shadow:0 1px 4px #0008">${movingBadge}</span>`, iconSize:[16,16], iconAnchor:[8,8]});
+        // heading_deg is a compass bearing (0°=North, clockwise) — exactly
+        // what CSS rotate() already expects, so no conversion is needed. The
+        // arrow itself points up (North) at rotate(0), same convention every
+        // map/compass UI uses.
+        const headingArrow = (pin.is_moving && pin.heading_deg !== null && pin.heading_deg !== undefined)
+            ? `<span style="position:absolute;bottom:-9px;left:50%;transform:translateX(-50%) rotate(${pin.heading_deg}deg);color:${color};text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff;font-size:15px;line-height:1;">▲</span>`
+            : '';
+        const icon = L.divIcon({className:'', html:`<span style="position:relative;display:block;width:16px;height:16px;background:${color};${ring}${opacity}border-radius:50%;box-shadow:0 1px 4px #0008">${movingBadge}${headingArrow}</span>`, iconSize:[16,16], iconAnchor:[8,8]});
         const statusLine = pinStatusLabel(pin.status);
         const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
             : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
@@ -2931,7 +2978,18 @@ function renderRouteWaypointUpcoming(wp) {
     </div>`;
 }
 
+// Same whole-array-JSON signature technique as renderPins/renderDispatches —
+// this card also holds a live note textarea (route.note_hint) per open
+// waypoint, so skipping the rebuild when the server-side route data hasn't
+// actually changed protects an in-progress typed note from being wiped out
+// by routine polling, same concern renderShortageReports' own signature
+// check already exists to solve for its own note input.
+let myRoutesRenderedSig = null;
 function renderMyRoutes(allRoutes) {
+    const sig = JSON.stringify(allRoutes);
+    if (sig === myRoutesRenderedSig) return;
+    myRoutesRenderedSig = sig;
+
     const list = document.getElementById('myRoutesList');
     const myRoutes = (allRoutes || []).filter(r => r.is_my_team);
     if (!myRoutes.length) {
@@ -3073,7 +3131,13 @@ function renderShortageReports(items) {
     list.querySelectorAll('.shortage-not-resolved-btn').forEach(btn => btn.addEventListener('click', () => submitShortageOutcome(btn, 'not_resolved')));
 }
 
+// Same whole-array-JSON signature technique as the other render*() functions.
+let sosAlertsRenderedSig = null;
 function renderSosAlerts(items) {
+    const sig = JSON.stringify(items);
+    if (sig === sosAlertsRenderedSig) return;
+    sosAlertsRenderedSig = sig;
+
     const list = document.getElementById('sosAlertsList');
     if (!list) return;
     if (!items.length) {
@@ -3512,7 +3576,7 @@ function loadActivity() {
 }
 if (!fieldMode) {
     loadActivity();
-    setInterval(loadActivity, 15000);
+    setInterval(() => { if (!document.hidden) loadActivity(); }, 15000);
 }
 
 const reportModalEl = document.getElementById('reportModal');
@@ -3823,51 +3887,76 @@ function renderPollStaleness() {
 // said when the connection first died.
 setInterval(renderPollStaleness, 5000);
 
-setInterval(() => fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => {
-    if (!checkSessionAlive(response)) return null;
-    return response.json();
-}).then(data => {
-    if (!data) return;
-    lastPollOkAt = Date.now();
-    renderPollStaleness();
-    if (!fieldMode) {
-        renderPins(pins = data.pins || []);
-        if (data.dispatches) renderDispatches(dispatches = data.dispatches);
-        if (data.annotations) renderAnnotations(annotations = data.annotations);
-        if (data.media) {
-            const sig = JSON.stringify(data.media);
-            if (sig !== mediaSignature) {
-                mediaSignature = sig;
-                renderMedia(media = data.media);
+// Named (not the previous inline arrow passed straight to setInterval) so
+// the Page Visibility handling below can also call it directly, once, the
+// moment this tab becomes visible again — rather than leaving the user
+// looking at a map/route/SOS list that's been silently frozen for however
+// long the tab was hidden until the next scheduled tick happens to land.
+function pollWarRoomData() {
+    fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => {
+        if (!checkSessionAlive(response)) return null;
+        return response.json();
+    }).then(data => {
+        if (!data) return;
+        lastPollOkAt = Date.now();
+        renderPollStaleness();
+        if (!fieldMode) {
+            renderPins(pins = data.pins || []);
+            if (data.dispatches) renderDispatches(dispatches = data.dispatches);
+            if (data.annotations) renderAnnotations(annotations = data.annotations);
+            if (data.media) {
+                const sig = JSON.stringify(data.media);
+                if (sig !== mediaSignature) {
+                    mediaSignature = sig;
+                    renderMedia(media = data.media);
+                }
             }
         }
-    }
-    if (data.myTasks) renderMyTasks(myTasks = data.myTasks);
-    if (data.routes) {
-        routes = data.routes;
-        renderMyRoutes(routes);
-        if (!fieldMode) { renderRoutesAdmin(routes); renderRouteLayer(routes); }
-    }
-    if (data.shortageReports) renderShortageReports(shortageReports = data.shortageReports);
-    if (data.sosAlerts) {
-        renderSosAlerts(sosAlerts = data.sosAlerts);
-        if (!fieldMode) updateSosAlarmState(sosAlerts);
-    }
-    if (data.onlinePresence) renderPresence(data.onlinePresence);
-    if (data.pingStaleness) renderPingStaleness(data.pingStaleness);
-    if (!fieldMode) document.getElementById('mapRefresh').textContent = data.time || '';
-    if (data.banners && data.banners.length) {
-        data.banners.forEach(b => {
-            if (b.id > bannerAfterId) bannerAfterId = b.id;
-            showWarRoomBanner(b.id, b.message, b.orderId, b.alarmStyle);
-        });
-    }
-    // Keep the offline fallback's copy of the route/orders current. Cheap:
-    // saveFieldSnapshot() compares a signature first and only writes when
-    // something actually changed, so a quiet mission doesn't rewrite
-    // localStorage every 5 seconds.
-    saveFieldSnapshot();
-}).catch(() => { renderPollStaleness(); }), 5000);
+        if (data.myTasks) renderMyTasks(myTasks = data.myTasks);
+        if (data.routes) {
+            routes = data.routes;
+            renderMyRoutes(routes);
+            if (!fieldMode) { renderRoutesAdmin(routes); renderRouteLayer(routes); }
+        }
+        if (data.shortageReports) renderShortageReports(shortageReports = data.shortageReports);
+        if (data.sosAlerts) {
+            renderSosAlerts(sosAlerts = data.sosAlerts);
+            if (!fieldMode) updateSosAlarmState(sosAlerts);
+        }
+        if (data.onlinePresence) renderPresence(data.onlinePresence);
+        if (data.pingStaleness) renderPingStaleness(data.pingStaleness);
+        if (!fieldMode) document.getElementById('mapRefresh').textContent = data.time || '';
+        if (data.banners && data.banners.length) {
+            data.banners.forEach(b => {
+                if (b.id > bannerAfterId) bannerAfterId = b.id;
+                showWarRoomBanner(b.id, b.message, b.orderId, b.alarmStyle);
+            });
+        }
+        // Keep the offline fallback's copy of the route/orders current. Cheap:
+        // saveFieldSnapshot() compares a signature first and only writes when
+        // something actually changed, so a quiet mission doesn't rewrite
+        // localStorage every 5 seconds.
+        saveFieldSnapshot();
+    }).catch(() => { renderPollStaleness(); });
+}
+setInterval(() => { if (!document.hidden) pollWarRoomData(); }, 5000);
+
+// A tab sitting in a background window/inactive phone screen still fires
+// these 5s timers at full rate today — harmless for one open tab, but this
+// app is routinely run with several tabs open at once (multiple admins,
+// or one admin's laptop+phone both open), and every hidden one was polling
+// exactly as often as the one actually being watched, for zero benefit.
+// Skipping the fetch while hidden (checked above, and in pollRoom/
+// loadActivity below) cuts that idle load; catching up immediately on
+// return (rather than waiting up to 5s for the next tick) keeps "switch
+// back to this tab" from ever showing stale data on the way back in.
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    pollWarRoomData();
+    // Chat's own pollRoom() lives inside its IIFE further down (not in scope
+    // here) and handles its own visibilitychange listener there instead.
+    if (!fieldMode && typeof loadActivity === 'function') loadActivity();
+});
 
 document.querySelectorAll('.team-form').forEach(form => {
     const leaderSelect = form.querySelector(form.dataset.leaderSelect);
@@ -3994,7 +4083,12 @@ document.querySelectorAll('.team-form').forEach(form => {
     });
 
     loadRoom('');
-    setInterval(pollRoom, 5000);
+    setInterval(() => { if (!document.hidden) pollRoom(); }, 5000);
+    // Scoped here (not the outer visibilitychange listener further up) since
+    // pollRoom only exists inside this closure.
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) pollRoom();
+    });
 })();
 
 (function() {
@@ -4246,7 +4340,19 @@ function renderRouteAdminWaypointsList(route) {
     return rows + footerHtml;
 }
 
+// Same whole-array-JSON signature technique as the other render*() functions
+// above — but this card also depends on expandedRouteIds (which route cards
+// are expanded), a purely client-side Set that isn't part of allRoutes at
+// all. That MUST be folded into the signature: the expand/collapse toggle
+// handler calls this function again with the exact same allRoutes reference
+// it was already given, so a signature built from allRoutes alone would
+// match on every toggle and silently break expand/collapse entirely.
+let routesAdminRenderedSig = null;
 function renderRoutesAdmin(allRoutes) {
+    const sig = JSON.stringify(allRoutes) + '|' + [...expandedRouteIds].sort().join(',');
+    if (sig === routesAdminRenderedSig) return;
+    routesAdminRenderedSig = sig;
+
     const list = document.getElementById('routesAdminList');
     if (!list) return;
     if (!allRoutes.length) {

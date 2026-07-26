@@ -260,6 +260,15 @@ if ($action === 'create') {
             echo json_encode(['ok' => false, 'error' => t('route.invalid_waypoint')]);
             exit;
         }
+        // Same range check ping-location.php already applies to a live GPS
+        // fix — a waypoint is admin-placed, not device-reported, but a
+        // malformed/out-of-range value here would still corrupt the map and
+        // every downstream distance/ETA calculation against it.
+        $wpLat = (float) $wp['lat']; $wpLng = (float) $wp['lng'];
+        if ($wpLat < -90 || $wpLat > 90 || $wpLng < -180 || $wpLng > 180 || ($wpLat == 0 && $wpLng == 0)) {
+            echo json_encode(['ok' => false, 'error' => t('route.invalid_waypoint')]);
+            exit;
+        }
         $label = isset($wp['label']) ? trim((string) $wp['label']) : '';
         $instructions = isset($wp['instructions']) ? trim((string) $wp['instructions']) : '';
         $dwellRaw = $wp['dwell_minutes'] ?? null;
@@ -431,6 +440,14 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
             $latRaw = post('lat'); $lngRaw = post('lng'); $accRaw = post('accuracy');
             $lat = ($latRaw !== '' && is_numeric($latRaw)) ? (float) $latRaw : null;
             $lng = ($lngRaw !== '' && is_numeric($lngRaw)) ? (float) $lngRaw : null;
+            // Out-of-range GPS (same bounds as ping-location.php) is treated
+            // as "no fix", not a reason to fail the arrival itself — the
+            // action this endpoint exists for is a real-world event that
+            // must still record even if the browser handed back garbage
+            // coordinates.
+            if ($lat !== null && ($lat < -90 || $lat > 90)) { $lat = null; }
+            if ($lng !== null && ($lng < -180 || $lng > 180)) { $lng = null; }
+            if ($lat === 0.0 && $lng === 0.0) { $lat = null; $lng = null; }
             $acc = ($accRaw !== '' && is_numeric($accRaw)) ? (float) $accRaw : null;
             $distance = ($lat !== null && $lng !== null) ? (int) round(gpsDistanceMeters((float) $wp['lat'], (float) $wp['lng'], $lat, $lng)) : null;
 

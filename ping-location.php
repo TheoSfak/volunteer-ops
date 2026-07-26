@@ -77,9 +77,9 @@ $pr = dbFetchOne(
     "SELECT pr.id, s.mission_id, m.title AS mission_title, m.responsible_user_id FROM participation_requests pr
      JOIN shifts s ON pr.shift_id = s.id
      JOIN missions m ON s.mission_id = m.id
-     WHERE pr.shift_id = ? AND pr.volunteer_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "'
-       AND m.status = '" . STATUS_OPEN . "' AND m.show_in_ops = 1 AND m.deleted_at IS NULL",
-    [$shiftId, $userId]
+     WHERE pr.shift_id = ? AND pr.volunteer_id = ? AND pr.status = ?
+       AND m.status = ? AND m.show_in_ops = 1 AND m.deleted_at IS NULL",
+    [$shiftId, $userId, PARTICIPATION_APPROVED, STATUS_OPEN]
 );
 
 if (!$pr) {

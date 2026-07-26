@@ -5204,6 +5204,24 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 108,
+            'description' => 'Add notifications.banner_mission_id (generated column, indexed) — War Room\'s live banner query used to filter directly on JSON_EXTRACT(data, \'$.bannerMission\'), which no index can support, so every 5s poll from every open tab did a full scan of that user\'s entire notification history. Mirrors data\'s own bannerMission JSON field automatically; nothing needs to change wherever notifications are created.',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'notifications' AND COLUMN_NAME = 'banner_mission_id'"
+                );
+                if (!$col) {
+                    dbExecute(
+                        "ALTER TABLE notifications
+                         ADD COLUMN banner_mission_id INT UNSIGNED GENERATED ALWAYS AS (JSON_EXTRACT(data, '$.bannerMission')) VIRTUAL,
+                         ADD INDEX idx_notifications_banner (user_id, banner_mission_id, id)"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
