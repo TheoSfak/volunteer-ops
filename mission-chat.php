@@ -106,12 +106,19 @@ if (!isPost()) {
 
     if ($afterId > 0) {
         $params[] = $afterId;
+        // Bounded even here: a client reconnecting after hours offline with a
+        // long-stale after_id would otherwise pull every message sent since
+        // then in one response. ORDER BY id ASC + LIMIT keeps the OLDEST of
+        // the new ones, not the newest — correct for this poll loop, since
+        // the client advances lastIdByRoom to whatever it actually received
+        // (see war-room.php's pollRoom()) and simply catches up the rest on
+        // its next tick, rather than ever silently skipping a gap.
         $rows = dbFetchAll(
             "SELECT c.id, c.user_id, u.name, u.is_external, u.guest_org_name, c.message, c.created_at
              FROM mission_chat_messages c
              JOIN users u ON u.id = c.user_id
              WHERE c.mission_id = ? AND {$teamSql} AND c.id > ?
-             ORDER BY c.id ASC",
+             ORDER BY c.id ASC LIMIT 200",
             $params
         );
     } else {

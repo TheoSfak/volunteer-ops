@@ -356,10 +356,17 @@ CREATE TABLE IF NOT EXISTS `notifications` (
     `title` VARCHAR(255) NOT NULL,
     `message` TEXT NULL,
     `data` JSON NULL,
+    -- Generated column mirroring data's own 'bannerMission' JSON field — War
+    -- Room's live banner query (war-room.php) used to filter directly on
+    -- JSON_EXTRACT(data, '$.bannerMission'), which no index can support, so
+    -- every poll tick from every open tab did a full scan of that user's
+    -- entire notification history. This is indexed below instead.
+    `banner_mission_id` INT UNSIGNED GENERATED ALWAYS AS (JSON_EXTRACT(`data`, '$.bannerMission')) VIRTUAL,
     `read_at` TIMESTAMP NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
-    INDEX `idx_notifications_user` (`user_id`, `read_at`)
+    INDEX `idx_notifications_user` (`user_id`, `read_at`),
+    INDEX `idx_notifications_banner` (`user_id`, `banner_mission_id`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================

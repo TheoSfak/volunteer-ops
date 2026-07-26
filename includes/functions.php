@@ -922,19 +922,30 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
  * true — admin-only opt-in filter, off by default everywhere else.
  */
 function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAuto): array {
+    // Capped PER USER (3000 most recent points each — ~6 days of continuous
+    // 180s auto-pinging for a single volunteer, far past any realistic
+    // single mission's length), not by one shared LIMIT across every row —
+    // a flat LIMIT here, ordered by user_id first, meant that once total
+    // pings for the mission exceeded the cap, whichever volunteers happened
+    // to have the numerically highest user_id lost part or all of their
+    // trail while everyone else kept theirs in full, for no reason
+    // connected to anything about their actual participation.
     $rows = dbFetchAll(
-        "SELECT vp.user_id, vp.lat, vp.lng, vp.created_at, vp.source,
-                u.name, mtm.team_id, mt.color AS team_color
-         FROM volunteer_pings vp
-         JOIN shifts s ON s.id = vp.shift_id
-         JOIN users u ON u.id = vp.user_id
-         LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = vp.user_id
-         LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
-         WHERE s.mission_id = ?
-           AND (? = 0 OR mtm.team_id = ?)
-           AND (vp.source = 'manual' OR ? = 1)
-         ORDER BY vp.user_id, vp.created_at
-         LIMIT 20000",
+        "SELECT user_id, lat, lng, created_at, source, name, team_id, team_color FROM (
+            SELECT vp.user_id, vp.lat, vp.lng, vp.created_at, vp.source,
+                    u.name, mtm.team_id, mt.color AS team_color,
+                    ROW_NUMBER() OVER (PARTITION BY vp.user_id ORDER BY vp.created_at DESC) AS rn
+             FROM volunteer_pings vp
+             JOIN shifts s ON s.id = vp.shift_id
+             JOIN users u ON u.id = vp.user_id
+             LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = vp.user_id
+             LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
+             WHERE s.mission_id = ?
+               AND (? = 0 OR mtm.team_id = ?)
+               AND (vp.source = 'manual' OR ? = 1)
+         ) ranked
+         WHERE rn <= 3000
+         ORDER BY user_id, created_at",
         [$missionId, $teamId, $teamId, $includeAuto ? 1 : 0]
     );
 
@@ -1506,6 +1517,23 @@ function gpsDistanceMeters(float $lat1, float $lng1, float $lat2, float $lng2): 
     $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
     $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
     return $earthRadiusMeters * $c;
+}
+
+/**
+ * Compass bearing (0-360°, 0 = North, clockwise) from point 1 to point 2 —
+ * the direction of travel for the live map's moving-pin arrow. Standard
+ * great-circle initial-bearing formula, paired with gpsDistanceMeters()
+ * above (same two-point GPS shape, $loadPins in war-room.php calls both on
+ * the same $prevPing → $pin pair).
+ */
+function gpsBearingDegrees(float $lat1, float $lng1, float $lat2, float $lng2): float {
+    $lat1Rad = deg2rad($lat1);
+    $lat2Rad = deg2rad($lat2);
+    $dLngRad = deg2rad($lng2 - $lng1);
+    $y = sin($dLngRad) * cos($lat2Rad);
+    $x = cos($lat1Rad) * sin($lat2Rad) - sin($lat1Rad) * cos($lat2Rad) * cos($dLngRad);
+    $bearing = rad2deg(atan2($y, $x));
+    return fmod($bearing + 360, 360);
 }
 
 /**

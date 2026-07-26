@@ -31,6 +31,12 @@ $latRaw = post('lat');
 $lngRaw = post('lng');
 $lat = ($latRaw !== '' && $latRaw !== null && is_numeric($latRaw)) ? (float) $latRaw : null;
 $lng = ($lngRaw !== '' && $lngRaw !== null && is_numeric($lngRaw)) ? (float) $lngRaw : null;
+// Out-of-range GPS (same bounds as ping-location.php) is treated as "no
+// fix", not a reason to reject anything — an SOS in particular must never
+// be blocked by a bad coordinate; it just goes out without a location.
+if ($lat !== null && ($lat < -90 || $lat > 90)) { $lat = null; }
+if ($lng !== null && ($lng < -180 || $lng > 180)) { $lng = null; }
+if ($lat === 0.0 && $lng === 0.0) { $lat = null; $lng = null; }
 
 // The War Room offline queue replays this endpoint, so a status change (and
 // especially an SOS) that only reaches the server once signal returns must be
@@ -51,9 +57,9 @@ $pr = dbFetchOne(
      FROM participation_requests pr
      JOIN shifts s ON pr.shift_id = s.id
      JOIN missions m ON s.mission_id = m.id
-     WHERE pr.id = ? AND pr.volunteer_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "'
-       AND m.status = '" . STATUS_OPEN . "' AND m.show_in_ops = 1 AND m.deleted_at IS NULL",
-    [$prId, $userId]
+     WHERE pr.id = ? AND pr.volunteer_id = ? AND pr.status = ?
+       AND m.status = ? AND m.show_in_ops = 1 AND m.deleted_at IS NULL",
+    [$prId, $userId, PARTICIPATION_APPROVED, STATUS_OPEN]
 );
 
 if (!$pr) {

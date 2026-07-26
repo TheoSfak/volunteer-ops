@@ -215,8 +215,16 @@ if ($action === 'create') {
     $label = $label !== '' ? mb_substr($label, 0, 255) : null;
     $rawGeo = json_decode((string) post('geo'), true);
 
+    // Same lat/lng range ping-location.php already enforces for a live GPS
+    // fix — this is admin-drawn, not device-reported, but a malformed value
+    // would still put a marker/zone somewhere nonsensical on the map and
+    // corrupt any distance/ETA calculation against it.
+    $isValidLatLng = fn($lat, $lng) => is_numeric($lat) && is_numeric($lng)
+        && (float) $lat >= -90 && (float) $lat <= 90 && (float) $lng >= -180 && (float) $lng <= 180
+        && !((float) $lat === 0.0 && (float) $lng === 0.0);
+
     if ($type === 'point') {
-        if (!is_array($rawGeo) || !isset($rawGeo['lat'], $rawGeo['lng'])) {
+        if (!is_array($rawGeo) || !isset($rawGeo['lat'], $rawGeo['lng']) || !$isValidLatLng($rawGeo['lat'], $rawGeo['lng'])) {
             echo json_encode(['ok' => false, 'error' => t('dispatch.invalid_point')]);
             exit;
         }
@@ -225,6 +233,12 @@ if ($action === 'create') {
         if (!is_array($rawGeo) || count($rawGeo) < 3) {
             echo json_encode(['ok' => false, 'error' => t('dispatch.polygon_needs_3_points')]);
             exit;
+        }
+        foreach ($rawGeo as $pt) {
+            if (!is_array($pt) || !isset($pt[0], $pt[1]) || !$isValidLatLng($pt[0], $pt[1])) {
+                echo json_encode(['ok' => false, 'error' => t('dispatch.invalid_point')]);
+                exit;
+            }
         }
         $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
     } else {

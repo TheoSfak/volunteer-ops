@@ -49,10 +49,23 @@ if ($action === 'create') {
     $label = trim((string) post('label'));
     $label = $label !== '' ? mb_substr($label, 0, 255) : null;
 
+    // Same lat/lng range ping-location.php already enforces for a live GPS
+    // fix — admin-drawn here, not device-reported, but a malformed value
+    // would still put a sketch somewhere nonsensical on the shared map.
+    $isValidLatLng = fn($lat, $lng) => is_numeric($lat) && is_numeric($lng)
+        && (float) $lat >= -90 && (float) $lat <= 90 && (float) $lng >= -180 && (float) $lng <= 180
+        && !((float) $lat === 0.0 && (float) $lng === 0.0);
+
     if ($type === 'freehand') {
         if (!is_array($rawGeo) || count($rawGeo) < 2) {
             echo json_encode(['ok' => false, 'error' => t('annotation.freehand_needs_2_points')]);
             exit;
+        }
+        foreach ($rawGeo as $pt) {
+            if (!is_array($pt) || !isset($pt[0], $pt[1]) || !$isValidLatLng($pt[0], $pt[1])) {
+                echo json_encode(['ok' => false, 'error' => t('annotation.invalid_point')]);
+                exit;
+            }
         }
         $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
         $label = null;
@@ -61,10 +74,16 @@ if ($action === 'create') {
             echo json_encode(['ok' => false, 'error' => t('annotation.arrow_needs_2_points')]);
             exit;
         }
+        foreach ($rawGeo as $pt) {
+            if (!is_array($pt) || !isset($pt[0], $pt[1]) || !$isValidLatLng($pt[0], $pt[1])) {
+                echo json_encode(['ok' => false, 'error' => t('annotation.invalid_point')]);
+                exit;
+            }
+        }
         $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
         $label = null;
     } elseif ($type === 'text') {
-        if (!is_array($rawGeo) || !isset($rawGeo['lat'], $rawGeo['lng'])) {
+        if (!is_array($rawGeo) || !isset($rawGeo['lat'], $rawGeo['lng']) || !$isValidLatLng($rawGeo['lat'], $rawGeo['lng'])) {
             echo json_encode(['ok' => false, 'error' => t('annotation.invalid_point')]);
             exit;
         }
