@@ -410,6 +410,9 @@ return [
         'media.video_label' => 'Το βίντεο',
         'media.sent_suffix' => ' εστάλη.',
         'sos.marquee_text' => '🆘 {team} ΣΕ SOS — {name} χρειάζεται άμεση βοήθεια!',
+        // Local-only siren mute — audio only, never touches the alert itself
+        'sos.mute_btn' => 'Σίγαση ήχου (5λ)',
+        'sos.muted_btn' => 'Σε σίγαση ({minutes}λ) — ενεργοποίηση',
         'banner.acked_label' => '✓ Ελήφθη',
         'hero.btn_exit_fullscreen' => 'Έξοδος Πλήρους Οθόνης',
         'activity.empty' => 'Δεν υπάρχουν καταγεγραμμένα γεγονότα ακόμη.',
@@ -1094,6 +1097,9 @@ return [
         'media.video_label' => 'The video',
         'media.sent_suffix' => ' was sent.',
         'sos.marquee_text' => '🆘 {team} IS IN SOS — {name} needs immediate help!',
+        // Local-only siren mute — audio only, never touches the alert itself
+        'sos.mute_btn' => 'Mute sound (5m)',
+        'sos.muted_btn' => 'Muted ({minutes}m) — unmute',
         'banner.acked_label' => '✓ Acknowledged',
         'hero.btn_exit_fullscreen' => 'Exit Fullscreen',
         'activity.empty' => 'No events recorded yet.',

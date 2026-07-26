@@ -976,6 +976,13 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
             // the viewer's own browser timezone instead.
             'time'   => date('d/m H:i', strtotime($row['created_at'])),
             'source' => $row['source'],
+            // Unix epoch seconds, alongside (not instead of) the pre-formatted
+            // 'time' above — added for the replay scrubber's timeline math
+            // (comparing/sorting points, positioning a slider), where a plain
+            // integer sidesteps the exact browser-timezone concern 'time'
+            // itself already exists to avoid; every consumer of 'time' is
+            // untouched.
+            'ts'     => strtotime($row['created_at']),
         ];
     }
 
