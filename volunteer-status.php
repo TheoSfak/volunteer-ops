@@ -101,30 +101,52 @@ logAudit($auditActionByStatus[$status], 'participation_requests', $prId, $auditN
 if ($status === 'needs_help') {
     $missionId = (int) $pr['mission_id'];
 
-    $existingAlertId = dbFetchValue(
-        "SELECT id FROM mission_sos_alerts WHERE pr_id = ? AND resolved_at IS NULL",
-        [$prId]
-    );
+    // Locking the participation_requests row (which always exists — $pr was
+    // already fetched above) rather than the mission_sos_alerts row is the
+    // point: two SOS taps for the same pr_id arriving within the same
+    // instant (double-tap, or a live tap racing the offline queue's replay
+    // of an earlier queued one) previously both ran the SELECT below, both
+    // saw "no existing open alert" — a real check-then-insert race, since
+    // there's no row to lock when none exists yet — and both inserted a
+    // duplicate ticket with a duplicate siren/push to command staff.
+    // Locking pr_id serializes any second concurrent request behind the
+    // first one's commit, so it correctly sees the alert the first request
+    // just created.
+    db()->beginTransaction();
+    try {
+        dbFetchOne("SELECT id FROM participation_requests WHERE id = ? FOR UPDATE", [$prId]);
 
-    if ($existingAlertId) {
-        dbExecute("UPDATE mission_sos_alerts SET lat = ?, lng = ? WHERE id = ?", [$lat, $lng, (int) $existingAlertId]);
-    } else {
+        $existingAlertId = dbFetchValue(
+            "SELECT id FROM mission_sos_alerts WHERE pr_id = ? AND resolved_at IS NULL",
+            [$prId]
+        );
+
+        if ($existingAlertId) {
+            dbExecute("UPDATE mission_sos_alerts SET lat = ?, lng = ? WHERE id = ?", [$lat, $lng, (int) $existingAlertId]);
+        } else {
+            // created_at is the resolved field time, not NOW(): an SOS queued
+            // offline and replayed 20 minutes later must show command staff when
+            // the volunteer actually called for help. It still surfaces as a new
+            // unacknowledged alert (siren + push fire below regardless), it just
+            // sorts and reads by its true time.
+            dbInsert(
+                "INSERT INTO mission_sos_alerts (mission_id, user_id, pr_id, team_id, lat, lng, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [$missionId, $userId, $prId, getUserTeamIdForMission($missionId, $userId), $lat, $lng, $eventTs]
+            );
+        }
+        db()->commit();
+    } catch (Exception $e) {
+        db()->rollBack();
+        echo json_encode(['ok' => false, 'error' => t('common.failed')]);
+        exit;
+    }
+
+    if (!$existingAlertId) {
         $currentUser = getCurrentUser();
-
         $teamId = getUserTeamIdForMission($missionId, $userId);
         $myTeam = $teamId ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$teamId]) : null;
         $teamLabel = $myTeam ? teamLabel($myTeam['codename'], $myTeam['team_number']) : t('status.no_team_label');
-
-        // created_at is the resolved field time, not NOW(): an SOS queued
-        // offline and replayed 20 minutes later must show command staff when
-        // the volunteer actually called for help. It still surfaces as a new
-        // unacknowledged alert (siren + push fire below regardless), it just
-        // sorts and reads by its true time.
-        dbInsert(
-            "INSERT INTO mission_sos_alerts (mission_id, user_id, pr_id, team_id, lat, lng, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [$missionId, $userId, $prId, $teamId, $lat, $lng, $eventTs]
-        );
 
         $recipientIds = getMissionCommandStaffIds(
             $missionId,
