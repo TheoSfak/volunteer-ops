@@ -1592,6 +1592,78 @@ function gpsBearingDegrees(float $lat1, float $lng1, float $lat2, float $lng2): 
 }
 
 /**
+ * War Room: each team's current position, taken as the most recent ping
+ * among its current members — same "team is one unit" convention and same
+ * per-team join shape as computeDispatchEta() above, just without that
+ * function's OSRM/cache machinery (this is plain Haversine, cheap enough to
+ * run fresh every poll tick for the handful of teams a mission typically
+ * has). Teams with no ping yet are silently omitted, not returned with a
+ * null position — callers (Nearby Teams, Team Distances) both treat
+ * "not in this array" as the correct empty state.
+ */
+function loadTeamPositionsForMission(int $missionId): array {
+    $teams = dbFetchAll(
+        "SELECT id, codename, team_number, color FROM mission_teams WHERE mission_id = ? ORDER BY codename",
+        [$missionId]
+    );
+
+    $positions = [];
+    foreach ($teams as $team) {
+        $ping = dbFetchOne(
+            "SELECT vp.lat, vp.lng, vp.created_at
+             FROM volunteer_pings vp
+             JOIN mission_team_members mtm ON mtm.user_id = vp.user_id
+             JOIN shifts s ON s.id = vp.shift_id AND s.mission_id = mtm.mission_id
+             WHERE mtm.team_id = ?
+             ORDER BY vp.created_at DESC LIMIT 1",
+            [$team['id']]
+        );
+        if (!$ping) {
+            continue;
+        }
+        // 540s = 9min, mirrors $loadPins/computeDispatchEta()'s own staleness
+        // threshold — not a shared constant anywhere today, kept deliberately
+        // in sync; update all three if this number ever changes.
+        $positions[] = [
+            'team_id' => (int) $team['id'],
+            'label' => teamLabel($team['codename'], $team['team_number']),
+            'color' => $team['color'],
+            'lat' => (float) $ping['lat'],
+            'lng' => (float) $ping['lng'],
+            'time' => date('H:i', strtotime($ping['created_at'])),
+            'is_stale' => (time() - strtotime($ping['created_at'])) > 540,
+        ];
+    }
+    return $positions;
+}
+
+/**
+ * War Room: every pairwise distance between teams that currently have a
+ * position (i<j, not the full N² — a mission with 4 teams has 6 pairs, not
+ * 16). Sorted nearest-first since the closest pair is usually the most
+ * operationally relevant ("are these two close enough to support each
+ * other"). Feeds the Team Distances section next to the Teams panel.
+ */
+function computeTeamDistanceMatrix(array $teamPositions): array {
+    $matrix = [];
+    $count = count($teamPositions);
+    for ($i = 0; $i < $count; $i++) {
+        for ($j = $i + 1; $j < $count; $j++) {
+            $a = $teamPositions[$i];
+            $b = $teamPositions[$j];
+            $matrix[] = [
+                'a_label' => $a['label'], 'a_color' => $a['color'],
+                'b_label' => $b['label'], 'b_color' => $b['color'],
+                'distance_m' => gpsDistanceMeters($a['lat'], $a['lng'], $b['lat'], $b['lng']),
+                'is_stale' => $a['is_stale'] || $b['is_stale'],
+            ];
+        }
+    }
+    usort($matrix, fn($x, $y) => $x['distance_m'] <=> $y['distance_m']);
+    return $matrix;
+}
+
+/**
  * War Room: response-time computation shared by the live report modal
  * (mission-response-report.php) and the archival print export
  * (mission-report-print.php) — merges the generic mission_orders/

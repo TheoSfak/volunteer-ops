@@ -631,6 +631,46 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
     }
 };
 
+// Nearby Teams (field-card column, both modes) + Team Distances (Teams
+// panel, full view only). Same "define once, call from both the ajax
+// branch and the full-page seed" shape as $loadPins above.
+$loadTeamProximity = function () use ($missionId, $user) {
+    $teamPositions = loadTeamPositionsForMission($missionId);
+
+    $myPing = dbFetchOne(
+        "SELECT vp.lat, vp.lng FROM volunteer_pings vp
+         JOIN shifts s ON s.id = vp.shift_id
+         WHERE s.mission_id = ? AND vp.user_id = ?
+         ORDER BY vp.created_at DESC LIMIT 1",
+        [$missionId, $user['id']]
+    );
+    $myTeamId = (int) dbFetchValue(
+        "SELECT team_id FROM mission_team_members WHERE mission_id = ? AND user_id = ?",
+        [$missionId, $user['id']]
+    );
+
+    $nearbyTeams = [];
+    foreach ($teamPositions as $tp) {
+        if ($myTeamId && $tp['team_id'] === $myTeamId) {
+            continue; // your own team isn't "nearby", it's you
+        }
+        if ($myPing) {
+            $tp['distance_m'] = gpsDistanceMeters((float) $myPing['lat'], (float) $myPing['lng'], $tp['lat'], $tp['lng']);
+            $tp['bearing_deg'] = gpsBearingDegrees((float) $myPing['lat'], (float) $myPing['lng'], $tp['lat'], $tp['lng']);
+        } else {
+            // No ping of our own yet this mission — distance/direction are
+            // undefined, not zero. The client shows a "send your own ping"
+            // hint instead of a number for these.
+            $tp['distance_m'] = null;
+            $tp['bearing_deg'] = null;
+        }
+        $nearbyTeams[] = $tp;
+    }
+    usort($nearbyTeams, fn($a, $b) => ($a['distance_m'] ?? PHP_FLOAT_MAX) <=> ($b['distance_m'] ?? PHP_FLOAT_MAX));
+
+    return ['nearbyTeams' => $nearbyTeams, 'teamDistances' => computeTeamDistanceMatrix($teamPositions)];
+};
+
 if (get('ajax') === '1') {
     header('Content-Type: application/json');
 
@@ -703,6 +743,7 @@ if (get('ajax') === '1') {
     $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
     $onlinePresence = loadOnlinePresenceUserIds($missionId);
     $annotations = loadMissionAnnotationsForMission($missionId);
+    $teamProximity = $loadTeamProximity();
 
     echo json_encode([
         'pins' => $pins,
@@ -717,6 +758,8 @@ if (get('ajax') === '1') {
         'onlinePresence' => $onlinePresence,
         'pingStaleness' => $pingIsStaleByVolunteerId,
         'annotations' => $annotations,
+        'nearbyTeams' => $teamProximity['nearbyTeams'],
+        'teamDistances' => $teamProximity['teamDistances'],
     ]);
     exit;
 }
@@ -773,6 +816,9 @@ $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $annotations = loadMissionAnnotationsForMission($missionId);
+$teamProximity = $loadTeamProximity();
+$nearbyTeams = $teamProximity['nearbyTeams'];
+$teamDistances = $teamProximity['teamDistances'];
 
 $firstShift = $shifts[0]['start_time'] ?? $mission['start_datetime'];
 $lastShift = !empty($shifts) ? end($shifts)['end_time'] : $mission['end_datetime'];
@@ -1205,6 +1251,16 @@ include __DIR__ . '/includes/header.php';
                 <div class="list-group-item text-muted"><?= t('teams.empty') ?></div>
                 <?php endif; ?>
             </div>
+            <!-- Pairwise team-to-team distances — a small addendum to the
+                 roster above, not its own card (this column already stacks
+                 Teams/Participants/Activity). JS-rendered and hidden via
+                 d-none whenever fewer than 2 teams currently have a
+                 position, since that's "nothing to compare yet", not an
+                 empty/error state worth its own message. -->
+            <div class="card-body border-top small d-none" id="teamDistancesSection">
+                <div class="fw-semibold mb-1"><i class="bi bi-rulers me-1"></i><?= t('teams.distances_title') ?></div>
+                <div id="teamDistancesList"></div>
+            </div>
         </div>
 
         <div class="card shadow-sm">
@@ -1402,6 +1458,19 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                     <p class="small text-muted mb-0"><?= t('myping.auto_note') ?></p>
                 <?php endif; ?>
+            </div>
+        </div>
+
+        <!-- Field Mode has no map at all (see the !$fieldMode wrap further up),
+             so this is the only place a field volunteer sees where other teams
+             are — a plain distance+direction list instead of pins on a map.
+             Unconditional card (like My Ping/Route/Tasks below it): shows in
+             both Field Mode and full view, content degrades gracefully via
+             renderNearbyTeams() when there's no data yet. -->
+        <div class="card shadow-sm mb-4 border-primary">
+            <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-compass me-1"></i><?= t('nearby.panel_title') ?></h5></div>
+            <div class="card-body">
+                <div id="nearbyTeamsList"></div>
             </div>
         </div>
 
@@ -1866,6 +1935,8 @@ let media = <?= json_encode($photos) ?>;
 let mediaSignature = JSON.stringify(media);
 let myTasks = <?= json_encode($myTasks) ?>;
 let routes = <?= json_encode($routes) ?>;
+let nearbyTeams = <?= json_encode($nearbyTeams) ?>;
+let teamDistances = <?= json_encode($teamDistances) ?>;
 // Team rosters for the Route Order composer's member picker — lets an admin
 // narrow a route to a subset of a team (e.g. 2 of 4) instead of always the
 // whole team. See includes/migrations.php v109.
@@ -2328,6 +2399,79 @@ function renderPins(items) {
             map.setView(coords[0], 15);
         }
     }
+}
+
+// Nearby Teams (field-card column, both modes — the only place a Field Mode
+// volunteer sees any position data at all, since that mode has no map) and
+// Team Distances (small addendum inside the Teams panel, full view only).
+// No existing meters->km or bearing->compass-letter formatter anywhere in
+// this file to reuse (route.distance_from_point only ever shows raw
+// unrounded meters) — both written fresh here.
+function formatDistanceMeters(m) {
+    if (m === null || m === undefined) return '';
+    return m < 1000 ? `${Math.round(m)} ${t('common.unit_m')}` : `${(m / 1000).toFixed(1)} ${t('common.unit_km')}`;
+}
+function bearingToCompassAbbr(deg) {
+    if (deg === null || deg === undefined) return '';
+    const keys = ['compass.n', 'compass.ne', 'compass.e', 'compass.se', 'compass.s', 'compass.sw', 'compass.w', 'compass.nw'];
+    return t(keys[Math.round(deg / 45) % 8]);
+}
+
+let nearbyTeamsRenderedSig = null;
+function renderNearbyTeams(items) {
+    const sig = JSON.stringify(items);
+    if (sig === nearbyTeamsRenderedSig) return;
+    nearbyTeamsRenderedSig = sig;
+
+    const list = document.getElementById('nearbyTeamsList');
+    if (!list) return;
+    if (!items.length) {
+        list.innerHTML = `<p class="text-muted mb-0 small">${t('nearby.empty')}</p>`;
+        return;
+    }
+    // team.label is admin-settable free text (custom team codename) — escaped
+    // here the same way the live map's own pin popups already had to be
+    // fixed to do (stored-XSS audit, v3.129.0). team.color is a validated
+    // hex swatch, interpolated the same unescaped way renderPins() already
+    // does for the identical field.
+    list.innerHTML = items.map(team => {
+        const swatch = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${team.color || '#6c757d'};margin-right:6px;"></span>`;
+        const dimmed = team.is_stale ? 'opacity:.55;' : '';
+        const distanceLine = (team.distance_m !== null && team.distance_m !== undefined)
+            ? `${formatDistanceMeters(team.distance_m)} · ${bearingToCompassAbbr(team.bearing_deg)}`
+            : `<span class="text-muted">${t('nearby.no_own_ping')}</span>`;
+        const staleNote = team.is_stale ? ` · <span class="text-warning small">${t('map.pin_stale')}</span>` : '';
+        return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom" style="${dimmed}">
+            <div>${swatch}<strong>${escapeHtml(team.label)}</strong></div>
+            <div class="text-end small">${distanceLine}${staleNote}<br><span class="text-muted">${team.time}</span></div>
+        </div>`;
+    }).join('');
+}
+
+let teamDistancesRenderedSig = null;
+function renderTeamDistances(items) {
+    const sig = JSON.stringify(items);
+    if (sig === teamDistancesRenderedSig) return;
+    teamDistancesRenderedSig = sig;
+
+    const section = document.getElementById('teamDistancesSection');
+    if (!section) return;
+    // Hidden rather than an empty-state message when fewer than 2 teams
+    // currently have a position — "nothing to compare yet" isn't an
+    // error/loading state worth its own line, unlike Nearby Teams' empty
+    // state (which a field volunteer might otherwise wonder is broken).
+    section.classList.toggle('d-none', items.length === 0);
+    if (!items.length) return;
+
+    document.getElementById('teamDistancesList').innerHTML = items.map(pair => {
+        const swatchA = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${pair.a_color || '#6c757d'};margin-right:4px;"></span>`;
+        const swatchB = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${pair.b_color || '#6c757d'};margin-right:4px;"></span>`;
+        const staleNote = pair.is_stale ? ` <span class="text-warning" title="${t('map.pin_stale')}">⚠</span>` : '';
+        return `<div class="d-flex justify-content-between align-items-center py-1">
+            <span>${swatchA}${escapeHtml(pair.a_label)} ↔ ${swatchB}${escapeHtml(pair.b_label)}</span>
+            <span class="text-muted">${formatDistanceMeters(pair.distance_m)}${staleNote}</span>
+        </div>`;
+    }).join('');
 }
 
 // "Πορεία Ομάδων" — historical GPS trail view, toggled in place of the live
@@ -3401,11 +3545,12 @@ wireMediaInput('videoCaptureInput', t('media.video_label'));
 wireMediaInput('videoGalleryInput', t('media.video_label'));
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); }
     renderMyTasks(myTasks);
     renderMyRoutes(routes);
     renderShortageReports(shortageReports);
     renderSosAlerts(sosAlerts);
+    renderNearbyTeams(nearbyTeams);
     if (!fieldMode) updateSosAlarmState(sosAlerts);
     // Anything still queued from a previous visit (closed the tab while
     // offline, reopened later) — the banner reflects it immediately, and a
@@ -4145,6 +4290,8 @@ function pollWarRoomData() {
         }
         if (data.onlinePresence) renderPresence(data.onlinePresence);
         if (data.pingStaleness) renderPingStaleness(data.pingStaleness);
+        if (data.nearbyTeams) renderNearbyTeams(nearbyTeams = data.nearbyTeams);
+        if (!fieldMode && data.teamDistances) renderTeamDistances(teamDistances = data.teamDistances);
         if (!fieldMode) document.getElementById('mapRefresh').textContent = data.time || '';
         if (data.banners && data.banners.length) {
             data.banners.forEach(b => {
