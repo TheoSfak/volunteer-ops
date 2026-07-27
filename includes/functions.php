@@ -2998,7 +2998,7 @@ function loadMissionActivityEventsForReport(int $missionId): array {
     }
 
     $fieldStatusIcons = ['field_status_on_way' => '🚗', 'field_status_on_site' => '✅', 'needs_help' => '🆘'];
-    $fieldStatusText  = ['field_status_on_way' => 'σε κίνηση', 'field_status_on_site' => 'επί τόπου', 'needs_help' => 'χρειάζεται βοήθεια (SOS)'];
+    $fieldStatusText  = ['field_status_on_way' => 'σε κίνηση', 'field_status_on_site' => 'στο σημείο', 'needs_help' => 'χρειάζεται βοήθεια (SOS)'];
     $statusRows = dbFetchAll(
         "SELECT al.action, al.created_at, u.name AS actor_name
          FROM audit_logs al
