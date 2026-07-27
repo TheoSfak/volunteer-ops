@@ -30,24 +30,9 @@ requireLogin();
 
 header('Content-Type: application/json');
 
-/**
- * Notify command staff (system/department admins, this mission's shift leaders,
- * and its responsible user) about a route-level event. Mirrors the recipient
- * resolution mission-dispatch.php/mission-photo.php already use.
- */
-function notifyRouteCommandStaff(int $missionId, string $missionTitle, ?int $responsibleUserId, int $actorId, string $code, string $titleKey, array $titleVars, string $messageKey, array $messageVars): void {
-    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $actorId);
-    $langByUserId = getUserLanguages($recipientIds);
-    foreach ($recipientIds as $recipientId) {
-        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
-        sendNotification($recipientId, t($titleKey, $titleVars, $lang), t($messageKey, $messageVars, $lang), 'info', $code, [
-            'url' => $warRoomUrl,
-            'tag' => 'route-' . $code . '-mission-' . $missionId,
-            'bannerMission' => $missionId,
-        ]);
-    }
-}
+// notifyRouteCommandStaff() now lives in includes/functions.php — it gained a
+// second real caller (mission-order.php's acknowledge action, see the Route
+// Order "Ελήφθη" feature) and needed to be shared, not just page-local here.
 
 /**
  * Notify every member actually assigned to a route about a route-level event

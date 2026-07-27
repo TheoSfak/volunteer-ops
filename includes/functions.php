@@ -782,7 +782,7 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
     }
 
     $routes = dbFetchAll(
-        "SELECT r.id, r.team_id, r.title, r.is_closed_loop, r.created_at, r.completed_at, r.cancelled_at, r.cancel_reason,
+        "SELECT r.id, r.team_id, r.order_id, r.title, r.is_closed_loop, r.created_at, r.completed_at, r.cancelled_at, r.cancel_reason,
                 mt.codename, mt.team_number, mt.color, cu.name AS created_by_name
          FROM mission_routes r
          LEFT JOIN mission_teams mt ON mt.id = r.team_id
@@ -866,6 +866,24 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
         $membersByRoute[(int) $rm['route_id']][] = ['id' => (int) $rm['user_id'], 'name' => $rm['name']];
     }
 
+    // Viewer's own acknowledgment of each route's underlying order — gates
+    // the waypoint UI behind an explicit "Ελήφθη" press client-side (see
+    // mission-order.php's acknowledge action, which is what actually stamps
+    // this). Keyed by order_id, not route_id: that's the real column
+    // mission_order_recipients is keyed on, and this is the viewer's own
+    // status, not a shared/team-wide one.
+    $ackByOrderId = [];
+    $orderIds = array_values(array_filter(array_map(fn($r) => $r['order_id'] ? (int) $r['order_id'] : null, $routes)));
+    if (!empty($orderIds)) {
+        $orderPlaceholders = implode(',', array_fill(0, count($orderIds), '?'));
+        foreach (dbFetchAll(
+            "SELECT order_id, acknowledged_at FROM mission_order_recipients WHERE order_id IN ($orderPlaceholders) AND user_id = ?",
+            [...$orderIds, $userId]
+        ) as $row) {
+            $ackByOrderId[(int) $row['order_id']] = (bool) $row['acknowledged_at'];
+        }
+    }
+
     $waypointsByRoute = [];
     foreach ($waypointRows as $w) {
         $waypointId = (int) $w['id'];
@@ -905,14 +923,22 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
         ];
     }
 
-    return array_map(function ($r) use ($waypointsByRoute, $membersByRoute, $canManageWarRoom, $myTeamId, $userId) {
+    return array_map(function ($r) use ($waypointsByRoute, $membersByRoute, $ackByOrderId, $canManageWarRoom, $myTeamId, $userId) {
         $routeId = (int) $r['id'];
         $teamId = $r['team_id'] ? (int) $r['team_id'] : null;
+        $orderId = $r['order_id'] ? (int) $r['order_id'] : null;
         [$teamColorBg, $teamColorFg] = teamBadgeColors($teamId ? $r['color'] : null);
         $members = $membersByRoute[$routeId] ?? [];
         return [
             'id'                    => $routeId,
             'team_id'               => $teamId,
+            'order_id'              => $orderId,
+            // Whether THIS viewer has acknowledged the route's order — a
+            // route created before this feature shipped (order_id somehow
+            // null, shouldn't happen post-migration but defensive regardless)
+            // reads as already-acknowledged so the gate never gets stuck
+            // with no way through.
+            'my_acknowledged_at'    => $orderId ? ($ackByOrderId[$orderId] ?? false) : true,
             // No single nominal team (cross-team route, migration v110) —
             // the member names ($members, already loaded above) stand in
             // for a team label instead of a generic "mixed" placeholder.
@@ -1163,6 +1189,28 @@ function getMissionCommandStaffIds(int $missionId, ?int $responsibleUserId, int 
         $ids[] = (int) $responsibleUserId;
     }
     return array_values(array_unique(array_diff($ids, [$excludeUserId])));
+}
+
+/**
+ * Notify command staff (system/department admins, this mission's shift leaders,
+ * and its responsible user) about a route-level event. Mirrors the recipient
+ * resolution mission-dispatch.php/mission-photo.php already use. Originally
+ * page-local to mission-route.php (depart/arrive/complete/skip/cancel all call
+ * it); moved here once mission-order.php's acknowledge action needed the exact
+ * same shape for the Route Order "Ελήφθη" sound alert.
+ */
+function notifyRouteCommandStaff(int $missionId, string $missionTitle, ?int $responsibleUserId, int $actorId, string $code, string $titleKey, array $titleVars, string $messageKey, array $messageVars): void {
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $actorId);
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        sendNotification($recipientId, t($titleKey, $titleVars, $lang), t($messageKey, $messageVars, $lang), 'info', $code, [
+            'url' => $warRoomUrl,
+            'tag' => 'route-' . $code . '-mission-' . $missionId,
+            'bannerMission' => $missionId,
+        ]);
+    }
 }
 
 /**
