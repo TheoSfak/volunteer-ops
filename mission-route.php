@@ -295,6 +295,41 @@ if ($action === 'create') {
         ];
     }
 
+    // Captures the team's own current position (their latest ping, same
+    // "team is one unit" join shape computeDispatchEta() uses) and appends
+    // it as one more real waypoint, so the patrol's last leg is a genuine
+    // tracked depart/arrive/complete back to wherever the team actually
+    // started — not just cosmetic. Single-team mode only: cross-team routes
+    // have no one team to capture a position from, and the composer itself
+    // hides this checkbox in that mode, so add_return_waypoint should never
+    // even arrive truthy here — the $teamId check is still the real
+    // authorization boundary, not just a UI nicety. Silently does nothing if
+    // the team has no ping yet, same "advisory, never blocks route creation"
+    // choice already made for is_closed_loop just below.
+    if (post('add_return_waypoint') === '1' && $teamId !== null) {
+        $startPing = dbFetchOne(
+            "SELECT vp.lat, vp.lng
+             FROM volunteer_pings vp
+             JOIN mission_team_members mtm ON mtm.user_id = vp.user_id
+             JOIN shifts s ON s.id = vp.shift_id AND s.mission_id = mtm.mission_id
+             WHERE mtm.team_id = ?
+             ORDER BY vp.created_at DESC LIMIT 1",
+            [$teamId]
+        );
+        if ($startPing) {
+            $waypoints[] = [
+                'lat'           => (float) $startPing['lat'],
+                'lng'           => (float) $startPing['lng'],
+                'label'         => t('route.return_to_start_label'),
+                'instructions'  => null,
+                'dwell_minutes' => null,
+                'require_photo' => 0,
+                'require_video' => 0,
+                'require_note'  => 0,
+            ];
+        }
+    }
+
     $memberIdsRaw = json_decode((string) post('member_ids'), true);
     $submittedMemberIds = is_array($memberIdsRaw) ? array_map('intval', $memberIdsRaw) : [];
 
