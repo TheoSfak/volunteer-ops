@@ -93,6 +93,15 @@ if (isLoggedIn() && isExternalGuest()) {
         'geocode-address.php', 'api-push-subscribe.php',
         'mission-certificate-print.php', 'certificate-verify.php',
         'mission-guest-debrief.php', 'export-mission-activity.php', 'export-mission-chat.php',
+        // Route Orders (mission-route.php, shipped v3.124.0) was missed here
+        // too — a separate list from WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS in
+        // includes/auth.php (which already got this same fix), and the real
+        // cause of a guest volunteer's "Ξεκίνησε" tap redirecting to
+        // missions.php on every single attempt: every request to a
+        // non-allow-listed script bounces a guest away unconditionally, not
+        // just after idle time, so v3.140.1's timeout fix alone could never
+        // have resolved this for a guest/partner-org account.
+        'mission-route.php',
     ];
     if (!in_array($__extScript, $__extAllowed, true)) {
         $__extMissionIds = getExternalGuestMissionIds(getCurrentUserId());
