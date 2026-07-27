@@ -27,6 +27,13 @@ define('WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS', [
     'mission-dispatch.php', 'mission-order.php', 'mission-sos.php',
     'mission-shortage.php', 'mission-history.php', 'mission-response-report.php',
     'mission-track.php', 'geocode-address.php', 'api-push-subscribe.php',
+    // Route Orders (mission-route.php, shipped v3.124.0, well after this list
+    // was first built) was missed entirely — every depart/arrive/complete/skip
+    // tap hit the same background-throttling-triggered force-logout this list
+    // exists to prevent everywhere else. Real report: a volunteer tapping
+    // "Ξεκίνησε" got the exact "session expired, GPS stopped sending" banner
+    // this comment already describes, repeatedly, on their phone.
+    'mission-route.php',
 ]);
 
 function initSession() {
