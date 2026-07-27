@@ -4654,7 +4654,13 @@ function routeWaypointColor(wp, isCurrent) {
 function renderRouteLayer(allRoutes) {
     if (!routeLayer) return;
     routeLayer.clearLayers();
-    (allRoutes || []).filter(r => r.status !== 'cancelled').forEach(route => {
+    // Live map only — a completed route (like a cancelled one) drops off
+    // here once done, so numbered waypoint pins/lines from finished patrols
+    // don't accumulate over a long multi-team mission. Nothing is lost: the
+    // full permanent record stays exactly as before in "Πορείες Ομάδων",
+    // each volunteer's own "Η Πορεία μου" card, the Activity feed, and the
+    // printed report — this is a live-map declutter, not a data change.
+    (allRoutes || []).filter(r => r.status === 'active').forEach(route => {
         if (!route.waypoints.length) return;
         const currentSeq = (route.waypoints.find(w => !w.completed_at && !w.skipped_at) || {}).seq;
         route.waypoints.forEach(wp => {
