@@ -3325,13 +3325,21 @@ function renderMyRoutes(allRoutes) {
             : route.status === 'completed'
                 ? `<span class="badge bg-success">${t('route.status_completed')}</span>`
                 : `<span class="badge bg-primary">${done}/${route.waypoints.length}</span>`;
-        const waypointsHtml = route.status === 'cancelled'
-            ? `<div class="small text-muted">${t('route.cancelled_reason_prefix')}${route.cancel_reason ? ' — ' + escapeHtml(route.cancel_reason) : ''}</div>`
-            : route.waypoints.map(wp => {
-                if (wp.completed_at || wp.skipped_at) return renderRouteWaypointClosed(wp);
-                if (wp.seq === currentSeq) return renderRouteWaypointCurrent(wp);
-                return renderRouteWaypointUpcoming(wp);
-            }).join('');
+        // Gated: the whole waypoint list (including "Ξεκίνησε" for stop 1)
+        // stays hidden behind an explicit "Ελήφθη" until this viewer
+        // acknowledges the route's order — same gate renderMyTasks() already
+        // uses for plain tasks, applied here so the admin gets a real-time
+        // sound the moment the team confirms they got it (mission-order.php's
+        // acknowledge action, route-order_type branch).
+        const waypointsHtml = (route.status === 'active' && !route.my_acknowledged_at)
+            ? `<button type="button" class="btn btn-sm wr-touch-btn btn-warning w-100 route-ack-btn" data-id="${route.id}" data-order-id="${route.order_id}"><i class="bi bi-check2 me-1"></i>${t('banner.ack_btn')}</button>`
+            : route.status === 'cancelled'
+                ? `<div class="small text-muted">${t('route.cancelled_reason_prefix')}${route.cancel_reason ? ' — ' + escapeHtml(route.cancel_reason) : ''}</div>`
+                : route.waypoints.map(wp => {
+                    if (wp.completed_at || wp.skipped_at) return renderRouteWaypointClosed(wp);
+                    if (wp.seq === currentSeq) return renderRouteWaypointCurrent(wp);
+                    return renderRouteWaypointUpcoming(wp);
+                }).join('');
         return `<div class="mb-3">
             <div class="d-flex justify-content-between align-items-center mb-1">
                 <strong class="small text-uppercase">${route.title ? escapeHtml(route.title) : t('route.default_title')}</strong>
@@ -3341,6 +3349,17 @@ function renderMyRoutes(allRoutes) {
         </div>`;
     }).join('');
 
+    list.querySelectorAll('.route-ack-btn').forEach(btn => btn.addEventListener('click', () => {
+        btn.disabled = true;
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge', order_id: btn.dataset.orderId});
+        fetch('mission-order.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                const route = allRoutes.find(r => String(r.id) === btn.dataset.id);
+                if (route) route.my_acknowledged_at = true;
+                renderMyRoutes(allRoutes);
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
+        }).catch(() => { btn.disabled = false; });
+    }));
     list.querySelectorAll('.route-depart-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeDepart(btn.dataset.id, false); }));
     list.querySelectorAll('.route-arrive-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeArrive(btn.dataset.id, false); }));
     list.querySelectorAll('.route-complete-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeComplete(btn.dataset.id, false); }));
@@ -4708,6 +4727,7 @@ function renderRouteAdminWaypointsList(route) {
             <div class="d-flex justify-content-between align-items-center">
                 <div class="small">${wp.seq}. ${label}${wp.out_of_sequence ? ' ⚠️' : ''}<br>${routeAdminWaypointStatusHtml(wp)}</div>
                 <div class="d-flex gap-1">
+                    <a href="${routeWaypointDirectionsUrl(wp)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success py-0 px-1" title="${t('dispatch.directions_btn')}"><i class="bi bi-signpost-2-fill"></i></a>
                     ${route.status === 'active' ? `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 route-edit-btn" data-id="${wp.id}" title="${t('common.edit')}"><i class="bi bi-pencil"></i></button>` : ''}
                     ${isOpen ? `<button type="button" class="btn btn-sm btn-outline-warning py-0 px-1 route-skip-btn" data-id="${wp.id}" title="${t('route.skip_btn')}"><i class="bi bi-skip-forward-fill"></i></button>` : ''}
                 </div>

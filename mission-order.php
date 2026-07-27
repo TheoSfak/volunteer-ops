@@ -34,7 +34,10 @@ if ($action === 'acknowledge') {
     $orderId = (int) post('order_id');
 
     $recipient = dbFetchOne(
-        "SELECT id, acknowledged_at FROM mission_order_recipients WHERE order_id = ? AND user_id = ?",
+        "SELECT r.id, r.acknowledged_at, o.order_type
+         FROM mission_order_recipients r
+         JOIN mission_orders o ON o.id = r.order_id
+         WHERE r.order_id = ? AND r.user_id = ?",
         [$orderId, $userId]
     );
     if (!$recipient) {
@@ -45,6 +48,33 @@ if ($action === 'acknowledge') {
     if (!$recipient['acknowledged_at']) {
         dbExecute("UPDATE mission_order_recipients SET acknowledged_at = NOW() WHERE id = ?", [$recipient['id']]);
         logAudit('acknowledge_mission_order', 'mission_order_recipients', $recipient['id'], null, ['order_id' => $orderId]);
+
+        // Route orders specifically get a loud sound alert to command staff
+        // the instant the team acknowledges (bannerMission tag below is what
+        // makes showWarRoomBanner()'s existing playWarRoomAlertSound() call
+        // fire — no new audio code needed). Every other order type's
+        // acknowledge stays exactly as silent as it's always been; this was
+        // asked for routes specifically, not a blanket behavior change.
+        if ($recipient['order_type'] === 'route') {
+            $route = dbFetchOne(
+                "SELECT r.id AS route_id, r.mission_id, r.team_id, m.title AS mission_title, m.responsible_user_id, mt.codename, mt.team_number
+                 FROM mission_routes r
+                 JOIN missions m ON m.id = r.mission_id
+                 LEFT JOIN mission_teams mt ON mt.id = r.team_id
+                 WHERE r.order_id = ?",
+                [$orderId]
+            );
+            if ($route) {
+                $teamLbl = $route['team_id']
+                    ? teamLabel($route['codename'], $route['team_number'])
+                    : routeMixedTeamLabel((int) $route['route_id']);
+                notifyRouteCommandStaff(
+                    (int) $route['mission_id'], $route['mission_title'], $route['responsible_user_id'] ? (int) $route['responsible_user_id'] : null, $userId,
+                    'mission_route_acknowledged', 'route.notify_acknowledged_title', [],
+                    'route.notify_acknowledged_message', ['team' => $teamLbl, 'mission' => $route['mission_title']]
+                );
+            }
+        }
     }
 
     echo json_encode(['ok' => true]);
