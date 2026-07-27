@@ -74,6 +74,23 @@ return [
         'teams.empty' => 'Δεν έχουν δημιουργηθεί ομάδες ακόμη.',
         'teams.panel_title' => 'Ομάδες Αποστολής',
         'teams.new_btn' => 'Νέα Ομάδα',
+        'teams.distances_title' => 'Αποστάσεις Ομάδων',
+
+        // Nearby Teams (field-card column, both Field Mode and full view) +
+        // the compass/unit labels it shares with Team Distances above.
+        'nearby.panel_title' => 'Κοντινές Ομάδες',
+        'nearby.empty' => 'Καμία άλλη ομάδα δεν έχει διαθέσιμη θέση ακόμη.',
+        'nearby.no_own_ping' => 'Στείλτε το στίγμα σας για να δείτε αποστάσεις.',
+        'common.unit_m' => 'μ',
+        'common.unit_km' => 'χλμ',
+        'compass.n' => 'Β',
+        'compass.ne' => 'ΒΑ',
+        'compass.e' => 'Α',
+        'compass.se' => 'ΝΑ',
+        'compass.s' => 'Ν',
+        'compass.sw' => 'ΝΔ',
+        'compass.w' => 'Δ',
+        'compass.nw' => 'ΒΔ',
 
         // Location/photo/video/task orders
         'order.location.title' => '📍 Ζητείται στίγμα GPS',
@@ -789,6 +806,21 @@ return [
         'teams.empty' => 'No teams have been created yet.',
         'teams.panel_title' => 'Mission Teams',
         'teams.new_btn' => 'New Team',
+        'teams.distances_title' => 'Team Distances',
+
+        'nearby.panel_title' => 'Nearby Teams',
+        'nearby.empty' => 'No other teams have a location yet.',
+        'nearby.no_own_ping' => 'Send your own ping to see distances.',
+        'common.unit_m' => 'm',
+        'common.unit_km' => 'km',
+        'compass.n' => 'N',
+        'compass.ne' => 'NE',
+        'compass.e' => 'E',
+        'compass.se' => 'SE',
+        'compass.s' => 'S',
+        'compass.sw' => 'SW',
+        'compass.w' => 'W',
+        'compass.nw' => 'NW',
 
         'order.location.title' => '📍 GPS location requested',
         'order.location.message' => 'The mission "{mission}" lead is asking you to send your current location.',
