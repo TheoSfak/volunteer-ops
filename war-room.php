@@ -2343,51 +2343,58 @@ function pinStatusLabel(status) {
 // since a missed field could mean a genuine needs_help/position update
 // silently fails to redraw).
 let pinsRenderedSig = null;
+// Builds one pin's marker (icon + popup), with no opinion about which
+// layer/map it ends up on — shared by the live map's own renderPins() and
+// the Route Order composer's read-only reference layer (renderRouteComposerPins()
+// below), so the team-color/stale/moving styling stays identical everywhere
+// a pin can appear instead of drifting between two copies.
+function buildPinMarker(pin) {
+    const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
+    // Team color takes priority (the whole point is spotting which team a
+    // pin belongs to at a glance); volunteers with no team fall back to the
+    // original status-based color. needs_help always gets a pulsing red
+    // ring on top, team-colored or not, so that safety signal never
+    // disappears just because someone's on a team.
+    const color = pin.team_color || statusColors[pin.status] || '#2563eb';
+    const ring = pin.status === 'needs_help'
+        ? 'border:3px solid #dc2626;animation:warRoomPulseRed 1s infinite;'
+        : 'border:2px solid white;';
+    // Stale = past due for a fresh ping but still their last-known
+    // position, so it stays on the map (never silently vanishes) just
+    // dimmed instead. Moving gets a small running-person badge (not a
+    // full icon swap, so the team-color dot itself still reads the same
+    // at a glance) plus, when the server could compute one (see
+    // $loadPins's gpsBearingDegrees() call — only once two real,
+    // non-jitter fixes are available), a small arrow rotated to the
+    // compass heading of travel.
+    const opacity = pin.is_stale ? 'opacity:.45;' : '';
+    const movingBadge = pin.is_moving
+        ? '<span style="position:absolute;top:-4px;right:-4px;width:14px;height:14px;background:#0ea5e9;border:2px solid #fff;border-radius:50%;font-size:8px;line-height:11px;text-align:center;">🏃</span>'
+        : '';
+    // heading_deg is a compass bearing (0°=North, clockwise) — exactly
+    // what CSS rotate() already expects, so no conversion is needed. The
+    // arrow itself points up (North) at rotate(0), same convention every
+    // map/compass UI uses.
+    const headingArrow = (pin.is_moving && pin.heading_deg !== null && pin.heading_deg !== undefined)
+        ? `<span style="position:absolute;bottom:-9px;left:50%;transform:translateX(-50%) rotate(${pin.heading_deg}deg);color:${color};text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff;font-size:15px;line-height:1;">▲</span>`
+        : '';
+    const icon = L.divIcon({className:'', html:`<span style="position:relative;display:block;width:16px;height:16px;background:${color};${ring}${opacity}border-radius:50%;box-shadow:0 1px 4px #0008">${movingBadge}${headingArrow}</span>`, iconSize:[16,16], iconAnchor:[8,8]});
+    const statusLine = pinStatusLabel(pin.status);
+    const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
+        : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
+    const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
+    const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${pin.lat},${pin.lng}&travelmode=driving`;
+    const navLine = `<br><a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-1">${t('map.navigate_btn')}</a>`;
+    return L.marker([pin.lat, pin.lng], {icon}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.guest_org_name)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${navLine}`);
+}
+
 function renderPins(items) {
     const sig = JSON.stringify(items);
     if (sig === pinsRenderedSig) return;
     pinsRenderedSig = sig;
 
     pinLayer.clearLayers();
-    const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
-    items.forEach(pin => {
-        // Team color takes priority (the whole point is spotting which team a
-        // pin belongs to at a glance); volunteers with no team fall back to the
-        // original status-based color. needs_help always gets a pulsing red
-        // ring on top, team-colored or not, so that safety signal never
-        // disappears just because someone's on a team.
-        const color = pin.team_color || statusColors[pin.status] || '#2563eb';
-        const ring = pin.status === 'needs_help'
-            ? 'border:3px solid #dc2626;animation:warRoomPulseRed 1s infinite;'
-            : 'border:2px solid white;';
-        // Stale = past due for a fresh ping but still their last-known
-        // position, so it stays on the map (never silently vanishes) just
-        // dimmed instead. Moving gets a small running-person badge (not a
-        // full icon swap, so the team-color dot itself still reads the same
-        // at a glance) plus, when the server could compute one (see
-        // $loadPins's gpsBearingDegrees() call — only once two real,
-        // non-jitter fixes are available), a small arrow rotated to the
-        // compass heading of travel.
-        const opacity = pin.is_stale ? 'opacity:.45;' : '';
-        const movingBadge = pin.is_moving
-            ? '<span style="position:absolute;top:-4px;right:-4px;width:14px;height:14px;background:#0ea5e9;border:2px solid #fff;border-radius:50%;font-size:8px;line-height:11px;text-align:center;">🏃</span>'
-            : '';
-        // heading_deg is a compass bearing (0°=North, clockwise) — exactly
-        // what CSS rotate() already expects, so no conversion is needed. The
-        // arrow itself points up (North) at rotate(0), same convention every
-        // map/compass UI uses.
-        const headingArrow = (pin.is_moving && pin.heading_deg !== null && pin.heading_deg !== undefined)
-            ? `<span style="position:absolute;bottom:-9px;left:50%;transform:translateX(-50%) rotate(${pin.heading_deg}deg);color:${color};text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff;font-size:15px;line-height:1;">▲</span>`
-            : '';
-        const icon = L.divIcon({className:'', html:`<span style="position:relative;display:block;width:16px;height:16px;background:${color};${ring}${opacity}border-radius:50%;box-shadow:0 1px 4px #0008">${movingBadge}${headingArrow}</span>`, iconSize:[16,16], iconAnchor:[8,8]});
-        const statusLine = pinStatusLabel(pin.status);
-        const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
-            : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
-        const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
-        const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${pin.lat},${pin.lng}&travelmode=driving`;
-        const navLine = `<br><a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-1">${t('map.navigate_btn')}</a>`;
-        L.marker([pin.lat, pin.lng], {icon}).addTo(pinLayer).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.guest_org_name)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${navLine}`);
-    });
+    items.forEach(pin => buildPinMarker(pin).addTo(pinLayer));
     if (!hasFitPins && items.length) {
         hasFitPins = true;
         map.invalidateSize();
@@ -4269,6 +4276,12 @@ function pollWarRoomData() {
             renderPins(pins = data.pins || []);
             if (data.dispatches) renderDispatches(dispatches = data.dispatches);
             if (data.annotations) renderAnnotations(annotations = data.annotations);
+            // Keeps the route composer's reference layers live while it's
+            // open, not just at the moment it was opened — both are no-ops
+            // until the composer has been opened at least once this session
+            // (the layers stay null until then).
+            renderRouteComposerPins(pins);
+            renderRouteComposerAnnotations(annotations);
             if (data.media) {
                 const sig = JSON.stringify(data.media);
                 if (sig !== mediaSignature) {
@@ -4850,6 +4863,13 @@ function openWaypointEditModal(waypoint) {
 let routeWaypoints = [];
 let routeClosed = false; // click near point 1 (see routeMap's click handler) sets this — same gesture as the dispatch polygon tool
 let routeMap = null, routeMarkers = [], routeLine = null;
+// Read-only reference layers — live pins + existing battle-map annotations,
+// so an admin plotting a route can see where teams currently are and what's
+// already been marked, without leaving the composer. Created once alongside
+// routeMap itself (shown.bs.modal below); the composer never lets you draw
+// a *new* annotation from here, only see the ones already on the live map.
+let routeComposerPinLayer = null, routeComposerAnnotationLayer = null;
+let routeComposerPinsRenderedSig = null;
 
 function updateRouteSendState() {
     const sendBtn = document.getElementById('routeSendBtn');
@@ -4891,6 +4911,43 @@ function resetRouteComposer() {
     renderRouteComposerMap();
     renderWaypointPanel();
     updateRouteSendState();
+}
+
+// Same signature-skip technique renderPins() uses (v3.130 audit) — cheap
+// insurance against rebuilding markers on every 5s poll tick when nothing
+// about the underlying pins actually changed.
+function renderRouteComposerPins(items) {
+    if (!routeComposerPinLayer) return;
+    const sig = JSON.stringify(items);
+    if (sig === routeComposerPinsRenderedSig) return;
+    routeComposerPinsRenderedSig = sig;
+    routeComposerPinLayer.clearLayers();
+    items.forEach(pin => buildPinMarker(pin).addTo(routeComposerPinLayer));
+}
+
+// Mirrors renderAnnotations()'s 3 shape types exactly (same ANNOTATION_COLOR,
+// same divIcon markup/classes) but deliberately has no click-to-erase handler
+// and no annotationPane — this view is read-only reference info, not a second
+// place to manage annotations, and routeMap has no draw-mode/activeTool
+// concept for a custom pane to protect against. No signature-guard, matching
+// renderAnnotations() itself (which doesn't have one either).
+function renderRouteComposerAnnotations(items) {
+    if (!routeComposerAnnotationLayer) return;
+    routeComposerAnnotationLayer.clearLayers();
+    items.forEach(item => {
+        if (item.type === 'freehand') {
+            L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 4}).addTo(routeComposerAnnotationLayer);
+        } else if (item.type === 'arrow') {
+            const [p1, p2] = item.geo;
+            L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 3}).addTo(routeComposerAnnotationLayer);
+            const brng = bearing(L.latLng(p1[0], p1[1]), L.latLng(p2[0], p2[1]));
+            const headIcon = L.divIcon({className:'', html:`<div class="wr-anno-arrowhead" style="transform:rotate(${brng}deg);border-bottom-color:${ANNOTATION_COLOR}"></div>`, iconSize:[16,16], iconAnchor:[8,8]});
+            L.marker(p2, {icon: headIcon}).addTo(routeComposerAnnotationLayer);
+        } else if (item.type === 'text') {
+            const icon = L.divIcon({className:'', html:`<span class="wr-anno-text-label" style="background:${ANNOTATION_COLOR}">${escapeHtml(item.label)}</span>`, iconAnchor:[0, 12]});
+            L.marker([item.geo.lat, item.geo.lng], {icon}).addTo(routeComposerAnnotationLayer);
+        }
+    });
 }
 
 function renderWaypointPanel() {
@@ -5034,6 +5091,12 @@ function renderWaypointPanel() {
             const center = missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73];
             routeMap = L.map('routeMap').setView(center, missionLocation.lat ? 13 : 7);
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(routeMap);
+            // Added before any waypoint markers exist, so once the admin
+            // starts clicking points those numbered markers land on top of
+            // (not under) the reference pins/annotations, matching Leaflet's
+            // added-later-renders-on-top default — no explicit pane needed.
+            routeComposerPinLayer = L.layerGroup().addTo(routeMap);
+            routeComposerAnnotationLayer = L.featureGroup().addTo(routeMap);
             routeMap.on('click', e => {
                 if (routeClosed) return;
                 // Same "click near point 1 closes the shape" gesture as the
@@ -5057,6 +5120,12 @@ function renderWaypointPanel() {
                 updateRouteSendState();
             });
         }
+        // Refreshed on every open, not just the first — pins/annotations may
+        // well have changed since the last time this admin opened the
+        // composer, even though the underlying data itself has stayed live
+        // (polled) the whole time in the background.
+        renderRouteComposerPins(pins);
+        renderRouteComposerAnnotations(annotations);
         setTimeout(() => routeMap.invalidateSize(), 100);
     });
 
