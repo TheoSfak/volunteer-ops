@@ -1603,6 +1603,11 @@ include __DIR__ . '/includes/header.php';
                     <label class="form-label small fw-semibold mb-1"><?= t('route.members_label') ?></label>
                     <div id="routeMemberPicker" class="d-flex flex-wrap gap-2 small"></div>
                 </div>
+                <div class="form-check mb-3" id="routeReturnToStartWrap">
+                    <input class="form-check-input" type="checkbox" id="routeReturnToStartCheck">
+                    <label class="form-check-label small" for="routeReturnToStartCheck"><?= t('route.return_to_start_checkbox') ?></label>
+                    <div class="text-muted" style="font-size:.75rem;"><?= t('route.return_to_start_hint') ?></div>
+                </div>
                 <button type="button" class="btn btn-primary w-100 fw-semibold" data-bs-toggle="modal" data-bs-target="#routeComposerModal">
                     <i class="bi bi-signpost-split-fill me-1"></i><?= t('route.send_btn') ?>
                 </button>
@@ -5046,6 +5051,16 @@ function renderWaypointPanel() {
     // defaults to everyone (old whole-team behavior unless the admin
     // unchecks someone), see includes/migrations.php v109.
     function renderRouteMemberPicker() {
+        // No single team position to capture in cross-team mode — hide the
+        // return-to-start option entirely rather than show a checkbox that
+        // would silently no-op server-side if checked (mission-route.php
+        // only honors it when team_id is set).
+        const returnWrap = document.getElementById('routeReturnToStartWrap');
+        const returnCheck = document.getElementById('routeReturnToStartCheck');
+        const isCrossTeam = teamSelect.value === '';
+        returnWrap.classList.toggle('d-none', isCrossTeam);
+        if (isCrossTeam) returnCheck.checked = false;
+
         // Empty value = cross-team mode (migration v110): list every
         // approved participant of the mission, grouped by their current
         // team, none pre-checked — unlike single-team mode there is no
@@ -5168,6 +5183,7 @@ function renderWaypointPanel() {
             csrf_token: csrfToken, action: 'create', mission_id: '<?= $missionId ?>',
             team_id: teamSelect.value, title: titleInput.value.trim(), waypoints: JSON.stringify(payload),
             is_closed_loop: routeClosed ? '1' : '0', member_ids: JSON.stringify(memberIds),
+            add_return_waypoint: document.getElementById('routeReturnToStartCheck').checked ? '1' : '0',
         });
         sendBtn.disabled = true;
         fetch('mission-route.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
