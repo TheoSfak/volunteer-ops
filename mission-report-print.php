@@ -293,21 +293,6 @@ $lastPings = dbFetchAll(
 $dispatchGeo = dbFetchAll("SELECT type, geo, label FROM mission_dispatch_points WHERE mission_id = ?", [$missionId]);
 $photoPoints = array_values(array_filter($media, fn($m) => $m['lat'] !== null));
 
-// Expected canvas/map-tile "ready" signals for the auto-print gate — mirrors
-// each block's own conditional rendering below exactly, so the JS counter
-// only waits for elements that will actually exist on the page.
-$expectedReady = 0;
-if ($score['overall'] !== null) $expectedReady++; // gauge
-if ($showPillarRadar) $expectedReady++; // pillarRadarChart
-if (!empty($timelineData)) $expectedReady++; // timeline
-if (!empty($teamSpeedBreakdown)) $expectedReady += 2; // teamCount + teamAck
-if ($showTeamRadar) $expectedReady++; // teamRadarChart
-if (!empty($orderTypeLabels)) $expectedReady += 2; // orderType pie + responseDetail bar
-if ($showHistogram) $expectedReady++; // responseHistogramChart
-if (!empty($shortageSummary)) $expectedReady += 2; // shortageSeverity pie + commandSeverity bar
-if (!empty($lastPings) || !empty($dispatchGeo) || !empty($photoPoints)) $expectedReady++; // map tiles
-$expectedReady += count($photos); // gallery thumbnails — see the img wireup near the closing script
-
 // ═══════════════════════════════════════════════════════════════════════════
 // 8. Route Orders — reused via the same loader war-room.php's live panel
 //    uses (loadRoutesForUser()), $canManageWarRoom already confirmed true by
@@ -950,28 +935,14 @@ $printDate = date('d/m/Y H:i');
 const PALETTE = ['#2a78d6','#008300','#e87ba4','#eda100','#1baf7a','#eb6834','#4a3aa7','#e34948'];
 Chart.defaults.font.family = "'Inter', 'Segoe UI', system-ui, sans-serif";
 
-// ── Print-readiness gate — the previous version fired window.print() blind
-// at a fixed 400ms, which raced Chart.js animations and Leaflet's async tile
-// loads once this page grew real charts/a map. Each chart's animation
-// completion and the map's tile-layer load event now count up toward
-// $expectedReady (computed server-side from the exact same conditionals that
-// gate each block below); auto-print fires once every expected signal has
-// reported in, or after a 2500ms fallback — whichever comes first. The
-// manual "Εκτύπωση / PDF" button stays the reliable primary path regardless.
-let readyCount = 0;
-const expectedReady = <?= json_encode($expectedReady) ?>;
-let autoprinted = false;
-function tryAutoprint() { if (!autoprinted && readyCount >= expectedReady) { autoprinted = true; window.print(); } }
-function markReady() { readyCount++; tryAutoprint(); }
-
+// Printing only ever happens via the manual "Εκτύπωση / PDF" button
+// (window.print() in the header above) — no auto-print-on-load.
 function mc(id, type, data, options = {}) {
     const el = document.getElementById(id);
-    if (!el) { markReady(); return null; }
-    let fired = false;
+    if (!el) return null;
     return new Chart(el, { type, data, options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { position: 'bottom', labels: { boxWidth: 11, font: { size: 9 } } } },
-        animation: { onComplete: () => { if (!fired) { fired = true; markReady(); } } },
         ...options
     }});
 }
@@ -1070,8 +1041,7 @@ if (mapEl) {
     const missionLatLng = <?= json_encode($mission['latitude'] ? [(float)$mission['latitude'], (float)$mission['longitude']] : null) ?>;
     const map = L.map('printMap').setView(missionLatLng || [37.97, 23.73], missionLatLng ? 13 : 7);
     window.__printMap = map;
-    const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
-    tiles.on('load', markReady);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
     const bounds = [];
 
     const pings = <?= json_encode($lastPings) ?>;
@@ -1108,26 +1078,10 @@ if (mapEl) {
 
 // Leaflet computes its tile grid at on-screen width; @page changes the
 // effective width once Chromium switches to print layout, so force a refit
-// right before any print snapshot — covers both the manual button and the
-// auto-print timer, since both trigger the native beforeprint event.
+// right before any print snapshot triggered by the manual button.
 window.addEventListener('beforeprint', function () {
     if (window.__printMap) window.__printMap.invalidateSize();
 });
-
-// Gallery thumbnails count toward the same readiness gate as the charts/map
-// — without this, auto-print could fire while a slow mission-photo-view.php
-// fetch is still in flight, baking a half-loaded/broken-looking image into
-// the printed PDF. A cached image is already .complete by the time this runs;
-// counted immediately rather than waiting on a load event that will never
-// fire for it. onerror also counts (a genuinely missing file) so one bad
-// photo can't stall every other ready signal forever.
-document.querySelectorAll('.media-item img').forEach(function (img) {
-    if (img.complete) { markReady(); return; }
-    img.addEventListener('load', markReady, { once: true });
-    img.addEventListener('error', markReady, { once: true });
-});
-
-setTimeout(tryAutoprint, 2500);
 </script>
 </body>
 </html>
