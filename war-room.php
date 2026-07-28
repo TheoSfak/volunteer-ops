@@ -1049,7 +1049,6 @@ include __DIR__ . '/includes/header.php';
             </span>
             <?php if ($canManageWarRoom && !$fieldMode): ?>
             <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
-            <button type="button" class="btn btn-outline-light" onclick="window.open('mission-report-print.php?mission_id=<?= $missionId ?>', '_blank')"><i class="bi bi-printer me-1"></i><?= t('hero.btn_pdf_report') ?></button>
             <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i><?= t('hero.btn_team_trail') ?></button>
             <?php endif; ?>
             <form method="post">

@@ -666,16 +666,30 @@ include __DIR__ . '/includes/header.php';
                 <i class="bi bi-broadcast-pin me-1"></i>Action Room
             </a>
         <?php endif; ?>
-        <?php if ($canManageMissions || $isResponsible): ?>
-            <button type="button" class="btn btn-outline-secondary" onclick="window.open('mission-report-print.php?mission_id=<?= $mission['id'] ?>', '_blank')">
-                <i class="bi bi-printer me-1"></i>Αναφορά PDF
-            </button>
-            <a href="mission-stats.php?id=<?= $mission['id'] ?>" class="btn btn-outline-primary">
-                <i class="bi bi-graph-up-arrow me-1"></i>Στατιστικά
-            </a>
-            <a href="mission-certificates.php?mission_id=<?= $mission['id'] ?>" class="btn btn-outline-success">
-                <i class="bi bi-patch-check me-1"></i>Βεβαιώσεις
-            </a>
+        <?php if ($canManageMissions || $isResponsible):
+            $missionClosedOrDone = in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED], true);
+        ?>
+            <?php if ($missionClosedOrDone): ?>
+                <button type="button" class="btn btn-outline-secondary" onclick="window.open('mission-report-print.php?mission_id=<?= $mission['id'] ?>', '_blank')">
+                    <i class="bi bi-printer me-1"></i>Αναφορά PDF
+                </button>
+                <a href="mission-stats.php?id=<?= $mission['id'] ?>" class="btn btn-outline-primary">
+                    <i class="bi bi-graph-up-arrow me-1"></i>Στατιστικά
+                </a>
+                <a href="mission-certificates.php?mission_id=<?= $mission['id'] ?>" class="btn btn-outline-success">
+                    <i class="bi bi-patch-check me-1"></i>Βεβαιώσεις
+                </a>
+            <?php else: ?>
+                <span class="d-inline-block" tabindex="0" data-bs-toggle="tooltip" title="Διαθέσιμο μετά το κλείσιμο της αποστολής">
+                    <button type="button" class="btn btn-outline-secondary" disabled><i class="bi bi-printer me-1"></i>Αναφορά PDF</button>
+                </span>
+                <span class="d-inline-block" tabindex="0" data-bs-toggle="tooltip" title="Διαθέσιμο μετά το κλείσιμο της αποστολής">
+                    <button type="button" class="btn btn-outline-primary" disabled><i class="bi bi-graph-up-arrow me-1"></i>Στατιστικά</button>
+                </span>
+                <span class="d-inline-block" tabindex="0" data-bs-toggle="tooltip" title="Διαθέσιμο μετά το κλείσιμο της αποστολής">
+                    <button type="button" class="btn btn-outline-success" disabled><i class="bi bi-patch-check me-1"></i>Βεβαιώσεις</button>
+                </span>
+            <?php endif; ?>
         <?php endif; ?>
         <?php if ($canManageMissions): ?>
             <a href="mission-form.php?id=<?= $mission['id'] ?>" class="btn btn-outline-primary">
