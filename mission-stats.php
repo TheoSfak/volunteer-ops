@@ -5,9 +5,9 @@
  * response times, participation, shortage handling, field media and the
  * debrief, reusing computeMissionResponseReport()/loadMissionActivityEventsForReport()/
  * loadMissionPhotosForUser() (includes/functions.php) rather than duplicating
- * their query logic a third time. Same permission gate as mission-report-print.php
- * (no status restriction — this is meant to work for a closed/completed mission,
- * but a live OPEN one just shows a partial snapshot, which is harmless).
+ * their query logic a third time. Same permission gate as mission-report-print.php,
+ * plus a status gate — this is a post-mission recap, so it (and the PDF report,
+ * and mission certificates) only unlock once the mission is closed/completed.
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -33,6 +33,11 @@ $canManageMissions = hasPagePermission('missions_manage');
 $isResponsible = !empty($mission['responsible_user_id']) && (int)$mission['responsible_user_id'] === (int)$userId;
 if (!$canManageMissions && !$isResponsible) {
     setFlash('error', 'Αυτή η σελίδα είναι διαθέσιμη μόνο σε διαχειριστές.');
+    redirect('mission-view.php?id=' . $missionId);
+}
+
+if (!in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED], true)) {
+    setFlash('error', 'Τα στατιστικά είναι διαθέσιμα μόνο για κλειστές ή ολοκληρωμένες αποστολές.');
     redirect('mission-view.php?id=' . $missionId);
 }
 

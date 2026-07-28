@@ -12,12 +12,12 @@
  * shared header.php) to mirror mission-stats.php's visual language for an
  * actual keepable/shareable document, not just a stripped-down table dump.
  *
- * Deliberately does NOT gate on mission status/show_in_ops like every other
- * War Room endpoint does — those gates exist to lock down the *live-ops*
- * tools once a mission closes, which is correct for them but would make an
- * *archival* export unusable for the exact moment it's meant to be used.
- * Only the permission check matters here. mission-photo-view.php's own gate
- * was loosened (OPEN or CLOSED) to match, so embedded photos keep working.
+ * Gated on mission status (CLOSED or COMPLETED), same as mission-stats.php
+ * and mission-certificates.php — this archival export, the stats recap and
+ * mission certificates are all meant to be generated *after* a mission
+ * closes, not mid-mission. mission-photo-view.php's own gate (OPEN, CLOSED
+ * or COMPLETED) stays wider than that, so embedded photos keep working
+ * across both statuses this page is reachable under.
  *
  * Activity/response-time/score data comes from shared includes/functions.php
  * helpers (loadMissionActivityEventsForReport(), computeMissionResponseReport(),
@@ -57,6 +57,11 @@ if (!$mission) {
 $canManageWarRoom = hasPagePermission('missions_manage') || (int)$mission['responsible_user_id'] === (int)$userId;
 if (!$canManageWarRoom) {
     setFlash('error', 'Η αναφορά αυτή είναι διαθέσιμη μόνο σε διαχειριστές.');
+    redirect('mission-view.php?id=' . $missionId);
+}
+
+if (!in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED], true)) {
+    setFlash('error', 'Η αναφορά PDF είναι διαθέσιμη μόνο για κλειστές ή ολοκληρωμένες αποστολές.');
     redirect('mission-view.php?id=' . $missionId);
 }
 

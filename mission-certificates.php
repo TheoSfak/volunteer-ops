@@ -16,7 +16,13 @@
  * can target multiple recipients at once; each gets its own row/notification/
  * certificate_number, all sharing the same language/citation text.
  *
- * Same permission gate as every other mission-scoped War Room admin page.
+ * Same permission gate as every other mission-scoped War Room admin page,
+ * plus a status gate (CLOSED or COMPLETED only) — same as mission-stats.php
+ * and mission-report-print.php, since issuing participation certificates is
+ * a post-mission wrap-up step, not something to do mid-mission. Once issued,
+ * a certificate stays valid/viewable regardless of any later status change
+ * (missions never transition back to OPEN), so mission-certificate-print.php
+ * itself carries no such gate.
  * The actual document lives at mission-certificate-print.php, which a
  * recipient (including guests, via a bootstrap.php allow-list entry) can
  * reach directly to view/download their own certificate.
@@ -44,6 +50,11 @@ if (!$mission) {
 $canManageWarRoom = hasPagePermission('missions_manage') || (int) $mission['responsible_user_id'] === (int) $userId;
 if (!$canManageWarRoom) {
     setFlash('error', 'Η έκδοση βεβαιώσεων είναι διαθέσιμη μόνο σε διαχειριστές.');
+    redirect('mission-view.php?id=' . $missionId);
+}
+
+if (!in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED], true)) {
+    setFlash('error', 'Η έκδοση βεβαιώσεων είναι διαθέσιμη μόνο για κλειστές ή ολοκληρωμένες αποστολές.');
     redirect('mission-view.php?id=' . $missionId);
 }
 
