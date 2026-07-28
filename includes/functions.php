@@ -2564,6 +2564,23 @@ function missionMinutesTrend(?float $current, ?float $historical): ?array {
 }
 
 /**
+ * War Room: per-pillar improvement suggestions, keyed the same as
+ * computeMissionScore()'s $pillars. Extracted out of
+ * generateMissionObserverNarrative() so generateWarRoomComparisonNarrative()
+ * (reports.php's cross-mission trends tab) can cite the same advice text
+ * instead of a second, independently-drifting copy.
+ */
+function missionScoreRecommendations(): array {
+    return [
+        'response'   => 'Εξετάστε συντομότερες υπενθυμίσεις (push notification) προς τις ομάδες όταν μια εντολή μένει αναπάντητη για μεγάλο διάστημα.',
+        'completion' => 'Εξετάστε αν οι εντολές ήταν σαφείς και εφικτές εντός του διαθέσιμου χρόνου κάθε ομάδας.',
+        'shortage'   => 'Εξετάστε ταχύτερη πρώτη ανταπόκριση στις αναφορές έλλειψης, ιδίως τις κρίσιμες.',
+        'staffing'   => 'Εξετάστε αύξηση του αριθμού διαθέσιμων εθελοντών ή καλύτερη προ-δρομολόγηση βαρδιών στην επόμενη αποστολή.',
+        'debrief'    => 'Εξετάστε πιο αναλυτική τεκμηρίωση των στόχων πριν την έναρξη της επόμενης αποστολής.',
+    ];
+}
+
+/**
  * War Room: composes the "expert observer" paragraph for the score section —
  * one paragraph of Greek prose grounded in the actual pillar numbers (not
  * generic boilerplate), naming the strongest/weakest measured area and, for
@@ -2680,13 +2697,7 @@ function generateMissionObserverNarrative(array $score, string $missionTitle): s
         $sentences[] = "Ιδιαίτερη προσοχή χρειάζεται η εντολή «{$worst['label']}» προς {$worst['user_name']} ({$worst['team_label']}), η οποία παρέμεινε αναπάντητη για περίπου {$hours} ώρες" . $extra;
     }
 
-    $recommendations = [
-        'response'   => 'Εξετάστε συντομότερες υπενθυμίσεις (push notification) προς τις ομάδες όταν μια εντολή μένει αναπάντητη για μεγάλο διάστημα.',
-        'completion' => 'Εξετάστε αν οι εντολές ήταν σαφείς και εφικτές εντός του διαθέσιμου χρόνου κάθε ομάδας.',
-        'shortage'   => 'Εξετάστε ταχύτερη πρώτη ανταπόκριση στις αναφορές έλλειψης, ιδίως τις κρίσιμες.',
-        'staffing'   => 'Εξετάστε αύξηση του αριθμού διαθέσιμων εθελοντών ή καλύτερη προ-δρομολόγηση βαρδιών στην επόμενη αποστολή.',
-        'debrief'    => 'Εξετάστε πιο αναλυτική τεκμηρίωση των στόχων πριν την έναρξη της επόμενης αποστολής.',
-    ];
+    $recommendations = missionScoreRecommendations();
     if ($tier === 'critical') {
         $weakKeys = [];
         foreach ($available as $key => $p) {
@@ -2839,6 +2850,365 @@ function generateTeamComparisonNarrative(array $teams): string {
         $sentences[] = "Υπήρξε μέτρια απόκλιση {$gap} μονάδων μεταξύ της κορυφαίας ομάδας ({$topLabel}) και της {$bottomLabel}.";
     } else {
         $sentences[] = "Η απόσταση βαθμολογίας μεταξύ της κορυφαίας ομάδας ({$topLabel}, {$topFmt}) και της {$bottomLabel} ({$bottomFmt}) έφτασε τις {$gap} μονάδες, υποδεικνύοντας σημαντική ανομοιογένεια στην απόδοση μεταξύ των ομάδων.";
+    }
+
+    return implode(' ', $sentences);
+}
+
+/**
+ * War Room: cross-mission pillar aggregates for reports.php's "Action Room"
+ * trends tab, one row per mission_type_id (including 0/"no type", and every
+ * type with zero missions in range, so callers never have to guess which
+ * types exist). Same five pillars/weights/tiering as computeMissionScore(),
+ * but computed with pooled SQL across every mission in [$startDate,$endDate]
+ * instead of one mission at a time — calling computeMissionScore() in a loop
+ * over a date range would be N+1 and, worse, would be *wrong* for the
+ * response pillar: its exponential-decay formula is nonlinear
+ * (decay(pooled avg) != avg(per-mission decayed scores)), so it specifically
+ * needs the raw per-order minute list, not a re-averaged score. The other
+ * four pillars ARE safe to pool directly: completion/shortage are simple
+ * ratios over pooled counts, staffing is pooled capacity vs pooled distinct
+ * (mission,volunteer) pairs, and debrief is safe to pool because its formula
+ * (0.6*rating + 0.4*objectives) is linear, so AVG(pooled) == AVG(per-mission
+ * scores) exactly.
+ *
+ * Response-pillar scope: mission_orders only, not the synthetic dispatch-
+ * point-derived rows computeMissionResponseReport() also merges in for a
+ * single mission — replicating that exact PHP-side merge in pooled SQL risks
+ * silently disagreeing with it at the edges. Fast-follow if ever needed, not v1.
+ *
+ * $departmentId=null means "every department" (reports.php's own
+ * $departmentId is '' for "all" — callers pass null, not '').
+ */
+function computeWarRoomTypeAggregates(string $startDate, string $endDate, ?int $departmentId = null): array {
+    $where = "m.deleted_at IS NULL AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 DAY";
+    $params = [$startDate, $endDate];
+    if ($departmentId) {
+        $where .= " AND m.department_id = ?";
+        $params[] = $departmentId;
+    }
+
+    $forgottenThresholdMinutes = MISSION_SCORE_FORGOTTEN_MINUTES;
+    $forgottenPenalty = 15;
+    $responseHalfLifeMinutes = 24;
+
+    // Seed every mission type (including inactive ones — a deactivated type
+    // can still have historical missions inside the selected range) plus a
+    // synthetic id-0 bucket for missions with no type set at all.
+    $types = dbFetchAll("SELECT id, name, color, icon FROM mission_types ORDER BY sort_order, id");
+    $result = [0 => ['id' => 0, 'name' => 'Χωρίς τύπο', 'color' => 'secondary', 'icon' => 'bi-question-circle', 'mission_count' => 0, 'pillars' => [], 'overall' => null, 'tier' => null]];
+    foreach ($types as $t) {
+        $result[(int) $t['id']] = ['id' => (int) $t['id'], 'name' => $t['name'], 'color' => $t['color'], 'icon' => $t['icon'], 'mission_count' => 0, 'pillars' => [], 'overall' => null, 'tier' => null];
+    }
+    $emptyPillar = fn(string $label, int $weight) => ['label' => $label, 'weight' => $weight, 'available' => false, 'score' => null, 'raw' => []];
+    foreach ($result as &$r) {
+        $r['pillars'] = [
+            'response'   => $emptyPillar('Ταχύτητα Απόκρισης', 25),
+            'completion' => $emptyPillar('Ολοκλήρωση Εντολών', 20),
+            'shortage'   => $emptyPillar('Διαχείριση Ελλείψεων', 20),
+            'staffing'   => $emptyPillar('Στελέχωση / Κάλυψη', 15),
+            'debrief'    => $emptyPillar('Απολογισμός Debrief', 20),
+        ];
+    }
+    unset($r);
+
+    // ── mission counts ──────────────────────────────────────────────────
+    $counts = dbFetchAll("SELECT COALESCE(m.mission_type_id,0) AS tid, COUNT(*) AS cnt FROM missions m WHERE $where GROUP BY tid", $params);
+    foreach ($counts as $row) {
+        $tid = (int) $row['tid'];
+        if (isset($result[$tid])) $result[$tid]['mission_count'] = (int) $row['cnt'];
+    }
+
+    // ── staffing: pooled capacity vs pooled distinct (mission,volunteer)
+    //    pairs — a flat COUNT(DISTINCT volunteer_id) would collapse one
+    //    volunteer who worked 3 missions down to 1, deflating the fill rate.
+    //    (mission_id,volunteer_id) pairs are inherently disjoint across
+    //    missions, so the multi-column DISTINCT is exactly the pooled sum of
+    //    each mission's own distinct-approved-volunteer count. ─────────────
+    $capacityRows = dbFetchAll(
+        "SELECT COALESCE(m.mission_type_id,0) AS tid, COALESCE(SUM(s.max_volunteers),0) AS capacity
+         FROM shifts s JOIN missions m ON m.id = s.mission_id WHERE $where GROUP BY tid",
+        $params
+    );
+    $capacityByType = [];
+    foreach ($capacityRows as $row) $capacityByType[(int) $row['tid']] = (int) $row['capacity'];
+
+    $approvedRows = dbFetchAll(
+        "SELECT COALESCE(m.mission_type_id,0) AS tid, COUNT(DISTINCT m.id, pr.volunteer_id) AS approved
+         FROM participation_requests pr JOIN shifts s ON s.id = pr.shift_id JOIN missions m ON m.id = s.mission_id
+         WHERE pr.status = ? AND $where GROUP BY tid",
+        array_merge([PARTICIPATION_APPROVED], $params)
+    );
+    $approvedByType = [];
+    foreach ($approvedRows as $row) $approvedByType[(int) $row['tid']] = (int) $row['approved'];
+
+    foreach ($result as $tid => &$r) {
+        $capacity = $capacityByType[$tid] ?? 0;
+        if ($capacity > 0) {
+            $approved = $approvedByType[$tid] ?? 0;
+            $r['pillars']['staffing'] = ['label' => 'Στελέχωση / Κάλυψη', 'weight' => 15, 'available' => true, 'score' => max(0, min(100, $approved / $capacity * 100)), 'raw' => ['approved' => $approved, 'capacity' => $capacity]];
+        }
+    }
+    unset($r);
+
+    // ── completion: pooled fulfilled/total over mission_order_recipients ──
+    $completionRows = dbFetchAll(
+        "SELECT COALESCE(m.mission_type_id,0) AS tid, COUNT(*) AS total,
+                SUM(CASE WHEN r.fulfilled_at IS NOT NULL THEN 1 ELSE 0 END) AS fulfilled
+         FROM mission_order_recipients r JOIN mission_orders o ON o.id = r.order_id JOIN missions m ON m.id = o.mission_id
+         WHERE $where GROUP BY tid",
+        $params
+    );
+    foreach ($completionRows as $row) {
+        $tid = (int) $row['tid'];
+        if (!isset($result[$tid])) continue;
+        $total = (int) $row['total'];
+        $fulfilled = (int) $row['fulfilled'];
+        if ($total > 0) {
+            $result[$tid]['pillars']['completion'] = ['label' => 'Ολοκλήρωση Εντολών', 'weight' => 20, 'available' => true, 'score' => $fulfilled / $total * 100, 'raw' => ['fulfilled' => $fulfilled, 'total' => $total]];
+        }
+    }
+
+    // ── shortage: pooled resolved/total/unresolved-critical — same formula
+    //    as computeMissionScore() (0 reports = neutral 100, not penalized) ──
+    $shortageRows = dbFetchAll(
+        "SELECT COALESCE(m.mission_type_id,0) AS tid, COUNT(*) AS total,
+                SUM(CASE WHEN r.resolved_at IS NOT NULL THEN 1 ELSE 0 END) AS resolved,
+                SUM(CASE WHEN r.resolved_at IS NULL AND r.severity = 'critical' THEN 1 ELSE 0 END) AS unresolved_critical
+         FROM mission_shortage_reports r JOIN missions m ON m.id = r.mission_id
+         WHERE $where GROUP BY tid",
+        $params
+    );
+    foreach ($shortageRows as $row) {
+        $tid = (int) $row['tid'];
+        if (!isset($result[$tid])) continue;
+        $total = (int) $row['total'];
+        $resolved = (int) $row['resolved'];
+        $unresolvedCritical = (int) $row['unresolved_critical'];
+        $score = $total > 0 ? max(0, min(100, ($resolved / $total * 100) - $unresolvedCritical * 15)) : 100.0;
+        $result[$tid]['pillars']['shortage'] = ['label' => 'Διαχείριση Ελλείψεων', 'weight' => 20, 'available' => true, 'score' => $score, 'raw' => ['resolved' => $resolved, 'total' => $total, 'unresolved_critical' => $unresolvedCritical]];
+    }
+
+    // ── debrief: pooled avg rating + objectives_met distribution — safe to
+    //    pool since the per-mission formula is linear (see docblock) ───────
+    $debriefRows = dbFetchAll(
+        "SELECT COALESCE(m.mission_type_id,0) AS tid, COUNT(*) AS n, AVG(md.rating) AS avg_rating,
+                SUM(CASE WHEN md.objectives_met = 'YES' THEN 1 ELSE 0 END) AS yes_cnt,
+                SUM(CASE WHEN md.objectives_met = 'PARTIAL' THEN 1 ELSE 0 END) AS partial_cnt,
+                SUM(CASE WHEN md.objectives_met = 'NO' THEN 1 ELSE 0 END) AS no_cnt
+         FROM mission_debriefs md JOIN missions m ON m.id = md.mission_id
+         WHERE $where GROUP BY tid",
+        $params
+    );
+    foreach ($debriefRows as $row) {
+        $tid = (int) $row['tid'];
+        if (!isset($result[$tid])) continue;
+        $n = (int) $row['n'];
+        if ($n === 0) continue;
+        $ratingScore = ((float) $row['avg_rating']) / 5 * 100;
+        $objScore = (((int) $row['yes_cnt']) * 100 + ((int) $row['partial_cnt']) * 55 + ((int) $row['no_cnt']) * 15) / $n;
+        $result[$tid]['pillars']['debrief'] = ['label' => 'Απολογισμός Debrief', 'weight' => 20, 'available' => true, 'score' => $ratingScore * 0.6 + $objScore * 0.4, 'raw' => ['avg_rating' => round((float) $row['avg_rating'], 2), 'n' => $n, 'yes' => (int) $row['yes_cnt'], 'partial' => (int) $row['partial_cnt'], 'no' => (int) $row['no_cnt']]];
+    }
+
+    // ── response: raw per-order minute deltas, bucketed by type in PHP so
+    //    the nonlinear decay formula runs on the real distribution rather
+    //    than a pre-averaged number (see docblock above) ────────────────────
+    $responseRows = dbFetchAll(
+        "SELECT COALESCE(m.mission_type_id,0) AS tid, TIMESTAMPDIFF(MINUTE, o.created_at, r.acknowledged_at) AS mins
+         FROM mission_order_recipients r JOIN mission_orders o ON o.id = r.order_id JOIN missions m ON m.id = o.mission_id
+         WHERE r.acknowledged_at IS NOT NULL AND $where",
+        $params
+    );
+    $minutesByType = [];
+    foreach ($responseRows as $row) {
+        $minutesByType[(int) $row['tid']][] = (float) $row['mins'];
+    }
+    foreach ($minutesByType as $tid => $minutesList) {
+        if (!isset($result[$tid])) continue;
+        $speed = missionScoreForgottenAwareSpeed($minutesList, $responseHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty);
+        if ($speed['available']) {
+            $result[$tid]['pillars']['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => true, 'score' => $speed['score'], 'raw' => ['avg_minutes' => $speed['avg_minutes'], 'forgotten_count' => $speed['forgotten_count']]];
+        }
+    }
+
+    // ── combine into overall/tier, same weights + "shortage alone can't
+    //    vacuously score a type" gate as computeMissionScore() ─────────────
+    foreach ($result as &$r) {
+        $weightSum = 0;
+        $weighted = 0.0;
+        $hasSubstantive = false;
+        foreach ($r['pillars'] as $key => $p) {
+            if ($p['available']) {
+                $weightSum += $p['weight'];
+                $weighted += $p['weight'] * $p['score'];
+                if ($key !== 'shortage') $hasSubstantive = true;
+            }
+        }
+        $r['overall'] = ($hasSubstantive && $weightSum > 0) ? round($weighted / $weightSum, 2) : null;
+        $r['tier'] = $r['overall'] !== null ? missionScoreTierMeta($r['overall']) : null;
+    }
+    unset($r);
+
+    return $result;
+}
+
+/**
+ * War Room: sibling of missionScorePillarPhrase() for
+ * generateWarRoomComparisonNarrative() — same key/$positive contract and
+ * "always return '' when unavailable" rule, but period-appropriate wording.
+ * Not a reuse of missionScorePillarPhrase() itself: its shortage/debrief
+ * case bodies are single-mission-specific ("κατά τη διάρκεια της αποστολής",
+ * "ο υπεύθυνος αποστολής... την άσκηση"), wording that doesn't read
+ * correctly when pooling many missions/commanders across a mission type.
+ */
+function warRoomTypePillarPhrase(string $key, array $pillar, bool $positive): string {
+    $raw = $pillar['raw'] ?? [];
+    switch ($key) {
+        case 'response':
+            $m = $raw['avg_minutes'] ?? null;
+            if ($m === null) return '';
+            return $positive
+                ? "Ο μέσος χρόνος απόκρισης στις εντολές ήταν {$m} λεπτά, χρόνος που υποδηλώνει καλή ετοιμότητα των ομάδων."
+                : "Ο μέσος χρόνος απόκρισης στις εντολές έφτασε τα {$m} λεπτά, χρόνος αυξημένος για επιχειρησιακό περιβάλλον.";
+        case 'completion':
+            $f = $raw['fulfilled'] ?? 0;
+            $t = $raw['total'] ?? 0;
+            if ($t === 0) return '';
+            $rate = round($f / $t * 100);
+            return $positive
+                ? "Ολοκληρώθηκαν {$f} από τις {$t} εντολές ({$rate}%) στις αποστολές αυτού του τύπου."
+                : "Ολοκληρώθηκαν {$f} από τις {$t} εντολές ({$rate}%) στις αποστολές αυτού του τύπου, ποσοστό που αφήνει περιθώριο βελτίωσης.";
+        case 'shortage':
+            $r = $raw['resolved'] ?? 0;
+            $t = $raw['total'] ?? 0;
+            if ($t === 0) return '';
+            $rate = round($r / $t * 100);
+            $uc = $raw['unresolved_critical'] ?? 0;
+            $extra = $uc > 0 ? (' ' . ($uc === 1 ? 'Μία κρίσιμη αναφορά παρέμεινε ανεπίλυτη.' : "{$uc} κρίσιμες αναφορές παρέμειναν ανεπίλυτες.")) : '';
+            return $positive
+                ? "Λύθηκαν {$r} από τις {$t} αναφορές έλλειψης ({$rate}%)."
+                : "Λύθηκαν {$r} από τις {$t} αναφορές έλλειψης ({$rate}%).{$extra}";
+        case 'staffing':
+            $a = $raw['approved'] ?? 0;
+            $c = $raw['capacity'] ?? 0;
+            if ($c === 0) return '';
+            $rate = round($a / $c * 100);
+            return $positive
+                ? "Η κάλυψη βαρδιών ήταν επαρκής, με {$rate}% των διαθέσιμων θέσεων εθελοντών καλυμμένες."
+                : "Η κάλυψη βαρδιών ήταν ανεπαρκής, με μόλις {$rate}% των διαθέσιμων θέσεων εθελοντών καλυμμένες.";
+        case 'debrief':
+            $n = $raw['n'] ?? 0;
+            $avgRating = $raw['avg_rating'] ?? null;
+            if ($n === 0 || $avgRating === null) return '';
+            $yesPct = round((($raw['yes'] ?? 0) / $n) * 100);
+            return $positive
+                ? "Ο μέσος όρος βαθμολογίας debrief ήταν {$avgRating}/5, με τους στόχους να θεωρούνται πλήρως επιτευχθέντες στο {$yesPct}% των αποστολών."
+                : "Ο μέσος όρος βαθμολογίας debrief ήταν {$avgRating}/5, με τους στόχους να θεωρούνται πλήρως επιτευχθέντες μόλις στο {$yesPct}% των αποστολών.";
+    }
+    return '';
+}
+
+/**
+ * War Room: cross-mission trends narrative for reports.php's "Action Room"
+ * tab — compares $current against $previous (each the direct return value
+ * of computeWarRoomTypeAggregates(), one call per period). All comparison/
+ * delta logic lives here, not in the aggregation function, mirroring how
+ * computeMissionScore() itself has no notion of "compare to something else"
+ * (that's this narrative's job, same separation as the single-mission side).
+ *
+ * Deliberately never names a specific mission or volunteer (unlike
+ * generateMissionObserverNarrative()/generateCommandNarrative(), which both
+ * do named-incident callouts) — comparisons stay at mission-type level only,
+ * per explicit requirement. Tone is advisory throughout: concerns are always
+ * phrased as suggestions via missionScoreRecommendations(), never verdicts.
+ */
+function generateWarRoomComparisonNarrative(array $current, array $previous, string $startDate, string $endDate, string $prevStartDate, string $prevEndDate): string {
+    $totalCurrent = array_sum(array_column($current, 'mission_count'));
+    if ($totalCurrent === 0) {
+        return 'Δεν καταγράφηκαν αποστολές με δεδομένα Επιχειρησιακού (Action Room) στην επιλεγμένη περίοδο, συνεπώς δεν υπάρχουν επαρκή στοιχεία για σύγκριση.';
+    }
+
+    $startFmt = formatDate($startDate);
+    $endFmt = formatDate($endDate);
+    $prevStartFmt = formatDate($prevStartDate);
+    $prevEndFmt = formatDate($prevEndDate);
+    $totalPrevious = array_sum(array_column($previous, 'mission_count'));
+    $typesUsed = count(array_filter($current, fn($t) => $t['mission_count'] > 0));
+
+    $sentences = [];
+    $sentences[] = "Κατά την περίοδο {$startFmt} έως {$endFmt} καταγράφηκαν {$totalCurrent} αποστολές σε {$typesUsed} "
+        . ($typesUsed === 1 ? 'τύπο αποστολών' : 'τύπους αποστολών')
+        . ", έναντι {$totalPrevious} αποστολών κατά την αμέσως προηγούμενη περίοδο ({$prevStartFmt}–{$prevEndFmt}).";
+
+    // ── standout / concern this period — only among types with enough
+    //    missions to mean something (>=2, same "don't crown a winner off one
+    //    mission" instinct as generateTeamComparisonNarrative()'s own gate) ─
+    $scored = array_values(array_filter($current, fn($t) => $t['overall'] !== null && $t['mission_count'] >= 2));
+    if (count($scored) >= 2) {
+        usort($scored, fn($a, $b) => $b['overall'] <=> $a['overall']);
+        $top = $scored[0];
+        $bottom = $scored[count($scored) - 1];
+        $gap = round($top['overall'] - $bottom['overall'], 1);
+        // Same gap-bucketing vocabulary as generateTeamComparisonNarrative()
+        // (<5 = similar, applied here to types instead of teams) — a small
+        // gap states homogeneity instead of forcing a false winner/loser.
+        if ($gap < 5) {
+            $sentences[] = 'Η επίδοση ήταν αρκετά ομοιογενής μεταξύ των διαφορετικών τύπων αποστολών αυτή την περίοδο.';
+        } else {
+            $topFmt = number_format($top['overall'], 1);
+            $bottomFmt = number_format($bottom['overall'], 1);
+            $sentences[] = "Ο τύπος «{$top['name']}» ξεχώρισε με βαθμολογία {$topFmt}/100, έναντι {$bottomFmt}/100 του τύπου «{$bottom['name']}».";
+
+            $topAvailable = array_filter($top['pillars'], fn($p) => $p['available']);
+            if (!empty($topAvailable)) {
+                uasort($topAvailable, fn($a, $b) => $a['score'] <=> $b['score']);
+                $strongestKey = array_key_last($topAvailable);
+                $phrase = warRoomTypePillarPhrase($strongestKey, $topAvailable[$strongestKey], true);
+                if ($phrase !== '') $sentences[] = $phrase;
+            }
+
+            $bottomAvailable = array_filter($bottom['pillars'], fn($p) => $p['available']);
+            if (!empty($bottomAvailable)) {
+                uasort($bottomAvailable, fn($a, $b) => $a['score'] <=> $b['score']);
+                $weakestKey = array_key_first($bottomAvailable);
+                $phrase = warRoomTypePillarPhrase($weakestKey, $bottomAvailable[$weakestKey], false);
+                if ($phrase !== '') $sentences[] = $phrase;
+                $recommendations = missionScoreRecommendations();
+                if (isset($recommendations[$weakestKey])) $sentences[] = $recommendations[$weakestKey];
+            }
+        }
+    }
+
+    // ── most-improved/declined vs. the previous period — only among types
+    //    with >=2 missions in BOTH periods, only if the delta clears the same
+    //    5-point dead zone used just above ──────────────────────────────────
+    $deltas = [];
+    foreach ($current as $tid => $c) {
+        if ($c['overall'] === null || $c['mission_count'] < 2) continue;
+        $p = $previous[$tid] ?? null;
+        if (!$p || $p['overall'] === null || $p['mission_count'] < 2) continue;
+        $deltas[] = ['name' => $c['name'], 'delta' => $c['overall'] - $p['overall'], 'current' => $c['overall'], 'previous' => $p['overall']];
+    }
+    if (!empty($deltas)) {
+        usort($deltas, fn($a, $b) => abs($b['delta']) <=> abs($a['delta']));
+        $biggest = $deltas[0];
+        if (abs($biggest['delta']) >= 5) {
+            $deltaFmt = number_format(abs($biggest['delta']), 1);
+            $curFmt = number_format($biggest['current'], 1);
+            $prevFmt = number_format($biggest['previous'], 1);
+            $sentences[] = $biggest['delta'] > 0
+                ? "Ο τύπος «{$biggest['name']}» παρουσίασε τη μεγαλύτερη βελτίωση σε σχέση με την προηγούμενη περίοδο, από {$prevFmt} σε {$curFmt} (+{$deltaFmt} μονάδες)."
+                : "Ο τύπος «{$biggest['name']}» παρουσίασε την πιο αισθητή πτώση σε σχέση με την προηγούμενη περίοδο, από {$prevFmt} σε {$curFmt} (-{$deltaFmt} μονάδες).";
+        } else {
+            $sentences[] = 'Η επίδοση παρέμεινε σε γενικές γραμμές σταθερή σε σχέση με την προηγούμενη περίοδο.';
+        }
+    }
+
+    // ── closing disclaimer for any type with zero missions this period ────
+    $zeroTypes = array_values(array_filter($current, fn($t) => $t['mission_count'] === 0));
+    if (!empty($zeroTypes)) {
+        $names = array_map(fn($t) => $t['name'], $zeroTypes);
+        $sentences[] = 'Δεν καταγράφηκαν αποστολές αυτή την περίοδο για: ' . implode(', ', $names) . '.';
     }
 
     return implode(' ', $sentences);
