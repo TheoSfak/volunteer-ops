@@ -44,6 +44,13 @@ $mWhere = "m.deleted_at IS NULL AND m.start_datetime >= ? AND m.start_datetime <
 $mParams = [$startDate, $endDate];
 if ($departmentId) { $mWhere .= " AND m.department_id = ?"; $mParams[] = $departmentId; }
 
+// Action Room tab: immediately-prior period of equal length, computed once
+// here (not inside the tab switch below) since the CSV export block runs
+// and exit()s before the main switch ever gets a chance to.
+$periodDays = (int) floor((strtotime($endDate) - strtotime($startDate)) / 86400) + 1;
+$prevEndDate = date('Y-m-d', strtotime($startDate . ' -1 day'));
+$prevStartDate = date('Y-m-d', strtotime($prevEndDate . ' -' . ($periodDays - 1) . ' days'));
+
 // --- CSV EXPORT ---
 if (get('export') === 'csv') {
     // Sanitize tab name to prevent header injection
@@ -98,6 +105,25 @@ if (get('export') === 'csv') {
             foreach ($rows as $r) {
                 $st = strtotime($r['expiry_date']) < time() ? 'Ληγμένο' : (strtotime($r['expiry_date']) < strtotime('+30 days') ? 'Λήγει σύντομα' : 'Ενεργό');
                 fputcsv($out, [$r['name'], $r['type_name'], $r['issue_date'], $r['expiry_date'], $st]);
+            }
+            break;
+        case 'warroom':
+            fputcsv($out, ['Τύπος Αποστολής', 'Περίοδος', 'Πλήθος Αποστολών', 'Συνολική Βαθμολογία', 'Ταχύτητα Απόκρισης', 'Ολοκλήρωση Εντολών', 'Διαχείριση Ελλείψεων', 'Στελέχωση/Κάλυψη', 'Απολογισμός Debrief']);
+            $wrDeptId = $departmentId !== '' ? (int) $departmentId : null;
+            $wrPeriods = [
+                "Τρέχουσα ($startDate έως $endDate)" => computeWarRoomTypeAggregates($startDate, $endDate, $wrDeptId),
+                "Προηγούμενη ($prevStartDate έως $prevEndDate)" => computeWarRoomTypeAggregates($prevStartDate, $prevEndDate, $wrDeptId),
+            ];
+            foreach ($wrPeriods as $wrLabel => $wrData) {
+                foreach ($wrData as $wrType) {
+                    if ($wrType['mission_count'] === 0) continue;
+                    $pc = fn($k) => $wrType['pillars'][$k]['available'] ? number_format($wrType['pillars'][$k]['score'], 1) : '';
+                    fputcsv($out, [
+                        $wrType['name'], $wrLabel, $wrType['mission_count'],
+                        $wrType['overall'] !== null ? number_format($wrType['overall'], 1) : '',
+                        $pc('response'), $pc('completion'), $pc('shortage'), $pc('staffing'), $pc('debrief'),
+                    ]);
+                }
             }
             break;
         default:
@@ -444,6 +470,46 @@ case 'system':
          GROUP BY month ORDER BY month");
     break;
 
+// ===== TAB 9: ACTION ROOM =====
+case 'warroom':
+    $wrDeptId = $departmentId !== '' ? (int) $departmentId : null;
+    $wrCurrent  = computeWarRoomTypeAggregates($startDate, $endDate, $wrDeptId);
+    $wrPrevious = computeWarRoomTypeAggregates($prevStartDate, $prevEndDate, $wrDeptId);
+
+    $kpi['wr_missions_current']  = array_sum(array_column($wrCurrent, 'mission_count'));
+    $kpi['wr_missions_previous'] = array_sum(array_column($wrPrevious, 'mission_count'));
+    $kpi['wr_types_active']      = count(array_filter($wrCurrent, fn($t) => $t['mission_count'] > 0));
+
+    // Mission-count-weighted average — an unweighted average across types
+    // would let a 1-mission type count equally against a 10-mission type.
+    $wrWeightAvg = function (array $data) {
+        $scored = array_filter($data, fn($t) => $t['overall'] !== null);
+        $wSum = array_sum(array_column($scored, 'mission_count'));
+        if ($wSum === 0) return null;
+        $weighted = array_sum(array_map(fn($t) => $t['overall'] * $t['mission_count'], $scored));
+        return round($weighted / $wSum, 1);
+    };
+    $kpi['wr_avg_score_current']  = $wrWeightAvg($wrCurrent);
+    $kpi['wr_avg_score_previous'] = $wrWeightAvg($wrPrevious);
+
+    $chartData['warRoomCurrent'] = $wrCurrent;
+    $chartData['warRoomComparison'] = [];
+    foreach ($wrCurrent as $wrTid => $wrType) {
+        $wrPrev = $wrPrevious[$wrTid] ?? null;
+        $chartData['warRoomComparison'][] = [
+            'name' => $wrType['name'],
+            'current_overall'  => $wrType['overall'],
+            'previous_overall' => $wrPrev['overall'] ?? null,
+            'current_count'    => $wrType['mission_count'],
+            'previous_count'   => $wrPrev['mission_count'] ?? 0,
+        ];
+    }
+
+    $tableData['warRoomTypes'] = array_filter($wrCurrent, fn($t) => $t['mission_count'] > 0 || ($wrPrevious[$t['id']]['mission_count'] ?? 0) > 0);
+    $tableData['warRoomPrevious'] = $wrPrevious;
+    $tableData['warRoomNarrative'] = generateWarRoomComparisonNarrative($wrCurrent, $wrPrevious, $startDate, $endDate, $prevStartDate, $prevEndDate);
+    break;
+
 default:
     $activeTab = 'overview';
     redirect('reports.php?tab=overview');
@@ -522,6 +588,7 @@ $greekMonths = ['Ιαν','Φεβ','Μαρ','Απρ','Μάι','Ιούν','Ιού�
     <li class="nav-item"><a class="nav-link <?= $activeTab==='certificates' ? 'active' : '' ?>" href="<?= tabUrl('certificates') ?>"><i class="bi bi-award"></i> Πιστοποιητικά</a></li>
     <li class="nav-item"><a class="nav-link <?= $activeTab==='inventory' ? 'active' : '' ?>" href="<?= tabUrl('inventory') ?>"><i class="bi bi-box-seam"></i> Εξοπλισμός</a></li>
     <li class="nav-item"><a class="nav-link <?= $activeTab==='system' ? 'active' : '' ?>" href="<?= tabUrl('system') ?>"><i class="bi bi-gear"></i> Σύστημα</a></li>
+    <li class="nav-item"><a class="nav-link <?= $activeTab==='warroom' ? 'active' : '' ?>" href="<?= tabUrl('warroom') ?>"><i class="bi bi-broadcast-pin"></i> Action Room</a></li>
 </ul>
 
 <!-- ==================== TAB CONTENT ==================== -->
@@ -994,6 +1061,84 @@ $greekMonths = ['Ιαν','Φεβ','Μαρ','Απρ','Μάι','Ιούν','Ιού�
             <div class="card-body"><canvas id="chartNewsletterMonthly"></canvas></div></div>
     </div>
 </div>
+
+<?php elseif ($activeTab === 'warroom'): ?>
+<div class="row mb-4">
+    <?php
+    $wrCards = [
+        ['Αποστολές (Τρέχουσα Περίοδος)', number_format($kpi['wr_missions_current']), 'geo-alt', '#4e73df'],
+        ['Αποστολές (Προηγούμενη Περίοδος)', number_format($kpi['wr_missions_previous']), 'clock-history', '#858796'],
+        ['Μέση Βαθμολογία / 100', $kpi['wr_avg_score_current'] !== null ? number_format($kpi['wr_avg_score_current'], 1) : '—', 'graph-up-arrow', '#1cc88a'],
+        ['Ενεργοί Τύποι Αποστολών', number_format($kpi['wr_types_active']), 'diagram-3', '#f6c23e'],
+    ];
+    foreach ($wrCards as $c): ?>
+    <div class="col-md-3 col-sm-6 mb-3">
+        <div class="card kpi-card" style="border-top-color:<?= $c[3] ?>">
+            <div class="card-body text-center p-3">
+                <i class="bi bi-<?= $c[2] ?> fs-3" style="color:<?= $c[3] ?>"></i>
+                <div class="kpi-value"><?= $c[1] ?></div>
+                <div class="kpi-label"><?= $c[0] ?></div>
+            </div>
+        </div>
+    </div>
+    <?php endforeach; ?>
+</div>
+
+<?php if (!empty($tableData['warRoomTypes'])): ?>
+<div class="row mb-4">
+    <?php foreach ($tableData['warRoomTypes'] as $wrT):
+        $wrHex = MISSION_TYPE_COLOR_HEX[$wrT['color']] ?? '#858796';
+        $wrPrevT = $tableData['warRoomPrevious'][$wrT['id']] ?? null;
+        $wrDelta = ($wrT['overall'] !== null && $wrPrevT && $wrPrevT['overall'] !== null) ? round($wrT['overall'] - $wrPrevT['overall'], 1) : null;
+    ?>
+    <div class="col-lg-4 col-md-6 mb-3">
+        <div class="card kpi-card" style="border-top-color:<?= $wrHex ?>">
+            <div class="card-body p-3">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <i class="bi <?= h($wrT['icon']) ?> fs-4" style="color:<?= $wrHex ?>"></i>
+                        <div class="fw-semibold mt-1"><?= h($wrT['name']) ?></div>
+                        <div class="small text-muted"><?= number_format($wrT['mission_count']) ?> αποστολ<?= $wrT['mission_count'] === 1 ? 'ή' : 'ές' ?></div>
+                    </div>
+                    <div class="text-end">
+                        <div class="kpi-value" style="font-size:1.5rem;"><?= $wrT['overall'] !== null ? number_format($wrT['overall'], 1) : '—' ?></div>
+                        <?php if ($wrDelta !== null): ?>
+                        <div class="small <?= $wrDelta > 0 ? 'text-success' : ($wrDelta < 0 ? 'text-danger' : 'text-muted') ?>">
+                            <i class="bi bi-<?= $wrDelta > 0 ? 'arrow-up' : ($wrDelta < 0 ? 'arrow-down' : 'dash') ?>"></i> <?= number_format(abs($wrDelta), 1) ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endforeach; ?>
+</div>
+<?php endif; ?>
+
+<div class="card mb-4 border-start border-4 border-primary">
+    <div class="card-header"><strong><i class="bi bi-chat-square-quote"></i> Παρατηρήσεις</strong></div>
+    <div class="card-body">
+        <p class="mb-0"><?= h($tableData['warRoomNarrative']) ?></p>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-6 mb-3">
+        <div class="card chart-card"><div class="card-header"><strong><i class="bi bi-bar-chart"></i> Συνολική Βαθμολογία ανά Τύπο</strong></div>
+            <div class="card-body"><canvas id="chartWarRoomOverall"></canvas></div></div>
+    </div>
+    <div class="col-lg-6 mb-3">
+        <div class="card chart-card"><div class="card-header"><strong><i class="bi bi-bar-chart-steps"></i> Πλήθος Αποστολών ανά Τύπο</strong></div>
+            <div class="card-body"><canvas id="chartWarRoomVolume"></canvas></div></div>
+    </div>
+</div>
+<div class="row">
+    <div class="col-12 mb-3">
+        <div class="card chart-card"><div class="card-header"><strong><i class="bi bi-diagram-3"></i> Ανάλυση ανά Δείκτη (Τρέχουσα Περίοδος)</strong></div>
+            <div class="card-body"><canvas id="chartWarRoomPillars"></canvas></div></div>
+    </div>
+</div>
 <?php endif; ?>
 
 <!-- ==================== CHART.JS INITIALIZATION ==================== -->
@@ -1268,6 +1413,47 @@ function mc(id, type, data, options = {}) {
             {label:'Αποτυχημένα', data:raw.map(r=>r.failed), backgroundColor:'#e74a3b'}
         ]
     }, {scales:{y:{beginAtZero:true}}});
+})();
+
+<?php elseif ($activeTab === 'warroom'): ?>
+// Overall score by mission type, current vs previous period
+(function(){
+    const raw = <?= json_encode($chartData['warRoomComparison'] ?? []) ?>;
+    mc('chartWarRoomOverall', 'bar', {
+        labels: raw.map(r => r.name),
+        datasets: [
+            {label: 'Τρέχουσα Περίοδος', data: raw.map(r => r.current_overall), backgroundColor: '#4e73df'},
+            {label: 'Προηγούμενη Περίοδος', data: raw.map(r => r.previous_overall), backgroundColor: '#858796'}
+        ]
+    }, {scales: {y: {beginAtZero: true, max: 100}}});
+})();
+
+// Mission volume by mission type, current vs previous period
+(function(){
+    const raw = <?= json_encode($chartData['warRoomComparison'] ?? []) ?>;
+    mc('chartWarRoomVolume', 'bar', {
+        labels: raw.map(r => r.name),
+        datasets: [
+            {label: 'Τρέχουσα Περίοδος', data: raw.map(r => r.current_count), backgroundColor: '#1cc88a'},
+            {label: 'Προηγούμενη Περίοδος', data: raw.map(r => r.previous_count), backgroundColor: '#858796'}
+        ]
+    }, {scales: {y: {beginAtZero: true, ticks: {precision: 0}}}});
+})();
+
+// Per-pillar breakdown, current period only, one dataset per mission type
+// that actually had missions — unavailable pillars render as a gap (null),
+// never a fake 0, matching every other "graceful, never fabricated" number
+// on this page.
+(function(){
+    const types = <?= json_encode(array_values(array_filter($chartData['warRoomCurrent'] ?? [], fn($t) => $t['mission_count'] > 0))) ?>;
+    const pillarKeys = ['response','completion','shortage','staffing','debrief'];
+    const pillarLabels = ['Ταχύτητα Απόκρισης','Ολοκλήρωση Εντολών','Διαχείριση Ελλείψεων','Στελέχωση/Κάλυψη','Απολογισμός Debrief'];
+    const datasets = types.map((t, i) => ({
+        label: t.name,
+        data: pillarKeys.map(k => t.pillars[k].available ? t.pillars[k].score : null),
+        backgroundColor: COLORS[i % COLORS.length]
+    }));
+    mc('chartWarRoomPillars', 'bar', { labels: pillarLabels, datasets }, {scales: {y: {beginAtZero: true, max: 100}}});
 })();
 <?php endif; ?>
 </script>

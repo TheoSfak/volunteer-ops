@@ -172,6 +172,23 @@ define('VOLUNTEER_TYPE_ICONS', [
     VTYPE_RESCUER => '⛑️',
 ]);
 
+// mission_types.color stores a Bootstrap contextual-class suffix, not a hex
+// code — 'purple'/'teal' among the seed rows have no real CSS anywhere in
+// this app (no bg-purple/text-teal defined), so charts/badges that need an
+// actual paintable color (Chart.js backgroundColor, inline styles) must look
+// it up here rather than using the raw column value directly.
+define('MISSION_TYPE_COLOR_HEX', [
+    'primary'   => '#4e73df',
+    'success'   => '#1cc88a',
+    'info'      => '#36b9cc',
+    'warning'   => '#f6c23e',
+    'danger'    => '#e74a3b',
+    'secondary' => '#858796',
+    'dark'      => '#5a5c69',
+    'teal'      => '#2c9faf',
+    'purple'    => '#6f42c1',
+]);
+
 define('STATUS_COLORS', [
     STATUS_DRAFT => 'secondary',
     STATUS_OPEN => 'success',
