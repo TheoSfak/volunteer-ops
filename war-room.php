@@ -1279,8 +1279,10 @@ include __DIR__ . '/includes/header.php';
 <div class="row g-4 mb-4">
     <div class="col-12 col-md-6">
         <div class="card shadow-sm h-100 border-warning">
-            <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('shortage.card_title') ?></h5></div>
-            <div class="card-body">
+            <div class="card-header bg-warning bg-opacity-25 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#shortageFormCollapse" role="button" aria-expanded="false" aria-controls="shortageFormCollapse">
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('shortage.card_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
+            </div>
+            <div class="card-body collapse d-lg-block" id="shortageFormCollapse">
                 <form method="post">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="report_shortage">
@@ -1306,8 +1308,10 @@ include __DIR__ . '/includes/header.php';
 
     <div class="col-12 col-md-6">
         <div class="card shadow-sm h-100 border-danger">
-            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('incident.card_title') ?></h5></div>
-            <div class="card-body">
+            <div class="card-header bg-danger bg-opacity-10 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#incidentFormCollapse" role="button" aria-expanded="false" aria-controls="incidentFormCollapse">
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('incident.card_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
+            </div>
+            <div class="card-body collapse d-lg-block" id="incidentFormCollapse">
                 <form method="post" id="incidentReportForm">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="report_incident">
