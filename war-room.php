@@ -1268,6 +1268,81 @@ include __DIR__ . '/includes/header.php';
 </div>
 <?php endif; ?>
 
+<?php if ($isApprovedParticipant): ?>
+<div class="row g-4 mb-4">
+    <div class="col-12 col-md-6">
+        <div class="card shadow-sm h-100 border-warning">
+            <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('shortage.card_title') ?></h5></div>
+            <div class="card-body">
+                <form method="post">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="report_shortage">
+                    <label class="form-label small fw-semibold"><?= t('shortage.type_label') ?></label>
+                    <select name="shortage_type" class="form-select mb-2" required>
+                        <?php foreach (SHORTAGE_TYPE_LABELS as $val => $label): ?>
+                        <option value="<?= h($val) ?>"><?= h(shortageTypeLabel($val)) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <label class="form-label small fw-semibold"><?= t('shortage.severity_label') ?></label>
+                    <select name="severity" class="form-select mb-2" required>
+                        <?php foreach (SHORTAGE_SEVERITY_LABELS as $val => $label): ?>
+                        <option value="<?= h($val) ?>" <?= $val === 'medium' ? 'selected' : '' ?>><?= h(shortageSeverityLabel($val)) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <input type="text" name="title" class="form-control mb-2" maxlength="255" placeholder="<?= t('shortage.title_placeholder') ?>" required>
+                    <textarea name="description" class="form-control mb-2" rows="3" maxlength="2000" placeholder="<?= t('shortage.desc_placeholder') ?>" required></textarea>
+                    <button type="submit" class="btn btn-warning w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('shortage.submit_btn') ?></button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12 col-md-6">
+        <div class="card shadow-sm h-100 border-danger">
+            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('incident.card_title') ?></h5></div>
+            <div class="card-body">
+                <form method="post" id="incidentReportForm">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="report_incident">
+                    <input type="hidden" name="lat" id="incidentLat" value="">
+                    <input type="hidden" name="lng" id="incidentLng" value="">
+                    <label class="form-label small fw-semibold"><?= t('incident.type_label') ?></label>
+                    <select name="incident_type" class="form-select mb-2" required>
+                        <?php foreach (INCIDENT_TYPE_LABELS as $val => $label): ?>
+                        <option value="<?= h($val) ?>"><?= h(incidentTypeLabel($val)) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <label class="form-label small fw-semibold"><?= t('incident.severity_label') ?></label>
+                    <select name="severity" class="form-select mb-2" required>
+                        <?php foreach (SHORTAGE_SEVERITY_LABELS as $val => $label): ?>
+                        <option value="<?= h($val) ?>" <?= $val === 'medium' ? 'selected' : '' ?>><?= h(incidentSeverityLabel($val)) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-check mb-2">
+                        <input type="checkbox" class="form-check-input" name="is_unknown_patient" value="1" id="incidentUnknownPatient">
+                        <label class="form-check-label small" for="incidentUnknownPatient"><?= t('incident.unknown_patient_label') ?></label>
+                    </div>
+                    <div id="incidentPatientFields">
+                        <input type="text" name="patient_name" class="form-control mb-2" maxlength="255" placeholder="<?= t('incident.patient_name_placeholder') ?>">
+                        <input type="tel" name="phone" class="form-control mb-2" maxlength="30" placeholder="<?= t('incident.phone_placeholder') ?>">
+                    </div>
+                    <input type="text" name="estimated_age" class="form-control mb-2" maxlength="50" placeholder="<?= t('incident.age_placeholder') ?>">
+                    <select name="gender" class="form-select mb-2">
+                        <option value=""><?= t('incident.gender_placeholder') ?></option>
+                        <?php foreach (INCIDENT_GENDER_LABELS as $val => $label): ?>
+                        <option value="<?= h($val) ?>"><?= h(incidentGenderLabel($val)) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <textarea name="notes" class="form-control mb-2" rows="2" maxlength="2000" placeholder="<?= t('incident.notes_placeholder') ?>"></textarea>
+                    <div class="small text-muted mb-2"><?= t('incident.staff_only_hint') ?></div>
+                    <button type="submit" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('incident.submit_btn') ?></button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <div class="row g-4">
     <?php if (!$fieldMode): ?>
     <div class="col-12 col-lg-8">
@@ -1550,75 +1625,6 @@ include __DIR__ . '/includes/header.php';
                 <div id="myTasksList"></div>
             </div>
         </div>
-
-        <?php if ($isApprovedParticipant): ?>
-        <div class="card shadow-sm mb-4 border-warning">
-            <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('shortage.card_title') ?></h5></div>
-            <div class="card-body">
-                <form method="post">
-                    <?= csrfField() ?>
-                    <input type="hidden" name="action" value="report_shortage">
-                    <label class="form-label small fw-semibold"><?= t('shortage.type_label') ?></label>
-                    <select name="shortage_type" class="form-select mb-2" required>
-                        <?php foreach (SHORTAGE_TYPE_LABELS as $val => $label): ?>
-                        <option value="<?= h($val) ?>"><?= h(shortageTypeLabel($val)) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <label class="form-label small fw-semibold"><?= t('shortage.severity_label') ?></label>
-                    <select name="severity" class="form-select mb-2" required>
-                        <?php foreach (SHORTAGE_SEVERITY_LABELS as $val => $label): ?>
-                        <option value="<?= h($val) ?>" <?= $val === 'medium' ? 'selected' : '' ?>><?= h(shortageSeverityLabel($val)) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <input type="text" name="title" class="form-control mb-2" maxlength="255" placeholder="<?= t('shortage.title_placeholder') ?>" required>
-                    <textarea name="description" class="form-control mb-2" rows="3" maxlength="2000" placeholder="<?= t('shortage.desc_placeholder') ?>" required></textarea>
-                    <button type="submit" class="btn btn-warning w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('shortage.submit_btn') ?></button>
-                </form>
-            </div>
-        </div>
-
-        <div class="card shadow-sm mb-4 border-danger">
-            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('incident.card_title') ?></h5></div>
-            <div class="card-body">
-                <form method="post" id="incidentReportForm">
-                    <?= csrfField() ?>
-                    <input type="hidden" name="action" value="report_incident">
-                    <input type="hidden" name="lat" id="incidentLat" value="">
-                    <input type="hidden" name="lng" id="incidentLng" value="">
-                    <label class="form-label small fw-semibold"><?= t('incident.type_label') ?></label>
-                    <select name="incident_type" class="form-select mb-2" required>
-                        <?php foreach (INCIDENT_TYPE_LABELS as $val => $label): ?>
-                        <option value="<?= h($val) ?>"><?= h(incidentTypeLabel($val)) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <label class="form-label small fw-semibold"><?= t('incident.severity_label') ?></label>
-                    <select name="severity" class="form-select mb-2" required>
-                        <?php foreach (SHORTAGE_SEVERITY_LABELS as $val => $label): ?>
-                        <option value="<?= h($val) ?>" <?= $val === 'medium' ? 'selected' : '' ?>><?= h(incidentSeverityLabel($val)) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <div class="form-check mb-2">
-                        <input type="checkbox" class="form-check-input" name="is_unknown_patient" value="1" id="incidentUnknownPatient">
-                        <label class="form-check-label small" for="incidentUnknownPatient"><?= t('incident.unknown_patient_label') ?></label>
-                    </div>
-                    <div id="incidentPatientFields">
-                        <input type="text" name="patient_name" class="form-control mb-2" maxlength="255" placeholder="<?= t('incident.patient_name_placeholder') ?>">
-                        <input type="tel" name="phone" class="form-control mb-2" maxlength="30" placeholder="<?= t('incident.phone_placeholder') ?>">
-                    </div>
-                    <input type="text" name="estimated_age" class="form-control mb-2" maxlength="50" placeholder="<?= t('incident.age_placeholder') ?>">
-                    <select name="gender" class="form-select mb-2">
-                        <option value=""><?= t('incident.gender_placeholder') ?></option>
-                        <?php foreach (INCIDENT_GENDER_LABELS as $val => $label): ?>
-                        <option value="<?= h($val) ?>"><?= h(incidentGenderLabel($val)) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <textarea name="notes" class="form-control mb-2" rows="2" maxlength="2000" placeholder="<?= t('incident.notes_placeholder') ?>"></textarea>
-                    <div class="small text-muted mb-2"><?= t('incident.staff_only_hint') ?></div>
-                    <button type="submit" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('incident.submit_btn') ?></button>
-                </form>
-            </div>
-        </div>
-        <?php endif; ?>
 
         <?php if (!$fieldMode): ?>
         <div class="card shadow-sm mb-4">
@@ -4946,6 +4952,13 @@ function renderRouteLayer(allRoutes) {
 // shortage-report textarea; sidestepped here at the root instead of a
 // signature-skip guard, since collapse/expand state has to survive anyway).
 let expandedRouteIds = new Set();
+// Cancelled routes stay in the list (this is the mission's permanent record,
+// same reasoning as everywhere else in the app — see renderRouteLayer()'s own
+// comment on why the live *map* drops them but nothing else does) but a
+// long-running mission can accumulate several, burying the routes someone
+// actually cares about below a wall of "Ακυρώθηκε" cards. Collapsed by
+// default behind a single toggle rather than deleted.
+let showCancelledRoutes = false;
 
 function routeAdminWaypointStatusHtml(wp) {
     const distanceHtml = wp.arrived_at ? routeDistanceBadgeHtml(wp) : '';
@@ -5006,7 +5019,7 @@ function renderRouteAdminWaypointsList(route) {
 // match on every toggle and silently break expand/collapse entirely.
 let routesAdminRenderedSig = null;
 function renderRoutesAdmin(allRoutes) {
-    const sig = JSON.stringify(allRoutes) + '|' + [...expandedRouteIds].sort().join(',');
+    const sig = JSON.stringify(allRoutes) + '|' + [...expandedRouteIds].sort().join(',') + '|' + showCancelledRoutes;
     if (sig === routesAdminRenderedSig) return;
     routesAdminRenderedSig = sig;
 
@@ -5016,7 +5029,9 @@ function renderRoutesAdmin(allRoutes) {
         list.innerHTML = '<p class="text-muted mb-0">' + t('route.admin_empty') + '</p>';
         return;
     }
-    list.innerHTML = allRoutes.map(route => {
+    const activeRoutes = allRoutes.filter(r => r.status !== 'cancelled');
+    const cancelledRoutes = allRoutes.filter(r => r.status === 'cancelled');
+    const renderRouteCard = route => {
         const done = route.waypoints.filter(w => w.completed_at || w.skipped_at).length;
         const statusBadge = route.status === 'cancelled'
             ? `<span class="badge bg-secondary">${t('route.status_cancelled')}</span>`
@@ -5051,13 +5066,27 @@ function renderRoutesAdmin(allRoutes) {
             </div>
             ${isExpanded ? `<div class="border-top p-2">${renderRouteAdminWaypointsList(route)}</div>` : ''}
         </div>`;
-    }).join('');
+    };
+
+    let html = activeRoutes.map(renderRouteCard).join('');
+    if (cancelledRoutes.length) {
+        html += `<div class="text-muted small p-2 d-flex align-items-center gap-1 route-cancelled-toggle" style="cursor:pointer;">
+            <i class="bi bi-chevron-${showCancelledRoutes ? 'up' : 'down'}"></i>${t('route.cancelled_toggle', {count: cancelledRoutes.length})}
+        </div>`;
+        if (showCancelledRoutes) html += cancelledRoutes.map(renderRouteCard).join('');
+    }
+    list.innerHTML = html;
 
     list.querySelectorAll('.route-admin-toggle').forEach(el => el.addEventListener('click', () => {
         const id = +el.dataset.id;
         if (expandedRouteIds.has(id)) expandedRouteIds.delete(id); else expandedRouteIds.add(id);
         renderRoutesAdmin(allRoutes);
     }));
+    const cancelledToggleEl = list.querySelector('.route-cancelled-toggle');
+    if (cancelledToggleEl) cancelledToggleEl.addEventListener('click', () => {
+        showCancelledRoutes = !showCancelledRoutes;
+        renderRoutesAdmin(allRoutes);
+    });
     list.querySelectorAll('.route-cancel-btn').forEach(btn => btn.addEventListener('click', e => {
         e.stopPropagation();
         if (!confirm(t('route.cancel_confirm'))) return;

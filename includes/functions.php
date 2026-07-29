@@ -3545,6 +3545,31 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         }
     }
 
+    // Patient name/phone are deliberately never mentioned here, even though the
+    // live activity card itself is command-staff-only (see the $canManageWarRoom
+    // gate around it in war-room.php) — these events also feed this same page's
+    // PDF export and the Excel activity export, neither of which carries that
+    // same access boundary. Only type/severity/outcome, same restraint as the
+    // dedicated incident PDF section.
+    $incidentEventRows = dbFetchAll(
+        "SELECT i.incident_type, i.severity, i.created_at, i.acknowledged_at, i.resolved_at, i.outcome, i.outcome_location, u.name AS actor_name
+         FROM mission_incidents i
+         JOIN users u ON u.id = i.reporter_id
+         WHERE i.mission_id = ?",
+        [$missionId]
+    );
+    foreach ($incidentEventRows as $row) {
+        $label = incidentTypeLabel($row['incident_type']) . ', ' . incidentSeverityLabel($row['severity']);
+        $events[] = ['icon' => '🚑', 'text' => h($row['actor_name']) . ' ανέφερε περιστατικό (' . h($label) . ')', 'ts' => strtotime($row['created_at'])];
+        if ($row['acknowledged_at']) {
+            $events[] = ['icon' => '👁️', 'text' => 'Η αναφορά περιστατικού (' . h($label) . ') ελέγχθηκε', 'ts' => strtotime($row['acknowledged_at'])];
+        }
+        if ($row['resolved_at']) {
+            $outcomeSuffix = $row['outcome'] ? ' — ' . h(incidentOutcomeLabel($row['outcome'])) . ($row['outcome_location'] ? ' («' . h($row['outcome_location']) . '»)' : '') : '';
+            $events[] = ['icon' => '✅', 'text' => 'Η αναφορά περιστατικού (' . h($label) . ') έκλεισε' . $outcomeSuffix, 'ts' => strtotime($row['resolved_at'])];
+        }
+    }
+
     usort($events, fn($a, $b) => $b['ts'] <=> $a['ts']);
     return $events;
 }
