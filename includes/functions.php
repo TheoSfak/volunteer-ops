@@ -1393,6 +1393,131 @@ function loadUnresolvedShortageReportsForMission(int $missionId): array {
 }
 
 /**
+ * Privacy redaction agreed with the mission owner for patient PII wherever it
+ * isn't reporting/resolving command staff looking (live panel for regular
+ * participants, PDF report, mission-stats). Name keeps the surname in full and
+ * initials the given name(s); phone keeps only the last 4 digits. Deliberately
+ * simple/pure (no DB, no unknown-patient check) — callers decide when to call
+ * these vs. show the raw value.
+ */
+function maskPatientName(string $name): string {
+    $name = trim($name);
+    if ($name === '') return '';
+    $parts = preg_split('/\s+/', $name);
+    $surname = array_pop($parts);
+    if (empty($parts)) {
+        return mb_substr($surname, 0, 1) . '.';
+    }
+    $initials = implode(' ', array_map(fn($p) => mb_substr($p, 0, 1) . '.', $parts));
+    return $initials . ' ' . $surname;
+}
+
+function maskPatientPhone(string $phone): string {
+    $digits = preg_replace('/\D+/', '', $phone);
+    $len = mb_strlen($digits);
+    if ($len <= 4) return str_repeat('*', $len);
+    $visible = mb_substr($digits, -4);
+    $maskedCount = $len - 4;
+    $groups = [];
+    for ($i = 0; $i < $maskedCount; $i += 3) {
+        $groups[] = str_repeat('*', min(3, $maskedCount - $i));
+    }
+    return implode(' ', $groups) . ' ' . $visible;
+}
+
+/**
+ * War Room: open (unresolved) incidents for the mission, shaped for both
+ * audiences from one query — $unmasked=true (command staff) gets the real
+ * patient_name/phone/notes, $unmasked=false (any other approved participant)
+ * gets maskPatientName()/maskPatientPhone() and notes stripped entirely (never
+ * shown outside command staff, per the mission owner's privacy decision).
+ * Mirrors loadUnresolvedShortageReportsForMission()'s shape/ordering.
+ */
+function loadUnresolvedIncidentsForMission(int $missionId, bool $unmasked): array {
+    $rows = dbFetchAll(
+        "SELECT i.id, i.incident_type, i.severity, i.is_unknown_patient, i.patient_name,
+                i.estimated_age, i.gender, i.phone, i.notes, i.team_id, i.lat, i.lng,
+                i.created_at, i.acknowledged_at,
+                u.name AS reporter_name, u.is_external, u.guest_org_name, mt.codename, mt.team_number
+         FROM mission_incidents i
+         JOIN users u ON u.id = i.reporter_id
+         LEFT JOIN mission_teams mt ON mt.id = i.team_id
+         WHERE i.mission_id = ? AND i.resolved_at IS NULL
+         ORDER BY FIELD(i.severity, 'critical', 'high', 'medium', 'low'), i.created_at ASC",
+        [$missionId]
+    );
+
+    return array_map(function ($row) use ($unmasked) {
+        $isUnknown = (bool) $row['is_unknown_patient'];
+        return [
+            'id'                 => (int) $row['id'],
+            'type_label'         => incidentTypeLabel($row['incident_type']),
+            'severity'           => $row['severity'],
+            'severity_label'     => incidentSeverityLabel($row['severity']),
+            'is_unknown_patient' => $isUnknown,
+            'patient_name'       => $isUnknown ? null : ($unmasked ? $row['patient_name'] : maskPatientName($row['patient_name'])),
+            'estimated_age'      => $row['estimated_age'],
+            'gender_label'       => $row['gender'] ? incidentGenderLabel($row['gender']) : null,
+            'phone'              => $row['phone'] ? ($unmasked ? $row['phone'] : maskPatientPhone($row['phone'])) : null,
+            'notes'              => $unmasked ? $row['notes'] : null,
+            'reporter_name'      => $row['reporter_name'],
+            'is_external'        => (bool) $row['is_external'],
+            'guest_org_name'     => $row['guest_org_name'],
+            'team_label'         => $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized'),
+            'lat'                => $row['lat'] !== null ? (float) $row['lat'] : null,
+            'lng'                => $row['lng'] !== null ? (float) $row['lng'] : null,
+            'created_at'         => date('d/m H:i', strtotime($row['created_at'])),
+            'acknowledged_at'    => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
+        ];
+    }, $rows);
+}
+
+/**
+ * mission-report-print.php: every incident from the mission (resolved or not
+ * — unlike loadUnresolvedIncidentsForMission() above, a closed-mission PDF
+ * must show the full history), always masked (PDF is print/export, never
+ * command-staff-only screen) and never including notes (staff-only, per the
+ * mission owner's privacy decision — see mission_incidents migration).
+ * Deliberately its own query rather than reusing computeMissionResponseReport()
+ * — incidents are NOT wired into that function's scoring pipeline (see the
+ * mission_incidents migration's docblock for why).
+ */
+function loadIncidentDetailForMissionReport(int $missionId): array {
+    $rows = dbFetchAll(
+        "SELECT i.incident_type, i.severity, i.is_unknown_patient, i.patient_name, i.phone,
+                i.estimated_age, i.gender, i.outcome, i.outcome_location, i.team_id,
+                i.created_at, i.acknowledged_at, i.resolved_at,
+                u.name AS reporter_name, mt.codename, mt.team_number
+         FROM mission_incidents i
+         JOIN users u ON u.id = i.reporter_id
+         LEFT JOIN mission_teams mt ON mt.id = i.team_id
+         WHERE i.mission_id = ?
+         ORDER BY FIELD(i.severity, 'critical', 'high', 'medium', 'low'), i.created_at ASC",
+        [$missionId]
+    );
+
+    return array_map(function ($row) {
+        $isUnknown = (bool) $row['is_unknown_patient'];
+        return [
+            'severity'         => $row['severity'],
+            'severity_label'   => incidentSeverityLabel($row['severity']),
+            'type_label'       => incidentTypeLabel($row['incident_type']),
+            'who'              => $isUnknown ? t('incident.unknown_patient_label') : maskPatientName((string) $row['patient_name']),
+            'phone'            => $row['phone'] ? maskPatientPhone($row['phone']) : null,
+            'estimated_age'    => $row['estimated_age'],
+            'gender_label'     => $row['gender'] ? incidentGenderLabel($row['gender']) : null,
+            'outcome_label'    => $row['outcome'] ? incidentOutcomeLabel($row['outcome']) : null,
+            'outcome_location' => $row['outcome_location'],
+            'reporter_name'    => $row['reporter_name'],
+            'team_label'       => $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized'),
+            'created_at'       => $row['created_at'],
+            'acknowledged_at'  => $row['acknowledged_at'],
+            'resolved_at'      => $row['resolved_at'],
+        ];
+    }, $rows);
+}
+
+/**
  * War Room: open (unresolved) SOS alerts for the command-staff alarm overlay +
  * "Ειδοποιήσεις SOS" card. Caller MUST gate this behind $canManageWarRoom before
  * calling — reporter identity and live location are sensitive, this function has

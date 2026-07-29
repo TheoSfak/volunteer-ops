@@ -27,6 +27,10 @@ define('WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS', [
     'mission-dispatch.php', 'mission-order.php', 'mission-sos.php',
     'mission-shortage.php', 'mission-history.php', 'mission-response-report.php',
     'mission-track.php', 'geocode-address.php', 'api-push-subscribe.php',
+    // mission-incident.php (Action Room incident/casualty log, added alongside
+    // mission-shortage.php/mission-route.php above) — same background-throttling
+    // force-logout risk as every other War Room AJAX endpoint on this list.
+    'mission-incident.php',
     // Route Orders (mission-route.php, shipped v3.124.0, well after this list
     // was first built) was missed entirely — every depart/arrive/complete/skip
     // tap hit the same background-throttling-triggered force-logout this list

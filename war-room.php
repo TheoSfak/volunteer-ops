@@ -499,6 +499,67 @@ if (isPost()) {
             setFlash('success', t('shortage.submitted_flash'));
         }
         redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'report_incident') {
+        if (!$isApprovedParticipant) {
+            setFlash('error', t('wr.perm.report_incident'));
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $allowedTypes = array_keys(INCIDENT_TYPE_LABELS);
+        $allowedSeverities = ['low', 'medium', 'high', 'critical'];
+        $incidentType = post('incident_type');
+        $severity = post('severity');
+        $isUnknownPatient = post('is_unknown_patient') === '1';
+        $patientName = $isUnknownPatient ? '' : mb_substr(trim((string) post('patient_name')), 0, 255);
+        $estimatedAge = mb_substr(trim((string) post('estimated_age')), 0, 50);
+        $gender = post('gender');
+        $allowedGenders = array_keys(INCIDENT_GENDER_LABELS);
+        $phone = $isUnknownPatient ? '' : mb_substr(trim((string) post('phone')), 0, 30);
+        $notes = mb_substr(trim((string) post('notes')), 0, 2000);
+        $lat = post('lat') !== '' ? (float) post('lat') : null;
+        $lng = post('lng') !== '' ? (float) post('lng') : null;
+
+        if (!in_array($incidentType, $allowedTypes, true) || !in_array($severity, $allowedSeverities, true)) {
+            setFlash('error', t('incident.invalid_fields'));
+        } elseif (!$isUnknownPatient && $patientName === '') {
+            setFlash('warning', t('incident.missing_fields'));
+        } elseif ($gender !== '' && !in_array($gender, $allowedGenders, true)) {
+            setFlash('error', t('incident.invalid_fields'));
+        } else {
+            $teamId = getUserTeamIdForMission($missionId, $user['id']);
+            $incidentId = dbInsert(
+                "INSERT INTO mission_incidents
+                    (mission_id, reporter_id, team_id, lat, lng, incident_type, severity,
+                     is_unknown_patient, patient_name, estimated_age, gender, phone, notes, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+                [
+                    $missionId, $user['id'], $teamId, $lat, $lng, $incidentType, $severity,
+                    $isUnknownPatient ? 1 : 0, $patientName ?: null, $estimatedAge ?: null,
+                    $gender ?: null, $phone ?: null, $notes ?: null,
+                ]
+            );
+            logAudit('report_mission_incident', 'mission_incidents', $incidentId, null, ['mission_id' => $missionId, 'severity' => $severity]);
+
+            $recipientIds = getMissionCommandStaffIds($missionId, $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, (int) $user['id']);
+            $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+            $incidentRecipientLangs = getUserLanguages($recipientIds);
+            foreach ($recipientIds as $recipientId) {
+                $lang = $incidentRecipientLangs[$recipientId] ?? DEFAULT_LANGUAGE;
+                $notifTitle = t('incident.notify_title', ['mission' => $mission['title']], $lang);
+                $notifMessage = t('incident.notify_message', [
+                    'name' => h($user['name']),
+                    'type' => incidentTypeLabel($incidentType, $lang),
+                    'severity' => incidentSeverityLabel($severity, $lang),
+                ], $lang);
+                $pushData = ['url' => $warRoomUrl, 'tag' => 'incident-report-mission-' . $missionId, 'bannerMission' => $missionId, 'vibrate' => [300, 100, 300, 100, 500]];
+                // Always mandatory (empty code, same as orders/SOS/needs_help) — a
+                // person needing help can never be silently muted by an admin's
+                // own notification preference, unlike shortage's low/medium tier.
+                sendNotification($recipientId, $notifTitle, $notifMessage, 'danger', '', $pushData);
+            }
+            setFlash('success', t('incident.submitted_flash'));
+        }
+        redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'toggle_field_mode') {
         $newFieldMode = $fieldMode ? '0' : '1';
         setcookie('wr_field_mode', $newFieldMode, [
@@ -740,6 +801,7 @@ if (get('ajax') === '1') {
     $myTasks = loadMyTaskOrdersForUser($missionId, (int)$user['id']);
     $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
+    $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
     $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
     $onlinePresence = loadOnlinePresenceUserIds($missionId);
     $annotations = loadMissionAnnotationsForMission($missionId);
@@ -754,6 +816,7 @@ if (get('ajax') === '1') {
         'myTasks' => $myTasks,
         'routes' => $routes,
         'shortageReports' => $shortageReports,
+        'incidents' => $incidents,
         'sosAlerts' => $sosAlerts,
         'onlinePresence' => $onlinePresence,
         'pingStaleness' => $pingIsStaleByVolunteerId,
@@ -814,6 +877,7 @@ $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRo
 $myTasks = loadMyTaskOrdersForUser($missionId, (int)$user['id']);
 $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
+$incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $annotations = loadMissionAnnotationsForMission($missionId);
 $teamProximity = $loadTeamProximity();
@@ -1512,6 +1576,48 @@ include __DIR__ . '/includes/header.php';
                 </form>
             </div>
         </div>
+
+        <div class="card shadow-sm mb-4 border-danger">
+            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('incident.card_title') ?></h5></div>
+            <div class="card-body">
+                <form method="post" id="incidentReportForm">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="report_incident">
+                    <input type="hidden" name="lat" id="incidentLat" value="">
+                    <input type="hidden" name="lng" id="incidentLng" value="">
+                    <label class="form-label small fw-semibold"><?= t('incident.type_label') ?></label>
+                    <select name="incident_type" class="form-select mb-2" required>
+                        <?php foreach (INCIDENT_TYPE_LABELS as $val => $label): ?>
+                        <option value="<?= h($val) ?>"><?= h(incidentTypeLabel($val)) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <label class="form-label small fw-semibold"><?= t('incident.severity_label') ?></label>
+                    <select name="severity" class="form-select mb-2" required>
+                        <?php foreach (SHORTAGE_SEVERITY_LABELS as $val => $label): ?>
+                        <option value="<?= h($val) ?>" <?= $val === 'medium' ? 'selected' : '' ?>><?= h(incidentSeverityLabel($val)) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-check mb-2">
+                        <input type="checkbox" class="form-check-input" name="is_unknown_patient" value="1" id="incidentUnknownPatient">
+                        <label class="form-check-label small" for="incidentUnknownPatient"><?= t('incident.unknown_patient_label') ?></label>
+                    </div>
+                    <div id="incidentPatientFields">
+                        <input type="text" name="patient_name" class="form-control mb-2" maxlength="255" placeholder="<?= t('incident.patient_name_placeholder') ?>">
+                        <input type="tel" name="phone" class="form-control mb-2" maxlength="30" placeholder="<?= t('incident.phone_placeholder') ?>">
+                    </div>
+                    <input type="text" name="estimated_age" class="form-control mb-2" maxlength="50" placeholder="<?= t('incident.age_placeholder') ?>">
+                    <select name="gender" class="form-select mb-2">
+                        <option value=""><?= t('incident.gender_placeholder') ?></option>
+                        <?php foreach (INCIDENT_GENDER_LABELS as $val => $label): ?>
+                        <option value="<?= h($val) ?>"><?= h(incidentGenderLabel($val)) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <textarea name="notes" class="form-control mb-2" rows="2" maxlength="2000" placeholder="<?= t('incident.notes_placeholder') ?>"></textarea>
+                    <div class="small text-muted mb-2"><?= t('incident.staff_only_hint') ?></div>
+                    <button type="submit" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('incident.submit_btn') ?></button>
+                </form>
+            </div>
+        </div>
         <?php endif; ?>
 
         <?php if (!$fieldMode): ?>
@@ -1539,7 +1645,18 @@ include __DIR__ . '/includes/header.php';
                 <div id="shortageReportsList"></div>
             </div>
         </div>
+        <?php endif; ?>
 
+        <?php if (($canManageWarRoom || $isApprovedParticipant) && !$fieldMode): ?>
+        <div class="card shadow-sm mb-4 border-danger">
+            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('incident.list_panel_title') ?></h5></div>
+            <div class="card-body">
+                <div id="incidentsList"></div>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($canManageWarRoom && !$fieldMode): ?>
         <div class="card shadow-sm mb-4 border-danger">
             <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-megaphone-fill me-1 text-danger"></i><?= t('global_message.card_title') ?></h5></div>
             <div class="card-body">
@@ -1958,6 +2075,12 @@ const allApprovedForRoute = <?= json_encode(array_values(array_map(
     $distinctApprovedById
 )), JSON_UNESCAPED_UNICODE) ?>;
 let shortageReports = <?= json_encode($shortageReports) ?>;
+let missionIncidents = <?= json_encode($incidents) ?>;
+// Regular participants see the same masked incidentsList as command staff (unlike
+// shortageReportsList, which never renders for them at all) — this flag is what
+// hides the seen/resolve action buttons for everyone except command staff, since
+// the server already strips patient name/phone/notes from their copy of the data.
+const canManageIncidents = <?= json_encode($canManageWarRoom) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
 
 // Field Mode only, automatic — keeps the screen from sleeping so passive
@@ -1982,7 +2105,7 @@ if (fieldMode) {
         if (document.visibilityState === 'visible') requestWarRoomWakeLock();
     });
 }
-let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null;
+let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
@@ -2012,6 +2135,7 @@ if (!fieldMode) {
     // (not used for buttons today, but keeps the two "War Room order" layers
     // consistent in case a future popup action needs it).
     routeLayer = L.featureGroup().addTo(map);
+    incidentLayer = L.featureGroup().addTo(map);
 }
 const ANNOTATION_COLOR = '#1f2937';
 // Battle-map annotation tool state — a plain toggle over the same live map
@@ -3470,6 +3594,103 @@ function renderShortageReports(items) {
     list.querySelectorAll('.shortage-not-resolved-btn').forEach(btn => btn.addEventListener('click', () => submitShortageOutcome(btn, 'not_resolved')));
 }
 
+const INCIDENT_OUTCOME_OPTIONS = [
+    ['stayed_on_site', 'incident.outcome.stayed_on_site'],
+    ['transported', 'incident.outcome.transported'],
+    ['declined', 'incident.outcome.declined'],
+    ['deceased', 'incident.outcome.deceased'],
+];
+
+// Same whole-array-JSON signature technique as renderShortageReports() above —
+// also folds in canManageIncidents so a card never gets stuck mid-render if
+// that ever changed within a session (it can't today, but costs nothing).
+let missionIncidentsRenderedSig = null;
+function renderMissionIncidents(items) {
+    const list = document.getElementById('incidentsList');
+    if (!list) return;
+    const sig = canManageIncidents + '|' + items.map(r => r.id + ':' + (r.acknowledged_at ? '1' : '0')).join(',');
+    if (sig === missionIncidentsRenderedSig) return;
+    missionIncidentsRenderedSig = sig;
+
+    if (!items.length) {
+        list.innerHTML = '<p class="text-muted mb-0">' + t('incident.empty_list') + '</p>';
+        return;
+    }
+    const sevColor = {low: 'secondary', medium: 'info', high: 'warning', critical: 'danger'};
+    list.innerHTML = items.map(r => {
+        const who = r.is_unknown_patient ? t('incident.unknown_patient_label') : (r.patient_name || '—');
+        const details = [r.estimated_age, r.gender_label, r.phone].filter(Boolean).join(' · ');
+        const outcomeOptions = INCIDENT_OUTCOME_OPTIONS.map(([val, key]) => `<option value="${val}">${t(key)}</option>`).join('');
+        return `
+        <div class="border rounded p-2 mb-2">
+            <div><span class="badge bg-${sevColor[r.severity] || 'secondary'}">${r.severity_label}</span> <strong>${r.type_label}</strong> — ${escapeHtml(who)}</div>
+            ${details ? `<div class="small mt-1">${escapeHtml(details)}</div>` : ''}
+            ${r.notes ? `<div class="small fst-italic mt-1">"${escapeHtml(r.notes)}"</div>` : ''}
+            <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.guest_org_name)} (${escapeHtml(r.team_label)}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
+            ${canManageIncidents ? `<div class="mt-1 d-flex gap-1">${r.acknowledged_at
+                ? `<select class="form-select form-select-sm incident-outcome-select" data-incident-id="${r.id}"><option value="">${t('incident.outcome_label')}…</option>${outcomeOptions}</select>
+                   <input type="text" class="form-control form-control-sm incident-outcome-location-input d-none" data-incident-id="${r.id}" maxlength="255" placeholder="${t('incident.outcome_location_placeholder')}">
+                   <button type="button" class="btn btn-sm btn-success flex-fill incident-resolve-btn" data-incident-id="${r.id}">${t('shortage.resolve_btn')}</button>`
+                : `<button type="button" class="btn btn-sm btn-warning w-100 incident-seen-btn" data-incident-id="${r.id}">${t('shortage.seen_btn')}</button>`}</div>` : ''}
+        </div>
+    `;
+    }).join('');
+    if (!canManageIncidents) return;
+
+    list.querySelectorAll('.incident-outcome-select').forEach(sel => sel.addEventListener('change', () => {
+        const locInput = list.querySelector(`.incident-outcome-location-input[data-incident-id="${sel.dataset.incidentId}"]`);
+        if (locInput) locInput.classList.toggle('d-none', sel.value !== 'transported');
+    }));
+    list.querySelectorAll('.incident-seen-btn').forEach(btn => btn.addEventListener('click', () => {
+        btn.disabled = true;
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'seen', incident_id: btn.dataset.incidentId});
+        fetch('mission-incident.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                const item = missionIncidents.find(x => String(x.id) === btn.dataset.incidentId);
+                if (item) item.acknowledged_at = item.acknowledged_at || t('common.now');
+                renderMissionIncidents(missionIncidents);
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
+        }).catch(() => { btn.disabled = false; });
+    }));
+    list.querySelectorAll('.incident-resolve-btn').forEach(btn => btn.addEventListener('click', () => {
+        const sel = list.querySelector(`.incident-outcome-select[data-incident-id="${btn.dataset.incidentId}"]`);
+        const outcome = sel ? sel.value : '';
+        if (!outcome) { alert(t('incident.pick_outcome_first')); return; }
+        const locInput = list.querySelector(`.incident-outcome-location-input[data-incident-id="${btn.dataset.incidentId}"]`);
+        btn.disabled = true;
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'resolve', incident_id: btn.dataset.incidentId, outcome, outcome_location: locInput ? locInput.value : ''});
+        fetch('mission-incident.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                missionIncidents = missionIncidents.filter(x => String(x.id) !== btn.dataset.incidentId);
+                renderMissionIncidents(missionIncidents);
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
+        }).catch(() => { btn.disabled = false; });
+    }));
+}
+
+// Live map pin per incident — view-only (no seen/resolve controls in the popup,
+// same split as route waypoints: actions live in the sidebar panel, the map is
+// for "where"). Skips any incident reported without a GPS fix (geolocation
+// denied/unavailable) rather than guessing a location for it.
+function renderIncidentLayer(items) {
+    if (!incidentLayer) return;
+    incidentLayer.clearLayers();
+    const sevColor = {low: '#6c757d', medium: '#0dcaf0', high: '#f59e0b', critical: '#dc3545'};
+    (items || []).filter(r => r.lat !== null && r.lng !== null).forEach(r => {
+        const icon = L.divIcon({
+            className: '',
+            html: `<div style="background:${sevColor[r.severity] || '#6c757d'};color:#fff;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 1px 4px #0008;"><i class="bi bi-heart-pulse-fill"></i></div>`,
+            iconSize: [26, 26], iconAnchor: [13, 13],
+        });
+        const who = r.is_unknown_patient ? t('incident.unknown_patient_label') : (r.patient_name || '—');
+        const details = [r.estimated_age, r.gender_label, r.phone].filter(Boolean).join(' · ');
+        const popupHtml = `<strong>${r.severity_label} — ${r.type_label}</strong><br>${escapeHtml(who)}` +
+            (details ? `<br><span class="small">${escapeHtml(details)}</span>` : '') +
+            `<br><span class="small text-muted">${escapeHtml(r.team_label)} · ${r.created_at}</span>`;
+        L.marker([r.lat, r.lng], {icon}).addTo(incidentLayer).bindPopup(popupHtml);
+    });
+}
+
 // Same whole-array-JSON signature technique as the other render*() functions.
 let sosAlertsRenderedSig = null;
 function renderSosAlerts(items) {
@@ -3574,11 +3795,31 @@ wireMediaInput('photoGalleryInput', t('media.photo_label'));
 wireMediaInput('videoCaptureInput', t('media.video_label'));
 wireMediaInput('videoGalleryInput', t('media.video_label'));
 
+(function wireIncidentReportForm() {
+    const form = document.getElementById('incidentReportForm');
+    if (!form) return;
+    // Best-effort, non-blocking — same "denied/unavailable never blocks submission"
+    // rule as every other geolocation call in this file. Captured once up front
+    // rather than on submit so a slow/denied GPS fix never delays sending the report.
+    navigator.geolocation.getCurrentPosition(pos => {
+        document.getElementById('incidentLat').value = pos.coords.latitude;
+        document.getElementById('incidentLng').value = pos.coords.longitude;
+    }, () => {}, {enableHighAccuracy: true, timeout: 10000});
+
+    const unknownCheckbox = document.getElementById('incidentUnknownPatient');
+    const patientFields = document.getElementById('incidentPatientFields');
+    unknownCheckbox.addEventListener('change', () => {
+        patientFields.classList.toggle('d-none', unknownCheckbox.checked);
+        patientFields.querySelectorAll('input').forEach(input => { input.disabled = unknownCheckbox.checked; });
+    });
+})();
+
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); }
     renderMyTasks(myTasks);
     renderMyRoutes(routes);
     renderShortageReports(shortageReports);
+    renderMissionIncidents(missionIncidents);
     renderSosAlerts(sosAlerts);
     renderNearbyTeams(nearbyTeams);
     if (!fieldMode) updateSosAlarmState(sosAlerts);
@@ -4320,6 +4561,11 @@ function pollWarRoomData() {
             if (!fieldMode) { renderRoutesAdmin(routes); renderRouteLayer(routes); }
         }
         if (data.shortageReports) renderShortageReports(shortageReports = data.shortageReports);
+        if (data.incidents) {
+            missionIncidents = data.incidents;
+            renderMissionIncidents(missionIncidents);
+            if (!fieldMode) renderIncidentLayer(missionIncidents);
+        }
         if (data.sosAlerts) {
             renderSosAlerts(sosAlerts = data.sosAlerts);
             if (!fieldMode) updateSosAlarmState(sosAlerts);

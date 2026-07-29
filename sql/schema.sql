@@ -2121,6 +2121,36 @@ CREATE TABLE IF NOT EXISTS `mission_shortage_reports` (
     INDEX `idx_shortage_mission` (`mission_id`, `resolved_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `mission_incidents` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `reporter_id` INT UNSIGNED NOT NULL,
+    `team_id` INT UNSIGNED NULL,
+    `lat` DECIMAL(10,7) NULL,
+    `lng` DECIMAL(10,7) NULL,
+    `incident_type` ENUM('trauma','cardiac','respiratory','fainting','burn','allergic','heat_cold','other') NOT NULL,
+    `severity` ENUM('low','medium','high','critical') NOT NULL DEFAULT 'medium',
+    `is_unknown_patient` TINYINT(1) NOT NULL DEFAULT 0,
+    `patient_name` VARCHAR(255) NULL,
+    `estimated_age` VARCHAR(50) NULL,
+    `gender` ENUM('male','female','unknown') NULL,
+    `phone` VARCHAR(30) NULL,
+    `notes` TEXT NULL COMMENT 'Staff-only context of what happened — never shown in the PDF/stats, only the live command panel',
+    `acknowledged_at` TIMESTAMP NULL,
+    `acknowledged_by` INT UNSIGNED NULL,
+    `resolved_at` TIMESTAMP NULL,
+    `resolved_by` INT UNSIGNED NULL,
+    `outcome` ENUM('stayed_on_site','transported','declined','deceased') NULL,
+    `outcome_location` VARCHAR(255) NULL COMMENT 'Where transported to, only meaningful when outcome=transported',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`reporter_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`acknowledged_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`resolved_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_incident_mission` (`mission_id`, `resolved_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- =============================================
 -- MISSION PRESENCE (War Room live "who has this open" tracking)
 -- =============================================

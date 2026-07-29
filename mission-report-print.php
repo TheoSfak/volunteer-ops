@@ -142,6 +142,12 @@ $shortageDetail = array_map(function ($row) {
     $row['resolved_at'] = $row['resolved_at'] ? date('d/m/Y H:i', strtotime($row['resolved_at'])) : null;
     return $row;
 }, $report['shortageDetail']);
+$incidentDetail = array_map(function ($row) {
+    $row['created_at'] = date('d/m/Y H:i', strtotime($row['created_at']));
+    $row['acknowledged_at'] = $row['acknowledged_at'] ? date('d/m/Y H:i', strtotime($row['acknowledged_at'])) : null;
+    $row['resolved_at'] = $row['resolved_at'] ? date('d/m/Y H:i', strtotime($row['resolved_at'])) : null;
+    return $row;
+}, loadIncidentDetailForMissionReport($missionId));
 
 $totalOrders = count($report['detail']);
 $fulfillCount = count(array_filter($report['detail'], fn($d) => $d['fulfill_minutes'] !== null));
@@ -881,6 +887,20 @@ $printDate = date('d/m/Y H:i');
         <div class="event-row">
             <div><span class="badge badge-<?= SHORTAGE_SEVERITY_COLORS[$d['severity']] ?? 'secondary' ?>"><?= h($d['severity_label']) ?></span> <?= h($d['type_label']) ?> <strong><?= h($d['team_label']) ?></strong> — <?= h($d['reporter_name']) ?> («<?= h($d['title']) ?>»)</div>
             <div class="event-time">Στάλθηκε <?= $d['sent_at'] ?> · Είδε <?= $d['seen_at'] ? $d['seen_at'] . ' (' . $d['seen_minutes'] . ' λεπ.)' : '—' ?> · Λύθηκε <?= $d['resolved_at'] ? $d['resolved_at'] . ' (' . $d['resolved_minutes'] . ' λεπ.)' : '—' ?></div>
+        </div>
+        <?php endforeach; ?>
+    <?php endif; ?>
+</div>
+
+<div class="pr-card">
+    <h2>🚑 Περιστατικά &mdash; Ανά Σοβαρότητα</h2>
+    <?php if (empty($incidentDetail)): ?>
+        <p class="pr-empty">Δεν έχουν καταγραφεί περιστατικά.</p>
+    <?php else: ?>
+        <?php foreach ($incidentDetail as $d): ?>
+        <div class="event-row">
+            <div><span class="badge badge-<?= SHORTAGE_SEVERITY_COLORS[$d['severity']] ?? 'secondary' ?>"><?= h($d['severity_label']) ?></span> <?= h($d['type_label']) ?> <strong><?= h($d['team_label']) ?></strong> — <?= h($d['reporter_name']) ?> (<?= h($d['who']) ?><?= $d['estimated_age'] || $d['gender_label'] ? ', ' . h(trim($d['estimated_age'] . ' ' . $d['gender_label'])) : '' ?><?= $d['phone'] ? ', ' . h($d['phone']) : '' ?>)</div>
+            <div class="event-time">Αναφέρθηκε <?= $d['created_at'] ?> · Είδε <?= $d['acknowledged_at'] ?: '—' ?> · Έκβαση <?= $d['outcome_label'] ? h($d['outcome_label']) . ($d['outcome_location'] ? ' (' . h($d['outcome_location']) . ')' : '') . ' — ' . $d['resolved_at'] : '—' ?></div>
         </div>
         <?php endforeach; ?>
     <?php endif; ?>

@@ -90,6 +90,9 @@ if (isLoggedIn() && isExternalGuest()) {
         'mission-dispatch.php', 'mission-order.php', 'mission-sos.php',
         'mission-shortage.php', 'mission-history.php', 'mission-response-report.php',
         'mission-track.php', 'ping-location.php', 'volunteer-status.php',
+        // mission-incident.php — new endpoint, same guest-lockdown gap class
+        // mission-route.php hit above; allow-listed from day one this time.
+        'mission-incident.php',
         'geocode-address.php', 'api-push-subscribe.php',
         'mission-certificate-print.php', 'certificate-verify.php',
         'mission-guest-debrief.php', 'export-mission-activity.php', 'export-mission-chat.php',
