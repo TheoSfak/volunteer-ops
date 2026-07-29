@@ -4677,7 +4677,8 @@ function renderRouteLayer(allRoutes) {
             const label = wp.label ? escapeHtml(wp.label) : t('route.waypoint_fallback_label', {seq: wp.seq});
             const popupHtml = `<strong>${escapeHtml(route.team_label || '')} — ${wp.seq}. ${label}</strong>` +
                 (wp.instructions ? `<br><span class="small">${escapeHtml(wp.instructions)}</span>` : '') +
-                (statusText ? `<br><span class="small text-muted">${statusText}</span>` : '');
+                (statusText ? `<br><span class="small text-muted">${statusText}</span>` : '') +
+                `<br><a href="${routeWaypointDirectionsUrl(wp)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
             L.marker([wp.lat, wp.lng], {icon}).addTo(routeLayer).bindPopup(popupHtml);
         });
         const coords = route.waypoints.map(w => [w.lat, w.lng]);
