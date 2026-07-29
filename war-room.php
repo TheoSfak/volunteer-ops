@@ -1018,6 +1018,13 @@ include __DIR__ . '/includes/header.php';
        query) since a bigger, easier-to-hit button is strictly better on
        desktop too, not just harmless there. */
     .wr-touch-btn { min-height: 44px; padding-top: .55rem; padding-bottom: .55rem; font-size: .95rem; }
+    /* Mobile-only collapse: card-body stays a Bootstrap .collapse (hidden
+       until the header is clicked) below the lg breakpoint, but d-lg-block
+       forces it permanently visible from lg up regardless of collapse
+       state — desktop never needed the tap-to-expand, only phones do. */
+    .wr-collapsible-header { cursor: pointer; }
+    .wr-collapsible-chevron { transition: transform .2s; }
+    .wr-collapsible-header:not(.collapsed) .wr-collapsible-chevron { transform: rotate(180deg); }
     #warRoomMap { height: 520px; border-radius: 12px; }
     #mapCard.map-fullscreen-active { position: fixed; inset: 0; z-index: 1040; border-radius: 0; }
     #mapCard.map-fullscreen-active #warRoomMap { height: 100%; border-radius: 0; }
@@ -1343,6 +1350,33 @@ include __DIR__ . '/includes/header.php';
 </div>
 <?php endif; ?>
 
+<?php if (($canManageWarRoom || $isApprovedParticipant) && !$fieldMode): ?>
+<div class="row g-4 mb-4">
+    <?php if ($canManageWarRoom): ?>
+    <div class="col-12 col-md-6">
+        <div class="card shadow-sm h-100 border-danger">
+            <div class="card-header bg-danger bg-opacity-10 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#shortageListCollapse" role="button" aria-expanded="false" aria-controls="shortageListCollapse">
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i><?= t('shortage.list_panel_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
+            </div>
+            <div class="card-body collapse d-lg-block" id="shortageListCollapse">
+                <div id="shortageReportsList"></div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+    <div class="<?= $canManageWarRoom ? 'col-12 col-md-6' : 'col-12' ?>">
+        <div class="card shadow-sm h-100 border-danger">
+            <div class="card-header bg-danger bg-opacity-10 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#incidentsListCollapse" role="button" aria-expanded="false" aria-controls="incidentsListCollapse">
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('incident.list_panel_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
+            </div>
+            <div class="card-body collapse d-lg-block" id="incidentsListCollapse">
+                <div id="incidentsList"></div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <div class="row g-4">
     <?php if (!$fieldMode): ?>
     <div class="col-12 col-lg-8">
@@ -1642,22 +1676,6 @@ include __DIR__ . '/includes/header.php';
             <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="bi bi-sos me-1"></i><?= t('sos.panel_title') ?></h5></div>
             <div class="card-body">
                 <div id="sosAlertsList"><p class="text-muted mb-0"><?= t('sos.empty') ?></p></div>
-            </div>
-        </div>
-
-        <div class="card shadow-sm mb-4 border-danger">
-            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i><?= t('shortage.list_panel_title') ?></h5></div>
-            <div class="card-body">
-                <div id="shortageReportsList"></div>
-            </div>
-        </div>
-        <?php endif; ?>
-
-        <?php if (($canManageWarRoom || $isApprovedParticipant) && !$fieldMode): ?>
-        <div class="card shadow-sm mb-4 border-danger">
-            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('incident.list_panel_title') ?></h5></div>
-            <div class="card-body">
-                <div id="incidentsList"></div>
             </div>
         </div>
         <?php endif; ?>
