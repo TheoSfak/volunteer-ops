@@ -5284,6 +5284,74 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 111,
+            'description' => 'Create mission_incidents — structured incident/casualty log for Medical/Rescue missions, a parallel to mission_shortage_reports but for a person encountered/treated in the field instead of a supply shortage. Patient identity (name/age/gender/phone) is captured once at report time; outcome is set separately at resolve time, same two-step ack/resolve shape as shortage reports. Deliberately NOT wired into computeMissionScore() — kept as a standalone log for now, matching the "plain log first" incremental plan agreed with the mission owner.',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_incidents'"
+                );
+                if (!$table) {
+                    // patient_name/estimated_age/gender/phone are all nullable together:
+                    // is_unknown_patient=1 covers an unconscious/unidentified patient where
+                    // none of them can be filled in. lat/lng mirror mission_photos' geotag
+                    // columns (nullable — browser geolocation can be denied, never blocks
+                    // submission). outcome/outcome_location are set at resolve time, not
+                    // report time, same split as mission_shortage_reports.outcome_note.
+                    dbExecute(
+                        "CREATE TABLE mission_incidents (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            reporter_id INT UNSIGNED NOT NULL,
+                            team_id INT UNSIGNED NULL,
+                            lat DECIMAL(10,7) NULL,
+                            lng DECIMAL(10,7) NULL,
+                            incident_type ENUM('trauma','cardiac','respiratory','fainting','burn','allergic','heat_cold','other') NOT NULL,
+                            severity ENUM('low','medium','high','critical') NOT NULL DEFAULT 'medium',
+                            is_unknown_patient TINYINT(1) NOT NULL DEFAULT 0,
+                            patient_name VARCHAR(255) NULL,
+                            estimated_age VARCHAR(50) NULL,
+                            gender ENUM('male','female','unknown') NULL,
+                            phone VARCHAR(30) NULL,
+                            notes TEXT NULL COMMENT 'Staff-only context of what happened — never shown in the PDF/stats, only the live command panel',
+                            acknowledged_at TIMESTAMP NULL,
+                            acknowledged_by INT UNSIGNED NULL,
+                            resolved_at TIMESTAMP NULL,
+                            resolved_by INT UNSIGNED NULL,
+                            outcome ENUM('stayed_on_site','transported','declined','deceased') NULL,
+                            outcome_location VARCHAR(255) NULL COMMENT 'Where transported to, only meaningful when outcome=transported',
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
+                            FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL,
+                            FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL,
+                            FOREIGN KEY (resolved_by) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_incident_mission (mission_id, resolved_at)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                // Command-staff notifications, same three-stage shape as shortage reports
+                // (report is always mandatory/loud — sent via empty code below, not
+                // configurable — seen/resolved are the two configurable codes).
+                $codes = [
+                    ['mission_incident_seen',     'Έλεγχος Περιστατικού',   'Το επιτελείο είδε μια αναφορά περιστατικού — ειδοποιεί την ομάδα/τον αναφέροντα (μόνο push/εντός εφαρμογής, όχι email)'],
+                    ['mission_incident_resolved', 'Επίλυση Περιστατικού',   'Το επιτελείο έκλεισε μια αναφορά περιστατικού με έκβαση — ειδοποιεί την ομάδα/τον αναφέροντα (μόνο push/εντός εφαρμογής, όχι email)'],
+                ];
+                foreach ($codes as [$code, $name, $description]) {
+                    $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = ?", [$code]);
+                    if (!$ns) {
+                        dbInsert(
+                            "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                             VALUES (?, ?, ?, 1, NULL)",
+                            [$code, $name, $description]
+                        );
+                    }
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

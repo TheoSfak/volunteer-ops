@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.144.1');
-define('DB_SCHEMA_VERSION', 110);
+define('APP_VERSION', '3.145.0');
+define('DB_SCHEMA_VERSION', 111);
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
@@ -288,6 +288,32 @@ define('SHORTAGE_SEVERITY_COLORS', [
     'medium'   => 'info',
     'high'     => 'warning',
     'critical' => 'danger',
+]);
+
+// War Room incident/casualty reports — severity reuses SHORTAGE_SEVERITY_LABELS/COLORS
+// (same low/medium/high/critical scale) rather than duplicating it.
+define('INCIDENT_TYPE_LABELS', [
+    'trauma'      => 'Τραύμα',
+    'cardiac'     => 'Ανακοπή',
+    'respiratory' => 'Αναπνευστικό',
+    'fainting'    => 'Λιποθυμία / Απώλεια αισθήσεων',
+    'burn'        => 'Έγκαυμα',
+    'allergic'    => 'Αλλεργική αντίδραση',
+    'heat_cold'   => 'Θερμοπληξία / Υποθερμία',
+    'other'       => 'Άλλο',
+]);
+
+define('INCIDENT_OUTCOME_LABELS', [
+    'stayed_on_site' => 'Παρέμεινε επί τόπου',
+    'transported'     => 'Διακομίστηκε',
+    'declined'        => 'Αρνήθηκε βοήθεια',
+    'deceased'        => 'Θανατηφόρο',
+]);
+
+define('INCIDENT_GENDER_LABELS', [
+    'male'    => 'Άνδρας',
+    'female'  => 'Γυναίκα',
+    'unknown' => 'Άγνωστο',
 ]);
 
 

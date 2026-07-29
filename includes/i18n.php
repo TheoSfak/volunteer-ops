@@ -75,6 +75,36 @@ function shortageSeverityLabel(string $severity, ?string $lang = null): string {
 }
 
 /**
+ * War Room incident reports — same translated-key-with-constant-fallback shape as
+ * shortageTypeLabel()/shortageSeverityLabel() above. incidentSeverityLabel() falls
+ * back to SHORTAGE_SEVERITY_LABELS (not a separate INCIDENT_SEVERITY_LABELS) since
+ * the low/medium/high/critical scale itself is shared, not reinvented.
+ */
+function incidentTypeLabel(string $type, ?string $lang = null): string {
+    $key = 'incident.type.' . $type;
+    $translated = t($key, [], $lang);
+    return $translated !== $key ? $translated : (INCIDENT_TYPE_LABELS[$type] ?? $type);
+}
+
+function incidentSeverityLabel(string $severity, ?string $lang = null): string {
+    $key = 'incident.severity.' . $severity;
+    $translated = t($key, [], $lang);
+    return $translated !== $key ? $translated : (SHORTAGE_SEVERITY_LABELS[$severity] ?? $severity);
+}
+
+function incidentOutcomeLabel(string $outcome, ?string $lang = null): string {
+    $key = 'incident.outcome.' . $outcome;
+    $translated = t($key, [], $lang);
+    return $translated !== $key ? $translated : (INCIDENT_OUTCOME_LABELS[$outcome] ?? $outcome);
+}
+
+function incidentGenderLabel(string $gender, ?string $lang = null): string {
+    $key = 'incident.gender.' . $gender;
+    $translated = t($key, [], $lang);
+    return $translated !== $key ? $translated : (INCIDENT_GENDER_LABELS[$gender] ?? $gender);
+}
+
+/**
  * Batch version for notification fan-out: one query for however many recipients,
  * never N+1. Returns [user_id => 'el'|'en'] for every id in $userIds.
  */
