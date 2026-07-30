@@ -398,7 +398,7 @@ foreach ($incidentRows as $row) {
 // collapse to one" design), but "checked" fires once per POI, not once per
 // photo merged into it.
 $poiPhotoRows = dbFetchAll(
-    "SELECT ph.created_at, u.name AS actor_name
+    "SELECT ph.poi_note, ph.created_at, u.name AS actor_name
      FROM mission_photos ph
      JOIN users u ON u.id = ph.user_id
      WHERE ph.mission_id = ? AND ph.poi_id IS NOT NULL
@@ -406,9 +406,13 @@ $poiPhotoRows = dbFetchAll(
     [$missionId]
 );
 foreach ($poiPhotoRows as $row) {
+    // Reuses the same dash+quote suffix dispatch labels already use — same
+    // visual shape, no new translation key needed for what's structurally
+    // the same "optional short free text, tacked onto the base sentence".
+    $noteSuffix = $row['poi_note'] ? t('history.label_suffix_dash', ['label' => h($row['poi_note'])], $viewerLang) : '';
     $events[] = [
         'icon' => '📍',
-        'text' => t('history.poi_reported', ['actor' => h($row['actor_name'])], $viewerLang),
+        'text' => t('history.poi_reported', ['actor' => h($row['actor_name'])], $viewerLang) . $noteSuffix,
         'time' => date('d/m H:i', strtotime($row['created_at'])),
         'ts'   => strtotime($row['created_at']),
     ];

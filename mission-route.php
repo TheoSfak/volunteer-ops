@@ -30,9 +30,10 @@ requireLogin();
 
 header('Content-Type: application/json');
 
-// notifyRouteCommandStaff() now lives in includes/functions.php — it gained a
-// second real caller (mission-order.php's acknowledge action, see the Route
-// Order "Ελήφθη" feature) and needed to be shared, not just page-local here.
+// notifyCommandStaffBanner() (formerly notifyRouteCommandStaff()) now lives in
+// includes/functions.php — it gained real callers beyond this page (mission-
+// order.php's acknowledge action, for the Route/Task/Message "Ελήφθη" loud
+// banner) and needed to be shared and order-type-agnostic, not page-local.
 
 /**
  * Notify every member actually assigned to a route about a route-level event
@@ -168,7 +169,7 @@ function maybeCompleteRoute(int $routeId, int $actorId): bool {
     $mission = dbFetchOne("SELECT title, responsible_user_id FROM missions WHERE id = ?", [$route['mission_id']]);
     $teamRow = $route['team_id'] ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$route['team_id']]) : null;
     $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : routeMixedTeamLabel($routeId);
-    notifyRouteCommandStaff(
+    notifyCommandStaffBanner(
         (int) $route['mission_id'], $mission['title'] ?? '', $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $actorId,
         'mission_route_completed', 'route.notify_completed_title', [],
         'route.notify_completed_message', ['team' => $teamLbl, 'mission' => $mission['title'] ?? '']
@@ -551,7 +552,7 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
                 $teamRow = $wp['team_id'] ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$wp['team_id']]) : null;
                 $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : routeMixedTeamLabel((int) $wp['route_id']);
                 $label = $wp['label'] !== null && $wp['label'] !== '' ? $wp['label'] : t('route.waypoint_fallback_label', ['seq' => $wp['seq']]);
-                notifyRouteCommandStaff(
+                notifyCommandStaffBanner(
                     $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
                     'mission_route_arrival', 'route.notify_arrival_title', [],
                     'route.notify_arrival_message', ['team' => $teamLbl, 'label' => $label, 'mission' => $mission['title']]

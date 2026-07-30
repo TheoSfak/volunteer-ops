@@ -5412,6 +5412,20 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 113,
+            'description' => 'Add mission_photos.poi_note — an optional short text a volunteer can attach to a Point of Interest photo (e.g. "found an object that might belong to the missing person"), alongside the photo and its mandatory GPS. Per-photo, not per-POI-group: a merged Point of Interest can carry several notes, one from each reporter, same as it already carries several photos.',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_photos' AND COLUMN_NAME = 'poi_note'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE mission_photos ADD COLUMN poi_note TEXT NULL AFTER poi_id");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

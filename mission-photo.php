@@ -192,6 +192,14 @@ if ($action === 'upload') {
         echo json_encode(['ok' => false, 'error' => t('poi.gps_required')]);
         exit;
     }
+    // Optional — "found an object that might belong to the missing person"
+    // is exactly the kind of context a bare photo can't convey on its own.
+    // Per-photo, not per-POI-group (see mission_points_of_interest schema
+    // docblock): a merged POI can carry several of these, one per reporter.
+    $poiNote = $isPoi ? (trim((string) post('note')) ?: null) : null;
+    if ($poiNote !== null) {
+        $poiNote = mb_substr($poiNote, 0, 500);
+    }
 
     $destDir = __DIR__ . '/uploads/mission-photos/';
     if (!is_dir($destDir)) {
@@ -260,9 +268,9 @@ if ($action === 'upload') {
     }
 
     $photoId = dbInsert(
-        "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, original_name, mime_type, file_size, lat, lng, route_waypoint_id, poi_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $userId, $mediaType, $storedName, $origName, $mime, (int) $file['size'], $lat, $lng, $routeWaypointId, $poiId]
+        "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, original_name, mime_type, file_size, lat, lng, route_waypoint_id, poi_id, poi_note, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $userId, $mediaType, $storedName, $origName, $mime, (int) $file['size'], $lat, $lng, $routeWaypointId, $poiId, $poiNote]
     );
     logAudit('upload_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId, 'media_type' => $mediaType, 'route_waypoint_id' => $routeWaypointId, 'poi_id' => $poiId]);
 

@@ -49,12 +49,13 @@ if ($action === 'acknowledge') {
         dbExecute("UPDATE mission_order_recipients SET acknowledged_at = NOW() WHERE id = ?", [$recipient['id']]);
         logAudit('acknowledge_mission_order', 'mission_order_recipients', $recipient['id'], null, ['order_id' => $orderId]);
 
-        // Route orders specifically get a loud sound alert to command staff
-        // the instant the team acknowledges (bannerMission tag below is what
-        // makes showWarRoomBanner()'s existing playWarRoomAlertSound() call
-        // fire — no new audio code needed). Every other order type's
-        // acknowledge stays exactly as silent as it's always been; this was
-        // asked for routes specifically, not a blanket behavior change.
+        // Route/task/message orders each get a loud sound alert to command
+        // staff the instant the recipient acknowledges (bannerMission tag
+        // below is what makes showWarRoomBanner()'s existing
+        // playWarRoomAlertSound() call fire — no new audio code needed).
+        // Photo/video/location request acknowledges stay exactly as silent
+        // as they've always been; this was asked for these three order
+        // types specifically, not a blanket behavior change.
         if ($recipient['order_type'] === 'route') {
             $route = dbFetchOne(
                 "SELECT r.id AS route_id, r.mission_id, r.team_id, m.title AS mission_title, m.responsible_user_id, mt.codename, mt.team_number
@@ -68,11 +69,35 @@ if ($action === 'acknowledge') {
                 $teamLbl = $route['team_id']
                     ? teamLabel($route['codename'], $route['team_number'])
                     : routeMixedTeamLabel((int) $route['route_id']);
-                notifyRouteCommandStaff(
+                notifyCommandStaffBanner(
                     (int) $route['mission_id'], $route['mission_title'], $route['responsible_user_id'] ? (int) $route['responsible_user_id'] : null, $userId,
                     'mission_route_acknowledged', 'route.notify_acknowledged_title', [],
                     'route.notify_acknowledged_message', ['team' => $teamLbl, 'mission' => $route['mission_title']]
                 );
+            }
+        } elseif (in_array($recipient['order_type'], ['task', 'message'], true)) {
+            $order = dbFetchOne(
+                "SELECT o.mission_id, m.title AS mission_title, m.responsible_user_id
+                 FROM mission_orders o
+                 JOIN missions m ON m.id = o.mission_id
+                 WHERE o.id = ?",
+                [$orderId]
+            );
+            if ($order) {
+                $recipientName = getCurrentUser()['name'] ?? '';
+                if ($recipient['order_type'] === 'task') {
+                    notifyCommandStaffBanner(
+                        (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
+                        'mission_task_acknowledged', 'order.task.notify_acknowledged_title', [],
+                        'order.task.notify_acknowledged_message', ['name' => $recipientName, 'mission' => $order['mission_title']]
+                    );
+                } else {
+                    notifyCommandStaffBanner(
+                        (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
+                        'global_message_acknowledged', 'global_message.notify_acknowledged_title', [],
+                        'global_message.notify_acknowledged_message', ['name' => $recipientName, 'mission' => $order['mission_title']]
+                    );
+                }
             }
         }
     }

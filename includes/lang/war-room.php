@@ -109,12 +109,16 @@ return [
         'order.task.title' => '📋 Νέα Εντολή — {mission}',
         'order.task.broadcast' => 'Δόθηκε εντολή σε εθελοντές της αποστολής «{mission}»: «{text}».',
         'order.task.sent_flash' => 'Στάλθηκε εντολή σε {count} ενεργούς εθελοντές.',
+        'order.task.notify_acknowledged_title' => '👍 Ελήφθη Γενική Εντολή',
+        'order.task.notify_acknowledged_message' => '{name} έλαβε τη Γενική Εντολή της αποστολής «{mission}».',
 
         // Global message
         'global_message.empty_warning' => 'Γράψτε ένα μήνυμα πριν την αποστολή.',
         'global_message.title' => '📢 Καθολικό μήνυμα — {mission}',
         'global_message.broadcast' => 'Στάλθηκε καθολικό μήνυμα στην αποστολή «{mission}».',
         'global_message.sent_flash' => 'Το καθολικό μήνυμα εστάλη σε {count} εθελοντές.',
+        'global_message.notify_acknowledged_title' => '👍 Ελήφθη Καθολικό Μήνυμα',
+        'global_message.notify_acknowledged_message' => '{name} έλαβε το Καθολικό Μήνυμα της αποστολής «{mission}».',
         'global_message.card_title' => 'Καθολικό Μήνυμα',
         'global_message.note' => 'Εμφανίζεται ως κυλιόμενο μήνυμα (60 δευτ.) σε όσους έχουν ανοιχτό το Action Room και στέλνεται ως ειδοποίηση σε όλους τους εγκεκριμένους εθελοντές της αποστολής.',
         'global_message.placeholder' => 'Γράψτε το μήνυμα προς όλους τους εθελοντές…',
@@ -594,6 +598,7 @@ return [
 
         // Points of Interest (mission-photo.php is_poi upload + check_poi action)
         'poi.capture_btn' => '📍 Σημείο Ενδιαφέροντος',
+        'poi.note_placeholder' => 'Σύντομη περιγραφή (προαιρετικό) — π.χ. «βρήκαμε αντικείμενο που πιθανόν ανήκει στον αγνοούμενο»…',
         'poi.list_panel_title' => 'Σημεία Ενδιαφέροντος',
         'poi.gps_required' => 'Απαιτείται στίγμα GPS για Σημείο Ενδιαφέροντος. Ελέγξτε ότι έχετε επιτρέψει την πρόσβαση τοποθεσίας.',
         'poi.no_manage_permission' => 'Δεν έχετε δικαίωμα ελέγχου Σημείων Ενδιαφέροντος.',
@@ -924,11 +929,15 @@ return [
         'order.task.title' => '📋 New Task — {mission}',
         'order.task.broadcast' => 'A task was issued to volunteers of mission "{mission}": "{text}".',
         'order.task.sent_flash' => 'Task sent to {count} active volunteers.',
+        'order.task.notify_acknowledged_title' => '👍 Task Order acknowledged',
+        'order.task.notify_acknowledged_message' => '{name} acknowledged the Task Order for mission "{mission}".',
 
         'global_message.empty_warning' => 'Write a message before sending.',
         'global_message.title' => '📢 Broadcast message — {mission}',
         'global_message.broadcast' => 'A broadcast message was sent to mission "{mission}".',
         'global_message.sent_flash' => 'Broadcast message sent to {count} volunteers.',
+        'global_message.notify_acknowledged_title' => '👍 Broadcast Message acknowledged',
+        'global_message.notify_acknowledged_message' => '{name} acknowledged the Broadcast Message for mission "{mission}".',
         'global_message.card_title' => 'Broadcast Message',
         'global_message.note' => 'Appears as scrolling text (60 sec) to anyone with Action Room open, and is sent as a notification to every approved volunteer of the mission.',
         'global_message.placeholder' => 'Write the message to all volunteers…',
@@ -1375,6 +1384,7 @@ return [
 
         // Points of Interest (mission-photo.php is_poi upload + check_poi action)
         'poi.capture_btn' => '📍 Point of Interest',
+        'poi.note_placeholder' => 'Short description (optional) — e.g. "found an object that might belong to the missing person"…',
         'poi.list_panel_title' => 'Points of Interest',
         'poi.gps_required' => 'GPS location is required for a Point of Interest. Check that location access is allowed.',
         'poi.no_manage_permission' => 'You do not have permission to check Points of Interest.',
