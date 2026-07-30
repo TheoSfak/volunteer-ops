@@ -803,6 +803,7 @@ if (get('ajax') === '1') {
     $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
     $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
     $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
+    $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
     $onlinePresence = loadOnlinePresenceUserIds($missionId);
     $annotations = loadMissionAnnotationsForMission($missionId);
     $teamProximity = $loadTeamProximity();
@@ -818,6 +819,7 @@ if (get('ajax') === '1') {
         'shortageReports' => $shortageReports,
         'incidents' => $incidents,
         'sosAlerts' => $sosAlerts,
+        'pointsOfInterest' => $pointsOfInterest,
         'onlinePresence' => $onlinePresence,
         'pingStaleness' => $pingIsStaleByVolunteerId,
         'annotations' => $annotations,
@@ -879,6 +881,7 @@ $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
 $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
+$pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
 $annotations = loadMissionAnnotationsForMission($missionId);
 $teamProximity = $loadTeamProximity();
 $nearbyTeams = $teamProximity['nearbyTeams'];
@@ -1280,6 +1283,17 @@ include __DIR__ . '/includes/header.php';
                         <input type="file" id="videoGalleryInput" accept="video/*" class="d-none">
                     </label>
                 </div>
+                <!-- Camera capture only, no gallery variant — a Point of
+                     Interest is "I found this right here, right now"; an
+                     old photo picked from the gallery would attach today's
+                     GPS to a find from god-knows-when/where, which defeats
+                     the entire point of the feature. -->
+                <div class="mb-2">
+                    <label class="btn btn-outline-danger w-100 mb-0">
+                        <i class="bi bi-search me-1"></i><?= t('poi.capture_btn') ?>
+                        <input type="file" id="poiCaptureInput" accept="image/*" capture="environment" class="d-none">
+                    </label>
+                </div>
                 <div class="small mb-2" id="mediaUploadStatus"></div>
                 <?php endif; ?>
                 <div id="mediaList" class="flex-grow-1 overflow-auto"></div>
@@ -1369,9 +1383,17 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 
 <?php if (($canManageWarRoom || $isApprovedParticipant) && !$fieldMode): ?>
+<?php
+// Shortage is admin-only, so whenever it's actually present there are
+// guaranteed to be 3 cards in this row (it + incidents + POI, both of the
+// latter always shown to everyone) — a 3-way split. Without it there are
+// only 2 (incidents + POI). Incidents/POI share this same formula since
+// both are always shown together, unlike shortage.
+$actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md-6';
+?>
 <div class="row g-4 mb-4">
     <?php if ($canManageWarRoom): ?>
-    <div class="col-12 col-md-6">
+    <div class="<?= $actionRoomListColClass ?>">
         <div class="card shadow-sm h-100 border-danger">
             <div class="card-header bg-danger bg-opacity-10 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#shortageListCollapse" role="button" aria-expanded="false" aria-controls="shortageListCollapse">
                 <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i><?= t('shortage.list_panel_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
@@ -1382,13 +1404,23 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
     <?php endif; ?>
-    <div class="<?= $canManageWarRoom ? 'col-12 col-md-6' : 'col-12' ?>">
+    <div class="<?= $actionRoomListColClass ?>">
         <div class="card shadow-sm h-100 border-danger">
             <div class="card-header bg-danger bg-opacity-10 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#incidentsListCollapse" role="button" aria-expanded="false" aria-controls="incidentsListCollapse">
                 <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('incident.list_panel_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
             </div>
             <div class="card-body collapse d-lg-block" id="incidentsListCollapse">
                 <div id="incidentsList"></div>
+            </div>
+        </div>
+    </div>
+    <div class="<?= $actionRoomListColClass ?>">
+        <div class="card shadow-sm h-100 border-primary">
+            <div class="card-header bg-primary bg-opacity-10 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#poiListCollapse" role="button" aria-expanded="false" aria-controls="poiListCollapse">
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-search me-1 text-primary"></i><?= t('poi.list_panel_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
+            </div>
+            <div class="card-body collapse d-lg-block" id="poiListCollapse">
+                <div id="poiList"></div>
             </div>
         </div>
     </div>
@@ -2000,6 +2032,10 @@ include __DIR__ . '/includes/header.php';
                     <input type="text" id="dispatchAddressInput" class="form-control" style="max-width:320px;" placeholder="<?= t('dispatch.address_placeholder') ?>">
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="dispatchAddressSearch"><i class="bi bi-search me-1"></i><?= t('dispatch.search_btn') ?></button>
                     <span class="text-muted small" id="dispatchAddressStatus"></span>
+                    <div class="input-group input-group-sm" style="max-width:230px;">
+                        <input type="text" id="dispatchCoordsInput" class="form-control" placeholder="<?= t('dispatch.coords_placeholder') ?>" title="<?= t('dispatch.coords_add_title') ?>">
+                        <button type="button" class="btn btn-outline-secondary" id="dispatchCoordsAddBtn" title="<?= t('dispatch.coords_add_title') ?>"><i class="bi bi-plus-lg"></i></button>
+                    </div>
                     <input type="text" id="dispatchNoteInput" class="form-control" style="max-width:260px;" maxlength="200" placeholder="<?= t('dispatch.note_placeholder') ?>">
                     <div class="ms-auto d-flex gap-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="dispatchClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
@@ -2028,6 +2064,10 @@ include __DIR__ . '/includes/header.php';
                     <input type="text" id="routeAddressInput" class="form-control" style="max-width:260px;" placeholder="<?= t('dispatch.address_placeholder') ?>">
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="routeAddressSearch"><i class="bi bi-search me-1"></i><?= t('dispatch.search_btn') ?></button>
                     <span class="text-muted small" id="routeAddressStatus"></span>
+                    <div class="input-group input-group-sm" style="max-width:230px;">
+                        <input type="text" id="routeCoordsInput" class="form-control" placeholder="<?= t('dispatch.coords_placeholder') ?>" title="<?= t('dispatch.coords_add_title') ?>">
+                        <button type="button" class="btn btn-outline-secondary" id="routeCoordsAddBtn" title="<?= t('dispatch.coords_add_title') ?>"><i class="bi bi-plus-lg"></i></button>
+                    </div>
                     <div class="ms-auto d-flex gap-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="routeClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
                         <button type="button" class="btn btn-success btn-sm" id="routeSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('route.send_btn') ?></button>
@@ -2146,6 +2186,7 @@ let missionIncidents = <?= json_encode($incidents) ?>;
 // the server already strips patient name/phone/notes from their copy of the data.
 const canManageIncidents = <?= json_encode($canManageWarRoom) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
+let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
 
 // Field Mode only, automatic — keeps the screen from sleeping so passive
 // location capture keeps working while a volunteer's phone is out. The
@@ -2169,7 +2210,7 @@ if (fieldMode) {
         if (document.visibilityState === 'visible') requestWarRoomWakeLock();
     });
 }
-let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null;
+let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
@@ -2200,6 +2241,7 @@ if (!fieldMode) {
     // consistent in case a future popup action needs it).
     routeLayer = L.featureGroup().addTo(map);
     incidentLayer = L.featureGroup().addTo(map);
+    poiLayer = L.featureGroup().addTo(map);
 }
 const ANNOTATION_COLOR = '#1f2937';
 // Battle-map annotation tool state — a plain toggle over the same live map
@@ -2259,6 +2301,21 @@ function submitAnnotation(type, geo, label) {
 }
 function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+// Shared by the dispatch and route composers' manual-coordinate-entry field —
+// accepts whatever separator someone pastes a "lat, lng" pair with (comma,
+// space, or both), since that's shared verbatim/read aloud from an outside
+// source (a partner-org radio call, a WhatsApp message) rather than typed
+// field-by-field. Same bounds + "reject exactly 0,0" rule mission-dispatch.php
+// already enforces server-side for admin-drawn points (isValidLatLng) — kept
+// here too so a bad paste is caught before a network round-trip, not after.
+function parseCoordsInput(raw) {
+    const parts = String(raw ?? '').trim().split(/[,\s]+/).map(Number);
+    if (parts.length !== 2 || parts.some(n => !isFinite(n))) return null;
+    const [lat, lng] = parts;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    if (lat === 0 && lng === 0) return null;
+    return {lat, lng};
 }
 // Mirrors guestNameHtml() in includes/functions.php for names that render from
 // a JS poll (chat, media, dispatch, SOS, shortage) rather than server-side PHP.
@@ -3793,6 +3850,71 @@ function renderIncidentLayer(items) {
     });
 }
 
+let poiRenderedSig = null;
+function renderPointsOfInterest(items) {
+    const list = document.getElementById('poiList');
+    if (!list) return;
+    const sig = JSON.stringify(items);
+    if (sig === poiRenderedSig) return;
+    poiRenderedSig = sig;
+
+    if (!items.length) {
+        list.innerHTML = '<p class="text-muted mb-0">' + t('poi.empty_list') + '</p>';
+        return;
+    }
+    // canManageIncidents is really just canManageWarRoom under an
+    // incident-specific name (see its own declaration above) — reused here
+    // rather than adding a second identical constant.
+    list.innerHTML = items.map(p => {
+        const reportedBy = p.reporter_names.length > 1
+            ? t('poi.reported_by_multiple', {count: String(p.reporter_names.length), names: p.reporter_names.map(escapeHtml).join(', ')})
+            : t('poi.reported_by_one', {name: escapeHtml(p.reporter_names[0] || '—')});
+        const thumbs = p.photos.map(photo => photo.media_type === 'video'
+            ? `<video src="mission-photo-view.php?id=${photo.id}" class="media-view-trigger" data-id="${photo.id}" data-media-type="video" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;background:#000;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}" preload="metadata"></video>`
+            : `<img src="mission-photo-view.php?id=${photo.id}" class="media-view-trigger" data-id="${photo.id}" data-media-type="photo" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}">`
+        ).join('');
+        return `
+        <div class="border rounded p-2 mb-2${p.checked_at ? '' : ' border-primary'}">
+            <div class="d-flex flex-wrap gap-1 mb-1">${thumbs}</div>
+            <div class="small">${reportedBy}</div>
+            <div class="text-muted" style="font-size:.75rem;">${p.created_at}${p.checked_at ? t('poi.checked_at_prefix', {time: p.checked_at, name: escapeHtml(p.checked_by_name || '')}) : ''}</div>
+            ${canManageIncidents && !p.checked_at ? `<button type="button" class="btn btn-sm btn-primary w-100 mt-1 poi-check-btn" data-poi-id="${p.id}">${t('poi.check_btn')}</button>` : ''}
+        </div>
+    `;
+    }).join('');
+
+    if (!canManageIncidents) return;
+    list.querySelectorAll('.poi-check-btn').forEach(btn => btn.addEventListener('click', () => {
+        btn.disabled = true;
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'check_poi', mission_id: '<?= $missionId ?>', poi_id: btn.dataset.poiId});
+        fetch('mission-photo.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                const item = pointsOfInterest.find(x => String(x.id) === btn.dataset.poiId);
+                if (item) item.checked_at = item.checked_at || t('common.now');
+                poiRenderedSig = null;
+                renderPointsOfInterest(pointsOfInterest);
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
+        }).catch(() => { btn.disabled = false; });
+    }));
+}
+
+function renderPoiLayer(items) {
+    if (!poiLayer) return;
+    poiLayer.clearLayers();
+    (items || []).forEach(p => {
+        const color = p.checked_at ? '#6c757d' : '#0d6efd';
+        const icon = L.divIcon({
+            className: '',
+            html: `<div style="background:${color};color:#fff;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 1px 4px #0008;"><i class="bi bi-search"></i></div>`,
+            iconSize: [26, 26], iconAnchor: [13, 13],
+        });
+        const reportedBy = p.reporter_names.map(escapeHtml).join(', ');
+        const popupHtml = `<strong>${t('poi.popup_title')}</strong><br>${reportedBy}<br><span class="small text-muted">${p.created_at}</span>` +
+            (p.checked_at ? `<br><span class="small text-success">${t('poi.checked_at_prefix', {time: p.checked_at, name: escapeHtml(p.checked_by_name || '')})}</span>` : '');
+        L.marker([p.lat, p.lng], {icon}).addTo(poiLayer).bindPopup(popupHtml);
+    });
+}
+
 // Same whole-array-JSON signature technique as the other render*() functions.
 let sosAlertsRenderedSig = null;
 function renderSosAlerts(items) {
@@ -3897,6 +4019,66 @@ wireMediaInput('photoGalleryInput', t('media.photo_label'));
 wireMediaInput('videoCaptureInput', t('media.video_label'));
 wireMediaInput('videoGalleryInput', t('media.video_label'));
 
+// Point of Interest capture — deliberately its own wiring rather than a
+// wireMediaInput() variant: GPS is mandatory here (the whole upload is
+// aborted on denial/timeout, never silently sent without a location the way
+// a regular field photo would be), and a successful send needs to refresh
+// the POI list/map pin immediately rather than wait for the next 5s poll.
+(function wirePoiInput() {
+    const input = document.getElementById('poiCaptureInput');
+    if (!input) return;
+    input.addEventListener('change', () => {
+        const file = input.files[0];
+        if (!file) return;
+        const status = document.getElementById('mediaUploadStatus');
+        status.textContent = t('poi.locating');
+        status.className = 'small mb-2';
+
+        if (!navigator.geolocation) {
+            status.textContent = t('poi.gps_required');
+            status.className = 'small mb-2 text-danger';
+            input.value = '';
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(
+            position => {
+                status.textContent = t('media.uploading');
+                const data = new FormData();
+                data.append('csrf_token', csrfToken);
+                data.append('action', 'upload');
+                data.append('mission_id', '<?= $missionId ?>');
+                data.append('media', file);
+                data.append('is_poi', '1');
+                data.append('lat', position.coords.latitude);
+                data.append('lng', position.coords.longitude);
+                fetch('mission-photo.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+                    if (result.ok) {
+                        status.textContent = '✓ ' + t('poi.sent_confirmation');
+                        status.className = 'small mb-2 text-success';
+                        renderMedia(media = [result.media, ...media]);
+                        mediaSignature = JSON.stringify(media);
+                        pollWarRoomData();
+                    } else {
+                        status.textContent = result.error || t('common.send_failed');
+                        status.className = 'small mb-2 text-danger';
+                    }
+                    input.value = '';
+                }).catch(() => {
+                    status.textContent = t('common.send_failed');
+                    status.className = 'small mb-2 text-danger';
+                    input.value = '';
+                });
+            },
+            () => {
+                status.textContent = t('poi.gps_required');
+                status.className = 'small mb-2 text-danger';
+                input.value = '';
+            },
+            {enableHighAccuracy: true, timeout: 8000}
+        );
+    });
+})();
+
 (function wireIncidentReportForm() {
     const form = document.getElementById('incidentReportForm');
     if (!form) return;
@@ -3917,11 +4099,12 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 })();
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); }
     renderMyTasks(myTasks);
     renderMyRoutes(routes);
     renderShortageReports(shortageReports);
     renderMissionIncidents(missionIncidents);
+    renderPointsOfInterest(pointsOfInterest);
     renderSosAlerts(sosAlerts);
     renderNearbyTeams(nearbyTeams);
     if (!fieldMode) updateSosAlarmState(sosAlerts);
@@ -4672,6 +4855,11 @@ function pollWarRoomData() {
             renderSosAlerts(sosAlerts = data.sosAlerts);
             if (!fieldMode) updateSosAlarmState(sosAlerts);
         }
+        if (data.pointsOfInterest) {
+            pointsOfInterest = data.pointsOfInterest;
+            renderPointsOfInterest(pointsOfInterest);
+            if (!fieldMode) renderPoiLayer(pointsOfInterest);
+        }
         if (data.onlinePresence) renderPresence(data.onlinePresence);
         if (data.pingStaleness) renderPingStaleness(data.pingStaleness);
         if (data.nearbyTeams) renderNearbyTeams(nearbyTeams = data.nearbyTeams);
@@ -4850,6 +5038,8 @@ document.querySelectorAll('.team-form').forEach(form => {
     const addressInput = document.getElementById('dispatchAddressInput');
     const addressSearchBtn = document.getElementById('dispatchAddressSearch');
     const addressStatus = document.getElementById('dispatchAddressStatus');
+    const coordsInput = document.getElementById('dispatchCoordsInput');
+    const coordsAddBtn = document.getElementById('dispatchCoordsAddBtn');
     const noteInput = document.getElementById('dispatchNoteInput');
     const clearBtn = document.getElementById('dispatchClearBtn');
     const sendBtn = document.getElementById('dispatchSendBtn');
@@ -4910,6 +5100,17 @@ document.querySelectorAll('.team-form').forEach(form => {
         sendBtn.disabled = !(drawPoints.length === 1 || (isClosed && drawPoints.length >= 3));
     }
 
+    // Shared by real map clicks and the manual coordinates field below — one
+    // place that actually appends to drawPoints, so a future third way to add
+    // a point can't diverge from the marker/preview/send-state bookkeeping
+    // the other two already do correctly.
+    function addDrawPoint(lat, lng) {
+        drawPoints.push([lat, lng]);
+        vertexMarkers.push(L.circleMarker([lat, lng], {radius:7, color:'#7c3aed', fillColor:'#fff', fillOpacity:1, weight:2}).addTo(dispatchMap));
+        updateShapePreview();
+        updateSendState();
+    }
+
     function onMapClick(e) {
         if (isClosed) return;
         if (drawPoints.length >= 3) {
@@ -4922,11 +5123,34 @@ document.querySelectorAll('.team-form').forEach(form => {
                 return;
             }
         }
-        drawPoints.push([e.latlng.lat, e.latlng.lng]);
-        vertexMarkers.push(L.circleMarker(e.latlng, {radius:7, color:'#7c3aed', fillColor:'#fff', fillOpacity:1, weight:2}).addTo(dispatchMap));
-        updateShapePreview();
-        updateSendState();
+        addDrawPoint(e.latlng.lat, e.latlng.lng);
     }
+
+    // Exact coordinates handed over verbally/in writing (e.g. a partner
+    // organization reporting a possible sighting) — bypasses needing to find
+    // and click the right spot on the map at all. Always just adds a point,
+    // even past 3 vertices — the "click near point 1 closes the shape"
+    // gesture above is a map-click-only affordance; typed coordinates that
+    // happen to land near point 1 are far more likely to be a second real
+    // point than an attempt at that gesture.
+    function addCoordsFromInput() {
+        const parsed = parseCoordsInput(coordsInput.value);
+        if (!parsed) {
+            alert(t('dispatch.coords_invalid'));
+            return;
+        }
+        if (isClosed) {
+            alert(t('dispatch.coords_shape_closed'));
+            return;
+        }
+        addDrawPoint(parsed.lat, parsed.lng);
+        dispatchMap.setView([parsed.lat, parsed.lng], Math.max(dispatchMap.getZoom(), 15));
+        coordsInput.value = '';
+    }
+    coordsAddBtn.addEventListener('click', addCoordsFromInput);
+    coordsInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); addCoordsFromInput(); }
+    });
 
     modalEl.addEventListener('shown.bs.modal', () => {
         if (!dispatchMap) {
@@ -4945,6 +5169,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         addressInput.value = '';
         addressStatus.textContent = '';
         lastAddressLabel = '';
+        coordsInput.value = '';
         noteInput.value = '';
     });
 
@@ -5439,6 +5664,8 @@ function renderWaypointPanel() {
     const addressInput = document.getElementById('routeAddressInput');
     const addressSearchBtn = document.getElementById('routeAddressSearch');
     const addressStatus = document.getElementById('routeAddressStatus');
+    const coordsInput = document.getElementById('routeCoordsInput');
+    const coordsAddBtn = document.getElementById('routeCoordsAddBtn');
     const clearBtn = document.getElementById('routeClearBtn');
     const sendBtn = document.getElementById('routeSendBtn');
     const teamSelect = document.getElementById('routeTeamSelect');
@@ -5493,6 +5720,39 @@ function renderWaypointPanel() {
     renderRouteMemberPicker();
     teamSelect.addEventListener('change', renderRouteMemberPicker);
 
+    // Shared by real map clicks and the manual coordinates field below — same
+    // reasoning as the dispatch composer's addDrawPoint().
+    function addRouteWaypoint(lat, lng) {
+        routeWaypoints.push({lat, lng, label: '', instructions: '', dwell_minutes: 10, require_photo: false, require_video: false, require_note: false});
+        renderRouteComposerMap();
+        renderWaypointPanel();
+        updateRouteSendState();
+    }
+
+    // Same rationale as the dispatch composer's addCoordsFromInput() — exact
+    // coordinates handed over verbally/in writing, no need to find the right
+    // spot on the map first. Always just adds a waypoint, even past 3 points;
+    // the "click near point 1" closed-loop gesture below is a map-click-only
+    // affordance.
+    function addCoordsFromInput() {
+        const parsed = parseCoordsInput(coordsInput.value);
+        if (!parsed) {
+            alert(t('dispatch.coords_invalid'));
+            return;
+        }
+        if (routeClosed) {
+            alert(t('dispatch.coords_shape_closed'));
+            return;
+        }
+        addRouteWaypoint(parsed.lat, parsed.lng);
+        routeMap.setView([parsed.lat, parsed.lng], Math.max(routeMap.getZoom(), 15));
+        coordsInput.value = '';
+    }
+    coordsAddBtn.addEventListener('click', addCoordsFromInput);
+    coordsInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); addCoordsFromInput(); }
+    });
+
     // routeMap/routeWaypoints and the render/reset functions are module-level
     // (declared above renderWaypointPanel) rather than local to this IIFE,
     // since renderWaypointPanel's own per-waypoint "remove" button needs to
@@ -5526,10 +5786,7 @@ function renderWaypointPanel() {
                         return;
                     }
                 }
-                routeWaypoints.push({lat: e.latlng.lat, lng: e.latlng.lng, label: '', instructions: '', dwell_minutes: 10, require_photo: false, require_video: false, require_note: false});
-                renderRouteComposerMap();
-                renderWaypointPanel();
-                updateRouteSendState();
+                addRouteWaypoint(e.latlng.lat, e.latlng.lng);
             });
         }
         // Refreshed on every open, not just the first — pins/annotations may
@@ -5546,6 +5803,7 @@ function renderWaypointPanel() {
         titleInput.value = '';
         addressInput.value = '';
         addressStatus.textContent = '';
+        coordsInput.value = '';
     });
 
     clearBtn.addEventListener('click', resetRouteComposer);

@@ -2152,6 +2152,35 @@ CREATE TABLE IF NOT EXISTS `mission_incidents` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- MISSION POINTS OF INTEREST (War Room: a physical clue photographed while
+-- searching, auto-GPS-tagged; mission_photos.poi_id below groups multiple
+-- nearby reports into one pin instead of one per photographer)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_points_of_interest` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `lat` DECIMAL(10,7) NOT NULL,
+    `lng` DECIMAL(10,7) NOT NULL,
+    `checked_at` TIMESTAMP NULL,
+    `checked_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`checked_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_poi_mission` (`mission_id`, `checked_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- mission_photos already created above (fresh installs run top-to-bottom) —
+-- added here rather than inline in that CREATE TABLE so this table's own
+-- definition stays right next to the feature it belongs to. SET NULL, not
+-- CASCADE: a photo is real field evidence, never deleted as a side effect of
+-- its POI group going away (see migration v112's comment for why that path
+-- shouldn't normally even trigger).
+ALTER TABLE `mission_photos`
+    ADD COLUMN `poi_id` INT UNSIGNED NULL,
+    ADD FOREIGN KEY (`poi_id`) REFERENCES `mission_points_of_interest`(`id`) ON DELETE SET NULL,
+    ADD INDEX `idx_photo_poi` (`poi_id`);
+
+-- =============================================
 -- MISSION PRESENCE (War Room live "who has this open" tracking)
 -- =============================================
 CREATE TABLE IF NOT EXISTS `mission_presence` (

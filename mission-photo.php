@@ -36,6 +36,74 @@ function notifyPhotoReceived(int $missionId, string $missionTitle, ?int $respons
     }
 }
 
+/**
+ * Notify command staff — like notifyPhotoReceived() above, but every
+ * approved participant too, not just command staff: unlike a routine field
+ * photo, a Point of Interest is exactly the kind of thing other teams
+ * searching nearby should hear about, per the mission owner's explicit
+ * answer when this feature was scoped ([[project-action-room-point-of-interest-idea]]
+ * in memory — visible to everyone, same reasoning as incidents). $isMerge
+ * only changes the wording (new lead vs. a second person corroborating an
+ * existing one) — same recipients, same mandatory/un-mutable severity
+ * either way (empty code, matching incidents/SOS/needs_help).
+ */
+function notifyPoiReported(int $missionId, string $missionTitle, ?int $responsibleUserId, string $senderName, int $senderId, bool $isMerge): void {
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+
+    $participantIds = array_map('intval', array_column(
+        dbFetchAll(
+            "SELECT DISTINCT pr.volunteer_id AS user_id FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             WHERE s.mission_id = ? AND pr.status = ?",
+            [$missionId, PARTICIPATION_APPROVED]
+        ),
+        'user_id'
+    ));
+    $recipientIds = array_values(array_unique(array_diff(
+        array_merge($participantIds, getMissionCommandStaffIds($missionId, $responsibleUserId, $senderId)),
+        [$senderId]
+    )));
+
+    $titleKey = $isMerge ? 'poi.notify_title_merged' : 'poi.notify_title_new';
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        $message = t('poi.notify_message', ['name' => $senderName, 'mission' => $missionTitle], $lang);
+        sendNotification($recipientId, t($titleKey, [], $lang), $message, 'danger', '', [
+            'url' => $warRoomUrl,
+            'tag' => 'poi-mission-' . $missionId,
+            'bannerMission' => $missionId,
+        ]);
+    }
+}
+
+/**
+ * Notify whoever photographed this Point of Interest (every distinct
+ * reporter across every photo merged into it, minus whoever just clicked
+ * "checked") once command staff verifies it. Configurable code (unlike the
+ * report notification above), same "seen"-tier severity as shortage/incident
+ * acknowledgement, not a hard alarm.
+ */
+function notifyPoiChecked(int $missionId, string $missionTitle, int $poiId, int $actingUserId): void {
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $recipientIds = array_values(array_diff(array_map('intval', array_column(
+        dbFetchAll("SELECT DISTINCT user_id FROM mission_photos WHERE poi_id = ?", [$poiId]),
+        'user_id'
+    )), [$actingUserId]));
+    if (!$recipientIds) {
+        return;
+    }
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        sendNotification(
+            $recipientId, t('poi.checked_notify_title', [], $lang),
+            t('poi.checked_notify_message', ['mission' => $missionTitle], $lang),
+            'success', 'mission_poi_checked', ['url' => $warRoomUrl, 'tag' => 'poi-checked-' . $poiId]
+        );
+    }
+}
+
 $userId = getCurrentUserId();
 $user = getCurrentUser();
 
@@ -104,6 +172,27 @@ if ($action === 'upload') {
         exit;
     }
 
+    $latRaw = post('lat');
+    $lngRaw = post('lng');
+    $lat = ($latRaw !== '' && $latRaw !== null && is_numeric($latRaw)) ? (float) $latRaw : null;
+    $lng = ($lngRaw !== '' && $lngRaw !== null && is_numeric($lngRaw)) ? (float) $lngRaw : null;
+    if ($lat !== null && ($lat < -90 || $lat > 90)) { $lat = null; }
+    if ($lng !== null && ($lng < -180 || $lng > 180)) { $lng = null; }
+    if ($lat === 0.0 && $lng === 0.0) { $lat = null; $lng = null; }
+
+    // Point of Interest: a photographed physical clue (e.g. clothing found
+    // while searching for a missing person), auto-GPS-tagged and shown as
+    // its own persistent map pin — unlike a regular field photo, whose
+    // location (if any) is locate-on-demand only. GPS is mandatory here,
+    // checked before touching the filesystem at all — a POI with no location
+    // isn't a POI, it's just a photo, so fail fast rather than save a file
+    // that will immediately turn out to be unusable for this mode.
+    $isPoi = post('is_poi') === '1';
+    if ($isPoi && ($lat === null || $lng === null)) {
+        echo json_encode(['ok' => false, 'error' => t('poi.gps_required')]);
+        exit;
+    }
+
     $destDir = __DIR__ . '/uploads/mission-photos/';
     if (!is_dir($destDir)) {
         mkdir($destDir, 0755, true);
@@ -113,11 +202,6 @@ if ($action === 'upload') {
         echo json_encode(['ok' => false, 'error' => t('photo.save_failed')]);
         exit;
     }
-
-    $latRaw = post('lat');
-    $lngRaw = post('lng');
-    $lat = ($latRaw !== '' && $latRaw !== null && is_numeric($latRaw)) ? (float) $latRaw : null;
-    $lng = ($lngRaw !== '' && $lngRaw !== null && is_numeric($lngRaw)) ? (float) $lngRaw : null;
 
     // Optional: this upload is the photo/video deliverable for one Route Order
     // waypoint (war-room.php's "Η Πορεία μου" card — field mode has no map/media
@@ -149,12 +233,38 @@ if ($action === 'upload') {
         }
     }
 
+    // Find-or-create the POI this photo belongs to: any existing point of
+    // interest for this mission within ~30m counts as "the same spot" —
+    // GPS accuracy on a phone is typically 5-20m, so this is generous enough
+    // to absorb that jitter while still keeping genuinely distinct nearby
+    // finds separate. Straight linear scan (no spatial index) is fine here —
+    // a single mission will only ever accumulate a handful of these.
+    $poiId = null;
+    $poiIsMerge = false;
+    if ($isPoi) {
+        $poiMergeThresholdMeters = 30;
+        $existingPois = dbFetchAll("SELECT id, lat, lng FROM mission_points_of_interest WHERE mission_id = ?", [$missionId]);
+        foreach ($existingPois as $candidate) {
+            if (gpsDistanceMeters($lat, $lng, (float) $candidate['lat'], (float) $candidate['lng']) <= $poiMergeThresholdMeters) {
+                $poiId = (int) $candidate['id'];
+                $poiIsMerge = true;
+                break;
+            }
+        }
+        if ($poiId === null) {
+            $poiId = dbInsert(
+                "INSERT INTO mission_points_of_interest (mission_id, lat, lng, created_at) VALUES (?, ?, ?, NOW())",
+                [$missionId, $lat, $lng]
+            );
+        }
+    }
+
     $photoId = dbInsert(
-        "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, original_name, mime_type, file_size, lat, lng, route_waypoint_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $userId, $mediaType, $storedName, $origName, $mime, (int) $file['size'], $lat, $lng, $routeWaypointId]
+        "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, original_name, mime_type, file_size, lat, lng, route_waypoint_id, poi_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $userId, $mediaType, $storedName, $origName, $mime, (int) $file['size'], $lat, $lng, $routeWaypointId, $poiId]
     );
-    logAudit('upload_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId, 'media_type' => $mediaType, 'route_waypoint_id' => $routeWaypointId]);
+    logAudit('upload_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId, 'media_type' => $mediaType, 'route_waypoint_id' => $routeWaypointId, 'poi_id' => $poiId]);
 
     // Auto-fulfill any outstanding War Room "send a photo/video" orders of this type for this user.
     dbExecute(
@@ -165,7 +275,11 @@ if ($action === 'upload') {
         [$userId, $missionId, $mediaType]
     );
 
-    notifyPhotoReceived($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $user['name'], $userId, $mediaType);
+    if ($isPoi) {
+        notifyPoiReported($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $user['name'], $userId, $poiIsMerge);
+    } else {
+        notifyPhotoReceived($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $user['name'], $userId, $mediaType);
+    }
 
     $teamLabel = null;
     $myTeamId = getUserTeamIdForMission($missionId, $userId);
@@ -187,13 +301,14 @@ if ($action === 'upload') {
         'lat'            => $lat,
         'lng'            => $lng,
         'can_delete'     => true,
+        'poi_id'         => $poiId,
     ]]);
     exit;
 }
 
 if ($action === 'delete') {
     $photoId = (int) post('id');
-    $photo = dbFetchOne("SELECT id, user_id, stored_name FROM mission_photos WHERE id = ? AND mission_id = ?", [$photoId, $missionId]);
+    $photo = dbFetchOne("SELECT id, user_id, stored_name, poi_id FROM mission_photos WHERE id = ? AND mission_id = ?", [$photoId, $missionId]);
     if (!$photo) {
         echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
@@ -210,6 +325,36 @@ if ($action === 'delete') {
     dbExecute("DELETE FROM mission_photos WHERE id = ?", [$photoId]);
     logAudit('delete_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId]);
 
+    // A POI's whole reason to exist is "at least one photo of this spot" —
+    // once the last one is gone there is nothing left to check, so the pin
+    // itself goes too rather than lingering empty on the map forever.
+    if ($photo['poi_id']) {
+        $remainingPhotos = (int) dbFetchValue("SELECT COUNT(*) FROM mission_photos WHERE poi_id = ?", [$photo['poi_id']]);
+        if ($remainingPhotos === 0) {
+            dbExecute("DELETE FROM mission_points_of_interest WHERE id = ?", [$photo['poi_id']]);
+        }
+    }
+
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
+if ($action === 'check_poi') {
+    if (!$canManageWarRoom) {
+        echo json_encode(['ok' => false, 'error' => t('poi.no_manage_permission')]);
+        exit;
+    }
+    $poiId = (int) post('poi_id');
+    $poi = dbFetchOne("SELECT id, checked_at FROM mission_points_of_interest WHERE id = ? AND mission_id = ?", [$poiId, $missionId]);
+    if (!$poi) {
+        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+        exit;
+    }
+    if (!$poi['checked_at']) {
+        dbExecute("UPDATE mission_points_of_interest SET checked_at = NOW(), checked_by = ? WHERE id = ?", [$userId, $poiId]);
+        logAudit('check_mission_poi', 'mission_points_of_interest', $poiId, null, ['mission_id' => $missionId]);
+        notifyPoiChecked($missionId, $mission['title'], $poiId, $userId);
+    }
     echo json_encode(['ok' => true]);
     exit;
 }

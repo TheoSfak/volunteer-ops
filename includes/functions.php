@@ -1473,6 +1473,80 @@ function loadUnresolvedIncidentsForMission(int $missionId, bool $unmasked): arra
 }
 
 /**
+ * War Room: Points of Interest for the mission — a physical clue
+ * photographed while searching (mission-photo.php's upload action creates/
+ * joins these), each with every photo merged into it (multiple nearby
+ * reports become one pin, see that file's proximity-match comment). Unlike
+ * incidents/shortages this has no masking — visible in full to every
+ * approved participant, no separate admin-only shape, per the mission
+ * owner's explicit answer that a POI should be as visible as an incident
+ * (other teams converging on/avoiding the area is the whole point, and
+ * there's no patient-privacy-equivalent concern here to mask in the first
+ * place). Caller still gates the call itself behind canManageWarRoom ||
+ * isApprovedParticipant, same as every other Action Room data loader.
+ */
+function loadPointsOfInterestForMission(int $missionId): array {
+    $pois = dbFetchAll(
+        "SELECT p.id, p.lat, p.lng, p.checked_at, cb.name AS checked_by_name, p.created_at
+         FROM mission_points_of_interest p
+         LEFT JOIN users cb ON cb.id = p.checked_by
+         WHERE p.mission_id = ?
+         ORDER BY (p.checked_at IS NULL) DESC, p.created_at DESC",
+        [$missionId]
+    );
+    if (!$pois) {
+        return [];
+    }
+
+    $poiIds = array_map('intval', array_column($pois, 'id'));
+    $placeholders = implode(',', array_fill(0, count($poiIds), '?'));
+    $photoRows = dbFetchAll(
+        "SELECT ph.id, ph.poi_id, ph.media_type, ph.user_id, ph.created_at,
+                u.name AS reporter_name, u.is_external, u.guest_org_name
+         FROM mission_photos ph
+         JOIN users u ON u.id = ph.user_id
+         WHERE ph.poi_id IN ($placeholders)
+         ORDER BY ph.created_at ASC",
+        $poiIds
+    );
+    $photosByPoi = [];
+    foreach ($photoRows as $row) {
+        $photosByPoi[(int) $row['poi_id']][] = [
+            'id'             => (int) $row['id'],
+            'media_type'     => $row['media_type'],
+            'reporter_name'  => $row['reporter_name'],
+            'is_external'    => (bool) $row['is_external'],
+            'guest_org_name' => $row['guest_org_name'],
+            'time'           => date('d/m H:i', strtotime($row['created_at'])),
+        ];
+    }
+
+    return array_map(function ($p) use ($photosByPoi) {
+        $photos = $photosByPoi[(int) $p['id']] ?? [];
+        // Distinct reporters in first-seen order — a merged POI's whole
+        // point is showing it was independently corroborated by more than
+        // one person, not a photo-by-photo dump (per the mission owner's
+        // explicit ask: "mention it was given by 2 volunteers").
+        $reporterNames = [];
+        foreach ($photos as $photo) {
+            if (!in_array($photo['reporter_name'], $reporterNames, true)) {
+                $reporterNames[] = $photo['reporter_name'];
+            }
+        }
+        return [
+            'id'              => (int) $p['id'],
+            'lat'             => (float) $p['lat'],
+            'lng'             => (float) $p['lng'],
+            'checked_at'      => $p['checked_at'] ? date('d/m H:i', strtotime($p['checked_at'])) : null,
+            'checked_by_name' => $p['checked_by_name'],
+            'created_at'      => date('d/m H:i', strtotime($p['created_at'])),
+            'reporter_names'  => $reporterNames,
+            'photos'          => $photos,
+        ];
+    }, $pois);
+}
+
+/**
  * mission-report-print.php: every incident from the mission (resolved or not
  * — unlike loadUnresolvedIncidentsForMission() above, a closed-mission PDF
  * must show the full history), always masked (PDF is print/export, never
@@ -3568,6 +3642,28 @@ function loadMissionActivityEventsForReport(int $missionId): array {
             $outcomeSuffix = $row['outcome'] ? ' — ' . h(incidentOutcomeLabel($row['outcome'])) . ($row['outcome_location'] ? ' («' . h($row['outcome_location']) . '»)' : '') : '';
             $events[] = ['icon' => '✅', 'text' => 'Η αναφορά περιστατικού (' . h($label) . ') έκλεισε' . $outcomeSuffix, 'ts' => strtotime($row['resolved_at'])];
         }
+    }
+
+    // Points of interest: one "reported" event per photo (independent
+    // corroboration from several volunteers each shows up individually,
+    // same as the live Δραστηριότητα tab's own choice for this — see
+    // mission-history.php), "checked" once per POI group.
+    $poiPhotoEventRows = dbFetchAll(
+        "SELECT ph.created_at, u.name AS actor_name
+         FROM mission_photos ph
+         JOIN users u ON u.id = ph.user_id
+         WHERE ph.mission_id = ? AND ph.poi_id IS NOT NULL",
+        [$missionId]
+    );
+    foreach ($poiPhotoEventRows as $row) {
+        $events[] = ['icon' => '📍', 'text' => h($row['actor_name']) . ' ανέφερε Σημείο Ενδιαφέροντος', 'ts' => strtotime($row['created_at'])];
+    }
+    $poiCheckedEventRows = dbFetchAll(
+        "SELECT checked_at FROM mission_points_of_interest WHERE mission_id = ? AND checked_at IS NOT NULL",
+        [$missionId]
+    );
+    foreach ($poiCheckedEventRows as $row) {
+        $events[] = ['icon' => '✅', 'text' => 'Ελέγχθηκε Σημείο Ενδιαφέροντος', 'ts' => strtotime($row['checked_at'])];
     }
 
     usort($events, fn($a, $b) => $b['ts'] <=> $a['ts']);

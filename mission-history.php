@@ -389,6 +389,43 @@ foreach ($incidentRows as $row) {
     }
 }
 
+// ── points of interest: reported (per photo) / checked (per POI group) ─────
+// Visible to every approved participant, same policy as incidents above — a
+// physical clue found during a search is not team-private. One "reported"
+// event per PHOTO, not per POI group: independent corroboration from
+// several volunteers should each show up individually here (same reasoning
+// as loadPointsOfInterestForMission()'s own "list every reporter, don't
+// collapse to one" design), but "checked" fires once per POI, not once per
+// photo merged into it.
+$poiPhotoRows = dbFetchAll(
+    "SELECT ph.created_at, u.name AS actor_name
+     FROM mission_photos ph
+     JOIN users u ON u.id = ph.user_id
+     WHERE ph.mission_id = ? AND ph.poi_id IS NOT NULL
+     ORDER BY ph.created_at DESC LIMIT 200",
+    [$missionId]
+);
+foreach ($poiPhotoRows as $row) {
+    $events[] = [
+        'icon' => '📍',
+        'text' => t('history.poi_reported', ['actor' => h($row['actor_name'])], $viewerLang),
+        'time' => date('d/m H:i', strtotime($row['created_at'])),
+        'ts'   => strtotime($row['created_at']),
+    ];
+}
+$poiCheckedRows = dbFetchAll(
+    "SELECT checked_at FROM mission_points_of_interest WHERE mission_id = ? AND checked_at IS NOT NULL ORDER BY checked_at DESC LIMIT 200",
+    [$missionId]
+);
+foreach ($poiCheckedRows as $row) {
+    $events[] = [
+        'icon' => '✅',
+        'text' => t('history.poi_checked', [], $viewerLang),
+        'time' => date('d/m H:i', strtotime($row['checked_at'])),
+        'ts'   => strtotime($row['checked_at']),
+    ];
+}
+
 usort($events, fn($a, $b) => $b['ts'] <=> $a['ts']);
 $events = array_slice($events, 0, 200);
 

@@ -345,6 +345,10 @@ return [
         // Dispatch map modal
         'dispatch.address_placeholder' => 'Διεύθυνση (προαιρετικό)…',
         'dispatch.search_btn' => 'Αναζήτηση',
+        'dispatch.coords_placeholder' => 'π.χ. 35.3387, 25.1442',
+        'dispatch.coords_add_title' => 'Προσθήκη σημείου από συντεταγμένες',
+        'dispatch.coords_invalid' => 'Μη έγκυρες συντεταγμένες. Χρησιμοποιήστε τη μορφή: γεωγρ. πλάτος, γεωγρ. μήκος (π.χ. 35.3387, 25.1442).',
+        'dispatch.coords_shape_closed' => 'Το σχήμα έχει ήδη κλείσει — καθαρίστε και ξεκινήστε ξανά για να προσθέσετε άλλο σημείο.',
         'dispatch.note_placeholder' => 'Σύντομη σημείωση (προαιρετικό)…',
         'dispatch.clear_btn' => 'Καθαρισμός',
         'dispatch.send_short_btn' => 'Αποστολή',
@@ -588,6 +592,25 @@ return [
         'photo.save_failed' => 'Αποτυχία αποθήκευσης του αρχείου.',
         'photo.no_delete_permission' => 'Δεν έχετε δικαίωμα διαγραφής αυτής της φωτογραφίας.',
 
+        // Points of Interest (mission-photo.php is_poi upload + check_poi action)
+        'poi.capture_btn' => '📍 Σημείο Ενδιαφέροντος',
+        'poi.list_panel_title' => 'Σημεία Ενδιαφέροντος',
+        'poi.gps_required' => 'Απαιτείται στίγμα GPS για Σημείο Ενδιαφέροντος. Ελέγξτε ότι έχετε επιτρέψει την πρόσβαση τοποθεσίας.',
+        'poi.no_manage_permission' => 'Δεν έχετε δικαίωμα ελέγχου Σημείων Ενδιαφέροντος.',
+        'poi.notify_title_new' => '📍 Νέο Σημείο Ενδιαφέροντος',
+        'poi.notify_title_merged' => '📍 Νέα φωτογραφία σε Σημείο Ενδιαφέροντος',
+        'poi.notify_message' => 'Ο/Η {name} ανέφερε Σημείο Ενδιαφέροντος στην αποστολή «{mission}».',
+        'poi.checked_notify_title' => 'Έλεγχος Σημείου Ενδιαφέροντος',
+        'poi.checked_notify_message' => 'Το επιτελείο έλεγξε ένα Σημείο Ενδιαφέροντος που αναφέρατε στην αποστολή «{mission}».',
+        'poi.empty_list' => 'Δεν υπάρχουν Σημεία Ενδιαφέροντος ακόμη.',
+        'poi.reported_by_multiple' => 'Αναφέρθηκε από {count} εθελοντές: {names}',
+        'poi.reported_by_one' => 'Αναφέρθηκε από: {name}',
+        'poi.checked_at_prefix' => ' · Ελέγχθηκε στις {time} από {name}',
+        'poi.check_btn' => 'Ελέγχθηκε',
+        'poi.popup_title' => 'Σημείο Ενδιαφέροντος',
+        'poi.locating' => 'Λήψη στίγματος GPS…',
+        'poi.sent_confirmation' => 'Το Σημείο Ενδιαφέροντος στάλθηκε.',
+
         // mission-dispatch.php
         'dispatch.kind_at_point' => 'στο σημείο',
         'dispatch.kind_at_area' => 'στην περιοχή',
@@ -666,6 +689,8 @@ return [
         'history.incident_reported' => '{actor} ανέφερε περιστατικό ({type})',
         'history.incident_seen' => 'Η αναφορά περιστατικού ({type}) ελέγχθηκε',
         'history.incident_resolved' => 'Η αναφορά περιστατικού ({type}) έκλεισε',
+        'history.poi_reported' => '{actor} ανέφερε Σημείο Ενδιαφέροντος',
+        'history.poi_checked' => 'Ελέγχθηκε Σημείο Ενδιαφέροντος',
 
         // missions.php (guest-reachable via bootstrap.php allow-list)
         'missions_page.title' => 'Αποστολές',
@@ -1114,6 +1139,10 @@ return [
 
         'dispatch.address_placeholder' => 'Address (optional)…',
         'dispatch.search_btn' => 'Search',
+        'dispatch.coords_placeholder' => 'e.g. 35.3387, 25.1442',
+        'dispatch.coords_add_title' => 'Add point from coordinates',
+        'dispatch.coords_invalid' => 'Invalid coordinates. Use the format: latitude, longitude (e.g. 35.3387, 25.1442).',
+        'dispatch.coords_shape_closed' => 'The shape is already closed — clear and start again to add another point.',
         'dispatch.note_placeholder' => 'Short note (optional)…',
         'dispatch.clear_btn' => 'Clear',
         'dispatch.send_short_btn' => 'Send',
@@ -1344,6 +1373,25 @@ return [
         'photo.save_failed' => 'Failed to save the file.',
         'photo.no_delete_permission' => 'You do not have permission to delete this photo.',
 
+        // Points of Interest (mission-photo.php is_poi upload + check_poi action)
+        'poi.capture_btn' => '📍 Point of Interest',
+        'poi.list_panel_title' => 'Points of Interest',
+        'poi.gps_required' => 'GPS location is required for a Point of Interest. Check that location access is allowed.',
+        'poi.no_manage_permission' => 'You do not have permission to check Points of Interest.',
+        'poi.notify_title_new' => '📍 New Point of Interest',
+        'poi.notify_title_merged' => '📍 New photo added to a Point of Interest',
+        'poi.notify_message' => '{name} reported a Point of Interest on mission "{mission}".',
+        'poi.checked_notify_title' => 'Point of Interest Checked',
+        'poi.checked_notify_message' => 'Command staff checked a Point of Interest you reported on mission "{mission}".',
+        'poi.empty_list' => 'No Points of Interest yet.',
+        'poi.reported_by_multiple' => 'Reported by {count} volunteers: {names}',
+        'poi.reported_by_one' => 'Reported by: {name}',
+        'poi.checked_at_prefix' => ' · Checked at {time} by {name}',
+        'poi.check_btn' => 'Checked',
+        'poi.popup_title' => 'Point of Interest',
+        'poi.locating' => 'Getting GPS location…',
+        'poi.sent_confirmation' => 'Point of Interest sent.',
+
         'dispatch.kind_at_point' => 'at the point',
         'dispatch.kind_at_area' => 'at the area',
         'dispatch.kind_of_point' => 'of the point',
@@ -1419,6 +1467,8 @@ return [
         'history.incident_reported' => '{actor} reported an incident ({type})',
         'history.incident_seen' => 'Incident report ({type}) was seen',
         'history.incident_resolved' => 'Incident report ({type}) was closed',
+        'history.poi_reported' => '{actor} reported a Point of Interest',
+        'history.poi_checked' => 'Point of Interest checked',
 
         'missions_page.title' => 'Missions',
         'missions_page.export_csv' => 'Export CSV',
