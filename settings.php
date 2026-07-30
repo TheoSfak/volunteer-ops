@@ -545,6 +545,16 @@ if (isPost()) {
                 $value = trim($value);
             }
 
+            // Clamp to the range this same form's number input already
+            // advertises (min="5" max="1440") — that attribute alone is only
+            // a browser-side hint, not enforced against a crafted request, and
+            // every consumer of this value (includes/auth.php's session
+            // cookie lifetime + inactivity check, includes/footer.php's
+            // client-side timer) trusts whatever is stored here directly.
+            if ($field === 'session_timeout_minutes') {
+                $value = (string) max(5, min(1440, (int) $value ?: 120));
+            }
+
             // Don't overwrite API key if form was submitted empty (acts like a "keep existing" field)
             if ($field === 'openweathermap_api_key' && empty($value) && !empty($settings['openweathermap_api_key'] ?? '')) {
                 continue;

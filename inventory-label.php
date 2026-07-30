@@ -355,5 +355,6 @@ foreach ($items as $it) {
     buildLabels();
 })();
 </script>
+<?php require __DIR__ . '/includes/inactivity-timeout.php'; ?>
 </body>
 </html>

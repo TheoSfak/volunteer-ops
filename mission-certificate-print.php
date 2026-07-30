@@ -294,5 +294,6 @@ $printDate = date('d/m/Y');
 <script>
 setTimeout(function () { window.print(); }, 400);
 </script>
+<?php require __DIR__ . '/includes/inactivity-timeout.php'; ?>
 </body>
 </html>

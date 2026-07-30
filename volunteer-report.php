@@ -393,5 +393,6 @@ $greekMonths = [
     </div><!-- /px-4 -->
 </div><!-- /report-wrapper -->
 
+<?php require __DIR__ . '/includes/inactivity-timeout.php'; ?>
 </body>
 </html>
