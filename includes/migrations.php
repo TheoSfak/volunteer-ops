@@ -5352,6 +5352,66 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 112,
+            'description' => 'Create mission_points_of_interest + mission_photos.poi_id — a volunteer photographing a physical clue while searching (e.g. clothing found while searching for a missing person) auto-tags GPS and creates/joins a persistent map pin, distinct from a regular field photo\'s locate-on-demand-only location. Multiple photos within ~30m of each other merge into the same POI (mission-photo.php\'s upload action does the proximity match, using the same gpsDistanceMeters() haversine helper computeDispatchEta()/team-distance already use) rather than one pin per photographer, so independent corroboration reads as one lead, not several. No ack/resolve workflow like incidents/shortages — a POI is an observation, not a problem to triage, so it only ever needs a single "checked" flag, not a full seen/resolve/outcome lifecycle.',
+            'up' => function () {
+                $table = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_points_of_interest'"
+                );
+                if (!$table) {
+                    dbExecute(
+                        "CREATE TABLE mission_points_of_interest (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            lat DECIMAL(10,7) NOT NULL,
+                            lng DECIMAL(10,7) NOT NULL,
+                            checked_at TIMESTAMP NULL,
+                            checked_by INT UNSIGNED NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (checked_by) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_poi_mission (mission_id, checked_at)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_photos' AND COLUMN_NAME = 'poi_id'"
+                );
+                if (!$col) {
+                    // SET NULL, not CASCADE: a photo is real field evidence and must never
+                    // be deleted as a side effect of its POI group going away — the only
+                    // code path that ever removes a mission_points_of_interest row
+                    // (mission-photo.php's delete action) already checks first that no
+                    // photo still references it, so in practice this SET NULL never
+                    // actually fires, it is a safety net rather than a normal path.
+                    dbExecute(
+                        "ALTER TABLE mission_photos
+                         ADD COLUMN poi_id INT UNSIGNED NULL,
+                         ADD FOREIGN KEY (poi_id) REFERENCES mission_points_of_interest(id) ON DELETE SET NULL,
+                         ADD INDEX idx_photo_poi (poi_id)"
+                    );
+                }
+
+                // Reporting a POI is always mandatory/loud (empty code, same as
+                // incidents/SOS/needs_help — a search lead can never be silently
+                // muted by an admin's own notification preference). Only the
+                // "checked" step is configurable.
+                $code = 'mission_poi_checked';
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = ?", [$code]);
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [$code, 'Έλεγχος Σημείου Ενδιαφέροντος', 'Το επιτελείο έλεγξε ένα Σημείο Ενδιαφέροντος — ειδοποιεί όποιον το είχε αναφέρει (μόνο push/εντός εφαρμογής, όχι email)']
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
