@@ -4,6 +4,15 @@
  * War Room: admin-only historical GPS trail per volunteer for a mission —
  * one or all teams, optionally including auto-captured pings (hidden by
  * default everywhere else). GET only, AJAX.
+ *
+ * Also returns the mission's full event timeline (reuses
+ * loadMissionActivityEventsForReport() — the same admin-facing,
+ * already-PII-safe aggregator mission-report-print.php/mission-stats.php
+ * use, deliberately NOT mission-history.php's separate live-tab
+ * implementation) so the replay scrubber below can show what was
+ * happening at any given instant, not just where everyone was. Always
+ * whole-mission regardless of the team_id filter below — that filter
+ * narrows which GPS trails draw, not the mission's actual history.
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -35,4 +44,5 @@ $includeAuto = get('include_auto') === '1';
 echo json_encode([
     'ok'     => true,
     'trails' => loadMissionTrailForMission($missionId, $teamId, $includeAuto),
+    'events' => loadMissionActivityEventsForReport($missionId),
 ]);
