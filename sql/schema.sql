@@ -2180,6 +2180,13 @@ ALTER TABLE `mission_photos`
     ADD FOREIGN KEY (`poi_id`) REFERENCES `mission_points_of_interest`(`id`) ON DELETE SET NULL,
     ADD INDEX `idx_photo_poi` (`poi_id`);
 
+-- Optional short text a volunteer can attach to a Point of Interest photo
+-- (e.g. "found an object that might belong to the missing person"),
+-- per-photo not per-POI-group — a merged Point of Interest can carry
+-- several notes, one from each reporter, same as it carries several photos.
+ALTER TABLE `mission_photos`
+    ADD COLUMN `poi_note` TEXT NULL AFTER `poi_id`;
+
 -- =============================================
 -- MISSION PRESENCE (War Room live "who has this open" tracking)
 -- =============================================

@@ -1193,13 +1193,17 @@ function getMissionCommandStaffIds(int $missionId, ?int $responsibleUserId, int 
 
 /**
  * Notify command staff (system/department admins, this mission's shift leaders,
- * and its responsible user) about a route-level event. Mirrors the recipient
- * resolution mission-dispatch.php/mission-photo.php already use. Originally
- * page-local to mission-route.php (depart/arrive/complete/skip/cancel all call
- * it); moved here once mission-order.php's acknowledge action needed the exact
- * same shape for the Route Order "Ελήφθη" sound alert.
+ * and its responsible user) about a notable event, with the scrolling-banner
+ * treatment (bannerMission => the sound/visual alert on war-room.php). Mirrors
+ * the recipient resolution mission-dispatch.php/mission-photo.php already use.
+ * Originally page-local to mission-route.php (depart/arrive/complete/skip/
+ * cancel all call it) under the name notifyRouteCommandStaff(); renamed once
+ * mission-order.php's acknowledge action needed the exact same shape for
+ * *two more* order types (task, global message) beyond the route case it was
+ * first built for — kept the generic tag/'route-' prefix would have been
+ * actively misleading on a non-route notification.
  */
-function notifyRouteCommandStaff(int $missionId, string $missionTitle, ?int $responsibleUserId, int $actorId, string $code, string $titleKey, array $titleVars, string $messageKey, array $messageVars): void {
+function notifyCommandStaffBanner(int $missionId, string $missionTitle, ?int $responsibleUserId, int $actorId, string $code, string $titleKey, array $titleVars, string $messageKey, array $messageVars): void {
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $actorId);
     $langByUserId = getUserLanguages($recipientIds);
@@ -1207,7 +1211,7 @@ function notifyRouteCommandStaff(int $missionId, string $missionTitle, ?int $res
         $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
         sendNotification($recipientId, t($titleKey, $titleVars, $lang), t($messageKey, $messageVars, $lang), 'info', $code, [
             'url' => $warRoomUrl,
-            'tag' => 'route-' . $code . '-mission-' . $missionId,
+            'tag' => $code . '-mission-' . $missionId,
             'bannerMission' => $missionId,
         ]);
     }
@@ -1501,7 +1505,7 @@ function loadPointsOfInterestForMission(int $missionId): array {
     $poiIds = array_map('intval', array_column($pois, 'id'));
     $placeholders = implode(',', array_fill(0, count($poiIds), '?'));
     $photoRows = dbFetchAll(
-        "SELECT ph.id, ph.poi_id, ph.media_type, ph.user_id, ph.created_at,
+        "SELECT ph.id, ph.poi_id, ph.media_type, ph.user_id, ph.poi_note, ph.created_at,
                 u.name AS reporter_name, u.is_external, u.guest_org_name
          FROM mission_photos ph
          JOIN users u ON u.id = ph.user_id
@@ -1517,6 +1521,7 @@ function loadPointsOfInterestForMission(int $missionId): array {
             'reporter_name'  => $row['reporter_name'],
             'is_external'    => (bool) $row['is_external'],
             'guest_org_name' => $row['guest_org_name'],
+            'note'           => $row['poi_note'],
             'time'           => date('d/m H:i', strtotime($row['created_at'])),
         ];
     }
@@ -3649,14 +3654,15 @@ function loadMissionActivityEventsForReport(int $missionId): array {
     // same as the live Δραστηριότητα tab's own choice for this — see
     // mission-history.php), "checked" once per POI group.
     $poiPhotoEventRows = dbFetchAll(
-        "SELECT ph.created_at, u.name AS actor_name
+        "SELECT ph.poi_note, ph.created_at, u.name AS actor_name
          FROM mission_photos ph
          JOIN users u ON u.id = ph.user_id
          WHERE ph.mission_id = ? AND ph.poi_id IS NOT NULL",
         [$missionId]
     );
     foreach ($poiPhotoEventRows as $row) {
-        $events[] = ['icon' => '📍', 'text' => h($row['actor_name']) . ' ανέφερε Σημείο Ενδιαφέροντος', 'ts' => strtotime($row['created_at'])];
+        $noteSuffix = $row['poi_note'] ? ' — «' . h($row['poi_note']) . '»' : '';
+        $events[] = ['icon' => '📍', 'text' => h($row['actor_name']) . ' ανέφερε Σημείο Ενδιαφέροντος' . $noteSuffix, 'ts' => strtotime($row['created_at'])];
     }
     $poiCheckedEventRows = dbFetchAll(
         "SELECT checked_at FROM mission_points_of_interest WHERE mission_id = ? AND checked_at IS NOT NULL",

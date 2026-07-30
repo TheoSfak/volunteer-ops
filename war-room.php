@@ -1289,6 +1289,7 @@ include __DIR__ . '/includes/header.php';
                      GPS to a find from god-knows-when/where, which defeats
                      the entire point of the feature. -->
                 <div class="mb-2">
+                    <input type="text" id="poiNoteInput" class="form-control form-control-sm mb-1" maxlength="500" placeholder="<?= t('poi.note_placeholder') ?>">
                     <label class="btn btn-outline-danger w-100 mb-0">
                         <i class="bi bi-search me-1"></i><?= t('poi.capture_btn') ?>
                         <input type="file" id="poiCaptureInput" accept="image/*" capture="environment" class="d-none">
@@ -3873,10 +3874,17 @@ function renderPointsOfInterest(items) {
             ? `<video src="mission-photo-view.php?id=${photo.id}" class="media-view-trigger" data-id="${photo.id}" data-media-type="video" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;background:#000;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}" preload="metadata"></video>`
             : `<img src="mission-photo-view.php?id=${photo.id}" class="media-view-trigger" data-id="${photo.id}" data-media-type="photo" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}">`
         ).join('');
+        // One line per note, attributed — a merged POI can have a note from
+        // each reporter (e.g. one says "found a shoe", another adds "there's
+        // a bag nearby too"), not just one for the whole group.
+        const notesHtml = p.photos.filter(photo => photo.note).map(photo =>
+            `<div class="small fst-italic mt-1">"${escapeHtml(photo.note)}" — ${escapeHtml(photo.reporter_name)}</div>`
+        ).join('');
         return `
         <div class="border rounded p-2 mb-2${p.checked_at ? '' : ' border-primary'}">
             <div class="d-flex flex-wrap gap-1 mb-1">${thumbs}</div>
-            <div class="small">${reportedBy}</div>
+            ${notesHtml}
+            <div class="small mt-1">${reportedBy}</div>
             <div class="text-muted" style="font-size:.75rem;">${p.created_at}${p.checked_at ? t('poi.checked_at_prefix', {time: p.checked_at, name: escapeHtml(p.checked_by_name || '')}) : ''}</div>
             ${canManageIncidents && !p.checked_at ? `<button type="button" class="btn btn-sm btn-primary w-100 mt-1 poi-check-btn" data-poi-id="${p.id}">${t('poi.check_btn')}</button>` : ''}
         </div>
@@ -3909,7 +3917,10 @@ function renderPoiLayer(items) {
             iconSize: [26, 26], iconAnchor: [13, 13],
         });
         const reportedBy = p.reporter_names.map(escapeHtml).join(', ');
-        const popupHtml = `<strong>${t('poi.popup_title')}</strong><br>${reportedBy}<br><span class="small text-muted">${p.created_at}</span>` +
+        const notesHtml = (p.photos || []).filter(photo => photo.note)
+            .map(photo => `<br><span class="small fst-italic">"${escapeHtml(photo.note)}"</span>`)
+            .join('');
+        const popupHtml = `<strong>${t('poi.popup_title')}</strong><br>${reportedBy}${notesHtml}<br><span class="small text-muted">${p.created_at}</span>` +
             (p.checked_at ? `<br><span class="small text-success">${t('poi.checked_at_prefix', {time: p.checked_at, name: escapeHtml(p.checked_by_name || '')})}</span>` : '');
         L.marker([p.lat, p.lng], {icon}).addTo(poiLayer).bindPopup(popupHtml);
     });
@@ -4026,10 +4037,12 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 // the POI list/map pin immediately rather than wait for the next 5s poll.
 (function wirePoiInput() {
     const input = document.getElementById('poiCaptureInput');
+    const noteInput = document.getElementById('poiNoteInput');
     if (!input) return;
     input.addEventListener('change', () => {
         const file = input.files[0];
         if (!file) return;
+        const note = noteInput ? noteInput.value.trim() : '';
         const status = document.getElementById('mediaUploadStatus');
         status.textContent = t('poi.locating');
         status.className = 'small mb-2';
@@ -4049,6 +4062,7 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
                 data.append('mission_id', '<?= $missionId ?>');
                 data.append('media', file);
                 data.append('is_poi', '1');
+                data.append('note', note);
                 data.append('lat', position.coords.latitude);
                 data.append('lng', position.coords.longitude);
                 fetch('mission-photo.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
@@ -4057,6 +4071,7 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
                         status.className = 'small mb-2 text-success';
                         renderMedia(media = [result.media, ...media]);
                         mediaSignature = JSON.stringify(media);
+                        if (noteInput) noteInput.value = '';
                         pollWarRoomData();
                     } else {
                         status.textContent = result.error || t('common.send_failed');
