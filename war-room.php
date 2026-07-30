@@ -1766,10 +1766,32 @@ include __DIR__ . '/includes/header.php';
         </div>
         <?php endif; ?>
 
+        <?php
+        // Closing is the only door out of the Action Room: every "Είδα"/"Λύθηκε"
+        // button for incidents/shortages/SOS lives exclusively behind war-room.php,
+        // which hard-redirects away the instant the mission is no longer OPEN (see
+        // the status check near the top of this file) — with no exception for
+        // admins and no other page that can act on those rows afterward. Closing
+        // with any of these still open silently stops them from ever being
+        // resolvable through the UI again, so this warns with the real counts
+        // before the generic confirm, rather than staying silent about it.
+        $openItemsCount = count($incidents) + count($shortageReports) + count($sosAlerts);
+        $closeConfirmMsg = t('admin.close_confirm');
+        if ($openItemsCount > 0) {
+            $closeConfirmMsg = t('admin.close_open_items_warning', [
+                'incidents' => count($incidents), 'shortages' => count($shortageReports), 'sos' => count($sosAlerts),
+            ]) . ' ' . $closeConfirmMsg;
+        }
+        ?>
         <div class="card border-danger shadow-sm">
             <div class="card-body"><h6><i class="bi bi-shield-exclamation text-danger me-1"></i><?= t('admin.mission_mgmt_title') ?></h6>
                 <p class="small text-muted"><?= t('admin.close_note') ?></p>
-                <form method="post" onsubmit="return confirm('<?= h(addslashes(t('admin.close_confirm'))) ?>')">
+                <?php if ($openItemsCount > 0): ?>
+                <div class="alert alert-warning small py-2 px-2 mb-2"><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('admin.close_open_items_warning', [
+                    'incidents' => count($incidents), 'shortages' => count($shortageReports), 'sos' => count($sosAlerts),
+                ]) ?></div>
+                <?php endif; ?>
+                <form method="post" onsubmit="return confirm('<?= h(addslashes($closeConfirmMsg)) ?>')">
                     <?= csrfField() ?><input type="hidden" name="action" value="close_mission">
                     <button class="btn btn-danger w-100"><i class="bi bi-x-octagon-fill me-1"></i><?= t('admin.close_btn') ?></button>
                 </form>
