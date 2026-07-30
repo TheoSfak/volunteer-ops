@@ -614,6 +614,7 @@ return [
         'poi.check_btn' => 'Ελέγχθηκε',
         'poi.popup_title' => 'Σημείο Ενδιαφέροντος',
         'poi.locating' => 'Λήψη στίγματος GPS…',
+        'poi.send_btn' => 'Αποστολή Σημείου Ενδιαφέροντος',
         'poi.sent_confirmation' => 'Το Σημείο Ενδιαφέροντος στάλθηκε.',
 
         // mission-dispatch.php
@@ -1400,6 +1401,7 @@ return [
         'poi.check_btn' => 'Checked',
         'poi.popup_title' => 'Point of Interest',
         'poi.locating' => 'Getting GPS location…',
+        'poi.send_btn' => 'Send Point of Interest',
         'poi.sent_confirmation' => 'Point of Interest sent.',
 
         'dispatch.kind_at_point' => 'at the point',

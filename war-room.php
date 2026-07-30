@@ -1294,6 +1294,7 @@ include __DIR__ . '/includes/header.php';
                         <i class="bi bi-search me-1"></i><?= t('poi.capture_btn') ?>
                         <input type="file" id="poiCaptureInput" accept="image/*" capture="environment" class="d-none">
                     </label>
+                    <button type="button" id="poiSendBtn" class="btn btn-danger w-100 mt-1 d-none" disabled></button>
                 </div>
                 <div class="small mb-2" id="mediaUploadStatus"></div>
                 <?php endif; ?>
@@ -4035,62 +4036,99 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 // aborted on denial/timeout, never silently sent without a location the way
 // a regular field photo would be), and a successful send needs to refresh
 // the POI list/map pin immediately rather than wait for the next 5s poll.
+//
+// Two-step stage-then-send, NOT upload-on-select: the first version fired
+// the whole upload straight from the file input's change event, reading
+// whatever was in the note field at that exact instant. That silently
+// required "type the note, THEN tap capture" — anyone who tapped capture
+// first (the obvious first move) got an empty note baked in with no way to
+// add one afterward, since the note field was left with nothing listening
+// to it. Now: choosing a photo only stages it (and starts the GPS fix in
+// the background) — nothing is sent until the note field's current value is
+// read at the moment the Send button is actually pressed, so the note can
+// be written before OR after taking the photo.
 (function wirePoiInput() {
     const input = document.getElementById('poiCaptureInput');
     const noteInput = document.getElementById('poiNoteInput');
-    if (!input) return;
+    const sendBtn = document.getElementById('poiSendBtn');
+    if (!input || !sendBtn) return;
+    const status = document.getElementById('mediaUploadStatus');
+    let stagedFile = null;
+    let stagedCoords = null;
+
+    function resetStage() {
+        stagedFile = null;
+        stagedCoords = null;
+        sendBtn.classList.add('d-none');
+        sendBtn.disabled = false;
+        input.value = '';
+    }
+
     input.addEventListener('change', () => {
         const file = input.files[0];
         if (!file) return;
-        const note = noteInput ? noteInput.value.trim() : '';
-        const status = document.getElementById('mediaUploadStatus');
-        status.textContent = t('poi.locating');
+        stagedFile = file;
+        stagedCoords = null;
+        status.textContent = '';
         status.className = 'small mb-2';
+        sendBtn.classList.remove('d-none');
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + t('poi.locating');
 
         if (!navigator.geolocation) {
             status.textContent = t('poi.gps_required');
             status.className = 'small mb-2 text-danger';
-            input.value = '';
+            resetStage();
             return;
         }
         navigator.geolocation.getCurrentPosition(
             position => {
-                status.textContent = t('media.uploading');
-                const data = new FormData();
-                data.append('csrf_token', csrfToken);
-                data.append('action', 'upload');
-                data.append('mission_id', '<?= $missionId ?>');
-                data.append('media', file);
-                data.append('is_poi', '1');
-                data.append('note', note);
-                data.append('lat', position.coords.latitude);
-                data.append('lng', position.coords.longitude);
-                fetch('mission-photo.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
-                    if (result.ok) {
-                        status.textContent = '✓ ' + t('poi.sent_confirmation');
-                        status.className = 'small mb-2 text-success';
-                        renderMedia(media = [result.media, ...media]);
-                        mediaSignature = JSON.stringify(media);
-                        if (noteInput) noteInput.value = '';
-                        pollWarRoomData();
-                    } else {
-                        status.textContent = result.error || t('common.send_failed');
-                        status.className = 'small mb-2 text-danger';
-                    }
-                    input.value = '';
-                }).catch(() => {
-                    status.textContent = t('common.send_failed');
-                    status.className = 'small mb-2 text-danger';
-                    input.value = '';
-                });
+                stagedCoords = {lat: position.coords.latitude, lng: position.coords.longitude};
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '<i class="bi bi-send-fill me-1"></i>' + t('poi.send_btn');
             },
             () => {
                 status.textContent = t('poi.gps_required');
                 status.className = 'small mb-2 text-danger';
-                input.value = '';
+                resetStage();
             },
             {enableHighAccuracy: true, timeout: 8000}
         );
+    });
+
+    sendBtn.addEventListener('click', () => {
+        if (!stagedFile || !stagedCoords) return;
+        const note = noteInput ? noteInput.value.trim() : '';
+        sendBtn.disabled = true;
+        status.textContent = t('media.uploading');
+        status.className = 'small mb-2';
+        const data = new FormData();
+        data.append('csrf_token', csrfToken);
+        data.append('action', 'upload');
+        data.append('mission_id', '<?= $missionId ?>');
+        data.append('media', stagedFile);
+        data.append('is_poi', '1');
+        data.append('note', note);
+        data.append('lat', stagedCoords.lat);
+        data.append('lng', stagedCoords.lng);
+        fetch('mission-photo.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                status.textContent = '✓ ' + t('poi.sent_confirmation');
+                status.className = 'small mb-2 text-success';
+                renderMedia(media = [result.media, ...media]);
+                mediaSignature = JSON.stringify(media);
+                if (noteInput) noteInput.value = '';
+                pollWarRoomData();
+            } else {
+                status.textContent = result.error || t('common.send_failed');
+                status.className = 'small mb-2 text-danger';
+            }
+            resetStage();
+        }).catch(() => {
+            status.textContent = t('common.send_failed');
+            status.className = 'small mb-2 text-danger';
+            resetStage();
+        });
     });
 })();
 
