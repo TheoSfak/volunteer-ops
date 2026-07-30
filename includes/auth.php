@@ -56,9 +56,39 @@ function initSession() {
             ini_set('session.gc_maxlifetime', 86400); // 24 hours
         }
 
+        // Read the configured inactivity window BEFORE starting the session,
+        // so the cookie's own lifetime just below can be driven by it too —
+        // previously this was computed only AFTER session_set_cookie_params()
+        // had already locked the cookie to the hardcoded SESSION_LIFETIME
+        // (2 hours), so setting_value above 120 minutes in Settings was
+        // silently capped: the browser discarded the cookie itself at the
+        // 2-hour mark no matter what admins configured, regardless of
+        // ongoing activity. Clamped to the same 5–1440 minute range
+        // settings.php's own form advertises (min="5" max="1440"), matching
+        // the equivalent clamp now enforced at save time — defense in depth
+        // in case an older/manually-edited row still holds something outside it.
+        $timeoutSeconds = SESSION_LIFETIME;
+        try {
+            $dbTimeout = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'session_timeout_minutes'");
+            if ($dbTimeout !== null && $dbTimeout !== false && (int)$dbTimeout > 0) {
+                $timeoutSeconds = max(300, min(86400, (int)$dbTimeout * 60));
+            }
+        } catch (Exception $e) {
+            // DB not ready yet (install phase), use constant
+        }
+
+        // War Room pages get the same generous cookie lifetime as their
+        // session.gc_maxlifetime override above (24h) rather than the
+        // possibly much shorter configured value — otherwise a short
+        // app-wide timeout would reintroduce, via the cookie itself
+        // expiring client-side, the exact background-throttling force-
+        // logout this whole exemption list exists to prevent (see the
+        // WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS docblock above).
+        $cookieLifetime = $isWarRoomExempt ? 86400 : $timeoutSeconds;
+
         $isSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
         session_set_cookie_params([
-            'lifetime' => SESSION_LIFETIME,
+            'lifetime' => $cookieLifetime,
             'path'     => '/',
             'secure'   => $isSecure,
             'httponly'  => true,
@@ -67,16 +97,6 @@ function initSession() {
         session_name(SESSION_NAME);
         session_start();
 
-        // Enforce session timeout (use DB setting if available, else SESSION_LIFETIME constant)
-        $timeoutSeconds = SESSION_LIFETIME;
-        try {
-            $dbTimeout = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'session_timeout_minutes'");
-            if ($dbTimeout !== null && $dbTimeout !== false && (int)$dbTimeout > 0) {
-                $timeoutSeconds = (int)$dbTimeout * 60;
-            }
-        } catch (Exception $e) {
-            // DB not ready yet (install phase), use constant
-        }
         if (!$isWarRoomExempt && isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeoutSeconds) {
             logout();
             session_start();

@@ -93,51 +93,7 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/gr.js"></script>
 
-    <?php if (function_exists('isLoggedIn') && isLoggedIn() && basename($_SERVER['PHP_SELF'], '.php') !== 'war-room'): ?>
-    <!-- Auto-logout on inactivity — skipped on Action Room (war-room.php):
-         an admin legitimately sits watching the live map/alerts for long
-         stretches with no clicks, including in kiosk/fullscreen mode, so
-         auto-logging them out there would be actively harmful, not a safe
-         default. -->
-    <script>
-    (function() {
-        var timeoutMinutes = <?= (int)(getSetting('session_timeout_minutes', '120')) ?>;
-        if (timeoutMinutes < 5) timeoutMinutes = 120;
-        var timeoutMs = timeoutMinutes * 60 * 1000;
-        var warningMs = timeoutMs - 60000; // warn 1 minute before
-        var timer, warnTimer;
-
-        function resetTimers() {
-            clearTimeout(timer);
-            clearTimeout(warnTimer);
-            // Dismiss warning if visible
-            var banner = document.getElementById('inactivityWarning');
-            if (banner) banner.style.display = 'none';
-
-            warnTimer = setTimeout(function() {
-                var banner = document.getElementById('inactivityWarning');
-                if (!banner) {
-                    banner = document.createElement('div');
-                    banner.id = 'inactivityWarning';
-                    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#dc3545;color:#fff;text-align:center;padding:10px 16px;font-size:14px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.3);';
-                    banner.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>Θα αποσυνδεθείτε σε 1 λεπτό λόγω αδράνειας. Κουνήστε το ποντίκι ή πατήστε ένα πλήκτρο.';
-                    document.body.appendChild(banner);
-                }
-                banner.style.display = 'block';
-            }, warningMs);
-
-            timer = setTimeout(function() {
-                window.location.href = 'logout.php?reason=inactivity';
-            }, timeoutMs);
-        }
-
-        ['mousemove','keydown','click','scroll','touchstart'].forEach(function(evt) {
-            document.addEventListener(evt, resetTimers, { passive: true });
-        });
-        resetTimers();
-    })();
-    </script>
-    <?php endif; ?>
+    <?php require __DIR__ . '/inactivity-timeout.php'; ?>
     
     <script>
         // Sidebar scroll position persistence

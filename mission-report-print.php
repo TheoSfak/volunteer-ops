@@ -1103,5 +1103,6 @@ window.addEventListener('beforeprint', function () {
     if (window.__printMap) window.__printMap.invalidateSize();
 });
 </script>
+<?php require __DIR__ . '/includes/inactivity-timeout.php'; ?>
 </body>
 </html>
