@@ -1052,8 +1052,8 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
  */
 function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canManageWarRoom, int $limit = 30): array {
     $rows = dbFetchAll(
-        "SELECT p.id, p.user_id, p.media_type, p.lat, p.lng, p.created_at, u.name AS user_name,
-                u.is_external, u.guest_org_name, mt.codename, mt.team_number
+        "SELECT p.id, p.user_id, p.media_type, p.lat, p.lng, p.created_at, p.poi_id, p.poi_note,
+                u.name AS user_name, u.is_external, u.guest_org_name, mt.codename, mt.team_number
          FROM mission_photos p
          JOIN users u ON u.id = p.user_id
          LEFT JOIN mission_team_members mtm ON mtm.user_id = p.user_id AND mtm.mission_id = p.mission_id
@@ -1075,6 +1075,8 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
         'lat'            => $row['lat'] !== null ? (float) $row['lat'] : null,
         'lng'            => $row['lng'] !== null ? (float) $row['lng'] : null,
         'can_delete'     => $canManageWarRoom || (int) $row['user_id'] === $currentUserId,
+        'is_poi'         => $row['poi_id'] !== null,
+        'poi_note'       => $row['poi_note'],
     ], $rows);
 }
 
