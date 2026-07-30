@@ -347,6 +347,48 @@ foreach ($shortageRows as $row) {
     }
 }
 
+// ── incidents: submitted / seen / resolved ──────────────────────────────────
+// Visible to every approved participant, not scoped to the reporter's own
+// team like shortage/orders above — mirrors loadUnresolvedIncidentsForMission()'s
+// own "any approved participant sees it" policy for the live incidents panel,
+// since a medical emergency isn't team-private the way a gear shortage is.
+// Never includes patient_name/phone/notes (staff-only elsewhere, masked even
+// on the live panel for non-command-staff) — same restraint
+// loadMissionActivityEventsForReport() already applies for the PDF/Excel export.
+$incidentRows = dbFetchAll(
+    "SELECT i.incident_type, i.severity, i.created_at, i.acknowledged_at, i.resolved_at, u.name AS actor_name
+     FROM mission_incidents i
+     JOIN users u ON u.id = i.reporter_id
+     WHERE i.mission_id = ?
+     ORDER BY i.created_at DESC LIMIT 200",
+    [$missionId]
+);
+foreach ($incidentRows as $row) {
+    $label = incidentTypeLabel($row['incident_type'], $viewerLang) . ', ' . incidentSeverityLabel($row['severity'], $viewerLang);
+    $events[] = [
+        'icon' => '🚑',
+        'text' => t('history.incident_reported', ['actor' => h($row['actor_name']), 'type' => h($label)], $viewerLang),
+        'time' => date('d/m H:i', strtotime($row['created_at'])),
+        'ts'   => strtotime($row['created_at']),
+    ];
+    if ($row['acknowledged_at']) {
+        $events[] = [
+            'icon' => '👁️',
+            'text' => t('history.incident_seen', ['type' => h($label)], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row['acknowledged_at'])),
+            'ts'   => strtotime($row['acknowledged_at']),
+        ];
+    }
+    if ($row['resolved_at']) {
+        $events[] = [
+            'icon' => '✅',
+            'text' => t('history.incident_resolved', ['type' => h($label)], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row['resolved_at'])),
+            'ts'   => strtotime($row['resolved_at']),
+        ];
+    }
+}
+
 usort($events, fn($a, $b) => $b['ts'] <=> $a['ts']);
 $events = array_slice($events, 0, 200);
 

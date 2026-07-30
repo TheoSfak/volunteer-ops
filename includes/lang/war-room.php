@@ -304,6 +304,7 @@ return [
         // Mission admin
         'admin.mission_mgmt_title' => 'Διαχείριση αποστολής',
         'admin.close_note' => 'Το κλείσιμο αφαιρεί την αποστολή από το Επιχειρησιακό και σταματά τη λήψη νέων στιγμάτων.',
+        'admin.close_open_items_warning' => 'Η αποστολή έχει ακόμα {incidents} ανοιχτά περιστατικά, {shortages} ανοιχτές ελλείψεις και {sos} ανοιχτά SOS. Μετά το κλείσιμο δεν θα μπορείτε πλέον να τα διαχειριστείτε (Είδα/Λύθηκε) από το Action Room.',
         'admin.close_confirm' => 'Είστε σίγουρος/η ότι θέλετε να κλείσετε την αποστολή;',
         'admin.close_btn' => 'Κλείσιμο αποστολής',
 
@@ -660,6 +661,9 @@ return [
         'history.shortage_reported' => '{actor} ανέφερε έλλειψη ({type}) — «{title}»',
         'history.shortage_seen' => 'Η αναφορά «{title}» ελέγχθηκε',
         'history.shortage_resolved' => 'Η αναφορά «{title}» λύθηκε',
+        'history.incident_reported' => '{actor} ανέφερε περιστατικό ({type})',
+        'history.incident_seen' => 'Η αναφορά περιστατικού ({type}) ελέγχθηκε',
+        'history.incident_resolved' => 'Η αναφορά περιστατικού ({type}) έκλεισε',
 
         // missions.php (guest-reachable via bootstrap.php allow-list)
         'missions_page.title' => 'Αποστολές',
@@ -1071,6 +1075,7 @@ return [
 
         'admin.mission_mgmt_title' => 'Mission Management',
         'admin.close_note' => 'Closing removes the mission from Operations and stops accepting new locations.',
+        'admin.close_open_items_warning' => 'This mission still has {incidents} open incident(s), {shortages} open shortage report(s), and {sos} open SOS alert(s). Once closed, you will no longer be able to manage (see/resolve) them from the Action Room.',
         'admin.close_confirm' => 'Are you sure you want to close this mission?',
         'admin.close_btn' => 'Close Mission',
 
@@ -1407,6 +1412,9 @@ return [
         'history.shortage_reported' => '{actor} reported a shortage ({type}) — "{title}"',
         'history.shortage_seen' => 'Report "{title}" was seen',
         'history.shortage_resolved' => 'Report "{title}" was resolved',
+        'history.incident_reported' => '{actor} reported an incident ({type})',
+        'history.incident_seen' => 'Incident report ({type}) was seen',
+        'history.incident_resolved' => 'Incident report ({type}) was closed',
 
         'missions_page.title' => 'Missions',
         'missions_page.export_csv' => 'Export CSV',
