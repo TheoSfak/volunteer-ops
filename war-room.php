@@ -1239,6 +1239,20 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
             </div>
         </div>
+        <?php if ($canManageWarRoom): ?>
+        <!-- Replay's event-timeline companion to the map above: same
+             trailModeActive show/hide lifecycle, filtered to the identical
+             cutoffTs on every single render the map itself gets (folded into
+             renderTrailUpTo() itself rather than threaded through as a
+             parallel call at each of its call sites — a separate call would
+             mean a future new call site could update the map and forget the
+             log, exactly the class of gap this project's own past audits
+             have hit before). -->
+        <div class="card shadow-sm mt-3 d-none" id="trailEventsCard">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-list-ul me-1"></i><?= t('trail.events_title') ?></h6></div>
+            <div class="card-body p-2" id="trailEventLog" style="max-height:300px;overflow-y:auto;"></div>
+        </div>
+        <?php endif; ?>
     </div>
 
     <div class="col-12 col-lg-4">
@@ -2668,6 +2682,9 @@ let trailModeActive = false;
 // re-render at any chosen instant without re-fetching, and so switching
 // filters (team/include-auto) via "Εμφάνιση" naturally replaces it.
 let currentTrails = [];
+// Mission-wide event timeline paired with the trails above — always the
+// full mission regardless of the team filter (see mission-track.php).
+let currentTrailEvents = [];
 
 // Shared by both the plain full-trail view and the replay scrubber: cutoffTs
 // = Infinity reproduces the original "show everything" behavior exactly
@@ -2707,9 +2724,35 @@ function renderTrailUpTo(trails, cutoffTs) {
         map.invalidateSize();
         map.fitBounds(L.latLngBounds(bounds), {padding: [40, 40]});
     }
+    // Folded in here rather than called separately at every renderTrailUpTo()
+    // call site — every one of them needs the event log updated to the exact
+    // same instant as the map, with no exceptions, so making that a property
+    // of this function itself instead of a convention callers must remember
+    // is the only way a future new call site can't accidentally skip it.
+    renderTrailEventsUpTo(cutoffTs);
 }
 function renderTrail(trails) {
     renderTrailUpTo(trails, Infinity);
+}
+
+// Text is already server-escaped by loadMissionActivityEventsForReport()
+// (same trust boundary mission-report-print.php/mission-stats.php already
+// rely on for this exact array) — safe to drop into innerHTML as-is.
+function renderTrailEventsUpTo(cutoffTs) {
+    const log = document.getElementById('trailEventLog');
+    if (!log) return;
+    const events = cutoffTs === Infinity ? currentTrailEvents : currentTrailEvents.filter(e => e.ts <= cutoffTs);
+    if (!events.length) {
+        log.innerHTML = '<p class="text-muted small mb-0">' + t('trail.events_empty') + '</p>';
+        return;
+    }
+    // Newest first, same convention as the Δραστηριότητα tab's own event list.
+    log.innerHTML = events.slice().sort((a, b) => b.ts - a.ts).map(e => `
+        <div class="small py-1 border-bottom d-flex justify-content-between gap-2">
+            <span>${e.icon} ${e.text}</span>
+            <span class="text-muted text-nowrap">${new Date(e.ts * 1000).toLocaleString(jsLocale, {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}</span>
+        </div>
+    `).join('');
 }
 
 // ── Replay scrubber ──────────────────────────────────────────────────────
@@ -2718,11 +2761,17 @@ const TRAIL_REPLAY_TICK_MS = 400; // ~24s to play a trail of any real length
 let trailReplayTimer = null;
 let trailMinTs = null, trailMaxTs = null;
 
-function setupTrailReplay(trails) {
+function setupTrailReplay(trails, events) {
     const bar = document.getElementById('trailReplayBar');
     const scrubber = document.getElementById('trailScrubber');
     stopTrailReplay();
-    const allTs = trails.flatMap(t => t.points.map(p => p.ts)).filter(ts => ts !== null && ts !== undefined);
+    // Range spans BOTH GPS pings and mission events — an order sent or an
+    // incident reported before anyone's first ping (or after their last one)
+    // still needs to be reachable by scrubbing, not clipped to whatever
+    // window the GPS trail alone happens to cover.
+    const allTs = trails.flatMap(t => t.points.map(p => p.ts))
+        .concat((events || []).map(e => e.ts))
+        .filter(ts => ts !== null && ts !== undefined);
     trailMinTs = allTs.length ? Math.min(...allTs) : null;
     trailMaxTs = allTs.length ? Math.max(...allTs) : null;
     // A single instant (or no points at all) has nothing to scrub between —
@@ -2806,13 +2855,16 @@ function enterTrailMode() {
         if (includeAdmin) { if (!map.hasLayer(dispatchLayer)) dispatchLayer.addTo(map); }
         else if (map.hasLayer(dispatchLayer)) { map.removeLayer(dispatchLayer); }
         currentTrails = result.trails;
+        currentTrailEvents = result.events || [];
+        document.getElementById('trailEventsCard')?.classList.remove('d-none');
         renderTrail(currentTrails);
-        setupTrailReplay(currentTrails);
+        setupTrailReplay(currentTrails, currentTrailEvents);
     }).catch(() => alert(t('trail.load_failed')));
 }
 function exitTrailMode() {
     stopTrailReplay();
     document.getElementById('trailReplayBar')?.classList.add('d-none');
+    document.getElementById('trailEventsCard')?.classList.add('d-none');
     trailModeActive = false;
     trailLayer.clearLayers();
     if (map.hasLayer(trailLayer)) map.removeLayer(trailLayer);
