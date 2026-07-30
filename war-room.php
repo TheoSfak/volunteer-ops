@@ -2967,12 +2967,14 @@ function renderMedia(items) {
         // time+buttons row instead of the old side-by-side split, which
         // would squeeze/overflow at this width.
         return `
-        <div class="card">
+        <div class="card position-relative">
+            ${m.is_poi ? `<span class="badge bg-danger position-absolute top-0 end-0 m-1" style="z-index:1;" title="${t('poi.popup_title')}"><i class="bi bi-search"></i></span>` : ''}
             ${m.media_type === 'video'
                 ? `<video src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="video" style="height:90px;object-fit:cover;background:#000;cursor:pointer;" preload="metadata"></video>`
                 : `<img src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="photo" style="height:90px;object-fit:cover;cursor:pointer;">`}
             <div class="card-body p-2">
                 ${whoBlock}
+                ${m.poi_note ? `<div class="small fst-italic mt-1">"${escapeHtml(m.poi_note)}"</div>` : ''}
                 <div class="d-flex justify-content-between align-items-center mt-1">
                     <span class="text-muted" style="font-size:.7rem;">${m.time}</span>
                     <div class="d-flex gap-1">
