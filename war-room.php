@@ -1552,8 +1552,10 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <div class="row g-4 mt-0">
             <div class="col-12 col-md-6">
                 <div class="card shadow-sm h-100 border-warning" data-card-id="requestLocationCard">
-                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-bell-fill me-1"></i><?= t('request.location.card_title') ?></h5></div>
-                    <div class="card-body">
+                    <div class="card-header bg-warning bg-opacity-25 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#requestLocationCollapse" role="button" aria-expanded="false" aria-controls="requestLocationCollapse">
+                        <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-bell-fill me-1"></i><?= t('request.location.card_title') ?></span><i class="bi bi-chevron-down wr-collapsible-chevron"></i></h5>
+                    </div>
+                    <div class="card-body collapse" id="requestLocationCollapse">
                         <?php if (empty($activeParticipants)): ?>
                             <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
                         <?php else: ?>
@@ -1584,8 +1586,10 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 
             <div class="col-12 col-md-6">
                 <div class="card shadow-sm h-100 border-warning" data-card-id="requestPhotoCard">
-                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('request.photo.card_title') ?></h5></div>
-                    <div class="card-body">
+                    <div class="card-header bg-warning bg-opacity-25 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#requestPhotoCollapse" role="button" aria-expanded="false" aria-controls="requestPhotoCollapse">
+                        <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-camera-fill me-1"></i><?= t('request.photo.card_title') ?></span><i class="bi bi-chevron-down wr-collapsible-chevron"></i></h5>
+                    </div>
+                    <div class="card-body collapse" id="requestPhotoCollapse">
                         <?php if (empty($activeParticipants)): ?>
                             <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
                         <?php else: ?>
@@ -1615,8 +1619,10 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 
             <div class="col-12 col-md-6">
                 <div class="card shadow-sm h-100 border-warning" data-card-id="requestVideoCard">
-                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-reels-fill me-1"></i><?= t('request.video.card_title') ?></h5></div>
-                    <div class="card-body">
+                    <div class="card-header bg-warning bg-opacity-25 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#requestVideoCollapse" role="button" aria-expanded="false" aria-controls="requestVideoCollapse">
+                        <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-camera-reels-fill me-1"></i><?= t('request.video.card_title') ?></span><i class="bi bi-chevron-down wr-collapsible-chevron"></i></h5>
+                    </div>
+                    <div class="card-body collapse" id="requestVideoCollapse">
                         <?php if (empty($activeParticipants)): ?>
                             <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
                         <?php else: ?>
@@ -1646,8 +1652,10 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 
             <div class="col-12 col-md-6">
                 <div class="card shadow-sm h-100 border-warning" data-card-id="requestTaskCard">
-                    <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-clipboard-check-fill me-1"></i><?= t('request.task.card_title') ?></h5></div>
-                    <div class="card-body">
+                    <div class="card-header bg-warning bg-opacity-25 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#requestTaskCollapse" role="button" aria-expanded="false" aria-controls="requestTaskCollapse">
+                        <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-clipboard-check-fill me-1"></i><?= t('request.task.card_title') ?></span><i class="bi bi-chevron-down wr-collapsible-chevron"></i></h5>
+                    </div>
+                    <div class="card-body collapse" id="requestTaskCollapse">
                         <?php if (empty($activeParticipants)): ?>
                             <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
                         <?php else: ?>
