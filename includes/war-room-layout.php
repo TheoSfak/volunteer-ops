@@ -1,10 +1,11 @@
 <?php
 /**
- * VolunteerOps - War Room card layout (drag-and-drop) persistence
+ * VolunteerOps - War Room card layout (drag-and-drop + show/hide) persistence
  *
  * Required directly by war-room.php and api-war-room-layout.php only (not
- * required globally from bootstrap.php) — it defines the card whitelist and
- * default order shared by both, so the two never drift apart.
+ * required globally from bootstrap.php) — it defines the card whitelist,
+ * default order, and hidden-card reconciliation shared by both, so the two
+ * never drift apart.
  */
 
 if (!defined('VOLUNTEEROPS')) {
@@ -68,6 +69,12 @@ function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams): ar
  *  - saved id that doesn't render now (e.g. no teams yet) -> silently dropped
  *  - card renders now but is missing from an older saved order (new card, or
  *    first customization) -> appended at the end of its zone
+ *  - 'hidden' (which cards the user has toggled off, defaulting to none) is
+ *    reconciled the same way but is orthogonal to zone/order: a hidden id
+ *    stays exactly where it is in main/sidebar (so un-hiding restores its
+ *    position) and is simply intersected against what renders today, with
+ *    no "append missing ids" step — an id absent from 'hidden' is visible
+ *    by default, which is already what we want.
  */
 function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool $hasTeams): array {
     $rendered = warRoomRenderedCardIds($isApprovedParticipant, $hasTeams);
@@ -110,7 +117,53 @@ function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool 
             }
         }
     }
+
+    $savedHidden = is_array($saved['hidden'] ?? null) ? $saved['hidden'] : [];
+    $result['hidden'] = array_values(array_intersect(array_unique($savedHidden), $allRenderedIds));
+
     return $result;
+}
+
+/**
+ * Short plain-text label per card, for the show/hide checklist modal —
+ * distinct from each card's own live header title (t()'d directly in
+ * war-room.php) because a couple of those titles are unsuitable for a
+ * checklist: participantsCard's interpolates a live {count}, which would
+ * either show a stale number or require threading one in for no reason.
+ * Resolved server-side (not just key names) since this gets json_encode'd
+ * straight to JS, which can't call t() itself.
+ */
+function warRoomCardLabels(): array {
+    return [
+        'mapCard' => t('map.title'),
+        'trailEventsCard' => t('trail.events_title'),
+        'shortageFormCard' => t('shortage.card_title'),
+        'incidentFormCard' => t('incident.card_title'),
+        'shortageListCard' => t('shortage.list_panel_title'),
+        'incidentsListCard' => t('incident.list_panel_title'),
+        'poiListCard' => t('poi.list_panel_title'),
+        'teamsCard' => t('teams.panel_title'),
+        'participantsCard' => t('card_visibility.label_participants'),
+        'requestLocationCard' => t('request.location.card_title'),
+        'requestPhotoCard' => t('request.photo.card_title'),
+        'requestVideoCard' => t('request.video.card_title'),
+        'requestTaskCard' => t('request.task.card_title'),
+        'activityCard' => t('activity.panel_title'),
+        'chatCard' => t('chat.panel_title'),
+        'mediaCard' => t('media.panel_title'),
+        'myLocationCard' => t('myping.panel_title'),
+        'nearbyTeamsCard' => t('nearby.panel_title'),
+        'myRouteCard' => t('route.my_panel_title'),
+        'myTasksCard' => t('mytasks.panel_title'),
+        'shiftsCard' => t('shifts.panel_title'),
+        'sosAlertsCard' => t('sos.panel_title'),
+        'broadcastCard' => t('global_message.card_title'),
+        'endMissionCard' => t('end_mission_broadcast.card_title'),
+        'dispatchCard' => t('dispatch.card_title'),
+        'routeOrderCard' => t('route.card_title'),
+        'teamRoutesAdminCard' => t('route.admin_panel_title'),
+        'missionMgmtCard' => t('admin.mission_mgmt_title'),
+    ];
 }
 
 /**

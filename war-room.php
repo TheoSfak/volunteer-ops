@@ -1042,6 +1042,12 @@ include __DIR__ . '/includes/header.php';
     .wr-zone.wr-unlocked > .card [data-card-drag-handle] { cursor: grab; }
     .wr-sortable-ghost { opacity: .4; }
     .wr-sortable-drag { box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+    /* Show/hide cards (admin desktop view only). A dedicated class rather
+       than reusing d-none — several cards toggle their OWN d-none
+       independently (e.g. trailEventsCard on trail-mode state), and reusing
+       it here would let that unrelated logic silently override this
+       preference. !important wins over any inline/utility display too. */
+    .wr-card-hidden { display: none !important; }
     #warRoomMap { height: 520px; border-radius: 12px; }
     #mapCard.map-fullscreen-active { position: fixed; inset: 0; z-index: 1040; border-radius: 0; }
     #mapCard.map-fullscreen-active #warRoomMap { height: 100%; border-radius: 0; }
@@ -1150,6 +1156,9 @@ include __DIR__ . '/includes/header.php';
             <button type="button" id="wakeLockToggle" class="btn btn-outline-light d-none"><i class="bi bi-sun me-1"></i><?= t('hero.btn_keep_awake') ?></button>
             <?php if ($canManageWarRoom && !$fieldMode): ?>
             <button type="button" id="wrLayoutLockToggle" class="btn btn-outline-light"></button>
+            <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#cardVisibilityModal" title="<?= t('hero.btn_manage_cards') ?>" aria-label="<?= t('hero.btn_manage_cards') ?>">
+                <i class="bi bi-gear-fill"></i>
+            </button>
             <?php endif; ?>
             <a href="ops-dashboard.php" class="btn btn-light"><i class="bi bi-arrow-left me-1"></i><?= t('hero.btn_back_ops') ?></a>
         </div>
@@ -2064,6 +2073,29 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
     </div>
 </div>
 
+<!-- Show/hide cards (admin desktop view only, see the wrCardVisibilityBtn
+     gear button in the hero header above). #cardVisibilityList is populated
+     entirely by JS — see the card-layout IIFE further down — from the same
+     cardLabels/hiddenCards data the drag-layout code already builds, in the
+     admin's current main+sidebar order rather than a fixed default order. -->
+<div class="modal fade" id="cardVisibilityModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-gear-fill me-1"></i><?= t('card_visibility.modal_title') ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row row-cols-1 row-cols-md-2 g-2" id="cardVisibilityList"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" id="cardVisibilityShowAllBtn"><?= t('card_visibility.show_all_btn') ?></button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= t('common.close') ?></button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="dispatchMapModal" tabindex="-1">
     <div class="modal-dialog modal-fullscreen">
         <div class="modal-content">
@@ -2240,6 +2272,8 @@ let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
 // measures it — see the map.invalidateSize() calls further down for the two
 // cases (initial load, live drag) where a corrective resize is still needed.
 let savedLayout = <?= json_encode($warRoomLayout) ?>;
+// id -> already-localized short label, for the show/hide checklist modal.
+let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>;
 (function() {
     const zoneMain = document.getElementById('wrZoneMain');
     const zoneSidebar = document.getElementById('wrZoneSidebar');
@@ -2269,6 +2303,61 @@ let savedLayout = <?= json_encode($warRoomLayout) ?>;
     const mapZoneAfter = mapCardEl ? mapCardEl.closest('.wr-zone') : null;
     if (mapCardEl && mapZoneBefore !== mapZoneAfter) {
         setTimeout(() => { if (map) map.invalidateSize(); }, 150);
+    }
+
+    // Show/hide cards. Orthogonal to placeCards() above — a hidden card
+    // still occupies its normal zone/position, it's just display:none, so
+    // un-hiding it later doesn't need to re-place anything.
+    const hiddenCards = new Set(savedLayout.hidden || []);
+    function setCardHidden(id, hide) {
+        const el = document.querySelector(`[data-card-id="${id}"]`);
+        if (el) el.classList.toggle('wr-card-hidden', hide);
+        // A map sized while display:none renders with missing/misaligned
+        // tiles — same corrective invalidateSize() used everywhere else in
+        // this file a hidden/resized map card can become visible again.
+        if (id === 'mapCard' && !hide) {
+            setTimeout(() => { if (map) map.invalidateSize(); }, 150);
+        }
+    }
+    hiddenCards.forEach(id => setCardHidden(id, true));
+
+    function renderCardVisibilityList() {
+        const list = document.getElementById('cardVisibilityList');
+        if (!list) return;
+        list.innerHTML = '';
+        const orderedIds = Array.from(zoneMain.children)
+            .concat(Array.from(zoneSidebar.children))
+            .map(el => el.getAttribute('data-card-id'))
+            .filter(Boolean);
+        orderedIds.forEach(id => {
+            const col = document.createElement('div');
+            col.className = 'col';
+            const checkId = 'cardVis_' + id;
+            col.innerHTML = `<div class="form-check">
+                <input class="form-check-input" type="checkbox" id="${checkId}" ${hiddenCards.has(id) ? '' : 'checked'}>
+                <label class="form-check-label" for="${checkId}">${escapeHtml(cardLabels[id] || id)}</label>
+            </div>`;
+            col.querySelector('input').addEventListener('change', (e) => {
+                const hide = !e.target.checked;
+                if (hide) hiddenCards.add(id); else hiddenCards.delete(id);
+                setCardHidden(id, hide);
+                scheduleSaveLayout();
+            });
+            list.appendChild(col);
+        });
+    }
+    const cardVisibilityModalEl = document.getElementById('cardVisibilityModal');
+    if (cardVisibilityModalEl) {
+        cardVisibilityModalEl.addEventListener('show.bs.modal', renderCardVisibilityList);
+    }
+    const showAllBtn = document.getElementById('cardVisibilityShowAllBtn');
+    if (showAllBtn) {
+        showAllBtn.addEventListener('click', () => {
+            Array.from(hiddenCards).forEach(id => setCardHidden(id, false));
+            hiddenCards.clear();
+            renderCardVisibilityList();
+            scheduleSaveLayout();
+        });
     }
 
     let sortableMain = null, sortableSidebar = null;
@@ -2303,6 +2392,7 @@ let savedLayout = <?= json_encode($warRoomLayout) ?>;
         const layout = {
             main: Array.from(zoneMain.children).map(el => el.getAttribute('data-card-id')).filter(Boolean),
             sidebar: Array.from(zoneSidebar.children).map(el => el.getAttribute('data-card-id')).filter(Boolean),
+            hidden: Array.from(hiddenCards),
         };
         const data = new URLSearchParams({csrf_token: csrfToken, layout_json: JSON.stringify(layout)});
         fetch('api-war-room-layout.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {

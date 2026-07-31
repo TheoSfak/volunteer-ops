@@ -1,13 +1,17 @@
 <?php
 /**
  * VolunteerOps - War Room Card Layout Save Endpoint
- * Saves the current user's drag-and-drop card arrangement for the Action
- * Room admin view. Global per-user, not per-mission — see
- * includes/war-room-layout.php for the shared whitelist/reconciliation logic
- * this endpoint shares with war-room.php's own load path.
+ * Saves the current user's drag-and-drop card arrangement AND show/hide
+ * choices for the Action Room admin view. Global per-user, not per-mission —
+ * see includes/war-room-layout.php for the shared whitelist/reconciliation
+ * logic this endpoint shares with war-room.php's own load path.
  * POST only, AJAX (mirrors mission-shortage.php's wire format, not
  * api-push-subscribe.php's, since this is war-room.php's own sibling
  * endpoint, not a for-everyone feature).
+ * The client always sends its complete current state (order + hidden set)
+ * on every save, never a delta — that's what lets a single endpoint/row
+ * safely serve both the drag-reorder and the visibility-toggle UI without
+ * either one's save clobbering the other's most recent change.
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -43,7 +47,8 @@ if ($rawLayout === '' || strlen($rawLayout) > 10000) {
 }
 
 $layout = json_decode($rawLayout, true);
-if (!is_array($layout) || !isset($layout['main']) || !isset($layout['sidebar']) || count($layout) !== 2) {
+if (!is_array($layout) || !isset($layout['main']) || !isset($layout['sidebar'])
+    || count(array_diff(array_keys($layout), ['main', 'sidebar', 'hidden'])) > 0) {
     echo json_encode(['ok' => false, 'error' => 'Invalid layout shape']);
     exit;
 }
@@ -74,5 +79,31 @@ if (count($combined) !== count(array_unique($combined))) {
     exit;
 }
 
-saveWarRoomLayoutForUser($userId, ['main' => array_values($main), 'sidebar' => array_values($sidebar)]);
+// 'hidden' is optional (older client, or nothing hidden) and orthogonal to
+// main/sidebar — it doesn't partition $combined, it's a subset marker of it.
+$hidden = $layout['hidden'] ?? [];
+if (!is_array($hidden) || array_values($hidden) !== $hidden) {
+    echo json_encode(['ok' => false, 'error' => 'Invalid layout shape']);
+    exit;
+}
+foreach ($hidden as $id) {
+    if (!is_string($id) || !in_array($id, $allIds, true)) {
+        echo json_encode(['ok' => false, 'error' => 'Unknown card id']);
+        exit;
+    }
+}
+if (count($hidden) !== count(array_unique($hidden))) {
+    echo json_encode(['ok' => false, 'error' => 'Duplicate card id']);
+    exit;
+}
+if (count(array_diff($hidden, $combined)) > 0) {
+    echo json_encode(['ok' => false, 'error' => 'Invalid layout shape']);
+    exit;
+}
+
+saveWarRoomLayoutForUser($userId, [
+    'main' => array_values($main),
+    'sidebar' => array_values($sidebar),
+    'hidden' => array_values($hidden),
+]);
 echo json_encode(['ok' => true]);
