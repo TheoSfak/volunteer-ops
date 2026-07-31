@@ -230,6 +230,7 @@ return [
         'hero.btn_awake_active' => 'Οθόνη Ενεργή ✓',
         'hero.btn_lock_layout' => 'Κλείδωμα Θέσεων',
         'hero.btn_unlock_layout' => 'Ξεκλείδωμα Θέσεων',
+        'hero.btn_manage_cards' => 'Διαχείριση Καρτών',
         'hero.btn_back_ops' => 'Επιχειρησιακό',
 
         // Banner
@@ -331,6 +332,11 @@ return [
         'chat.export_btn' => 'Εξαγωγή',
         'chat.general_room' => 'Γενικό',
         'chat.placeholder' => 'Γράψτε μήνυμα…',
+
+        // Show/hide cards modal (gear icon in the hero header)
+        'card_visibility.modal_title' => 'Εμφάνιση/Απόκρυψη Καρτών',
+        'card_visibility.show_all_btn' => 'Εμφάνιση Όλων',
+        'card_visibility.label_participants' => 'Εγκεκριμένοι εθελοντές',
 
         // Response-time report modal
         'report.modal_title' => 'Αναφορά Χρόνων Απόκρισης',
@@ -1048,6 +1054,7 @@ return [
         'hero.btn_awake_active' => 'Keep Awake ✓',
         'hero.btn_lock_layout' => 'Lock Layout',
         'hero.btn_unlock_layout' => 'Unlock Layout',
+        'hero.btn_manage_cards' => 'Manage Cards',
         'hero.btn_back_ops' => 'Operations',
 
         'banner.ack_btn' => 'Acknowledge',
@@ -1135,6 +1142,11 @@ return [
         'chat.export_btn' => 'Export',
         'chat.general_room' => 'General',
         'chat.placeholder' => 'Write a message…',
+
+        // Show/hide cards modal (gear icon in the hero header)
+        'card_visibility.modal_title' => 'Show/Hide Cards',
+        'card_visibility.show_all_btn' => 'Show All',
+        'card_visibility.label_participants' => 'Approved volunteers',
 
         'report.modal_title' => 'Response Time Report',
         'report.by_team' => 'By team',
