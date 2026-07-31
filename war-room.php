@@ -1006,6 +1006,11 @@ foreach ($participants as $participant) {
     ];
 }
 
+require_once __DIR__ . '/includes/war-room-layout.php';
+$warRoomLayout = ($canManageWarRoom && !$fieldMode)
+    ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams))
+    : null;
+
 $pageTitle = 'Action Room — ' . $mission['title'];
 $currentPage = 'war-room';
 include __DIR__ . '/includes/header.php';
@@ -1028,6 +1033,15 @@ include __DIR__ . '/includes/header.php';
     .wr-collapsible-header { cursor: pointer; }
     .wr-collapsible-chevron { transition: transform .2s; }
     .wr-collapsible-header:not(.collapsed) .wr-collapsible-chevron { transform: rotate(180deg); }
+    /* Drag-and-drop card layout (admin desktop view only) — a flat flex stack
+       inside each existing col-lg-8/col-lg-4 column, so mobile reflow (which
+       only ever saw one column at a time anyway) is unaffected. */
+    .wr-zone { display: flex; flex-direction: column; gap: 1rem; }
+    .wr-zone > .card { margin: 0; }
+    .wr-zone.wr-unlocked > .card > .card-header,
+    .wr-zone.wr-unlocked > .card [data-card-drag-handle] { cursor: grab; }
+    .wr-sortable-ghost { opacity: .4; }
+    .wr-sortable-drag { box-shadow: 0 8px 24px rgba(0,0,0,.25); }
     #warRoomMap { height: 520px; border-radius: 12px; }
     #mapCard.map-fullscreen-active { position: fixed; inset: 0; z-index: 1040; border-radius: 0; }
     #mapCard.map-fullscreen-active #warRoomMap { height: 100%; border-radius: 0; }
@@ -1134,6 +1148,9 @@ include __DIR__ . '/includes/header.php';
             </form>
             <button type="button" id="warRoomFocusToggle" class="btn btn-outline-light"><i class="bi bi-arrows-fullscreen me-1"></i><?= t('hero.btn_fullscreen') ?></button>
             <button type="button" id="wakeLockToggle" class="btn btn-outline-light d-none"><i class="bi bi-sun me-1"></i><?= t('hero.btn_keep_awake') ?></button>
+            <?php if ($canManageWarRoom && !$fieldMode): ?>
+            <button type="button" id="wrLayoutLockToggle" class="btn btn-outline-light"></button>
+            <?php endif; ?>
             <a href="ops-dashboard.php" class="btn btn-light"><i class="bi bi-arrow-left me-1"></i><?= t('hero.btn_back_ops') ?></a>
         </div>
     </div>
@@ -1168,10 +1185,29 @@ include __DIR__ . '/includes/header.php';
      obvious error. -->
 <div id="pollStaleBanner" class="alert alert-warning d-flex align-items-center gap-2 py-2 px-3 mb-3 d-none" role="status" aria-live="polite"></div>
 
-<?php if (!$fieldMode): ?>
+<?php if ($canManageWarRoom && !$fieldMode): ?>
+<!-- Drag-and-drop card layout (admin desktop view only). Starts empty —
+     every card below still renders in its normal PHP-conditioned spot; JS
+     physically relocates each [data-card-id] node into these two zones
+     (never clones), then removes the now-empty .wr-legacy-row containers
+     left behind. Any other view ($fieldMode, or a non-admin participant)
+     never renders this block, so nothing below is ever touched for them. -->
 <div class="row g-4 mb-4">
     <div class="col-12 col-lg-8">
-        <div class="card shadow-sm h-100" id="mapCard">
+        <div id="wrZoneMain" class="wr-zone"></div>
+    </div>
+    <div class="col-12 col-lg-4">
+        <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
+        <div id="offlineQueueFailures"></div>
+        <div id="wrZoneSidebar" class="wr-zone"></div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if (!$fieldMode): ?>
+<div class="row g-4 mb-4 wr-legacy-row">
+    <div class="col-12 col-lg-8">
+        <div class="card shadow-sm h-100" id="mapCard" data-card-id="mapCard">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-map me-1"></i><?= t('map.title') ?></h5>
                 <div class="d-flex align-items-center gap-2">
@@ -1251,7 +1287,7 @@ include __DIR__ . '/includes/header.php';
              mean a future new call site could update the map and forget the
              log, exactly the class of gap this project's own past audits
              have hit before). -->
-        <div class="card shadow-sm mt-3 d-none" id="trailEventsCard">
+        <div class="card shadow-sm mt-3 d-none" id="trailEventsCard" data-card-id="trailEventsCard">
             <div class="card-header"><h6 class="mb-0"><i class="bi bi-list-ul me-1"></i><?= t('trail.events_title') ?></h6></div>
             <div class="card-body p-2" id="trailEventLog" style="max-height:300px;overflow-y:auto;"></div>
         </div>
@@ -1259,7 +1295,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <div class="col-12 col-lg-4">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100" data-card-id="mediaCard">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('media.panel_title') ?></h5></div>
             <div class="card-body d-flex flex-column" style="height:520px;">
                 <?php if ($isApprovedParticipant): ?>
@@ -1306,9 +1342,9 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 
 <?php if ($isApprovedParticipant): ?>
-<div class="row g-4 mb-4">
+<div class="row g-4 mb-4 wr-legacy-row">
     <div class="col-12 col-md-6">
-        <div class="card shadow-sm h-100 border-warning">
+        <div class="card shadow-sm h-100 border-warning" data-card-id="shortageFormCard">
             <div class="card-header bg-warning bg-opacity-25 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#shortageFormCollapse" role="button" aria-expanded="false" aria-controls="shortageFormCollapse">
                 <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('shortage.card_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
             </div>
@@ -1337,7 +1373,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <div class="col-12 col-md-6">
-        <div class="card shadow-sm h-100 border-danger">
+        <div class="card shadow-sm h-100 border-danger" data-card-id="incidentFormCard">
             <div class="card-header bg-danger bg-opacity-10 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#incidentFormCollapse" role="button" aria-expanded="false" aria-controls="incidentFormCollapse">
                 <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('incident.card_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
             </div>
@@ -1393,31 +1429,31 @@ include __DIR__ . '/includes/header.php';
 // both are always shown together, unlike shortage.
 $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md-6';
 ?>
-<div class="row g-4 mb-4">
+<div class="row g-4 mb-4 wr-legacy-row">
     <?php if ($canManageWarRoom): ?>
     <div class="<?= $actionRoomListColClass ?>">
-        <div class="card shadow-sm h-100 border-danger">
+        <div class="card shadow-sm h-100 border-danger" data-card-id="shortageListCard">
             <div class="card-header bg-danger bg-opacity-10 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#shortageListCollapse" role="button" aria-expanded="false" aria-controls="shortageListCollapse">
-                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i><?= t('shortage.list_panel_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i><?= t('shortage.list_panel_title') ?></span><i class="bi bi-chevron-down wr-collapsible-chevron"></i></h5>
             </div>
-            <div class="card-body collapse d-lg-block" id="shortageListCollapse">
+            <div class="card-body collapse" id="shortageListCollapse">
                 <div id="shortageReportsList"></div>
             </div>
         </div>
     </div>
     <?php endif; ?>
     <div class="<?= $actionRoomListColClass ?>">
-        <div class="card shadow-sm h-100 border-danger">
+        <div class="card shadow-sm h-100 border-danger" data-card-id="incidentsListCard">
             <div class="card-header bg-danger bg-opacity-10 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#incidentsListCollapse" role="button" aria-expanded="false" aria-controls="incidentsListCollapse">
-                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('incident.list_panel_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('incident.list_panel_title') ?></span><i class="bi bi-chevron-down wr-collapsible-chevron"></i></h5>
             </div>
-            <div class="card-body collapse d-lg-block" id="incidentsListCollapse">
+            <div class="card-body collapse" id="incidentsListCollapse">
                 <div id="incidentsList"></div>
             </div>
         </div>
     </div>
     <div class="<?= $actionRoomListColClass ?>">
-        <div class="card shadow-sm h-100 border-primary">
+        <div class="card shadow-sm h-100 border-primary" data-card-id="poiListCard">
             <div class="card-header bg-primary bg-opacity-10 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#poiListCollapse" role="button" aria-expanded="false" aria-controls="poiListCollapse">
                 <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-search me-1 text-primary"></i><?= t('poi.list_panel_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
             </div>
@@ -1431,8 +1467,8 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 
 <div class="row g-4">
     <?php if (!$fieldMode): ?>
-    <div class="col-12 col-lg-8">
-        <div class="card shadow-sm mb-4">
+    <div class="col-12 col-lg-8 wr-legacy-row">
+        <div class="card shadow-sm mb-4" data-card-id="teamsCard">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-diagram-3 me-1"></i><?= t('teams.panel_title') ?></h5>
                 <?php if ($canManageWarRoom && !empty($unassignedApproved)): ?>
@@ -1487,7 +1523,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
-        <div class="card shadow-sm">
+        <div class="card shadow-sm" data-card-id="participantsCard">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-people me-1"></i><?= t('participants.panel_title', ['count' => count($participants)]) ?></h5></div>
             <div class="list-group list-group-flush">
                 <?php foreach ($participants as $participant): ?>
@@ -1506,7 +1542,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <?php if ($canManageWarRoom): ?>
         <div class="row g-4 mt-0">
             <div class="col-12 col-md-6">
-                <div class="card shadow-sm h-100 border-warning">
+                <div class="card shadow-sm h-100 border-warning" data-card-id="requestLocationCard">
                     <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-bell-fill me-1"></i><?= t('request.location.card_title') ?></h5></div>
                     <div class="card-body">
                         <?php if (empty($activeParticipants)): ?>
@@ -1538,7 +1574,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
 
             <div class="col-12 col-md-6">
-                <div class="card shadow-sm h-100 border-warning">
+                <div class="card shadow-sm h-100 border-warning" data-card-id="requestPhotoCard">
                     <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('request.photo.card_title') ?></h5></div>
                     <div class="card-body">
                         <?php if (empty($activeParticipants)): ?>
@@ -1569,7 +1605,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
 
             <div class="col-12 col-md-6">
-                <div class="card shadow-sm h-100 border-warning">
+                <div class="card shadow-sm h-100 border-warning" data-card-id="requestVideoCard">
                     <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-camera-reels-fill me-1"></i><?= t('request.video.card_title') ?></h5></div>
                     <div class="card-body">
                         <?php if (empty($activeParticipants)): ?>
@@ -1600,7 +1636,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
 
             <div class="col-12 col-md-6">
-                <div class="card shadow-sm h-100 border-warning">
+                <div class="card shadow-sm h-100 border-warning" data-card-id="requestTaskCard">
                     <div class="card-header bg-warning bg-opacity-25"><h5 class="mb-0"><i class="bi bi-clipboard-check-fill me-1"></i><?= t('request.task.card_title') ?></h5></div>
                     <div class="card-body">
                         <?php if (empty($activeParticipants)): ?>
@@ -1633,7 +1669,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         </div>
         <?php endif; ?>
 
-        <div class="card shadow-sm mt-4">
+        <div class="card shadow-sm mt-4" data-card-id="activityCard">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#activityCollapse" role="button" aria-expanded="false" aria-controls="activityCollapse"><i class="bi bi-activity me-1"></i><?= t('activity.panel_title') ?><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron ms-1"></i></h5>
                 <div class="d-flex align-items-center gap-2">
@@ -1654,11 +1690,17 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <!-- Offline queue status. Sits above every field card rather than inside
              the Route Order one (where it used to live) because the queue now
              also carries field-status/SOS taps, which are reported from the
-             card below and can happen on a mission with no route at all. -->
+             card below and can happen on a mission with no route at all.
+             Rendered here except for the admin-desktop drag/zone view, which
+             already rendered these same two ids once, above, next to
+             #wrZoneSidebar — never both, since duplicate ids would break
+             every getElementById() lookup that targets them. -->
+        <?php if (!($canManageWarRoom && !$fieldMode)): ?>
         <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
         <div id="offlineQueueFailures"></div>
+        <?php endif; ?>
 
-        <div class="card shadow-sm mb-4 border-primary">
+        <div class="card shadow-sm mb-4 border-primary" data-card-id="myLocationCard">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-geo-alt-fill me-1"></i><?= t('myping.panel_title') ?></h5></div>
             <div class="card-body">
                 <?php if (empty($myAssignments)): ?>
@@ -1691,21 +1733,21 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
              Unconditional card (like My Ping/Route/Tasks below it): shows in
              both Field Mode and full view, content degrades gracefully via
              renderNearbyTeams() when there's no data yet. -->
-        <div class="card shadow-sm mb-4 border-primary">
+        <div class="card shadow-sm mb-4 border-primary" data-card-id="nearbyTeamsCard">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-compass me-1"></i><?= t('nearby.panel_title') ?></h5></div>
             <div class="card-body">
                 <div id="nearbyTeamsList"></div>
             </div>
         </div>
 
-        <div class="card shadow-sm mb-4 border-primary">
+        <div class="card shadow-sm mb-4 border-primary" data-card-id="myRouteCard">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-signpost-split-fill me-1"></i><?= t('route.my_panel_title') ?></h5></div>
             <div class="card-body">
                 <div id="myRoutesList"><p class="text-muted mb-0"><?= t('route.my_empty') ?></p></div>
             </div>
         </div>
 
-        <div class="card shadow-sm mb-4 border-primary">
+        <div class="card shadow-sm mb-4 border-primary" data-card-id="myTasksCard">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-clipboard-check me-1"></i><?= t('mytasks.panel_title') ?></h5></div>
             <div class="card-body">
                 <div id="myTasksList"></div>
@@ -1713,7 +1755,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         </div>
 
         <?php if (!$fieldMode): ?>
-        <div class="card shadow-sm mb-4">
+        <div class="card shadow-sm mb-4" data-card-id="shiftsCard">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-calendar-range me-1"></i><?= t('shifts.panel_title') ?></h5></div>
             <div class="list-group list-group-flush">
                 <?php foreach ($shifts as $shift): ?>
@@ -1724,7 +1766,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <?php endif; ?>
 
         <?php if ($canManageWarRoom && !$fieldMode): ?>
-        <div class="card shadow-sm mb-4 border-danger">
+        <div class="card shadow-sm mb-4 border-danger" data-card-id="sosAlertsCard">
             <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="bi bi-sos me-1"></i><?= t('sos.panel_title') ?></h5></div>
             <div class="card-body">
                 <div id="sosAlertsList"><p class="text-muted mb-0"><?= t('sos.empty') ?></p></div>
@@ -1733,7 +1775,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <?php endif; ?>
 
         <?php if ($canManageWarRoom && !$fieldMode): ?>
-        <div class="card shadow-sm mb-4 border-danger">
+        <div class="card shadow-sm mb-4 border-danger" data-card-id="broadcastCard">
             <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-megaphone-fill me-1 text-danger"></i><?= t('global_message.card_title') ?></h5></div>
             <div class="card-body">
                 <p class="small text-muted"><?= t('global_message.note') ?></p>
@@ -1746,7 +1788,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
-        <div class="card shadow-sm mb-4 border-danger">
+        <div class="card shadow-sm mb-4 border-danger" data-card-id="endMissionCard">
             <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="bi bi-flag-fill me-1"></i><?= t('end_mission_broadcast.card_title') ?></h5></div>
             <div class="card-body">
                 <p class="small text-muted"><?= t('end_mission_broadcast.note') ?></p>
@@ -1760,7 +1802,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
-        <div class="card shadow-sm mb-4 border-primary">
+        <div class="card shadow-sm mb-4 border-primary" data-card-id="dispatchCard">
             <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-geo-fill me-1"></i><?= t('dispatch.card_title') ?></h5></div>
             <div class="card-body">
                 <p class="small text-muted"><?= t('dispatch.note') ?></p>
@@ -1778,7 +1820,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         </div>
 
         <?php if (!empty($teams)): ?>
-        <div class="card shadow-sm mb-4 border-primary">
+        <div class="card shadow-sm mb-4 border-primary" data-card-id="routeOrderCard">
             <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-signpost-split-fill me-1"></i><?= t('route.card_title') ?></h5></div>
             <div class="card-body">
                 <p class="small text-muted"><?= t('route.note') ?></p>
@@ -1806,7 +1848,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
-        <div class="card shadow-sm mb-4 border-primary">
+        <div class="card shadow-sm mb-4 border-primary" data-card-id="teamRoutesAdminCard">
             <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-list-check me-1"></i><?= t('route.admin_panel_title') ?></h5></div>
             <div class="card-body">
                 <div id="routesAdminList"><p class="text-muted mb-0"><?= t('route.admin_empty') ?></p></div>
@@ -1831,8 +1873,8 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             ]) . ' ' . $closeConfirmMsg;
         }
         ?>
-        <div class="card border-danger shadow-sm">
-            <div class="card-body"><h6><i class="bi bi-shield-exclamation text-danger me-1"></i><?= t('admin.mission_mgmt_title') ?></h6>
+        <div class="card border-danger shadow-sm" data-card-id="missionMgmtCard">
+            <div class="card-body"><h6 data-card-drag-handle><i class="bi bi-shield-exclamation text-danger me-1"></i><?= t('admin.mission_mgmt_title') ?></h6>
                 <p class="small text-muted"><?= t('admin.close_note') ?></p>
                 <?php if ($openItemsCount > 0): ?>
                 <div class="alert alert-warning small py-2 px-2 mb-2"><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('admin.close_open_items_warning', [
@@ -1933,7 +1975,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 <?php endforeach; ?>
 <?php endif; ?>
 
-<div class="card shadow-sm mb-4">
+<div class="card shadow-sm mb-4" data-card-id="chatCard">
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0"><i class="bi bi-chat-dots me-1"></i><?= t('chat.panel_title') ?></h5>
         <div class="dropdown">
@@ -2189,6 +2231,108 @@ let missionIncidents = <?= json_encode($incidents) ?>;
 const canManageIncidents = <?= json_encode($canManageWarRoom) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
 let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
+
+// Drag-and-drop card layout (admin desktop view only — #wrZoneMain/#wrZoneSidebar
+// only exist in the DOM when canManageWarRoom && !fieldMode, so their absence
+// here already means "not this view", nothing further to check). Runs before
+// the map initializes below, so a saved layout that puts the map card in a
+// different zone is already in its final position before Leaflet ever
+// measures it — see the map.invalidateSize() calls further down for the two
+// cases (initial load, live drag) where a corrective resize is still needed.
+let savedLayout = <?= json_encode($warRoomLayout) ?>;
+(function() {
+    const zoneMain = document.getElementById('wrZoneMain');
+    const zoneSidebar = document.getElementById('wrZoneSidebar');
+    if (!zoneMain || !zoneSidebar) return;
+
+    const mapCardEl = document.querySelector('[data-card-id="mapCard"]');
+
+    function placeCards(order) {
+        [['main', zoneMain], ['sidebar', zoneSidebar]].forEach(([zoneName, zoneEl]) => {
+            ((order && order[zoneName]) || []).forEach(id => {
+                const el = document.querySelector(`[data-card-id="${id}"]`);
+                if (el) zoneEl.appendChild(el); // real node, never a clone — same idiom as the banner relocation below
+            });
+        });
+        // Defensive only: PHP already reconciles savedLayout against whatever
+        // actually renders this request, so this should never find anything —
+        // but if it ever does, the card still ends up visible (in main)
+        // rather than silently disappearing from the page.
+        document.querySelectorAll('[data-card-id]').forEach(el => {
+            if (!zoneMain.contains(el) && !zoneSidebar.contains(el)) zoneMain.appendChild(el);
+        });
+    }
+
+    const mapZoneBefore = mapCardEl ? mapCardEl.closest('.wr-zone') : null;
+    placeCards(savedLayout);
+    document.querySelectorAll('.wr-legacy-row').forEach(el => el.remove());
+    const mapZoneAfter = mapCardEl ? mapCardEl.closest('.wr-zone') : null;
+    if (mapCardEl && mapZoneBefore !== mapZoneAfter) {
+        setTimeout(() => { if (map) map.invalidateSize(); }, 150);
+    }
+
+    let sortableMain = null, sortableSidebar = null;
+    if (typeof Sortable !== 'undefined') {
+        const zoneOpts = {
+            group: 'wrCards',
+            handle: '.card-header, [data-card-drag-handle]',
+            animation: 200,
+            ghostClass: 'wr-sortable-ghost',
+            dragClass: 'wr-sortable-drag',
+            delay: 150,
+            delayOnTouchOnly: true,
+            touchStartThreshold: 5,
+            disabled: true,
+            onEnd: function(evt) {
+                if (evt.item.getAttribute('data-card-id') === 'mapCard') {
+                    setTimeout(() => { if (map) map.invalidateSize(); }, 150);
+                }
+                scheduleSaveLayout();
+            },
+        };
+        sortableMain = new Sortable(zoneMain, zoneOpts);
+        sortableSidebar = new Sortable(zoneSidebar, zoneOpts);
+    }
+
+    let saveTimer = null;
+    function scheduleSaveLayout() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(saveLayoutNow, 600);
+    }
+    function saveLayoutNow() {
+        const layout = {
+            main: Array.from(zoneMain.children).map(el => el.getAttribute('data-card-id')).filter(Boolean),
+            sidebar: Array.from(zoneSidebar.children).map(el => el.getAttribute('data-card-id')).filter(Boolean),
+        };
+        const data = new URLSearchParams({csrf_token: csrfToken, layout_json: JSON.stringify(layout)});
+        fetch('api-war-room-layout.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (!result.ok) console.error('War room layout save failed:', result.error);
+        }).catch(() => {});
+    }
+
+    // Always starts locked, every page load — this is a live incident-command
+    // screen, so the risk of an accidental drag mid-incident outweighs the
+    // one-click cost of unlocking each session. Not persisted on purpose.
+    const lockBtn = document.getElementById('wrLayoutLockToggle');
+    let layoutLocked = true;
+    function applyLockState() {
+        zoneMain.classList.toggle('wr-unlocked', !layoutLocked);
+        zoneSidebar.classList.toggle('wr-unlocked', !layoutLocked);
+        if (sortableMain) sortableMain.option('disabled', layoutLocked);
+        if (sortableSidebar) sortableSidebar.option('disabled', layoutLocked);
+        if (lockBtn) {
+            lockBtn.classList.toggle('btn-outline-light', layoutLocked);
+            lockBtn.classList.toggle('btn-warning', !layoutLocked);
+            lockBtn.innerHTML = layoutLocked
+                ? '<i class="bi bi-lock-fill me-1"></i>' + t('hero.btn_unlock_layout')
+                : '<i class="bi bi-unlock-fill me-1"></i>' + t('hero.btn_lock_layout');
+        }
+    }
+    if (lockBtn) {
+        lockBtn.addEventListener('click', () => { layoutLocked = !layoutLocked; applyLockState(); });
+    }
+    applyLockState();
+})();
 
 // Field Mode only, automatic — keeps the screen from sleeping so passive
 // location capture keeps working while a volunteer's phone is out. The

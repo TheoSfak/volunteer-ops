@@ -1150,6 +1150,23 @@ function canManageActionRoom(?int $responsibleUserId, int $userId): bool {
 }
 
 /**
+ * Same authorization as canManageActionRoom(), but for a mission-independent
+ * check (e.g. saving a cross-mission preference like the war room's card
+ * layout) — canManageActionRoom(null, $userId) is NOT equivalent, since it
+ * silently drops the responsible_user_id path and would 403 a shift leader
+ * who manages their own mission's Action Room but holds no sitewide
+ * missions_manage permission. This checks that path across every mission.
+ */
+function canManageAnyActionRoom(int $userId): bool {
+    if (isExternalGuest()) return false;
+    if (hasPagePermission('missions_manage')) return true;
+    return (bool) dbFetchOne(
+        "SELECT 1 FROM missions WHERE responsible_user_id = ? AND deleted_at IS NULL LIMIT 1",
+        [$userId]
+    );
+}
+
+/**
  * War Room: appends an always-visible small badge showing a guest's home
  * rescue-team/organization right after their name — only for is_external
  * accounts (users.guest_org_name). Everyone else's name renders exactly as

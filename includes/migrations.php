@@ -5426,6 +5426,30 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 114,
+            'description' => 'Create war_room_layouts table — one row per user (not per mission), storing their chosen drag-and-drop card arrangement for war-room.php\'s Action Room admin view (main/sidebar zone order). Global across missions by design.',
+            'up' => function () {
+                $tableExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'war_room_layouts'"
+                );
+                if (!$tableExists) {
+                    dbExecute(
+                        "CREATE TABLE war_room_layouts (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            user_id INT UNSIGNED NOT NULL,
+                            layout_json JSON NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            UNIQUE KEY uq_war_room_layouts_user (user_id),
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

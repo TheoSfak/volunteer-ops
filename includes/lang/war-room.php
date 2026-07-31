@@ -228,6 +228,8 @@ return [
         'hero.btn_fullscreen' => 'Πλήρης Οθόνη',
         'hero.btn_keep_awake' => 'Οθόνη Ενεργή',
         'hero.btn_awake_active' => 'Οθόνη Ενεργή ✓',
+        'hero.btn_lock_layout' => 'Κλείδωμα Θέσεων',
+        'hero.btn_unlock_layout' => 'Ξεκλείδωμα Θέσεων',
         'hero.btn_back_ops' => 'Επιχειρησιακό',
 
         // Banner
@@ -1044,6 +1046,8 @@ return [
         'hero.btn_fullscreen' => 'Fullscreen',
         'hero.btn_keep_awake' => 'Keep Awake',
         'hero.btn_awake_active' => 'Keep Awake ✓',
+        'hero.btn_lock_layout' => 'Lock Layout',
+        'hero.btn_unlock_layout' => 'Unlock Layout',
         'hero.btn_back_ops' => 'Operations',
 
         'banner.ack_btn' => 'Acknowledge',
