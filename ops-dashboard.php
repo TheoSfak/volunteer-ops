@@ -166,6 +166,11 @@ $activeMissions = [];
 $upcomingMissions = [];
 $overdueMissions = [];
 $opsNow = time();
+// "Προσεχώς" is meant as a short-term heads-up, not every future mission ever
+// scheduled — a mission months out doesn't need operational attention yet, so
+// it's simply left out of all 3 buckets until it enters this window (it'll
+// appear on its own on a later page load, no stored state needed).
+$upcomingWindowDays = 20;
 foreach ($missions as $missionId => &$mission) {
     $shiftStarts = array_map(fn($shift) => strtotime($shift['start_time']), $mission['shifts']);
     $shiftEnds = array_map(fn($shift) => strtotime($shift['end_time']), $mission['shifts']);
@@ -173,7 +178,9 @@ foreach ($missions as $missionId => &$mission) {
     $mission['operational_end'] = max($shiftEnds);
 
     if ($mission['operational_start'] > $opsNow) {
-        $upcomingMissions[$missionId] = $mission;
+        if ($mission['operational_start'] <= $opsNow + ($upcomingWindowDays * 86400)) {
+            $upcomingMissions[$missionId] = $mission;
+        }
     } elseif ($mission['operational_end'] < $opsNow) {
         $overdueMissions[$missionId] = $mission;
     } else {
@@ -666,7 +673,6 @@ include __DIR__ . '/includes/header.php';
 
         <!-- ── Upcoming missions (collapsible) ── -->
         </div>
-        <?php if (!empty($upcomingMissions)): ?>
         <div class="text-center my-3 d-none">
             <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#upcomingSection" aria-expanded="false">
                 <i class="bi bi-calendar-event me-1"></i>Δείτε τις επερχόμενες αποστολές
@@ -674,6 +680,9 @@ include __DIR__ . '/includes/header.php';
             </button>
         </div>
         <div class="d-none" id="upcomingSection">
+        <?php if (empty($upcomingMissions)): ?>
+            <div class="alert alert-light border text-muted mb-0"><i class="bi bi-check2-circle me-1 text-success"></i>Δεν υπάρχουν επερχόμενες αποστολές τις επόμενες <?= $upcomingWindowDays ?> ημέρες.</div>
+        <?php else: ?>
         <?php foreach ($upcomingMissions as $m): ?>
         <?php
             $isUrgent = (bool)$m['is_urgent'];
@@ -736,8 +745,8 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
         <?php endforeach; ?>
-        </div>
         <?php endif; ?>
+        </div>
 
         <div class="d-none" id="overdueSection">
             <?php if (empty($overdueMissions)): ?>
