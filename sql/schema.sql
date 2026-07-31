@@ -447,6 +447,19 @@ CREATE TABLE IF NOT EXISTS `user_notification_preferences` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- WAR ROOM LAYOUTS TABLE
+-- =============================================
+CREATE TABLE IF NOT EXISTS `war_room_layouts` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT UNSIGNED NOT NULL,
+    `layout_json` JSON NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_war_room_layouts_user` (`user_id`),
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- VOLUNTEER DOCUMENTS TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS `volunteer_documents` (

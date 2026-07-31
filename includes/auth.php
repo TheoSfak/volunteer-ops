@@ -38,6 +38,12 @@ define('WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS', [
     // "Ξεκίνησε" got the exact "session expired, GPS stopped sending" banner
     // this comment already describes, repeatedly, on their phone.
     'mission-route.php',
+    // api-war-room-layout.php (drag-and-drop card layout save) — same risk as
+    // every other endpoint on this list: called from within a long-open
+    // war-room.php tab, so it needs the same exemption. Not "mission-"
+    // prefixed, but neither is api-push-subscribe.php above, already on this
+    // list for the identical reason.
+    'api-war-room-layout.php',
 ]);
 
 function initSession() {
