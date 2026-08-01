@@ -95,11 +95,9 @@ if (isPost()) {
     if (empty($errors)) {
         try {
             if ($isEdit) {
-                // Move all related shifts by the same number of calendar days as the mission.
-                // This preserves each shift's start/end time and duration.
-                $oldMissionDate = (new DateTime($mission['start_datetime']))->setTime(0, 0, 0);
-                $newMissionDate = (new DateTime($data['start_datetime']))->setTime(0, 0, 0);
-                $shiftDateOffsetDays = (int)$oldMissionDate->diff($newMissionDate)->format('%r%a');
+                $missionTimeChanged = $data['start_datetime'] !== $mission['start_datetime']
+                                    || $data['end_datetime']   !== $mission['end_datetime'];
+                $shiftCountBeforeUpdate = (int) dbFetchValue("SELECT COUNT(*) FROM shifts WHERE mission_id = ?", [$id]);
 
                 db()->beginTransaction();
                 try {
@@ -116,32 +114,34 @@ if (isPost()) {
                         $data['is_urgent'], $data['show_in_ops'], $data['status'], $data['responsible_user_id'], $id
                     ]);
 
+                    // Exactly one shift: unambiguous which shift should move, so mirror
+                    // the mission's new start/end onto it directly — same convention as
+                    // the auto-created shift below, which always equals the mission's own
+                    // datetime. More than one shift: which shift(s) should change — and by
+                    // how much — is no longer unambiguous, so leave them untouched and flag
+                    // it for the admin instead of guessing on their behalf.
                     $updatedShifts = 0;
-                    if ($shiftDateOffsetDays !== 0) {
+                    $shiftsNeedManualUpdate = false;
+                    if ($missionTimeChanged && $shiftCountBeforeUpdate === 1) {
                         $updatedShifts = dbExecute(
-                            "UPDATE shifts
-                             SET start_time = DATE_ADD(start_time, INTERVAL ? DAY),
-                                 end_time = DATE_ADD(end_time, INTERVAL ? DAY),
-                                 updated_at = NOW()
-                             WHERE mission_id = ?",
-                            [$shiftDateOffsetDays, $shiftDateOffsetDays, $id]
+                            "UPDATE shifts SET start_time = ?, end_time = ?, updated_at = NOW() WHERE mission_id = ?",
+                            [$data['start_datetime'], $data['end_datetime'], $id]
                         );
+                    } elseif ($missionTimeChanged && $shiftCountBeforeUpdate > 1) {
+                        $shiftsNeedManualUpdate = true;
                     }
 
                     // Auto-create a default shift matching the mission's date/time if it's
                     // (now) Open and still has none — same convention as the create flow
                     // and the "publish" action on mission-view.php.
                     $autoCreatedShift = false;
-                    if ($data['status'] === STATUS_OPEN) {
-                        $existingShiftCount = (int) dbFetchValue("SELECT COUNT(*) FROM shifts WHERE mission_id = ?", [$id]);
-                        if ($existingShiftCount === 0) {
-                            dbInsert(
-                                "INSERT INTO shifts (mission_id, start_time, end_time, max_volunteers, min_volunteers, created_at, updated_at)
-                                 VALUES (?, ?, ?, 5, 1, NOW(), NOW())",
-                                [$id, $data['start_datetime'], $data['end_datetime']]
-                            );
-                            $autoCreatedShift = true;
-                        }
+                    if ($data['status'] === STATUS_OPEN && $shiftCountBeforeUpdate === 0) {
+                        dbInsert(
+                            "INSERT INTO shifts (mission_id, start_time, end_time, max_volunteers, min_volunteers, created_at, updated_at)
+                             VALUES (?, ?, ?, 5, 1, NOW(), NOW())",
+                            [$id, $data['start_datetime'], $data['end_datetime']]
+                        );
+                        $autoCreatedShift = true;
                     }
 
                     db()->commit();
@@ -155,13 +155,15 @@ if (isPost()) {
                 logAudit('update', 'missions', $id, $mission, $data);
                 $message = 'Η αποστολή ενημερώθηκε επιτυχώς.';
                 if ($updatedShifts > 0) {
-                    $shiftLabel = $updatedShifts === 1 ? 'βάρδιας' : 'βαρδιών';
-                    $message .= ' Ενημερώθηκε αυτόματα η ημερομηνία ' . $updatedShifts . ' ' . $shiftLabel . '.';
+                    $message .= ' Ενημερώθηκε αυτόματα η ημερομηνία/ώρα της βάρδιας.';
                 } elseif ($autoCreatedShift) {
                     logAudit('auto_create_shift', 'shifts', $id, 'Αυτόματη δημιουργία βαρδίας κατά την ενημέρωση αποστολής');
                     $message .= ' Δημιουργήθηκε αυτόματα μία βάρδια.';
                 }
                 setFlash('success', $message);
+                if ($shiftsNeedManualUpdate) {
+                    setFlash('warning', 'Η αποστολή έχει ' . $shiftCountBeforeUpdate . ' βάρδιες, οπότε οι ημερομηνίες/ώρες τους ΔΕΝ ενημερώθηκαν αυτόματα. Ελέγξτε και ενημερώστε τις χειροκίνητα από τη σελίδα της αποστολής.');
+                }
             } else {
                 if ($isRecurring) {
                     // ── RECURRING MISSIONS ──────────────────────────────────────────
