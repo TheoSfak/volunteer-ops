@@ -1,0 +1,8 @@
+{
+  "appId": "gr.volunteerops.yphresies",
+  "appName": "Εθελοντές Σε Δράση",
+  "webDir": "www",
+  "server": {
+    "url": "https://yphresies.gr"
+  }
+}

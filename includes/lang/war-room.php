@@ -575,6 +575,7 @@ return [
         'ping.invalid_coordinates' => 'Μη έγκυρες συντεταγμένες',
         'ping.mission_not_open_or_not_approved' => 'Η αποστολή δεν είναι ανοιχτή στο Επιχειρησιακό ή δεν έχετε εγκεκριμένη συμμετοχή',
         'ping.gps_unavailable_migration' => 'Η λειτουργία GPS δεν είναι διαθέσιμη ακόμη (χρειάζεται migration βάσης).',
+        'bgtrack.notification_text' => 'Η τοποθεσία σας κοινοποιείται στο Επιχειρησιακό όσο η βάρδια είναι ενεργή.',
 
         // mission-chat.php
         'chat.no_room_access' => 'Δεν έχετε πρόσβαση σε αυτό το chat.',
@@ -1373,6 +1374,7 @@ return [
         'ping.invalid_coordinates' => 'Invalid coordinates',
         'ping.mission_not_open_or_not_approved' => 'The mission is not open in Operations, or you do not have an approved participation',
         'ping.gps_unavailable_migration' => 'GPS is not available yet (database migration required).',
+        'bgtrack.notification_text' => 'Your location is being shared with Operations while your shift is active.',
 
         'chat.no_room_access' => 'You do not have access to this chat.',
         'chat.empty_message' => 'The message cannot be empty.',

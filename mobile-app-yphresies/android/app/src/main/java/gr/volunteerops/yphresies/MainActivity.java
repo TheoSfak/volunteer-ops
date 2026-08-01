@@ -1,4 +1,4 @@
-package gr.volunteerops.app;
+package gr.volunteerops.yphresies;
 
 import com.getcapacitor.BridgeActivity;
 

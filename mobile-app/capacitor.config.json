@@ -1,9 +1,8 @@
 {
-  "appId": "gr.volunteerops.app",
-  "appName": "VolunteerOps",
+  "appId": "gr.volunteerops.epidrasis",
+  "appName": "ΕΠΙΔΡΑΣΙΣ",
   "webDir": "www",
   "server": {
-    "url": "http://10.0.2.2/volunteerops",
-    "cleartext": true
+    "url": "https://epidrasis.iloveweb.gr"
   }
 }

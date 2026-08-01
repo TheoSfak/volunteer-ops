@@ -112,7 +112,7 @@ if (isLoggedIn() && isExternalGuest()) {
         // (mobile-ping-location.php itself is NOT on this list: it's
         // bearer-token-authed with no session at all, so isLoggedIn() is
         // false and this whole guest gate never runs for it.)
-        'mobile-token-issue.php',
+        'mobile-token-issue.php', 'mobile-app-setup.php',
     ];
     if (!in_array($__extScript, $__extAllowed, true)) {
         $__extMissionIds = getExternalGuestMissionIds(getCurrentUserId());

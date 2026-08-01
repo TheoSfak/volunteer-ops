@@ -1,0 +1,154 @@
+diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
+index 00b9e10..fdabcbd 100644
+--- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
++++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
+@@ -117,7 +117,10 @@ public class BackgroundGeolocation extends Plugin {
+                 call.getString("backgroundTitle", "Using your location"),
+                 call.getString("backgroundMessage", ""),
+                 call.getFloat("distanceFilter", 0f),
+-                call.getString("url", null)
++                call.getString("url", null),
++                // VolunteerOps patch — see LocationStore.KEY_INTERVAL_MS / KEY_AUTH_TOKEN.
++                call.getInt("intervalMs", 1000),
++                call.getString("authToken", null)
+             );
+         });
+     }
+diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
+index 85f2a02..a2efb45 100644
+--- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
++++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
+@@ -51,6 +51,8 @@ public class BackgroundGeolocationService extends Service {
+     private Runnable watchdogRunnable;
+     private Runnable restartRunnable;
+     private float currentDistanceFilter;
++    // VolunteerOps patch — see LocationStore.KEY_INTERVAL_MS for why.
++    private long currentIntervalMs = 1000L;
+     private PowerManager.WakeLock wakeLock;
+ 
+     // When set (via the "url" start option), each location is also POSTed to
+@@ -115,6 +117,7 @@ public class BackgroundGeolocationService extends Service {
+             acquireWakeLock();
+             client = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+             currentDistanceFilter = LocationStore.getDistanceFilter(context);
++            currentIntervalMs = LocationStore.getIntervalMs(context);
+             locationCallback = createLocationListener(this);
+             requestLocationUpdates();
+             startWatchdog();
+@@ -195,7 +198,7 @@ public class BackgroundGeolocationService extends Service {
+                 return;
+             }
+             try {
+-                client.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, currentDistanceFilter, locationCallback);
++                client.requestLocationUpdates(LocationManager.GPS_PROVIDER, currentIntervalMs, currentDistanceFilter, locationCallback);
+             } catch (SecurityException ignore) {
+                 // Permission issues are handled in the start() method
+             }
+@@ -303,7 +306,7 @@ public class BackgroundGeolocationService extends Service {
+ 
+     private void requestLocationUpdates() {
+         try {
+-            client.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, currentDistanceFilter, locationCallback);
++            client.requestLocationUpdates(LocationManager.GPS_PROVIDER, currentIntervalMs, currentDistanceFilter, locationCallback);
+         } catch (SecurityException ignore) {
+             // According to Android Studio, this method can throw a Security Exception if
+             // permissions are not yet granted. Rather than check the permissions, which is fiddly,
+@@ -344,16 +347,19 @@ public class BackgroundGeolocationService extends Service {
+             final String notificationTitle,
+             final String notificationMessage,
+             float distanceFilter,
+-            final String url
++            final String url,
++            long intervalMs,
++            final String authToken
+         ) {
+             releaseMediaPlayer();
+             acquireWakeLock();
+             client = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+             callbackId = id;
+             currentDistanceFilter = distanceFilter;
++            currentIntervalMs = intervalMs;
+ 
+             nativePostUrl = (url == null || url.isEmpty()) ? null : url;
+-            LocationStore.saveSetup(getApplicationContext(), nativePostUrl, notificationTitle, notificationMessage, distanceFilter);
++            LocationStore.saveSetup(getApplicationContext(), nativePostUrl, notificationTitle, notificationMessage, distanceFilter, intervalMs, authToken);
+ 
+             // The service may already be running (for example after a sticky
+             // restart), so drop any previous listener before registering a new one.
+diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
+index 2e19afe..da10f9e 100644
+--- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
++++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
+@@ -22,6 +22,19 @@ final class LocationStore {
+     private static final String KEY_TITLE = "title";
+     private static final String KEY_MESSAGE = "message";
+     private static final String KEY_DISTANCE_FILTER = "distanceFilter";
++    // VolunteerOps patch (see patches/@capgo+background-geolocation+*.patch):
++    // upstream hardcodes the LocationManager min-update-time at 1000ms, which
++    // has no "check in periodically even while stationary" behavior beyond
++    // that 1s floor — fine for a demo, not for a multi-hour field shift. This
++    // makes that interval configurable from the JS "intervalMs" start option
++    // instead of forking the whole plugin.
++    private static final String KEY_INTERVAL_MS = "intervalMs";
++    // VolunteerOps patch: upstream's native POST only ever sends Accept/
++    // Content-Type — no way to authenticate the request it makes. Putting a
++    // bearer token in the URL instead (as a query string) was considered and
++    // rejected: query strings land in plain text in the web server's access
++    // log. A real Authorization header doesn't get logged that way.
++    private static final String KEY_AUTH_TOKEN = "authToken";
+ 
+     private LocationStore() {}
+ 
+@@ -30,7 +43,7 @@ final class LocationStore {
+     }
+ 
+     // Persists the watcher config. A null or empty url disables native delivery.
+-    static void saveSetup(Context context, String url, String title, String message, float distanceFilter) {
++    static void saveSetup(Context context, String url, String title, String message, float distanceFilter, long intervalMs, String authToken) {
+         SharedPreferences.Editor editor = prefs(context).edit();
+         if (url == null || url.isEmpty()) {
+             editor.clear();
+@@ -40,7 +53,9 @@ final class LocationStore {
+                 .putString(KEY_URL, url)
+                 .putString(KEY_TITLE, title)
+                 .putString(KEY_MESSAGE, message)
+-                .putFloat(KEY_DISTANCE_FILTER, distanceFilter);
++                .putFloat(KEY_DISTANCE_FILTER, distanceFilter)
++                .putLong(KEY_INTERVAL_MS, intervalMs)
++                .putString(KEY_AUTH_TOKEN, authToken == null ? "" : authToken);
+         }
+         editor.apply();
+     }
+@@ -70,6 +85,14 @@ final class LocationStore {
+         return prefs(context).getFloat(KEY_DISTANCE_FILTER, 0f);
+     }
+ 
++    static long getIntervalMs(Context context) {
++        return prefs(context).getLong(KEY_INTERVAL_MS, 1000L);
++    }
++
++    static String getAuthToken(Context context) {
++        return prefs(context).getString(KEY_AUTH_TOKEN, "");
++    }
++
+     // POSTs a single location as JSON to the configured url. Runs synchronously,
+     // so callers must invoke it off the main thread.
+     static void sendLocation(Context context, JSONObject data) throws IOException {
+@@ -77,6 +100,7 @@ final class LocationStore {
+         if (urlString == null || urlString.isEmpty()) {
+             return;
+         }
++        String authToken = getAuthToken(context);
+         HttpURLConnection connection = null;
+         try {
+             URL url = new URL(urlString);
+@@ -89,6 +113,9 @@ final class LocationStore {
+             connection.setRequestProperty("Accept", "application/json");
+             connection.setRequestProperty("Content-Type", "application/json");
+             connection.setRequestProperty("Content-Length", String.valueOf(body.length));
++            if (authToken != null && !authToken.isEmpty()) {
++                connection.setRequestProperty("Authorization", "Bearer " + authToken);
++            }
+             try (OutputStream outputStream = connection.getOutputStream()) {
+                 outputStream.write(body);
+             }
