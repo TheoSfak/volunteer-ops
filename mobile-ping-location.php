@@ -1,11 +1,15 @@
 <?php
 /**
  * VolunteerOps - Mobile App GPS Ping Endpoint (bearer-token auth)
- * Called by the native Android app's background-location plugin, which posts
- * from detached native code — no live browser session or CSRF token to use,
- * see mobile-token-issue.php for how the app obtains its token. Session-authed
- * pings from a live war-room.php tab keep using ping-location.php; both share
- * their core logic via recordVolunteerPing() in includes/functions.php.
+ * Called by the native Android app's background-location plugin
+ * (@capgo/background-geolocation, patched — see the patches/ folder in
+ * mobile-app/ and mobile-app-yphresies/), which
+ * posts from detached native code — no live browser session or CSRF token to
+ * use, see mobile-token-issue.php for how the app obtains its token and
+ * passes it as a real Authorization header (never the URL — that would land
+ * in the web server's access log). Session-authed pings from a live
+ * war-room.php tab keep using ping-location.php; both share their core logic
+ * via recordVolunteerPing() in includes/functions.php.
  * AJAX POST only.
  */
 
@@ -45,11 +49,31 @@ if (!$user) {
 
 dbExecute("UPDATE mobile_api_tokens SET last_used_at = NOW() WHERE token_hash = ?", [$tokenHash]);
 
-$shiftId = (int) post('shift_id');
-$lat     = (float) post('lat');
-$lng     = (float) post('lng');
-$source  = post('source') === 'auto' ? 'auto' : 'manual';
-$rawAccuracy = post('accuracy');
+// Two request shapes land here: plain form fields (curl/manual testing) and
+// @capgo/background-geolocation's native JSON body (native HTTP delivery,
+// posted straight from the Android foreground service — see
+// mobile-app*/patches/ for why: upstream doesn't support extra JSON fields,
+// so shift_id rides the URL's query string instead of the body — it's just a
+// numeric ID, not a secret, unlike the bearer token above, which is exactly
+// why that one is a header and never a query param). Branch once on
+// Content-Type rather than probing both shapes for every field.
+$contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+if (stripos($contentType, 'application/json') !== false) {
+    $body = json_decode(file_get_contents('php://input'), true) ?? [];
+
+    $shiftId  = (int) get('shift_id');
+    $lat      = (float) ($body['latitude'] ?? 0);
+    $lng      = (float) ($body['longitude'] ?? 0);
+    $source   = 'auto'; // this path is only ever the passive background watcher, never the manual "send now" button
+    $rawAccuracy = $body['accuracy'] ?? null;
+} else {
+    $shiftId  = (int) post('shift_id');
+    $lat      = (float) post('lat');
+    $lng      = (float) post('lng');
+    $source   = post('source') === 'auto' ? 'auto' : 'manual';
+    $rawAccuracy = post('accuracy');
+}
+
 $accuracy = ($rawAccuracy !== null && $rawAccuracy !== '' && is_numeric($rawAccuracy))
     ? min((float) $rawAccuracy, 5000)
     : null;

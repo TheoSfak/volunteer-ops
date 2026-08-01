@@ -1435,6 +1435,7 @@ if (isLoggedIn()) {
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i><?= t('nav.my_profile') ?></a></li>
+                        <li><a class="dropdown-item" href="mobile-app-setup.php"><i class="bi bi-android2 me-2"></i>Εφαρμογή Android</a></li>
                         <?php if (!isExternalGuest()): ?>
                         <li><a class="dropdown-item" href="my-participations.php"><i class="bi bi-list-check me-2"></i>Οι Αιτήσεις μου</a></li>
                         <?php if (!empty($currentUser['custom_role_id'])): ?>

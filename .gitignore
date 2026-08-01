@@ -37,3 +37,13 @@ uploads/
 *.temp
 ~*
 VolunteerOps-v2.1-PRODUCTION.zip
+
+# Android app signing keys — never commit these, losing git-tracked history of
+# them is as bad as losing the file itself. Root-level defense-in-depth on top
+# of mobile-app*/android/.gitignore (that one only guards its own subtree, and
+# its keystore exclusion ships commented-out by default in the Capacitor/
+# Android template — easy to miss, already confirmed absent in both apps here
+# once).
+*.jks
+*.keystore
+*-release-key.properties

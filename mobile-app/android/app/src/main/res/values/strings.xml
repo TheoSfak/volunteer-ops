@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">VolunteerOps</string>
-    <string name="title_activity_main">VolunteerOps</string>
-    <string name="package_name">gr.volunteerops.app</string>
-    <string name="custom_url_scheme">gr.volunteerops.app</string>
+    <string name="app_name">ΕΠΙΔΡΑΣΙΣ</string>
+    <string name="title_activity_main">ΕΠΙΔΡΑΣΙΣ</string>
+    <string name="package_name">gr.volunteerops.epidrasis</string>
+    <string name="custom_url_scheme">gr.volunteerops.epidrasis</string>
 </resources>

@@ -4994,6 +4994,99 @@ document.addEventListener('visibilitychange', () => {
     );
 });
 
+// Native background GPS — Capacitor Android app only, no-op in any browser
+// (including the installed PWA). Everything above this block keeps running
+// unchanged for browser users; this is purely additive.
+//
+// The whole reason this exists: watchPosition() above — like any page JS —
+// gets frozen by the OS the instant the screen locks or the app is
+// backgrounded, so the pings above stop the moment a volunteer's phone
+// screen turns off. That's not a bug in this file, it's a browser sandboxing
+// limit no web code can lift (see includes/auth.php's WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS
+// comment for the real incident this caused). Only a native OS background-
+// location API can keep reporting through that. Same activation condition as
+// the web auto-ping above (.send-ping buttons present = an active approved
+// participation on an open mission) so the two mechanisms never disagree
+// about whether tracking should be running.
+//
+// Uses the plugin's raw native-bridge API (Capacitor.Plugins.*) rather than
+// the npm package's JS wrapper (import BackgroundGeolocation from '...'):
+// this app loads the live site via capacitor.config.json's server.url with
+// no JS bundler, so ES imports aren't available here — Capacitor.Plugins is
+// Capacitor's own documented mechanism for exactly this remote-content case.
+//
+// Plugin is @capgo/background-geolocation (free — see mobile-app*/patches/
+// for two small, deliberate patches on top of it: (1) upstream hardcodes its
+// LocationManager update interval at 1s with no "check in periodically while
+// stationary" concept beyond that, so a stationary volunteer waiting at a
+// checkpoint would otherwise never get pinged at all under a real
+// distanceFilter — patched to accept "intervalMs" from the start() call
+// below instead; (2) upstream's native POST only ever sends Accept/
+// Content-Type, no way to authenticate it — patched to accept "authToken"
+// and send it as a real Authorization header. shift_id, not being a secret,
+// rides the URL's query string instead — no patch needed for that part.
+//
+// Only the FIRST shift found drives native tracking if a volunteer somehow
+// has more than one active shift on this same mission — the web auto-ping
+// above already covers any additional ones whenever the tab is actually open.
+if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundGeolocation) {
+    (async () => {
+        const { BackgroundGeolocation, Preferences } = window.Capacitor.Plugins;
+        const pingButton = document.querySelector('.send-ping');
+
+        if (!pingButton) {
+            try { await BackgroundGeolocation.stop(); } catch (e) {}
+            return;
+        }
+
+        try {
+            const stored = await Preferences.get({ key: 'mobile_api_token' });
+            let token = stored && stored.value;
+            if (!token) {
+                const issueResp = await fetch('mobile-token-issue.php', {
+                    method: 'POST',
+                    body: new URLSearchParams({ csrf_token: csrfToken, device_label: 'Android' })
+                });
+                const issued = await issueResp.json();
+                if (issued.ok) {
+                    token = issued.token;
+                    await Preferences.set({ key: 'mobile_api_token', value: token });
+                }
+            }
+            // No token (issuance failed) — leave native tracking off rather
+            // than start a background service that can never authenticate.
+            // The web auto-ping above still covers this tab while it's open.
+            if (!token) return;
+
+            const shiftId = pingButton.dataset.shiftId;
+            const pingUrl = window.location.origin + '/mobile-ping-location.php?shift_id=' + encodeURIComponent(shiftId);
+
+            await BackgroundGeolocation.start({
+                backgroundTitle: <?= json_encode(getSetting('app_name', 'VolunteerOps')) ?>,
+                backgroundMessage: t('bgtrack.notification_text'),
+                distanceFilter: 0, // periodic cadence comes from intervalMs below, not movement — a stationary volunteer still needs to stay visible to command staff
+                intervalMs: AUTO_PING_CADENCE_MS,
+                url: pingUrl,
+                authToken: token,
+                requestPermissions: true
+            }, (location, error) => {
+                // Native POST already handles delivery; this callback is
+                // mainly useful for debugging via a connected device.
+                if (error) {
+                    console.error('[BackgroundGeolocation] location error', error);
+                }
+            });
+        } catch (e) {
+            // Calling start() again while already running (e.g. navigating
+            // back to an open Action Room tab) rejects as ALREADY_STARTED —
+            // expected, tracking is already correctly active, not a real error.
+            if (!e || e.code !== 'ALREADY_STARTED') {
+                console.error('[BackgroundGeolocation] setup failed', e);
+            }
+        }
+    })();
+}
+
 const FIELD_STATUS_LABEL_KEYS = {on_way: 'status.self_on_way', on_site: 'status.self_on_site', needs_help: 'status.self_sos'};
 
 // Same contract as postRouteAction(): resolves to the server's JSON, to
