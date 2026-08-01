@@ -35,6 +35,7 @@ $defaults = [
     'war_room_banner_font_size' => '1.35',
     'war_room_auto_ping_seconds' => '180',
     'admin_email' => '',
+    'developer_email' => '',
     'timezone' => 'Europe/Athens',
     'date_format' => 'd/m/Y',
     'points_per_hour' => '10',
@@ -523,7 +524,7 @@ if (isPost()) {
         // Save general settings
         $fieldsToUpdate = [
             'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_auto_ping_seconds',
-            'admin_email', 'timezone', 'date_format',
+            'admin_email', 'developer_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
             'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode',
@@ -1072,6 +1073,11 @@ include __DIR__ . '/includes/header.php';
                     <div class="mb-3">
                         <label class="form-label">Email Διαχειριστή</label>
                         <input type="email" class="form-control" name="admin_email" value="<?= h($settings['admin_email']) ?>">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email Προγραμματιστή</label>
+                        <input type="email" class="form-control" name="developer_email" value="<?= h($settings['developer_email']) ?>">
+                        <small class="text-muted">Εδώ στέλνονται οι αναφορές από το "Αποστολή Bug" του μενού χρήστη.</small>
                     </div>
                     <div class="row">
                         <div class="col-md-6 mb-3">

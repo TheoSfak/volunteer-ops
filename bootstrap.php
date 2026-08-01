@@ -105,6 +105,14 @@ if (isLoggedIn() && isExternalGuest()) {
         // just after idle time, so v3.140.1's timeout fix alone could never
         // have resolved this for a guest/partner-org account.
         'mission-route.php',
+        // mobile-token-issue.php — native Android app requests its
+        // background-ping bearer token here, session-authed like everything
+        // else on this list. Guest/partner-org volunteers are exactly who
+        // field GPS reliability matters most for, so they need this too.
+        // (mobile-ping-location.php itself is NOT on this list: it's
+        // bearer-token-authed with no session at all, so isLoggedIn() is
+        // false and this whole guest gate never runs for it.)
+        'mobile-token-issue.php',
     ];
     if (!in_array($__extScript, $__extAllowed, true)) {
         $__extMissionIds = getExternalGuestMissionIds(getCurrentUserId());

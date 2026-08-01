@@ -1,0 +1,18 @@
+{
+  "name": "volunteerops-mobile",
+  "version": "1.0.0",
+  "description": "Capacitor Android wrapper for VolunteerOps — native background GPS for Action Room shifts.",
+  "private": true,
+  "scripts": {
+    "sync": "npx cap sync android"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/core": "^8.5.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.0"
+  }
+}

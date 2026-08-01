@@ -1,0 +1,9 @@
+{
+  "appId": "gr.volunteerops.app",
+  "appName": "VolunteerOps",
+  "webDir": "www",
+  "server": {
+    "url": "http://10.0.2.2/volunteerops",
+    "cleartext": true
+  }
+}

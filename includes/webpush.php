@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Web Push Notification Library
  * Raw PHP implementation using openssl + curl (no Composer required)

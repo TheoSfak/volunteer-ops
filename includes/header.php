@@ -1195,6 +1195,13 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= in_array($currentPage, ['bug-reports', 'bug-report-view']) ? 'active' : '' ?>" href="bug-reports.php">
+                    <i class="bi bi-bug"></i> Bug Reports
+                </a>
+            </li>
+            <?php endif; ?>
             <?php endif; // Διοίκηση section ?>
             
             <?php if (!isTraineeRescuer()): ?>
@@ -1439,6 +1446,8 @@ if (isLoggedIn()) {
                         <li><a class="dropdown-item" href="notification-preferences.php"><i class="bi bi-bell me-2"></i>Ρυθμίσεις Ειδοποιήσεων</a></li>
                         <li><a class="dropdown-item" href="complaint-form.php"><i class="bi bi-exclamation-triangle me-2"></i>Αναφορά Παραπόνου</a></li>
                         <li><a class="dropdown-item" href="my-complaints.php"><i class="bi bi-chat-left-dots me-2"></i>Τα Παράπονά μου</a></li>
+                        <li><a class="dropdown-item" href="bug-report.php"><i class="bi bi-bug me-2"></i>Αποστολή Bug</a></li>
+                        <li><a class="dropdown-item" href="my-bug-reports.php"><i class="bi bi-list-ul me-2"></i>Τα Bug μου</a></li>
                         <?php endif; ?>
                         <li><hr class="dropdown-divider"></li>
                         <li>

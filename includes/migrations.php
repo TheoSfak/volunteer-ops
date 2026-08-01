@@ -5494,6 +5494,66 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 116,
+            'description' => 'Create mobile_api_tokens table — bearer-token auth for the native Android app wrapper (Capacitor), letting its background-location plugin post GPS pings from detached native code that has no live browser session/CSRF token to use.',
+            'up' => function () {
+                $tableExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mobile_api_tokens'"
+                );
+                if (!$tableExists) {
+                    dbExecute(
+                        "CREATE TABLE mobile_api_tokens (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            user_id INT UNSIGNED NOT NULL,
+                            token_hash CHAR(64) NOT NULL,
+                            device_label VARCHAR(100) NOT NULL DEFAULT 'Android app',
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            last_used_at TIMESTAMP NULL,
+                            revoked_at TIMESTAMP NULL,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            UNIQUE KEY unique_token_hash (token_hash),
+                            INDEX idx_mobile_tokens_user (user_id, revoked_at)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
+        [
+            'version'     => 117,
+            'description' => 'Create bug_reports table — "Αποστολή Bug" dropdown link lets any logged-in user report an app problem straight to the developer. Same shape as complaints (status workflow + admin_response) since it\'s the same "submit, staff reviews, staff responds" pattern, just routed to a developer_email setting instead of the DEPARTMENT_ADMIN/SYSTEM_ADMIN pool complaints notify. page_url/app_version are captured automatically at submit time (HTTP_REFERER + APP_VERSION) — a developer debugging a report always wants to know where/on what version it happened, and a reporter would never think to type that in themselves.',
+            'up' => function () {
+                $tableExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bug_reports'"
+                );
+                if (!$tableExists) {
+                    dbExecute(
+                        "CREATE TABLE bug_reports (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            user_id INT UNSIGNED NOT NULL,
+                            description TEXT NOT NULL,
+                            screenshot VARCHAR(255) NULL,
+                            page_url VARCHAR(500) NULL,
+                            app_version VARCHAR(20) NULL,
+                            status ENUM('NEW','IN_REVIEW','RESOLVED','REJECTED') NOT NULL DEFAULT 'NEW',
+                            admin_response TEXT NULL,
+                            responded_by INT UNSIGNED NULL,
+                            responded_at DATETIME NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                            FOREIGN KEY (responded_by) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_bug_reports_user (user_id),
+                            INDEX idx_bug_reports_status (status)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

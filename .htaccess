@@ -16,6 +16,13 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteRule ^uploads/(volunteer-docs|training/materials)/ - [F,L]
+
+    # Apache strips the Authorization header from $_SERVER by default (it's
+    # reserved for Apache's own Basic Auth) — mobile-ping-location.php and
+    # mobile-token-issue.php's bearer-token auth (native Android app) need it
+    # forwarded through explicitly, or every request 401s regardless of token.
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 </IfModule>
 
 # Block access to install.php after deployment
