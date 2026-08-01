@@ -5450,6 +5450,50 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 115,
+            'description' => 'Create announcements + announcement_dismissals tables — admin-authored "what\'s new" popup shown to every user on next page load until dismissed. Dismissal is per-user-per-announcement (announcement_dismissals), same UNIQUE-pair shape war_room_layouts uses for its own per-user row, so a repeat dismiss is a no-op rather than a duplicate. created_by is nullable with ON DELETE SET NULL (not CASCADE) — this is a standalone global record like a newsletter, not a mission child row, so deleting the admin who wrote it must never take the announcement (and everyone\'s already-recorded dismissals) down with it.',
+            'up' => function () {
+                $tableExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'announcements'"
+                );
+                if (!$tableExists) {
+                    dbExecute(
+                        "CREATE TABLE announcements (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            version VARCHAR(20) NULL,
+                            title VARCHAR(255) NOT NULL,
+                            body TEXT NOT NULL,
+                            is_active TINYINT(1) NOT NULL DEFAULT 1,
+                            created_by INT UNSIGNED NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_announcements_active (is_active, created_at)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $dismissalsExist = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'announcement_dismissals'"
+                );
+                if (!$dismissalsExist) {
+                    dbExecute(
+                        "CREATE TABLE announcement_dismissals (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            announcement_id INT UNSIGNED NOT NULL,
+                            user_id INT UNSIGNED NOT NULL,
+                            dismissed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            UNIQUE KEY uq_announcement_dismissals (announcement_id, user_id),
+                            FOREIGN KEY (announcement_id) REFERENCES announcements(id) ON DELETE CASCADE,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

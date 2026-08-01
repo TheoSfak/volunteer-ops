@@ -627,5 +627,71 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
 </script>
 <?php endif; ?>
 
+<?php if (!empty($pendingAnnouncements)): ?>
+<!-- ══════════════════════════════════════════════════════════════════════════
+     "WHAT'S NEW" ANNOUNCEMENT POPUP — see announcements.php + header.php's
+     capped-digest query. data-bs-backdrop="static" + no close [x]: the only
+     way out is the button, so a dismiss is always a deliberate click.
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div class="modal fade" id="vo-announcement-modal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-scrollable modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary bg-opacity-10">
+                <h5 class="modal-title">
+                    <i class="bi bi-megaphone-fill text-primary me-2"></i>
+                    <?= count($pendingAnnouncements) === 1 ? 'Νέα ανακοίνωση' : 'Νέες ανακοινώσεις' ?>
+                </h5>
+            </div>
+            <div class="modal-body">
+                <?php foreach ($pendingAnnouncements as $i => $ann): ?>
+                <div class="<?= $i > 0 ? 'mt-4 pt-4 border-top' : '' ?>">
+                    <h6 class="fw-bold mb-2">
+                        <?= h($ann['title']) ?>
+                        <?php if ($ann['version']): ?><span class="badge bg-secondary ms-1">v<?= h($ann['version']) ?></span><?php endif; ?>
+                    </h6>
+                    <div style="white-space: pre-wrap;"><?= h($ann['body']) ?></div>
+                </div>
+                <?php endforeach; ?>
+
+                <?php if ($earlierAnnouncementCount > 0): ?>
+                <div class="text-muted small mt-4 pt-3 border-top">
+                    <i class="bi bi-clock-history me-1"></i>
+                    +<?= $earlierAnnouncementCount ?> παλαιότερ<?= $earlierAnnouncementCount === 1 ? 'η ενημέρωση' : 'ες ενημερώσεις' ?>
+                </div>
+                <?php endif; ?>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" id="vo-announcement-dismiss-btn">
+                    <i class="bi bi-check-lg me-1"></i>Κατάλαβα
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    var ids = <?= json_encode(array_map('intval', array_column($pendingAnnouncements, 'id'))) ?>;
+    var modalEl = document.getElementById('vo-announcement-modal');
+    var modal = new bootstrap.Modal(modalEl);
+    modal.show();
+
+    document.getElementById('vo-announcement-dismiss-btn').addEventListener('click', function(e) {
+        var btn = e.currentTarget;
+        btn.disabled = true;
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        var csrfToken = meta ? meta.getAttribute('content') : '';
+        fetch('<?= rtrim(BASE_URL, '/') ?>/announcement-dismiss.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            body: JSON.stringify({ ids: ids, csrf_token: csrfToken }),
+            credentials: 'same-origin'
+        }).finally(function() {
+            modal.hide();
+        });
+    });
+})();
+</script>
+<?php endif; ?>
+
 </body>
 </html>
