@@ -150,29 +150,10 @@ function notePriorityBadge($priority) {
  * Check if user has access to a specific inventory item
  */
 function checkInventoryAccess($itemId, $userId = null) {
-    $userId = $userId ?? getCurrentUserId();
-    $user   = getCurrentUser();
-
-    // System admin can access everything
-    if ($user['role'] === ROLE_SYSTEM_ADMIN) {
-        return true;
-    }
-
-    $item = dbFetchOne("SELECT department_id FROM inventory_items WHERE id = ?", [$itemId]);
-    if (!$item) return false;
-
-    // Global items (no department) are accessible to all
-    if ($item['department_id'] === null) return true;
-
-    // User belongs to this department
-    if ($user['department_id'] && $user['department_id'] == $item['department_id']) return true;
-
-    // Check explicit department access grant
-    $access = dbFetchOne(
-        "SELECT 1 FROM inventory_department_access WHERE user_id = ? AND department_id = ?",
-        [$userId, $item['department_id']]
-    );
-    return !empty($access);
+    // Materials visibility is shared — department_id is just an item's filing
+    // warehouse, not an access-control partition. See filterInventoryByDepartment().
+    $item = dbFetchOne("SELECT id FROM inventory_items WHERE id = ?", [$itemId]);
+    return !empty($item);
 }
 
 /**
@@ -199,20 +180,16 @@ function canManageInventory() {
 function filterInventoryByDepartment($query, $params = [], $alias = 'i') {
     $user = getCurrentUser();
 
+    // Materials visibility is shared across all departments/warehouses —
+    // "department_id" on an item is just its filing warehouse, not an
+    // access-control partition. Only system admins get an optional narrowing
+    // filter, applied via the session-based dropdown on inventory.php.
     if ($user['role'] === ROLE_SYSTEM_ADMIN) {
-        // System admin: optional filter from session/GET
         $filter = $_SESSION['inventory_department_filter'] ?? null;
         if ($filter !== null && $filter !== '' && $filter !== 'all') {
             $query   .= " AND ({$alias}.department_id = ? OR {$alias}.department_id IS NULL)";
             $params[] = (int)$filter;
         }
-        return [$query, $params];
-    }
-
-    // Non-system-admin: filter to own department + global items
-    if ($user['department_id']) {
-        $query   .= " AND ({$alias}.department_id = ? OR {$alias}.department_id IS NULL)";
-        $params[] = $user['department_id'];
     }
 
     return [$query, $params];
