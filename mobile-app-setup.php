@@ -91,7 +91,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <div class="text-center mb-4">
-        <a href="assets/downloads/volunteerops-app.apk" class="btn btn-success btn-lg">
+        <a href="assets/downloads/epidrasis.apk" class="btn btn-success btn-lg">
             <i class="bi bi-download me-1"></i>Λήψη Εφαρμογής Android
         </a>
     </div>
