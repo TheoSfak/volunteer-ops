@@ -75,6 +75,7 @@ if (isLoggedIn()) {
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="<?= h($appName) ?>">
     <link rel="apple-touch-icon" href="<?= rtrim(BASE_URL, '/') ?>/assets/icons/icon-192.png">
+    <link rel="icon" type="image/png" href="<?= rtrim(BASE_URL, '/') ?>/assets/favicon.png">
 
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
