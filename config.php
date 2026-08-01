@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.151.0');
-define('DB_SCHEMA_VERSION', 115);
+define('APP_VERSION', '3.152.0');
+define('DB_SCHEMA_VERSION', 117);
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
@@ -259,6 +259,26 @@ define('COMPLAINT_PRIORITY_LABELS', [
     COMPLAINT_PRIORITY_LOW => 'Χαμηλή',
     COMPLAINT_PRIORITY_MEDIUM => 'Μεσαία',
     COMPLAINT_PRIORITY_HIGH => 'Υψηλή',
+]);
+
+// Bug report statuses ("Αποστολή Bug" — reports an app problem to the developer)
+define('BUG_REPORT_NEW', 'NEW');
+define('BUG_REPORT_IN_REVIEW', 'IN_REVIEW');
+define('BUG_REPORT_RESOLVED', 'RESOLVED');
+define('BUG_REPORT_REJECTED', 'REJECTED');
+
+define('BUG_REPORT_STATUS_LABELS', [
+    BUG_REPORT_NEW => 'Νέο',
+    BUG_REPORT_IN_REVIEW => 'Σε Εξέταση',
+    BUG_REPORT_RESOLVED => 'Επιλύθηκε',
+    BUG_REPORT_REJECTED => 'Απορρίφθηκε',
+]);
+
+define('BUG_REPORT_STATUS_COLORS', [
+    BUG_REPORT_NEW => 'primary',
+    BUG_REPORT_IN_REVIEW => 'warning',
+    BUG_REPORT_RESOLVED => 'success',
+    BUG_REPORT_REJECTED => 'danger',
 ]);
 
 define('COMPLAINT_PRIORITY_COLORS', [

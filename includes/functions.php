@@ -1237,6 +1237,110 @@ function notifyCommandStaffBanner(int $missionId, string $missionTitle, ?int $re
 }
 
 /**
+ * Notify command staff that a volunteer sent their GPS location — mirrors
+ * mission-dispatch.php's notifyDispatchReceive()/notifyDispatchArrival()
+ * shape (own notification code, bannerMission for the loud scrolling
+ * banner + sound, getMissionCommandStaffIds() for recipients). Fires on
+ * every ping regardless of whether it was requested via a War Room order —
+ * request fulfillment is already tracked separately
+ * (mission_order_recipients.fulfilled_at) for the response-time report;
+ * this is the live "someone just sent their location" alert. Moved here
+ * from ping-location.php (originally page-local) so mobile-ping-location.php
+ * — the bearer-token-authed twin used by the native Android app — can call
+ * it too via recordVolunteerPing() below.
+ */
+function notifyVolunteerGpsPing(int $missionId, string $missionTitle, ?int $responsibleUserId, string $senderName, int $senderId): void {
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $senderId);
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        sendNotification(
+            $recipientId,
+            t('ping.notify_title', [], $lang),
+            t('ping.notify_message', ['name' => $senderName, 'mission' => $missionTitle], $lang),
+            'info', 'mission_gps_ping', [
+                'url' => $warRoomUrl,
+                'tag' => 'gps-ping-mission-' . $missionId,
+                'bannerMission' => $missionId,
+            ]
+        );
+    }
+}
+
+/**
+ * Core GPS-ping write path (ownership check + volunteer_pings insert +
+ * command-staff notify + order auto-fulfillment) shared by ping-location.php
+ * (session + CSRF auth, called from the live war-room.php tab) and
+ * mobile-ping-location.php (bearer-token auth, called by the native Android
+ * app's background-location plugin — which runs detached from any WebView
+ * and so can never hold a live session or CSRF token). Keeping this in one
+ * place means the two auth paths can't silently drift apart, the way this
+ * codebase's separate report/live-tab event aggregators once did.
+ * $user must be a full users row (id, name, language) — callers resolve it
+ * their own way (session vs. token lookup) before calling this.
+ */
+function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, ?float $accuracy, string $source): array {
+    $userId = (int) $user['id'];
+    $lang = $user['language'] ?? DEFAULT_LANGUAGE;
+
+    if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180 || ($lat == 0 && $lng == 0)) {
+        return ['ok' => false, 'error' => t('ping.invalid_coordinates', [], $lang)];
+    }
+
+    // Verify user has an APPROVED participation for this shift
+    $pr = dbFetchOne(
+        "SELECT pr.id, s.mission_id, m.title AS mission_title, m.responsible_user_id FROM participation_requests pr
+         JOIN shifts s ON pr.shift_id = s.id
+         JOIN missions m ON s.mission_id = m.id
+         WHERE pr.shift_id = ? AND pr.volunteer_id = ? AND pr.status = ?
+           AND m.status = ? AND m.show_in_ops = 1 AND m.deleted_at IS NULL",
+        [$shiftId, $userId, PARTICIPATION_APPROVED, STATUS_OPEN]
+    );
+
+    if (!$pr) {
+        return ['ok' => false, 'error' => t('ping.mission_not_open_or_not_approved', [], $lang)];
+    }
+
+    try {
+        dbInsert(
+            "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, source, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+            [$userId, $shiftId, $lat, $lng, $accuracy, $source]
+        );
+    } catch (Exception $e) {
+        return ['ok' => false, 'error' => t('ping.gps_unavailable_migration', [], $lang)];
+    }
+
+    // Auto-captured pings (passive, every few minutes while Action Room is open,
+    // or from the native app's background plugin) stay quiet — only a manual
+    // tap should trigger the loud command-staff alert.
+    if ($source !== 'auto') {
+        notifyVolunteerGpsPing(
+            (int) $pr['mission_id'],
+            $pr['mission_title'],
+            $pr['responsible_user_id'] ? (int) $pr['responsible_user_id'] : null,
+            $user['name'],
+            $userId
+        );
+    }
+
+    // Auto-fulfill any outstanding War Room "send your location" orders for this user.
+    try {
+        dbExecute(
+            "UPDATE mission_order_recipients r
+             JOIN mission_orders o ON o.id = r.order_id
+             SET r.fulfilled_at = NOW()
+             WHERE r.user_id = ? AND o.mission_id = ? AND o.order_type = 'location' AND r.fulfilled_at IS NULL",
+            [$userId, $pr['mission_id']]
+        );
+    } catch (Exception $e) {
+        // Non-critical — the ping itself already succeeded.
+    }
+
+    return ['ok' => true, 'ts' => date('H:i:s')];
+}
+
+/**
  * War Room: persist a trackable order (mission_orders + one mission_order_recipients
  * row per recipient, snapshotting each recipient's team) then notify them, threading
  * orderId into the pushData so the alert banner can offer an "Ελήφθη" button. Shared
