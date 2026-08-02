@@ -5554,6 +5554,25 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 118,
+            'description' => 'Add mission_photos.order_id — lets a Καθολικό Μήνυμα (global broadcast message) carry an optional reference photo (e.g. a missing person\'s photo relayed to the coordination center, broadcast out to every team). Stored as a mission_photos row so it reuses the existing secure view/delete endpoints, but tagged to the mission_orders row that broadcast it so loadMissionPhotosForUser can exclude it (order_id IS NULL) and the new loadBroadcastPhotosForMission() can list it on its own — a coordinator-to-field broadcast is the opposite direction from the field-to-coordinator "Φωτογραφίες Πεδίου" gallery and must never be mixed into it. CASCADE (unlike poi_id\'s SET NULL above): this row has no standalone value without the order it illustrates, unlike a field photo which is evidence in its own right.',
+            'up' => function () {
+                $columnExists = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_photos' AND COLUMN_NAME = 'order_id'"
+                );
+                if (!$columnExists) {
+                    dbExecute(
+                        "ALTER TABLE mission_photos
+                         ADD COLUMN order_id INT UNSIGNED NULL,
+                         ADD FOREIGN KEY (order_id) REFERENCES mission_orders(id) ON DELETE CASCADE,
+                         ADD INDEX idx_photo_order (order_id)"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -27,7 +27,7 @@ function warRoomDefaultLayout(): array {
             'requestVideoCard', 'requestTaskCard', 'activityCard', 'chatCard',
         ],
         'sidebar' => [
-            'mediaCard', 'myLocationCard', 'nearbyTeamsCard', 'myRouteCard',
+            'mediaCard', 'myLocationCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'myRouteCard',
             'myTasksCard', 'shiftsCard', 'sosAlertsCard', 'broadcastCard',
             'endMissionCard', 'dispatchCard', 'routeOrderCard',
             'teamRoutesAdminCard', 'missionMgmtCard',
@@ -152,6 +152,7 @@ function warRoomCardLabels(): array {
         'chatCard' => t('chat.panel_title'),
         'mediaCard' => t('media.panel_title'),
         'myLocationCard' => t('myping.panel_title'),
+        'broadcastPhotoCard' => t('broadcast_photo.card_title'),
         'nearbyTeamsCard' => t('nearby.panel_title'),
         'myRouteCard' => t('route.my_panel_title'),
         'myTasksCard' => t('mytasks.panel_title'),
