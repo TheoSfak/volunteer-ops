@@ -1058,7 +1058,7 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
          JOIN users u ON u.id = p.user_id
          LEFT JOIN mission_team_members mtm ON mtm.user_id = p.user_id AND mtm.mission_id = p.mission_id
          LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
-         WHERE p.mission_id = ?
+         WHERE p.mission_id = ? AND p.order_id IS NULL
          ORDER BY p.created_at DESC
          LIMIT ?",
         [$missionId, $limit]
@@ -1077,6 +1077,37 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
         'can_delete'     => $canManageWarRoom || (int) $row['user_id'] === $currentUserId,
         'is_poi'         => $row['poi_id'] !== null,
         'poi_note'       => $row['poi_note'],
+    ], $rows);
+}
+
+/**
+ * War Room: load reference photos attached to a Καθολικό Μήνυμα (global
+ * broadcast message) — the coordinator-to-field direction, opposite of
+ * loadMissionPhotosForUser()'s field-to-coordinator gallery, and always
+ * shown in its own card so the two are never confused for one another.
+ * Visible to every command-staff/approved-participant viewer alike (no
+ * per-viewer filtering, same reasoning as the broadcast itself going to
+ * everyone); can_delete is simply $canManageWarRoom since only command
+ * staff can ever create one of these in the first place.
+ */
+function loadBroadcastPhotosForMission(int $missionId, bool $canManageWarRoom, int $limit = 15): array {
+    $rows = dbFetchAll(
+        "SELECT p.id, p.created_at, u.name AS user_name, o.task_text AS caption
+         FROM mission_photos p
+         JOIN mission_orders o ON o.id = p.order_id
+         JOIN users u ON u.id = p.user_id
+         WHERE p.mission_id = ? AND p.order_id IS NOT NULL
+         ORDER BY p.created_at DESC
+         LIMIT ?",
+        [$missionId, $limit]
+    );
+
+    return array_map(fn($row) => [
+        'id'         => (int) $row['id'],
+        'user_name'  => $row['user_name'],
+        'caption'    => $row['caption'],
+        'time'       => date('d\m H:i', strtotime($row['created_at'])),
+        'can_delete' => $canManageWarRoom,
     ], $rows);
 }
 

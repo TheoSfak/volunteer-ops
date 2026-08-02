@@ -122,7 +122,16 @@ return [
         'global_message.card_title' => 'Καθολικό Μήνυμα',
         'global_message.note' => 'Εμφανίζεται ως κυλιόμενο μήνυμα (60 δευτ.) σε όσους έχουν ανοιχτό το Action Room και στέλνεται ως ειδοποίηση σε όλους τους εγκεκριμένους εθελοντές της αποστολής.',
         'global_message.placeholder' => 'Γράψτε το μήνυμα προς όλους τους εθελοντές…',
+        'global_message.photo_label' => 'Φωτογραφία (προαιρετικό)',
+        'global_message.photo_only_text' => '📷 Στάλθηκε φωτογραφία αναφοράς.',
         'global_message.submit_btn' => 'Αποστολή σε όλους ({count})',
+
+        // Broadcast reference photo — the read-only card showing what was sent
+        // via the Καθολικό Μήνυμα composer above, kept deliberately separate
+        // from "Φωτογραφίες Πεδίου" (media.*): that gallery is field-to-
+        // coordinator, this card is coordinator-to-field, the opposite direction.
+        'broadcast_photo.card_title' => 'Φωτογραφία Αναφοράς',
+        'broadcast_photo.empty' => 'Δεν έχει σταλεί φωτογραφία αναφοράς.',
 
         // End of Mission / Return to Base — same loud red-screen+siren treatment
         // as SOS, but command-initiated and broadcast to everyone at once.
@@ -951,7 +960,12 @@ return [
         'global_message.card_title' => 'Broadcast Message',
         'global_message.note' => 'Appears as scrolling text (60 sec) to anyone with Action Room open, and is sent as a notification to every approved volunteer of the mission.',
         'global_message.placeholder' => 'Write the message to all volunteers…',
+        'global_message.photo_label' => 'Photo (optional)',
+        'global_message.photo_only_text' => '📷 A reference photo was sent.',
         'global_message.submit_btn' => 'Send to all ({count})',
+
+        'broadcast_photo.card_title' => 'Reference Photo',
+        'broadcast_photo.empty' => 'No reference photo has been sent.',
 
         'wr.perm.end_mission_broadcast' => 'You do not have permission to do this.',
         'end_mission_broadcast.card_title' => 'End of Mission — Return to Base',

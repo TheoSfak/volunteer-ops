@@ -227,7 +227,45 @@ if (isPost()) {
         $broadcastText = trim((string) post('global_message_text'));
         $broadcastText = mb_substr($broadcastText, 0, 500);
 
-        if ($broadcastText === '') {
+        // Optional reference photo (e.g. a missing person's photo relayed to
+        // the coordination center) — broadcast alongside the text to every
+        // approved participant. Validated fail-fast, same style as
+        // mission-photo.php's own upload action, before anything is written.
+        $photoUpload = null;
+        if (!empty($_FILES['global_message_photo']['name']) && $_FILES['global_message_photo']['error'] !== UPLOAD_ERR_NO_FILE) {
+            $file = $_FILES['global_message_photo'];
+            if ($file['error'] !== UPLOAD_ERR_OK) {
+                setFlash('error', t('photo.select_file'));
+                redirect('war-room.php?id=' . $missionId);
+            }
+            $photoExt  = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+            $photoMime = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+            $origName = basename($file['name']);
+            $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $mime = $finfo->file($file['tmp_name']);
+            if (!in_array($ext, $photoExt, true) || !in_array($mime, $photoMime, true)) {
+                setFlash('error', t('photo.invalid_type'));
+                redirect('war-room.php?id=' . $missionId);
+            }
+            if ($file['size'] > UPLOAD_MAX_SIZE) {
+                setFlash('error', t('photo.file_too_large', ['size' => UPLOAD_MAX_SIZE / 1024 / 1024]));
+                redirect('war-room.php?id=' . $missionId);
+            }
+
+            $destDir = __DIR__ . '/uploads/mission-photos/';
+            if (!is_dir($destDir)) {
+                mkdir($destDir, 0755, true);
+            }
+            $storedName = 'orderphoto_' . $missionId . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+            if (!move_uploaded_file($file['tmp_name'], $destDir . $storedName)) {
+                setFlash('error', t('photo.save_failed'));
+                redirect('war-room.php?id=' . $missionId);
+            }
+            $photoUpload = ['stored_name' => $storedName, 'original_name' => $origName, 'mime_type' => $mime, 'file_size' => (int) $file['size']];
+        }
+
+        if ($broadcastText === '' && $photoUpload === null) {
             setFlash('warning', t('global_message.empty_warning'));
         } else {
             $recipients = dbFetchAll(
@@ -244,13 +282,22 @@ if (isPost()) {
                 [(int) $user['id']]
             ));
 
-            createMissionOrderAndNotify(
+            $orderId = createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'message', $user['id'], $recipientIds,
-                'global_message.title', ['mission' => $mission['title']], $broadcastText, '', [],
+                'global_message.title', ['mission' => $mission['title']], $broadcastText !== '' ? $broadcastText : t('global_message.photo_only_text'), '', [],
                 'global_message.broadcast', ['mission' => $mission['title']],
-                $broadcastText
+                $broadcastText !== '' ? $broadcastText : null
             );
-            logAudit('global_message_war_room', 'missions', $missionId, null, ['message' => $broadcastText]);
+
+            if ($photoUpload !== null) {
+                dbInsert(
+                    "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, original_name, mime_type, file_size, order_id, created_at)
+                     VALUES (?, ?, 'photo', ?, ?, ?, ?, ?, NOW())",
+                    [$missionId, $user['id'], $photoUpload['stored_name'], $photoUpload['original_name'], $photoUpload['mime_type'], $photoUpload['file_size'], $orderId]
+                );
+            }
+
+            logAudit('global_message_war_room', 'missions', $missionId, null, ['message' => $broadcastText, 'has_photo' => $photoUpload !== null]);
             setFlash('success', t('global_message.sent_flash', ['count' => count($recipientIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
@@ -798,6 +845,7 @@ if (get('ajax') === '1') {
 
     $dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
     $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRoom);
+    $broadcastPhotos = loadBroadcastPhotosForMission($missionId, $canManageWarRoom);
     $myTasks = loadMyTaskOrdersForUser($missionId, (int)$user['id']);
     $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
@@ -814,6 +862,7 @@ if (get('ajax') === '1') {
         'banners' => $banners,
         'dispatches' => $dispatches,
         'media' => $photos,
+        'broadcastPhotos' => $broadcastPhotos,
         'myTasks' => $myTasks,
         'routes' => $routes,
         'shortageReports' => $shortageReports,
@@ -876,6 +925,7 @@ $bannerSinceId = (int) dbFetchValue(
 
 $dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
 $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRoom);
+$broadcastPhotos = loadBroadcastPhotosForMission($missionId, $canManageWarRoom);
 $myTasks = loadMyTaskOrdersForUser($missionId, (int)$user['id']);
 $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
@@ -1744,6 +1794,22 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
+        <!-- Broadcast reference photo (e.g. a missing person's photo relayed
+             to the coordination center) — read-only here, sent via the
+             Καθολικό Μήνυμα composer further down (command staff only).
+             Unconditional card (like My Location/Nearby/Route/Tasks): shows
+             in both Field Mode and full view, since field volunteers out
+             searching are exactly who most need to see it. Deliberately its
+             own card, never merged into "Φωτογραφίες Πεδίου" (mediaCard) —
+             that gallery is field-to-coordinator, this is the opposite
+             direction, coordinator-to-field. -->
+        <div class="card shadow-sm mb-4 border-danger" data-card-id="broadcastPhotoCard">
+            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-image-fill me-1 text-danger"></i><?= t('broadcast_photo.card_title') ?></h5></div>
+            <div class="card-body">
+                <div id="broadcastPhotoList"><p class="text-muted mb-0 small"><?= t('broadcast_photo.empty') ?></p></div>
+            </div>
+        </div>
+
         <!-- Field Mode has no map at all (see the !$fieldMode wrap further up),
              so this is the only place a field volunteer sees where other teams
              are — a plain distance+direction list instead of pins on a map.
@@ -1796,10 +1862,14 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-megaphone-fill me-1 text-danger"></i><?= t('global_message.card_title') ?></h5></div>
             <div class="card-body">
                 <p class="small text-muted"><?= t('global_message.note') ?></p>
-                <form method="post">
+                <form method="post" enctype="multipart/form-data">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="global_message">
-                    <textarea name="global_message_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="<?= t('global_message.placeholder') ?>" required></textarea>
+                    <textarea name="global_message_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="<?= t('global_message.placeholder') ?>"></textarea>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1"><?= t('global_message.photo_label') ?></label>
+                        <input type="file" name="global_message_photo" accept="image/*" class="form-control form-control-sm">
+                    </div>
                     <button type="submit" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('global_message.submit_btn', ['count' => count($participants)]) ?></button>
                 </form>
             </div>
@@ -2235,6 +2305,7 @@ let pins = <?= json_encode($pins) ?>;
 let dispatches = <?= json_encode($dispatches) ?>;
 let annotations = <?= json_encode($annotations) ?>;
 let media = <?= json_encode($photos) ?>;
+let broadcastPhotos = <?= json_encode($broadcastPhotos) ?>;
 // Media re-renders every image tag from scratch (mission-photo-view.php is
 // deliberately Cache-Control: no-store, since it's access-gated field media),
 // so re-running renderMedia() on a poll tick where nothing actually changed
@@ -3239,6 +3310,40 @@ function renderMedia(items) {
         const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: btn.dataset.id});
         fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
             if (result.ok) { renderMedia(media = media.filter(m => String(m.id) !== btn.dataset.id)); mediaSignature = JSON.stringify(media); }
+            else alert(result.error || t('common.delete_failed'));
+        });
+    }));
+}
+
+// Reference photos attached to a Καθολικό Μήνυμα — coordinator-to-field
+// direction, rendered in its own #broadcastPhotoList card, never merged into
+// #mediaList above. Reuses the same secure view endpoint + lightbox modal
+// and the same mission-photo.php delete action (it doesn't care whether a
+// row has order_id set, only whether the viewer may delete it).
+function renderBroadcastPhotos(items) {
+    const list = document.getElementById('broadcastPhotoList');
+    if (!items.length) {
+        list.innerHTML = '<p class="text-muted mb-0 small">' + t('broadcast_photo.empty') + '</p>';
+        return;
+    }
+    list.innerHTML = items.map(p => `
+        <div class="d-flex gap-2 mb-2 pb-2 border-bottom">
+            <img src="mission-photo-view.php?id=${p.id}" class="broadcast-photo-thumb media-view-trigger" data-id="${p.id}" data-media-type="photo" style="width:64px;height:64px;object-fit:cover;border-radius:.25rem;cursor:pointer;flex-shrink:0;">
+            <div class="flex-grow-1" style="min-width:0;">
+                ${p.caption ? `<div class="small">${escapeHtml(p.caption)}</div>` : ''}
+                <div class="text-muted" style="font-size:.7rem;">${escapeHtml(p.user_name)} · ${p.time}</div>
+            </div>
+            ${p.can_delete ? `<button type="button" class="btn btn-sm btn-outline-danger broadcast-photo-delete-btn p-1 align-self-start" data-id="${p.id}" title="${t('common.delete')}"><i class="bi bi-trash" style="font-size:.7rem;"></i></button>` : ''}
+        </div>
+    `).join('');
+    list.querySelectorAll('.broadcast-photo-thumb').forEach(el => el.addEventListener('click', () => {
+        openMediaViewModal(el.dataset.id, el.dataset.mediaType);
+    }));
+    list.querySelectorAll('.broadcast-photo-delete-btn').forEach(btn => btn.addEventListener('click', () => {
+        if (!confirm(t('media.delete_confirm'))) return;
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: btn.dataset.id});
+        fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+            if (result.ok) { renderBroadcastPhotos(broadcastPhotos = broadcastPhotos.filter(p => String(p.id) !== btn.dataset.id)); }
             else alert(result.error || t('common.delete_failed'));
         });
     }));
@@ -4404,6 +4509,7 @@ setTimeout(() => {
     renderPointsOfInterest(pointsOfInterest);
     renderSosAlerts(sosAlerts);
     renderNearbyTeams(nearbyTeams);
+    renderBroadcastPhotos(broadcastPhotos);
     if (!fieldMode) updateSosAlarmState(sosAlerts);
     // Anything still queued from a previous visit (closed the tab while
     // offline, reopened later) — the banner reflects it immediately, and a
@@ -5229,6 +5335,7 @@ function pollWarRoomData() {
                 }
             }
         }
+        if (data.broadcastPhotos) renderBroadcastPhotos(broadcastPhotos = data.broadcastPhotos);
         if (data.myTasks) renderMyTasks(myTasks = data.myTasks);
         if (data.routes) {
             routes = data.routes;
