@@ -103,7 +103,9 @@ login($email, $password)                  // Returns ['success'=>bool, 'message'
 logout()
 ```
 
-### Utilities (includes/functions.php)
+### Utilities (includes/functions-core.php)
+War Room / Action Room domain logic (dispatch, routes, GPS/ETA, incidents,
+scoring, narratives) lives in a separate `includes/functions-warroom.php`.
 ```php
 h($string)                                // Escape HTML (ALWAYS use in output)
 redirect($url)                            // Header redirect + exit

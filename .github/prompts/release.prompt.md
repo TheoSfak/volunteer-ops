@@ -33,9 +33,11 @@ Run PHP syntax check: `C:\xampp\php\php.exe -l includes\migrations.php`
 ### 4. Sync 3 folders
 
 ```powershell
-robocopy "c:\Users\theo\Desktop\VolunteerOps\volunteer-ops-github" "c:\Users\theo\Desktop\VolunteerOps\volunteerops" /MIR /XD .git node_modules uploads /XF .gitignore .gitattributes /NFL /NDL /NJH /NJS /NC /NS /NP
-robocopy "c:\Users\theo\Desktop\VolunteerOps\volunteer-ops-github" "C:\xampp\htdocs\volunteerops" /MIR /XD .git node_modules uploads /XF .gitignore .gitattributes /NFL /NDL /NJH /NJS /NC /NS /NP
+robocopy "c:\Users\theo\Desktop\VolunteerOps\volunteer-ops-github" "c:\Users\theo\Desktop\VolunteerOps\volunteerops" /MIR /XD .git node_modules uploads vendor tests /XF .gitignore .gitattributes /NFL /NDL /NJH /NJS /NC /NS /NP
+robocopy "c:\Users\theo\Desktop\VolunteerOps\volunteer-ops-github" "C:\xampp\htdocs\volunteerops" /MIR /XD .git node_modules uploads vendor tests /XF .gitignore .gitattributes /NFL /NDL /NJH /NJS /NC /NS /NP
 ```
+
+Dev-only tooling (`vendor/`, `tests/`) never belongs in a deployed copy — Composer dev dependencies and test source have no reason to be reachable from a web root. If a real production deploy is ever done by copying this repo directly (rather than a checkout), exclude the same two directories there too.
 
 Robocopy exit code 1 = files copied (success).
 

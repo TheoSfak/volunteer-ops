@@ -19,7 +19,7 @@
  * or COMPLETED) stays wider than that, so embedded photos keep working
  * across both statuses this page is reachable under.
  *
- * Activity/response-time/score data comes from shared includes/functions.php
+ * Activity/response-time/score data comes from shared includes/functions-warroom.php
  * helpers (loadMissionActivityEventsForReport(), computeMissionResponseReport(),
  * computeMissionScore()) rather than a proxy through mission-history.php/
  * mission-response-report.php/mission-stats.php — those endpoints inherit the
@@ -72,7 +72,7 @@ $attendanceReady = in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. Activity feed — shared with mission-stats.php via
-//    loadMissionActivityEventsForReport() in includes/functions.php (the
+//    loadMissionActivityEventsForReport() in includes/functions-warroom.php (the
 //    same 7 sources as mission-history.php's live feed, but unconditionally
 //    admin-scoped since this whole page already is, and uncapped since this
 //    is an archival document, not the bounded live UI).

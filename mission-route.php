@@ -31,7 +31,7 @@ requireLogin();
 header('Content-Type: application/json');
 
 // notifyCommandStaffBanner() (formerly notifyRouteCommandStaff()) now lives in
-// includes/functions.php — it gained real callers beyond this page (mission-
+// includes/functions-warroom.php — it gained real callers beyond this page (mission-
 // order.php's acknowledge action, for the Route/Task/Message "Ελήφθη" loud
 // banner) and needed to be shared and order-type-agnostic, not page-local.
 
@@ -125,7 +125,7 @@ function currentWaypointSeq(int $routeId): ?int {
 }
 
 // resolveEventTimestamp() — the offline-queue replay clock — now lives in
-// includes/functions.php, since volunteer-status.php (field status / SOS)
+// includes/functions-warroom.php, since volunteer-status.php (field status / SOS)
 // replays through the same queue and needs the identical rules. Behaviour
 // here is unchanged.
 

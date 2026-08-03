@@ -36,7 +36,7 @@ if (!defined('MISSION_TEAM_CODENAMES')) {
 }
 
 // MISSION_TEAM_COLORS/MISSION_TEAM_COLOR_TEXT and teamBadgeColors() moved to
-// includes/functions.php (still same index basis as MISSION_TEAM_CODENAMES
+// includes/functions-warroom.php (still same index basis as MISSION_TEAM_CODENAMES
 // above) once loadMissionDispatchesForUser() there needed them too.
 
 /**
@@ -2288,6 +2288,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-utils.js?v=<?= APP_VERSION ?>"></script>
 <script>
 const csrfToken = '<?= csrfToken() ?>';
 <?php $__wrStrings = loadLangStrings('war-room'); $__viewerLang = $user['language'] ?? DEFAULT_LANGUAGE; ?>
@@ -2600,12 +2601,6 @@ if (annoToolbarEl) {
 // for the rest of the session, since nothing else would ever call
 // cancelActiveDrawing() again.
 window.addEventListener('blur', cancelActiveDrawing);
-function bearing(latlng1, latlng2) {
-    const lat1 = latlng1.lat * Math.PI / 180, lat2 = latlng2.lat * Math.PI / 180, dLng = (latlng2.lng - latlng1.lng) * Math.PI / 180;
-    const y = Math.sin(dLng) * Math.cos(lat2);
-    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
-    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-}
 function submitAnnotation(type, geo, label) {
     const data = new URLSearchParams({csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>, type, geo: JSON.stringify(geo)});
     if (label) data.append('label', label);
@@ -2614,25 +2609,7 @@ function submitAnnotation(type, geo, label) {
         else alert(result.error || t('common.send_failed'));
     }).catch(() => alert(t('common.send_failed')));
 }
-function escapeHtml(str) {
-    return String(str ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
-}
-// Shared by the dispatch and route composers' manual-coordinate-entry field —
-// accepts whatever separator someone pastes a "lat, lng" pair with (comma,
-// space, or both), since that's shared verbatim/read aloud from an outside
-// source (a partner-org radio call, a WhatsApp message) rather than typed
-// field-by-field. Same bounds + "reject exactly 0,0" rule mission-dispatch.php
-// already enforces server-side for admin-drawn points (isValidLatLng) — kept
-// here too so a bad paste is caught before a network round-trip, not after.
-function parseCoordsInput(raw) {
-    const parts = String(raw ?? '').trim().split(/[,\s]+/).map(Number);
-    if (parts.length !== 2 || parts.some(n => !isFinite(n))) return null;
-    const [lat, lng] = parts;
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
-    if (lat === 0 && lng === 0) return null;
-    return {lat, lng};
-}
-// Mirrors guestNameHtml() in includes/functions.php for names that render from
+// Mirrors guestNameHtml() in includes/functions-warroom.php for names that render from
 // a JS poll (chat, media, dispatch, SOS, shortage) rather than server-side PHP.
 function guestNameHtml(name, isExternal, orgName) {
     if (!isExternal) return escapeHtml(name);
@@ -2978,16 +2955,6 @@ function renderPins(items) {
 // No existing meters->km or bearing->compass-letter formatter anywhere in
 // this file to reuse (route.distance_from_point only ever shows raw
 // unrounded meters) — both written fresh here.
-function formatDistanceMeters(m) {
-    if (m === null || m === undefined) return '';
-    return m < 1000 ? `${Math.round(m)} ${t('common.unit_m')}` : `${(m / 1000).toFixed(1)} ${t('common.unit_km')}`;
-}
-function bearingToCompassAbbr(deg) {
-    if (deg === null || deg === undefined) return '';
-    const keys = ['compass.n', 'compass.ne', 'compass.e', 'compass.se', 'compass.s', 'compass.sw', 'compass.w', 'compass.nw'];
-    return t(keys[Math.round(deg / 45) % 8]);
-}
-
 let nearbyTeamsRenderedSig = null;
 function renderNearbyTeams(items) {
     const sig = JSON.stringify(items);
@@ -3447,7 +3414,7 @@ function postRouteAction(action, id, extra) {
 // queued locally and replayed once connectivity returns, with the server
 // recording the *actual* field time (reported_at) rather than whenever the
 // network happened to come back — see resolveEventTimestamp() in
-// includes/functions.php, which both replayed endpoints share.
+// includes/functions-warroom.php, which both replayed endpoints share.
 //
 // Two kinds ride this queue:
 //   kind:'route'  → mission-route.php  (depart/arrive/complete)
@@ -3753,14 +3720,6 @@ function findRouteWaypointById(waypointId) {
     }
     return null;
 }
-function missingRouteDeliverablesClientSide(wp, noteValue) {
-    const missing = [];
-    if (wp.require_photo && !wp.photo) missing.push(t('route.deliverable_photo'));
-    if (wp.require_video && !wp.video) missing.push(t('route.deliverable_video'));
-    if (wp.require_note && !(noteValue || wp.note || '').trim()) missing.push(t('route.deliverable_note'));
-    return missing;
-}
-
 function routeComplete(waypointId, confirmed) {
     const noteInput = document.querySelector(`.route-note-input[data-id="${waypointId}"]`);
     const noteValue = noteInput ? noteInput.value.trim() : '';
@@ -4290,7 +4249,7 @@ function renderSosAlerts(items) {
         return;
     }
     // a.team_label arrives ALREADY escaped — loadOpenSosAlertsForMission()
-    // (includes/functions.php) wraps it in h() server-side, unlike every
+    // (includes/functions-warroom.php) wraps it in h() server-side, unlike every
     // other team_label source in this file. Do not add escapeHtml() here:
     // confirmed live that doing so double-escapes to "&amp;lt;" instead of
     // neutralizing the payload, while still being fully inert either way —

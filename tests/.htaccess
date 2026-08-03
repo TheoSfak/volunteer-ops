@@ -1,0 +1,3 @@
+# Deny all access to tests directory
+Order Deny,Allow
+Deny from all

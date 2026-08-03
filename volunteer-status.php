@@ -42,7 +42,7 @@ if ($lat === 0.0 && $lng === 0.0) { $lat = null; $lng = null; }
 // especially an SOS) that only reaches the server once signal returns must be
 // recorded at the time the volunteer actually tapped it, not on arrival. Same
 // rules and same plausibility window as mission-route.php — see
-// resolveEventTimestamp() in includes/functions.php.
+// resolveEventTimestamp() in includes/functions-warroom.php.
 [$eventTs, $reportedAtTs] = resolveEventTimestamp();
 
 $allowedStatuses = ['on_way', 'on_site', 'needs_help'];
