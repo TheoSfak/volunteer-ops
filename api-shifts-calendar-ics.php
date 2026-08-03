@@ -11,7 +11,6 @@
  *   range_days       int   (optional, how many days ahead, default 90)
  */
 
-define('VOLUNTEEROPS', true);
 require_once __DIR__ . '/bootstrap.php';
 
 if (!isLoggedIn()) {
