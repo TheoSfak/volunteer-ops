@@ -5,8 +5,15 @@
 
 // Bump this whenever a precached file changes — offline.html is served from
 // the cache, so without a version change an installed client keeps the old
-// copy forever. (It had drifted to v3.71.3 while the app was at v3.124.)
-const CACHE_VERSION = 'vo-v3.125.0';
+// copy forever. (It had drifted to v3.71.3 while the app was at v3.124.) Also
+// bump on any change to how a *runtime-cached* asset is fetched/handled, not
+// just precached files — v3.153.6 added `crossorigin`+`integrity` to every
+// CDN <script>/<link> without bumping this, so returning clients kept their
+// pre-existing opaque (no-cors) cached responses for those exact URLs, which
+// can never satisfy an integrity check; each one 404'd-looking until its own
+// background stale-while-revalidate refetch (same code, further down) quietly
+// replaced it with a proper cors-mode response on the following load.
+const CACHE_VERSION = 'vo-v3.153.8';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime';
 
