@@ -1314,11 +1314,14 @@ CREATE TABLE IF NOT EXISTS `mission_chat_messages` (
 -- INDEXES FOR PERFORMANCE
 -- =============================================
 CREATE INDEX `idx_users_cohort_year` ON `users`(`cohort_year`);
-CREATE INDEX IF NOT EXISTS `idx_tasks_status` ON `tasks`(`status`);
-CREATE INDEX IF NOT EXISTS `idx_tasks_deadline` ON `tasks`(`deadline`);
-CREATE INDEX IF NOT EXISTS `idx_tasks_created_by` ON `tasks`(`created_by`);
-CREATE INDEX IF NOT EXISTS `idx_task_assignments_user` ON `task_assignments`(`user_id`);
-CREATE INDEX IF NOT EXISTS `idx_task_comments_task` ON `task_comments`(`task_id`);
+-- No "IF NOT EXISTS" below (MariaDB-only extension, invalid on real MySQL) -
+-- install.php's loader already tolerates the resulting "Duplicate key name"
+-- error on a rerun, same as idx_users_cohort_year above always has.
+CREATE INDEX `idx_tasks_status` ON `tasks`(`status`);
+CREATE INDEX `idx_tasks_deadline` ON `tasks`(`deadline`);
+CREATE INDEX `idx_tasks_created_by` ON `tasks`(`created_by`);
+CREATE INDEX `idx_task_assignments_user` ON `task_assignments`(`user_id`);
+CREATE INDEX `idx_task_comments_task` ON `task_comments`(`task_id`);
 
 -- =============================================
 -- EMAIL LOGS TABLE
