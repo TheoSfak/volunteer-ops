@@ -4,7 +4,7 @@
  * A post-mission "highlight reel" for War Room missions: a visual recap of
  * response times, participation, shortage handling, field media and the
  * debrief, reusing computeMissionResponseReport()/loadMissionActivityEventsForReport()/
- * loadMissionPhotosForUser() (includes/functions.php) rather than duplicating
+ * loadMissionPhotosForUser() (includes/functions-warroom.php) rather than duplicating
  * their query logic a third time. Same permission gate as mission-report-print.php,
  * plus a status gate — this is a post-mission recap, so it (and the PDF report,
  * and mission certificates) only unlock once the mission is closed/completed.

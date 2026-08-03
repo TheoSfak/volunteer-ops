@@ -23,6 +23,7 @@ node_modules/
 
 # Cache
 *.cache
+.phpunit.cache/
 
 # Uploads (if added later)
 uploads/

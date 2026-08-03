@@ -5,7 +5,7 @@
  * AJAX POST only. Session + CSRF auth — for the bearer-token-authed twin used
  * by the native Android app's background-location plugin, see
  * mobile-ping-location.php. Both share their core logic via
- * recordVolunteerPing() in includes/functions.php.
+ * recordVolunteerPing() in includes/functions-warroom.php.
  */
 
 require_once __DIR__ . '/bootstrap.php';

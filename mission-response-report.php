@@ -34,7 +34,7 @@ if (!$canManageWarRoom) {
     exit;
 }
 
-// Core computation lives in includes/functions.php (computeMissionResponseReport()),
+// Core computation lives in includes/functions-warroom.php (computeMissionResponseReport()),
 // shared with mission-report-print.php and mission-stats.php — it returns raw,
 // unformatted timestamps, so this page applies its own compact date() format
 // (the archival print export intentionally uses a longer format with the year).

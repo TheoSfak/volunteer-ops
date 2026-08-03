@@ -9,7 +9,7 @@
  * passes it as a real Authorization header (never the URL — that would land
  * in the web server's access log). Session-authed pings from a live
  * war-room.php tab keep using ping-location.php; both share their core logic
- * via recordVolunteerPing() in includes/functions.php.
+ * via recordVolunteerPing() in includes/functions-warroom.php.
  * AJAX POST only.
  */
 

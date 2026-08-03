@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: PHP lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+
+      - name: Syntax-check every tracked PHP file
+        run: |
+          status=0
+          while IFS= read -r -d '' file; do
+            php -l "$file" > /dev/null || status=1
+          done < <(git ls-files -z -- '*.php')
+          exit $status
+
+      - name: Reject stray UTF-8 BOMs
+        run: |
+          status=0
+          while IFS= read -r -d '' file; do
+            if head -c 3 "$file" | grep -q $'\xef\xbb\xbf'; then
+              echo "::error file=$file::starts with a UTF-8 BOM before <?php"
+              status=1
+            fi
+          done < <(git ls-files -z -- '*.php')
+          exit $status
+
+  test:
+    name: PHPUnit
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+          MYSQL_DATABASE: volunteer_ops_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: Load test schema
+        run: mysql -h 127.0.0.1 -u root volunteer_ops_test < tests/fixtures/schema-structure.sql
+
+      - name: Run PHPUnit
+        env:
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_NAME: volunteer_ops_test
+          TEST_DB_USER: root
+          TEST_DB_PASS: ""
+        run: vendor/bin/phpunit
+
+  test-js:
+    name: JS tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run Node test runner
+        run: node --test tests/js/*.test.js
