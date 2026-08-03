@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS `inventory_locations` (
     `is_active` TINYINT(1) DEFAULT 1,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
+    UNIQUE KEY `unique_name` (`name`),
     FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
     INDEX `idx_department` (`department_id`),
     INDEX `idx_type` (`location_type`)
