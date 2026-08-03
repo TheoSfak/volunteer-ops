@@ -97,7 +97,7 @@ foreach ($templates as $t) {
 <!DOCTYPE html>
 <html lang="el">
 <head><meta charset="UTF-8"><title>Migration: complaints v3.51.2</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
 </head>
 <body class="p-4">
 <div class="container" style="max-width:660px">

@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Παραρτήματα (Regional Branches)
  * Manage city-based departments that serve dual purpose:

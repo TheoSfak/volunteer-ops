@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Inventory Item View
  * Displays item details, booking history, notes, and quick actions.

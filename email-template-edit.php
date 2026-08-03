@@ -216,9 +216,9 @@ include __DIR__ . '/includes/header.php';
 <?php include __DIR__ . '/includes/footer.php'; ?>
 
 <!-- Summernote JS (must be after jQuery from footer) -->
-<link href="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.css" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/lang/summernote-el-GR.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.css" rel="stylesheet" integrity="sha384-hqv27sxmxAI2L4eughLkUpjS75/Z3/hg9DOWIl0PJWE4B6GJqM2Kx72ZPoQzsUpF" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.js" integrity="sha384-VuY5PEOHfx/+RyPd+UmHCqDU8d9IM8bhIrXbbli+OpDD0A9G/YaovME4NwAzOyxt" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/lang/summernote-el-GR.min.js" integrity="sha384-kK5iVyc0Cb94fn4ALwu+ZERH29vmL9zyDcrUDH2rS6I1wGCmajfDaCTbEtvU8y5c" crossorigin="anonymous"></script>
 
 <script>
 $(document).ready(function() {

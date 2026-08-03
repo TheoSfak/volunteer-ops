@@ -22,7 +22,7 @@
  * Skipped on Action Room (war-room.php) for its OWN timeout: an admin
  * legitimately sits watching the live map/alerts for long stretches with no
  * clicks, including kiosk/fullscreen mode (see includes/auth.php's
- * WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS for the equivalent server-side exemption).
+ * WAR_ROOM_ACTION_SCRIPTS for the equivalent server-side exemption).
  * But per the paragraph above, an open Action Room tab now also sends its
  * own periodic heartbeat into the same shared activity value, so it
  * actively PROTECTS every other tab's session too for as long as it's

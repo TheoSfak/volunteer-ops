@@ -237,7 +237,7 @@ $pageTitle = 'Στατιστικά Αποστολής: ' . $mission['title'];
 include __DIR__ . '/includes/header.php';
 ?>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
 <style>
     .mstats-hero { background: linear-gradient(135deg, #172554, #b91c1c); color: #fff; border-radius: 16px; }
     .mstats-hero h1 { color: #fff; font-weight: 700; }
@@ -780,7 +780,7 @@ include __DIR__ . '/includes/header.php';
 
 <div class="mstats-lightbox" id="lightboxOverlay"><img id="lightboxImg" src="" alt=""></div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 <script>
 const PALETTE = ['#2a78d6','#008300','#e87ba4','#eda100','#1baf7a','#eb6834','#4a3aa7','#e34948'];
 Chart.defaults.font.family = "'Segoe UI', system-ui, sans-serif";

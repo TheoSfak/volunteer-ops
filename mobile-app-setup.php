@@ -5,7 +5,7 @@
  * settings a volunteer must configure for background GPS to actually survive
  * a locked screen — permissions alone aren't enough on most Android phones,
  * OEM battery optimization silently kills the tracking service otherwise
- * (see includes/auth.php's WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS comment for the
+ * (see includes/auth.php's WAR_ROOM_ACTION_SCRIPTS comment for the
  * real incident this whole feature exists to prevent). Download button is
  * deliberately at the bottom, after the setup steps, not at the top — a
  * volunteer who installs without doing these steps first gets an app that

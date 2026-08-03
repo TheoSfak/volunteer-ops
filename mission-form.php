@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Mission Create/Edit Form
  */
@@ -339,7 +339,7 @@ include __DIR__ . '/includes/header.php';
 ?>
 
 <!-- Summernote CSS -->
-<link href="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.css" rel="stylesheet" integrity="sha384-hqv27sxmxAI2L4eughLkUpjS75/Z3/hg9DOWIl0PJWE4B6GJqM2Kx72ZPoQzsUpF" crossorigin="anonymous">
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0">
@@ -680,6 +680,7 @@ include __DIR__ . '/includes/header.php';
 <!-- Google Maps Link Parser -->
 <script>
 (function() {
+    var csrfToken = '<?= csrfToken() ?>';
     function extractLatLng(url) {
         if (!url) return null;
 
@@ -730,7 +731,7 @@ include __DIR__ . '/includes/header.php';
             fetch('api-resolve-maps.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
-                body: 'url=' + encodeURIComponent(url)
+                body: 'url=' + encodeURIComponent(url) + '&csrf_token=' + encodeURIComponent(csrfToken)
             })
             .then(function(r) { return r.json(); })
             .then(function(data) {
@@ -777,8 +778,8 @@ include __DIR__ . '/includes/header.php';
 </script>
 
 <!-- Summernote JS -->
-<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/lang/summernote-el-GR.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.js" integrity="sha384-VuY5PEOHfx/+RyPd+UmHCqDU8d9IM8bhIrXbbli+OpDD0A9G/YaovME4NwAzOyxt" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/lang/summernote-el-GR.min.js" integrity="sha384-kK5iVyc0Cb94fn4ALwu+ZERH29vmL9zyDcrUDH2rS6I1wGCmajfDaCTbEtvU8y5c" crossorigin="anonymous"></script>
 
 <!-- Date/Time Picker Modal -->
 <div class="modal fade" id="datePickerModal" tabindex="-1" aria-hidden="true">

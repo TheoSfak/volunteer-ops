@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Inventory Categories Management
  * Admin page to manage inventory categories.
