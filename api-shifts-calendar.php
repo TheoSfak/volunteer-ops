@@ -11,7 +11,6 @@
  *   mine           1/0 (optional, only shifts the current user participates in)
  */
 
-define('VOLUNTEEROPS', true);
 require_once __DIR__ . '/bootstrap.php';
 
 // Must be logged in
