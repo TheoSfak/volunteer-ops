@@ -14,6 +14,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string) $_POST['csrf_token'])) {
+    echo json_encode(['error' => 'Μη έγκυρο αίτημα']);
+    exit;
+}
+
 $url = trim($_POST['url'] ?? '');
 if (empty($url)) {
     echo json_encode(['error' => 'Δεν δόθηκε σύνδεσμος']);

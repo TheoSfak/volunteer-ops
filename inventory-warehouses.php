@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Inventory Warehouses Management
  * Manage warehouse departments (multi-tenancy for inventory).

@@ -1066,7 +1066,7 @@ $currentPage = 'war-room';
 include __DIR__ . '/includes/header.php';
 ?>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
 <style>
     /* Field-safety touch targets: the SOS/field-status buttons and the
        route depart/arrive/complete/photo/video buttons are what a volunteer
@@ -2287,7 +2287,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
     </div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 <script>
 const csrfToken = '<?= csrfToken() ?>';
 <?php $__wrStrings = loadLangStrings('war-room'); $__viewerLang = $user['language'] ?? DEFAULT_LANGUAGE; ?>
@@ -5108,7 +5108,7 @@ document.addEventListener('visibilitychange', () => {
 // gets frozen by the OS the instant the screen locks or the app is
 // backgrounded, so the pings above stop the moment a volunteer's phone
 // screen turns off. That's not a bug in this file, it's a browser sandboxing
-// limit no web code can lift (see includes/auth.php's WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS
+// limit no web code can lift (see includes/auth.php's WAR_ROOM_ACTION_SCRIPTS
 // comment for the real incident this caused). Only a native OS background-
 // location API can keep reporting through that. Same activation condition as
 // the web auto-ping above (.send-ping buttons present = an active approved

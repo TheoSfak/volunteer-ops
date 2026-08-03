@@ -10,8 +10,24 @@ if (!defined('VOLUNTEEROPS')) {
 /**
  * Start secure session
  */
-// Action Room (War Room) and everything it depends on (GPS ping, chat, dispatch,
-// SOS, etc.) are exempt from the idle-timeout below. Real incident: a mobile
+// The set of scripts that make up an active War Room (Action Room) session:
+// war-room.php itself plus every AJAX/JSON endpoint it calls from a long-open
+// tab. TWO independent things key off this one list — that's deliberate, not
+// incidental — because keeping it as a single constant is what fixes a bug
+// class this codebase already shipped twice: mission-route.php and then
+// mission-incident.php were each added to only ONE of what used to be two
+// separately hand-maintained arrays (this timeout exemption here, and
+// bootstrap.php's external-guest allow-list), silently breaking the other
+// behavior until someone noticed. Add a new War Room endpoint to THIS array
+// once and both behaviors below follow automatically:
+//   1. initSession() below exempts these scripts from the idle-timeout (see
+//      the incident this fixed, described in the next comment block).
+//   2. bootstrap.php's external-guest gate does
+//      array_merge(WAR_ROOM_ACTION_SCRIPTS, [...guest-only pages...]) to
+//      build the pages a partner-org guest account may navigate to.
+//
+// Action Room and everything it depends on (GPS ping, chat, dispatch, SOS,
+// etc.) are exempt from the idle-timeout below. Real incident: a mobile
 // phone's screen was kept on via the Keep Awake button the whole time, but the
 // OS still throttled background JS/network activity (Android Doze-style
 // battery optimization applies independently of a screen wake lock — the lock
@@ -21,7 +37,7 @@ if (!defined('VOLUNTEEROPS')) {
 // volunteer out mid-mission, and GPS auto-ping silently started failing with
 // no warning to anyone. As long as the PHP session itself is still valid, one
 // of these pages never force-logs-out purely for elapsed time.
-define('WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS', [
+define('WAR_ROOM_ACTION_SCRIPTS', [
     'war-room.php', 'ping-location.php', 'volunteer-status.php',
     'mission-chat.php', 'mission-photo.php', 'mission-photo-view.php',
     'mission-dispatch.php', 'mission-order.php', 'mission-sos.php',
@@ -42,14 +58,19 @@ define('WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS', [
     // every other endpoint on this list: called from within a long-open
     // war-room.php tab, so it needs the same exemption. Not "mission-"
     // prefixed, but neither is api-push-subscribe.php above, already on this
-    // list for the identical reason.
+    // list for the identical reason. Previously absent from bootstrap.php's
+    // separate guest allow-list (a guest UI never renders the drag/reorder
+    // controls, so this was never reachable for them in practice); now
+    // included there too via the shared constant, which is safe regardless —
+    // the endpoint enforces its own canManageAnyActionRoom() check no matter
+    // how the request got routed to it.
     'api-war-room-layout.php',
 ]);
 
 function initSession() {
     if (session_status() === PHP_SESSION_NONE) {
         $currentScript = basename($_SERVER['SCRIPT_NAME'] ?? '');
-        $isWarRoomExempt = in_array($currentScript, WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS, true);
+        $isWarRoomExempt = in_array($currentScript, WAR_ROOM_ACTION_SCRIPTS, true);
 
         // Second layer of defense, independent of the app's own timeout check
         // below: PHP's own session garbage collector can delete a session
@@ -89,7 +110,7 @@ function initSession() {
         // app-wide timeout would reintroduce, via the cookie itself
         // expiring client-side, the exact background-throttling force-
         // logout this whole exemption list exists to prevent (see the
-        // WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS docblock above).
+        // WAR_ROOM_ACTION_SCRIPTS docblock above).
         $cookieLifetime = $isWarRoomExempt ? 86400 : $timeoutSeconds;
 
         $isSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');

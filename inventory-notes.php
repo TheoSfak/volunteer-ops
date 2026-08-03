@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * VolunteerOps - Inventory Notes Management (Admin)
  * Centralized view of all inventory notes/deficiencies.

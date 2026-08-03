@@ -2703,7 +2703,11 @@ document.getElementById('btnTestWeatherKey') && document.getElementById('btnTest
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Έλεγχος...';
     result.style.display = 'none';
 
-    fetch('api-weather-test.php', { method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'} })
+    fetch('api-weather-test.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest'},
+        body: 'csrf_token=' + encodeURIComponent('<?= csrfToken() ?>')
+    })
         .then(function(r) { return r.json(); })
         .then(function(data) {
             result.style.display = '';

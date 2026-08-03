@@ -82,29 +82,20 @@ if (isLoggedIn() && isset($_GET['exit_preview'])) {
 // away. The AJAX/JSON endpoints below already carry their own per-mission auth checks
 // (isApprovedParticipant / canManageWarRoom), so allow-listing them just lets those
 // existing checks answer normally instead of this gate intercepting the request first.
+//
+// Built from WAR_ROOM_ACTION_SCRIPTS (includes/auth.php) plus a few guest-only
+// pages below, rather than its own separately hand-maintained array — that's
+// what this used to be, and mission-incident.php then mission-route.php each
+// shipped to only one of the two lists, silently breaking guest access (or
+// the guest's session timeout) until the gap was noticed and patched. A new
+// War Room AJAX endpoint now only needs adding to WAR_ROOM_ACTION_SCRIPTS
+// once to cover both behaviors — see that constant's docblock for the history.
 if (isLoggedIn() && isExternalGuest()) {
     $__extScript = basename($_SERVER['SCRIPT_NAME'] ?? '');
-    $__extAllowed = [
-        'war-room.php', 'missions.php', 'profile.php', 'logout.php',
-        'mission-chat.php', 'mission-photo.php', 'mission-photo-view.php',
-        'mission-dispatch.php', 'mission-order.php', 'mission-sos.php',
-        'mission-shortage.php', 'mission-history.php', 'mission-response-report.php',
-        'mission-track.php', 'ping-location.php', 'volunteer-status.php',
-        // mission-incident.php — new endpoint, same guest-lockdown gap class
-        // mission-route.php hit above; allow-listed from day one this time.
-        'mission-incident.php',
-        'geocode-address.php', 'api-push-subscribe.php',
+    $__extAllowed = array_merge(WAR_ROOM_ACTION_SCRIPTS, [
+        'missions.php', 'profile.php', 'logout.php',
         'mission-certificate-print.php', 'certificate-verify.php',
         'mission-guest-debrief.php', 'export-mission-activity.php', 'export-mission-chat.php',
-        // Route Orders (mission-route.php, shipped v3.124.0) was missed here
-        // too — a separate list from WAR_ROOM_TIMEOUT_EXEMPT_SCRIPTS in
-        // includes/auth.php (which already got this same fix), and the real
-        // cause of a guest volunteer's "Ξεκίνησε" tap redirecting to
-        // missions.php on every single attempt: every request to a
-        // non-allow-listed script bounces a guest away unconditionally, not
-        // just after idle time, so v3.140.1's timeout fix alone could never
-        // have resolved this for a guest/partner-org account.
-        'mission-route.php',
         // mobile-token-issue.php — native Android app requests its
         // background-ping bearer token here, session-authed like everything
         // else on this list. Guest/partner-org volunteers are exactly who
@@ -113,7 +104,7 @@ if (isLoggedIn() && isExternalGuest()) {
         // bearer-token-authed with no session at all, so isLoggedIn() is
         // false and this whole guest gate never runs for it.)
         'mobile-token-issue.php', 'mobile-app-setup.php',
-    ];
+    ]);
     if (!in_array($__extScript, $__extAllowed, true)) {
         $__extMissionIds = getExternalGuestMissionIds(getCurrentUserId());
         if (count($__extMissionIds) === 1) {

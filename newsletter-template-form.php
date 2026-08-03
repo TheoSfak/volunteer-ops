@@ -172,13 +172,13 @@ include __DIR__ . '/includes/header.php';
 </form>
 
 <!-- Summernote CSS -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.css" integrity="sha384-hqv27sxmxAI2L4eughLkUpjS75/Z3/hg9DOWIl0PJWE4B6GJqM2Kx72ZPoQzsUpF" crossorigin="anonymous">
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
 
 <!-- Summernote JS -->
-<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/lang/summernote-el-GR.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/summernote-bs5.min.js" integrity="sha384-VuY5PEOHfx/+RyPd+UmHCqDU8d9IM8bhIrXbbli+OpDD0A9G/YaovME4NwAzOyxt" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/summernote@0.8.20/dist/lang/summernote-el-GR.min.js" integrity="sha384-kK5iVyc0Cb94fn4ALwu+ZERH29vmL9zyDcrUDH2rS6I1wGCmajfDaCTbEtvU8y5c" crossorigin="anonymous"></script>
 
 <script>
 $(function() {

@@ -14,6 +14,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string) $_POST['csrf_token'])) {
+    echo json_encode(['ok' => false, 'message' => 'Μη έγκυρο αίτημα']);
+    exit;
+}
+
 $apiKey = trim(getSetting('openweathermap_api_key', ''));
 if (empty($apiKey)) {
     echo json_encode(['ok' => false, 'message' => 'Δεν έχει οριστεί API key']);

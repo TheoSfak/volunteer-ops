@@ -46,7 +46,7 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     </div><!-- /.main-content -->
     
     <!-- jQuery (required for Summernote) -->
-    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js" integrity="sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs" crossorigin="anonymous"></script>
     <!-- Bootstrap 5 JS (served locally so modals/dropdowns also work when the CDN is unavailable) -->
     <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/bootstrap.bundle.min.js?v=5.3.2"></script>
 
@@ -89,9 +89,11 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     })();
     </script>
 
-    <!-- Flatpickr -->
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/gr.js"></script>
+    <!-- Flatpickr (version pinned to match the CSS <link> in header.php and to keep
+         the SRI hashes below valid — previously unversioned, silently floating to
+         whatever jsdelivr resolved "latest" to on each request) -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js" integrity="sha384-5JqMv4L/Xa0hfvtF06qboNdhvuYXUku9ZrhZh3bSk8VXF0A/RuSLHpLsSV9Zqhl6" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/gr.js" integrity="sha384-7STUK95jMuLzt8TQwLkG9iO+1guhYjTNS5z4xnFzHc+P3tsRBeD6E5JdfdPEkdM9" crossorigin="anonymous"></script>
 
     <?php require __DIR__ . '/inactivity-timeout.php'; ?>
     
@@ -374,7 +376,7 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
 <!-- ══════════════════════════════════════════════════════════════════════════
      ACHIEVEMENT BADGE POPUP — fires once per session when new badges earned
      ══════════════════════════════════════════════════════════════════════════ -->
-<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js" integrity="sha384-0esPaJH+F9evp2lsJYN36SW7XkRbaYviuyF+PpnbjDXBC9i1CWGiJyGrXCyiyGqZ" crossorigin="anonymous"></script>
 
 <style>
 #vo-badge-overlay {
