@@ -32,20 +32,50 @@ mysqldump -u root --no-data --routines --triggers --skip-comments volunteer_ops 
 ```
 
 **This is deliberately not `sql/schema.sql`** (the documented "fresh install"
-baseline). `sql/schema.sql` currently has a real ordering bug - it INSERTs
-into `inventory_categories` before that table's own `CREATE TABLE` statement,
-which comes ~380 lines later in the same file - so loading it standalone (or
-via `install.php`'s loader) fails. See the tech-debt tracker / spawned task
-for the fix; it's orthogonal to what these tests check.
+baseline) - this fixture proves the migration runner's own logic, not that
+`sql/schema.sql` itself loads cleanly, so the two are kept separate on
+purpose.
 
-Because of that, `MigrationsRunnerTest` proves the migration **runner's own
-control flow** is correct against a real schema - version gating, the
-5-minute failure cooldown, stop-at-first-failure ordering, and (very
-usefully) that every migration is genuinely idempotent when run against a
-database that already has its effects applied. It does **not** prove a
-true zero-to-118 install from `sql/schema.sql` succeeds - that needs the
-schema.sql ordering bug fixed first, and a separate test using the real
-fresh-install file instead of this fixture.
+`sql/schema.sql` previously had a real ordering bug (INSERTed into
+`inventory_categories`/`inventory_locations` before those tables' own
+`CREATE TABLE` statements, ~380 lines later in the same file) plus two
+related forward-reference issues that surfaced once that was fixed: a
+stray mid-file `SET FOREIGN_KEY_CHECKS = 1;` that re-enabled FK validation
+before several tables added later in the file's growth, and a MariaDB-only
+limit on combining `ADD COLUMN` + `ADD FOREIGN KEY` (same column) in one
+`ALTER TABLE`. All three are fixed as of the commit that added this note -
+loading `sql/schema.sql` then `sql/inventory_schema.sql` standalone (e.g.
+via `mysql < file.sql`, or through `install.php`'s loader) now succeeds
+end to end against a genuinely empty database.
+
+`MigrationsRunnerTest` proves the migration **runner's own control flow**
+is correct against a real schema - version gating, the 5-minute failure
+cooldown, stop-at-first-failure ordering, and (very usefully) that every
+migration is genuinely idempotent when run against a database that already
+has its effects applied. It does **not** prove a true zero-to-118 install
+from `sql/schema.sql` succeeds - that's what `FreshInstallTest` (below) is for.
+
+## What `FreshInstallTest` covers
+
+Proves `sql/schema.sql` + `sql/inventory_schema.sql` load cleanly end to end
+against a genuinely empty database - the "true zero-to-118 install" case
+`MigrationsRunnerTest` doesn't cover (that one starts from
+`schema-structure.sql`, already fully migrated).
+
+It uses `includes/sql-statement-splitter.php`'s `splitSqlStatements()` - the
+same quote-aware statement splitter `install.php`'s real web installer uses
+in place of a naive `explode(';', ...)` (which breaks on `;` inside seeded
+HTML/CSS, e.g. `font-family: Arial, sans-serif;`) - so a regression in that
+shared parsing logic fails this test too, not just a regression in the two
+`.sql` files themselves.
+
+Runs against its own disposable database (`TEST_DB_NAME` + `_freshinstall`,
+e.g. `volunteer_ops_test_freshinstall`), created in `setUpBeforeClass()` and
+dropped in `tearDownAfterClass()` via a separate PDO connection - never the
+shared `TEST_DB_NAME` fixture `MigrationsRunnerTest` and others depend on
+already being fully migrated. No extra setup needed beyond the DB credentials
+already used by every other test (`TEST_DB_HOST`/`PORT`/`USER`/`PASS`); the
+test creates and tears down its own schema itself.
 
 ## JavaScript tests
 

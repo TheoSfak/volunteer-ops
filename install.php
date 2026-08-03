@@ -40,6 +40,8 @@ function logDebug($action, $status = 'info', $details = '') {
     ];
 }
 
+require_once __DIR__ . '/includes/sql-statement-splitter.php';
+
 session_start();
 
 $step = isset($_GET['step']) ? (int)$_GET['step'] : 1;
@@ -107,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     // Split and execute
                     $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
-                    $statements = array_filter(array_map('trim', explode(';', $sql)));
+                    $statements = array_filter(array_map('trim', splitSqlStatements($sql)));
                     $executed = 0;
                     $skipped = 0;
                     
@@ -146,7 +148,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $invSql = preg_replace('/DELIMITER\s+\$\$.*?DELIMITER\s+;/s', '', $invSql);
                         
                         $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
-                        $invStatements = array_filter(array_map('trim', explode(';', $invSql)));
+                        $invStatements = array_filter(array_map('trim', splitSqlStatements($invSql)));
                         $invExecuted = 0;
                         $invSkipped = 0;
                         

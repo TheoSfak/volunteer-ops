@@ -555,8 +555,6 @@ CREATE TABLE IF NOT EXISTS `volunteer_certificates` (
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-SET FOREIGN_KEY_CHECKS = 1;
-
 -- =============================================
 -- DEFAULT DATA
 -- =============================================
@@ -1022,25 +1020,6 @@ INSERT INTO `volunteer_positions` (`id`, `name`, `color`, `icon`, `sort_order`) 
 (3, 'Εκπαιδευτής',          'success', 'bi-mortarboard',       3),
 (4, 'Ταμίας',               'warning', 'bi-cash-coin',         4);
 
--- Default inventory categories
-INSERT INTO `inventory_categories` (`name`, `icon`, `color`, `sort_order`) VALUES
-('Φαρμακεία', '💊', '#dc3545', 1),
-('Ιατρικός Εξοπλισμός', '🏥', '#28a745', 2),
-('Επικοινωνία', '📢', '#17a2b8', 3),
-('Σκηνές & Εξοπλισμός', '⛺', '#ffc107', 4),
-('Εκπαίδευση', '📚', '#6c757d', 5),
-('Ασύρματοι', '📻', '#007bff', 6),
-('Οχήματα', '🚑', '#e83e8c', 7),
-('Γενικά', '📦', '#6c757d', 8)
-ON DUPLICATE KEY UPDATE `sort_order` = VALUES(`sort_order`);
-
--- Default inventory locations
-INSERT INTO `inventory_locations` (`name`, `location_type`, `notes`) VALUES
-('Κεντρική Αποθήκη', 'warehouse', 'Κύρια αποθήκη υλικών'),
-('Αποθήκη Οχημάτων', 'vehicle', 'Αποθήκη εντός οχημάτων'),
-('Γραφείο', 'room', 'Γραφείο διοίκησης')
-ON DUPLICATE KEY UPDATE `notes` = VALUES(`notes`);
-
 -- =============================================
 -- TRAINING MODULE TABLES
 -- =============================================
@@ -1426,10 +1405,30 @@ CREATE TABLE IF NOT EXISTS `inventory_locations` (
     `notes` TEXT NULL,
     `is_active` TINYINT(1) DEFAULT 1,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `unique_name` (`name`),
     FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
     INDEX `idx_department` (`department_id`),
     INDEX `idx_type` (`location_type`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Default inventory categories
+INSERT INTO `inventory_categories` (`name`, `icon`, `color`, `sort_order`) VALUES
+('Φαρμακεία', '💊', '#dc3545', 1),
+('Ιατρικός Εξοπλισμός', '🏥', '#28a745', 2),
+('Επικοινωνία', '📢', '#17a2b8', 3),
+('Σκηνές & Εξοπλισμός', '⛺', '#ffc107', 4),
+('Εκπαίδευση', '📚', '#6c757d', 5),
+('Ασύρματοι', '📻', '#007bff', 6),
+('Οχήματα', '🚑', '#e83e8c', 7),
+('Γενικά', '📦', '#6c757d', 8)
+ON DUPLICATE KEY UPDATE `sort_order` = VALUES(`sort_order`);
+
+-- Default inventory locations
+INSERT INTO `inventory_locations` (`name`, `location_type`, `notes`) VALUES
+('Κεντρική Αποθήκη', 'warehouse', 'Κύρια αποθήκη υλικών'),
+('Αποθήκη Οχημάτων', 'vehicle', 'Αποθήκη εντός οχημάτων'),
+('Γραφείο', 'room', 'Γραφείο διοίκησης')
+ON DUPLICATE KEY UPDATE `notes` = VALUES(`notes`);
 
 -- INVENTORY ITEMS
 CREATE TABLE IF NOT EXISTS `inventory_items` (
@@ -2205,7 +2204,11 @@ CREATE TABLE IF NOT EXISTS `mission_points_of_interest` (
 -- its POI group going away (see migration v112's comment for why that path
 -- shouldn't normally even trigger).
 ALTER TABLE `mission_photos`
-    ADD COLUMN `poi_id` INT UNSIGNED NULL,
+    ADD COLUMN `poi_id` INT UNSIGNED NULL;
+-- MariaDB rejects ADD COLUMN + ADD FOREIGN KEY on that same new column in a
+-- single ALTER TABLE (errno 1823, "failed to add FK constraint to system
+-- tables") — split into its own statement.
+ALTER TABLE `mission_photos`
     ADD FOREIGN KEY (`poi_id`) REFERENCES `mission_points_of_interest`(`id`) ON DELETE SET NULL,
     ADD INDEX `idx_photo_poi` (`poi_id`);
 
