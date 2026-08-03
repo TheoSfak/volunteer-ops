@@ -228,14 +228,17 @@ CREATE TABLE IF NOT EXISTS `inventory_department_access` (
 -- =============================================
 -- ALTER DEPARTMENTS TABLE (Add inventory fields)
 -- =============================================
+-- No "IF NOT EXISTS" below (MariaDB-only extension, invalid on real MySQL) -
+-- install.php's loader already tolerates the resulting "Duplicate column/key
+-- name" error on a rerun.
 ALTER TABLE `departments`
-    ADD COLUMN IF NOT EXISTS `has_inventory` TINYINT(1) DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS `inventory_settings` JSON NULL;
+    ADD COLUMN `has_inventory` TINYINT(1) DEFAULT 0,
+    ADD COLUMN `inventory_settings` JSON NULL;
 
 -- Add warehouse_id to users (multi-tenancy: volunteer belongs to a city/warehouse)
 ALTER TABLE `users`
-    ADD COLUMN IF NOT EXISTS `warehouse_id` INT UNSIGNED NULL AFTER `department_id`,
-    ADD INDEX IF NOT EXISTS `idx_users_warehouse` (`warehouse_id`);
+    ADD COLUMN `warehouse_id` INT UNSIGNED NULL AFTER `department_id`,
+    ADD INDEX `idx_users_warehouse` (`warehouse_id`);
 -- Note: FK constraint added manually: FOREIGN KEY (warehouse_id) REFERENCES departments(id) ON DELETE SET NULL
 
 -- =============================================
