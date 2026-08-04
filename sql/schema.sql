@@ -2147,15 +2147,35 @@ CREATE TABLE IF NOT EXISTS `mission_dispatch_receipts` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- MISSION SEARCH AREAS (War Room search-area coverage tracking — the outer
+-- polygon an admin draws first, representing a whole search zone, which then
+-- gets divided into sectors. No status/team of its own — purely an
+-- organizational container + boundary; the trackable unit of work is Sector)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_search_areas` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `label` VARCHAR(255) NOT NULL,
+    `geo` TEXT NOT NULL,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_search_area_mission` (`mission_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- MISSION SEARCH SECTORS (War Room search-area coverage tracking — polygon
--- zones assigned to a team, tracked not_started/assigned/in_progress/
--- completed/needs_recheck; team_id is SET NULL not CASCADE, unlike dispatch,
--- since a sector is the durable coverage record and must survive a team
--- being deleted/recreated mid-mission)
+-- sub-divisions of a search area, assigned to a team, tracked not_started/
+-- assigned/in_progress/completed/needs_recheck; team_id is SET NULL not
+-- CASCADE, unlike dispatch, since a sector is the durable coverage record and
+-- must survive a team being deleted/recreated mid-mission. area_id IS
+-- CASCADE — an area's sectors have no purpose once the area itself is gone)
 -- =============================================
 CREATE TABLE IF NOT EXISTS `mission_search_sectors` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `mission_id` INT UNSIGNED NOT NULL,
+    `area_id` INT UNSIGNED NOT NULL,
     `team_id` INT UNSIGNED NULL,
     `label` VARCHAR(255) NOT NULL,
     `geo` TEXT NOT NULL,
@@ -2166,10 +2186,12 @@ CREATE TABLE IF NOT EXISTS `mission_search_sectors` (
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`area_id`) REFERENCES `mission_search_areas`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`status_updated_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     INDEX `idx_sector_mission` (`mission_id`, `status`),
+    INDEX `idx_sector_area` (`area_id`),
     INDEX `idx_sector_team` (`team_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

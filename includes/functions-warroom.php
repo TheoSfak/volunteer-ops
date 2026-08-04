@@ -202,8 +202,62 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
 }
 
 /**
- * War Room search-sector coverage tracking — polygon zones drawn on the
- * shared map, optionally assigned to a team, tracked through a
+ * War Room search-area coverage tracking — the outer polygon an admin draws
+ * first, representing a whole search zone, which then gets divided into
+ * sectors (see loadMissionSectorsForUser() below). Deliberately UNIVERSAL
+ * visibility, same rationale as sectors: everyone needs to see the whole
+ * coverage picture. No status of its own — sector_count/completed_count is
+ * always computed fresh from its sectors here, never stored on the area row,
+ * so it can never go stale.
+ */
+function loadMissionSearchAreasForUser(int $missionId, bool $canManageWarRoom): array {
+    $rows = dbFetchAll(
+        "SELECT a.id, a.label, a.geo, a.created_at, cu.name AS created_by_name
+         FROM mission_search_areas a
+         LEFT JOIN users cu ON cu.id = a.created_by
+         WHERE a.mission_id = ?
+         ORDER BY a.created_at",
+        [$missionId]
+    );
+    if (empty($rows)) {
+        return [];
+    }
+
+    $areaIds = array_map(fn($r) => (int) $r['id'], $rows);
+    $placeholders = implode(',', array_fill(0, count($areaIds), '?'));
+
+    // Rollup, batched — no N+1, same discipline as the buildings/floors
+    // batching in loadMissionSectorsForUser() below.
+    $rollupRows = dbFetchAll(
+        "SELECT area_id, COUNT(*) AS total, SUM(status = 'completed') AS completed_count
+         FROM mission_search_sectors WHERE area_id IN ($placeholders) GROUP BY area_id",
+        $areaIds
+    );
+    $rollupByArea = [];
+    foreach ($rollupRows as $r) {
+        $rollupByArea[(int) $r['area_id']] = ['total' => (int) $r['total'], 'completed_count' => (int) $r['completed_count']];
+    }
+
+    return array_map(function ($row) use ($canManageWarRoom, $rollupByArea) {
+        $areaId = (int) $row['id'];
+        $rollup = $rollupByArea[$areaId] ?? ['total' => 0, 'completed_count' => 0];
+        return [
+            'id'              => $areaId,
+            'label'           => $row['label'],
+            'geo'             => json_decode($row['geo'], true),
+            'sector_count'    => $rollup['total'],
+            'completed_count' => $rollup['completed_count'],
+            'can_manage'      => $canManageWarRoom,
+            'created_at'      => date('d/m H:i', strtotime($row['created_at'])),
+            'created_by_name' => $row['created_by_name'],
+        ];
+    }, $rows);
+}
+
+/**
+ * War Room search-sector coverage tracking — polygon sub-divisions of a
+ * search area (see loadMissionSearchAreasForUser() above), optionally
+ * assigned to a team, tracked through a
  * not_started/assigned/in_progress/completed/needs_recheck lifecycle, with
  * an optional per-building/per-floor checklist for urban sectors.
  *
@@ -215,7 +269,7 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
  */
 function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
     $rows = dbFetchAll(
-        "SELECT s.id, s.team_id, s.label, s.geo, s.status, s.status_updated_at,
+        "SELECT s.id, s.area_id, s.team_id, s.label, s.geo, s.status, s.status_updated_at,
                 su.name AS status_updated_by_name, s.created_at, cu.name AS created_by_name,
                 mt.codename, mt.team_number, mt.color
          FROM mission_search_sectors s
@@ -334,6 +388,7 @@ function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageW
 
         return [
             'id'                     => $sectorId,
+            'area_id'                => (int) $row['area_id'],
             'label'                  => $row['label'],
             'geo'                    => json_decode($row['geo'], true),
             'status'                 => $row['status'],
@@ -3325,6 +3380,22 @@ function loadMissionActivityEventsForReport(int $missionId): array {
             'text' => ($teamLabel ? 'Η ομάδα ' . h($teamLabel) : h($row['actor_name'])) . ' ανέφερε άφιξη'
                 . ($row['dispatch_label'] ? ' στο «' . h($row['dispatch_label']) . '»' : '')
                 . ($teamLabel ? ' (' . h($row['actor_name']) . ')' : ''),
+            'ts'   => strtotime($row['created_at']),
+        ];
+    }
+
+    // Search areas — no status/team, so nothing to log beyond creation.
+    $areaCreatedRows = dbFetchAll(
+        "SELECT a.label, a.created_at, cu.name AS actor_name
+         FROM mission_search_areas a
+         LEFT JOIN users cu ON cu.id = a.created_by
+         WHERE a.mission_id = ?",
+        [$missionId]
+    );
+    foreach ($areaCreatedRows as $row) {
+        $events[] = [
+            'icon' => '🗺️',
+            'text' => h($row['actor_name'] ?? '—') . ' δημιούργησε την περιοχή έρευνας «' . h($row['label']) . '»',
             'ts'   => strtotime($row['created_at']),
         ];
     }

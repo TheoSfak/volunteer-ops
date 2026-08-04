@@ -88,6 +88,20 @@ function notifySectorStatusChanged(int $missionId, string $missionTitle, ?int $r
     }
 }
 
+/**
+ * Every mutating action below ends by reloading and returning the current
+ * state. Areas and sectors are always paired through this one function so
+ * they can never drift apart at any individual call site — a lesson already
+ * learned twice elsewhere in this codebase about independently-maintained
+ * things going out of sync.
+ */
+function loadSectorPollPayload(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
+    return [
+        'areas'   => loadMissionSearchAreasForUser($missionId, $canManageWarRoom),
+        'sectors' => loadMissionSectorsForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant),
+    ];
+}
+
 $userId = getCurrentUserId();
 $user = getCurrentUser();
 
@@ -114,10 +128,9 @@ if (!$canManageWarRoom && !$isApprovedParticipant) {
     exit;
 }
 
-// ── GET: poll for sectors visible to me (universal — see loadMissionSectorsForUser) ─
+// ── GET: poll for areas+sectors visible to me (universal — see loadMissionSearchAreasForUser/loadMissionSectorsForUser) ─
 if (!isPost()) {
-    $sectors = loadMissionSectorsForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
-    echo json_encode(['ok' => true, 'sectors' => $sectors]);
+    echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 
@@ -203,8 +216,7 @@ if ($action === 'status') {
         $sector, $targetStatus, $userId, $canManageWarRoom
     );
 
-    $sectors = loadMissionSectorsForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
-    echo json_encode(['ok' => true, 'sectors' => $sectors]);
+    echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 
@@ -245,14 +257,44 @@ if ($action === 'check_floor' || $action === 'uncheck_floor') {
     }
     logAudit($action === 'check_floor' ? 'check_sector_floor' : 'uncheck_sector_floor', 'mission_sector_building_floors', $floorId, null, ['mission_id' => $missionId]);
 
-    $sectors = loadMissionSectorsForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
-    echo json_encode(['ok' => true, 'sectors' => $sectors]);
+    echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 
 // ── Everything below requires admin ──────────────────────────────────────────
 if (!$canManageWarRoom) {
     echo json_encode(['ok' => false, 'error' => t('sector.no_manage_permission')]);
+    exit;
+}
+
+if ($action === 'create_area') {
+    $label = trim((string) post('label'));
+    if ($label === '') {
+        echo json_encode(['ok' => false, 'error' => t('sector.invalid_label')]);
+        exit;
+    }
+    $label = mb_substr($label, 0, 255);
+
+    $rawGeo = json_decode((string) post('geo'), true);
+    if (!is_array($rawGeo) || count($rawGeo) < 3) {
+        echo json_encode(['ok' => false, 'error' => t('dispatch.polygon_needs_3_points')]);
+        exit;
+    }
+    foreach ($rawGeo as $pt) {
+        if (!is_array($pt) || !isset($pt[0], $pt[1]) || !$isValidLatLng($pt[0], $pt[1])) {
+            echo json_encode(['ok' => false, 'error' => t('dispatch.invalid_point')]);
+            exit;
+        }
+    }
+    $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
+
+    $areaId = dbInsert(
+        "INSERT INTO mission_search_areas (mission_id, label, geo, created_by, created_at) VALUES (?, ?, ?, ?, NOW())",
+        [$missionId, $label, json_encode($geo), $userId]
+    );
+    logAudit('create_mission_search_area', 'mission_search_areas', $areaId, null, ['mission_id' => $missionId]);
+
+    echo json_encode(['ok' => true, 'id' => (int) $areaId] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 
@@ -263,6 +305,13 @@ if ($action === 'create') {
         exit;
     }
     $label = mb_substr($label, 0, 255);
+
+    $areaId = (int) post('area_id');
+    $area = dbFetchOne("SELECT id FROM mission_search_areas WHERE id = ? AND mission_id = ?", [$areaId, $missionId]);
+    if (!$area) {
+        echo json_encode(['ok' => false, 'error' => t('sector.area_not_found')]);
+        exit;
+    }
 
     $teamIdRaw = post('team_id');
     $teamId = ($teamIdRaw !== '' && $teamIdRaw !== null) ? (int) $teamIdRaw : null;
@@ -289,8 +338,8 @@ if ($action === 'create') {
 
     $status = $teamId ? 'assigned' : 'not_started';
     $sectorId = dbInsert(
-        "INSERT INTO mission_search_sectors (mission_id, team_id, label, geo, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $teamId, $label, json_encode($geo), $status, $userId]
+        "INSERT INTO mission_search_sectors (mission_id, area_id, team_id, label, geo, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $areaId, $teamId, $label, json_encode($geo), $status, $userId]
     );
     if ($teamId) {
         dbExecute("UPDATE mission_search_sectors SET status_updated_at = NOW(), status_updated_by = ? WHERE id = ?", [$userId, $sectorId]);
@@ -307,8 +356,7 @@ if ($action === 'create') {
         notifySectorAssigned($missionId, $mission['title'], $teamId, $label, $userId);
     }
 
-    $sectors = loadMissionSectorsForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
-    echo json_encode(['ok' => true, 'id' => (int) $sectorId, 'sectors' => $sectors]);
+    echo json_encode(['ok' => true, 'id' => (int) $sectorId] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 
@@ -359,8 +407,7 @@ if ($action === 'assign') {
         notifySectorAssigned($missionId, $mission['title'], $newTeamId, $sector['label'], $userId);
     }
 
-    $sectors = loadMissionSectorsForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
-    echo json_encode(['ok' => true, 'sectors' => $sectors]);
+    echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 
@@ -373,6 +420,22 @@ if ($action === 'delete') {
     }
     dbExecute("DELETE FROM mission_search_sectors WHERE id = ?", [$sectorId]);
     logAudit('delete_mission_sector', 'mission_search_sectors', $sectorId, null, ['mission_id' => $missionId]);
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
+if ($action === 'delete_area') {
+    $areaId = (int) post('id');
+    $row = dbFetchOne("SELECT id FROM mission_search_areas WHERE id = ? AND mission_id = ?", [$areaId, $missionId]);
+    if (!$row) {
+        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+        exit;
+    }
+    // Cascades to this area's sectors, and transitively their buildings/
+    // floors — no payload reload (same convention as the plain sector
+    // `delete` above); the client filters both local arrays by area_id.
+    dbExecute("DELETE FROM mission_search_areas WHERE id = ?", [$areaId]);
+    logAudit('delete_mission_search_area', 'mission_search_areas', $areaId, null, ['mission_id' => $missionId]);
     echo json_encode(['ok' => true]);
     exit;
 }
@@ -417,8 +480,7 @@ if ($action === 'create_building') {
         'mission_id' => $missionId, 'sector_id' => $sectorId, 'floor_count' => $floorCount,
     ]);
 
-    $sectors = loadMissionSectorsForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
-    echo json_encode(['ok' => true, 'id' => (int) $buildingId, 'sectors' => $sectors]);
+    echo json_encode(['ok' => true, 'id' => (int) $buildingId] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 
@@ -450,8 +512,7 @@ if ($action === 'update_building_floors') {
         'mission_id' => $missionId, 'required_floor_numbers' => $requiredFloorNumbers,
     ]);
 
-    $sectors = loadMissionSectorsForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
-    echo json_encode(['ok' => true, 'sectors' => $sectors]);
+    echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 
@@ -470,8 +531,7 @@ if ($action === 'delete_building') {
     dbExecute("DELETE FROM mission_sector_buildings WHERE id = ?", [$buildingId]);
     logAudit('delete_sector_building', 'mission_sector_buildings', $buildingId, null, ['mission_id' => $missionId]);
 
-    $sectors = loadMissionSectorsForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
-    echo json_encode(['ok' => true, 'sectors' => $sectors]);
+    echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 

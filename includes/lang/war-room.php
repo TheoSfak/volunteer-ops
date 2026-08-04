@@ -176,7 +176,7 @@ return [
 
         // Search-sector coverage tracking
         'sector.card_title' => 'Τομείς Έρευνας',
-        'sector.note' => 'Σχεδιάστε τομείς έρευνας στον χάρτη και αναθέστε τους σε ομάδες για παρακολούθηση κάλυψης.',
+        'sector.note' => 'Σχεδιάστε μια περιοχή έρευνας, χωρίστε τη σε τομείς και αναθέστε τους σε ομάδες για παρακολούθηση κάλυψης.',
         'sector.assign_team_label' => 'Ομάδα',
         'sector.unassigned_option' => 'Χωρίς ομάδα (μη ανατεθειμένος)',
         'sector.label_placeholder' => 'π.χ. Τομέας Α1',
@@ -188,6 +188,16 @@ return [
         'sector.my_panel_title' => 'Οι Τομείς μου',
         'sector.my_empty' => 'Δεν σας έχουν ανατεθεί τομείς έρευνας.',
         'sector.note_placeholder' => 'Προαιρετικό σχόλιο…',
+        // Search areas — the outer polygon a sector lives inside
+        'sector.area_card_new_btn' => 'Νέα Περιοχή Έρευνας',
+        'sector.area_label_placeholder' => 'π.χ. Περιοχή Α',
+        'sector.area_map_instructions' => 'Κάντε κλικ στον χάρτη για να σχεδιάσετε τα όρια της περιοχής (τουλάχιστον 3 σημεία).',
+        'sector.area_select_placeholder' => '— Επιλέξτε περιοχή —',
+        'sector.area_not_found' => 'Η περιοχή έρευνας δεν βρέθηκε.',
+        'sector.area_rollup' => '{completed}/{total} τομείς ολοκληρώθηκαν',
+        'sector.area_delete_confirm' => 'Διαγραφή περιοχής «{label}» — θα διαγραφούν {count} τομείς. Συνέχεια;',
+        'sector.area_add_sector_btn' => 'Νέος τομέας εδώ',
+        'sector.area_empty_list' => 'Δεν έχουν οριστεί περιοχές έρευνας.',
         'sector.status.not_started' => 'Δεν έχει ξεκινήσει',
         'sector.status.assigned' => 'Ανατέθηκε',
         'sector.status.in_progress' => 'Σε εξέλιξη',
@@ -217,6 +227,7 @@ return [
         'sector.floor_uncheck_btn' => 'Αναίρεση',
         'sector.all_floors_checked_prompt' => 'Όλοι οι απαιτούμενοι όροφοι ελέγχθηκαν!',
         'sector.complete_sector_btn' => 'Δήλωση Ολοκλήρωσης Τομέα',
+        'history.area_created' => '{actor} δημιούργησε την περιοχή έρευνας «{label}»',
         'history.sector_created' => '{actor} δημιούργησε τον τομέα έρευνας «{label}» ({team})',
         'history.sector_status_changed' => '{actor} άλλαξε τον τομέα «{label}» σε «{status}» ({team})',
 
@@ -1056,7 +1067,7 @@ return [
 
         // Search-sector coverage tracking
         'sector.card_title' => 'Search Sectors',
-        'sector.note' => 'Draw search sectors on the map and assign them to teams to track coverage.',
+        'sector.note' => 'Draw a search area, divide it into sectors, and assign them to teams to track coverage.',
         'sector.assign_team_label' => 'Team',
         'sector.unassigned_option' => 'No team (unassigned)',
         'sector.label_placeholder' => 'e.g. Sector A1',
@@ -1068,6 +1079,16 @@ return [
         'sector.my_panel_title' => 'My Sectors',
         'sector.my_empty' => 'No search sectors are assigned to you.',
         'sector.note_placeholder' => 'Optional note…',
+        // Search areas — the outer polygon a sector lives inside
+        'sector.area_card_new_btn' => 'New Search Area',
+        'sector.area_label_placeholder' => 'e.g. Area A',
+        'sector.area_map_instructions' => 'Click the map to draw the area boundary (at least 3 points).',
+        'sector.area_select_placeholder' => '— Select an area —',
+        'sector.area_not_found' => 'Search area not found.',
+        'sector.area_rollup' => '{completed}/{total} sectors complete',
+        'sector.area_delete_confirm' => 'Delete area "{label}" — this will delete {count} sectors. Continue?',
+        'sector.area_add_sector_btn' => 'New sector here',
+        'sector.area_empty_list' => 'No search areas have been defined.',
         'sector.status.not_started' => 'Not started',
         'sector.status.assigned' => 'Assigned',
         'sector.status.in_progress' => 'In progress',
@@ -1097,6 +1118,7 @@ return [
         'sector.floor_uncheck_btn' => 'Undo',
         'sector.all_floors_checked_prompt' => 'All required floors have been checked!',
         'sector.complete_sector_btn' => 'Declare Sector Complete',
+        'history.area_created' => '{actor} created search area "{label}"',
         'history.sector_created' => '{actor} created search sector "{label}" ({team})',
         'history.sector_status_changed' => '{actor} changed sector "{label}" to "{status}" ({team})',
 

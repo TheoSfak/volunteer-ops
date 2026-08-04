@@ -144,6 +144,25 @@ foreach ($arrivedRows as $row) {
     ];
 }
 
+// ── search areas: created (no status/team, so nothing else to log) ─────────
+// Same unscoped rationale as sectors below.
+$areaCreatedRows = dbFetchAll(
+    "SELECT a.label, a.created_at, cu.name AS actor_name
+     FROM mission_search_areas a
+     LEFT JOIN users cu ON cu.id = a.created_by
+     WHERE a.mission_id = ?
+     ORDER BY a.created_at DESC LIMIT 200",
+    [$missionId]
+);
+foreach ($areaCreatedRows as $row) {
+    $events[] = [
+        'icon' => '🗺️',
+        'text' => t('history.area_created', ['actor' => h($row['actor_name'] ?? '—'), 'label' => h($row['label'])], $viewerLang),
+        'time' => date('d/m H:i', strtotime($row['created_at'])),
+        'ts'   => strtotime($row['created_at']),
+    ];
+}
+
 // ── search sectors: created / status changed ────────────────────────────────
 // Deliberately UNSCOPED (no team predicate, not $dispatchScopeSql above) —
 // every team needs to see sector coverage regardless of which team it's
