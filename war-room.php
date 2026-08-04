@@ -2996,7 +2996,14 @@ function buildPinMarker(pin) {
     const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
     const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${pin.lat},${pin.lng}&travelmode=driving`;
     const navLine = `<br><a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-1">${t('map.navigate_btn')}</a>`;
-    return L.marker([pin.lat, pin.lng], {icon}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${navLine}`);
+    // zIndexOffset keeps a live position dot on top of any other pin type
+    // (POI, dispatch, incident) that happens to land on the exact same spot
+    // — Leaflet's default z-index is purely latitude-based, so two markers
+    // at the same coordinate tie and fall back to DOM order, which is fragile
+    // (depends on which render*() happened to run last that poll tick). A
+    // volunteer's own live position should never be the one that silently
+    // disappears underneath another marker.
+    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${navLine}`);
 }
 
 function renderPins(items) {
@@ -4290,10 +4297,21 @@ function renderPoiLayer(items) {
     poiLayer.clearLayers();
     (items || []).forEach(p => {
         const color = p.checked_at ? '#6c757d' : '#0d6efd';
+        // A centered circle anchored on its own coordinate used to sit
+        // exactly on top of (and, being bigger, fully hide) a position pin
+        // reported at the same spot — extremely common here, since a POI
+        // photo is normally taken from right where the reporter is
+        // standing. Anchored like a real map pin instead (tip at the true
+        // coordinate, body floating above it) so the badge no longer covers
+        // whatever else is at that exact point; see buildPinMarker's
+        // zIndexOffset for the other half of this fix.
         const icon = L.divIcon({
             className: '',
-            html: `<div style="background:${color};color:#fff;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 1px 4px #0008;"><i class="bi bi-search"></i></div>`,
-            iconSize: [26, 26], iconAnchor: [13, 13],
+            html: `<div style="position:relative;width:26px;height:34px;">
+                <div style="width:26px;height:26px;background:${color};color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 1px 4px #0008;"><i class="bi bi-search"></i></div>
+                <div style="position:absolute;left:50%;top:24px;transform:translateX(-50%);width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:10px solid ${color};"></div>
+            </div>`,
+            iconSize: [26, 34], iconAnchor: [13, 34],
         });
         const reportedBy = p.reporter_names.map(escapeHtml).join(', ');
         const notesHtml = (p.photos || []).filter(photo => photo.note)
