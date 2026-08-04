@@ -1381,6 +1381,7 @@ include __DIR__ . '/includes/header.php';
                         <button type="button" class="btn btn-outline-secondary" id="annoToolArrow" data-tool="arrow" title="<?= t('annotation.tool_arrow') ?>"><i class="bi bi-arrow-up-right"></i></button>
                         <button type="button" class="btn btn-outline-secondary" id="annoToolText" data-tool="text" title="<?= t('annotation.tool_text') ?>"><i class="bi bi-fonts"></i></button>
                         <button type="button" class="btn btn-outline-secondary" id="annoToolErase" data-tool="erase" title="<?= t('annotation.tool_erase') ?>"><i class="bi bi-eraser"></i></button>
+                        <button type="button" class="btn btn-outline-danger" id="annoToolClearAll" title="<?= t('annotation.tool_clear_all') ?>"><i class="bi bi-trash3"></i></button>
                     </div>
                     <?php endif; ?>
                     <button type="button" id="mapFullscreenToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.btn_fullscreen') ?>">
@@ -2698,8 +2699,21 @@ function setActiveTool(tool) {
 }
 const annoToolbarEl = document.getElementById('annotationToolbar');
 if (annoToolbarEl) {
-    annoToolbarEl.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => setActiveTool(btn.dataset.tool)));
+    // [data-tool] excludes annoToolClearAll below — it performs an immediate
+    // action, not a persistent tool selection, and has no data-tool value of
+    // its own (setActiveTool(undefined) would have wrongly matched the same
+    // "active" style toggle every other tool-less state already uses).
+    annoToolbarEl.querySelectorAll('button[data-tool]').forEach(btn => btn.addEventListener('click', () => setActiveTool(btn.dataset.tool)));
 }
+document.getElementById('annoToolClearAll')?.addEventListener('click', () => {
+    if (!annotations.length) return;
+    if (!confirm(t('annotation.clear_all_confirm'))) return;
+    const data = new URLSearchParams({csrf_token: csrfToken, action: 'clear_all', mission_id: '<?= $missionId ?>'});
+    fetch('mission-annotation.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+        if (result.ok) renderAnnotations(annotations = []);
+        else alert(result.error || t('common.failed'));
+    });
+});
 // Safety net: a mousedown with no matching mouseup (alt-tab mid-stroke, focus
 // stolen mid-gesture) would otherwise leave map.dragging permanently disabled
 // for the rest of the session, since nothing else would ever call
