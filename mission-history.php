@@ -145,7 +145,7 @@ foreach ($arrivedRows as $row) {
 }
 
 // ── orders (location/photo/video/task): sent / acknowledged / fulfilled ───────
-$orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'route' => '🧭'];
+$orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'return_to_base' => '🏁', 'route' => '🧭'];
 $orderRows = dbFetchAll(
     "SELECT o.order_type, o.task_text, o.created_at AS sent_at, r.team_id, r.acknowledged_at, r.fulfilled_at,
             u.name AS actor_name, mt.codename, mt.team_number
@@ -164,6 +164,18 @@ foreach ($orderRows as $row) {
     if (in_array($row['order_type'], ['task', 'message', 'route'], true) && $row['task_text']) {
         $snippet = mb_strlen($row['task_text']) > 120 ? mb_substr($row['task_text'], 0, 117) . '…' : $row['task_text'];
         $extra = t('history.label_suffix_dash', ['label' => h($snippet)], $viewerLang);
+    } elseif ($row['order_type'] === 'return_to_base') {
+        // No task_text stored for this type — end_mission_broadcast sends a
+        // fixed system phrase, not admin-typed free text (see war-room.php's
+        // create action, $taskText stays null there), so it's re-resolved
+        // here from the same key it was actually sent with, in the VIEWER's
+        // own language like every other event in this feed (not the
+        // original recipients' languages, which could differ per-person and
+        // aren't what a single shared feed entry can show anyway). Mission
+        // title is the one untrusted value in that template, escaped before
+        // going in — t()'s own output is then used as-is, same single-escape
+        // convention every other 'extra' in this file already follows.
+        $extra = t('history.label_suffix_dash', ['label' => t('end_mission_broadcast.message', ['mission' => h($mission['title'])], $viewerLang)], $viewerLang);
     }
     $events[] = [
         'icon' => $icon,
