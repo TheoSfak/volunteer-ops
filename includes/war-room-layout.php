@@ -13,7 +13,7 @@ if (!defined('VOLUNTEEROPS')) {
 }
 
 /**
- * The 28 admin-desktop-view cards, in default reading order, split into the
+ * The 32 admin-desktop-view cards, in default reading order, split into the
  * two drag zones (main/left column, sidebar/right column). This list IS the
  * server-side whitelist — api-war-room-layout.php rejects any card id not
  * present here.
@@ -22,14 +22,14 @@ function warRoomDefaultLayout(): array {
     return [
         'main' => [
             'mapCard', 'trailEventsCard', 'shortageFormCard', 'incidentFormCard',
-            'shortageListCard', 'incidentsListCard', 'poiListCard', 'teamsCard',
+            'shortageListCard', 'incidentsListCard', 'poiListCard', 'sectorsListCard', 'teamsCard',
             'participantsCard', 'requestLocationCard', 'requestPhotoCard',
             'requestVideoCard', 'requestTaskCard', 'activityCard', 'chatCard',
         ],
         'sidebar' => [
             'mediaCard', 'myLocationCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'myRouteCard',
-            'myTasksCard', 'shiftsCard', 'sosAlertsCard', 'broadcastCard',
-            'endMissionCard', 'dispatchCard', 'routeOrderCard',
+            'myTasksCard', 'mySectorsCard', 'shiftsCard', 'sosAlertsCard', 'broadcastCard',
+            'endMissionCard', 'dispatchCard', 'sectorsCard', 'routeOrderCard',
             'teamRoutesAdminCard', 'missionMgmtCard',
         ],
     ];
@@ -142,6 +142,7 @@ function warRoomCardLabels(): array {
         'shortageListCard' => t('shortage.list_panel_title'),
         'incidentsListCard' => t('incident.list_panel_title'),
         'poiListCard' => t('poi.list_panel_title'),
+        'sectorsListCard' => t('sector.list_panel_title'),
         'teamsCard' => t('teams.panel_title'),
         'participantsCard' => t('card_visibility.label_participants'),
         'requestLocationCard' => t('request.location.card_title'),
@@ -156,11 +157,13 @@ function warRoomCardLabels(): array {
         'nearbyTeamsCard' => t('nearby.panel_title'),
         'myRouteCard' => t('route.my_panel_title'),
         'myTasksCard' => t('mytasks.panel_title'),
+        'mySectorsCard' => t('sector.my_panel_title'),
         'shiftsCard' => t('shifts.panel_title'),
         'sosAlertsCard' => t('sos.panel_title'),
         'broadcastCard' => t('global_message.card_title'),
         'endMissionCard' => t('end_mission_broadcast.card_title'),
         'dispatchCard' => t('dispatch.card_title'),
+        'sectorsCard' => t('sector.card_title'),
         'routeOrderCard' => t('route.card_title'),
         'teamRoutesAdminCard' => t('route.admin_panel_title'),
         'missionMgmtCard' => t('admin.mission_mgmt_title'),
