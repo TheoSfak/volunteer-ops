@@ -127,4 +127,16 @@ if ($action === 'delete') {
     exit;
 }
 
+if ($action === 'clear_all') {
+    $count = (int) dbFetchValue("SELECT COUNT(*) FROM mission_annotations WHERE mission_id = ?", [$missionId]);
+    if ($count > 0) {
+        dbExecute("DELETE FROM mission_annotations WHERE mission_id = ?", [$missionId]);
+        // No single record_id for a bulk wipe — same null-id shape audit.php
+        // already uses for 'clear_audit_log'.
+        logAudit('clear_all_mission_annotations', 'mission_annotations', null, null, ['mission_id' => $missionId, 'count' => $count]);
+    }
+    echo json_encode(['ok' => true, 'deleted' => $count]);
+    exit;
+}
+
 echo json_encode(['ok' => false, 'error' => t('common.unknown_action')]);
