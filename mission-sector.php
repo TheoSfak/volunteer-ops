@@ -440,6 +440,39 @@ if ($action === 'delete_area') {
     exit;
 }
 
+if ($action === 'clear_area_sectors') {
+    $areaId = (int) post('id');
+    $area = dbFetchOne("SELECT id FROM mission_search_areas WHERE id = ? AND mission_id = ?", [$areaId, $missionId]);
+    if (!$area) {
+        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+        exit;
+    }
+    // Cascades buildings/floors same as every other sector delete path here —
+    // no payload reload (matches `delete`/`delete_area`'s own convention),
+    // the client filters its local sectors array by area_id.
+    $count = (int) dbFetchValue("SELECT COUNT(*) FROM mission_search_sectors WHERE area_id = ?", [$areaId]);
+    dbExecute("DELETE FROM mission_search_sectors WHERE area_id = ?", [$areaId]);
+    logAudit('clear_mission_search_area_sectors', 'mission_search_areas', $areaId, null, ['mission_id' => $missionId, 'count' => $count]);
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
+if ($action === 'clear_all_areas') {
+    // Bulk wipe — no single record to point at, same null-record_id audit
+    // shape as mission-annotation.php's own clear_all action.
+    $areaCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_search_areas WHERE mission_id = ?", [$missionId]);
+    $sectorCount = (int) dbFetchValue(
+        "SELECT COUNT(*) FROM mission_search_sectors s JOIN mission_search_areas a ON a.id = s.area_id WHERE a.mission_id = ?",
+        [$missionId]
+    );
+    dbExecute("DELETE FROM mission_search_areas WHERE mission_id = ?", [$missionId]);
+    logAudit('clear_all_mission_search_areas', 'mission_search_areas', null, null, [
+        'mission_id' => $missionId, 'area_count' => $areaCount, 'sector_count' => $sectorCount,
+    ]);
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
 if ($action === 'create_building') {
     $sectorId = (int) post('sector_id');
     $sector = dbFetchOne("SELECT id FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
