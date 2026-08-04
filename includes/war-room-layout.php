@@ -13,7 +13,7 @@ if (!defined('VOLUNTEEROPS')) {
 }
 
 /**
- * The 32 admin-desktop-view cards, in default reading order, split into the
+ * The 33 admin-desktop-view cards, in default reading order, split into the
  * two drag zones (main/left column, sidebar/right column). This list IS the
  * server-side whitelist — api-war-room-layout.php rejects any card id not
  * present here.
@@ -29,7 +29,7 @@ function warRoomDefaultLayout(): array {
         'sidebar' => [
             'mediaCard', 'myLocationCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'myRouteCard',
             'myTasksCard', 'mySectorsCard', 'shiftsCard', 'sosAlertsCard', 'broadcastCard',
-            'endMissionCard', 'dispatchCard', 'sectorsCard', 'routeOrderCard',
+            'endMissionCard', 'dispatchCard', 'sectorsCard', 'restrictedAreasCard', 'routeOrderCard',
             'teamRoutesAdminCard', 'missionMgmtCard',
         ],
     ];
@@ -164,6 +164,7 @@ function warRoomCardLabels(): array {
         'endMissionCard' => t('end_mission_broadcast.card_title'),
         'dispatchCard' => t('dispatch.card_title'),
         'sectorsCard' => t('sector.card_title'),
+        'restrictedAreasCard' => t('restricted_area.card_title'),
         'routeOrderCard' => t('route.card_title'),
         'teamRoutesAdminCard' => t('route.admin_panel_title'),
         'missionMgmtCard' => t('admin.mission_mgmt_title'),

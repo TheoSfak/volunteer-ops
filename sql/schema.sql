@@ -2386,4 +2386,44 @@ CREATE TABLE IF NOT EXISTS `mission_sos_alerts` (
     INDEX `idx_sos_mission` (`mission_id`, `resolved_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- RESTRICTED AREAS (War Room hazard/danger-zone polygons + breach alarm log)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_restricted_areas` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `label` VARCHAR(255) NOT NULL,
+    `geo` TEXT NOT NULL,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_restricted_area_mission` (`mission_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mission_restricted_area_breaches` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `restricted_area_id` INT UNSIGNED NULL,
+    `area_label` VARCHAR(255) NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `team_id` INT UNSIGNED NULL,
+    `lat` DECIMAL(10,7) NOT NULL,
+    `lng` DECIMAL(10,7) NOT NULL,
+    `exited_at` TIMESTAMP NULL,
+    `acknowledged_at` TIMESTAMP NULL,
+    `acknowledged_by` INT UNSIGNED NULL,
+    `resolved_at` TIMESTAMP NULL,
+    `resolved_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`restricted_area_id`) REFERENCES `mission_restricted_areas`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`acknowledged_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`resolved_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_breach_mission` (`mission_id`, `resolved_at`),
+    INDEX `idx_breach_open_lookup` (`restricted_area_id`, `user_id`, `exited_at`, `resolved_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
