@@ -518,6 +518,7 @@ return [
         // Local-only siren mute — audio only, never touches the alert itself
         'sos.mute_btn' => 'Σίγαση ήχου (5λ)',
         'sos.muted_btn' => 'Σε σίγαση ({minutes}λ) — ενεργοποίηση',
+        'sos.close_overlay_btn' => 'Κλείσιμο πλήρους οθόνης — η ειδοποίηση παραμένει ανοιχτή',
         'banner.acked_label' => '✓ Ελήφθη',
         'hero.btn_exit_fullscreen' => 'Έξοδος Πλήρους Οθόνης',
         'activity.empty' => 'Δεν υπάρχουν καταγεγραμμένα γεγονότα ακόμη.',
@@ -1331,6 +1332,7 @@ return [
         // Local-only siren mute — audio only, never touches the alert itself
         'sos.mute_btn' => 'Mute sound (5m)',
         'sos.muted_btn' => 'Muted ({minutes}m) — unmute',
+        'sos.close_overlay_btn' => 'Close full-screen view — the alert stays open',
         'banner.acked_label' => '✓ Acknowledged',
         'hero.btn_exit_fullscreen' => 'Exit Fullscreen',
         'activity.empty' => 'No events recorded yet.',
