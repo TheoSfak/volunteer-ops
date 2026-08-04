@@ -2415,6 +2415,38 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
     </div>
 </div>
 
+<div class="modal fade" id="splitSectorModal" tabindex="-1">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h5 class="modal-title"><i class="bi bi-scissors me-1"></i><span id="splitSectorLabel"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0 d-flex flex-column flex-md-row">
+                <div class="p-2 border-bottom border-md-bottom-0 border-md-end d-flex flex-column gap-2" style="width:100%;max-width:320px;">
+                    <div class="small text-muted" id="splitSectorHint"><?= t('sector.split_hint') ?></div>
+                    <div id="splitSectorPreview" style="display:none;">
+                        <div class="input-group input-group-sm mb-2">
+                            <span class="input-group-text justify-content-center text-white" id="splitSectorSwatch1" style="min-width:34px;">Α</span>
+                            <input type="text" class="form-control" id="splitSectorLabelInput1" maxlength="255">
+                        </div>
+                        <div class="input-group input-group-sm mb-2">
+                            <span class="input-group-text justify-content-center text-white" id="splitSectorSwatch2" style="min-width:34px;">Β</span>
+                            <input type="text" class="form-control" id="splitSectorLabelInput2" maxlength="255">
+                        </div>
+                    </div>
+                    <div class="flex-grow-1"></div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="splitSectorClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
+                        <button type="button" class="btn btn-success btn-sm flex-grow-1" id="splitSectorSaveBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.split_save_btn') ?></button>
+                    </div>
+                </div>
+                <div id="splitSectorMap" style="flex:1;min-height:300px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="searchAreaMapModal" tabindex="-1">
     <div class="modal-dialog modal-fullscreen">
         <div class="modal-content">
@@ -2559,6 +2591,10 @@ let areas = <?= json_encode($areas) ?>;
 // !fieldMode block has already thrown "is not defined" once this session —
 // caught via a live shown.bs.modal test, not visible from php -l.
 let pendingDivideAreaId = null;
+// Same cross-scope requirement as pendingDivideAreaId just above — set by
+// openSplitSectorModal() (inside the !fieldMode block) and read by the
+// splitSectorModal IIFE (a separate top-level scope further down the file).
+let pendingSplitSectorId = null;
 // Team assignment moved from the (now-removed) sector composer's own select
 // to a per-sector control in its popup/list row instead (see sectorAdminSetTeam
 // below) — needs the team roster available client-side for that <select>'s
@@ -3167,6 +3203,14 @@ function openDivideSectorsForArea(areaId) {
     const modalEl = document.getElementById('divideSectorsModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
+// Split an already-created sector into two — only ever called for a sector
+// that's still not_started with no buildings (see the caller's own gate);
+// this function itself doesn't re-check that, it's purely "open the tool".
+function openSplitSectorModal(sectorId) {
+    pendingSplitSectorId = sectorId;
+    const modalEl = document.getElementById('splitSectorModal');
+    if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
 function areaDelete(id) {
     const area = areas.find(a => String(a.id) === String(id));
     if (!confirm(t('sector.area_delete_confirm', {label: area ? area.label : '', count: area ? area.sector_count : 0}))) return;
@@ -3295,7 +3339,10 @@ function renderSectorLayer(items) {
         const completePrompt = (item.buildings.length && item.all_buildings_complete && item.can_self_report)
             ? `<div class="small text-success fw-semibold mt-1">${t('sector.all_floors_checked_prompt')}</div>` : '';
         const selfReportBtn = item.can_self_report
-            ? `<br><button type="button" class="btn btn-sm btn-primary mt-1 sector-advance-btn" data-id="${item.id}" data-status="${item.next_status}">${sectorActionLabel(item.status)}</button>`
+            ? `<br><div class="mt-1 sector-advance-group">
+                <input type="text" class="form-control form-control-sm mb-1 sector-advance-note" placeholder="${t('sector.note_placeholder')}" maxlength="500">
+                <button type="button" class="btn btn-sm btn-primary w-100 sector-advance-btn" data-id="${item.id}" data-status="${item.next_status}">${sectorActionLabel(item.status)}</button>
+            </div>`
             : '';
         // Admin can never pick 'assigned' directly (mission-sector.php
         // rejects it — that value only ever results from assigning a team
@@ -3310,6 +3357,7 @@ function renderSectorLayer(items) {
                     ${['not_started','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
                 </select>
                 <button type="button" class="btn btn-sm btn-outline-primary mt-1 sector-add-building-btn" data-id="${item.id}"><i class="bi bi-building-add me-1"></i>${t('sector.add_building_btn')}</button>
+                ${item.status === 'not_started' && !item.buildings.length ? `<button type="button" class="btn btn-sm btn-outline-secondary mt-1 sector-split-btn" data-id="${item.id}"><i class="bi bi-scissors me-1"></i>${t('sector.split_btn')}</button>` : ''}
                 <button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
             </div>` : '';
         const popupHtml = `<strong>${escapeHtml(item.label)}</strong><br>` +
@@ -3362,6 +3410,8 @@ sectorLayer?.on('popupopen', event => {
         map.closePopup();
         document.getElementById('mapCard')?.classList.add('wr-draw-active');
     });
+    const splitBtn = popupEl.querySelector('.sector-split-btn');
+    if (splitBtn) splitBtn.addEventListener('click', () => { map.closePopup(); openSplitSectorModal(parseInt(splitBtn.dataset.id, 10)); });
 });
 sectorBuildingLayer?.on('popupopen', event => {
     const popupEl = event.popup.getElement();
@@ -3379,7 +3429,10 @@ function sectorListRowHtml(item) {
     const buildingsSummary = item.buildings.length
         ? `<div class="small">🏢 ${item.buildings.filter(b => b.all_required_checked).length}/${item.buildings.length}</div>` : '';
     const advanceBtn = item.can_self_report
-        ? `<button type="button" class="btn btn-sm btn-primary mt-1 sector-advance-btn" data-id="${item.id}" data-status="${item.next_status}">${sectorActionLabel(item.status)}</button>`
+        ? `<div class="mt-1 sector-advance-group">
+            <input type="text" class="form-control form-control-sm mb-1 sector-advance-note" placeholder="${t('sector.note_placeholder')}" maxlength="500">
+            <button type="button" class="btn btn-sm btn-primary w-100 sector-advance-btn" data-id="${item.id}" data-status="${item.next_status}">${sectorActionLabel(item.status)}</button>
+        </div>`
         : '';
     const manageHtml = item.can_manage ? `
         <select class="form-select form-select-sm mt-1 sector-team-select" data-id="${item.id}">
@@ -3389,6 +3442,7 @@ function sectorListRowHtml(item) {
         <select class="form-select form-select-sm mt-1 sector-status-select" data-id="${item.id}">
             ${['not_started','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
         </select>
+        ${item.status === 'not_started' && !item.buildings.length ? `<button type="button" class="btn btn-sm btn-outline-secondary mt-1 sector-split-btn" data-id="${item.id}"><i class="bi bi-scissors me-1"></i>${t('sector.split_btn')}</button>` : ''}
         <button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-delete-btn" data-id="${item.id}">${t('common.delete')}</button>` : '';
     return `<div class="border rounded p-2 mb-2 sector-list-row" data-id="${item.id}" style="cursor:pointer;">
         <div class="d-flex justify-content-between align-items-start">
@@ -3430,7 +3484,7 @@ function renderSectorsList(items) {
     }).join('');
 
     list.querySelectorAll('.sector-list-row').forEach(row => row.addEventListener('click', e => {
-        if (e.target.closest('button, select')) return;
+        if (e.target.closest('button, select, input')) return;
         if (fieldMode || !map) return;
         const item = sectors.find(s => String(s.id) === row.dataset.id);
         if (item && item.geo && item.geo.length) {
@@ -3441,6 +3495,7 @@ function renderSectorsList(items) {
     list.querySelectorAll('.sector-advance-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); sectorSelfAdvance(btn.dataset.id, btn.dataset.status, btn); }));
     list.querySelectorAll('.sector-team-select').forEach(sel => sel.addEventListener('change', () => sectorAdminSetTeam(sel.dataset.id, sel.value, sel)));
     list.querySelectorAll('.sector-status-select').forEach(sel => sel.addEventListener('change', () => sectorAdminSetStatus(sel.dataset.id, sel.value, sel)));
+    list.querySelectorAll('.sector-split-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); openSplitSectorModal(parseInt(btn.dataset.id, 10)); }));
     list.querySelectorAll('.sector-delete-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); sectorDelete(btn.dataset.id); }));
 
     list.querySelectorAll('.area-list-header').forEach(header => header.addEventListener('click', e => {
@@ -3596,7 +3651,13 @@ function sectorRefreshAfter(newSectors, newAreas) {
 }
 function sectorSelfAdvance(id, status, btnEl) {
     if (btnEl) btnEl.disabled = true;
+    // Optional note, entered in the sibling input right next to the button —
+    // deliberately not a separate popup/step, so the fast "just tap to
+    // advance" case stays exactly one click; the note is purely additive.
+    const noteInput = btnEl ? btnEl.closest('.sector-advance-group')?.querySelector('.sector-advance-note') : null;
+    const note = noteInput ? noteInput.value.trim() : '';
     const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'status', id, status});
+    if (note) data.set('note', note);
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
         else { alert(result.error || t('common.send_failed')); if (btnEl) btnEl.disabled = false; }
@@ -3653,7 +3714,10 @@ function renderMySectors(items) {
     }
     list.innerHTML = mine.map(item => {
         const advanceBtn = item.can_self_report
-            ? `<button type="button" class="btn btn-sm btn-primary w-100 mt-1 sector-advance-btn" data-id="${item.id}" data-status="${item.next_status}">${sectorActionLabel(item.status)}</button>`
+            ? `<div class="mt-1 sector-advance-group">
+                <input type="text" class="form-control form-control-sm mb-1 sector-advance-note" placeholder="${t('sector.note_placeholder')}" maxlength="500">
+                <button type="button" class="btn btn-sm btn-primary w-100 sector-advance-btn" data-id="${item.id}" data-status="${item.next_status}">${sectorActionLabel(item.status)}</button>
+            </div>`
             : '';
         const completePrompt = (item.buildings.length && item.all_buildings_complete && item.can_self_report)
             ? `<div class="small text-success fw-semibold mt-1">${t('sector.all_floors_checked_prompt')}</div>` : '';
@@ -6748,6 +6812,242 @@ document.querySelectorAll('.team-form').forEach(form => {
             composerMap.fitBounds(L.latLngBounds(currentArea.geo), {padding: [30, 30]});
         }
         resetDivision();
+        document.addEventListener('keydown', keydownHandler);
+        setTimeout(() => composerMap.invalidateSize(), 100);
+    });
+
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        document.removeEventListener('keydown', keydownHandler);
+    });
+})();
+
+(function() {
+    const modalEl = document.getElementById('splitSectorModal');
+    if (!modalEl) return;
+
+    const labelEl = document.getElementById('splitSectorLabel');
+    const previewEl = document.getElementById('splitSectorPreview');
+    const swatch1 = document.getElementById('splitSectorSwatch1');
+    const swatch2 = document.getElementById('splitSectorSwatch2');
+    const labelInput1 = document.getElementById('splitSectorLabelInput1');
+    const labelInput2 = document.getElementById('splitSectorLabelInput2');
+    const clearBtn = document.getElementById('splitSectorClearBtn');
+    const saveBtn = document.getElementById('splitSectorSaveBtn');
+
+    const COLOR_1 = '#0d6efd', COLOR_2 = '#198754';
+    // Screen-pixel distance a click must land within an edge to be accepted
+    // as a cut point — same order of magnitude as the existing "click near
+    // the first point to close the shape" threshold elsewhere in this file.
+    const SNAP_PX = 18;
+
+    let composerMap = null;
+    let previewLayer = null;
+    let currentSector = null;
+    // Each is null, or a "ring position": floor(r) = edge index (edge from
+    // geo[i] to geo[(i+1)%n]), frac(r) = how far along that edge (0 = right
+    // at geo[i]). This one representation covers both "clicked an existing
+    // corner" (frac exactly 0) and "clicked partway along an edge" — a
+    // corner-only model can never split a triangle, since connecting any two
+    // of its 3 corners is just an existing edge, not a new cut.
+    let cutPoint1 = null;
+    let cutPoint2 = null;
+    let actionStack = [];
+
+    function pointAtRingPos(ring, r) {
+        const n = ring.length;
+        const i = ((Math.floor(r) % n) + n) % n;
+        const t = r - Math.floor(r);
+        const a = ring[i];
+        if (t < 1e-9) return a.slice();
+        const b = ring[(i + 1) % n];
+        return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    }
+
+    // Closest point on segment a-b to point p, all as [lat,lng] — flat local
+    // approximation, accurate enough at mission scale (a few km at most).
+    function closestPointOnSegment(p, a, b) {
+        const dx = b[1] - a[1], dy = b[0] - a[0];
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq < 1e-15) return {point: a.slice(), t: 0};
+        let t = ((p[1] - a[1]) * dx + (p[0] - a[0]) * dy) / lenSq;
+        t = Math.max(0, Math.min(1, t));
+        return {point: [a[0] + dy * t, a[1] + dx * t], t};
+    }
+
+    // Projects a raw map click onto the sector's own boundary: finds the
+    // closest edge, and if that closest point is within SNAP_PX on screen,
+    // returns its ring position (snapped to the nearer endpoint if very
+    // close to one) — otherwise null (click was too far from the boundary
+    // to mean anything, e.g. deep in the polygon's interior).
+    function ringPositionAt(latlng) {
+        if (!currentSector) return null;
+        const ring = currentSector.geo;
+        const n = ring.length;
+        const clickPt = composerMap.latLngToContainerPoint(latlng);
+        let best = null;
+        for (let i = 0; i < n; i++) {
+            const proj = closestPointOnSegment([latlng.lat, latlng.lng], ring[i], ring[(i + 1) % n]);
+            const projPt = composerMap.latLngToContainerPoint(proj.point);
+            const dist = clickPt.distanceTo(projPt);
+            if (best === null || dist < best.dist) best = {dist, edgeIndex: i, t: proj.t};
+        }
+        if (!best || best.dist > SNAP_PX) return null;
+        if (best.t < 0.04) return best.edgeIndex;
+        if (best.t > 0.96) return (best.edgeIndex + 1) % n;
+        return best.edgeIndex + best.t;
+    }
+
+    // Given the two accepted ring positions, walks the original vertex ring
+    // to build both halves: polygon A gets everything strictly between r1
+    // and r2 (plus the two new cut points closing it), polygon B gets
+    // everything strictly outside that range (wrapping past the end). A cut
+    // that leaves either half under 3 points (e.g. both points on the same
+    // edge) is rejected here, before Save is ever enabled.
+    function computeSplit() {
+        if (cutPoint1 === null || cutPoint2 === null || !currentSector || cutPoint1 === cutPoint2) return [];
+        let r1 = cutPoint1, r2 = cutPoint2;
+        if (r1 > r2) { const tmp = r1; r1 = r2; r2 = tmp; }
+        const ring = currentSector.geo;
+        const p1 = pointAtRingPos(ring, r1);
+        const p2 = pointAtRingPos(ring, r2);
+        const polyA = [p1];
+        const polyB = [p2];
+        for (let i = 0; i < ring.length; i++) {
+            if (i > r1 && i < r2) polyA.push(ring[i]);
+            else if (i > r2 || i < r1) polyB.push(ring[i]);
+        }
+        polyA.push(p2);
+        polyB.push(p1);
+        if (polyA.length < 3 || polyB.length < 3) return [];
+        return [polyA, polyB];
+    }
+
+    function renderBoundary() {
+        if (!currentSector) return;
+        L.polygon(currentSector.geo, {color: '#6c757d', weight: 2, dashArray: '6,4', fillOpacity: 0.03, interactive: false}).addTo(previewLayer);
+        currentSector.geo.forEach(pt => {
+            L.circleMarker(pt, {radius: 5, color: '#fff', weight: 1.5, fillColor: '#6c757d', fillOpacity: 1, interactive: false}).addTo(previewLayer);
+        });
+    }
+
+    function renderCutPointMarker(r, color) {
+        if (r === null) return;
+        const pt = pointAtRingPos(currentSector.geo, r);
+        L.circleMarker(pt, {radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1, interactive: false}).addTo(previewLayer);
+    }
+
+    function renderSplitPreview() {
+        previewLayer.clearLayers();
+        renderBoundary();
+        renderCutPointMarker(cutPoint1, COLOR_1);
+        renderCutPointMarker(cutPoint2, COLOR_2);
+
+        const halves = computeSplit();
+        if (halves.length === 2) {
+            L.polygon(halves[0], {color: COLOR_1, weight: 2, fillColor: COLOR_1, fillOpacity: 0.35, interactive: false}).addTo(previewLayer);
+            L.polygon(halves[1], {color: COLOR_2, weight: 2, fillColor: COLOR_2, fillOpacity: 0.35, interactive: false}).addTo(previewLayer);
+            swatch1.style.background = COLOR_1;
+            swatch2.style.background = COLOR_2;
+            if (!labelInput1.value) labelInput1.value = t('sector.split_label_suffix', {label: currentSector.label, letter: 'Α'});
+            if (!labelInput2.value) labelInput2.value = t('sector.split_label_suffix', {label: currentSector.label, letter: 'Β'});
+            previewEl.style.display = '';
+        } else {
+            previewEl.style.display = 'none';
+        }
+        saveBtn.disabled = halves.length !== 2;
+    }
+
+    function onSplitMapClick(e) {
+        const r = ringPositionAt(e.latlng);
+        if (r === null) return;
+        if (cutPoint1 === null) {
+            cutPoint1 = r;
+            actionStack.push('point1');
+        } else if (cutPoint2 === null) {
+            if (Math.abs(r - cutPoint1) < 0.02) return; // same spot as point 1, ignore
+            cutPoint2 = r;
+            actionStack.push('point2');
+        } else {
+            return; // both already set — Clear or Ctrl+Z to change either
+        }
+        renderSplitPreview();
+    }
+
+    function resetSplit() {
+        cutPoint1 = null;
+        cutPoint2 = null;
+        actionStack = [];
+        labelInput1.value = '';
+        labelInput2.value = '';
+        renderSplitPreview();
+    }
+
+    function undo() {
+        if (!actionStack.length) return;
+        const last = actionStack.pop();
+        if (last === 'point2') cutPoint2 = null;
+        else cutPoint1 = null;
+        renderSplitPreview();
+    }
+
+    function keydownHandler(e) {
+        if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return;
+        const activeTag = document.activeElement ? document.activeElement.tagName : '';
+        if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+        e.preventDefault();
+        undo();
+    }
+
+    clearBtn.addEventListener('click', resetSplit);
+
+    saveBtn.addEventListener('click', () => {
+        const halves = computeSplit();
+        if (halves.length !== 2 || !currentSector) return;
+        const label1 = labelInput1.value.trim() || t('sector.split_label_suffix', {label: currentSector.label, letter: 'Α'});
+        const label2 = labelInput2.value.trim() || t('sector.split_label_suffix', {label: currentSector.label, letter: 'Β'});
+        const missionId = <?= $missionId ?>;
+        const originalId = currentSector.id;
+        const areaId = currentSector.area_id;
+        saveBtn.disabled = true;
+        const post = (label, geo) => {
+            const data = new URLSearchParams({csrf_token: csrfToken, action: 'create', mission_id: missionId, area_id: areaId, label, geo: JSON.stringify(geo)});
+            return fetch('mission-sector.php', {method: 'POST', body: data}).then(r => r.json());
+        };
+        // Create both halves BEFORE deleting the original — if anything
+        // fails partway through, the failure mode is "3 sectors instead of
+        // 2" (recoverable by hand), never "0 sectors" from deleting first.
+        Promise.all([post(label1, halves[0]), post(label2, halves[1])]).then(createResults => {
+            const createFailed = createResults.find(r => !r.ok);
+            const delData = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: missionId, id: originalId});
+            return fetch('mission-sector.php', {method: 'POST', body: delData}).then(r => r.json())
+                .then(delResult => ({createFailed, delResult}));
+        }).then(({createFailed, delResult}) => {
+            fetch('mission-sector.php?mission_id=' + missionId).then(r => r.json()).then(fresh => {
+                if (fresh.ok) sectorRefreshAfter(fresh.sectors, fresh.areas);
+                if (createFailed || !delResult.ok) {
+                    alert((createFailed && createFailed.error) || delResult.error || t('common.send_failed'));
+                    saveBtn.disabled = false;
+                } else {
+                    bootstrap.Modal.getInstance(modalEl).hide();
+                }
+            });
+        }).catch(() => { alert(t('common.send_failed')); saveBtn.disabled = false; });
+    });
+
+    modalEl.addEventListener('shown.bs.modal', () => {
+        currentSector = sectors.find(s => s.id === pendingSplitSectorId) || null;
+        pendingSplitSectorId = null;
+        labelEl.textContent = currentSector ? currentSector.label : '';
+        if (!composerMap) {
+            composerMap = L.map('splitSectorMap');
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(composerMap);
+            previewLayer = L.layerGroup().addTo(composerMap);
+            composerMap.on('click', onSplitMapClick);
+        }
+        if (currentSector && currentSector.geo && currentSector.geo.length) {
+            composerMap.fitBounds(L.latLngBounds(currentSector.geo), {padding: [30, 30]});
+        }
+        resetSplit();
         document.addEventListener('keydown', keydownHandler);
         setTimeout(() => composerMap.invalidateSize(), 100);
     });
