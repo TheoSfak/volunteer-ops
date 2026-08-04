@@ -1155,8 +1155,40 @@ include __DIR__ . '/includes/header.php';
     }
     @keyframes warRoomPulseRed { 0%, 100% { box-shadow: 0 0 0 0 rgba(220,53,69,0); } 50% { box-shadow: 0 0 0 10px rgba(220,53,69,0.4); } }
     #sosOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
-    #sosOverlay.sos-active { display: block; animation: sosPulseCorners 1s ease-in-out infinite; }
+    /* Unacknowledged = maximum drama: full dark-red scrim + rotating beacon +
+       scrolling "who's in danger" text, same full-takeover idea as the
+       end-of-mission overlay but red and (deliberately) not on a timer — it
+       stays until someone acts. Still pointer-events:none like every overlay
+       here, so it never blocks command staff from clicking straight through
+       to the map or the real Acknowledge/Resolve buttons in the SOS list
+       panel underneath. Once acknowledged (sos-calm), it intentionally steps
+       back down to the original lightweight corner-glow-only look instead of
+       staying full-screen — the "drop everything" moment is over, and staff
+       need the map clear to actually coordinate the response. */
+    #sosOverlay.sos-active { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: rgba(20,2,2,.93); animation: sosPulseCorners 1s ease-in-out infinite; }
     #sosOverlay.sos-calm { display: block; animation: none; box-shadow: inset 0 0 120px 40px rgba(220,38,38,.35); }
+    .sos-beacon, .sos-overlay-marquee { display: none; }
+    #sosOverlay.sos-active .sos-beacon, #sosOverlay.sos-active .sos-overlay-marquee { display: block; }
+    /* A real siren graphic (🚨, the standard "revolving light" emoji — a
+       single long-established codepoint, unlike the flag emoji sequences
+       that are known to render as literal text on Windows/Chrome, see
+       volunteer-team badges) instead of a hand-drawn CSS shape, still with
+       zero external asset file: same zero-download approach already used
+       for the siren sound (Web Audio API, synthesized, no audio file).
+       Two independent animations layered on it, deliberately on different
+       cycle lengths (0.5s vs 1.1s) so they read as two distinct effects —
+       a rotating sweep behind it AND the siren itself strobing — rather
+       than one animation that just looks like the other. The sweep spins
+       behind the icon (its own layer, ::before) instead of spinning the
+       emoji itself, since a spinning "revolving light" glyph reads as a
+       tumbling icon rather than a beam sweeping around a fixed light. */
+    .sos-beacon { position: relative; width: 130px; height: 130px; border-radius: 50%; background: radial-gradient(circle, #4a0000 0%, #1a0000 72%); box-shadow: 0 0 70px 25px rgba(220,38,38,.55); overflow: hidden; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+    .sos-beacon::before { content: ''; position: absolute; inset: 0; background: conic-gradient(from 0deg, rgba(255,59,48,0) 0deg, rgba(255,59,48,0) 290deg, rgba(255,140,130,.95) 328deg, rgba(255,59,48,0) 360deg); animation: sosBeaconSpin 1.1s linear infinite; }
+    @keyframes sosBeaconSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .sos-beacon-icon { position: relative; font-size: 70px; line-height: 1; animation: sosBeaconFlash .5s ease-in-out infinite; }
+    @keyframes sosBeaconFlash { 0%, 100% { filter: drop-shadow(0 0 14px rgba(255,59,48,.9)) brightness(1); transform: scale(1); } 50% { filter: drop-shadow(0 0 28px rgba(255,110,100,1)) brightness(1.5); transform: scale(1.08); } }
+    .sos-overlay-marquee { width: 100%; white-space: nowrap; overflow: hidden; position: relative; height: 1.3em; font-size: clamp(1.2rem, 5.5vw, 2.4rem); }
+    .sos-overlay-marquee span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #ff6b60; font-weight: 800; text-transform: uppercase; letter-spacing: .02em; text-shadow: 0 0 20px rgba(255,59,48,.85); animation: warRoomBannerScroll 14s linear infinite; }
     /* Sits above #sosOverlay's own z-index (2000) so it's always clickable
        even while the corners are pulsing — #sosOverlay itself is
        pointer-events:none, so there's no overlap-blocking risk either way. */
@@ -1269,7 +1301,10 @@ include __DIR__ . '/includes/header.php';
 <div id="warRoomBanner" class="war-room-banner"></div>
 
 <?php if ($canManageWarRoom): ?>
-<div id="sosOverlay"></div>
+<div id="sosOverlay">
+    <div class="sos-beacon"><div class="sos-beacon-icon">🚨</div></div>
+    <div class="sos-overlay-marquee"><span id="sosOverlayMarqueeText"></span></div>
+</div>
 <!-- Local-only siren mute — silences the audio on THIS device for 5 minutes
      without touching the alert itself (no ack/resolve), for the real case of
      "I'm in a meeting/on a call, I can see the SOS is still active on
@@ -4717,18 +4752,24 @@ function updateSosAlarmState(items) {
             muteBtn.innerHTML = `<i class="bi bi-volume-mute me-1"></i>${escapeHtml(t('sos.mute_btn'))}`;
         }
     }
+    // Shared by the map-bottom marquee and the full-screen overlay's own
+    // centered one (the latter only ever visible while sos-active) — one
+    // "who's in danger" string computed once, not duplicated per surface.
+    const marqueeText = items.length
+        ? items.map(a => t('sos.marquee_text', {team: a.team_label.toUpperCase(), name: a.user_name})).join('     •••     ')
+        : '';
     const marquee = document.getElementById('sosMapMarquee');
     if (marquee) {
         if (items.length) {
-            document.getElementById('sosMapMarqueeText').textContent = items.map(a =>
-                t('sos.marquee_text', {team: a.team_label.toUpperCase(), name: a.user_name})
-            ).join('     •••     ');
+            document.getElementById('sosMapMarqueeText').textContent = marqueeText;
             marquee.classList.remove('d-none');
         } else {
             marquee.classList.add('d-none');
             document.getElementById('sosMapMarqueeText').textContent = '';
         }
     }
+    const overlayMarqueeText = document.getElementById('sosOverlayMarqueeText');
+    if (overlayMarqueeText) overlayMarqueeText.textContent = marqueeText;
 }
 
 // End of Mission / Return to Base — reuses the SOS siren sound engine (via
