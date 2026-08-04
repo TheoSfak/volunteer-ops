@@ -2085,15 +2085,11 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <button type="button" class="btn btn-outline-secondary w-100 fw-semibold mb-2" data-bs-toggle="modal" data-bs-target="#searchAreaMapModal">
                     <i class="bi bi-bounding-box me-1"></i><?= t('sector.area_card_new_btn') ?>
                 </button>
-                <label class="form-label small fw-semibold"><?= t('sector.assign_team_label') ?></label>
-                <select class="form-select mb-3" id="sectorTeamSelect">
-                    <option value=""><?= t('sector.unassigned_option') ?></option>
-                    <?php foreach ($teams as $team): ?>
-                    <option value="<?= $team['id'] ?>"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></option>
-                    <?php endforeach; ?>
-                </select>
-                <button type="button" class="btn btn-primary w-100 fw-semibold" data-bs-toggle="modal" data-bs-target="#sectorMapModal">
-                    <i class="bi bi-vector-pen me-1"></i><?= t('sector.new_btn') ?>
+                <button type="button" class="btn btn-primary w-100 fw-semibold mb-2" id="sectorsCardDivideBtn">
+                    <i class="bi bi-scissors me-1"></i><?= t('sector.divide_btn') ?>
+                </button>
+                <button type="button" class="btn btn-outline-danger w-100 btn-sm" id="sectorsCardClearAllBtn">
+                    <i class="bi bi-trash3 me-1"></i><?= t('sector.clear_all_btn') ?>
                 </button>
             </div>
         </div>
@@ -2397,35 +2393,23 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
     </div>
 </div>
 
-<div class="modal fade" id="sectorMapModal" tabindex="-1">
+<div class="modal fade" id="divideSectorsModal" tabindex="-1">
     <div class="modal-dialog modal-fullscreen">
         <div class="modal-content">
             <div class="modal-header py-2">
-                <h5 class="modal-title"><i class="bi bi-vector-pen me-1"></i><?= t('sector.card_title') ?></h5>
+                <h5 class="modal-title"><i class="bi bi-scissors me-1"></i><span id="divideSectorsAreaLabel"></span></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body p-0 d-flex flex-column">
-                <div class="p-2 border-bottom d-flex flex-wrap gap-2 align-items-center bg-light">
-                    <input type="text" id="sectorAddressInput" class="form-control" style="max-width:320px;" placeholder="<?= t('dispatch.address_placeholder') ?>">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" id="sectorAddressSearch"><i class="bi bi-search me-1"></i><?= t('dispatch.search_btn') ?></button>
-                    <span class="text-muted small" id="sectorAddressStatus"></span>
-                    <div class="input-group input-group-sm" style="max-width:230px;">
-                        <input type="text" id="sectorCoordsInput" class="form-control" placeholder="<?= t('dispatch.coords_placeholder') ?>" title="<?= t('dispatch.coords_add_title') ?>">
-                        <button type="button" class="btn btn-outline-secondary" id="sectorCoordsAddBtn" title="<?= t('dispatch.coords_add_title') ?>"><i class="bi bi-plus-lg"></i></button>
-                    </div>
-                    <input type="text" id="sectorLabelInput" class="form-control" style="max-width:220px;" maxlength="255" placeholder="<?= t('sector.label_placeholder') ?>">
-                    <select class="form-select form-select-sm" id="sectorAreaSelect" style="max-width:220px;">
-                        <option value=""><?= t('sector.area_select_placeholder') ?></option>
-                    </select>
-                    <div class="ms-auto d-flex gap-2">
-                        <button type="button" class="btn btn-outline-secondary btn-sm" id="sectorClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
-                        <button type="button" class="btn btn-success btn-sm" id="sectorSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.save_btn') ?></button>
+            <div class="modal-body p-0 d-flex flex-column flex-md-row">
+                <div class="p-2 border-bottom border-md-bottom-0 border-md-end d-flex flex-column gap-2" style="width:100%;max-width:320px;">
+                    <div class="small text-muted" id="divideSectorsHint"><?= t('sector.hub_hint') ?></div>
+                    <div id="divideSectorsWedgeList" class="flex-grow-1" style="overflow-y:auto;min-height:0;"></div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="divideSectorsClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
+                        <button type="button" class="btn btn-success btn-sm flex-grow-1" id="divideSectorsSaveBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.divide_save_btn') ?></button>
                     </div>
                 </div>
-                <div class="small text-muted px-2 py-1 bg-light border-bottom">
-                    <?= t('sector.map_instructions') ?>
-                </div>
-                <div id="sectorComposerMap" style="flex:1;min-height:0;"></div>
+                <div id="divideSectorsMap" style="flex:1;min-height:300px;"></div>
             </div>
         </div>
     </div>
@@ -2563,19 +2547,24 @@ let pins = <?= json_encode($pins) ?>;
 let dispatches = <?= json_encode($dispatches) ?>;
 let annotations = <?= json_encode($annotations) ?>;
 let areas = <?= json_encode($areas) ?>;
-// Set by openSectorComposerForArea() (declared further down, inside the
-// !fieldMode block, where the area popup's "New sector here" button lives)
-// and read by the sectorMapModal composer IIFE (declared later in the file,
-// as its own separate top-level scope). MUST live at this true top-level
-// script scope, not inside any block — a `let` declared inside a `{}` block
-// is invisible to a sibling scope outside that block (unlike a `function`
-// declaration, which at least gets its name hoisted in sloppy mode; see the
-// field-mode hoisting note elsewhere in this file for that related but
-// distinct pitfall). Declaring it inside the !fieldMode block here threw
-// "pendingSectorAreaId is not defined" the moment the composer tried to
-// read it — caught via a live shown.bs.modal test, not visible from php -l
-// or any static check.
-let pendingSectorAreaId = null;
+// Set by openDivideSectorsForArea() (declared further down, inside the
+// !fieldMode block, where the area popup's "Divide into Sectors" button
+// lives) and read by the divideSectorsModal IIFE (declared later in the
+// file, as its own separate top-level scope). MUST live at this true
+// top-level script scope, not inside any block — a `let` declared inside a
+// `{}` block is invisible to a sibling scope outside that block (unlike a
+// `function` declaration, which at least gets its name hoisted in sloppy
+// mode; see the field-mode hoisting note elsewhere in this file for that
+// related but distinct pitfall). Declaring this class of state inside the
+// !fieldMode block has already thrown "is not defined" once this session —
+// caught via a live shown.bs.modal test, not visible from php -l.
+let pendingDivideAreaId = null;
+// Team assignment moved from the (now-removed) sector composer's own select
+// to a per-sector control in its popup/list row instead (see sectorAdminSetTeam
+// below) — needs the team roster available client-side for that <select>'s
+// options, same id+label shape mission-history.php/etc. already compute
+// server-side via teamLabel().
+let teams = <?= json_encode(array_values(array_map(fn($t) => ['id' => $t['id'], 'label' => teamLabel($t['codename'], $t['team_number'])], $teams))) ?>;
 let sectors = <?= json_encode($sectors) ?>;
 let media = <?= json_encode($photos) ?>;
 let broadcastPhotos = <?= json_encode($broadcastPhotos) ?>;
@@ -3136,6 +3125,18 @@ function sectorAdminSetStatus(id, status, selectEl) {
         else { alert(result.error || t('common.send_failed')); if (selectEl) selectEl.disabled = false; }
     });
 }
+// Only client-side entry point to the `assign` action — sectors created by
+// the divide tool start unassigned on purpose (team choice is per-wedge,
+// made here rather than duplicated into that tool), so this is the sole way
+// to ever put a team on a sector post-creation.
+function sectorAdminSetTeam(id, teamId, selectEl) {
+    if (selectEl) selectEl.disabled = true;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'assign', id, team_id: teamId});
+    fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+        if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
+        else { alert(result.error || t('common.send_failed')); if (selectEl) selectEl.disabled = false; }
+    });
+}
 function sectorDelete(id) {
     if (!confirm(t('sector.delete_confirm'))) return;
     const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'delete', id});
@@ -3154,10 +3155,16 @@ function sectorDeleteBuilding(id) {
 // Search-area boundaries — the outer polygon a sector lives inside. No
 // status/self-report machinery of its own (see loadMissionSearchAreasForUser
 // in functions-warroom.php): just a label, a rollup computed server-side from
-// its sectors, and two admin actions (add a sector inside it, delete it).
-function openSectorComposerForArea(areaId) {
-    pendingSectorAreaId = areaId;
-    const modalEl = document.getElementById('sectorMapModal');
+// its sectors, and admin actions (divide into sectors OR clear them, delete
+// the area itself). pendingDivideAreaId is read by the divideSectorsModal
+// IIFE (a separate top-level scope later in the file) — MUST stay at true
+// top-level script scope, not inside this block, for the same reason
+// pendingSectorAreaId used to have to (see the note further down where the
+// file-wide `let areas/sectors` globals are declared): a `let` inside this
+// `if (!fieldMode) {}` block is invisible to a sibling scope outside it.
+function openDivideSectorsForArea(areaId) {
+    pendingDivideAreaId = areaId;
+    const modalEl = document.getElementById('divideSectorsModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 function areaDelete(id) {
@@ -3173,6 +3180,53 @@ function areaDelete(id) {
         }
     });
 }
+function clearAreaSectors(id) {
+    const area = areas.find(a => String(a.id) === String(id));
+    if (!confirm(t('sector.clear_area_sectors_confirm', {count: area ? area.sector_count : 0}))) return;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_area_sectors', id});
+    fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+        if (result.ok) {
+            if (map) map.closePopup();
+            sectors = sectors.filter(s => String(s.area_id) !== String(id));
+            // Locally mirror what the server's own rollup would now say —
+            // without this, the area's stale sector_count would keep its
+            // popup showing "Clear Sectors" instead of switching back to
+            // "Divide into Sectors" until the next poll tick.
+            const areaObj = areas.find(a => String(a.id) === String(id));
+            if (areaObj) { areaObj.sector_count = 0; areaObj.completed_count = 0; }
+            sectorRefreshAfter();
+        }
+    });
+}
+// Sidebar shortcut — only unambiguous when exactly one area still has zero
+// sectors; with several, sending the admin to that specific area's own map
+// popup (which has no such ambiguity) beats building a whole second picker
+// UI for what's a secondary entry point to begin with.
+document.getElementById('sectorsCardDivideBtn')?.addEventListener('click', () => {
+    const eligible = areas.filter(a => a.sector_count === 0);
+    if (!eligible.length) {
+        alert(t('sector.no_undivided_areas'));
+    } else if (eligible.length === 1) {
+        openDivideSectorsForArea(eligible[0].id);
+    } else {
+        alert(t('sector.pick_area_on_map'));
+    }
+});
+document.getElementById('sectorsCardClearAllBtn')?.addEventListener('click', () => {
+    const sectorTotal = areas.reduce((sum, a) => sum + a.sector_count, 0);
+    if (!confirm(t('sector.clear_all_confirm', {areas: areas.length, sectors: sectorTotal}))) return;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_all_areas'});
+    fetch('mission-sector.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+        if (result.ok) {
+            if (map) map.closePopup();
+            areas = [];
+            sectors = [];
+            sectorRefreshAfter();
+        } else {
+            alert(result.error || t('common.send_failed'));
+        }
+    });
+});
 let areasRenderedSig = null;
 function renderAreaLayer(items) {
     if (!areaLayer) return;
@@ -3185,9 +3239,16 @@ function renderAreaLayer(items) {
 
     items.forEach(item => {
         const rollup = `<div class="small mt-1">${t('sector.area_rollup', {completed: item.completed_count, total: item.sector_count})}</div>`;
+        // Divide vs Clear are mutually exclusive by design — re-dividing an
+        // area that already has sectors would fan a second, overlapping set
+        // from scratch, so the supported path is clear-then-redivide, not
+        // both actions available at once.
+        const divideOrClearBtn = item.sector_count > 0
+            ? `<button type="button" class="btn btn-sm btn-outline-warning mt-1 area-clear-sectors-btn" data-id="${item.id}">${t('sector.clear_area_sectors_btn')}</button>`
+            : `<button type="button" class="btn btn-sm btn-outline-primary mt-1 area-divide-btn" data-id="${item.id}">${t('sector.divide_btn')}</button>`;
         const manageHtml = item.can_manage ? `
             <div class="mt-2">
-                <button type="button" class="btn btn-sm btn-outline-primary mt-1 area-add-sector-btn" data-id="${item.id}">${t('sector.area_add_sector_btn')}</button>
+                ${divideOrClearBtn}
                 <button type="button" class="btn btn-sm btn-outline-danger mt-1 area-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
             </div>` : '';
         const popupHtml = `<strong>${escapeHtml(item.label)}</strong>${rollup}${manageHtml}`;
@@ -3202,8 +3263,10 @@ function renderAreaLayer(items) {
 }
 areaLayer?.on('popupopen', event => {
     const popupEl = event.popup.getElement();
-    const addSectorBtn = popupEl.querySelector('.area-add-sector-btn');
-    if (addSectorBtn) addSectorBtn.addEventListener('click', () => { map.closePopup(); openSectorComposerForArea(addSectorBtn.dataset.id); });
+    const divideBtn = popupEl.querySelector('.area-divide-btn');
+    if (divideBtn) divideBtn.addEventListener('click', () => { map.closePopup(); openDivideSectorsForArea(parseInt(divideBtn.dataset.id, 10)); });
+    const clearSectorsBtn = popupEl.querySelector('.area-clear-sectors-btn');
+    if (clearSectorsBtn) clearSectorsBtn.addEventListener('click', () => clearAreaSectors(clearSectorsBtn.dataset.id));
     const delBtn = popupEl.querySelector('.area-delete-btn');
     if (delBtn) delBtn.addEventListener('click', () => areaDelete(delBtn.dataset.id));
 });
@@ -3239,6 +3302,10 @@ function renderSectorLayer(items) {
         // to a not_started sector), so it's deliberately not an option here.
         const manageHtml = item.can_manage ? `
             <div class="mt-2">
+                <select class="form-select form-select-sm sector-team-select mb-1" data-id="${item.id}">
+                    <option value="">${escapeHtml(t('sector.unassigned_option'))}</option>
+                    ${teams.map(tm => `<option value="${tm.id}" ${String(tm.id) === String(item.team_id) ? 'selected' : ''}>${escapeHtml(tm.label)}</option>`).join('')}
+                </select>
                 <select class="form-select form-select-sm sector-status-select" data-id="${item.id}">
                     ${['not_started','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
                 </select>
@@ -3278,6 +3345,8 @@ sectorLayer?.on('popupopen', event => {
     const popupEl = event.popup.getElement();
     const advBtn = popupEl.querySelector('.sector-advance-btn');
     if (advBtn) advBtn.addEventListener('click', () => sectorSelfAdvance(advBtn.dataset.id, advBtn.dataset.status, advBtn));
+    const teamSelect = popupEl.querySelector('.sector-team-select');
+    if (teamSelect) teamSelect.addEventListener('change', () => sectorAdminSetTeam(teamSelect.dataset.id, teamSelect.value, teamSelect));
     const statusSelect = popupEl.querySelector('.sector-status-select');
     if (statusSelect) statusSelect.addEventListener('change', () => sectorAdminSetStatus(statusSelect.dataset.id, statusSelect.value, statusSelect));
     const delBtn = popupEl.querySelector('.sector-delete-btn');
@@ -3313,6 +3382,10 @@ function sectorListRowHtml(item) {
         ? `<button type="button" class="btn btn-sm btn-primary mt-1 sector-advance-btn" data-id="${item.id}" data-status="${item.next_status}">${sectorActionLabel(item.status)}</button>`
         : '';
     const manageHtml = item.can_manage ? `
+        <select class="form-select form-select-sm mt-1 sector-team-select" data-id="${item.id}">
+            <option value="">${escapeHtml(t('sector.unassigned_option'))}</option>
+            ${teams.map(tm => `<option value="${tm.id}" ${String(tm.id) === String(item.team_id) ? 'selected' : ''}>${escapeHtml(tm.label)}</option>`).join('')}
+        </select>
         <select class="form-select form-select-sm mt-1 sector-status-select" data-id="${item.id}">
             ${['not_started','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
         </select>
@@ -3366,6 +3439,7 @@ function renderSectorsList(items) {
         }
     }));
     list.querySelectorAll('.sector-advance-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); sectorSelfAdvance(btn.dataset.id, btn.dataset.status, btn); }));
+    list.querySelectorAll('.sector-team-select').forEach(sel => sel.addEventListener('change', () => sectorAdminSetTeam(sel.dataset.id, sel.value, sel)));
     list.querySelectorAll('.sector-status-select').forEach(sel => sel.addEventListener('change', () => sectorAdminSetStatus(sel.dataset.id, sel.value, sel)));
     list.querySelectorAll('.sector-delete-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); sectorDelete(btn.dataset.id); }));
 
@@ -6472,184 +6546,214 @@ document.querySelectorAll('.team-form').forEach(form => {
 })();
 
 (function() {
-    const modalEl = document.getElementById('sectorMapModal');
+    const modalEl = document.getElementById('divideSectorsModal');
     if (!modalEl) return;
 
-    const teamSelect = document.getElementById('sectorTeamSelect');
-    const areaSelect = document.getElementById('sectorAreaSelect');
-    const addressInput = document.getElementById('sectorAddressInput');
-    const addressSearchBtn = document.getElementById('sectorAddressSearch');
-    const addressStatus = document.getElementById('sectorAddressStatus');
-    const coordsInput = document.getElementById('sectorCoordsInput');
-    const coordsAddBtn = document.getElementById('sectorCoordsAddBtn');
-    const labelInput = document.getElementById('sectorLabelInput');
-    const clearBtn = document.getElementById('sectorClearBtn');
-    const sendBtn = document.getElementById('sectorSendBtn');
+    const areaLabelEl = document.getElementById('divideSectorsAreaLabel');
+    const wedgeListEl = document.getElementById('divideSectorsWedgeList');
+    const clearBtn = document.getElementById('divideSectorsClearBtn');
+    const saveBtn = document.getElementById('divideSectorsSaveBtn');
+
+    // Greek capitals, matching the wedge-lettering convention already used
+    // for the placeholder sector label ("Τομέας Α1") — 24 letters is far
+    // beyond any realistic single-area subdivision.
+    const GREEK_LETTERS = ['Α','Β','Γ','Δ','Ε','Ζ','Η','Θ','Ι','Κ','Λ','Μ','Ν','Ξ','Ο','Π','Ρ','Σ','Τ','Υ','Φ','Χ','Ψ','Ω'];
+    const WEDGE_COLORS = ['#0d6efd','#198754','#dc3545','#fd7e14','#6f42c1','#20c997','#d63384','#0dcaf0'];
 
     let composerMap = null;
-    let refLayer = null;
-    let drawPoints = [];
+    let wedgeLayer = null;
+    let currentArea = null;
     let vertexMarkers = [];
-    let shapeLayer = null;
-    let isClosed = false;
+    let hubIndex = null;
+    let cutIndices = [];
+    // Undo history for this session only — {type:'hub'|'cut', index}. A
+    // second click on an already-selected vertex is deliberately a no-op
+    // (not a toggle-off) so this stack is always the single source of truth
+    // for what a Ctrl+Z should reverse; a click-to-remove path would let the
+    // stack and the actual state drift apart.
+    let actionStack = [];
 
-    // Dimmed, read-only copy of the live map's pins + existing sectors, so
-    // the admin isn't drawing a new sector blind — same idea and technique
-    // as the dispatch composer's own renderDispatchContext() above.
-    function renderSectorContext() {
-        if (!refLayer) return;
-        refLayer.clearLayers();
-        const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
-        pins.forEach(pin => {
-            const color = pin.team_color || statusColors[pin.status] || '#2563eb';
-            L.circleMarker([pin.lat, pin.lng], {radius:6, weight:2, color:'#fff', fillColor:color, fillOpacity:0.55, opacity:0.6})
-                .addTo(refLayer)
-                .bindTooltip(escapeHtml(pin.name));
+    // Given the area's own vertex list + a chosen hub + chosen cut vertices,
+    // returns the wedge polygons: boundary walked starting right after the
+    // hub back around to just before it, split at each cut. Zero cuts
+    // degenerates to exactly one wedge — the whole area, re-ordered to start
+    // at the hub — so this same function covers the "one sector = whole
+    // area" case with no special-casing.
+    function computeWedges() {
+        if (hubIndex === null || !currentArea) return [];
+        const n = currentArea.geo.length;
+        const hub = currentArea.geo[hubIndex];
+        const boundary = [];
+        for (let k = 1; k < n; k++) boundary.push(currentArea.geo[(hubIndex + k) % n]);
+        const cutPositions = cutIndices
+            .map(ci => ((ci - hubIndex + n) % n) - 1)
+            .sort((a, b) => a - b);
+        const wedges = [];
+        let start = 0;
+        cutPositions.forEach(cp => {
+            wedges.push([hub, ...boundary.slice(start, cp + 1)]);
+            start = cp;
         });
-        sectors.forEach(item => {
-            const color = SECTOR_STATUS_HEX[item.status] || '#6c757d';
-            L.polygon(item.geo, {color, weight:2, opacity:0.5, fillOpacity:0.1}).addTo(refLayer).bindTooltip(escapeHtml(item.label));
-        });
-        // Existing areas too, dashed — so it's obvious which boundary a new
-        // sector is meant to sit inside while drawing it.
-        areas.forEach(item => {
-            L.polygon(item.geo, {color:'#495057', weight:2, opacity:0.6, dashArray:'8,5', fillOpacity:0.03}).addTo(refLayer).bindTooltip(escapeHtml(item.label));
-        });
+        wedges.push([hub, ...boundary.slice(start)]);
+        return wedges;
     }
 
-    function resetDrawing() {
-        drawPoints = [];
-        isClosed = false;
+    function wedgeCentroid(poly) {
+        const lat = poly.reduce((s, p) => s + p[0], 0) / poly.length;
+        const lng = poly.reduce((s, p) => s + p[1], 0) / poly.length;
+        return [lat, lng];
+    }
+
+    function renderVertexMarkers() {
         vertexMarkers.forEach(m => composerMap.removeLayer(m));
         vertexMarkers = [];
-        if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
-        sendBtn.disabled = true;
+        if (!currentArea) return;
+        currentArea.geo.forEach((pt, idx) => {
+            const isHub = idx === hubIndex;
+            const isCut = cutIndices.includes(idx);
+            const color = isHub ? '#212529' : (isCut ? '#6c757d' : '#0d6efd');
+            const marker = L.circleMarker(pt, {radius: isHub ? 10 : 7, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1}).addTo(composerMap);
+            marker.on('click', () => onVertexClick(idx));
+            vertexMarkers.push(marker);
+        });
     }
 
-    function updateShapePreview() {
-        if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
-        if (drawPoints.length < 2) return;
-        shapeLayer = isClosed
-            ? L.polygon(drawPoints, {color:'#0d6efd', fillOpacity:0.15}).addTo(composerMap)
-            : L.polyline(drawPoints, {color:'#0d6efd'}).addTo(composerMap);
-    }
-
-    // Polygon-only, unlike the dispatch composer's point-or-polygon —
-    // a sector is always an area, so the send button only ever enables
-    // once the shape is actually closed with at least 3 vertices. Also
-    // requires a parent area to be picked — every sector belongs to one.
-    function updateSendState() {
-        sendBtn.disabled = !(isClosed && drawPoints.length >= 3 && areaSelect.value !== '');
-    }
-
-    function addDrawPoint(lat, lng) {
-        drawPoints.push([lat, lng]);
-        vertexMarkers.push(L.circleMarker([lat, lng], {radius:7, color:'#0d6efd', fillColor:'#fff', fillOpacity:1, weight:2}).addTo(composerMap));
-        updateShapePreview();
-        updateSendState();
-    }
-
-    function onMapClick(e) {
-        if (isClosed) return;
-        if (drawPoints.length >= 3) {
-            const firstPoint = composerMap.latLngToContainerPoint(L.latLng(drawPoints[0]));
-            const clickPoint = composerMap.latLngToContainerPoint(e.latlng);
-            if (firstPoint.distanceTo(clickPoint) < 16) {
-                isClosed = true;
-                updateShapePreview();
-                updateSendState();
-                return;
-            }
-        }
-        addDrawPoint(e.latlng.lat, e.latlng.lng);
-    }
-
-    function addCoordsFromInput() {
-        const parsed = parseCoordsInput(coordsInput.value);
-        if (!parsed) {
-            alert(t('dispatch.coords_invalid'));
+    function onVertexClick(idx) {
+        if (hubIndex === null) {
+            hubIndex = idx;
+            actionStack.push({type: 'hub', index: idx});
+        } else if (idx === hubIndex || cutIndices.includes(idx)) {
             return;
+        } else {
+            cutIndices.push(idx);
+            actionStack.push({type: 'cut', index: idx});
         }
-        if (isClosed) {
-            alert(t('dispatch.coords_shape_closed'));
-            return;
-        }
-        addDrawPoint(parsed.lat, parsed.lng);
-        composerMap.setView([parsed.lat, parsed.lng], Math.max(composerMap.getZoom(), 15));
-        coordsInput.value = '';
+        renderVertexMarkers();
+        renderWedges();
     }
-    coordsAddBtn.addEventListener('click', addCoordsFromInput);
-    coordsInput.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); addCoordsFromInput(); }
+
+    function undo() {
+        if (!actionStack.length) return;
+        const last = actionStack.pop();
+        if (last.type === 'cut') {
+            cutIndices = cutIndices.filter(i => i !== last.index);
+        } else {
+            hubIndex = null;
+            cutIndices = [];
+        }
+        renderVertexMarkers();
+        renderWedges();
+    }
+
+    function keydownHandler(e) {
+        if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return;
+        const activeTag = document.activeElement ? document.activeElement.tagName : '';
+        if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return; // let native text-undo happen
+        e.preventDefault();
+        undo();
+    }
+
+    function renderWedges() {
+        wedgeLayer.clearLayers();
+        const wedges = computeWedges();
+        const existingValues = Array.from(wedgeListEl.querySelectorAll('.wedge-label-input')).map(inp => inp.value);
+        wedgeListEl.innerHTML = '';
+        wedges.forEach((poly, i) => {
+            const color = WEDGE_COLORS[i % WEDGE_COLORS.length];
+            const letter = GREEK_LETTERS[i % GREEK_LETTERS.length];
+            // interactive:false — this fill is pure visual feedback, never
+            // meant to be clickable; without it, it silently steals clicks
+            // from the vertex circle-markers underneath (later-added SVG
+            // paths paint on top and win hit-testing), found live when a
+            // second/third vertex click stopped registering as soon as the
+            // first wedge existed.
+            L.polygon(poly, {color, weight: 2, fillColor: color, fillOpacity: 0.35, interactive: false}).addTo(wedgeLayer);
+            const [lat, lng] = wedgeCentroid(poly);
+            L.marker([lat, lng], {
+                icon: L.divIcon({className: '', html: `<div style="font-weight:700;font-size:16px;color:${color};text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;">${letter}</div>`, iconSize: [24, 24], iconAnchor: [12, 12]}),
+                interactive: false,
+            }).addTo(wedgeLayer);
+
+            const row = document.createElement('div');
+            row.className = 'input-group input-group-sm mb-2';
+            const swatch = document.createElement('span');
+            swatch.className = 'input-group-text justify-content-center text-white';
+            swatch.style.cssText = `background:${color};min-width:34px;`;
+            swatch.textContent = letter;
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'form-control wedge-label-input';
+            input.maxLength = 255;
+            // Preserve any label the admin already typed for this position
+            // across a re-render (e.g. after adding one more cut) rather
+            // than clobbering it back to the auto-suggested default.
+            input.value = existingValues[i] || t('sector.wedge_label_placeholder', {letter});
+            row.appendChild(swatch);
+            row.appendChild(input);
+            wedgeListEl.appendChild(row);
+        });
+        saveBtn.disabled = wedges.length === 0;
+    }
+
+    function resetDivision() {
+        hubIndex = null;
+        cutIndices = [];
+        actionStack = [];
+        renderVertexMarkers();
+        renderWedges();
+    }
+
+    clearBtn.addEventListener('click', resetDivision);
+
+    saveBtn.addEventListener('click', () => {
+        const wedges = computeWedges();
+        if (!wedges.length || !currentArea) return;
+        const labelInputs = wedgeListEl.querySelectorAll('.wedge-label-input');
+        saveBtn.disabled = true;
+        const posts = wedges.map((poly, i) => {
+            const label = (labelInputs[i] ? labelInputs[i].value.trim() : '') || `${t('sector.wedge_label_placeholder', {letter: GREEK_LETTERS[i % GREEK_LETTERS.length]})}`;
+            const data = new URLSearchParams({
+                csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
+                area_id: currentArea.id, label, geo: JSON.stringify(poly),
+            });
+            return fetch('mission-sector.php', {method: 'POST', body: data}).then(r => r.json());
+        });
+        Promise.all(posts).then(results => {
+            const failed = results.find(r => !r.ok);
+            // Re-sync from the server's own truth rather than trust any one
+            // POST's own echoed payload — safer when several requests landed
+            // concurrently and one of them failed partway through the batch.
+            fetch('mission-sector.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(fresh => {
+                if (fresh.ok) sectorRefreshAfter(fresh.sectors, fresh.areas);
+                if (failed) {
+                    alert(failed.error || t('common.send_failed'));
+                    saveBtn.disabled = false;
+                } else {
+                    bootstrap.Modal.getInstance(modalEl).hide();
+                }
+            });
+        }).catch(() => { alert(t('common.send_failed')); saveBtn.disabled = false; });
     });
-    areaSelect.addEventListener('change', updateSendState);
 
     modalEl.addEventListener('shown.bs.modal', () => {
-        // Repopulated every time the modal opens (not just once) so a newly
-        // created area shows up without needing a full page reload.
-        areaSelect.innerHTML = `<option value="">${escapeHtml(t('sector.area_select_placeholder'))}</option>` +
-            areas.map(a => `<option value="${a.id}">${escapeHtml(a.label)}</option>`).join('');
-        if (pendingSectorAreaId !== null) {
-            areaSelect.value = pendingSectorAreaId;
-            pendingSectorAreaId = null;
-        }
-        updateSendState();
+        currentArea = areas.find(a => a.id === pendingDivideAreaId) || null;
+        pendingDivideAreaId = null;
+        areaLabelEl.textContent = currentArea ? currentArea.label : '';
         if (!composerMap) {
-            const center = missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73];
-            composerMap = L.map('sectorComposerMap').setView(center, missionLocation.lat ? 13 : 7);
+            composerMap = L.map('divideSectorsMap');
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(composerMap);
-            refLayer = L.layerGroup().addTo(composerMap);
-            composerMap.on('click', onMapClick);
+            wedgeLayer = L.layerGroup().addTo(composerMap);
         }
-        renderSectorContext();
+        if (currentArea && currentArea.geo && currentArea.geo.length) {
+            composerMap.fitBounds(L.latLngBounds(currentArea.geo), {padding: [30, 30]});
+        }
+        resetDivision();
+        document.addEventListener('keydown', keydownHandler);
         setTimeout(() => composerMap.invalidateSize(), 100);
     });
 
     modalEl.addEventListener('hidden.bs.modal', () => {
-        resetDrawing();
-        addressInput.value = '';
-        addressStatus.textContent = '';
-        coordsInput.value = '';
-        labelInput.value = '';
-        areaSelect.value = '';
-    });
-
-    clearBtn.addEventListener('click', resetDrawing);
-
-    addressSearchBtn.addEventListener('click', () => {
-        const q = addressInput.value.trim();
-        if (!q) return;
-        addressStatus.textContent = t('dispatch.searching');
-        fetch('geocode-address.php?q=' + encodeURIComponent(q)).then(response => response.json()).then(result => {
-            if (result.ok) {
-                composerMap.setView([result.lat, result.lng], 16);
-                addressStatus.textContent = '✓ ' + (result.display_name || q);
-            } else {
-                addressStatus.textContent = result.error || t('dispatch.address_not_found');
-            }
-        }).catch(() => { addressStatus.textContent = t('dispatch.search_failed'); });
-    });
-
-    sendBtn.addEventListener('click', () => {
-        const label = labelInput.value.trim();
-        if (!label) {
-            alert(t('sector.invalid_label'));
-            return;
-        }
-        const data = new URLSearchParams({
-            csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
-            area_id: areaSelect.value, team_id: teamSelect.value, geo: JSON.stringify(drawPoints), label: label,
-        });
-        sendBtn.disabled = true;
-        fetch('mission-sector.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
-            if (result.ok) {
-                bootstrap.Modal.getInstance(modalEl).hide();
-                sectorRefreshAfter(result.sectors, result.areas);
-            } else {
-                alert(result.error || t('common.send_failed'));
-                sendBtn.disabled = false;
-            }
-        }).catch(() => { alert(t('common.send_failed')); sendBtn.disabled = false; });
+        document.removeEventListener('keydown', keydownHandler);
     });
 })();
 
@@ -6672,6 +6776,12 @@ document.querySelectorAll('.team-form').forEach(form => {
     let vertexMarkers = [];
     let shapeLayer = null;
     let isClosed = false;
+    // Undo history: {type:'add'} | {type:'move', index, from} | {type:'close'}.
+    let actionStack = [];
+
+    function vertexIcon() {
+        return L.divIcon({className: '', html: '<div style="width:14px;height:14px;border-radius:50%;background:#fff;border:3px solid #495057;box-shadow:0 1px 3px #0006;"></div>', iconSize: [14, 14], iconAnchor: [7, 7]});
+    }
 
     // Dimmed, read-only copy of the live map's pins + existing areas — same
     // technique as the sector composer's own renderSectorContext() above,
@@ -6695,6 +6805,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     function resetDrawing() {
         drawPoints = [];
         isClosed = false;
+        actionStack = [];
         vertexMarkers.forEach(m => composerMap.removeLayer(m));
         vertexMarkers = [];
         if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
@@ -6716,10 +6827,44 @@ document.querySelectorAll('.team-form').forEach(form => {
     }
 
     function addDrawPoint(lat, lng) {
+        const idx = vertexMarkers.length;
         drawPoints.push([lat, lng]);
-        vertexMarkers.push(L.circleMarker([lat, lng], {radius:7, color:'#495057', fillColor:'#fff', fillOpacity:1, weight:2}).addTo(composerMap));
+        const marker = L.marker([lat, lng], {icon: vertexIcon(), draggable: true}).addTo(composerMap);
+        marker.on('dragend', () => {
+            const ll = marker.getLatLng();
+            actionStack.push({type: 'move', index: idx, from: drawPoints[idx].slice()});
+            drawPoints[idx] = [ll.lat, ll.lng];
+            updateShapePreview();
+        });
+        vertexMarkers.push(marker);
+        actionStack.push({type: 'add'});
         updateShapePreview();
         updateSendState();
+    }
+
+    function undo() {
+        if (!actionStack.length) return;
+        const last = actionStack.pop();
+        if (last.type === 'add') {
+            const marker = vertexMarkers.pop();
+            if (marker) composerMap.removeLayer(marker);
+            drawPoints.pop();
+        } else if (last.type === 'move') {
+            drawPoints[last.index] = last.from;
+            vertexMarkers[last.index].setLatLng(last.from);
+        } else if (last.type === 'close') {
+            isClosed = false;
+        }
+        updateShapePreview();
+        updateSendState();
+    }
+
+    function keydownHandler(e) {
+        if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return;
+        const activeTag = document.activeElement ? document.activeElement.tagName : '';
+        if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return; // let native text-undo happen
+        e.preventDefault();
+        undo();
     }
 
     function onMapClick(e) {
@@ -6729,6 +6874,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             const clickPoint = composerMap.latLngToContainerPoint(e.latlng);
             if (firstPoint.distanceTo(clickPoint) < 16) {
                 isClosed = true;
+                actionStack.push({type: 'close'});
                 updateShapePreview();
                 updateSendState();
                 return;
@@ -6765,6 +6911,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             composerMap.on('click', onMapClick);
         }
         renderAreaComposerContext();
+        document.addEventListener('keydown', keydownHandler);
         setTimeout(() => composerMap.invalidateSize(), 100);
     });
 
@@ -6774,6 +6921,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         addressStatus.textContent = '';
         coordsInput.value = '';
         labelInput.value = '';
+        document.removeEventListener('keydown', keydownHandler);
     });
 
     clearBtn.addEventListener('click', resetDrawing);
