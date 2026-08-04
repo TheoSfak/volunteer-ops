@@ -3297,7 +3297,7 @@ function renderAreaLayer(items) {
             </div>` : '';
         const popupHtml = `<strong>${escapeHtml(item.label)}</strong>${rollup}${manageHtml}`;
 
-        const layer = L.polygon(item.geo, {pane: 'areaPane', color: '#495057', weight: 3, dashArray: '10,6', fillColor: '#495057', fillOpacity: 0.04}).addTo(areaLayer).bindPopup(popupHtml);
+        const layer = L.polygon(item.geo, {pane: 'areaPane', color: '#dc3545', weight: 4, dashArray: '10,6', fillColor: '#dc3545', fillOpacity: 0.06}).addTo(areaLayer).bindPopup(popupHtml);
         layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'dispatch-team-label', interactive: false});
         layer.areaId = item.id;
         if (String(item.id) === String(openAreaId)) reopenAreaLayer = layer;
