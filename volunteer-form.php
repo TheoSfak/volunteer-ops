@@ -36,7 +36,7 @@ $departments = dbFetchAll("SELECT id, name FROM departments WHERE (has_inventory
 $warehouses = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
 
 // Home teams: guests pick from the pre-created partner-org list; regular
-// volunteers are always pinned to the default (Επίδραση) team server-side,
+// volunteers are always pinned to the default (Επίδρασις) team server-side,
 // not user-choosable — see the is_external branch below.
 $guestTeams = dbFetchAll("SELECT id, name, color FROM volunteer_teams WHERE is_default = 0 AND is_active = 1 ORDER BY name");
 $defaultTeamId = dbFetchValue("SELECT id FROM volunteer_teams WHERE is_default = 1 LIMIT 1") ?: null;

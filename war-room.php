@@ -1195,7 +1195,20 @@ include __DIR__ . '/includes/header.php';
     body.war-room-focus .sidebar-overlay,
     body.war-room-focus .sidebar-toggle { display: none; }
     body.war-room-focus .main-content { margin-left: 0; }
-    #mediaList { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; align-content: start; }
+    /* grid-auto-rows defaults to `auto`, which does NOT reliably mean
+       "size each row to its tallest item" once #mediaList sits inside a
+       fixed-height overflow:auto ancestor with dynamically-inserted (JS,
+       not server-rendered) children — Chrome under-measured row height
+       (matching the item's now-overridden automatic-minimum-size of 0
+       rather than its real min-content size), so row N+1 started
+       *before* row N's cards actually ended, painting over their bottom
+       (name/GPS/delete row) instead of the panel overflowing to scroll
+       past it. Forcing the row-sizing function itself to min-content
+       (not just the item's min-height below) is what actually fixes the
+       row positions — confirmed live: card top-to-top spacing matched
+       real card height only after adding this, not with the item-level
+       fix alone. */
+    #mediaList { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: min-content; gap: .5rem; align-content: start; }
     /* .card's own overflow:hidden (clips card-img-top's square corners to the
        card's rounded ones) gives every grid item here an automatic minimum
        size of 0 per the CSS Grid spec — so once #mediaList's fixed-height
@@ -2648,13 +2661,12 @@ function guestNameHtml(name, isExternal, teamName, teamColorBg, teamColorFg, cou
         const org = (teamName && teamName.trim() !== '') ? teamName : t('guest.org_unknown');
         return `${escapeHtml(name)}<sup class="guest-org-badge" title="${escapeHtml(t('guest.org_tooltip', {org}))}">${escapeHtml(org)}</sup>`;
     }
-    // Regular members are always Επίδραση, a Greek org — fixed, hardcoded
+    // Regular members are always Επίδρασις, a Greek org — fixed, hardcoded
     // here rather than left blank (users.guest_country_code is guest-only
     // data and never populated for anyone else).
     const flag = flagHtml(isExternal ? countryCode : 'GR');
     const team = (teamName && teamName.trim() !== '') ? teamName : t('guest.org_unknown');
-    const content = isExternal ? (flag + escapeHtml(team)) : flag;
-    return `<span class="team-name-badge" style="background:${teamColorBg};color:${teamColorFg}" title="${escapeHtml(team)}">${content}</span> ${escapeHtml(name)}`;
+    return `${escapeHtml(name)} <span class="team-name-badge" style="background:${teamColorBg};color:${teamColorFg}" title="${escapeHtml(team)}">${flag}${escapeHtml(team)}</span>`;
 }
 // Mirrors flagHtml() in includes/functions-warroom.php — real self-hosted SVG,
 // never emoji (Windows/Chrome renders flag emoji as literal "GR"/"GB" text).

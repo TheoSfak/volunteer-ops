@@ -917,10 +917,11 @@ if (isLoggedIn()) {
             cursor: help;
         }
 
-        /* Home-team badge (volunteer_teams — "Επίδραση" for regular members,
-           a partner org for guests) + country flag, riding just before the
-           name wherever guestNameHtml()'s new $teamColor/$countryCode args
-           are supplied. Colored per-instance via inline style=. */
+        /* Home-team badge (volunteer_teams — "Επίδρασις" for regular members,
+           a partner org for guests) + country flag, riding at the upper-right
+           of the name (same superscript position the old guest-only org badge
+           always used) wherever guestNameHtml()'s new $teamColor/$countryCode
+           args are supplied. Colored per-instance via inline style=. */
         .team-name-badge {
             display: inline-flex;
             align-items: center;
@@ -929,7 +930,7 @@ if (isLoggedIn()) {
             font-weight: 700;
             border-radius: 999px;
             padding: 1px 6px;
-            margin-right: 3px;
+            margin-left: 4px;
             vertical-align: top;
             line-height: 1.4;
             white-space: nowrap;

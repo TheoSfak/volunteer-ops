@@ -5600,7 +5600,7 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                 if (!$defaultTeamId) {
                     $defaultTeamId = dbInsert(
                         "INSERT INTO volunteer_teams (name, color, is_default, is_active) VALUES (?, ?, 1, 1)",
-                        ['Επίδραση', '#fd7e14']
+                        ['Επίδρασις', '#fd7e14']
                     );
                 }
 
@@ -5662,6 +5662,16 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                 dbExecute(
                     "UPDATE users SET guest_country_code = 'GR'
                      WHERE is_external = 1 AND guest_country_code IS NULL AND guest_country IN ('Ελλάδα', 'Greece', 'GR')"
+                );
+            },
+        ],
+
+        [
+            'version'     => 120,
+            'description' => 'Rename the seeded default volunteer_teams row from "Επίδραση" to "Επίδρασις" — the mission owner\'s actual org name, corrected after reviewing the shipped badge feature. Only touches the row if its name is still exactly the old (wrong) spelling, so an admin who already renamed/customized it via volunteer-teams.php is left alone.',
+            'up' => function () {
+                dbExecute(
+                    "UPDATE volunteer_teams SET name = 'Επίδρασις', updated_at = NOW() WHERE is_default = 1 AND name = 'Επίδραση'"
                 );
             },
         ],
