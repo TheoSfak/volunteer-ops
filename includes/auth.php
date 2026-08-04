@@ -151,7 +151,13 @@ function getCurrentUser() {
     
     static $user = null;
     if ($user === null) {
-        $user = dbFetchOne("SELECT * FROM users WHERE id = ? AND is_active = 1", [$_SESSION['user_id']]);
+        $user = dbFetchOne(
+            "SELECT u.*, vt.name AS home_team_name, vt.color AS home_team_color
+             FROM users u
+             LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+             WHERE u.id = ? AND u.is_active = 1",
+            [$_SESSION['user_id']]
+        );
     }
     return $user;
 }

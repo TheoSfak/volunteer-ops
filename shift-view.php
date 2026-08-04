@@ -711,13 +711,16 @@ if ($canManage) {
     }
     $excludeClause = '';
     if (!empty($activeIds)) {
-        $excludeClause = 'AND id NOT IN (' . implode(',', $activeIds) . ')';
+        $excludeClause = 'AND u.id NOT IN (' . implode(',', $activeIds) . ')';
     }
     $availableVolunteers = dbFetchAll(
-        "SELECT id, name, email, role, is_external, guest_org_name FROM users
-         WHERE is_active = 1
+        "SELECT u.id, u.name, u.email, u.role, u.is_external, u.guest_org_name, u.guest_country_code,
+                vt.name AS home_team_name, vt.color AS home_team_color
+         FROM users u
+         LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+         WHERE u.is_active = 1
            $excludeClause
-         ORDER BY name"
+         ORDER BY u.name"
     );
 }
 
@@ -1291,7 +1294,7 @@ include __DIR__ . '/includes/header.php';
                             <label class="list-group-item d-flex gap-2 align-items-center volunteer-item">
                                 <input class="form-check-input flex-shrink-0 volunteer-checkbox" type="checkbox" name="volunteer_ids[]" value="<?= $v['id'] ?>">
                                 <span>
-                                    <span class="volunteer-name fw-bold"><?= guestNameHtml($v['name'], (bool) $v['is_external'], $v['guest_org_name']) ?></span>
+                                    <span class="volunteer-name fw-bold"><?= guestNameHtml($v['name'], (bool) $v['is_external'], $v['home_team_name'], $v['home_team_color'], $v['guest_country_code']) ?></span>
                                     <small class="text-muted volunteer-email d-block"><?= h($v['email']) ?> — <?= h(ROLE_LABELS[$v['role']] ?? $v['role']) ?></small>
                                 </span>
                             </label>

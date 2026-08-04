@@ -660,10 +660,13 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
         $field = $hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status';
         $rawPins = dbFetchAll(
             "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.created_at, u.name,
-                    u.is_external, u.guest_org_name, mt.color AS team_color, mt.codename, mt.team_number{$field}
+                    u.is_external, u.guest_org_name, u.guest_country_code,
+                    ht.name AS home_team_name, ht.color AS home_team_color,
+                    mt.color AS team_color, mt.codename, mt.team_number{$field}
              FROM volunteer_pings vp
              JOIN shifts s ON s.id = vp.shift_id
              JOIN users u ON u.id = vp.user_id
+             LEFT JOIN volunteer_teams ht ON ht.id = u.volunteer_team_id
              LEFT JOIN participation_requests pr ON pr.shift_id = vp.shift_id AND pr.volunteer_id = vp.user_id
              LEFT JOIN mission_team_members mtm ON mtm.user_id = vp.user_id AND mtm.mission_id = s.mission_id
              LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
@@ -724,11 +727,14 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 }
             }
 
+            [$homeBg, $homeFg] = teamBadgeColors($pin['home_team_color']);
             $pins[] = [
                 'lat' => (float) $pin['lat'], 'lng' => (float) $pin['lng'], 'name' => $pin['name'],
                 'status' => $pin['field_status'], 'team_color' => $pin['team_color'],
                 'team_label' => $pin['codename'] ? teamLabel($pin['codename'], $pin['team_number']) : null,
                 'is_external' => (bool) $pin['is_external'], 'guest_org_name' => $pin['guest_org_name'],
+                'home_team_name' => $pin['home_team_name'], 'home_team_color_bg' => $homeBg, 'home_team_color_fg' => $homeFg,
+                'guest_country_code' => $pin['guest_country_code'],
                 'time' => date('H:i', $pingTs),
                 'is_stale' => $isStale, 'is_moving' => $isMoving, 'heading_deg' => $headingDeg,
             ];
@@ -889,10 +895,13 @@ if (get('ajax') === '1') {
 $fieldStatusColumns = $hasFieldStatus ? ', pr.field_status, pr.field_status_updated_at' : ', NULL AS field_status, NULL AS field_status_updated_at';
 $participants = dbFetchAll(
     "SELECT pr.id AS pr_id, pr.volunteer_id, pr.attended{$fieldStatusColumns},
-            u.name, u.phone, u.is_external, u.guest_org_name, s.id AS shift_id, s.start_time, s.end_time,
+            u.name, u.phone, u.is_external, u.guest_org_name, u.guest_country_code,
+            ht.name AS home_team_name, ht.color AS home_team_color,
+            s.id AS shift_id, s.start_time, s.end_time,
             (SELECT MAX(vp.created_at) FROM volunteer_pings vp WHERE vp.user_id = pr.volunteer_id AND vp.shift_id = pr.shift_id) AS last_ping_at
      FROM participation_requests pr
      JOIN users u ON u.id = pr.volunteer_id
+     LEFT JOIN volunteer_teams ht ON ht.id = u.volunteer_team_id
      JOIN shifts s ON s.id = pr.shift_id
      WHERE s.mission_id = ? AND pr.status = ?
      ORDER BY s.start_time, u.name",
@@ -948,12 +957,16 @@ $activeParticipants = array_values(array_filter($participants, fn($participant) 
 // ── Mission teams ─────────────────────────────────────────────────────────
 $teamRows = dbFetchAll(
     "SELECT mt.id, mt.codename, mt.team_number, mt.color, mt.leader_id, l.name AS leader_name,
-            l.is_external AS leader_is_external, l.guest_org_name AS leader_guest_org_name,
-            mtm.user_id, u.name AS member_name, u.is_external AS member_is_external, u.guest_org_name AS member_guest_org_name
+            l.is_external AS leader_is_external, l.guest_org_name AS leader_guest_org_name, l.guest_country_code AS leader_guest_country_code,
+            lht.name AS leader_home_team_name, lht.color AS leader_home_team_color,
+            mtm.user_id, u.name AS member_name, u.is_external AS member_is_external, u.guest_org_name AS member_guest_org_name, u.guest_country_code AS member_guest_country_code,
+            mht.name AS member_home_team_name, mht.color AS member_home_team_color
      FROM mission_teams mt
      LEFT JOIN users l ON l.id = mt.leader_id
+     LEFT JOIN volunteer_teams lht ON lht.id = l.volunteer_team_id
      LEFT JOIN mission_team_members mtm ON mtm.team_id = mt.id
      LEFT JOIN users u ON u.id = mtm.user_id
+     LEFT JOIN volunteer_teams mht ON mht.id = u.volunteer_team_id
      WHERE mt.mission_id = ?
      ORDER BY mt.created_at, u.name",
     [$missionId]
@@ -971,6 +984,9 @@ foreach ($teamRows as $row) {
             'leader_name' => $row['leader_name'],
             'leader_is_external' => (bool) $row['leader_is_external'],
             'leader_guest_org_name' => $row['leader_guest_org_name'],
+            'leader_guest_country_code' => $row['leader_guest_country_code'],
+            'leader_home_team_name' => $row['leader_home_team_name'],
+            'leader_home_team_color' => $row['leader_home_team_color'],
             'members' => [],
         ];
     }
@@ -978,6 +994,8 @@ foreach ($teamRows as $row) {
         $teams[$tid]['members'][] = [
             'user_id' => (int)$row['user_id'], 'name' => $row['member_name'],
             'is_external' => (bool) $row['member_is_external'], 'guest_org_name' => $row['member_guest_org_name'],
+            'guest_country_code' => $row['member_guest_country_code'],
+            'home_team_name' => $row['member_home_team_name'], 'home_team_color' => $row['member_home_team_color'],
         ];
     }
 }
@@ -1544,11 +1562,11 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                         <div>
                             <span class="badge fs-6 me-2" style="background:<?= h($teamBg) ?>;color:<?= h($teamFg) ?>;"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
                             <?php if ($team['leader_name']): ?>
-                            <span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i><?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_guest_org_name']) ?></span>
+                            <span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i><?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_home_team_name'], $team['leader_home_team_color'], $team['leader_guest_country_code']) ?></span>
                             <?php endif; ?>
                             <div class="small mt-2">
                                 <?php foreach ($team['members'] as $member): ?>
-                                <span class="badge bg-light text-dark border me-1 mb-1"><?= guestNameHtml($member['name'], $member['is_external'], $member['guest_org_name']) ?><?= $member['user_id'] === $team['leader_id'] ? ' ⭐' : '' ?></span>
+                                <span class="badge bg-light text-dark border me-1 mb-1"><?= guestNameHtml($member['name'], $member['is_external'], $member['home_team_name'], $member['home_team_color'], $member['guest_country_code']) ?><?= $member['user_id'] === $team['leader_id'] ? ' ⭐' : '' ?></span>
                                 <?php endforeach; ?>
                             </div>
                         </div>
@@ -1588,7 +1606,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <?php foreach ($participants as $participant): ?>
                 <?php $status = $participant['field_status'] ?? ''; ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'presence-online' : 'presence-offline' ?>" title="<?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['guest_org_name']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => date('H:i', strtotime($participant['last_ping_at']))]) : t('participants.no_ping') ?><?php if ($participant['last_ping_at']): ?><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']] ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span><?php endif; ?></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'presence-online' : 'presence-offline' ?>" title="<?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => date('H:i', strtotime($participant['last_ping_at']))]) : t('participants.no_ping') ?><?php if ($participant['last_ping_at']): ?><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']] ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span><?php endif; ?></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>">
                         <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
@@ -2611,10 +2629,30 @@ function submitAnnotation(type, geo, label) {
 }
 // Mirrors guestNameHtml() in includes/functions-warroom.php for names that render from
 // a JS poll (chat, media, dispatch, SOS, shortage) rather than server-side PHP.
-function guestNameHtml(name, isExternal, orgName) {
-    if (!isExternal) return escapeHtml(name);
-    const org = (orgName && orgName.trim() !== '') ? orgName : t('guest.org_unknown');
-    return `${escapeHtml(name)}<sup class="guest-org-badge" title="${escapeHtml(t('guest.org_tooltip', {org}))}">${escapeHtml(org)}</sup>`;
+// teamColorBg/teamColorFg are pre-resolved server-side via PHP's teamBadgeColors()
+// and ride along in the poll JSON rather than being reimplemented here — same
+// division of labor dispatchTeamLabelHtml() below already relies on.
+function guestNameHtml(name, isExternal, teamName, teamColorBg, teamColorFg, countryCode) {
+    if (!teamColorBg) {
+        // Legacy path — poll payload not yet upgraded to the team badge/flag.
+        if (!isExternal) return escapeHtml(name);
+        const org = (teamName && teamName.trim() !== '') ? teamName : t('guest.org_unknown');
+        return `${escapeHtml(name)}<sup class="guest-org-badge" title="${escapeHtml(t('guest.org_tooltip', {org}))}">${escapeHtml(org)}</sup>`;
+    }
+    // Regular members are always Επίδραση, a Greek org — fixed, hardcoded
+    // here rather than left blank (users.guest_country_code is guest-only
+    // data and never populated for anyone else).
+    const flag = flagHtml(isExternal ? countryCode : 'GR');
+    const team = (teamName && teamName.trim() !== '') ? teamName : t('guest.org_unknown');
+    const content = isExternal ? (flag + escapeHtml(team)) : flag;
+    return `<span class="team-name-badge" style="background:${teamColorBg};color:${teamColorFg}" title="${escapeHtml(team)}">${content}</span> ${escapeHtml(name)}`;
+}
+// Mirrors flagHtml() in includes/functions-warroom.php — real self-hosted SVG,
+// never emoji (Windows/Chrome renders flag emoji as literal "GR"/"GB" text).
+const FLAG_ASSET_BASE = '<?= rtrim(BASE_URL, "/") ?>/assets/flags/';
+function flagHtml(countryCode) {
+    if (!countryCode || !/^[A-Za-z]{2}$/.test(countryCode)) return '';
+    return `<img class="flag-icon" src="${FLAG_ASSET_BASE}${countryCode.toLowerCase()}.svg" alt="">`;
 }
 // Small colored pill (team's own badge color, or the dark "all teams" fallback
 // teamBadgeColors() already returns for a null team) shown as a permanent —
@@ -2651,7 +2689,7 @@ function renderDispatches(items) {
     let reopenLayer = null;
     items.forEach(item => {
         const acksHtml = item.acks.length
-            ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? escapeHtml(a.team_label) + ' — ' : ''}${guestNameHtml(a.user_name, a.is_external, a.guest_org_name)} (${a.time})`).join('<br>') + '</div>'
+            ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? escapeHtml(a.team_label) + ' — ' : ''}${guestNameHtml(a.user_name, a.is_external, a.home_team_name, a.home_team_color_bg, a.home_team_color_fg, a.guest_country_code)} (${a.time})`).join('<br>') + '</div>'
             : '';
         const receiveHtml = item.can_receive
             ? `<br><button type="button" class="btn btn-sm btn-warning mt-1 dispatch-receive-btn" data-id="${item.id}"><i class="bi bi-flag me-1"></i>${t('banner.ack_btn')}</button>`
@@ -2926,7 +2964,7 @@ function buildPinMarker(pin) {
     const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
     const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${pin.lat},${pin.lng}&travelmode=driving`;
     const navLine = `<br><a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-1">${t('map.navigate_btn')}</a>`;
-    return L.marker([pin.lat, pin.lng], {icon}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.guest_org_name)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${navLine}`);
+    return L.marker([pin.lat, pin.lng], {icon}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${navLine}`);
 }
 
 function renderPins(items) {
@@ -3240,8 +3278,8 @@ function renderMedia(items) {
         // than being the only identity shown. Teamless senders keep the old
         // single-line look, just their name, since there's no team to lead with.
         const whoBlock = m.team_label
-            ? `<div style="font-size:.85rem;font-weight:700;line-height:1.2;">${icon}${escapeHtml(m.team_label)}</div><div class="text-muted" style="font-size:.7rem;">${guestNameHtml(m.user_name, m.is_external, m.guest_org_name)}</div>`
-            : `<div class="fw-bold" style="font-size:.8rem;">${icon}${guestNameHtml(m.user_name, m.is_external, m.guest_org_name)}</div>`;
+            ? `<div style="font-size:.85rem;font-weight:700;line-height:1.2;">${icon}${escapeHtml(m.team_label)}</div><div class="text-muted" style="font-size:.7rem;">${guestNameHtml(m.user_name, m.is_external, m.home_team_name, m.home_team_color_bg, m.home_team_color_fg, m.guest_country_code)}</div>`
+            : `<div class="fw-bold" style="font-size:.8rem;">${icon}${guestNameHtml(m.user_name, m.is_external, m.home_team_name, m.home_team_color_bg, m.home_team_color_fg, m.guest_country_code)}</div>`;
         // Two-column grid (#mediaList below) leaves each card roughly half as
         // wide as before, so the footer stacks name-block over a
         // time+buttons row instead of the old side-by-side split, which
@@ -4029,7 +4067,7 @@ function renderShortageReports(items) {
         <div class="border rounded p-2 mb-2">
             <div><span class="badge bg-${sevColor[r.severity] || 'secondary'}">${r.severity_label}</span> <strong>${r.type_label}</strong> — ${escapeHtml(r.title)}</div>
             <div class="small mt-1">${escapeHtml(r.description)}</div>
-            <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.guest_org_name)} (${escapeHtml(r.team_label)}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
+            <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.home_team_name, r.home_team_color_bg, r.home_team_color_fg, r.guest_country_code)} (${escapeHtml(r.team_label)}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
             ${r.acknowledged_at ? `<textarea class="form-control form-control-sm mt-1 shortage-note-input" data-report-id="${r.id}" rows="1" placeholder="${t('shortage.note_placeholder')}"></textarea>` : ''}
             <div class="mt-1 d-flex gap-1">${r.acknowledged_at
                 ? `<button type="button" class="btn btn-sm btn-success flex-fill shortage-resolve-btn" data-report-id="${r.id}">${t('shortage.resolve_btn')}</button>
@@ -4095,7 +4133,7 @@ function renderMissionIncidents(items) {
             <div><span class="badge bg-${sevColor[r.severity] || 'secondary'}">${r.severity_label}</span> <strong>${r.type_label}</strong> — ${escapeHtml(who)}</div>
             ${details ? `<div class="small mt-1">${escapeHtml(details)}</div>` : ''}
             ${r.notes ? `<div class="small fst-italic mt-1">"${escapeHtml(r.notes)}"</div>` : ''}
-            <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.guest_org_name)} (${escapeHtml(r.team_label)}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
+            <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.home_team_name, r.home_team_color_bg, r.home_team_color_fg, r.guest_country_code)} (${escapeHtml(r.team_label)}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
             ${canManageIncidents ? `<div class="mt-1 d-flex gap-1">${r.acknowledged_at
                 ? `<select class="form-select form-select-sm incident-outcome-select" data-incident-id="${r.id}"><option value="">${t('incident.outcome_label')}…</option>${outcomeOptions}</select>
                    <input type="text" class="form-control form-control-sm incident-outcome-location-input d-none" data-incident-id="${r.id}" maxlength="255" placeholder="${t('incident.outcome_location_placeholder')}">
@@ -4256,7 +4294,7 @@ function renderSosAlerts(items) {
     // this is a display-correctness note, not a security one.
     list.innerHTML = items.map(a => `
         <div class="border border-danger rounded p-2 mb-2">
-            <div><strong>🆘 ${a.team_label}</strong> — ${guestNameHtml(a.user_name, a.is_external, a.guest_org_name)}</div>
+            <div><strong>🆘 ${a.team_label}</strong> — ${guestNameHtml(a.user_name, a.is_external, a.home_team_name, a.home_team_color_bg, a.home_team_color_fg, a.guest_country_code)}</div>
             <div class="text-muted" style="font-size:.75rem;">${a.created_at}${a.lat !== null ? ` · <a href="#" class="sos-locate-link" data-lat="${a.lat}" data-lng="${a.lng}">${t('sos.view_on_map')}</a>` : t('sos.no_gps')}${a.acknowledged_at ? t('sos.ack_at_prefix', {time: a.acknowledged_at}) : ''}</div>
             <div class="mt-1">${a.acknowledged_at
                 ? `<button type="button" class="btn btn-sm btn-success w-100 sos-resolve-btn" data-alert-id="${a.id}">${t('shortage.resolve_btn')}</button>`
@@ -5397,7 +5435,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         const meta = document.createElement('div');
         meta.className = 'small d-flex align-items-center gap-1 ' + (msg.mine ? 'text-white-50' : 'text-muted');
         const metaText = document.createElement('span');
-        metaText.innerHTML = guestNameHtml(msg.name, msg.is_external, msg.guest_org_name) + ' · ' + escapeHtml(msg.time);
+        metaText.innerHTML = guestNameHtml(msg.name, msg.is_external, msg.home_team_name, msg.home_team_color_bg, msg.home_team_color_fg, msg.guest_country_code) + ' · ' + escapeHtml(msg.time);
         meta.appendChild(metaText);
         if (msg.can_delete) {
             const del = document.createElement('button');

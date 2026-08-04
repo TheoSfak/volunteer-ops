@@ -35,6 +35,12 @@ $departments = dbFetchAll("SELECT id, name FROM departments WHERE (has_inventory
 // Get warehouses (departments with inventory)
 $warehouses = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
 
+// Home teams: guests pick from the pre-created partner-org list; regular
+// volunteers are always pinned to the default (Επίδραση) team server-side,
+// not user-choosable — see the is_external branch below.
+$guestTeams = dbFetchAll("SELECT id, name, color FROM volunteer_teams WHERE is_default = 0 AND is_active = 1 ORDER BY name");
+$defaultTeamId = dbFetchValue("SELECT id FROM volunteer_teams WHERE is_default = 1 LIMIT 1") ?: null;
+
 // Get volunteer positions
 $volunteerPositions = dbFetchAll("SELECT id, name, color, icon FROM volunteer_positions WHERE is_active = 1 ORDER BY sort_order ASC, name ASC");
 
@@ -61,8 +67,6 @@ if (isPost()) {
         'is_active' => isset($_POST['is_active']) ? 1 : 0,
         'is_external' => isset($_POST['is_external']) ? 1 : 0,
         'language' => in_array(post('language'), SUPPORTED_LANGUAGES, true) ? post('language') : DEFAULT_LANGUAGE,
-        'guest_org_name' => isset($_POST['is_external']) ? (trim((string) post('guest_org_name')) ?: null) : null,
-        'guest_country' => isset($_POST['is_external']) ? (trim((string) post('guest_country')) ?: 'Ελλάδα') : null,
         'position_id' => post('position_id') ?: null,
         'id_card' => post('id_card') ?: null,
         'afm' => post('afm') ?: null,
@@ -89,7 +93,26 @@ if (isPost()) {
             }
         }
     }
-    
+
+    // Home team + country. Guests pick an existing partner-org team (and its
+    // country) from the pre-created list; guest_org_name/guest_country stay
+    // in the row too, auto-derived from that pick, so anything not yet
+    // reading the new columns doesn't see stale data. Regular volunteers are
+    // always pinned to the default team — never user-choosable.
+    if ($data['is_external']) {
+        $pickedTeam = dbFetchOne("SELECT id, name FROM volunteer_teams WHERE id = ? AND is_default = 0", [(int) post('volunteer_team_id')]);
+        $data['volunteer_team_id'] = $pickedTeam ? (int) $pickedTeam['id'] : null;
+        $data['guest_org_name'] = $pickedTeam ? $pickedTeam['name'] : null;
+        $countryCode = post('guest_country_code');
+        $data['guest_country_code'] = ($countryCode && isset(COUNTRIES[$countryCode])) ? $countryCode : null;
+        $data['guest_country'] = $data['guest_country_code'] ? COUNTRIES[$data['guest_country_code']] : null;
+    } else {
+        $data['volunteer_team_id'] = $defaultTeamId;
+        $data['guest_org_name'] = null;
+        $data['guest_country_code'] = null;
+        $data['guest_country'] = null;
+    }
+
     // Validation
     if (empty($data['name'])) {
         $errors[] = 'Το όνομα είναι υποχρεωτικό.';
@@ -140,7 +163,7 @@ if (isPost()) {
             // Update
             dbExecute(
                 "UPDATE users SET
-                 name = ?, email = ?, phone = ?, role = ?, custom_role_id = ?, department_id = ?, warehouse_id = ?, is_active = ?, is_external = ?, language = ?, guest_org_name = ?, guest_country = ?,
+                 name = ?, email = ?, phone = ?, role = ?, custom_role_id = ?, department_id = ?, warehouse_id = ?, is_active = ?, is_external = ?, language = ?, guest_org_name = ?, guest_country = ?, volunteer_team_id = ?, guest_country_code = ?,
                  volunteer_type = ?, cohort_year = ?, position_id = ?,
                  id_card = ?, afm = ?, amka = ?, driving_license = ?, vehicle_plate = ?,
                  pants_size = ?, shirt_size = ?, blouse_size = ?, fleece_size = ?,
@@ -148,7 +171,7 @@ if (isPost()) {
                  WHERE id = ?",
                 [
                     $data['name'], $data['email'], $data['phone'],
-                    $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'], $data['language'], $data['guest_org_name'], $data['guest_country'],
+                    $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'], $data['language'], $data['guest_org_name'], $data['guest_country'], $data['volunteer_team_id'], $data['guest_country_code'],
                     $volunteerType, $cohortYear, $data['position_id'],
                     $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
@@ -170,13 +193,13 @@ if (isPost()) {
             // Create
             $id = dbInsert(
                 "INSERT INTO users
-                 (name, email, password, phone, role, custom_role_id, department_id, warehouse_id, is_active, is_external, language, guest_org_name, guest_country, volunteer_type, cohort_year, position_id,
+                 (name, email, password, phone, role, custom_role_id, department_id, warehouse_id, is_active, is_external, language, guest_org_name, guest_country, volunteer_team_id, guest_country_code, volunteer_type, cohort_year, position_id,
                   id_card, afm, amka, driving_license, vehicle_plate, pants_size, shirt_size, blouse_size, fleece_size,
                   registry_epidrasis, registry_ggpp, total_points, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                 [
                     $data['name'], $data['email'], password_hash($password, PASSWORD_DEFAULT),
-                    $data['phone'], $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'], $data['language'], $data['guest_org_name'], $data['guest_country'],
+                    $data['phone'], $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'], $data['language'], $data['guest_org_name'], $data['guest_country'], $data['volunteer_team_id'], $data['guest_country_code'],
                     $volunteerType, $cohortYear, $data['position_id'],
                     $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
@@ -245,6 +268,8 @@ $form = $volunteer ?: [
     'language' => DEFAULT_LANGUAGE,
     'guest_org_name' => '',
     'guest_country' => 'Ελλάδα',
+    'volunteer_team_id' => null,
+    'guest_country_code' => 'GR',
     'volunteer_type' => VTYPE_RESCUER,
     'cohort_year' => null,
     'position_id' => null,
@@ -442,15 +467,28 @@ include __DIR__ . '/includes/header.php';
             </div>
 
             <div class="mb-3" id="guestOrgNameRow">
-                <label class="form-label">Όνομα Ομάδας / Οργάνωσης</label>
-                <input type="text" class="form-control" name="guest_org_name" value="<?= h($form['guest_org_name'] ?? '') ?>" placeholder="π.χ. Ελληνική Ομάδα Διάσωσης" maxlength="150">
-                <small class="text-muted">Εμφανίζεται ως tooltip πάνω στο όνομά του/της παντού στο Action Room, ώστε να ξεχωρίζει σε ποια ομάδα/οργάνωση ανήκει.</small>
+                <label class="form-label">Ομάδα / Οργάνωση</label>
+                <select class="form-select" name="volunteer_team_id">
+                    <option value="">— Επιλέξτε ομάδα —</option>
+                    <?php foreach ($guestTeams as $gt): ?>
+                        <option value="<?= $gt['id'] ?>" <?= (int) ($form['volunteer_team_id'] ?? 0) === (int) $gt['id'] ? 'selected' : '' ?>>
+                            <?= h($gt['name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+                <small class="text-muted">Το badge/χρώμα της ομάδας εμφανίζεται δίπλα στο όνομά του/της παντού στην εφαρμογή. Δεν βλέπετε την ομάδα που ψάχνετε; Προσθέστε την πρώτα από τις <a href="volunteer-teams.php" target="_blank">Ομάδες Εθελοντών</a>.</small>
             </div>
 
             <div class="mb-3" id="guestCountryRow">
                 <label class="form-label">Χώρα</label>
-                <input type="text" class="form-control" name="guest_country" value="<?= h($form['guest_country'] ?? 'Ελλάδα') ?>" placeholder="Ελλάδα" maxlength="100">
-                <small class="text-muted">Χώρα προέλευσης της ομάδας/οργάνωσης. Αν δεν αλλαχθεί, παραμένει «Ελλάδα».</small>
+                <select class="form-select" name="guest_country_code" style="max-width: 320px;">
+                    <?php foreach (COUNTRIES as $code => $countryName): ?>
+                        <option value="<?= h($code) ?>" <?= ($form['guest_country_code'] ?? 'GR') === $code ? 'selected' : '' ?>>
+                            <?= h($countryName) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+                <small class="text-muted">Χώρα προέλευσης της ομάδας/οργάνωσης — καθορίζει τη σημαία δίπλα στο όνομα.</small>
             </div>
 
             <div class="mb-3">

@@ -242,9 +242,11 @@ include __DIR__ . '/includes/header.php';
             // merged with the official debrief above; a guest can only ever
             // see/edit their own row, via mission-guest-debrief.php.
             $guestDebriefs = dbFetchAll(
-                "SELECT mgd.*, u.name, u.is_external, u.guest_org_name
+                "SELECT mgd.*, u.name, u.is_external, u.guest_org_name, u.guest_country_code,
+                        vt.name AS home_team_name, vt.color AS home_team_color
                  FROM mission_guest_debriefs mgd
                  JOIN users u ON u.id = mgd.user_id
+                 LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
                  WHERE mgd.mission_id = ?
                  ORDER BY mgd.updated_at DESC",
                 [$id]
@@ -259,7 +261,7 @@ include __DIR__ . '/includes/header.php';
                     <?php foreach ($guestDebriefs as $gd): ?>
                         <div class="border rounded p-3 mb-3">
                             <div class="d-flex justify-content-between align-items-start mb-2">
-                                <strong><?= guestNameHtml($gd['name'], (bool) $gd['is_external'], $gd['guest_org_name']) ?></strong>
+                                <strong><?= guestNameHtml($gd['name'], (bool) $gd['is_external'], $gd['home_team_name'], $gd['home_team_color'], $gd['guest_country_code']) ?></strong>
                                 <span class="badge bg-success-subtle text-success-emphasis"><?= (int) $gd['rating'] ?> / 5</span>
                             </div>
                             <?php if (!empty($gd['what_went_well'])): ?>

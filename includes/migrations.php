@@ -5573,6 +5573,99 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 119,
+            'description' => 'Create volunteer_teams (a volunteer\'s home rescue-team, e.g. "Επίδραση" for regular members or a partner org for guests — distinct from mission_teams, the per-mission Action Room squads) seeded with a permanent "Επίδραση"/orange default row, and add users.volunteer_team_id + users.guest_country_code so every name render app-wide can show a colored team badge + real flag icon instead of Windows/Chrome\'s broken flag-emoji rendering. Old free-text guest_org_name/guest_country columns are kept for history; volunteer-form.php now writes them as a derived mirror of the picked team/country rather than free user input.',
+            'up' => function () {
+                $tableExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'volunteer_teams'"
+                );
+                if (!$tableExists) {
+                    dbExecute(
+                        "CREATE TABLE volunteer_teams (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            name VARCHAR(100) NOT NULL,
+                            color VARCHAR(7) NOT NULL DEFAULT '#6c757d',
+                            is_default TINYINT(1) NOT NULL DEFAULT 0,
+                            is_active TINYINT(1) NOT NULL DEFAULT 1,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            UNIQUE KEY uq_volunteer_teams_name (name)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $defaultTeamId = dbFetchValue("SELECT id FROM volunteer_teams WHERE is_default = 1 LIMIT 1");
+                if (!$defaultTeamId) {
+                    $defaultTeamId = dbInsert(
+                        "INSERT INTO volunteer_teams (name, color, is_default, is_active) VALUES (?, ?, 1, 1)",
+                        ['Επίδραση', '#fd7e14']
+                    );
+                }
+
+                $teamColExists = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'volunteer_team_id'"
+                );
+                if (!$teamColExists) {
+                    dbExecute(
+                        "ALTER TABLE users
+                         ADD COLUMN volunteer_team_id INT UNSIGNED NULL,
+                         ADD FOREIGN KEY (volunteer_team_id) REFERENCES volunteer_teams(id) ON DELETE SET NULL,
+                         ADD INDEX idx_users_volunteer_team (volunteer_team_id)"
+                    );
+                }
+
+                $countryColExists = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'guest_country_code'"
+                );
+                if (!$countryColExists) {
+                    dbExecute("ALTER TABLE users ADD COLUMN guest_country_code CHAR(2) NULL");
+                }
+
+                // Backfill existing guests: one new team per distinct existing
+                // guest_org_name, colors cycled from the existing mission_teams
+                // palette (a reasonable starting point, not the same table —
+                // an admin can rename/recolor any of these via volunteer-teams.php).
+                $orgNames = dbFetchAll(
+                    "SELECT DISTINCT guest_org_name FROM users
+                     WHERE is_external = 1 AND guest_org_name IS NOT NULL AND guest_org_name != '' AND volunteer_team_id IS NULL"
+                );
+                $palette = defined('MISSION_TEAM_COLORS') ? MISSION_TEAM_COLORS : ['#e34948','#008300','#4a3aa7','#eda100','#2a78d6','#e87ba4','#1baf7a','#eb6834'];
+                foreach ($orgNames as $i => $row) {
+                    $org = $row['guest_org_name'];
+                    $teamId = dbFetchValue("SELECT id FROM volunteer_teams WHERE name = ?", [$org]);
+                    if (!$teamId) {
+                        $teamId = dbInsert(
+                            "INSERT INTO volunteer_teams (name, color, is_default, is_active) VALUES (?, ?, 0, 1)",
+                            [$org, $palette[$i % count($palette)]]
+                        );
+                    }
+                    dbExecute(
+                        "UPDATE users SET volunteer_team_id = ? WHERE is_external = 1 AND guest_org_name = ? AND volunteer_team_id IS NULL",
+                        [$teamId, $org]
+                    );
+                }
+
+                // Every regular (non-guest) volunteer's home team is always the
+                // seeded default row.
+                dbExecute(
+                    "UPDATE users SET volunteer_team_id = ? WHERE is_external = 0 AND volunteer_team_id IS NULL",
+                    [$defaultTeamId]
+                );
+
+                // Best-effort country backfill for the overwhelmingly common
+                // case (the field's own old default was 'Ελλάδα'); anything
+                // else stays NULL until an admin re-saves via the new dropdown.
+                dbExecute(
+                    "UPDATE users SET guest_country_code = 'GR'
+                     WHERE is_external = 1 AND guest_country_code IS NULL AND guest_country IN ('Ελλάδα', 'Greece', 'GR')"
+                );
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

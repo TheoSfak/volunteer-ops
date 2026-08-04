@@ -205,7 +205,12 @@ if (isPost()) {
                 $success = t('profile.updated_success');
                 
                 // Refresh data
-                $user = dbFetchOne("SELECT * FROM users WHERE id = ?", [$user['id']]);
+                $user = dbFetchOne(
+    "SELECT u.*, vt.name AS home_team_name, vt.color AS home_team_color
+     FROM users u LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+     WHERE u.id = ?",
+    [$user['id']]
+);
                 $profile = dbFetchOne("SELECT * FROM volunteer_profiles WHERE user_id = ?", [$user['id']]);
             }
             break;
@@ -318,7 +323,12 @@ if (isPost()) {
                         imagedestroy($dst);
                         dbExecute("UPDATE users SET profile_photo = ?, updated_at = NOW() WHERE id = ?", [$filename, $user['id']]);
                         logAudit('update_photo', 'users', $user['id']);
-                        $user = dbFetchOne("SELECT * FROM users WHERE id = ?", [$user['id']]);
+                        $user = dbFetchOne(
+    "SELECT u.*, vt.name AS home_team_name, vt.color AS home_team_color
+     FROM users u LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+     WHERE u.id = ?",
+    [$user['id']]
+);
                         $success = t('profile.photo_updated');
                     } else {
                         $errors[] = t('profile.photo_processing_failed');
@@ -331,7 +341,12 @@ if (isPost()) {
                 }
                 dbExecute("UPDATE users SET profile_photo = NULL, updated_at = NOW() WHERE id = ?", [$user['id']]);
                 logAudit('delete_photo', 'users', $user['id']);
-                $user = dbFetchOne("SELECT * FROM users WHERE id = ?", [$user['id']]);
+                $user = dbFetchOne(
+    "SELECT u.*, vt.name AS home_team_name, vt.color AS home_team_color
+     FROM users u LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+     WHERE u.id = ?",
+    [$user['id']]
+);
                 $success = t('profile.photo_deleted');
             }
             break;
@@ -494,7 +509,7 @@ include __DIR__ . '/includes/header.php';
             <div class="hero-avatar-placeholder"><i class="bi bi-person-fill"></i></div>
         <?php endif; ?>
         <div class="flex-grow-1">
-            <h1 class="h4 mb-1 text-white fw-bold"><?= guestNameHtml($user['name'], (bool)$user['is_external'], $user['guest_org_name']) ?></h1>
+            <h1 class="h4 mb-1 text-white fw-bold"><?= guestNameHtml($user['name'], (bool)$user['is_external'], $user['home_team_name'] ?? null, $user['home_team_color'] ?? null, $user['guest_country_code']) ?></h1>
             <div style="opacity:.85">
                 <i class="bi bi-envelope me-1"></i><?= h($user['email']) ?>
                 <?php if ($user['phone']): ?>

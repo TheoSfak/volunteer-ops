@@ -71,6 +71,22 @@ function teamBadgeColors(?string $color): array {
 }
 
 /**
+ * <img> for a real flag graphic — deliberately never an emoji and never a
+ * bare "GR"/"GB" text code: Windows/Chrome renders flag emoji as literal
+ * two-letter text instead of a picture, which is the whole reason this
+ * exists. Self-hosted SVGs under assets/flags/{code}.svg (sourced from the
+ * MIT-licensed lipis/flag-icons project), not a CDN. Returns '' if there's
+ * no code to show.
+ */
+function flagHtml(?string $countryCode): string {
+    if (!$countryCode || !preg_match('/^[A-Za-z]{2}$/', $countryCode)) {
+        return '';
+    }
+    $cc = strtolower($countryCode);
+    return '<img class="flag-icon" src="' . BASE_URL . '/assets/flags/' . $cc . '.svg" alt="">';
+}
+
+/**
  * War Room: load dispatch points/areas visible to $userId, each augmented with
  * its receipt (mission_dispatch_receipts, "Ελήφθη") and arrival (mission_dispatch_acks,
  * "Άφιξη") acknowledgements — shared by war-room.php (live map, twice) and
@@ -96,9 +112,12 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
     $placeholders = implode(',', array_fill(0, count($dispatchIds), '?'));
     $ackRows = dbFetchAll(
         "SELECT a.dispatch_id, a.team_id, a.user_id, a.created_at, u.name AS user_name,
-                u.is_external, u.guest_org_name, mt.codename, mt.team_number
+                u.is_external, u.guest_org_name, u.guest_country_code,
+                vt.name AS home_team_name, vt.color AS home_team_color,
+                mt.codename, mt.team_number
          FROM mission_dispatch_acks a
          JOIN users u ON u.id = a.user_id
+         LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
          LEFT JOIN mission_teams mt ON mt.id = a.team_id
          WHERE a.dispatch_id IN ($placeholders)
          ORDER BY a.created_at",
@@ -106,13 +125,18 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
     );
     $acksByDispatch = [];
     foreach ($ackRows as $ack) {
+        [$homeBg, $homeFg] = teamBadgeColors($ack['home_team_color']);
         $acksByDispatch[(int) $ack['dispatch_id']][] = [
-            'team_label'     => $ack['team_id'] ? teamLabel($ack['codename'], $ack['team_number']) : null,
-            'user_name'      => $ack['user_name'],
-            'is_external'    => (bool) $ack['is_external'],
-            'guest_org_name' => $ack['guest_org_name'],
-            'user_id'        => (int) $ack['user_id'],
-            'time'           => date('H:i', strtotime($ack['created_at'])),
+            'team_label'         => $ack['team_id'] ? teamLabel($ack['codename'], $ack['team_number']) : null,
+            'user_name'          => $ack['user_name'],
+            'is_external'        => (bool) $ack['is_external'],
+            'guest_org_name'     => $ack['guest_org_name'],
+            'home_team_name'     => $ack['home_team_name'],
+            'home_team_color_bg' => $homeBg,
+            'home_team_color_fg' => $homeFg,
+            'guest_country_code' => $ack['guest_country_code'],
+            'user_id'            => (int) $ack['user_id'],
+            'time'               => date('H:i', strtotime($ack['created_at'])),
         ];
     }
 
@@ -165,7 +189,9 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'can_delete'  => $canManageWarRoom,
             'acks'        => array_map(fn($a) => [
                 'team_label' => $a['team_label'] ?? '—', 'user_name' => $a['user_name'],
-                'is_external' => $a['is_external'], 'guest_org_name' => $a['guest_org_name'], 'time' => $a['time'],
+                'is_external' => $a['is_external'], 'guest_org_name' => $a['guest_org_name'],
+                'home_team_name' => $a['home_team_name'], 'home_team_color_bg' => $a['home_team_color_bg'], 'home_team_color_fg' => $a['home_team_color_fg'],
+                'guest_country_code' => $a['guest_country_code'], 'time' => $a['time'],
             ], $acks),
             'my_ack'      => $myAck,
             'can_ack'     => $isApprovedParticipant && !$myAck && $eligible,
@@ -473,9 +499,12 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
 function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canManageWarRoom, int $limit = 30): array {
     $rows = dbFetchAll(
         "SELECT p.id, p.user_id, p.media_type, p.lat, p.lng, p.created_at, p.poi_id, p.poi_note,
-                u.name AS user_name, u.is_external, u.guest_org_name, mt.codename, mt.team_number
+                u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
+                vt.name AS home_team_name, vt.color AS home_team_color,
+                mt.codename, mt.team_number
          FROM mission_photos p
          JOIN users u ON u.id = p.user_id
+         LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
          LEFT JOIN mission_team_members mtm ON mtm.user_id = p.user_id AND mtm.mission_id = p.mission_id
          LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
          WHERE p.mission_id = ? AND p.order_id IS NULL
@@ -484,20 +513,27 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
         [$missionId, $limit]
     );
 
-    return array_map(fn($row) => [
-        'id'             => (int) $row['id'],
-        'media_type'     => $row['media_type'],
-        'user_name'      => $row['user_name'],
-        'is_external'    => (bool) $row['is_external'],
-        'guest_org_name' => $row['guest_org_name'],
-        'team_label'     => $row['codename'] ? teamLabel($row['codename'], $row['team_number']) : null,
-        'time'           => date('d/m H:i', strtotime($row['created_at'])),
-        'lat'            => $row['lat'] !== null ? (float) $row['lat'] : null,
-        'lng'            => $row['lng'] !== null ? (float) $row['lng'] : null,
-        'can_delete'     => $canManageWarRoom || (int) $row['user_id'] === $currentUserId,
-        'is_poi'         => $row['poi_id'] !== null,
-        'poi_note'       => $row['poi_note'],
-    ], $rows);
+    return array_map(function ($row) use ($canManageWarRoom, $currentUserId) {
+        [$homeBg, $homeFg] = teamBadgeColors($row['home_team_color']);
+        return [
+            'id'                 => (int) $row['id'],
+            'media_type'         => $row['media_type'],
+            'user_name'          => $row['user_name'],
+            'is_external'        => (bool) $row['is_external'],
+            'guest_org_name'     => $row['guest_org_name'],
+            'home_team_name'     => $row['home_team_name'],
+            'home_team_color_bg' => $homeBg,
+            'home_team_color_fg' => $homeFg,
+            'guest_country_code' => $row['guest_country_code'],
+            'team_label'         => $row['codename'] ? teamLabel($row['codename'], $row['team_number']) : null,
+            'time'               => date('d/m H:i', strtotime($row['created_at'])),
+            'lat'                => $row['lat'] !== null ? (float) $row['lat'] : null,
+            'lng'                => $row['lng'] !== null ? (float) $row['lng'] : null,
+            'can_delete'         => $canManageWarRoom || (int) $row['user_id'] === $currentUserId,
+            'is_poi'             => $row['poi_id'] !== null,
+            'poi_note'           => $row['poi_note'],
+        ];
+    }, $rows);
 }
 
 /**
@@ -618,23 +654,43 @@ function canManageAnyActionRoom(int $userId): bool {
 }
 
 /**
- * War Room: appends an always-visible small badge showing a guest's home
- * rescue-team/organization right after their name — only for is_external
- * accounts (users.guest_org_name). Everyone else's name renders exactly as
- * before (plain escaped text, byte-identical to a bare h($name) call). The
- * badge itself also carries a native title= tooltip (full org name, in case
- * it's ever truncated visually) on top of always being visible — "visible at
- * a glance AND on hover", not hover-only. Used everywhere a person's name is
- * shown app-wide, including the guest's own profile hero (not just Action
- * Room). Mirrored client-side by the same-named JS function in war-room.php
- * for names that render from a JS poll (chat, media, dispatch, SOS, shortage).
+ * War Room: prepends an always-visible small badge showing this person's
+ * home team (users.volunteer_team_id — "Επίδραση" for regular members, a
+ * partner org for guests; NOT the same as a mission_teams squad) plus their
+ * country's flag, right before their name. $teamColor/$countryCode are
+ * optional trailing params so call sites not yet upgraded keep compiling and
+ * rendering exactly as before — a byte-identical bare h($name) for regular
+ * users, today's plain right-side org-name <sup> for guests.
+ *
+ * Once upgraded ($teamColor passed), guests show their team name as visible
+ * text (it varies row to row, worth seeing) while regular/Επίδραση rows show
+ * only the flag+color chip — repeating "Επίδραση" on every single name
+ * app-wide would be pure noise since it never varies. Used everywhere a
+ * person's name is shown app-wide, including the guest's own profile hero
+ * (not just Action Room). Mirrored client-side by the same-named JS function
+ * in war-room.php for names that render from a JS poll (chat, media,
+ * dispatch, SOS, shortage).
  */
-function guestNameHtml(string $name, bool $isExternal, ?string $orgName): string {
-    if (!$isExternal) {
-        return h($name);
+function guestNameHtml(string $name, bool $isExternal, ?string $teamName, ?string $teamColor = null, ?string $countryCode = null): string {
+    if ($teamColor === null) {
+        // Legacy path — call site not yet upgraded to the team badge/flag.
+        if (!$isExternal) {
+            return h($name);
+        }
+        $org = ($teamName !== null && trim($teamName) !== '') ? $teamName : t('guest.org_unknown');
+        return h($name) . '<sup class="guest-org-badge" title="' . h(t('guest.org_tooltip', ['org' => $org])) . '">' . h($org) . '</sup>';
     }
-    $org = ($orgName !== null && trim($orgName) !== '') ? $orgName : t('guest.org_unknown');
-    return h($name) . '<sup class="guest-org-badge" title="' . h(t('guest.org_tooltip', ['org' => $org])) . '">' . h($org) . '</sup>';
+
+    [$bg, $fg] = teamBadgeColors($teamColor);
+    // Regular members are always Επίδραση, a Greek org — fixed, not stored
+    // per-row (users.guest_country_code is guest-only data and stays NULL
+    // for everyone else), so the flag is hardcoded here rather than left
+    // blank for the common case.
+    $flag = flagHtml($isExternal ? $countryCode : 'GR');
+    $team = ($teamName !== null && trim($teamName) !== '') ? $teamName : t('guest.org_unknown');
+    $content = $isExternal ? ($flag . h($team)) : $flag;
+    $badge = '<span class="team-name-badge" style="background:' . h($bg) . ';color:' . h($fg) . '" title="' . h($team) . '">' . $content . '</span>';
+    return $badge . ' ' . h($name);
 }
 
 /**
@@ -945,29 +1001,39 @@ function notifyCommandStaffGuestDebriefSubmitted(int $missionId, ?int $responsib
 function loadUnresolvedShortageReportsForMission(int $missionId): array {
     $rows = dbFetchAll(
         "SELECT r.id, r.shortage_type, r.severity, r.title, r.description, r.created_at, r.acknowledged_at,
-                r.team_id, u.name AS reporter_name, u.is_external, u.guest_org_name, mt.codename, mt.team_number
+                r.team_id, u.name AS reporter_name, u.is_external, u.guest_org_name, u.guest_country_code,
+                vt.name AS home_team_name, vt.color AS home_team_color,
+                mt.codename, mt.team_number
          FROM mission_shortage_reports r
          JOIN users u ON u.id = r.reporter_id
+         LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
          LEFT JOIN mission_teams mt ON mt.id = r.team_id
          WHERE r.mission_id = ? AND r.resolved_at IS NULL AND r.not_resolved_at IS NULL
          ORDER BY FIELD(r.severity, 'critical', 'high', 'medium', 'low'), r.created_at ASC",
         [$missionId]
     );
 
-    return array_map(fn($row) => [
-        'id'              => (int) $row['id'],
-        'type_label'      => shortageTypeLabel($row['shortage_type']),
-        'severity'        => $row['severity'],
-        'severity_label'  => shortageSeverityLabel($row['severity']),
-        'title'           => $row['title'],
-        'description'     => $row['description'],
-        'reporter_name'   => $row['reporter_name'],
-        'is_external'     => (bool) $row['is_external'],
-        'guest_org_name'  => $row['guest_org_name'],
-        'team_label'      => $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized'),
-        'created_at'      => date('d/m H:i', strtotime($row['created_at'])),
-        'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
-    ], $rows);
+    return array_map(function ($row) {
+        [$homeBg, $homeFg] = teamBadgeColors($row['home_team_color']);
+        return [
+            'id'                 => (int) $row['id'],
+            'type_label'         => shortageTypeLabel($row['shortage_type']),
+            'severity'           => $row['severity'],
+            'severity_label'     => shortageSeverityLabel($row['severity']),
+            'title'              => $row['title'],
+            'description'        => $row['description'],
+            'reporter_name'      => $row['reporter_name'],
+            'is_external'        => (bool) $row['is_external'],
+            'guest_org_name'     => $row['guest_org_name'],
+            'home_team_name'     => $row['home_team_name'],
+            'home_team_color_bg' => $homeBg,
+            'home_team_color_fg' => $homeFg,
+            'guest_country_code' => $row['guest_country_code'],
+            'team_label'         => $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized'),
+            'created_at'         => date('d/m H:i', strtotime($row['created_at'])),
+            'acknowledged_at'    => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
+        ];
+    }, $rows);
 }
 
 /**
@@ -1016,9 +1082,12 @@ function loadUnresolvedIncidentsForMission(int $missionId, bool $unmasked): arra
         "SELECT i.id, i.incident_type, i.severity, i.is_unknown_patient, i.patient_name,
                 i.estimated_age, i.gender, i.phone, i.notes, i.team_id, i.lat, i.lng,
                 i.created_at, i.acknowledged_at,
-                u.name AS reporter_name, u.is_external, u.guest_org_name, mt.codename, mt.team_number
+                u.name AS reporter_name, u.is_external, u.guest_org_name, u.guest_country_code,
+                vt.name AS home_team_name, vt.color AS home_team_color,
+                mt.codename, mt.team_number
          FROM mission_incidents i
          JOIN users u ON u.id = i.reporter_id
+         LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
          LEFT JOIN mission_teams mt ON mt.id = i.team_id
          WHERE i.mission_id = ? AND i.resolved_at IS NULL
          ORDER BY FIELD(i.severity, 'critical', 'high', 'medium', 'low'), i.created_at ASC",
@@ -1027,6 +1096,7 @@ function loadUnresolvedIncidentsForMission(int $missionId, bool $unmasked): arra
 
     return array_map(function ($row) use ($unmasked) {
         $isUnknown = (bool) $row['is_unknown_patient'];
+        [$homeBg, $homeFg] = teamBadgeColors($row['home_team_color']);
         return [
             'id'                 => (int) $row['id'],
             'type_label'         => incidentTypeLabel($row['incident_type']),
@@ -1041,6 +1111,10 @@ function loadUnresolvedIncidentsForMission(int $missionId, bool $unmasked): arra
             'reporter_name'      => $row['reporter_name'],
             'is_external'        => (bool) $row['is_external'],
             'guest_org_name'     => $row['guest_org_name'],
+            'home_team_name'     => $row['home_team_name'],
+            'home_team_color_bg' => $homeBg,
+            'home_team_color_fg' => $homeFg,
+            'guest_country_code' => $row['guest_country_code'],
             'team_label'         => $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized'),
             'lat'                => $row['lat'] !== null ? (float) $row['lat'] : null,
             'lng'                => $row['lng'] !== null ? (float) $row['lng'] : null,
@@ -1080,23 +1154,30 @@ function loadPointsOfInterestForMission(int $missionId): array {
     $placeholders = implode(',', array_fill(0, count($poiIds), '?'));
     $photoRows = dbFetchAll(
         "SELECT ph.id, ph.poi_id, ph.media_type, ph.user_id, ph.poi_note, ph.created_at,
-                u.name AS reporter_name, u.is_external, u.guest_org_name
+                u.name AS reporter_name, u.is_external, u.guest_org_name, u.guest_country_code,
+                vt.name AS home_team_name, vt.color AS home_team_color
          FROM mission_photos ph
          JOIN users u ON u.id = ph.user_id
+         LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
          WHERE ph.poi_id IN ($placeholders)
          ORDER BY ph.created_at ASC",
         $poiIds
     );
     $photosByPoi = [];
     foreach ($photoRows as $row) {
+        [$homeBg, $homeFg] = teamBadgeColors($row['home_team_color']);
         $photosByPoi[(int) $row['poi_id']][] = [
-            'id'             => (int) $row['id'],
-            'media_type'     => $row['media_type'],
-            'reporter_name'  => $row['reporter_name'],
-            'is_external'    => (bool) $row['is_external'],
-            'guest_org_name' => $row['guest_org_name'],
-            'note'           => $row['poi_note'],
-            'time'           => date('d/m H:i', strtotime($row['created_at'])),
+            'id'                 => (int) $row['id'],
+            'media_type'         => $row['media_type'],
+            'reporter_name'      => $row['reporter_name'],
+            'is_external'        => (bool) $row['is_external'],
+            'guest_org_name'     => $row['guest_org_name'],
+            'home_team_name'     => $row['home_team_name'],
+            'home_team_color_bg' => $homeBg,
+            'home_team_color_fg' => $homeFg,
+            'guest_country_code' => $row['guest_country_code'],
+            'note'               => $row['poi_note'],
+            'time'               => date('d/m H:i', strtotime($row['created_at'])),
         ];
     }
 
@@ -1181,9 +1262,12 @@ function loadIncidentDetailForMissionReport(int $missionId): array {
 function loadOpenSosAlertsForMission(int $missionId): array {
     $rows = dbFetchAll(
         "SELECT a.id, a.pr_id, a.lat, a.lng, a.created_at, a.acknowledged_at,
-                a.team_id, u.name AS user_name, u.is_external, u.guest_org_name, mt.codename, mt.team_number
+                a.team_id, u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
+                vt.name AS home_team_name, vt.color AS home_team_color,
+                mt.codename, mt.team_number
          FROM mission_sos_alerts a
          JOIN users u ON u.id = a.user_id
+         LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
          LEFT JOIN mission_teams mt ON mt.id = a.team_id
          WHERE a.mission_id = ? AND a.resolved_at IS NULL
          ORDER BY a.created_at ASC",
@@ -1195,17 +1279,24 @@ function loadOpenSosAlertsForMission(int $missionId): array {
     // guestNameHtml() helper to wrap and escape together, same as the
     // dispatch-acks/media loaders. team_label keeps its original
     // pre-escaped-server-side treatment, unchanged.
-    return array_map(fn($row) => [
-        'id'              => (int) $row['id'],
-        'user_name'       => $row['user_name'],
-        'is_external'     => (bool) $row['is_external'],
-        'guest_org_name'  => $row['guest_org_name'],
-        'team_label'      => h($row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized')),
-        'lat'             => $row['lat'] !== null ? (float) $row['lat'] : null,
-        'lng'             => $row['lng'] !== null ? (float) $row['lng'] : null,
-        'created_at'      => date('d/m H:i', strtotime($row['created_at'])),
-        'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
-    ], $rows);
+    return array_map(function ($row) {
+        [$homeBg, $homeFg] = teamBadgeColors($row['home_team_color']);
+        return [
+            'id'                 => (int) $row['id'],
+            'user_name'          => $row['user_name'],
+            'is_external'        => (bool) $row['is_external'],
+            'guest_org_name'     => $row['guest_org_name'],
+            'home_team_name'     => $row['home_team_name'],
+            'home_team_color_bg' => $homeBg,
+            'home_team_color_fg' => $homeFg,
+            'guest_country_code' => $row['guest_country_code'],
+            'team_label'         => h($row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized')),
+            'lat'                => $row['lat'] !== null ? (float) $row['lat'] : null,
+            'lng'                => $row['lng'] !== null ? (float) $row['lng'] : null,
+            'created_at'         => date('d/m H:i', strtotime($row['created_at'])),
+            'acknowledged_at'    => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
+        ];
+    }, $rows);
 }
 
 /**

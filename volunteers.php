@@ -78,6 +78,7 @@ $volunteers = dbFetchAll(
     "SELECT u.*, d.name as department_name, wh.name as warehouse_name,
             vp.name as position_name,
             cr.name as custom_role_name, cr.color as custom_role_color,
+            vt.name AS home_team_name, vt.color AS home_team_color,
             COALESCE(pr_stats.shifts_count, 0) as shifts_count,
             COALESCE(pr_stats.total_hours, 0) as total_hours
      FROM users u
@@ -86,6 +87,7 @@ $volunteers = dbFetchAll(
      LEFT JOIN departments wh ON u.warehouse_id = wh.id
      LEFT JOIN volunteer_positions vp ON u.position_id = vp.id
      LEFT JOIN custom_roles cr ON u.custom_role_id = cr.id
+     LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
      LEFT JOIN (
          SELECT volunteer_id, 
                 COUNT(*) as shifts_count,
@@ -547,7 +549,7 @@ include __DIR__ . '/includes/header.php';
                     <tr class="<?= !$v['is_active'] ? 'table-secondary text-muted' : '' ?>">
                         <td data-label="Εθελοντής">
                             <a href="volunteer-view.php?id=<?= $v['id'] ?>" class="text-decoration-none fw-semibold">
-                                <?= guestNameHtml($v['name'], (bool)$v['is_external'], $v['guest_org_name']) ?>
+                                <?= guestNameHtml($v['name'], (bool)$v['is_external'], $v['home_team_name'], $v['home_team_color'], $v['guest_country_code']) ?>
                             </a><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_RESCUER) ?><?= positionBadge($v['position_name'] ?? '') ?>
                             <br><small class="text-muted"><?= h($v['email']) ?><?= $v['phone'] ? ' · ' . h($v['phone']) : '' ?></small>
                         </td>

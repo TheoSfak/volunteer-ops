@@ -155,13 +155,17 @@ $scoreTierHex = ['good' => '#0ca30c', 'warning' => '#a56600', 'critical' => '#d0
 //    join, not after — a raw join would duplicate/overcount) ────────────────
 $rosterRows = dbFetchAll(
     "SELECT mt.id AS team_id, mt.codename, mt.team_number, mt.color,
-            mt.leader_id, l.name AS leader_name, l.is_external AS leader_is_external, l.guest_org_name AS leader_guest_org_name,
-            mtm.user_id, u.name AS member_name, u.is_external AS member_is_external, u.guest_org_name AS member_guest_org_name,
+            mt.leader_id, l.name AS leader_name, l.is_external AS leader_is_external, l.guest_org_name AS leader_guest_org_name, l.guest_country_code AS leader_guest_country_code,
+            lht.name AS leader_home_team_name, lht.color AS leader_home_team_color,
+            mtm.user_id, u.name AS member_name, u.is_external AS member_is_external, u.guest_org_name AS member_guest_org_name, u.guest_country_code AS member_guest_country_code,
+            mht.name AS member_home_team_name, mht.color AS member_home_team_color,
             COALESCE(hrs.hours, 0) AS member_hours
      FROM mission_teams mt
      LEFT JOIN users l ON l.id = mt.leader_id
+     LEFT JOIN volunteer_teams lht ON lht.id = l.volunteer_team_id
      LEFT JOIN mission_team_members mtm ON mtm.team_id = mt.id
      LEFT JOIN users u ON u.id = mtm.user_id
+     LEFT JOIN volunteer_teams mht ON mht.id = u.volunteer_team_id
      LEFT JOIN (
          SELECT pr.volunteer_id, COALESCE(SUM(pr.actual_hours), 0) AS hours
          FROM participation_requests pr JOIN shifts s ON s.id = pr.shift_id
@@ -180,13 +184,17 @@ foreach ($rosterRows as $row) {
             'codename' => $row['codename'], 'team_number' => $row['team_number'], 'color' => $row['color'] ?: '#898781',
             'leader_name' => $row['leader_name'],
             'leader_is_external' => (bool) $row['leader_is_external'], 'leader_guest_org_name' => $row['leader_guest_org_name'],
+            'leader_guest_country_code' => $row['leader_guest_country_code'],
+            'leader_home_team_name' => $row['leader_home_team_name'], 'leader_home_team_color' => $row['leader_home_team_color'],
             'members' => [],
         ];
     }
     if ($row['user_id'] !== null) {
         $roster[$tid]['members'][] = [
             'name' => $row['member_name'], 'is_external' => (bool) $row['member_is_external'],
-            'guest_org_name' => $row['member_guest_org_name'], 'hours' => (float) $row['member_hours'],
+            'guest_org_name' => $row['member_guest_org_name'], 'guest_country_code' => $row['member_guest_country_code'],
+            'home_team_name' => $row['member_home_team_name'], 'home_team_color' => $row['member_home_team_color'],
+            'hours' => (float) $row['member_hours'],
         ];
     }
 }
@@ -527,14 +535,14 @@ include __DIR__ . '/includes/header.php';
                 <div class="roster-team-header">
                     <span class="roster-swatch" style="background:<?= h($team['color']) ?>;"></span>
                     <span><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
-                    <?php if ($team['leader_name']): ?><span class="text-muted fw-normal small">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_guest_org_name']) ?></span><?php endif; ?>
+                    <?php if ($team['leader_name']): ?><span class="text-muted fw-normal small">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_home_team_name'], $team['leader_home_team_color'], $team['leader_guest_country_code']) ?></span><?php endif; ?>
                 </div>
                 <?php if (empty($team['members'])): ?>
                     <div class="text-muted small">Χωρίς μέλη.</div>
                 <?php else: ?>
                     <?php foreach ($team['members'] as $m): ?>
                     <div class="roster-member-row">
-                        <span><?= guestNameHtml($m['name'], $m['is_external'], $m['guest_org_name']) ?></span>
+                        <span><?= guestNameHtml($m['name'], $m['is_external'], $m['home_team_name'], $m['home_team_color'], $m['guest_country_code']) ?></span>
                         <span class="text-muted"><?= $attendanceReady ? number_format($m['hours'], 1) . ' ώρες' : 'Εκκρεμεί' ?></span>
                     </div>
                     <?php endforeach; ?>

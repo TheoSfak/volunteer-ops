@@ -21,6 +21,26 @@ CREATE TABLE IF NOT EXISTS `departments` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- VOLUNTEER TEAMS TABLE
+-- A volunteer's home rescue-team (e.g. "Επίδραση" for regular members, or a
+-- partner org for guests) — distinct from mission_teams below, which are
+-- ephemeral per-mission Action Room squads.
+-- =============================================
+CREATE TABLE IF NOT EXISTS `volunteer_teams` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(100) NOT NULL,
+    `color` VARCHAR(7) NOT NULL DEFAULT '#6c757d',
+    `is_default` TINYINT(1) NOT NULL DEFAULT 0,
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_volunteer_teams_name` (`name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `volunteer_teams` (`name`, `color`, `is_default`, `is_active`) VALUES
+('Επίδραση', '#fd7e14', 1, 1);
+
+-- =============================================
 -- USERS TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS `users` (
@@ -52,6 +72,8 @@ CREATE TABLE IF NOT EXISTS `users` (
     `language` ENUM('el','en') NOT NULL DEFAULT 'el' COMMENT 'Action Room UI language for this user',
     `guest_org_name` VARCHAR(150) NULL COMMENT 'Partner rescue-team/organization name for is_external accounts, shown as a tooltip on their name throughout Action Room',
     `guest_country` VARCHAR(100) NULL DEFAULT 'Ελλάδα' COMMENT 'Partner rescue-team country for is_external accounts',
+    `volunteer_team_id` INT UNSIGNED NULL COMMENT 'Home team badge (Επίδραση for regular members, or a partner-org team for guests) — not the same as mission_teams',
+    `guest_country_code` CHAR(2) NULL COMMENT 'ISO 3166-1 alpha-2 code, drives the flag icon next to this user''s name',
     `total_points` INT DEFAULT 0,
     `monthly_points` INT DEFAULT 0,
     `email_verified_at` TIMESTAMP NULL,
@@ -63,7 +85,8 @@ CREATE TABLE IF NOT EXISTS `users` (
     `newsletter_unsubscribed` TINYINT(1) NOT NULL DEFAULT 0,
     `deleted_at` TIMESTAMP NULL DEFAULT NULL,
     `deleted_by` INT UNSIGNED NULL DEFAULT NULL,
-    FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL
+    FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`volunteer_team_id`) REFERENCES `volunteer_teams`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
