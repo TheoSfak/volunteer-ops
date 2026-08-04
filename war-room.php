@@ -871,6 +871,7 @@ if (get('ajax') === '1') {
     $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
     $onlinePresence = loadOnlinePresenceUserIds($missionId);
     $annotations = loadMissionAnnotationsForMission($missionId);
+    $sectors = loadMissionSectorsForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
     $teamProximity = $loadTeamProximity();
 
     echo json_encode([
@@ -889,6 +890,7 @@ if (get('ajax') === '1') {
         'onlinePresence' => $onlinePresence,
         'pingStaleness' => $pingIsStaleByVolunteerId,
         'annotations' => $annotations,
+        'sectors' => $sectors,
         'nearbyTeams' => $teamProximity['nearbyTeams'],
         'teamDistances' => $teamProximity['teamDistances'],
     ]);
@@ -953,6 +955,7 @@ $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncid
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
 $annotations = loadMissionAnnotationsForMission($missionId);
+$sectors = loadMissionSectorsForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
 $teamProximity = $loadTeamProximity();
 $nearbyTeams = $teamProximity['nearbyTeams'];
 $teamDistances = $teamProximity['teamDistances'];
@@ -1145,7 +1148,12 @@ include __DIR__ . '/includes/header.php';
     #annotationToolbar button.active { background: #1f2937; color: #fff; border-color: #1f2937; }
     #mapCard.wr-draw-active #warRoomMap { cursor: crosshair; }
     #mapCard.wr-draw-active .leaflet-marker-pane,
-    #mapCard.wr-draw-active .leaflet-overlay-pane { pointer-events: none; }
+    #mapCard.wr-draw-active .leaflet-overlay-pane,
+    /* sectorPane isn't covered by the two rules above (it's a separate custom
+       pane, not markerPane/overlayPane) — without this, a sector polygon's
+       popup keeps intercepting clicks underneath an in-progress freehand/
+       arrow annotation stroke drawn on top of it. */
+    #mapCard.wr-draw-active .leaflet-sectorPane-pane { pointer-events: none; }
     .wr-anno-arrowhead { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 16px solid; filter: drop-shadow(0 1px 2px #0008); }
     .wr-anno-text-label { display: inline-block; padding: 2px 8px; border-radius: 4px; color: #fff; font-weight: 600; font-size: .78rem; white-space: nowrap; box-shadow: 0 1px 3px #0006; }
     .war-room-banner { display: none; flex-direction: column; background: #000; border-bottom: 2px solid #dc2626; position: relative; z-index: 1900; max-height: 40vh; overflow-y: auto; }
@@ -1638,6 +1646,23 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         </div>
     </div>
 </div>
+
+<!-- Own full-width row rather than a 4th column squeezed into the row
+     above — sectors carry more visual content per row (nested buildings)
+     than shortage/incident/POI entries do, so the extra width earns its
+     keep here. -->
+<div class="row g-4 mb-4 wr-legacy-row">
+    <div class="col-12">
+        <div class="card shadow-sm border-primary" data-card-id="sectorsListCard">
+            <div class="card-header bg-primary bg-opacity-10 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#sectorsListCollapse" role="button" aria-expanded="false" aria-controls="sectorsListCollapse">
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-grid-3x3-gap-fill me-1 text-primary"></i><?= t('sector.list_panel_title') ?></span><i class="bi bi-chevron-down wr-collapsible-chevron"></i></h5>
+            </div>
+            <div class="card-body collapse" id="sectorsListCollapse">
+                <div id="sectorsList"></div>
+            </div>
+        </div>
+    </div>
+</div>
 <?php endif; ?>
 
 <div class="row g-4">
@@ -1953,6 +1978,17 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
+        <!-- Unconditional, same as myTasksCard above: shows in both Field
+             Mode and full view, since this is the primary surface for a
+             volunteer physically walking a sector's buildings — no map
+             involved, just the nested checklist. -->
+        <div class="card shadow-sm mb-4 border-primary" data-card-id="mySectorsCard">
+            <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-grid-3x3-gap-fill me-1"></i><?= t('sector.my_panel_title') ?></h5></div>
+            <div class="card-body">
+                <div id="mySectorsList"></div>
+            </div>
+        </div>
+
         <?php if (!$fieldMode): ?>
         <div class="card shadow-sm mb-4" data-card-id="shiftsCard">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-calendar-range me-1"></i><?= t('shifts.panel_title') ?></h5></div>
@@ -2018,6 +2054,23 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 </select>
                 <button type="button" class="btn btn-primary w-100 fw-semibold" data-bs-toggle="modal" data-bs-target="#dispatchMapModal">
                     <i class="bi bi-pin-map-fill me-1"></i><?= t('dispatch.send_btn') ?>
+                </button>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4 border-primary" data-card-id="sectorsCard">
+            <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-grid-3x3-gap-fill me-1"></i><?= t('sector.card_title') ?></h5></div>
+            <div class="card-body">
+                <p class="small text-muted"><?= t('sector.note') ?></p>
+                <label class="form-label small fw-semibold"><?= t('sector.assign_team_label') ?></label>
+                <select class="form-select mb-3" id="sectorTeamSelect">
+                    <option value=""><?= t('sector.unassigned_option') ?></option>
+                    <?php foreach ($teams as $team): ?>
+                    <option value="<?= $team['id'] ?>"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <button type="button" class="btn btn-primary w-100 fw-semibold" data-bs-toggle="modal" data-bs-target="#sectorMapModal">
+                    <i class="bi bi-vector-pen me-1"></i><?= t('sector.new_btn') ?>
                 </button>
             </div>
         </div>
@@ -2321,6 +2374,37 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
     </div>
 </div>
 
+<div class="modal fade" id="sectorMapModal" tabindex="-1">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h5 class="modal-title"><i class="bi bi-vector-pen me-1"></i><?= t('sector.card_title') ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0 d-flex flex-column">
+                <div class="p-2 border-bottom d-flex flex-wrap gap-2 align-items-center bg-light">
+                    <input type="text" id="sectorAddressInput" class="form-control" style="max-width:320px;" placeholder="<?= t('dispatch.address_placeholder') ?>">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="sectorAddressSearch"><i class="bi bi-search me-1"></i><?= t('dispatch.search_btn') ?></button>
+                    <span class="text-muted small" id="sectorAddressStatus"></span>
+                    <div class="input-group input-group-sm" style="max-width:230px;">
+                        <input type="text" id="sectorCoordsInput" class="form-control" placeholder="<?= t('dispatch.coords_placeholder') ?>" title="<?= t('dispatch.coords_add_title') ?>">
+                        <button type="button" class="btn btn-outline-secondary" id="sectorCoordsAddBtn" title="<?= t('dispatch.coords_add_title') ?>"><i class="bi bi-plus-lg"></i></button>
+                    </div>
+                    <input type="text" id="sectorLabelInput" class="form-control" style="max-width:220px;" maxlength="255" placeholder="<?= t('sector.label_placeholder') ?>">
+                    <div class="ms-auto d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="sectorClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
+                        <button type="button" class="btn btn-success btn-sm" id="sectorSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.save_btn') ?></button>
+                    </div>
+                </div>
+                <div class="small text-muted px-2 py-1 bg-light border-bottom">
+                    <?= t('sector.map_instructions') ?>
+                </div>
+                <div id="sectorComposerMap" style="flex:1;min-height:0;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="routeComposerModal" tabindex="-1">
     <div class="modal-dialog modal-fullscreen">
         <div class="modal-content">
@@ -2421,6 +2505,7 @@ const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)
 let pins = <?= json_encode($pins) ?>;
 let dispatches = <?= json_encode($dispatches) ?>;
 let annotations = <?= json_encode($annotations) ?>;
+let sectors = <?= json_encode($sectors) ?>;
 let media = <?= json_encode($photos) ?>;
 let broadcastPhotos = <?= json_encode($broadcastPhotos) ?>;
 // Media re-renders every image tag from scratch (mission-photo-view.php is
@@ -2642,10 +2727,23 @@ if (fieldMode) {
         if (document.visibilityState === 'visible') requestWarRoomWakeLock();
     });
 }
-let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null;
+let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, sectorLayer = null, sectorBuildingLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
+    // Search-sector polygons get their own pane BELOW the default marker/
+    // overlay panes (tilePane 200 < sectorPane 350 < overlayPane 400 <
+    // markerPane 600) — sectors are large background coverage fills and
+    // must never sit visually on top of dispatch polygons or live pins the
+    // way annotationPane (610, above everything) deliberately does for
+    // hand-drawn sketches. Buildings are separate point markers and stay in
+    // the default marker pane (sectorBuildingLayer, created below) rather
+    // than this pane, since a small precise point would visually bury
+    // under the sector's own fill if placed at this same low z-index.
+    map.createPane('sectorPane');
+    map.getPane('sectorPane').style.zIndex = 350;
+    sectorLayer = L.featureGroup().addTo(map);
+    sectorBuildingLayer = L.featureGroup().addTo(map);
     pinLayer = L.layerGroup().addTo(map);
     // FeatureGroup (not plain LayerGroup) is required here: only FeatureGroup
     // propagates child-layer events like 'popupopen' up to the group's own
@@ -2684,6 +2782,12 @@ const ANNOTATION_COLOR = '#1f2937';
 let activeTool = null; // null | 'freehand' | 'arrow' | 'text' | 'erase'
 let freehandPoints = [], freehandPreviewLayer = null;
 let arrowStart = null, arrowStartMarker = null;
+// Search-sector "Add Building" — a one-shot click-to-place mode set by the
+// sector popup's own button (not part of the annotationToolbar/activeTool
+// state machine above, since it needs a sectorId carried through to the
+// next click, not a persistent toggleable tool). Consumed and cleared by
+// the map click handler below.
+let addingBuildingToSectorId = null;
 function cancelActiveDrawing() {
     if (map) { map.dragging.enable(); map.doubleClickZoom.enable(); }
     if (annotationDrawLayer) annotationDrawLayer.clearLayers();
@@ -2927,6 +3031,191 @@ dispatchLayer.on('popupopen', event => {
         });
     }
 });
+
+// Search-sector coverage tracking. Bootstrap-class-name -> hex lookup so the
+// same SECTOR_STATUS_COLORS badge classes used server-side also paint the
+// map polygons/building pins with a real color, same technique mission-
+// stats.php already uses for its own status-driven charts.
+// NOTE: sectorRefreshAfter/sectorSelfAdvance/sectorFloorToggle/
+// sectorActionLabel/sectorFloorChecklistHtml/renderMySectors are NOT here —
+// they live below, outside this `if (!fieldMode)` block. A `function` DEFINED
+// inside a block is only actually ASSIGNED if that block runs (legacy
+// sloppy-mode "Annex B" hoisting rules) — in field mode this block never
+// runs at all, so anything renderMySectors' own field-mode card needs at
+// call time must be declared where field mode still reaches it. Confirmed
+// live: this exact mistake first shipped as "renderMySectors is not a
+// function" the moment field mode was tested for real, not caught by
+// php -l (a JS runtime issue, not a PHP one) or by any of the full-view
+// testing done first.
+const SECTOR_STATUS_HEX = <?= json_encode(array_map(fn($c) => MISSION_TYPE_COLOR_HEX[$c] ?? '#6c757d', SECTOR_STATUS_COLORS)) ?>;
+
+function sectorAdminSetStatus(id, status, selectEl) {
+    if (selectEl) selectEl.disabled = true;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'status', id, status});
+    fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+        if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors); }
+        else { alert(result.error || t('common.send_failed')); if (selectEl) selectEl.disabled = false; }
+    });
+}
+function sectorDelete(id) {
+    if (!confirm(t('sector.delete_confirm'))) return;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'delete', id});
+    fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+        if (result.ok) { if (map) map.closePopup(); sectors = sectors.filter(s => String(s.id) !== String(id)); sectorRefreshAfter(); }
+    });
+}
+function sectorDeleteBuilding(id) {
+    if (!confirm(t('sector.delete_confirm'))) return;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'delete_building', id});
+    fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+        if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors); }
+    });
+}
+
+let sectorsRenderedSig = null;
+function renderSectorLayer(items) {
+    if (!sectorLayer || !sectorBuildingLayer) return;
+
+    // Same "remember and reopen the open popup across a re-render" dance as
+    // renderDispatches() above, tracked separately for the two layers since
+    // a sector popup and a building popup can each independently be open.
+    let openSectorId = null;
+    sectorLayer.eachLayer(layer => { if (layer.sectorId !== undefined && layer.isPopupOpen && layer.isPopupOpen()) openSectorId = layer.sectorId; });
+    let openBuildingId = null;
+    sectorBuildingLayer.eachLayer(layer => { if (layer.buildingId !== undefined && layer.isPopupOpen && layer.isPopupOpen()) openBuildingId = layer.buildingId; });
+
+    sectorLayer.clearLayers();
+    sectorBuildingLayer.clearLayers();
+    let reopenSectorLayer = null, reopenBuildingLayer = null;
+
+    items.forEach(item => {
+        const color = SECTOR_STATUS_HEX[item.status] || '#6c757d';
+        const buildingsSummary = item.buildings.length
+            ? `<div class="small mt-1">🏢 ${item.buildings.filter(b => b.all_required_checked).length}/${item.buildings.length}</div>`
+            : '';
+        const completePrompt = (item.buildings.length && item.all_buildings_complete && item.can_self_report)
+            ? `<div class="small text-success fw-semibold mt-1">${t('sector.all_floors_checked_prompt')}</div>` : '';
+        const selfReportBtn = item.can_self_report
+            ? `<br><button type="button" class="btn btn-sm btn-primary mt-1 sector-advance-btn" data-id="${item.id}" data-status="${item.next_status}">${sectorActionLabel(item.status)}</button>`
+            : '';
+        // Admin can never pick 'assigned' directly (mission-sector.php
+        // rejects it — that value only ever results from assigning a team
+        // to a not_started sector), so it's deliberately not an option here.
+        const manageHtml = item.can_manage ? `
+            <div class="mt-2">
+                <select class="form-select form-select-sm sector-status-select" data-id="${item.id}">
+                    ${['not_started','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
+                </select>
+                <button type="button" class="btn btn-sm btn-outline-primary mt-1 sector-add-building-btn" data-id="${item.id}"><i class="bi bi-building-add me-1"></i>${t('sector.add_building_btn')}</button>
+                <button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
+            </div>` : '';
+        const popupHtml = `<strong>${escapeHtml(item.label)}</strong><br>` +
+            `<span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span> ${escapeHtml(item.team_label)}` +
+            buildingsSummary + completePrompt + selfReportBtn + manageHtml;
+
+        const layer = L.polygon(item.geo, {pane: 'sectorPane', color, fillColor: color, fillOpacity: 0.35, weight: 2}).addTo(sectorLayer).bindPopup(popupHtml);
+        layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'dispatch-team-label', interactive: false});
+        layer.sectorId = item.id;
+        if (String(item.id) === String(openSectorId)) reopenSectorLayer = layer;
+
+        const canActOnBuildings = item.can_self_report || item.can_manage;
+        item.buildings.forEach(b => {
+            const hasRequired = b.floors.some(f => f.is_required);
+            const bColor = !hasRequired ? '#6c757d' : (b.all_required_checked ? '#198754' : '#dc3545');
+            const icon = L.divIcon({
+                className: '',
+                html: `<div style="background:${bColor};color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;border:2px solid #fff;box-shadow:0 1px 4px #0008;"><i class="bi bi-building"></i></div>`,
+                iconSize: [22, 22], iconAnchor: [11, 11],
+            });
+            const delBuildingBtn = item.can_manage ? `<button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-building-delete-btn" data-id="${b.id}">${t('common.delete')}</button>` : '';
+            const bPopupHtml = `<strong>${escapeHtml(b.label)}</strong>${sectorFloorChecklistHtml(b, canActOnBuildings)}${delBuildingBtn}`;
+            const bLayer = L.marker([b.lat, b.lng], {icon}).addTo(sectorBuildingLayer).bindPopup(bPopupHtml);
+            bLayer.buildingId = b.id;
+            if (String(b.id) === String(openBuildingId)) reopenBuildingLayer = bLayer;
+        });
+    });
+
+    if (reopenSectorLayer) reopenSectorLayer.openPopup();
+    if (reopenBuildingLayer) reopenBuildingLayer.openPopup();
+}
+sectorLayer?.on('popupopen', event => {
+    const popupEl = event.popup.getElement();
+    const advBtn = popupEl.querySelector('.sector-advance-btn');
+    if (advBtn) advBtn.addEventListener('click', () => sectorSelfAdvance(advBtn.dataset.id, advBtn.dataset.status, advBtn));
+    const statusSelect = popupEl.querySelector('.sector-status-select');
+    if (statusSelect) statusSelect.addEventListener('change', () => sectorAdminSetStatus(statusSelect.dataset.id, statusSelect.value, statusSelect));
+    const delBtn = popupEl.querySelector('.sector-delete-btn');
+    if (delBtn) delBtn.addEventListener('click', () => sectorDelete(delBtn.dataset.id));
+    const addBuildingBtn = popupEl.querySelector('.sector-add-building-btn');
+    if (addBuildingBtn) addBuildingBtn.addEventListener('click', () => {
+        // One-shot: the NEXT click anywhere on the live map places a
+        // building for this sector (see the map.on('click', ...) handler
+        // below) — mirrors the annotation toolbar's own click-to-place
+        // tools (arrow/text) rather than a native prompt(), which this
+        // file's own convention deliberately avoids for real data entry.
+        addingBuildingToSectorId = parseInt(addBuildingBtn.dataset.id, 10);
+        map.closePopup();
+        document.getElementById('mapCard')?.classList.add('wr-draw-active');
+    });
+});
+sectorBuildingLayer?.on('popupopen', event => {
+    const popupEl = event.popup.getElement();
+    popupEl.querySelectorAll('.sector-floor-btn').forEach(btn => btn.addEventListener('click', () => sectorFloorToggle(btn.dataset.id, btn.dataset.action, btn)));
+    const delBtn = popupEl.querySelector('.sector-building-delete-btn');
+    if (delBtn) delBtn.addEventListener('click', () => sectorDeleteBuilding(delBtn.dataset.id));
+});
+
+// Admin-facing full list (sectorsListCard) — an at-a-glance overview with
+// the same actions as the map popups (clicking a row locates+opens it on
+// the map too), for command staff who'd rather scan a list than click
+// through polygons one at a time.
+let sectorsListRenderedSig = null;
+function renderSectorsList(items) {
+    const sig = JSON.stringify(items);
+    if (sig === sectorsListRenderedSig) return;
+    sectorsListRenderedSig = sig;
+
+    const list = document.getElementById('sectorsList');
+    if (!list) return;
+    if (!items.length) {
+        list.innerHTML = '<p class="text-muted mb-0">' + t('sector.empty_list') + '</p>';
+        return;
+    }
+    list.innerHTML = items.map(item => {
+        const buildingsSummary = item.buildings.length
+            ? `<div class="small">🏢 ${item.buildings.filter(b => b.all_required_checked).length}/${item.buildings.length}</div>` : '';
+        const advanceBtn = item.can_self_report
+            ? `<button type="button" class="btn btn-sm btn-primary mt-1 sector-advance-btn" data-id="${item.id}" data-status="${item.next_status}">${sectorActionLabel(item.status)}</button>`
+            : '';
+        const manageHtml = item.can_manage ? `
+            <select class="form-select form-select-sm mt-1 sector-status-select" data-id="${item.id}">
+                ${['not_started','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
+            </select>
+            <button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-delete-btn" data-id="${item.id}">${t('common.delete')}</button>` : '';
+        return `<div class="border rounded p-2 mb-2 sector-list-row" data-id="${item.id}" style="cursor:pointer;">
+            <div class="d-flex justify-content-between align-items-start">
+                <strong>${escapeHtml(item.label)}</strong>
+                <span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span>
+            </div>
+            <div class="small text-muted">${escapeHtml(item.team_label)}</div>
+            ${buildingsSummary}${advanceBtn}${manageHtml}
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.sector-list-row').forEach(row => row.addEventListener('click', e => {
+        if (e.target.closest('button, select')) return;
+        if (fieldMode || !map) return;
+        const item = sectors.find(s => String(s.id) === row.dataset.id);
+        if (item && item.geo && item.geo.length) {
+            map.fitBounds(L.latLngBounds(item.geo), {padding: [40, 40], maxZoom: 17});
+            sectorLayer.eachLayer(l => { if (String(l.sectorId) === row.dataset.id) l.openPopup(); });
+        }
+    }));
+    list.querySelectorAll('.sector-advance-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); sectorSelfAdvance(btn.dataset.id, btn.dataset.status, btn); }));
+    list.querySelectorAll('.sector-status-select').forEach(sel => sel.addEventListener('change', () => sectorAdminSetStatus(sel.dataset.id, sel.value, sel)));
+    list.querySelectorAll('.sector-delete-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); sectorDelete(btn.dataset.id); }));
+}
+
 // Freehand: mousedown starts a stroke, mousemove samples points at a
 // zoom-independent pixel-distance threshold (not a geographic one, so visual
 // density stays constant whether zoomed in or out), mouseup finalizes and
@@ -3016,10 +3305,136 @@ map.on('click', e => {
             document.getElementById('annoTextSave')?.addEventListener('click', save);
             input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); save(); } });
         }, 0);
+    } else if (addingBuildingToSectorId !== null) {
+        // Same click-opens-a-popup-with-an-inline-form technique as the
+        // 'text' annotation tool just above, not a native prompt() — one-
+        // shot (not a persistent toggleable tool), so the state is cleared
+        // as soon as this click is consumed, regardless of whether the
+        // form is actually submitted afterward.
+        const sectorId = addingBuildingToSectorId;
+        const latlng = e.latlng;
+        addingBuildingToSectorId = null;
+        document.getElementById('mapCard')?.classList.remove('wr-draw-active');
+        L.popup({closeOnClick: false})
+            .setLatLng(latlng)
+            .setContent(`<input type="text" maxlength="255" class="form-control form-control-sm mb-1" id="sectorBuildingLabelInput" placeholder="${t('sector.building_label_placeholder')}">
+                          <input type="number" min="1" max="50" class="form-control form-control-sm mb-1" id="sectorBuildingFloorsInput" placeholder="${t('sector.floor_count_label')}">
+                          <button type="button" class="btn btn-sm btn-primary w-100" id="sectorBuildingSave">${t('sector.add_building_btn')}</button>`)
+            .openOn(map);
+        setTimeout(() => {
+            const input = document.getElementById('sectorBuildingLabelInput');
+            if (!input) return;
+            input.focus();
+            const save = () => {
+                const label = input.value.trim();
+                const floorCount = parseInt(document.getElementById('sectorBuildingFloorsInput').value, 10);
+                if (!label || !floorCount || floorCount < 1 || floorCount > 50) return;
+                const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create_building', sector_id: sectorId, label, lat: latlng.lat, lng: latlng.lng, floor_count: floorCount});
+                fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+                    map.closePopup();
+                    if (result.ok) sectorRefreshAfter(result.sectors);
+                    else alert(result.error || t('common.send_failed'));
+                });
+            };
+            document.getElementById('sectorBuildingSave')?.addEventListener('click', save);
+        }, 0);
     }
 });
 if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup('<strong>' + t('map.mission_point_label') + '</strong><br><?= h(addslashes($mission['title'])) ?>');
 }
+
+// Search-sector functions that MUST work in field mode (no map involved,
+// deliberately declared outside the `if (!fieldMode)` block above — see the
+// note next to SECTOR_STATUS_HEX for why a block-scoped `function` here
+// would silently never be assigned in field mode). renderSectorLayer/
+// renderSectorsList/sectorAdminSetStatus/sectorDelete/sectorDeleteBuilding
+// stay inside that block on purpose — they're genuinely map/full-view-only.
+function sectorRefreshAfter(newSectors) {
+    if (newSectors) sectors = newSectors;
+    if (!fieldMode) { renderSectorLayer(sectors); renderSectorsList(sectors); }
+    renderMySectors(sectors);
+}
+function sectorSelfAdvance(id, status, btnEl) {
+    if (btnEl) btnEl.disabled = true;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'status', id, status});
+    fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+        if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors); }
+        else { alert(result.error || t('common.send_failed')); if (btnEl) btnEl.disabled = false; }
+    });
+}
+function sectorFloorToggle(floorId, action, btnEl) {
+    if (btnEl) btnEl.disabled = true;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action, id: floorId});
+    fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+        if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors); }
+        else { alert(result.error || t('common.send_failed')); if (btnEl) btnEl.disabled = false; }
+    });
+}
+// Keyed by the sector's CURRENT status (the action that would move it
+// forward), not the target — 'assigned' and 'needs_recheck' both advance
+// TO 'in_progress', so keying by target would collide between "start" and
+// "resume" and show the wrong label for one of them.
+function sectorActionLabel(currentStatus) {
+    return {
+        'assigned': t('sector.action.start'),
+        'in_progress': t('sector.action.complete'),
+        'completed': t('sector.action.flag_recheck'),
+        'needs_recheck': t('sector.action.resume'),
+    }[currentStatus] || '';
+}
+function sectorFloorChecklistHtml(building, canAct) {
+    const requiredFloors = building.floors.filter(f => f.is_required);
+    if (!requiredFloors.length) {
+        return `<div class="small text-muted">${t('sector.floor_required_hint')}</div>`;
+    }
+    return requiredFloors.map(f => {
+        const isChecked = f.checked_at !== null;
+        const btn = canAct
+            ? `<button type="button" class="btn btn-sm ${isChecked ? 'btn-outline-secondary' : 'btn-success'} sector-floor-btn" data-id="${f.id}" data-action="${isChecked ? 'uncheck_floor' : 'check_floor'}">${isChecked ? t('sector.floor_uncheck_btn') : t('sector.floor_check_btn')}</button>`
+            : (isChecked ? '✅' : '');
+        const meta = isChecked ? `<span class="text-muted small ms-1">(${escapeHtml(f.checked_by_name || '')}, ${f.checked_at})</span>` : '';
+        const note = f.note ? `<div class="small fst-italic">"${escapeHtml(f.note)}"</div>` : '';
+        return `<div class="d-flex justify-content-between align-items-center py-1">
+            <span class="small">${escapeHtml(t('sector.floor_label', {n: f.floor_number}))}${meta}</span>${btn}
+        </div>${note}`;
+    }).join('');
+}
+// Field-mode-safe (no map): every sector assigned to the viewer's own team,
+// with the full nested building/floor checklist inline — this is the
+// primary real-world surface for a volunteer physically walking building to
+// building, not a fallback for when the map isn't available.
+function renderMySectors(items) {
+    const list = document.getElementById('mySectorsList');
+    if (!list) return;
+    const mine = items.filter(s => s.is_my_team);
+    if (!mine.length) {
+        list.innerHTML = '<p class="text-muted mb-0 small">' + t('sector.my_empty') + '</p>';
+        return;
+    }
+    list.innerHTML = mine.map(item => {
+        const advanceBtn = item.can_self_report
+            ? `<button type="button" class="btn btn-sm btn-primary w-100 mt-1 sector-advance-btn" data-id="${item.id}" data-status="${item.next_status}">${sectorActionLabel(item.status)}</button>`
+            : '';
+        const completePrompt = (item.buildings.length && item.all_buildings_complete && item.can_self_report)
+            ? `<div class="small text-success fw-semibold mt-1">${t('sector.all_floors_checked_prompt')}</div>` : '';
+        const buildingsHtml = item.buildings.map(b => `
+            <div class="border-top pt-1 mt-1">
+                <div class="small fw-semibold">${escapeHtml(b.label)}${b.all_required_checked ? ' ✅' : ''}</div>
+                ${sectorFloorChecklistHtml(b, item.can_self_report)}
+            </div>`).join('');
+        return `<div class="border rounded p-2 mb-2${item.status === 'needs_recheck' ? ' border-danger' : ''}">
+            <div class="d-flex justify-content-between align-items-center">
+                <strong>${escapeHtml(item.label)}</strong>
+                <span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span>
+            </div>
+            ${buildingsHtml}${completePrompt}${advanceBtn}
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.sector-advance-btn').forEach(btn => btn.addEventListener('click', () => sectorSelfAdvance(btn.dataset.id, btn.dataset.status, btn)));
+    list.querySelectorAll('.sector-floor-btn').forEach(btn => btn.addEventListener('click', () => sectorFloorToggle(btn.dataset.id, btn.dataset.action, btn)));
+}
+
 let hasFitPins = false;
 function pinStatusLabel(status) {
     return {needs_help: t('status.badge_needs_help'), on_site: t('status.badge_on_site'), on_way: t('status.badge_on_way')}[status] || '';
@@ -4626,8 +5041,9 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 })();
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderSectorLayer(sectors); renderSectorsList(sectors); }
     renderMyTasks(myTasks);
+    renderMySectors(sectors);
     renderMyRoutes(routes);
     renderShortageReports(shortageReports);
     renderMissionIncidents(missionIncidents);
@@ -5523,6 +5939,11 @@ function pollWarRoomData() {
             renderPointsOfInterest(pointsOfInterest);
             if (!fieldMode) renderPoiLayer(pointsOfInterest);
         }
+        if (data.sectors) {
+            sectors = data.sectors;
+            renderMySectors(sectors);
+            if (!fieldMode) { renderSectorLayer(sectors); renderSectorsList(sectors); }
+        }
         if (data.onlinePresence) renderPresence(data.onlinePresence);
         if (data.pingStaleness) renderPingStaleness(data.pingStaleness);
         if (data.nearbyTeams) renderNearbyTeams(nearbyTeams = data.nearbyTeams);
@@ -5869,6 +6290,170 @@ document.querySelectorAll('.team-form').forEach(form => {
                 fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId)
                     .then(response => response.json())
                     .then(d => { if (d.dispatches) renderDispatches(dispatches = d.dispatches); });
+            } else {
+                alert(result.error || t('common.send_failed'));
+                sendBtn.disabled = false;
+            }
+        }).catch(() => { alert(t('common.send_failed')); sendBtn.disabled = false; });
+    });
+})();
+
+(function() {
+    const modalEl = document.getElementById('sectorMapModal');
+    if (!modalEl) return;
+
+    const teamSelect = document.getElementById('sectorTeamSelect');
+    const addressInput = document.getElementById('sectorAddressInput');
+    const addressSearchBtn = document.getElementById('sectorAddressSearch');
+    const addressStatus = document.getElementById('sectorAddressStatus');
+    const coordsInput = document.getElementById('sectorCoordsInput');
+    const coordsAddBtn = document.getElementById('sectorCoordsAddBtn');
+    const labelInput = document.getElementById('sectorLabelInput');
+    const clearBtn = document.getElementById('sectorClearBtn');
+    const sendBtn = document.getElementById('sectorSendBtn');
+
+    let composerMap = null;
+    let refLayer = null;
+    let drawPoints = [];
+    let vertexMarkers = [];
+    let shapeLayer = null;
+    let isClosed = false;
+
+    // Dimmed, read-only copy of the live map's pins + existing sectors, so
+    // the admin isn't drawing a new sector blind — same idea and technique
+    // as the dispatch composer's own renderDispatchContext() above.
+    function renderSectorContext() {
+        if (!refLayer) return;
+        refLayer.clearLayers();
+        const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
+        pins.forEach(pin => {
+            const color = pin.team_color || statusColors[pin.status] || '#2563eb';
+            L.circleMarker([pin.lat, pin.lng], {radius:6, weight:2, color:'#fff', fillColor:color, fillOpacity:0.55, opacity:0.6})
+                .addTo(refLayer)
+                .bindTooltip(escapeHtml(pin.name));
+        });
+        sectors.forEach(item => {
+            const color = SECTOR_STATUS_HEX[item.status] || '#6c757d';
+            L.polygon(item.geo, {color, weight:2, opacity:0.5, fillOpacity:0.1}).addTo(refLayer).bindTooltip(escapeHtml(item.label));
+        });
+    }
+
+    function resetDrawing() {
+        drawPoints = [];
+        isClosed = false;
+        vertexMarkers.forEach(m => composerMap.removeLayer(m));
+        vertexMarkers = [];
+        if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
+        sendBtn.disabled = true;
+    }
+
+    function updateShapePreview() {
+        if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
+        if (drawPoints.length < 2) return;
+        shapeLayer = isClosed
+            ? L.polygon(drawPoints, {color:'#0d6efd', fillOpacity:0.15}).addTo(composerMap)
+            : L.polyline(drawPoints, {color:'#0d6efd'}).addTo(composerMap);
+    }
+
+    // Polygon-only, unlike the dispatch composer's point-or-polygon —
+    // a sector is always an area, so the send button only ever enables
+    // once the shape is actually closed with at least 3 vertices.
+    function updateSendState() {
+        sendBtn.disabled = !(isClosed && drawPoints.length >= 3);
+    }
+
+    function addDrawPoint(lat, lng) {
+        drawPoints.push([lat, lng]);
+        vertexMarkers.push(L.circleMarker([lat, lng], {radius:7, color:'#0d6efd', fillColor:'#fff', fillOpacity:1, weight:2}).addTo(composerMap));
+        updateShapePreview();
+        updateSendState();
+    }
+
+    function onMapClick(e) {
+        if (isClosed) return;
+        if (drawPoints.length >= 3) {
+            const firstPoint = composerMap.latLngToContainerPoint(L.latLng(drawPoints[0]));
+            const clickPoint = composerMap.latLngToContainerPoint(e.latlng);
+            if (firstPoint.distanceTo(clickPoint) < 16) {
+                isClosed = true;
+                updateShapePreview();
+                updateSendState();
+                return;
+            }
+        }
+        addDrawPoint(e.latlng.lat, e.latlng.lng);
+    }
+
+    function addCoordsFromInput() {
+        const parsed = parseCoordsInput(coordsInput.value);
+        if (!parsed) {
+            alert(t('dispatch.coords_invalid'));
+            return;
+        }
+        if (isClosed) {
+            alert(t('dispatch.coords_shape_closed'));
+            return;
+        }
+        addDrawPoint(parsed.lat, parsed.lng);
+        composerMap.setView([parsed.lat, parsed.lng], Math.max(composerMap.getZoom(), 15));
+        coordsInput.value = '';
+    }
+    coordsAddBtn.addEventListener('click', addCoordsFromInput);
+    coordsInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); addCoordsFromInput(); }
+    });
+
+    modalEl.addEventListener('shown.bs.modal', () => {
+        if (!composerMap) {
+            const center = missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73];
+            composerMap = L.map('sectorComposerMap').setView(center, missionLocation.lat ? 13 : 7);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(composerMap);
+            refLayer = L.layerGroup().addTo(composerMap);
+            composerMap.on('click', onMapClick);
+        }
+        renderSectorContext();
+        setTimeout(() => composerMap.invalidateSize(), 100);
+    });
+
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        resetDrawing();
+        addressInput.value = '';
+        addressStatus.textContent = '';
+        coordsInput.value = '';
+        labelInput.value = '';
+    });
+
+    clearBtn.addEventListener('click', resetDrawing);
+
+    addressSearchBtn.addEventListener('click', () => {
+        const q = addressInput.value.trim();
+        if (!q) return;
+        addressStatus.textContent = t('dispatch.searching');
+        fetch('geocode-address.php?q=' + encodeURIComponent(q)).then(response => response.json()).then(result => {
+            if (result.ok) {
+                composerMap.setView([result.lat, result.lng], 16);
+                addressStatus.textContent = '✓ ' + (result.display_name || q);
+            } else {
+                addressStatus.textContent = result.error || t('dispatch.address_not_found');
+            }
+        }).catch(() => { addressStatus.textContent = t('dispatch.search_failed'); });
+    });
+
+    sendBtn.addEventListener('click', () => {
+        const label = labelInput.value.trim();
+        if (!label) {
+            alert(t('sector.invalid_label'));
+            return;
+        }
+        const data = new URLSearchParams({
+            csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
+            team_id: teamSelect.value, geo: JSON.stringify(drawPoints), label: label,
+        });
+        sendBtn.disabled = true;
+        fetch('mission-sector.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
+            if (result.ok) {
+                bootstrap.Modal.getInstance(modalEl).hide();
+                sectorRefreshAfter(result.sectors);
             } else {
                 alert(result.error || t('common.send_failed'));
                 sendBtn.disabled = false;

@@ -144,6 +144,54 @@ foreach ($arrivedRows as $row) {
     ];
 }
 
+// ── search sectors: created / status changed ────────────────────────────────
+// Deliberately UNSCOPED (no team predicate, not $dispatchScopeSql above) —
+// every team needs to see sector coverage regardless of which team it's
+// assigned to, or the whole point of tracking coverage is defeated. Matches
+// the same unscoped precedent already set below for incidents/POI ("not
+// team-private"), not the assignment-target scoping dispatch uses.
+$sectorCreatedRows = dbFetchAll(
+    "SELECT s.label, s.team_id, s.created_at, cu.name AS actor_name, mt.codename, mt.team_number
+     FROM mission_search_sectors s
+     LEFT JOIN users cu ON cu.id = s.created_by
+     LEFT JOIN mission_teams mt ON mt.id = s.team_id
+     WHERE s.mission_id = ?
+     ORDER BY s.created_at DESC LIMIT 200",
+    [$missionId]
+);
+foreach ($sectorCreatedRows as $row) {
+    $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team', [], $viewerLang);
+    $events[] = [
+        'icon' => '🗺️',
+        'text' => t('history.sector_created', ['actor' => h($row['actor_name'] ?? '—'), 'label' => h($row['label']), 'team' => h($teamLabel)], $viewerLang),
+        'time' => date('d/m H:i', strtotime($row['created_at'])),
+        'ts'   => strtotime($row['created_at']),
+    ];
+}
+
+$sectorStatusRows = dbFetchAll(
+    "SELECT l.to_status, l.created_at, s.label, u.name AS actor_name, mt.codename, mt.team_number
+     FROM mission_sector_status_log l
+     JOIN mission_search_sectors s ON s.id = l.sector_id
+     LEFT JOIN users u ON u.id = l.user_id
+     LEFT JOIN mission_teams mt ON mt.id = l.team_id
+     WHERE s.mission_id = ?
+     ORDER BY l.created_at DESC LIMIT 200",
+    [$missionId]
+);
+foreach ($sectorStatusRows as $row) {
+    $teamLabel = $row['codename'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team', [], $viewerLang);
+    $events[] = [
+        'icon' => $row['to_status'] === 'completed' ? '✅' : ($row['to_status'] === 'needs_recheck' ? '⚠️' : '🗺️'),
+        'text' => t('history.sector_status_changed', [
+            'actor' => h($row['actor_name'] ?? '—'), 'label' => h($row['label']),
+            'status' => h(sectorStatusLabel($row['to_status'], $viewerLang)), 'team' => h($teamLabel),
+        ], $viewerLang),
+        'time' => date('d/m H:i', strtotime($row['created_at'])),
+        'ts'   => strtotime($row['created_at']),
+    ];
+}
+
 // ── orders (location/photo/video/task): sent / acknowledged / fulfilled ───────
 $orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'return_to_base' => '🏁', 'route' => '🧭'];
 $orderRows = dbFetchAll(

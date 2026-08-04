@@ -202,6 +202,181 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
 }
 
 /**
+ * War Room search-sector coverage tracking — polygon zones drawn on the
+ * shared map, optionally assigned to a team, tracked through a
+ * not_started/assigned/in_progress/completed/needs_recheck lifecycle, with
+ * an optional per-building/per-floor checklist for urban sectors.
+ *
+ * Deliberately UNIVERSAL visibility (no team_id filter at all), unlike
+ * loadMissionDispatchesForUser() above — the whole point of this feature is
+ * that every team can see what's already covered so nobody re-searches it.
+ * Team-scoping only applies to the self-report action in mission-sector.php,
+ * never to what gets returned here.
+ */
+function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
+    $rows = dbFetchAll(
+        "SELECT s.id, s.team_id, s.label, s.geo, s.status, s.status_updated_at,
+                su.name AS status_updated_by_name, s.created_at, cu.name AS created_by_name,
+                mt.codename, mt.team_number, mt.color
+         FROM mission_search_sectors s
+         LEFT JOIN mission_teams mt ON mt.id = s.team_id
+         LEFT JOIN users su ON su.id = s.status_updated_by
+         LEFT JOIN users cu ON cu.id = s.created_by
+         WHERE s.mission_id = ?
+         ORDER BY s.created_at",
+        [$missionId]
+    );
+    if (empty($rows)) {
+        return [];
+    }
+
+    $sectorIds = array_map(fn($r) => (int) $r['id'], $rows);
+    $placeholders = implode(',', array_fill(0, count($sectorIds), '?'));
+
+    // Buildings + floors, batched via IN(...) — no per-sector/per-building
+    // loop queries, matching this session's own running discipline about
+    // N+1s on the 15s poll path (see $loadPins' LEAD() rewrite).
+    $buildingRows = dbFetchAll(
+        "SELECT id, sector_id, label, lat, lng, floor_count FROM mission_sector_buildings
+         WHERE sector_id IN ($placeholders) ORDER BY id",
+        $sectorIds
+    );
+    $buildingsBySector = [];
+    $buildingIds = [];
+    foreach ($buildingRows as $b) {
+        $buildingsBySector[(int) $b['sector_id']][] = $b;
+        $buildingIds[] = (int) $b['id'];
+    }
+
+    $floorsByBuilding = [];
+    if (!empty($buildingIds)) {
+        $bPlaceholders = implode(',', array_fill(0, count($buildingIds), '?'));
+        $floorRows = dbFetchAll(
+            "SELECT f.id, f.building_id, f.floor_number, f.is_required, f.checked_at, f.note,
+                    cb.name AS checked_by_name
+             FROM mission_sector_building_floors f
+             LEFT JOIN users cb ON cb.id = f.checked_by
+             WHERE f.building_id IN ($bPlaceholders)
+             ORDER BY f.building_id, f.floor_number",
+            $buildingIds
+        );
+        foreach ($floorRows as $f) {
+            $floorsByBuilding[(int) $f['building_id']][] = [
+                'id'              => (int) $f['id'],
+                'floor_number'    => (int) $f['floor_number'],
+                'is_required'     => (bool) $f['is_required'],
+                'checked_at'      => $f['checked_at'] ? date('d/m H:i', strtotime($f['checked_at'])) : null,
+                'checked_by_name' => $f['checked_by_name'],
+                'note'            => $f['note'],
+            ];
+        }
+    }
+
+    // Status change log, also batched.
+    $logRows = dbFetchAll(
+        "SELECT l.sector_id, l.from_status, l.to_status, l.note, l.created_at, u.name AS user_name,
+                mt.codename, mt.team_number
+         FROM mission_sector_status_log l
+         LEFT JOIN users u ON u.id = l.user_id
+         LEFT JOIN mission_teams mt ON mt.id = l.team_id
+         WHERE l.sector_id IN ($placeholders)
+         ORDER BY l.sector_id, l.created_at",
+        $sectorIds
+    );
+    $logBySector = [];
+    foreach ($logRows as $l) {
+        $logBySector[(int) $l['sector_id']][] = [
+            'from_status' => $l['from_status'],
+            'to_status'   => $l['to_status'],
+            'note'        => $l['note'],
+            'user_name'   => $l['user_name'],
+            'team_label'  => $l['codename'] ? teamLabel($l['codename'], $l['team_number']) : null,
+            'time'        => date('d/m H:i', strtotime($l['created_at'])),
+        ];
+    }
+
+    $myTeamId = getUserTeamIdForMission($missionId, $userId);
+
+    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $myTeamId, $buildingsBySector, $floorsByBuilding, $logBySector) {
+        $sectorId = (int) $row['id'];
+        $teamId = $row['team_id'] ? (int) $row['team_id'] : null;
+        $isMyTeam = $teamId !== null && $teamId === $myTeamId;
+        [$teamColorBg, $teamColorFg] = teamBadgeColors($teamId ? $row['color'] : null);
+
+        $buildings = array_map(function ($b) use ($floorsByBuilding) {
+            $floors = $floorsByBuilding[(int) $b['id']] ?? [];
+            $requiredFloors = array_values(array_filter($floors, fn($f) => $f['is_required']));
+            // Vacuously "done" if this building has no required floors at
+            // all (e.g. shown on the map for awareness only) — nothing
+            // needed from it, so it must never block the sector's own
+            // "everything's checked" rollup below.
+            $allRequiredChecked = empty($requiredFloors)
+                || array_reduce($requiredFloors, fn($carry, $f) => $carry && $f['checked_at'] !== null, true);
+            return [
+                'id'                    => (int) $b['id'],
+                'label'                 => $b['label'],
+                'lat'                   => (float) $b['lat'],
+                'lng'                   => (float) $b['lng'],
+                'floor_count'           => (int) $b['floor_count'],
+                'floors'                => $floors,
+                'all_required_checked'  => $allRequiredChecked,
+            ];
+        }, $buildingsBySector[$sectorId] ?? []);
+
+        // Only meaningful when the sector actually has buildings — an
+        // empty-buildings sector (no urban checklist at all) stays false
+        // here, but the client only ever reads this alongside buildings.length
+        // > 0, so it never wrongly reads as "not yet done."
+        $allBuildingsComplete = !empty($buildings)
+            && array_reduce($buildings, fn($carry, $b) => $carry && $b['all_required_checked'], true);
+
+        $nextStatus = sectorSelfReportNextStatus($row['status']);
+
+        return [
+            'id'                     => $sectorId,
+            'label'                  => $row['label'],
+            'geo'                    => json_decode($row['geo'], true),
+            'status'                 => $row['status'],
+            'status_label'           => sectorStatusLabel($row['status']),
+            'status_color'           => SECTOR_STATUS_COLORS[$row['status']] ?? 'secondary',
+            'status_updated_at'      => $row['status_updated_at'] ? date('d/m H:i', strtotime($row['status_updated_at'])) : null,
+            'status_updated_by_name' => $row['status_updated_by_name'],
+            'team_id'                => $teamId,
+            'team_label'             => $teamId ? teamLabel($row['codename'], $row['team_number']) : t('sector.unassigned_option'),
+            'team_color_bg'          => $teamColorBg,
+            'team_color_fg'          => $teamColorFg,
+            'is_my_team'             => $isMyTeam,
+            'can_manage'             => $canManageWarRoom,
+            'can_self_report'        => $isApprovedParticipant && $isMyTeam && $nextStatus !== null,
+            'next_status'            => $nextStatus,
+            'next_status_label'      => $nextStatus ? sectorStatusLabel($nextStatus) : null,
+            'buildings'              => $buildings,
+            'all_buildings_complete' => $allBuildingsComplete,
+            'status_log'             => $logBySector[$sectorId] ?? [],
+            'created_at'             => date('d/m H:i', strtotime($row['created_at'])),
+            'created_by_name'        => $row['created_by_name'],
+        ];
+    }, $rows);
+}
+
+/**
+ * Self-report status progression for search sectors — shared by
+ * loadMissionSectorsForUser() above (to compute next_status/can_self_report)
+ * and mission-sector.php's `status` action (to validate what a non-admin
+ * submitted), so the button shown and the action actually allowed can never
+ * drift apart. Admin overrides are NOT restricted to this adjacency — this
+ * function only governs the self-report path.
+ */
+function sectorSelfReportNextStatus(string $currentStatus): ?string {
+    return [
+        'assigned'      => 'in_progress',
+        'in_progress'   => 'completed',
+        'completed'     => 'needs_recheck',
+        'needs_recheck' => 'in_progress',
+    ][$currentStatus] ?? null;
+}
+
+/**
  * War Room "Εντολή Πορείας": load routes visible to $userId — every route of
  * the mission for command staff (the live admin panel needs the full
  * picture, including closed ones), or just their own team's route(s) for an
@@ -3150,6 +3325,50 @@ function loadMissionActivityEventsForReport(int $missionId): array {
             'text' => ($teamLabel ? 'Η ομάδα ' . h($teamLabel) : h($row['actor_name'])) . ' ανέφερε άφιξη'
                 . ($row['dispatch_label'] ? ' στο «' . h($row['dispatch_label']) . '»' : '')
                 . ($teamLabel ? ' (' . h($row['actor_name']) . ')' : ''),
+            'ts'   => strtotime($row['created_at']),
+        ];
+    }
+
+    // Search sectors — unscoped (no team filter), same reasoning as
+    // mission-history.php's own copy: every team needs to see coverage
+    // regardless of who it's assigned to.
+    $sectorCreatedRows = dbFetchAll(
+        "SELECT s.label, s.team_id, s.created_at, cu.name AS actor_name, mt.codename, mt.team_number
+         FROM mission_search_sectors s
+         LEFT JOIN users cu ON cu.id = s.created_by
+         LEFT JOIN mission_teams mt ON mt.id = s.team_id
+         WHERE s.mission_id = ?",
+        [$missionId]
+    );
+    foreach ($sectorCreatedRows as $row) {
+        $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'χωρίς ομάδα';
+        $events[] = [
+            'icon' => '🗺️',
+            'text' => h($row['actor_name'] ?? '—') . ' δημιούργησε τον τομέα έρευνας «' . h($row['label']) . '» (' . h($teamLabel) . ')',
+            'ts'   => strtotime($row['created_at']),
+        ];
+    }
+
+    $sectorStatusRows = dbFetchAll(
+        "SELECT l.to_status, l.created_at, s.label, u.name AS actor_name, mt.codename, mt.team_number
+         FROM mission_sector_status_log l
+         JOIN mission_search_sectors s ON s.id = l.sector_id
+         LEFT JOIN users u ON u.id = l.user_id
+         LEFT JOIN mission_teams mt ON mt.id = l.team_id
+         WHERE s.mission_id = ?",
+        [$missionId]
+    );
+    foreach ($sectorStatusRows as $row) {
+        $teamLabel = $row['codename'] ? teamLabel($row['codename'], $row['team_number']) : 'χωρίς ομάδα';
+        $events[] = [
+            'icon' => $row['to_status'] === 'completed' ? '✅' : ($row['to_status'] === 'needs_recheck' ? '⚠️' : '🗺️'),
+            // Forced 'el', not the viewer's own profile language — this whole
+            // function is hardcoded-Greek by its own 100%-consistent existing
+            // convention (a PDF/Excel export, not a per-viewer live surface),
+            // and sectorStatusLabel() would otherwise resolve in whichever
+            // language the CALLER happens to be viewing in, breaking that
+            // invariant for this one string alone.
+            'text' => h($row['actor_name'] ?? '—') . ' άλλαξε τον τομέα «' . h($row['label']) . '» σε «' . h(sectorStatusLabel($row['to_status'], 'el')) . '» (' . h($teamLabel) . ')',
             'ts'   => strtotime($row['created_at']),
         ];
     }

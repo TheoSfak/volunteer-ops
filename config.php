@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.153.23');
-define('DB_SCHEMA_VERSION', 120);
+define('APP_VERSION', '3.154.0');
+define('DB_SCHEMA_VERSION', 121);
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
@@ -308,6 +308,22 @@ define('SHORTAGE_SEVERITY_COLORS', [
     'medium'   => 'info',
     'high'     => 'warning',
     'critical' => 'danger',
+]);
+
+define('SECTOR_STATUS_LABELS', [
+    'not_started'   => 'Δεν έχει ξεκινήσει',
+    'assigned'      => 'Ανατέθηκε',
+    'in_progress'   => 'Σε εξέλιξη',
+    'completed'     => 'Ολοκληρώθηκε',
+    'needs_recheck' => 'Χρειάζεται επανέλεγχο',
+]);
+
+define('SECTOR_STATUS_COLORS', [
+    'not_started'   => 'secondary',
+    'assigned'      => 'info',
+    'in_progress'   => 'warning',
+    'completed'     => 'success',
+    'needs_recheck' => 'danger',
 ]);
 
 // War Room incident/casualty reports — severity reuses SHORTAGE_SEVERITY_LABELS/COLORS

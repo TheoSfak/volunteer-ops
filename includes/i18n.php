@@ -105,6 +105,17 @@ function incidentGenderLabel(string $gender, ?string $lang = null): string {
 }
 
 /**
+ * Search-sector coverage status — same translated-key-with-constant-fallback
+ * shape as the other War Room status labels above. Matters more than usual
+ * here since sector viewers can include multi-country guest accounts on EN.
+ */
+function sectorStatusLabel(string $status, ?string $lang = null): string {
+    $key = 'sector.status.' . $status;
+    $translated = t($key, [], $lang);
+    return $translated !== $key ? $translated : (SECTOR_STATUS_LABELS[$status] ?? $status);
+}
+
+/**
  * Batch version for notification fan-out: one query for however many recipients,
  * never N+1. Returns [user_id => 'el'|'en'] for every id in $userIds.
  */

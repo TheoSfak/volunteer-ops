@@ -5676,6 +5676,107 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 121,
+            'description' => 'Create search-area coverage tracking: mission_search_sectors (polygon zones drawn on the live map, assigned to a team, tracked through a not_started/assigned/in_progress/completed/needs_recheck lifecycle) + mission_sector_status_log (append-only history/notes per status change, same split-from-the-parent-row shape as mission_dispatch_acks/_receipts) + mission_sector_buildings/mission_sector_building_floors (per-sector points for urban search areas, where not every floor of every building needs checking — is_required flags which floors count toward "done"). team_id uses ON DELETE SET NULL (not CASCADE like dispatch) since a sector is the durable coverage record and must survive a team being deleted/recreated mid-mission.',
+            'up' => function () {
+                $tableExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_search_sectors'"
+                );
+                if (!$tableExists) {
+                    dbExecute(
+                        "CREATE TABLE mission_search_sectors (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            team_id INT UNSIGNED NULL,
+                            label VARCHAR(255) NOT NULL,
+                            geo TEXT NOT NULL,
+                            status ENUM('not_started','assigned','in_progress','completed','needs_recheck') NOT NULL DEFAULT 'not_started',
+                            status_updated_at TIMESTAMP NULL,
+                            status_updated_by INT UNSIGNED NULL,
+                            created_by INT UNSIGNED NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL,
+                            FOREIGN KEY (status_updated_by) REFERENCES users(id) ON DELETE SET NULL,
+                            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_sector_mission (mission_id, status),
+                            INDEX idx_sector_team (team_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $logExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_sector_status_log'"
+                );
+                if (!$logExists) {
+                    dbExecute(
+                        "CREATE TABLE mission_sector_status_log (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            sector_id INT UNSIGNED NOT NULL,
+                            from_status ENUM('not_started','assigned','in_progress','completed','needs_recheck') NOT NULL,
+                            to_status ENUM('not_started','assigned','in_progress','completed','needs_recheck') NOT NULL,
+                            team_id INT UNSIGNED NULL,
+                            user_id INT UNSIGNED NULL,
+                            note VARCHAR(500) NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (sector_id) REFERENCES mission_search_sectors(id) ON DELETE CASCADE,
+                            FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL,
+                            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_sector_status_log_sector (sector_id, created_at)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $buildingsExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_sector_buildings'"
+                );
+                if (!$buildingsExists) {
+                    dbExecute(
+                        "CREATE TABLE mission_sector_buildings (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            sector_id INT UNSIGNED NOT NULL,
+                            label VARCHAR(255) NOT NULL,
+                            lat DECIMAL(10,8) NOT NULL,
+                            lng DECIMAL(11,8) NOT NULL,
+                            floor_count TINYINT UNSIGNED NOT NULL,
+                            created_by INT UNSIGNED NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (sector_id) REFERENCES mission_search_sectors(id) ON DELETE CASCADE,
+                            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_sector_building_sector (sector_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $floorsExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_sector_building_floors'"
+                );
+                if (!$floorsExists) {
+                    dbExecute(
+                        "CREATE TABLE mission_sector_building_floors (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            building_id INT UNSIGNED NOT NULL,
+                            floor_number SMALLINT NOT NULL,
+                            is_required TINYINT(1) NOT NULL DEFAULT 1,
+                            checked_at TIMESTAMP NULL,
+                            checked_by INT UNSIGNED NULL,
+                            note VARCHAR(500) NULL,
+                            FOREIGN KEY (building_id) REFERENCES mission_sector_buildings(id) ON DELETE CASCADE,
+                            FOREIGN KEY (checked_by) REFERENCES users(id) ON DELETE SET NULL,
+                            UNIQUE KEY uniq_building_floor (building_id, floor_number),
+                            INDEX idx_sector_floor_building (building_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

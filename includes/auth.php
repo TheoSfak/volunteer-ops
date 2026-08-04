@@ -65,6 +65,13 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // the endpoint enforces its own canManageAnyActionRoom() check no matter
     // how the request got routed to it.
     'api-war-room-layout.php',
+    // mission-sector.php (search-area coverage tracking) — same background-
+    // throttling force-logout risk as every other War Room AJAX endpoint
+    // here, and this one matters especially given the multi-country drill
+    // this feature was built for: partner-org guest accounts polling it
+    // from the field need both this exemption and (via bootstrap.php's
+    // $__extAllowed, which derives from this array) guest access itself.
+    'mission-sector.php',
 ]);
 
 function initSession() {
