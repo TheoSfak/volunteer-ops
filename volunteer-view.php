@@ -14,11 +14,13 @@ if (!$id) {
 
 $volunteer = dbFetchOne(
     "SELECT u.*, d.name as department_name, wh.name as warehouse_name,
-            vp.name as position_name, vp.color as position_color, vp.icon as position_icon
-     FROM users u 
-     LEFT JOIN departments d ON u.department_id = d.id 
-     LEFT JOIN departments wh ON u.warehouse_id = wh.id 
+            vp.name as position_name, vp.color as position_color, vp.icon as position_icon,
+            vt.name AS home_team_name, vt.color AS home_team_color
+     FROM users u
+     LEFT JOIN departments d ON u.department_id = d.id
+     LEFT JOIN departments wh ON u.warehouse_id = wh.id
      LEFT JOIN volunteer_positions vp ON u.position_id = vp.id
+     LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
      WHERE u.id = ?",
     [$id]
 );
@@ -719,7 +721,7 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
         <div class="flex-grow-1">
             <h1 class="h4 mb-1 text-white fw-bold">
-                <?= guestNameHtml($volunteer['name'], (bool)$volunteer['is_external'], $volunteer['guest_org_name']) ?>
+                <?= guestNameHtml($volunteer['name'], (bool)$volunteer['is_external'], $volunteer['home_team_name'], $volunteer['home_team_color'], $volunteer['guest_country_code']) ?>
                 <?= volunteerTypeBadge($volunteer['volunteer_type'] ?? VTYPE_RESCUER) ?>
                 <?php if (!empty($volunteer['position_name'])): ?>
                     <span class="badge bg-<?= h($volunteer['position_color'] ?? 'secondary') ?> ms-1" style="font-size:.7rem">
@@ -1484,7 +1486,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
                         <i class="bi bi-person-fill"></i>
                     </div>
                 <?php endif; ?>
-                <h5 class="mb-1"><?= guestNameHtml($volunteer['name'], (bool)$volunteer['is_external'], $volunteer['guest_org_name']) ?></h5>
+                <h5 class="mb-1"><?= guestNameHtml($volunteer['name'], (bool)$volunteer['is_external'], $volunteer['home_team_name'], $volunteer['home_team_color'], $volunteer['guest_country_code']) ?></h5>
                 <small class="text-muted d-block mb-3"><?= h($volunteer['email']) ?></small>
 
                 <?php if (isAdmin()): ?>

@@ -916,6 +916,32 @@ if (isLoggedIn()) {
             white-space: nowrap;
             cursor: help;
         }
+
+        /* Home-team badge (volunteer_teams — "Επίδραση" for regular members,
+           a partner org for guests) + country flag, riding just before the
+           name wherever guestNameHtml()'s new $teamColor/$countryCode args
+           are supplied. Colored per-instance via inline style=. */
+        .team-name-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-size: .62em;
+            font-weight: 700;
+            border-radius: 999px;
+            padding: 1px 6px;
+            margin-right: 3px;
+            vertical-align: top;
+            line-height: 1.4;
+            white-space: nowrap;
+            cursor: help;
+        }
+        .team-name-badge .flag-icon {
+            width: 14px;
+            height: 10.5px;
+            border-radius: 2px;
+            object-fit: cover;
+            flex-shrink: 0;
+        }
     </style>
 </head>
 <body>
@@ -1138,6 +1164,11 @@ if (isLoggedIn()) {
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'branches' ? 'active' : '' ?>" href="branches.php">
                     <i class="bi bi-geo-alt-fill"></i> Παραρτήματα
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'volunteer-teams' ? 'active' : '' ?>" href="volunteer-teams.php">
+                    <i class="bi bi-flag"></i> Ομάδες Εθελοντών
                 </a>
             </li>
             <?php endif; ?>
@@ -1432,7 +1463,7 @@ if (isLoggedIn()) {
                         <?php else: ?>
                             <i class="bi bi-person-circle me-1 flex-shrink-0"></i>
                         <?php endif; ?>
-                        <span class="user-name-text d-none d-sm-inline"><?= $currentUser ? guestNameHtml($currentUser['name'], (bool)($currentUser['is_external'] ?? false), $currentUser['guest_org_name'] ?? null) : h('Χρήστης') ?></span>
+                        <span class="user-name-text d-none d-sm-inline"><?= $currentUser ? guestNameHtml($currentUser['name'], (bool)($currentUser['is_external'] ?? false), $currentUser['home_team_name'] ?? null, $currentUser['home_team_color'] ?? null, $currentUser['guest_country_code'] ?? null) : h('Χρήστης') ?></span>
                         <span class="user-type-badge d-none d-md-inline"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_RESCUER) ?></span>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">

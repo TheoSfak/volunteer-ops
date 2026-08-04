@@ -21,6 +21,7 @@ define('DB_PASS', getenv('TEST_DB_PASS') ?: '');
 
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../includes/db.php';
+require_once __DIR__ . '/../includes/countries.php';
 require_once __DIR__ . '/../includes/functions-core.php';
 require_once __DIR__ . '/../includes/functions-warroom.php';
 require_once __DIR__ . '/../includes/auth.php';

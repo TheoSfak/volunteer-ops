@@ -298,18 +298,23 @@ if ($action === 'upload') {
         }
     }
 
+    [$homeBg, $homeFg] = teamBadgeColors($user['home_team_color'] ?? null);
     echo json_encode(['ok' => true, 'media' => [
-        'id'             => (int) $photoId,
-        'media_type'     => $mediaType,
-        'user_name'      => $user['name'],
-        'is_external'    => (bool) $user['is_external'],
-        'guest_org_name' => $user['guest_org_name'],
-        'team_label'     => $teamLabel,
-        'time'           => date('d/m H:i'),
-        'lat'            => $lat,
-        'lng'            => $lng,
-        'can_delete'     => true,
-        'poi_id'         => $poiId,
+        'id'                 => (int) $photoId,
+        'media_type'         => $mediaType,
+        'user_name'          => $user['name'],
+        'is_external'        => (bool) $user['is_external'],
+        'guest_org_name'     => $user['guest_org_name'],
+        'home_team_name'     => $user['home_team_name'] ?? null,
+        'home_team_color_bg' => $homeBg,
+        'home_team_color_fg' => $homeFg,
+        'guest_country_code' => $user['guest_country_code'] ?? null,
+        'team_label'         => $teamLabel,
+        'time'               => date('d/m H:i'),
+        'lat'                => $lat,
+        'lng'                => $lng,
+        'can_delete'         => true,
+        'poi_id'             => $poiId,
     ]]);
     exit;
 }
