@@ -654,22 +654,22 @@ function canManageAnyActionRoom(int $userId): bool {
 }
 
 /**
- * War Room: prepends an always-visible small badge showing this person's
- * home team (users.volunteer_team_id — "Επίδραση" for regular members, a
+ * War Room: appends an always-visible small badge showing this person's
+ * home team (users.volunteer_team_id — "Επίδρασις" for regular members, a
  * partner org for guests; NOT the same as a mission_teams squad) plus their
- * country's flag, right before their name. $teamColor/$countryCode are
- * optional trailing params so call sites not yet upgraded keep compiling and
- * rendering exactly as before — a byte-identical bare h($name) for regular
- * users, today's plain right-side org-name <sup> for guests.
+ * country's flag, at the upper-right of their name (superscript-style, same
+ * position the old guest-only org badge always used). $teamColor/$countryCode
+ * are optional trailing params so call sites not yet upgraded keep compiling
+ * and rendering exactly as before — a byte-identical bare h($name) for
+ * regular users, today's plain org-name <sup> for guests.
  *
- * Once upgraded ($teamColor passed), guests show their team name as visible
- * text (it varies row to row, worth seeing) while regular/Επίδραση rows show
- * only the flag+color chip — repeating "Επίδραση" on every single name
- * app-wide would be pure noise since it never varies. Used everywhere a
- * person's name is shown app-wide, including the guest's own profile hero
- * (not just Action Room). Mirrored client-side by the same-named JS function
- * in war-room.php for names that render from a JS poll (chat, media,
- * dispatch, SOS, shortage).
+ * Once upgraded ($teamColor passed), the team name is always shown as
+ * visible text next to the flag — for every user, not just guests, per the
+ * mission owner's explicit correction after reviewing the shipped feature.
+ * Used everywhere a person's name is shown app-wide, including the guest's
+ * own profile hero (not just Action Room). Mirrored client-side by the
+ * same-named JS function in war-room.php for names that render from a JS
+ * poll (chat, media, dispatch, SOS, shortage).
  */
 function guestNameHtml(string $name, bool $isExternal, ?string $teamName, ?string $teamColor = null, ?string $countryCode = null): string {
     if ($teamColor === null) {
@@ -682,15 +682,14 @@ function guestNameHtml(string $name, bool $isExternal, ?string $teamName, ?strin
     }
 
     [$bg, $fg] = teamBadgeColors($teamColor);
-    // Regular members are always Επίδραση, a Greek org — fixed, not stored
+    // Regular members are always Επίδρασις, a Greek org — fixed, not stored
     // per-row (users.guest_country_code is guest-only data and stays NULL
     // for everyone else), so the flag is hardcoded here rather than left
     // blank for the common case.
     $flag = flagHtml($isExternal ? $countryCode : 'GR');
     $team = ($teamName !== null && trim($teamName) !== '') ? $teamName : t('guest.org_unknown');
-    $content = $isExternal ? ($flag . h($team)) : $flag;
-    $badge = '<span class="team-name-badge" style="background:' . h($bg) . ';color:' . h($fg) . '" title="' . h($team) . '">' . $content . '</span>';
-    return $badge . ' ' . h($name);
+    $badge = '<span class="team-name-badge" style="background:' . h($bg) . ';color:' . h($fg) . '" title="' . h($team) . '">' . $flag . h($team) . '</span>';
+    return h($name) . ' ' . $badge;
 }
 
 /**

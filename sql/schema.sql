@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS `departments` (
 
 -- =============================================
 -- VOLUNTEER TEAMS TABLE
--- A volunteer's home rescue-team (e.g. "Επίδραση" for regular members, or a
+-- A volunteer's home rescue-team (e.g. "Επίδρασις" for regular members, or a
 -- partner org for guests) — distinct from mission_teams below, which are
 -- ephemeral per-mission Action Room squads.
 -- =============================================
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS `volunteer_teams` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO `volunteer_teams` (`name`, `color`, `is_default`, `is_active`) VALUES
-('Επίδραση', '#fd7e14', 1, 1);
+('Επίδρασις', '#fd7e14', 1, 1);
 
 -- =============================================
 -- USERS TABLE
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `language` ENUM('el','en') NOT NULL DEFAULT 'el' COMMENT 'Action Room UI language for this user',
     `guest_org_name` VARCHAR(150) NULL COMMENT 'Partner rescue-team/organization name for is_external accounts, shown as a tooltip on their name throughout Action Room',
     `guest_country` VARCHAR(100) NULL DEFAULT 'Ελλάδα' COMMENT 'Partner rescue-team country for is_external accounts',
-    `volunteer_team_id` INT UNSIGNED NULL COMMENT 'Home team badge (Επίδραση for regular members, or a partner-org team for guests) — not the same as mission_teams',
+    `volunteer_team_id` INT UNSIGNED NULL COMMENT 'Home team badge (Επίδρασις for regular members, or a partner-org team for guests) — not the same as mission_teams',
     `guest_country_code` CHAR(2) NULL COMMENT 'ISO 3166-1 alpha-2 code, drives the flag icon next to this user''s name',
     `total_points` INT DEFAULT 0,
     `monthly_points` INT DEFAULT 0,

@@ -1,7 +1,7 @@
 <?php
 /**
  * VolunteerOps - Ομάδες Εθελοντών (Home Teams) Management
- * A volunteer's home rescue-team (e.g. "Επίδραση" for regular members, or a
+ * A volunteer's home rescue-team (e.g. "Επίδρασις" for regular members, or a
  * partner org for guests) — the color+flag badge shown next to their name
  * app-wide. NOT the same as the per-mission Action Room squads managed
  * inside war-room.php.
@@ -92,7 +92,7 @@ include __DIR__ . '/includes/header.php';
         <h1 class="h3 mb-0">
             <i class="bi bi-flag me-2"></i>Ομάδες Εθελοντών
         </h1>
-        <p class="text-muted mb-0 mt-1">Η ομάδα-«σπίτι» κάθε εθελοντή (π.χ. «Επίδραση» για τα τακτικά μέλη, ή μία ομάδα-συνεργάτης για guest λογαριασμούς) — καθορίζει το έγχρωμο badge δίπλα στο όνομά του παντού στην εφαρμογή. Δεν έχει σχέση με τις ομάδες αποστολής μέσα στο Action Room.</p>
+        <p class="text-muted mb-0 mt-1">Η ομάδα-«σπίτι» κάθε εθελοντή (π.χ. «Επίδρασις» για τα τακτικά μέλη, ή μία ομάδα-συνεργάτης για guest λογαριασμούς) — καθορίζει το έγχρωμο badge δίπλα στο όνομά του παντού στην εφαρμογή. Δεν έχει σχέση με τις ομάδες αποστολής μέσα στο Action Room.</p>
     </div>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#teamModal">
         <i class="bi bi-plus-lg me-1"></i>Νέα Ομάδα
