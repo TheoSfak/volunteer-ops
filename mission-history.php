@@ -188,6 +188,46 @@ foreach ($sectorCreatedRows as $row) {
     ];
 }
 
+// ── restricted areas: created (no status/team, same as search areas above) ─
+$restrictedAreaCreatedRows = dbFetchAll(
+    "SELECT a.label, a.created_at, cu.name AS actor_name
+     FROM mission_restricted_areas a
+     LEFT JOIN users cu ON cu.id = a.created_by
+     WHERE a.mission_id = ?
+     ORDER BY a.created_at DESC LIMIT 200",
+    [$missionId]
+);
+foreach ($restrictedAreaCreatedRows as $row) {
+    $events[] = [
+        'icon' => '⚠️',
+        'text' => t('history.restricted_area_created', ['actor' => h($row['actor_name'] ?? '—'), 'label' => h($row['label'])], $viewerLang),
+        'time' => date('d/m H:i', strtotime($row['created_at'])),
+        'ts'   => strtotime($row['created_at']),
+    ];
+}
+
+// ── restricted-area breaches: unscoped, same reasoning as sectors above —
+// every team needs visibility into a safety incident regardless of which
+// team it happened to.
+$restrictedAreaBreachRows = dbFetchAll(
+    "SELECT b.area_label, b.created_at, b.team_id, u.name AS actor_name, mt.codename, mt.team_number
+     FROM mission_restricted_area_breaches b
+     JOIN users u ON u.id = b.user_id
+     LEFT JOIN mission_teams mt ON mt.id = b.team_id
+     WHERE b.mission_id = ?
+     ORDER BY b.created_at DESC LIMIT 200",
+    [$missionId]
+);
+foreach ($restrictedAreaBreachRows as $row) {
+    $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team', [], $viewerLang);
+    $events[] = [
+        'icon' => '🚨',
+        'text' => t('history.restricted_area_breach', ['actor' => h($row['actor_name']), 'team' => h($teamLabel), 'label' => h($row['area_label'])], $viewerLang),
+        'time' => date('d/m H:i', strtotime($row['created_at'])),
+        'ts'   => strtotime($row['created_at']),
+    ];
+}
+
 $sectorStatusRows = dbFetchAll(
     "SELECT l.to_status, l.created_at, s.label, u.name AS actor_name, mt.codename, mt.team_number
      FROM mission_sector_status_log l

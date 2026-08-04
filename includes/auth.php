@@ -72,6 +72,12 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // from the field need both this exemption and (via bootstrap.php's
     // $__extAllowed, which derives from this array) guest access itself.
     'mission-sector.php',
+    // mission-restricted-area.php (hazard/danger-zone polygons + breach
+    // ack/resolve) — same risk and same need for guest access as
+    // mission-sector.php just above: its GET poll is read by every approved
+    // participant (not just admins) so their own device can drive the
+    // personalized full-screen breach alarm.
+    'mission-restricted-area.php',
 ]);
 
 function initSession() {

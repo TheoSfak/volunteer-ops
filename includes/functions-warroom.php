@@ -1047,6 +1047,19 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
         return ['ok' => false, 'error' => t('ping.gps_unavailable_migration', [], $lang)];
     }
 
+    // Geofence check against any admin-drawn restricted areas — best-effort,
+    // same "non-critical" treatment as the order-auto-fulfill block below: a
+    // hiccup here (malformed geo on some row, a transient lock timeout) must
+    // never fail the ping itself, which already succeeded above.
+    try {
+        checkRestrictedAreaBreach(
+            (int) $pr['mission_id'], $userId, getUserTeamIdForMission((int) $pr['mission_id'], $userId),
+            (int) $pr['id'], $lat, $lng, $source, $accuracy
+        );
+    } catch (Exception $e) {
+        // Non-critical — the ping itself already succeeded.
+    }
+
     // Auto-captured pings (passive, every few minutes while Action Room is open,
     // or from the native app's background plugin) stay quiet — only a manual
     // tap should trigger the loud command-staff alert.
@@ -1074,6 +1087,126 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     }
 
     return ['ok' => true, 'ts' => date('H:i:s')];
+}
+
+/**
+ * Geofence check for admin-drawn restricted (hazard/danger) areas, called
+ * from recordVolunteerPing() on every ping from every source (web manual,
+ * web auto, native background). For each active restricted area on this
+ * mission: newly inside with no open breach -> open one; newly outside an
+ * open breach -> close it, but only on a ping trustworthy enough to believe
+ * (see below). Entry is deliberately eager (a false-positive alarm is
+ * cheap) while exit is deliberately conservative (a false-negative means
+ * someone stays in a danger zone with a silenced alarm) — asymmetric on
+ * purpose, not a missed case.
+ *
+ * Race-safety mirrors volunteer-status.php's SOS-alert creation exactly:
+ * lock the participation_requests row (guaranteed to already exist) before
+ * the check-then-act on the breaches table, since there's nothing to lock
+ * when the breach row doesn't exist yet. Without this, two near-simultaneous
+ * pings for the same user (e.g. a browser tab's auto-ping racing the native
+ * app's own background ping) could both observe "no open breach" and both
+ * insert.
+ */
+function checkRestrictedAreaBreach(int $missionId, int $userId, ?int $teamId, int $prId, float $lat, float $lng, string $source, ?float $accuracy): void {
+    $newBreaches = [];
+
+    db()->beginTransaction();
+    try {
+        dbFetchOne("SELECT id FROM participation_requests WHERE id = ? FOR UPDATE", [$prId]);
+
+        $areas = dbFetchAll("SELECT id, label, geo FROM mission_restricted_areas WHERE mission_id = ?", [$missionId]);
+        foreach ($areas as $area) {
+            $geo = json_decode((string) $area['geo'], true);
+            if (!is_array($geo) || count($geo) < 3) {
+                continue;
+            }
+            $inside = pointInPolygon($lat, $lng, $geo);
+            $openId = dbFetchValue(
+                "SELECT id FROM mission_restricted_area_breaches
+                 WHERE restricted_area_id = ? AND user_id = ? AND exited_at IS NULL AND resolved_at IS NULL",
+                [$area['id'], $userId]
+            );
+
+            if ($inside && !$openId) {
+                $breachId = dbInsert(
+                    "INSERT INTO mission_restricted_area_breaches (mission_id, restricted_area_id, area_label, user_id, team_id, lat, lng, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+                    [$missionId, $area['id'], $area['label'], $userId, $teamId, $lat, $lng]
+                );
+                $newBreaches[] = ['id' => (int) $breachId, 'area_label' => $area['label']];
+            } elseif (!$inside && $openId) {
+                // Auto-pings default to enableHighAccuracy:false (war-room.php's
+                // sendAutoPing/watchPosition setup) and are already excluded from
+                // other alerting for the same low-trust reason (the source!=='auto'
+                // check just above in recordVolunteerPing) — a single noisy,
+                // low-accuracy auto-ping landing just outside the boundary must not
+                // be enough on its own to silence the siren.
+                $trustworthy = $source !== 'auto' || ($accuracy !== null && $accuracy <= 100);
+                if ($trustworthy) {
+                    dbExecute("UPDATE mission_restricted_area_breaches SET exited_at = NOW() WHERE id = ?", [$openId]);
+                }
+            }
+        }
+        db()->commit();
+    } catch (Exception $e) {
+        db()->rollBack();
+        throw $e;
+    }
+
+    // Notify after commit, never inside the transaction — matches every other
+    // notify-after-write call in this codebase.
+    foreach ($newBreaches as $breach) {
+        notifyRestrictedAreaBreach($missionId, $userId, $teamId, $breach['area_label']);
+    }
+}
+
+/**
+ * Alerts BOTH sides of a restricted-area breach — deliberately two separate
+ * sendNotification() calls, not one. getMissionCommandStaffIds() excludes
+ * whoever is passed as its own $excludeUserId (that's how notifyVolunteerGpsPing
+ * avoids notifying someone about their own ping), so it only ever reaches the
+ * *other* party; the breaching volunteer themselves needs their own explicit
+ * call, which no existing helper does today.
+ */
+function notifyRestrictedAreaBreach(int $missionId, int $userId, ?int $teamId, string $areaLabel): void {
+    $mission = dbFetchOne("SELECT title, responsible_user_id FROM missions WHERE id = ?", [$missionId]);
+    if (!$mission) {
+        return;
+    }
+    $user = dbFetchOne("SELECT name FROM users WHERE id = ?", [$userId]);
+    $team = $teamId ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$teamId]) : null;
+    $teamLabelStr = $team ? teamLabel($team['codename'], $team['team_number']) : t('history.no_team_capitalized');
+
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $pushData = [
+        'url' => $warRoomUrl,
+        'tag' => 'restricted-area-mission-' . $missionId,
+        'bannerMission' => $missionId,
+    ];
+
+    // The volunteer themselves.
+    sendNotification(
+        $userId,
+        t('restricted_area.notify_title_self'),
+        t('restricted_area.notify_message_self', ['area' => $areaLabel]),
+        'danger', 'mission_restricted_area_breach', $pushData
+    );
+
+    // Command staff (excludes the volunteer above — same helper every other
+    // admin-facing War Room alert uses).
+    $responsibleUserId = $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null;
+    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $userId);
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        sendNotification(
+            $recipientId,
+            t('restricted_area.notify_title_admin', ['mission' => $mission['title']], $lang),
+            t('restricted_area.notify_message_admin', ['team' => $teamLabelStr, 'name' => $user['name'] ?? '', 'area' => $areaLabel], $lang),
+            'danger', 'mission_restricted_area_breach', $pushData
+        );
+    }
 }
 
 /**
@@ -1529,6 +1662,81 @@ function loadOpenSosAlertsForMission(int $missionId): array {
 }
 
 /**
+ * War Room: admin-drawn restricted (hazard/danger) area polygons for this
+ * mission's map layer. No per-item personalization needed (unlike areas/
+ * sectors) — the caller decides whether to call this at all, same external
+ * gate loadOpenSosAlertsForMission() already uses ($canManageWarRoom ? load() : []),
+ * since field mode has no map to draw these on regardless of role.
+ */
+function loadMissionRestrictedAreasForUser(int $missionId): array {
+    $rows = dbFetchAll(
+        "SELECT id, label, geo, created_at FROM mission_restricted_areas WHERE mission_id = ? ORDER BY created_at ASC",
+        [$missionId]
+    );
+    return array_map(fn($row) => [
+        'id'         => (int) $row['id'],
+        'label'      => $row['label'],
+        'geo'        => json_decode($row['geo'], true),
+        'created_at' => date('d\m H:i', strtotime($row['created_at'])),
+    ], $rows);
+}
+
+/**
+ * War Room: open (unresolved) restricted-area breaches. Unlike
+ * loadMissionRestrictedAreasForUser() above, this one personalizes AT LOAD
+ * TIME rather than via an external all-or-nothing gate — admin gets every
+ * open breach mission-wide (drives the admin's own full-screen alarm +
+ * breach-list card), a regular approved participant gets only their OWN
+ * breaches (drives just their own full-screen alarm, and only their own —
+ * they must never see, or be alarmed by, a different team's breach). This
+ * is what lets one shared client-side alarm function correctly serve both
+ * audiences: the payload is already scoped correctly per caller by the time
+ * it reaches the client. Row shape mirrors loadOpenSosAlertsForMission()
+ * above (guest-aware user_name/home-team fields for the same client-side
+ * guestNameHtml() treatment).
+ */
+function loadOpenRestrictedAreaBreachesForUser(int $missionId, int $userId, bool $canManageWarRoom): array {
+    $sql = "SELECT b.id, b.area_label, b.lat, b.lng, b.exited_at, b.acknowledged_at, b.created_at,
+                   b.user_id, b.team_id, u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
+                   vt.name AS home_team_name, vt.color AS home_team_color,
+                   mt.codename, mt.team_number
+            FROM mission_restricted_area_breaches b
+            JOIN users u ON u.id = b.user_id
+            LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+            LEFT JOIN mission_teams mt ON mt.id = b.team_id
+            WHERE b.mission_id = ? AND b.resolved_at IS NULL";
+    $params = [$missionId];
+    if (!$canManageWarRoom) {
+        $sql .= " AND b.user_id = ?";
+        $params[] = $userId;
+    }
+    $sql .= " ORDER BY b.created_at ASC";
+
+    $rows = dbFetchAll($sql, $params);
+    return array_map(function ($row) use ($userId) {
+        [$homeBg, $homeFg] = teamBadgeColors($row['home_team_color']);
+        return [
+            'id'                 => (int) $row['id'],
+            'area_label'         => $row['area_label'],
+            'user_name'          => $row['user_name'],
+            'is_external'        => (bool) $row['is_external'],
+            'guest_org_name'     => $row['guest_org_name'],
+            'home_team_name'     => $row['home_team_name'],
+            'home_team_color_bg' => $homeBg,
+            'home_team_color_fg' => $homeFg,
+            'guest_country_code' => $row['guest_country_code'],
+            'team_label'         => h($row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized')),
+            'lat'                => (float) $row['lat'],
+            'lng'                => (float) $row['lng'],
+            'exited_at'          => $row['exited_at'] ? date('d\m H:i', strtotime($row['exited_at'])) : null,
+            'acknowledged_at'    => $row['acknowledged_at'] ? date('d\m H:i', strtotime($row['acknowledged_at'])) : null,
+            'created_at'         => date('d\m H:i', strtotime($row['created_at'])),
+            'is_mine'            => (int) $row['user_id'] === $userId,
+        ];
+    }, $rows);
+}
+
+/**
  * War Room: user_ids currently "present" on this mission's War Room — last
  * touched the 15s ajax poll within the last 2x its interval. Shared by
  * war-room.php's full-page render (initial dot state) and its own ajax
@@ -1735,6 +1943,33 @@ function gpsBearingDegrees(float $lat1, float $lng1, float $lat2, float $lng2): 
     $x = cos($lat1Rad) * sin($lat2Rad) - sin($lat1Rad) * cos($lat2Rad) * cos($dLngRad);
     $bearing = rad2deg(atan2($y, $x));
     return fmod($bearing + 360, 360);
+}
+
+/**
+ * Standard ray-casting point-in-polygon test (odd-number-of-crossings rule).
+ * $geo is a ring of [lat, lng] pairs, same shape as every other polygon
+ * stored in this app (mission_search_areas.geo etc.) — not GeoJSON's
+ * [lng, lat] order. Flat-Cartesian on lat/lng, same accuracy tradeoff as the
+ * point-to-segment projection in war-room.php's sector-split tool: not
+ * geodesically exact, but well within tolerance at mission scale. Used by
+ * checkRestrictedAreaBreach() below; no existing implementation elsewhere
+ * in this codebase.
+ */
+function pointInPolygon(float $lat, float $lng, array $geo): bool {
+    $inside = false;
+    $n = count($geo);
+    for ($i = 0, $j = $n - 1; $i < $n; $j = $i++) {
+        $latI = (float) $geo[$i][0];
+        $lngI = (float) $geo[$i][1];
+        $latJ = (float) $geo[$j][0];
+        $lngJ = (float) $geo[$j][1];
+        $crosses = (($latI > $lat) !== ($latJ > $lat))
+            && ($lng < ($lngJ - $lngI) * ($lat - $latI) / ($latJ - $latI) + $lngI);
+        if ($crosses) {
+            $inside = !$inside;
+        }
+    }
+    return $inside;
 }
 
 /**
@@ -3416,6 +3651,43 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         $events[] = [
             'icon' => '🗺️',
             'text' => h($row['actor_name'] ?? '—') . ' δημιούργησε τον τομέα έρευνας «' . h($row['label']) . '» (' . h($teamLabel) . ')',
+            'ts'   => strtotime($row['created_at']),
+        ];
+    }
+
+    // Restricted (hazard/danger) areas — creation, same "nothing else to log"
+    // reasoning as search areas above.
+    $restrictedAreaCreatedRows = dbFetchAll(
+        "SELECT a.label, a.created_at, cu.name AS actor_name
+         FROM mission_restricted_areas a
+         LEFT JOIN users cu ON cu.id = a.created_by
+         WHERE a.mission_id = ?",
+        [$missionId]
+    );
+    foreach ($restrictedAreaCreatedRows as $row) {
+        $events[] = [
+            'icon' => '⚠️',
+            'text' => h($row['actor_name'] ?? '—') . ' δημιούργησε την απαγορευμένη περιοχή «' . h($row['label']) . '»',
+            'ts'   => strtotime($row['created_at']),
+        ];
+    }
+
+    // Restricted-area breaches — one event per entry (exit/resolve aren't
+    // separately logged here, same granularity as SOS alerts below, which
+    // also only report the initial created_at, not the ack/resolve times).
+    $restrictedAreaBreachRows = dbFetchAll(
+        "SELECT b.area_label, b.created_at, b.team_id, u.name AS actor_name, mt.codename, mt.team_number
+         FROM mission_restricted_area_breaches b
+         JOIN users u ON u.id = b.user_id
+         LEFT JOIN mission_teams mt ON mt.id = b.team_id
+         WHERE b.mission_id = ?",
+        [$missionId]
+    );
+    foreach ($restrictedAreaBreachRows as $row) {
+        $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'χωρίς ομάδα';
+        $events[] = [
+            'icon' => '🚨',
+            'text' => h($row['actor_name']) . ' (' . h($teamLabel) . ') μπήκε στην απαγορευμένη περιοχή «' . h($row['area_label']) . '»',
             'ts'   => strtotime($row['created_at']),
         ];
     }

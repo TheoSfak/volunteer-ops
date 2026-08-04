@@ -873,6 +873,8 @@ if (get('ajax') === '1') {
     $annotations = loadMissionAnnotationsForMission($missionId);
     $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
     $sectors = loadMissionSectorsForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
+    $restrictedAreas = $canManageWarRoom ? loadMissionRestrictedAreasForUser($missionId) : [];
+    $restrictedAreaBreaches = loadOpenRestrictedAreaBreachesForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $teamProximity = $loadTeamProximity();
 
     echo json_encode([
@@ -893,6 +895,8 @@ if (get('ajax') === '1') {
         'annotations' => $annotations,
         'areas' => $areas,
         'sectors' => $sectors,
+        'restrictedAreas' => $restrictedAreas,
+        'restrictedAreaBreaches' => $restrictedAreaBreaches,
         'nearbyTeams' => $teamProximity['nearbyTeams'],
         'teamDistances' => $teamProximity['teamDistances'],
     ]);
@@ -959,6 +963,8 @@ $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOf
 $annotations = loadMissionAnnotationsForMission($missionId);
 $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
 $sectors = loadMissionSectorsForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
+$restrictedAreas = $canManageWarRoom ? loadMissionRestrictedAreasForUser($missionId) : [];
+$restrictedAreaBreaches = loadOpenRestrictedAreaBreachesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $teamProximity = $loadTeamProximity();
 $nearbyTeams = $teamProximity['nearbyTeams'];
 $teamDistances = $teamProximity['teamDistances'];
@@ -1207,7 +1213,8 @@ include __DIR__ . '/includes/header.php';
     #sosOverlay.sos-active { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: rgba(20,2,2,.93); animation: sosPulseCorners 1s ease-in-out infinite; }
     #sosOverlay.sos-calm { display: block; animation: none; box-shadow: inset 0 0 120px 40px rgba(220,38,38,.35); }
     .sos-beacon, .sos-overlay-marquee { display: none; }
-    #sosOverlay.sos-active .sos-beacon, #sosOverlay.sos-active .sos-overlay-marquee { display: block; }
+    #sosOverlay.sos-active .sos-beacon, #sosOverlay.sos-active .sos-overlay-marquee,
+    #restrictedAreaOverlay.ra-active .sos-beacon, #restrictedAreaOverlay.ra-active .sos-overlay-marquee { display: block; }
     /* A real siren graphic (🚨, the standard "revolving light" emoji — a
        single long-established codepoint, unlike the flag emoji sequences
        that are known to render as literal text on Windows/Chrome, see
@@ -1258,6 +1265,38 @@ include __DIR__ . '/includes/header.php';
        Auto-clears on a timer instead of staying until acked. */
     #returnToBaseOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
     #returnToBaseOverlay.rtb-active { display: flex; align-items: center; justify-content: center; background: rgba(2,20,10,.93); animation: rtbPulseGreen 1s ease-in-out infinite; }
+    /* Restricted-area breach — a THIRD independent full-screen overlay (own
+       element, own class, never touches sosAlerts/sosOverlay or
+       returnToBaseOverlay's own state), rendered for EVERY approved
+       participant unconditionally (unlike #sosOverlay, which is command-only
+       — see the HTML below), since the primary audience here is the specific
+       field volunteer who walked into the zone, not just command staff.
+       Reuses #sosOverlay's exact beacon/marquee visual components and
+       sosPulseCorners animation (extended above) rather than duplicating
+       them — the user explicitly asked for the same intensity as SOS.
+       ra-active/ra-calm mirror sos-active/sos-calm's two-tier idea, but
+       driven by exited_at/resolved_at, not acknowledged_at (see
+       updateRestrictedAreaAlarmState() — calms the instant the volunteer's
+       own next trustworthy ping shows them outside the zone, independent of
+       whether admin ever acknowledges). */
+    #restrictedAreaOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
+    #restrictedAreaOverlay.ra-active { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: rgba(20,2,2,.93); animation: sosPulseCorners 1s ease-in-out infinite; }
+    #restrictedAreaOverlay.ra-calm { display: block; animation: none; box-shadow: inset 0 0 120px 40px rgba(220,38,38,.35); }
+    #raMuteBtn {
+        position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+        z-index: 2001; border: none; border-radius: 999px; padding: .6rem 1.4rem;
+        font-weight: 700; font-size: .95rem; box-shadow: 0 4px 16px rgba(0,0,0,.4);
+        cursor: pointer;
+    }
+    #raMuteBtn.sos-mute-offer { background: #fff; color: #dc2626; }
+    #raMuteBtn.sos-mute-active { background: #dc2626; color: #fff; }
+    #restrictedAreaOverlayCloseBtn {
+        position: fixed; top: 16px; right: 16px; z-index: 2001;
+        width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(255,255,255,.5);
+        background: rgba(255,255,255,.12); color: #fff; font-size: 1.6rem; line-height: 1;
+        cursor: pointer;
+    }
+    #restrictedAreaOverlayCloseBtn:hover { background: rgba(255,255,255,.25); }
     @keyframes sosPulseCorners {
         0%, 100% { box-shadow: inset 0 0 60px 20px rgba(220,38,38,.25), inset 0 0 160px 60px rgba(220,38,38,.12); }
         50%      { box-shadow: inset 0 0 120px 50px rgba(220,38,38,.65), inset 0 0 260px 120px rgba(220,38,38,.35); }
@@ -1377,6 +1416,20 @@ include __DIR__ . '/includes/header.php';
 <div id="returnToBaseOverlay">
     <div class="rtb-marquee-track"><span id="returnToBaseMarqueeText"></span></div>
 </div>
+
+<!-- Restricted-area breach — same reasoning as #returnToBaseOverlay just
+     above: rendered unconditionally regardless of $canManageWarRoom, since
+     the field volunteer who actually walked into the zone is this feature's
+     primary audience, not just command staff (who also get it, driven by
+     the SAME element/JS but with mission-wide breach data instead of just
+     their own — see loadOpenRestrictedAreaBreachesForUser()'s personalization
+     and updateRestrictedAreaAlarmState() below). -->
+<div id="restrictedAreaOverlay">
+    <div class="sos-beacon"><div class="sos-beacon-icon">🚨</div></div>
+    <div class="sos-overlay-marquee"><span id="restrictedAreaOverlayMarqueeText"></span></div>
+</div>
+<button type="button" id="raMuteBtn" class="d-none"></button>
+<button type="button" id="restrictedAreaOverlayCloseBtn" class="d-none" aria-label="<?= t('sos.close_overlay_btn') ?>" title="<?= t('sos.close_overlay_btn') ?>">&times;</button>
 
 <!-- Live-data staleness. The footer's generic offline bar only reacts to
      navigator.onLine, which stays true for the genuinely dangerous cases: a
@@ -2094,6 +2147,20 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
+        <div class="card shadow-sm mb-4 border-danger" data-card-id="restrictedAreasCard">
+            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('restricted_area.card_title') ?></h5></div>
+            <div class="card-body">
+                <p class="small text-muted"><?= t('restricted_area.note') ?></p>
+                <button type="button" class="btn btn-danger w-100 fw-semibold mb-3" data-bs-toggle="modal" data-bs-target="#restrictedAreaMapModal">
+                    <i class="bi bi-plus-lg me-1"></i><?= t('restricted_area.new_btn') ?>
+                </button>
+                <div id="restrictedAreasList" class="mb-3"></div>
+                <hr>
+                <h6 class="small fw-semibold text-uppercase text-muted"><?= t('restricted_area.breaches_title') ?></h6>
+                <div id="restrictedAreaBreachesList"></div>
+            </div>
+        </div>
+
         <?php if (!empty($teams)): ?>
         <div class="card shadow-sm mb-4 border-primary" data-card-id="routeOrderCard">
             <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-signpost-split-fill me-1"></i><?= t('route.card_title') ?></h5></div>
@@ -2478,6 +2545,37 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
     </div>
 </div>
 
+<div class="modal fade" id="restrictedAreaMapModal" tabindex="-1">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i><?= t('restricted_area.new_btn') ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0 d-flex flex-column">
+                <div class="p-2 border-bottom d-flex flex-wrap gap-2 align-items-center bg-light">
+                    <input type="text" id="restrictedAreaAddressInput" class="form-control" style="max-width:320px;" placeholder="<?= t('dispatch.address_placeholder') ?>">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="restrictedAreaAddressSearch"><i class="bi bi-search me-1"></i><?= t('dispatch.search_btn') ?></button>
+                    <span class="text-muted small" id="restrictedAreaAddressStatus"></span>
+                    <div class="input-group input-group-sm" style="max-width:230px;">
+                        <input type="text" id="restrictedAreaCoordsInput" class="form-control" placeholder="<?= t('dispatch.coords_placeholder') ?>" title="<?= t('dispatch.coords_add_title') ?>">
+                        <button type="button" class="btn btn-outline-secondary" id="restrictedAreaCoordsAddBtn" title="<?= t('dispatch.coords_add_title') ?>"><i class="bi bi-plus-lg"></i></button>
+                    </div>
+                    <input type="text" id="restrictedAreaLabelInput" class="form-control" style="max-width:220px;" maxlength="255" placeholder="<?= t('restricted_area.label_placeholder') ?>">
+                    <div class="ms-auto d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="restrictedAreaClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
+                        <button type="button" class="btn btn-danger btn-sm" id="restrictedAreaSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.save_btn') ?></button>
+                    </div>
+                </div>
+                <div class="small text-muted px-2 py-1 bg-light border-bottom">
+                    <?= t('restricted_area.map_instructions') ?>
+                </div>
+                <div id="restrictedAreaComposerMap" style="flex:1;min-height:0;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="routeComposerModal" tabindex="-1">
     <div class="modal-dialog modal-fullscreen">
         <div class="modal-content">
@@ -2640,6 +2738,8 @@ let missionIncidents = <?= json_encode($incidents) ?>;
 const canManageIncidents = <?= json_encode($canManageWarRoom) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
 let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
+let restrictedAreas = <?= json_encode($restrictedAreas) ?>;
+let restrictedAreaBreaches = <?= json_encode($restrictedAreaBreaches) ?>;
 
 // Drag-and-drop card layout (admin desktop view only — #wrZoneMain/#wrZoneSidebar
 // only exist in the DOM when canManageWarRoom && !fieldMode, so their absence
@@ -2823,7 +2923,7 @@ if (fieldMode) {
         if (document.visibilityState === 'visible') requestWarRoomWakeLock();
     });
 }
-let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null;
+let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
@@ -2876,6 +2976,33 @@ if (!fieldMode) {
     routeLayer = L.featureGroup().addTo(map);
     incidentLayer = L.featureGroup().addTo(map);
     poiLayer = L.featureGroup().addTo(map);
+    // Restricted (hazard/danger) areas render ABOVE literally everything else
+    // on the map, including annotationPane (610, itself already above every
+    // default Leaflet pane) — the user's own explicit ask. 700 leaves headroom
+    // above annotationPane without needing to renumber anything else.
+    map.createPane('restrictedAreaPane');
+    map.getPane('restrictedAreaPane').style.zIndex = 700;
+    restrictedAreaLayer = L.featureGroup().addTo(map);
+    // Diagonal-hatch fill pattern, injected once as a standalone SVG appended
+    // to document.body — deliberately NOT reaching into Leaflet's internals
+    // (map.getPanes()/map._renderer._container). A custom pane with no
+    // explicitly-created renderer gets its own separate, lazily-created SVG
+    // root distinct from the default overlayPane's (areaPane/sectorPane
+    // already do this invisibly), so a <defs> placed inside one pane's tree
+    // wouldn't be reachable from a polygon drawn in a different pane anyway.
+    // fill="url(#id)" resolves document-wide regardless of which SVG subtree
+    // hosts the referencing element, so a standalone def sidesteps the whole
+    // question and survives restrictedAreaLayer.clearLayers() on every
+    // re-render (never part of the cleared layer group to begin with).
+    if (!document.getElementById('restrictedHatchDefs')) {
+        const hatchSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        hatchSvg.setAttribute('id', 'restrictedHatchDefs');
+        hatchSvg.style.cssText = 'position:absolute;width:0;height:0';
+        hatchSvg.innerHTML = '<defs><pattern id="restrictedHatch" patternUnits="userSpaceOnUse" width="10" height="10" patternTransform="rotate(45)">'
+            + '<line x1="0" y1="0" x2="0" y2="10" stroke="#dc3545" stroke-width="4" stroke-dasharray="4,3"/>'
+            + '</pattern></defs>';
+        document.body.appendChild(hatchSvg);
+    }
 }
 const ANNOTATION_COLOR = '#1f2937';
 // Battle-map annotation tool state — a plain toggle over the same live map
@@ -3314,6 +3441,120 @@ areaLayer?.on('popupopen', event => {
     const delBtn = popupEl.querySelector('.area-delete-btn');
     if (delBtn) delBtn.addEventListener('click', () => areaDelete(delBtn.dataset.id));
 });
+
+// Restricted (hazard/danger) areas — solid red border + red diagonal-hatch
+// fill (restrictedHatch pattern, defined once at map init above), rendered
+// in restrictedAreaPane (z-index 700) so they sit above every other layer on
+// the map, admin-drawn/managed only (field mode has no map to show these on;
+// the volunteer-facing side of this feature is purely the full-screen alarm,
+// wired separately below).
+function renderRestrictedAreaLayer(items) {
+    if (!restrictedAreaLayer) return;
+
+    let openId = null;
+    restrictedAreaLayer.eachLayer(layer => { if (layer.restrictedAreaId !== undefined && layer.isPopupOpen && layer.isPopupOpen()) openId = layer.restrictedAreaId; });
+    restrictedAreaLayer.clearLayers();
+    let reopenLayer = null;
+
+    items.forEach(item => {
+        const popupHtml = `<strong>${escapeHtml(item.label)}</strong>
+            <div class="mt-2">
+                <button type="button" class="btn btn-sm btn-outline-danger restricted-area-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
+            </div>`;
+        const layer = L.polygon(item.geo, {pane: 'restrictedAreaPane', color: '#dc3545', weight: 3, fillColor: 'url(#restrictedHatch)', fillOpacity: 0.55}).addTo(restrictedAreaLayer).bindPopup(popupHtml);
+        layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'dispatch-team-label', interactive: false});
+        layer.restrictedAreaId = item.id;
+        if (String(item.id) === String(openId)) reopenLayer = layer;
+    });
+
+    if (reopenLayer) reopenLayer.openPopup();
+}
+restrictedAreaLayer?.on('popupopen', event => {
+    const popupEl = event.popup.getElement();
+    const delBtn = popupEl.querySelector('.restricted-area-delete-btn');
+    if (delBtn) delBtn.addEventListener('click', () => restrictedAreaDelete(delBtn.dataset.id));
+});
+function restrictedAreaDelete(id) {
+    const area = restrictedAreas.find(a => String(a.id) === String(id));
+    if (!confirm(t('restricted_area.delete_confirm', {label: area ? area.label : ''}))) return;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'delete', id});
+    fetch('mission-restricted-area.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+        if (result.ok) {
+            if (map) map.closePopup();
+            restrictedAreas = restrictedAreas.filter(a => String(a.id) !== String(id));
+            renderRestrictedAreaLayer(restrictedAreas);
+            renderRestrictedAreasList(restrictedAreas);
+        }
+    });
+}
+
+// restrictedAreasCard's flat list of drawn zones — the map popup (above) is
+// the primary way to manage one, this is just a non-map-dependent secondary
+// surface, same relationship sectorsListCard has to renderSectorLayer's
+// popups.
+function renderRestrictedAreasList(items) {
+    const list = document.getElementById('restrictedAreasList');
+    if (!list) return;
+    if (!items.length) {
+        list.innerHTML = '<p class="text-muted mb-0 small">' + t('restricted_area.empty_list') + '</p>';
+        return;
+    }
+    list.innerHTML = items.map(a => `
+        <div class="d-flex justify-content-between align-items-center border rounded p-2 mb-1">
+            <strong class="small">${escapeHtml(a.label)}</strong>
+            <button type="button" class="btn btn-sm btn-outline-danger restricted-area-list-delete-btn" data-id="${a.id}">${t('common.delete')}</button>
+        </div>
+    `).join('');
+    list.querySelectorAll('.restricted-area-list-delete-btn').forEach(btn => btn.addEventListener('click', () => restrictedAreaDelete(btn.dataset.id)));
+}
+
+// Breach list — structural clone of renderSosAlerts (same border-danger card
+// shape, same guestNameHtml() treatment, same acknowledge-then-resolve two-
+// step button), pointed at mission-restricted-area.php's own actions instead
+// of mission-sos.php's. Unlike SOS, resolving here doesn't require the
+// breach to already be acknowledged (mirrors mission-restricted-area.php's
+// own resolve action, which COALESCEs acknowledged_at if it was skipped) —
+// an admin force-clearing a stuck alarm shouldn't need two clicks.
+function renderRestrictedAreaBreachesList(items) {
+    const list = document.getElementById('restrictedAreaBreachesList');
+    if (!list) return;
+    if (!items.length) {
+        list.innerHTML = '<p class="text-muted mb-0 small">' + t('restricted_area.breaches_empty') + '</p>';
+        return;
+    }
+    list.innerHTML = items.map(b => `
+        <div class="border border-danger rounded p-2 mb-2">
+            <div><strong>⚠️ ${b.team_label}</strong> — ${guestNameHtml(b.user_name, b.is_external, b.home_team_name, b.home_team_color_bg, b.home_team_color_fg, b.guest_country_code)}</div>
+            <div class="small">${escapeHtml(b.area_label)}</div>
+            <div class="text-muted" style="font-size:.75rem;">${b.created_at}${b.exited_at ? t('restricted_area.exited_at_prefix', {time: b.exited_at}) : t('restricted_area.still_inside')}${b.acknowledged_at ? t('sos.ack_at_prefix', {time: b.acknowledged_at}) : ''}</div>
+            <div class="mt-1 d-flex gap-1">
+                ${!b.acknowledged_at ? `<button type="button" class="btn btn-sm btn-warning w-100 restricted-area-ack-btn" data-breach-id="${b.id}">${t('banner.ack_btn')}</button>` : ''}
+                <button type="button" class="btn btn-sm btn-success w-100 restricted-area-resolve-btn" data-breach-id="${b.id}">${t('shortage.resolve_btn')}</button>
+            </div>
+        </div>
+    `).join('');
+    list.querySelectorAll('.restricted-area-ack-btn').forEach(btn => btn.addEventListener('click', () => {
+        btn.disabled = true;
+        const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'acknowledge', id: btn.dataset.breachId});
+        fetch('mission-restricted-area.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                restrictedAreaBreaches = result.breaches;
+                renderRestrictedAreaBreachesList(restrictedAreaBreaches);
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
+        }).catch(() => { btn.disabled = false; });
+    }));
+    list.querySelectorAll('.restricted-area-resolve-btn').forEach(btn => btn.addEventListener('click', () => {
+        btn.disabled = true;
+        const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'resolve', id: btn.dataset.breachId});
+        fetch('mission-restricted-area.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                restrictedAreaBreaches = result.breaches;
+                renderRestrictedAreaBreachesList(restrictedAreaBreaches);
+                updateRestrictedAreaAlarmState(restrictedAreaBreaches);
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
+        }).catch(() => { btn.disabled = false; });
+    }));
+}
 
 let sectorsRenderedSig = null;
 function renderSectorLayer(items) {
@@ -5351,7 +5592,7 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 })();
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreaches); }
     renderMyTasks(myTasks);
     renderMySectors(sectors);
     renderMyRoutes(routes);
@@ -5362,6 +5603,10 @@ setTimeout(() => {
     renderNearbyTeams(nearbyTeams);
     renderBroadcastPhotos(broadcastPhotos);
     if (!fieldMode) updateSosAlarmState(sosAlerts);
+    // Ungated (unlike updateSosAlarmState just above) — same reasoning as the
+    // poll-path wiring in pollWarRoomData(): this alarm's primary audience is
+    // the field volunteer's own device, not just command staff.
+    updateRestrictedAreaAlarmState(restrictedAreaBreaches);
     // Anything still queued from a previous visit (closed the tab while
     // offline, reopened later) — the banner reflects it immediately, and a
     // flush is attempted right away rather than waiting for the first 15s tick.
@@ -5570,6 +5815,101 @@ function updateSosAlarmState(items) {
         }
     }
     const overlayMarqueeText = document.getElementById('sosOverlayMarqueeText');
+    if (overlayMarqueeText) overlayMarqueeText.textContent = marqueeText;
+}
+
+// Restricted-area breach alarm — structural clone of the SOS mute/dismiss/
+// alarm-state trio directly above (same local-only, non-destructive, keyed-
+// to-specific-ids escape hatches), but gated on exited_at/resolved_at
+// instead of acknowledged_at: this is a physical-safety alarm about a
+// CURRENT condition (is the volunteer still inside the zone right now?),
+// not a ticket queue, so it calms itself the instant the volunteer's own
+// next trustworthy ping shows them outside — independent of whether admin
+// ever acknowledges. resolved_at (admin's manual force-clear) is the only
+// thing that fully removes an item from `items` in the first place (see
+// loadOpenRestrictedAreaBreachesForUser's WHERE resolved_at IS NULL).
+const RA_MUTE_DURATION_MS = 5 * 60 * 1000;
+let raMutedBreachIds = new Set();
+let raMuteExpiresAt = 0;
+function isRaMuteActive() {
+    return raMuteExpiresAt > Date.now();
+}
+function muteRaAlerts(breachIds) {
+    raMutedBreachIds = new Set(breachIds);
+    raMuteExpiresAt = Date.now() + RA_MUTE_DURATION_MS;
+    stopSosSiren();
+    updateRestrictedAreaAlarmState(restrictedAreaBreaches);
+}
+function unmuteRaAlerts() {
+    raMutedBreachIds = new Set();
+    raMuteExpiresAt = 0;
+    updateRestrictedAreaAlarmState(restrictedAreaBreaches);
+}
+document.getElementById('raMuteBtn')?.addEventListener('click', () => {
+    if (isRaMuteActive()) {
+        unmuteRaAlerts();
+    } else {
+        muteRaAlerts(restrictedAreaBreaches.filter(b => !b.exited_at).map(b => b.id));
+    }
+});
+
+let raDismissedBreachIds = new Set();
+function dismissRestrictedAreaOverlay() {
+    raDismissedBreachIds = new Set(restrictedAreaBreaches.filter(b => !b.exited_at).map(b => b.id));
+    updateRestrictedAreaAlarmState(restrictedAreaBreaches);
+}
+document.getElementById('restrictedAreaOverlayCloseBtn')?.addEventListener('click', dismissRestrictedAreaOverlay);
+
+function updateRestrictedAreaAlarmState(items) {
+    const overlay = document.getElementById('restrictedAreaOverlay');
+    if (!overlay) return;
+    const open = items.filter(b => !b.exited_at);
+    const anyOpen = open.length > 0;
+    const muteStillValid = isRaMuteActive() && open.every(b => raMutedBreachIds.has(b.id));
+    const dismissStillValid = anyOpen && open.every(b => raDismissedBreachIds.has(b.id));
+    if (!items.length) {
+        overlay.classList.remove('ra-active', 'ra-calm');
+        // Same cross-alarm courtesy triggerReturnToBaseAlarm's own timeout
+        // uses: don't stop the shared siren oscillator out from under a
+        // genuinely separate, still-active SOS. #sosOverlay only exists in
+        // the DOM at all for admins, so this is a safe no-op check for
+        // everyone else.
+        if (!document.getElementById('sosOverlay')?.classList.contains('sos-active')) stopSosSiren();
+        raMutedBreachIds = new Set();
+        raMuteExpiresAt = 0;
+        raDismissedBreachIds = new Set();
+    } else if (anyOpen && !dismissStillValid) {
+        overlay.classList.add('ra-active');
+        overlay.classList.remove('ra-calm');
+        if (muteStillValid) { stopSosSiren(); } else { playSosSiren(); }
+    } else if (anyOpen) {
+        overlay.classList.remove('ra-active');
+        overlay.classList.add('ra-calm');
+        if (muteStillValid) { stopSosSiren(); } else { playSosSiren(); }
+    } else {
+        overlay.classList.remove('ra-active');
+        overlay.classList.add('ra-calm');
+        stopSosSiren();
+    }
+    const muteBtn = document.getElementById('raMuteBtn');
+    if (muteBtn) {
+        if (!anyOpen) {
+            muteBtn.className = 'd-none';
+        } else if (muteStillValid) {
+            const minutesLeft = Math.max(1, Math.ceil((raMuteExpiresAt - Date.now()) / 60000));
+            muteBtn.className = 'sos-mute-active';
+            muteBtn.innerHTML = `<i class="bi bi-volume-mute-fill me-1"></i>${escapeHtml(t('sos.muted_btn', {minutes: minutesLeft}))}`;
+        } else {
+            muteBtn.className = 'sos-mute-offer';
+            muteBtn.innerHTML = `<i class="bi bi-volume-mute me-1"></i>${escapeHtml(t('sos.mute_btn'))}`;
+        }
+    }
+    const closeBtn = document.getElementById('restrictedAreaOverlayCloseBtn');
+    if (closeBtn) closeBtn.classList.toggle('d-none', !(anyOpen && !dismissStillValid));
+    const marqueeText = items.length
+        ? items.map(b => t('restricted_area.marquee_text', {team: b.team_label.toUpperCase(), name: b.user_name, area: b.area_label})).join('     •••     ')
+        : '';
+    const overlayMarqueeText = document.getElementById('restrictedAreaOverlayMarqueeText');
     if (overlayMarqueeText) overlayMarqueeText.textContent = marqueeText;
 }
 
@@ -6254,6 +6594,20 @@ function pollWarRoomData() {
             sectors = data.sectors;
             renderMySectors(sectors);
             if (!fieldMode) { renderSectorLayer(sectors); renderSectorsList(sectors); renderAreaLayer(areas); }
+        }
+        if (data.restrictedAreas) {
+            restrictedAreas = data.restrictedAreas;
+            if (!fieldMode) { renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); }
+        }
+        if (data.restrictedAreaBreaches) {
+            restrictedAreaBreaches = data.restrictedAreaBreaches;
+            if (!fieldMode) renderRestrictedAreaBreachesList(restrictedAreaBreaches);
+            // Deliberately NOT !fieldMode-gated, unlike updateSosAlarmState just
+            // above — SOS is command-only by design, but this alarm's primary
+            // audience is the field volunteer's own device. Mirrors how
+            // triggerReturnToBaseAlarm (via the banners loop below) already
+            // reaches fieldMode unconditionally.
+            updateRestrictedAreaAlarmState(restrictedAreaBreaches);
         }
         if (data.onlinePresence) renderPresence(data.onlinePresence);
         if (data.pingStaleness) renderPingStaleness(data.pingStaleness);
@@ -7255,6 +7609,218 @@ document.querySelectorAll('.team-form').forEach(form => {
             if (result.ok) {
                 bootstrap.Modal.getInstance(modalEl).hide();
                 sectorRefreshAfter(result.sectors, result.areas);
+            } else {
+                alert(result.error || t('common.send_failed'));
+                sendBtn.disabled = false;
+            }
+        }).catch(() => { alert(t('common.send_failed')); sendBtn.disabled = false; });
+    });
+})();
+
+// Restricted-area composer — structural clone of the searchAreaMapModal IIFE
+// directly above (draggable vertices, Ctrl+Z action-stack, address/coords
+// input, polygon-only). Save posts to mission-restricted-area.php's own
+// create action instead of mission-sector.php's create_area.
+(function() {
+    const modalEl = document.getElementById('restrictedAreaMapModal');
+    if (!modalEl) return;
+
+    const addressInput = document.getElementById('restrictedAreaAddressInput');
+    const addressSearchBtn = document.getElementById('restrictedAreaAddressSearch');
+    const addressStatus = document.getElementById('restrictedAreaAddressStatus');
+    const coordsInput = document.getElementById('restrictedAreaCoordsInput');
+    const coordsAddBtn = document.getElementById('restrictedAreaCoordsAddBtn');
+    const labelInput = document.getElementById('restrictedAreaLabelInput');
+    const clearBtn = document.getElementById('restrictedAreaClearBtn');
+    const sendBtn = document.getElementById('restrictedAreaSendBtn');
+
+    let composerMap = null;
+    let refLayer = null;
+    let drawPoints = [];
+    let vertexMarkers = [];
+    let shapeLayer = null;
+    let isClosed = false;
+    let actionStack = [];
+
+    function vertexIcon() {
+        return L.divIcon({className: '', html: '<div style="width:14px;height:14px;border-radius:50%;background:#fff;border:3px solid #dc3545;box-shadow:0 1px 3px #0006;"></div>', iconSize: [14, 14], iconAnchor: [7, 7]});
+    }
+
+    // Dimmed, read-only copy of the live map's pins + existing search areas +
+    // existing restricted areas — same technique as the search-area composer's
+    // own renderAreaComposerContext(), extended to also show other restricted
+    // zones so an admin drawing a new one can see it doesn't overlap another.
+    function renderRestrictedAreaComposerContext() {
+        if (!refLayer) return;
+        refLayer.clearLayers();
+        const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
+        pins.forEach(pin => {
+            const color = pin.team_color || statusColors[pin.status] || '#2563eb';
+            L.circleMarker([pin.lat, pin.lng], {radius:6, weight:2, color:'#fff', fillColor:color, fillOpacity:0.55, opacity:0.6})
+                .addTo(refLayer)
+                .bindTooltip(escapeHtml(pin.name));
+        });
+        areas.forEach(item => {
+            L.polygon(item.geo, {color:'#495057', weight:2, opacity:0.5, dashArray:'8,5', fillOpacity:0.05}).addTo(refLayer).bindTooltip(escapeHtml(item.label));
+        });
+        restrictedAreas.forEach(item => {
+            L.polygon(item.geo, {color:'#dc3545', weight:2, opacity:0.6, dashArray:'4,3', fillOpacity:0.08}).addTo(refLayer).bindTooltip(escapeHtml(item.label));
+        });
+    }
+
+    function resetDrawing() {
+        drawPoints = [];
+        isClosed = false;
+        actionStack = [];
+        vertexMarkers.forEach(m => composerMap.removeLayer(m));
+        vertexMarkers = [];
+        if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
+        sendBtn.disabled = true;
+    }
+
+    function updateShapePreview() {
+        if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
+        if (drawPoints.length < 2) return;
+        shapeLayer = isClosed
+            ? L.polygon(drawPoints, {color:'#dc3545', fillOpacity:0.15}).addTo(composerMap)
+            : L.polyline(drawPoints, {color:'#dc3545'}).addTo(composerMap);
+    }
+
+    function updateSendState() {
+        sendBtn.disabled = !(isClosed && drawPoints.length >= 3);
+    }
+
+    function addDrawPoint(lat, lng) {
+        const idx = vertexMarkers.length;
+        drawPoints.push([lat, lng]);
+        const marker = L.marker([lat, lng], {icon: vertexIcon(), draggable: true}).addTo(composerMap);
+        marker.on('dragend', () => {
+            const ll = marker.getLatLng();
+            actionStack.push({type: 'move', index: idx, from: drawPoints[idx].slice()});
+            drawPoints[idx] = [ll.lat, ll.lng];
+            updateShapePreview();
+        });
+        vertexMarkers.push(marker);
+        actionStack.push({type: 'add'});
+        updateShapePreview();
+        updateSendState();
+    }
+
+    function undo() {
+        if (!actionStack.length) return;
+        const last = actionStack.pop();
+        if (last.type === 'add') {
+            const marker = vertexMarkers.pop();
+            if (marker) composerMap.removeLayer(marker);
+            drawPoints.pop();
+        } else if (last.type === 'move') {
+            drawPoints[last.index] = last.from;
+            vertexMarkers[last.index].setLatLng(last.from);
+        } else if (last.type === 'close') {
+            isClosed = false;
+        }
+        updateShapePreview();
+        updateSendState();
+    }
+
+    function keydownHandler(e) {
+        if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return;
+        const activeTag = document.activeElement ? document.activeElement.tagName : '';
+        if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+        e.preventDefault();
+        undo();
+    }
+
+    function onMapClick(e) {
+        if (isClosed) return;
+        if (drawPoints.length >= 3) {
+            const firstPoint = composerMap.latLngToContainerPoint(L.latLng(drawPoints[0]));
+            const clickPoint = composerMap.latLngToContainerPoint(e.latlng);
+            if (firstPoint.distanceTo(clickPoint) < 16) {
+                isClosed = true;
+                actionStack.push({type: 'close'});
+                updateShapePreview();
+                updateSendState();
+                return;
+            }
+        }
+        addDrawPoint(e.latlng.lat, e.latlng.lng);
+    }
+
+    function addCoordsFromInput() {
+        const parsed = parseCoordsInput(coordsInput.value);
+        if (!parsed) {
+            alert(t('dispatch.coords_invalid'));
+            return;
+        }
+        if (isClosed) {
+            alert(t('dispatch.coords_shape_closed'));
+            return;
+        }
+        addDrawPoint(parsed.lat, parsed.lng);
+        composerMap.setView([parsed.lat, parsed.lng], Math.max(composerMap.getZoom(), 15));
+        coordsInput.value = '';
+    }
+    coordsAddBtn.addEventListener('click', addCoordsFromInput);
+    coordsInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); addCoordsFromInput(); }
+    });
+
+    modalEl.addEventListener('shown.bs.modal', () => {
+        if (!composerMap) {
+            const center = missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73];
+            composerMap = L.map('restrictedAreaComposerMap').setView(center, missionLocation.lat ? 13 : 7);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(composerMap);
+            refLayer = L.layerGroup().addTo(composerMap);
+            composerMap.on('click', onMapClick);
+        }
+        renderRestrictedAreaComposerContext();
+        document.addEventListener('keydown', keydownHandler);
+        setTimeout(() => composerMap.invalidateSize(), 100);
+    });
+
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        resetDrawing();
+        addressInput.value = '';
+        addressStatus.textContent = '';
+        coordsInput.value = '';
+        labelInput.value = '';
+        document.removeEventListener('keydown', keydownHandler);
+    });
+
+    clearBtn.addEventListener('click', resetDrawing);
+
+    addressSearchBtn.addEventListener('click', () => {
+        const q = addressInput.value.trim();
+        if (!q) return;
+        addressStatus.textContent = t('dispatch.searching');
+        fetch('geocode-address.php?q=' + encodeURIComponent(q)).then(response => response.json()).then(result => {
+            if (result.ok) {
+                composerMap.setView([result.lat, result.lng], 16);
+                addressStatus.textContent = '✓ ' + (result.display_name || q);
+            } else {
+                addressStatus.textContent = result.error || t('dispatch.address_not_found');
+            }
+        }).catch(() => { addressStatus.textContent = t('dispatch.search_failed'); });
+    });
+
+    sendBtn.addEventListener('click', () => {
+        const label = labelInput.value.trim();
+        if (!label) {
+            alert(t('sector.invalid_label'));
+            return;
+        }
+        const data = new URLSearchParams({
+            csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
+            geo: JSON.stringify(drawPoints), label: label,
+        });
+        sendBtn.disabled = true;
+        fetch('mission-restricted-area.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
+            if (result.ok) {
+                bootstrap.Modal.getInstance(modalEl).hide();
+                restrictedAreas = result.areas;
+                renderRestrictedAreaLayer(restrictedAreas);
+                renderRestrictedAreasList(restrictedAreas);
             } else {
                 alert(result.error || t('common.send_failed'));
                 sendBtn.disabled = false;

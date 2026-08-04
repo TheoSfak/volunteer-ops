@@ -240,6 +240,27 @@ return [
         'history.area_created' => '{actor} δημιούργησε την περιοχή έρευνας «{label}»',
         'history.sector_created' => '{actor} δημιούργησε τον τομέα έρευνας «{label}» ({team})',
         'history.sector_status_changed' => '{actor} άλλαξε τον τομέα «{label}» σε «{status}» ({team})',
+        // Restricted (hazard/danger) areas — admin-drawn zones rendered above
+        // every other War Room layer; a volunteer's GPS ping landing inside
+        // one triggers the dual-sided full-screen alarm.
+        'restricted_area.card_title' => 'Απαγορευμένες Περιοχές',
+        'restricted_area.note' => 'Σχεδιάστε επικίνδυνες/απαγορευμένες ζώνες στον χάρτη. Αν το στίγμα ενός εθελοντή εντοπιστεί μέσα σε μία από αυτές, ενεργοποιείται άμεσα συναγερμός πλήρους οθόνης — και στον ίδιο και στους συντονιστές.',
+        'restricted_area.new_btn' => 'Νέα Απαγορευμένη Περιοχή',
+        'restricted_area.label_placeholder' => 'π.χ. Επικίνδυνο Κτίριο',
+        'restricted_area.map_instructions' => 'Κάντε κλικ στον χάρτη για να σχεδιάσετε τα όρια της απαγορευμένης περιοχής (τουλάχιστον 3 σημεία).',
+        'restricted_area.delete_confirm' => 'Διαγραφή της απαγορευμένης περιοχής «{label}»; Τυχόν ανοιχτές παραβιάσεις θα κλείσουν αυτόματα. Η ενέργεια δεν αναιρείται.',
+        'restricted_area.empty_list' => 'Δεν έχουν οριστεί απαγορευμένες περιοχές.',
+        'restricted_area.breaches_title' => 'Παραβιάσεις',
+        'restricted_area.breaches_empty' => 'Δεν υπάρχουν παραβιάσεις.',
+        'restricted_area.exited_at_prefix' => ' · Αποχώρησε: {time}',
+        'restricted_area.still_inside' => ' · Παραμένει εντός',
+        'restricted_area.marquee_text' => '🚨 {team} — {name}: ΕΝΤΟΣ ΑΠΑΓΟΡΕΥΜΕΝΗΣ ΠΕΡΙΟΧΗΣ «{area}»!',
+        'restricted_area.notify_title_self' => '🚨 Μπήκατε σε απαγορευμένη περιοχή!',
+        'restricted_area.notify_message_self' => 'Βρίσκεστε εντός της απαγορευμένης περιοχής «{area}». Απομακρυνθείτε άμεσα.',
+        'restricted_area.notify_title_admin' => '🚨 Παραβίαση απαγορευμένης περιοχής — {mission}',
+        'restricted_area.notify_message_admin' => 'Η ομάδα {team} ({name}) μπήκε στην απαγορευμένη περιοχή «{area}».',
+        'history.restricted_area_created' => '{actor} δημιούργησε την απαγορευμένη περιοχή «{label}»',
+        'history.restricted_area_breach' => '{actor} ({team}) μπήκε στην απαγορευμένη περιοχή «{label}»',
 
         // Incident/casualty reports
         'wr.perm.report_incident' => 'Μόνο εγκεκριμένοι εθελοντές μπορούν να υποβάλουν αναφορά περιστατικού.',
@@ -1141,6 +1162,27 @@ return [
         'history.area_created' => '{actor} created search area "{label}"',
         'history.sector_created' => '{actor} created search sector "{label}" ({team})',
         'history.sector_status_changed' => '{actor} changed sector "{label}" to "{status}" ({team})',
+        // Restricted (hazard/danger) areas — admin-drawn zones rendered above
+        // every other War Room layer; a volunteer's GPS ping landing inside
+        // one triggers the dual-sided full-screen alarm.
+        'restricted_area.card_title' => 'Restricted Areas',
+        'restricted_area.note' => 'Draw hazard/danger zones on the map. If a volunteer\'s GPS location is detected inside one, a full-screen alarm fires immediately — for both the volunteer and command staff.',
+        'restricted_area.new_btn' => 'New Restricted Area',
+        'restricted_area.label_placeholder' => 'e.g. Hazardous Building',
+        'restricted_area.map_instructions' => 'Click the map to draw the restricted area\'s boundary (at least 3 points).',
+        'restricted_area.delete_confirm' => 'Delete restricted area "{label}"? Any open breaches will be auto-resolved. This cannot be undone.',
+        'restricted_area.empty_list' => 'No restricted areas have been defined.',
+        'restricted_area.breaches_title' => 'Breaches',
+        'restricted_area.breaches_empty' => 'No breaches.',
+        'restricted_area.exited_at_prefix' => ' · Exited: {time}',
+        'restricted_area.still_inside' => ' · Still inside',
+        'restricted_area.marquee_text' => '🚨 {team} — {name}: INSIDE RESTRICTED AREA "{area}"!',
+        'restricted_area.notify_title_self' => '🚨 You entered a restricted area!',
+        'restricted_area.notify_message_self' => 'You are inside the restricted area "{area}". Move away immediately.',
+        'restricted_area.notify_title_admin' => '🚨 Restricted area breach — {mission}',
+        'restricted_area.notify_message_admin' => 'Team {team} ({name}) entered the restricted area "{area}".',
+        'history.restricted_area_created' => '{actor} created restricted area "{label}"',
+        'history.restricted_area_breach' => '{actor} ({team}) entered restricted area "{label}"',
 
         // Incident/casualty reports
         'wr.perm.report_incident' => 'Only approved volunteers can submit an incident report.',
