@@ -658,21 +658,38 @@ foreach (dbFetchAll(
 $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds) {
     try {
         $field = $hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status';
+        // Was: 1 query for the latest ping per volunteer, PLUS one extra
+        // query per volunteer inside the loop below to find their previous
+        // ping (needed only for the moving/heading calc) — a real N+1 that
+        // scaled with active-volunteer count on every single poll tick.
+        // LEAD() pulls that previous ping's lat/lng/accuracy/time into the
+        // SAME row in one query. Windowed/ordered by vp.id (not created_at)
+        // to match exactly what the old MAX(id) subquery picked as
+        // "latest" — id is the real tiebreak of record here, not the
+        // timestamp, so this selects and pairs the identical rows the old
+        // two-query version did.
         $rawPins = dbFetchAll(
-            "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.created_at, u.name,
-                    u.is_external, u.guest_org_name, u.guest_country_code,
-                    ht.name AS home_team_name, ht.color AS home_team_color,
-                    mt.color AS team_color, mt.codename, mt.team_number{$field}
-             FROM volunteer_pings vp
-             JOIN shifts s ON s.id = vp.shift_id
-             JOIN users u ON u.id = vp.user_id
-             LEFT JOIN volunteer_teams ht ON ht.id = u.volunteer_team_id
-             LEFT JOIN participation_requests pr ON pr.shift_id = vp.shift_id AND pr.volunteer_id = vp.user_id
-             LEFT JOIN mission_team_members mtm ON mtm.user_id = vp.user_id AND mtm.mission_id = s.mission_id
-             LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
-             WHERE s.mission_id = ?
-               AND vp.id = (SELECT MAX(vp2.id) FROM volunteer_pings vp2 WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id)
-             ORDER BY vp.created_at DESC",
+            "SELECT * FROM (
+                SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.created_at, u.name,
+                        u.is_external, u.guest_org_name, u.guest_country_code,
+                        ht.name AS home_team_name, ht.color AS home_team_color,
+                        mt.color AS team_color, mt.codename, mt.team_number{$field},
+                        ROW_NUMBER() OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS rn,
+                        LEAD(vp.lat) OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS prev_lat,
+                        LEAD(vp.lng) OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS prev_lng,
+                        LEAD(vp.accuracy_meters) OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS prev_accuracy_meters,
+                        LEAD(vp.created_at) OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS prev_created_at
+                 FROM volunteer_pings vp
+                 JOIN shifts s ON s.id = vp.shift_id
+                 JOIN users u ON u.id = vp.user_id
+                 LEFT JOIN volunteer_teams ht ON ht.id = u.volunteer_team_id
+                 LEFT JOIN participation_requests pr ON pr.shift_id = vp.shift_id AND pr.volunteer_id = vp.user_id
+                 LEFT JOIN mission_team_members mtm ON mtm.user_id = vp.user_id AND mtm.mission_id = s.mission_id
+                 LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
+                 WHERE s.mission_id = ?
+             ) ranked
+             WHERE rn = 1
+             ORDER BY created_at DESC",
             [$missionId]
         );
 
@@ -697,21 +714,15 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
             // than assuming the old, now-proven-too-loose 30m applies.
             $isMoving = false;
             $headingDeg = null;
-            $prevPing = dbFetchOne(
-                "SELECT lat, lng, accuracy_meters, created_at FROM volunteer_pings
-                 WHERE user_id = ? AND shift_id = ? AND created_at < ?
-                 ORDER BY created_at DESC LIMIT 1",
-                [$pin['user_id'], $pin['shift_id'], $pin['created_at']]
-            );
-            if ($prevPing) {
-                $secondsBetween = $pingTs - strtotime($prevPing['created_at']);
+            if ($pin['prev_created_at'] !== null) {
+                $secondsBetween = $pingTs - strtotime($pin['prev_created_at']);
                 if ($secondsBetween > 0 && $secondsBetween <= 1200) {
                     $distanceMeters = gpsDistanceMeters(
-                        (float) $prevPing['lat'], (float) $prevPing['lng'],
+                        (float) $pin['prev_lat'], (float) $pin['prev_lng'],
                         (float) $pin['lat'], (float) $pin['lng']
                     );
-                    $requiredMeters = ($prevPing['accuracy_meters'] !== null && $pin['accuracy_meters'] !== null)
-                        ? max(30, (float) $prevPing['accuracy_meters'] + (float) $pin['accuracy_meters'])
+                    $requiredMeters = ($pin['prev_accuracy_meters'] !== null && $pin['accuracy_meters'] !== null)
+                        ? max(30, (float) $pin['prev_accuracy_meters'] + (float) $pin['accuracy_meters'])
                         : 75;
                     $isMoving = $distanceMeters >= $requiredMeters;
                     // Heading only means something once we've already decided
@@ -720,7 +731,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                     // point in a meaningless, randomly-flipping direction.
                     if ($isMoving) {
                         $headingDeg = gpsBearingDegrees(
-                            (float) $prevPing['lat'], (float) $prevPing['lng'],
+                            (float) $pin['prev_lat'], (float) $pin['prev_lng'],
                             (float) $pin['lat'], (float) $pin['lng']
                         );
                     }

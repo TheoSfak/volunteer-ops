@@ -3172,6 +3172,13 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         if (in_array($row['order_type'], ['task', 'message', 'route'], true) && $row['task_text']) {
             $snippet = mb_strlen($row['task_text']) > 120 ? mb_substr($row['task_text'], 0, 117) . '…' : $row['task_text'];
             $extra = ' — «' . h($snippet) . '»';
+        } elseif ($row['order_type'] === 'return_to_base') {
+            // No task_text stored for this type (see mission-history.php's own
+            // fix for the same gap) — the sent message is a fixed system
+            // phrase, not admin-typed free text, so it's spelled out directly
+            // here rather than re-derived from a translation key this
+            // hardcoded-Greek report file doesn't otherwise use.
+            $extra = ' — «Η αποστολή ολοκληρώθηκε — επιστρέψτε άμεσα στη βάση.»';
         }
         $events[] = ['icon' => $icon, 'text' => 'Εντολή προς ' . h($row['actor_name']) . ' (' . h($teamLabel) . ')' . $extra, 'ts' => strtotime($row['sent_at'])];
         if ($row['acknowledged_at']) {
