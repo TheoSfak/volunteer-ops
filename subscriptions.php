@@ -1029,7 +1029,7 @@ include __DIR__ . '/includes/header.php';
         cameraInput.type = 'file';
         cameraInput.name = 'receipt_camera';
         cameraInput.id = cameraId;
-        cameraInput.accept = 'image/jpeg,image/png';
+        cameraInput.accept = 'image/*';
         cameraInput.setAttribute('capture', 'environment');
         cameraInput.className = 'd-none';
         if (formId) cameraInput.setAttribute('form', formId);
