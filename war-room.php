@@ -1200,6 +1200,16 @@ include __DIR__ . '/includes/header.php';
     }
     #sosMuteBtn.sos-mute-offer { background: #fff; color: #dc2626; }
     #sosMuteBtn.sos-mute-active { background: #dc2626; color: #fff; }
+    /* Sits above #sosOverlay the same way #sosMuteBtn does (own fixed
+       position, own z-index) — only shown while sos-active, toggled in
+       updateSosAlarmState() alongside the mute button. */
+    #sosOverlayCloseBtn {
+        position: fixed; top: 16px; right: 16px; z-index: 2001;
+        width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(255,255,255,.5);
+        background: rgba(255,255,255,.12); color: #fff; font-size: 1.6rem; line-height: 1;
+        cursor: pointer;
+    }
+    #sosOverlayCloseBtn:hover { background: rgba(255,255,255,.25); }
     /* End of Mission / Return to Base — a separate overlay from #sosOverlay
        (own element, own class) so it never interferes with real SOS alert
        state. Deliberately GREEN with a full dark scrim (not SOS's red corner
@@ -1313,6 +1323,14 @@ include __DIR__ . '/includes/header.php';
      the sound is ever affected, and only on this one device/tab, not for
      any other command-staff member watching the same mission. -->
 <button type="button" id="sosMuteBtn" class="d-none"></button>
+<!-- Full-screen SOS takeover (sos-active) is a near-opaque dark scrim over
+     the whole viewport — pointer-events:none technically lets clicks reach
+     the map/SOS-panel underneath, but staff can't SEE them to click blind.
+     This button is the one way back to a usable screen without acknowledging
+     anything: it's a purely local/visual dismiss (see sosDismissedAlertIds),
+     not a call to mission-sos.php, so the alert stays genuinely open — the
+     siren, the SOS list panel, and the small map marquee are all untouched. -->
+<button type="button" id="sosOverlayCloseBtn" class="d-none" aria-label="<?= t('sos.close_overlay_btn') ?>" title="<?= t('sos.close_overlay_btn') ?>">&times;</button>
 <?php endif; ?>
 <!-- Unlike #sosOverlay (command-staff-only, since SOS is a field->command
      incoming alert), this is command->field, so every approved participant
@@ -4713,26 +4731,56 @@ document.getElementById('sosMuteBtn')?.addEventListener('click', () => {
     }
 });
 
+// Local-only dismiss of the full-screen SOS takeover — NOT an acknowledge.
+// The takeover's dark scrim covers the whole viewport, so even though it's
+// pointer-events:none (clicks technically reach the map/SOS panel
+// underneath), staff can't SEE those controls to click them. This is the
+// way back to a usable screen without pretending anyone has actually
+// responded: the siren, the SOS list panel's real Acknowledge/Resolve
+// buttons, and the small map marquee are all untouched — only the
+// full-screen visual steps down to the calm corner-glow look. Same
+// "keyed to the specific alert ids, so a NEW SOS is never silently
+// suppressed by a stale dismiss" safety property as the mute button above,
+// but no time expiry — unlike the siren sound, there's no reason a
+// deliberately-dismissed full-screen takeover should reappear on its own
+// while staff are actively using the map to respond.
+let sosDismissedAlertIds = new Set();
+function dismissSosOverlay() {
+    sosDismissedAlertIds = new Set(sosAlerts.filter(a => !a.acknowledged_at).map(a => a.id));
+    updateSosAlarmState(sosAlerts);
+}
+document.getElementById('sosOverlayCloseBtn')?.addEventListener('click', dismissSosOverlay);
+
 // Drives the full-viewport red corner overlay + map marquee from the current
-// sosAlerts list. Any unacknowledged alert = pulsing corners; all
-// acknowledged-but-unresolved = calm static red; no open alerts = fully off.
-// The VISUAL state is never affected by the local mute above — only the
-// siren audio itself is; muting must never look like "no SOS is happening."
+// sosAlerts list. Any unacknowledged, non-dismissed alert = full-screen
+// takeover; everything else (acknowledged, or dismissed-but-still-open) =
+// calm static red; no open alerts = fully off. The VISUAL state is never
+// affected by the local mute above — only the siren audio itself is; muting
+// must never look like "no SOS is happening."
 function updateSosAlarmState(items) {
     const overlay = document.getElementById('sosOverlay');
     if (!overlay) return;
     const unacked = items.filter(a => !a.acknowledged_at);
     const anyUnacked = unacked.length > 0;
     const muteStillValid = isSosMuteActive() && unacked.every(a => sosMutedAlertIds.has(a.id));
+    const dismissStillValid = anyUnacked && unacked.every(a => sosDismissedAlertIds.has(a.id));
     if (!items.length) {
         overlay.classList.remove('sos-active', 'sos-calm');
         stopSosSiren();
-        // A fresh SOS later must never inherit today's stale mute state.
+        // A fresh SOS later must never inherit today's stale mute/dismiss state.
         sosMutedAlertIds = new Set();
         sosMuteExpiresAt = 0;
-    } else if (anyUnacked) {
+        sosDismissedAlertIds = new Set();
+    } else if (anyUnacked && !dismissStillValid) {
         overlay.classList.add('sos-active');
         overlay.classList.remove('sos-calm');
+        if (muteStillValid) { stopSosSiren(); } else { playSosSiren(); }
+    } else if (anyUnacked) {
+        // Dismissed, not acknowledged — still genuinely open, so the siren
+        // keeps obeying mute exactly as it would in the full-screen state;
+        // only the takeover visual itself steps back.
+        overlay.classList.remove('sos-active');
+        overlay.classList.add('sos-calm');
         if (muteStillValid) { stopSosSiren(); } else { playSosSiren(); }
     } else {
         overlay.classList.remove('sos-active');
@@ -4752,6 +4800,8 @@ function updateSosAlarmState(items) {
             muteBtn.innerHTML = `<i class="bi bi-volume-mute me-1"></i>${escapeHtml(t('sos.mute_btn'))}`;
         }
     }
+    const closeBtn = document.getElementById('sosOverlayCloseBtn');
+    if (closeBtn) closeBtn.classList.toggle('d-none', !(anyUnacked && !dismissStillValid));
     // Shared by the map-bottom marquee and the full-screen overlay's own
     // centered one (the latter only ever visible while sos-active) — one
     // "who's in danger" string computed once, not duplicated per surface.
