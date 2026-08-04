@@ -5777,6 +5777,71 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 122,
+            'description' => 'Create mission_search_areas (the outer polygon an admin draws first, representing a whole search zone) and add area_id to mission_search_sectors — sectors are now sub-divisions of an area rather than standalone top-level polygons, correcting the original v121 shape which skipped this parent level. area_id uses ON DELETE CASCADE (unlike sector.team_id\'s SET NULL) since an area with no sectors left has no purpose of its own — deleting it should take its sectors, and their buildings/floors, with it.',
+            'up' => function () {
+                $areasExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_search_areas'"
+                );
+                if (!$areasExists) {
+                    dbExecute(
+                        "CREATE TABLE mission_search_areas (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            mission_id INT UNSIGNED NOT NULL,
+                            label VARCHAR(255) NOT NULL,
+                            geo TEXT NOT NULL,
+                            created_by INT UNSIGNED NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                            FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_search_area_mission (mission_id)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                $areaIdCol = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE()
+                       AND TABLE_NAME   = 'mission_search_sectors'
+                       AND COLUMN_NAME  = 'area_id'"
+                );
+                if (!$areaIdCol) {
+                    // Nullable first, not NOT NULL directly — a straight ADD
+                    // COLUMN ... NOT NULL with no default fails outright on a
+                    // non-empty table, and this migration must stay safe to
+                    // run against a deployment where an admin already created
+                    // real sectors under the old (area-less) shape. Backfill
+                    // a placeholder area per affected mission, grouping its
+                    // orphaned sectors under it, before tightening to NOT NULL.
+                    dbExecute("ALTER TABLE mission_search_sectors ADD COLUMN area_id INT UNSIGNED NULL AFTER mission_id");
+
+                    $orphanMissions = dbFetchAll(
+                        "SELECT DISTINCT mission_id FROM mission_search_sectors WHERE area_id IS NULL"
+                    );
+                    foreach ($orphanMissions as $row) {
+                        $missionId = (int) $row['mission_id'];
+                        $placeholderAreaId = dbInsert(
+                            "INSERT INTO mission_search_areas (mission_id, label, geo, created_at) VALUES (?, ?, ?, NOW())",
+                            [$missionId, 'Migrated Area', '[]']
+                        );
+                        dbExecute(
+                            "UPDATE mission_search_sectors SET area_id = ? WHERE mission_id = ? AND area_id IS NULL",
+                            [$placeholderAreaId, $missionId]
+                        );
+                    }
+
+                    dbExecute(
+                        "ALTER TABLE mission_search_sectors
+                            MODIFY COLUMN area_id INT UNSIGNED NOT NULL,
+                            ADD FOREIGN KEY (area_id) REFERENCES mission_search_areas(id) ON DELETE CASCADE,
+                            ADD INDEX idx_sector_area (area_id)"
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
