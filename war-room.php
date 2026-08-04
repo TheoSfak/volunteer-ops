@@ -1196,6 +1196,15 @@ include __DIR__ . '/includes/header.php';
     body.war-room-focus .sidebar-toggle { display: none; }
     body.war-room-focus .main-content { margin-left: 0; }
     #mediaList { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; align-content: start; }
+    /* .card's own overflow:hidden (clips card-img-top's square corners to the
+       card's rounded ones) gives every grid item here an automatic minimum
+       size of 0 per the CSS Grid spec — so once #mediaList's fixed-height
+       overflow:auto ancestor runs out of room, rows silently shrink below
+       their content's real height (clipping the name/GPS/delete row) instead
+       of overflowing and letting the scrollbar do its job. min-height
+       overrides that computed 0 back to the content's natural size, which is
+       what actually makes #mediaList grow past its container and scroll. */
+    #mediaList .card { min-height: min-content; }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
