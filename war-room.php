@@ -1170,14 +1170,23 @@ include __DIR__ . '/includes/header.php';
     #sosMuteBtn.sos-mute-active { background: #dc2626; color: #fff; }
     /* End of Mission / Return to Base — a separate overlay from #sosOverlay
        (own element, own class) so it never interferes with real SOS alert
-       state; reuses the same sosPulseCorners keyframe for the same visual
-       urgency, but auto-clears on a timer instead of staying until acked. */
+       state. Deliberately GREEN with a full dark scrim (not SOS's red corner
+       pulse) — this is an all-clear signal, not an emergency, and should
+       read as visually distinct from SOS at a glance, with the message
+       scrolling front-and-center instead of tucked in a corner/banner.
+       Auto-clears on a timer instead of staying until acked. */
     #returnToBaseOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
-    #returnToBaseOverlay.rtb-active { display: block; animation: sosPulseCorners 1s ease-in-out infinite; }
+    #returnToBaseOverlay.rtb-active { display: flex; align-items: center; justify-content: center; background: rgba(2,20,10,.93); animation: rtbPulseGreen 1s ease-in-out infinite; }
     @keyframes sosPulseCorners {
         0%, 100% { box-shadow: inset 0 0 60px 20px rgba(220,38,38,.25), inset 0 0 160px 60px rgba(220,38,38,.12); }
         50%      { box-shadow: inset 0 0 120px 50px rgba(220,38,38,.65), inset 0 0 260px 120px rgba(220,38,38,.35); }
     }
+    @keyframes rtbPulseGreen {
+        0%, 100% { box-shadow: inset 0 0 60px 20px rgba(34,197,94,.3), inset 0 0 160px 60px rgba(34,197,94,.15); }
+        50%      { box-shadow: inset 0 0 120px 50px rgba(34,197,94,.7), inset 0 0 260px 120px rgba(34,197,94,.4); }
+    }
+    .rtb-marquee-track { width: 100%; white-space: nowrap; overflow: hidden; position: relative; height: 1.3em; font-size: clamp(1.8rem, 9vw, 3.5rem); }
+    .rtb-marquee-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #4ade80; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; text-shadow: 0 0 24px rgba(74,222,128,.85); animation: warRoomBannerScroll 14s linear infinite; }
     .sos-map-marquee { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.75); padding: 6px 10px; overflow: hidden; z-index: 500; }
     .sos-map-marquee-track { white-space: nowrap; position: relative; height: 1.4em; }
     .sos-map-marquee-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #ff3b30; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; animation: warRoomBannerScroll 14s linear infinite; }
@@ -1273,7 +1282,9 @@ include __DIR__ . '/includes/header.php';
 <!-- Unlike #sosOverlay (command-staff-only, since SOS is a field->command
      incoming alert), this is command->field, so every approved participant
      needs the element regardless of $canManageWarRoom. -->
-<div id="returnToBaseOverlay"></div>
+<div id="returnToBaseOverlay">
+    <div class="rtb-marquee-track"><span id="returnToBaseMarqueeText"></span></div>
+</div>
 
 <!-- Live-data staleness. The footer's generic offline bar only reacts to
      navigator.onLine, which stays true for the genuinely dangerous cases: a
@@ -4703,13 +4714,16 @@ function updateSosAlarmState(items) {
 }
 
 // End of Mission / Return to Base — reuses the SOS siren sound engine (via
-// playSosSiren/stopSosSiren) and the SOS pulsing-red-corners keyframe, but on
-// its own overlay element/timer so it never reads or clobbers real SOS state.
-// Only stops the siren afterward if a genuine SOS isn't ALSO currently active.
+// playSosSiren/stopSosSiren) but its own green full-screen overlay (not the
+// SOS red corner pulse) and its own overlay element/timer, so it never reads
+// or clobbers real SOS state. Only stops the siren afterward if a genuine
+// SOS isn't ALSO currently active.
 let returnToBaseTimer = null;
-function triggerReturnToBaseAlarm() {
+function triggerReturnToBaseAlarm(text) {
     const overlay = document.getElementById('returnToBaseOverlay');
     if (!overlay) return;
+    const marqueeText = document.getElementById('returnToBaseMarqueeText');
+    if (marqueeText) marqueeText.textContent = text || '';
     overlay.classList.add('rtb-active');
     playSosSiren();
     if (returnToBaseTimer) clearTimeout(returnToBaseTimer);
@@ -4725,7 +4739,7 @@ function triggerReturnToBaseAlarm() {
 function showWarRoomBanner(id, text, orderId, alarmStyle) {
     if (activeBannerRows.has(id)) return;
     playWarRoomAlertSound();
-    if (alarmStyle === 'return_to_base') triggerReturnToBaseAlarm();
+    if (alarmStyle === 'return_to_base') triggerReturnToBaseAlarm(text);
 
     const row = document.createElement('div');
     row.className = 'war-room-banner-row';
