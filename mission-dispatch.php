@@ -252,16 +252,29 @@ if ($action === 'create') {
     );
     logAudit('create_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'type' => $type]);
 
-    // Recipients: every approved volunteer of the mission gets the scrolling banner, even
-    // when the dispatch itself targets one team — only that team's map shows the actual
-    // pin (loadMissionDispatchesForUser), but everyone should see that an order went out.
-    // (Team members are always a subset of approved participants, so this covers them too.)
-    $recipients = dbFetchAll(
-        "SELECT DISTINCT pr.volunteer_id AS user_id FROM participation_requests pr
-         JOIN shifts s ON s.id = pr.shift_id
-         WHERE s.mission_id = ? AND pr.status = ?",
-        [$missionId, PARTICIPATION_APPROVED]
-    );
+    // Recipients: a team-targeted dispatch only alerts (banner + sound) that
+    // team — matching who can actually see the pin/area on their map
+    // (loadMissionDispatchesForUser). Previously every approved participant
+    // got the alert regardless of target, on the theory that "everyone
+    // should know an order went out" even without seeing where — reversed
+    // per explicit request: a team getting dispatched shouldn't sound an
+    // alarm for every other team on the mission. A dispatch with no team
+    // (sent to "all teams") still notifies everyone, since that's genuinely
+    // for the whole mission.
+    $recipients = $teamId
+        ? dbFetchAll(
+            "SELECT DISTINCT pr.volunteer_id AS user_id FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             WHERE s.mission_id = ? AND pr.status = ?
+               AND pr.volunteer_id IN (SELECT user_id FROM mission_team_members WHERE team_id = ?)",
+            [$missionId, PARTICIPATION_APPROVED, $teamId]
+        )
+        : dbFetchAll(
+            "SELECT DISTINCT pr.volunteer_id AS user_id FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             WHERE s.mission_id = ? AND pr.status = ?",
+            [$missionId, PARTICIPATION_APPROVED]
+        );
 
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     $titleKey = $type === 'point' ? 'dispatch.create_notify_title_point' : 'dispatch.create_notify_title_area';
