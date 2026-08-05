@@ -943,6 +943,30 @@ if (isLoggedIn()) {
             object-fit: cover;
             flex-shrink: 0;
         }
+        /* Prominent standalone variant of .team-name-badge for a row/card's
+           upper-right corner (e.g. war-room.php team list) — bigger, bolder,
+           with its own shadow so it reads as a tag rather than inline text.
+           See homeTeamCornerBadgeHtml() in functions-warroom.php. */
+        .team-name-badge-corner {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: .72rem;
+            font-weight: 700;
+            border-radius: 999px;
+            padding: 3px 9px;
+            line-height: 1.4;
+            white-space: nowrap;
+            cursor: help;
+            box-shadow: 0 1px 3px rgba(0,0,0,.35);
+        }
+        .team-name-badge-corner .flag-icon {
+            width: 15px;
+            height: 11px;
+            border-radius: 2px;
+            object-fit: cover;
+            flex-shrink: 0;
+        }
     </style>
 </head>
 <body>
