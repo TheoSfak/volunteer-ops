@@ -3559,10 +3559,20 @@ function renderRestrictedAreaLayer(items) {
     let reopenLayer = null;
 
     items.forEach(item => {
-        const popupHtml = `<strong>${escapeHtml(item.label)}</strong>
+        // canManageIncidents is really just canManageWarRoom under an
+        // incident-specific name (see its own declaration) — reused here too.
+        // Server already rejects a non-admin's delete POST either way
+        // (mission-restricted-area.php is admin-only for every mutation),
+        // but showing a button that always errors on click is bad UX on its
+        // own — sectors/buildings already hide their own manage controls the
+        // same way (item.can_manage), this just brings restricted areas in
+        // line with that, closing the gap the visibility fix above exposed
+        // (non-admins never saw this popup at all before that fix).
+        const popupHtml = `<strong>${escapeHtml(item.label)}</strong>` +
+            (canManageIncidents ? `
             <div class="mt-2">
                 <button type="button" class="btn btn-sm btn-outline-danger restricted-area-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
-            </div>`;
+            </div>` : '');
         const layer = L.polygon(item.geo, {pane: 'restrictedAreaPane', color: '#dc3545', weight: 3, fillColor: 'url(#restrictedHatch)', fillOpacity: 0.55}).addTo(restrictedAreaLayer).bindPopup(popupHtml);
         layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'dispatch-team-label', interactive: false});
         layer.restrictedAreaId = item.id;
@@ -3755,84 +3765,106 @@ function renderRestrictedAreaBreachesList(items) {
 }
 
 let sectorsRenderedSig = null;
+function addSectorBuildingMarker(b, item) {
+    const hasRequired = b.floors.some(f => f.is_required);
+    const bColor = !hasRequired ? '#6c757d' : (b.all_required_checked ? '#198754' : '#dc3545');
+    const icon = L.divIcon({
+        className: '',
+        html: `<div style="background:${bColor};color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;border:2px solid #fff;box-shadow:0 1px 4px #0008;"><i class="bi bi-building"></i></div>`,
+        iconSize: [22, 22], iconAnchor: [11, 11],
+    });
+    const canActOnBuildings = item.can_self_report || item.can_manage;
+    const delBuildingBtn = item.can_manage ? `<button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-building-delete-btn" data-id="${b.id}">${t('common.delete')}</button>` : '';
+    const bPopupHtml = `<strong>${escapeHtml(b.label)}</strong>${sectorFloorChecklistHtml(b, canActOnBuildings)}${delBuildingBtn}`;
+    const bLayer = L.marker([b.lat, b.lng], {icon}).addTo(sectorBuildingLayer).bindPopup(bPopupHtml);
+    bLayer.buildingId = b.id;
+}
+
 function renderSectorLayer(items) {
     if (!sectorLayer || !sectorBuildingLayer) return;
 
-    // Same "remember and reopen the open popup across a re-render" dance as
-    // renderDispatches() above, tracked separately for the two layers since
-    // a sector popup and a building popup can each independently be open.
-    let openSectorId = null;
-    sectorLayer.eachLayer(layer => { if (layer.sectorId !== undefined && layer.isPopupOpen && layer.isPopupOpen()) openSectorId = layer.sectorId; });
-    let openBuildingId = null;
-    sectorBuildingLayer.eachLayer(layer => { if (layer.buildingId !== undefined && layer.isPopupOpen && layer.isPopupOpen()) openBuildingId = layer.buildingId; });
-
-    sectorLayer.clearLayers();
-    sectorBuildingLayer.clearLayers();
-    let reopenSectorLayer = null, reopenBuildingLayer = null;
-
-    items.forEach(item => {
-        const color = SECTOR_STATUS_HEX[item.status] || '#6c757d';
-        const buildingsSummary = item.buildings.length
-            ? `<div class="small mt-1">🏢 ${item.buildings.filter(b => b.all_required_checked).length}/${item.buildings.length}</div>`
-            : '';
-        const completePrompt = (item.buildings.length && item.all_buildings_complete && item.can_self_report)
-            ? `<div class="small text-success fw-semibold mt-1">${t('sector.all_floors_checked_prompt')}</div>` : '';
-        const selfReportBtn = item.can_self_report
-            ? `<br><div class="mt-1 sector-advance-group">
-                <input type="text" class="form-control form-control-sm mb-1 sector-advance-note" placeholder="${t('sector.note_placeholder')}" maxlength="500">
-                <button type="button" class="btn btn-sm btn-primary w-100 sector-advance-btn" data-id="${item.id}" data-status="${item.next_status}">${sectorActionLabel(item.status)}</button>
-            </div>`
-            : '';
-        // Admin can never pick 'assigned' directly (mission-sector.php
-        // rejects it — that value only ever results from assigning a team
-        // to a not_started sector), so it's deliberately not an option here.
-        const manageHtml = item.can_manage ? `
-            <div class="mt-2">
-                <select class="form-select form-select-sm sector-team-select mb-1" data-id="${item.id}">
-                    <option value="">${escapeHtml(t('sector.unassigned_option'))}</option>
-                    ${teams.map(tm => `<option value="${tm.id}" ${String(tm.id) === String(item.team_id) ? 'selected' : ''}>${escapeHtml(tm.label)}</option>`).join('')}
-                </select>
-                <select class="form-select form-select-sm sector-status-select" data-id="${item.id}">
-                    ${['not_started','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
-                </select>
-                <button type="button" class="btn btn-sm btn-outline-primary mt-1 sector-add-building-btn" data-id="${item.id}"><i class="bi bi-building-add me-1"></i>${t('sector.add_building_btn')}</button>
-                ${item.status === 'not_started' && !item.buildings.length ? `<button type="button" class="btn btn-sm btn-outline-secondary mt-1 sector-split-btn" data-id="${item.id}"><i class="bi bi-scissors me-1"></i>${t('sector.split_btn')}</button>` : ''}
-                <button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
-            </div>` : '';
-        const popupHtml = `<strong>${escapeHtml(item.label)}</strong><br>` +
-            `<span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span> ${escapeHtml(item.team_label)}${sectorCoverageBadgeHtml(item)}` +
-            buildingsSummary + completePrompt + selfReportBtn + manageHtml;
-
-        const layer = L.polygon(item.geo, {pane: 'sectorPane', color, fillColor: color, fillOpacity: 0.35, weight: 2}).addTo(sectorLayer).bindPopup(popupHtml);
-        layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'dispatch-team-label', interactive: false});
-        layer.sectorId = item.id;
-        // Verified Coverage gap-cell detail is only ever drawn for whichever
-        // sector's popup is currently open (never all sectors at once — see
-        // drawCoverageGapCells) so map SVG node count stays bounded
-        // regardless of mission size.
-        layer.on('popupopen', () => drawCoverageGapCells(item.id));
-        layer.on('popupclose', () => coverageLayer?.clearLayers());
-        if (String(item.id) === String(openSectorId)) reopenSectorLayer = layer;
-
-        const canActOnBuildings = item.can_self_report || item.can_manage;
-        item.buildings.forEach(b => {
-            const hasRequired = b.floors.some(f => f.is_required);
-            const bColor = !hasRequired ? '#6c757d' : (b.all_required_checked ? '#198754' : '#dc3545');
-            const icon = L.divIcon({
-                className: '',
-                html: `<div style="background:${bColor};color:#fff;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;border:2px solid #fff;box-shadow:0 1px 4px #0008;"><i class="bi bi-building"></i></div>`,
-                iconSize: [22, 22], iconAnchor: [11, 11],
-            });
-            const delBuildingBtn = item.can_manage ? `<button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-building-delete-btn" data-id="${b.id}">${t('common.delete')}</button>` : '';
-            const bPopupHtml = `<strong>${escapeHtml(b.label)}</strong>${sectorFloorChecklistHtml(b, canActOnBuildings)}${delBuildingBtn}`;
-            const bLayer = L.marker([b.lat, b.lng], {icon}).addTo(sectorBuildingLayer).bindPopup(bPopupHtml);
-            bLayer.buildingId = b.id;
-            if (String(b.id) === String(openBuildingId)) reopenBuildingLayer = bLayer;
-        });
+    // A sector/building whose popup is open right now is left completely
+    // untouched below — not removed, not rebuilt, not reopened — instead of
+    // the old "clear everything, rebuild everything, then reopen whichever
+    // one was open" dance shared with renderDispatches() above. That old
+    // dance kept the popup LOOKING open across every poll tick, but it was
+    // still fresh DOM underneath: the team/status <select>s and the note
+    // <input> inside it got silently replaced with server-state defaults
+    // every ~5s, discarding a pick or a half-typed note the admin hadn't
+    // submitted yet. Reported live: assigning a team kept getting reset
+    // mid-interaction. Skipping the rebuild for just the open one fixes it
+    // while everything else on the map still updates normally. A sector and
+    // one of its own buildings can be open independently of each other
+    // (separate layer groups, separate click targets), so both are tracked
+    // and preserved on their own.
+    let openSectorLayer = null, openSectorId = null;
+    sectorLayer.eachLayer(layer => {
+        if (layer.sectorId !== undefined && layer.isPopupOpen && layer.isPopupOpen()) {
+            openSectorLayer = layer;
+            openSectorId = layer.sectorId;
+        }
+    });
+    let openBuildingLayer = null, openBuildingId = null;
+    sectorBuildingLayer.eachLayer(layer => {
+        if (layer.buildingId !== undefined && layer.isPopupOpen && layer.isPopupOpen()) {
+            openBuildingLayer = layer;
+            openBuildingId = layer.buildingId;
+        }
     });
 
-    if (reopenSectorLayer) reopenSectorLayer.openPopup();
-    if (reopenBuildingLayer) reopenBuildingLayer.openPopup();
+    sectorLayer.eachLayer(layer => { if (layer !== openSectorLayer) sectorLayer.removeLayer(layer); });
+    sectorBuildingLayer.eachLayer(layer => { if (layer !== openBuildingLayer) sectorBuildingLayer.removeLayer(layer); });
+
+    items.forEach(item => {
+        if (String(item.id) !== String(openSectorId)) {
+            const color = SECTOR_STATUS_HEX[item.status] || '#6c757d';
+            const buildingsSummary = item.buildings.length
+                ? `<div class="small mt-1">🏢 ${item.buildings.filter(b => b.all_required_checked).length}/${item.buildings.length}</div>`
+                : '';
+            const completePrompt = (item.buildings.length && item.all_buildings_complete && item.can_self_report)
+                ? `<div class="small text-success fw-semibold mt-1">${t('sector.all_floors_checked_prompt')}</div>` : '';
+            const selfReportBtn = item.can_self_report
+                ? `<br><div class="mt-1 sector-advance-group">
+                    <input type="text" class="form-control form-control-sm mb-1 sector-advance-note" placeholder="${t('sector.note_placeholder')}" maxlength="500">
+                    <button type="button" class="btn btn-sm btn-primary w-100 sector-advance-btn" data-id="${item.id}" data-status="${item.next_status}">${sectorActionLabel(item.status)}</button>
+                </div>`
+                : '';
+            // Admin can never pick 'assigned' directly (mission-sector.php
+            // rejects it — that value only ever results from assigning a team
+            // to a not_started sector), so it's deliberately not an option here.
+            const manageHtml = item.can_manage ? `
+                <div class="mt-2">
+                    <select class="form-select form-select-sm sector-team-select mb-1" data-id="${item.id}">
+                        <option value="">${escapeHtml(t('sector.unassigned_option'))}</option>
+                        ${teams.map(tm => `<option value="${tm.id}" ${String(tm.id) === String(item.team_id) ? 'selected' : ''}>${escapeHtml(tm.label)}</option>`).join('')}
+                    </select>
+                    <select class="form-select form-select-sm sector-status-select" data-id="${item.id}">
+                        ${['not_started','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
+                    </select>
+                    <button type="button" class="btn btn-sm btn-outline-primary mt-1 sector-add-building-btn" data-id="${item.id}"><i class="bi bi-building-add me-1"></i>${t('sector.add_building_btn')}</button>
+                    ${item.status === 'not_started' && !item.buildings.length ? `<button type="button" class="btn btn-sm btn-outline-secondary mt-1 sector-split-btn" data-id="${item.id}"><i class="bi bi-scissors me-1"></i>${t('sector.split_btn')}</button>` : ''}
+                    <button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
+                </div>` : '';
+            const popupHtml = `<strong>${escapeHtml(item.label)}</strong><br>` +
+                `<span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span> ${escapeHtml(item.team_label)}${sectorCoverageBadgeHtml(item)}` +
+                buildingsSummary + completePrompt + selfReportBtn + manageHtml;
+
+            const layer = L.polygon(item.geo, {pane: 'sectorPane', color, fillColor: color, fillOpacity: 0.35, weight: 2}).addTo(sectorLayer).bindPopup(popupHtml);
+            layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'dispatch-team-label', interactive: false});
+            layer.sectorId = item.id;
+            // Verified Coverage gap-cell detail is only ever drawn for whichever
+            // sector's popup is currently open (never all sectors at once — see
+            // drawCoverageGapCells) so map SVG node count stays bounded
+            // regardless of mission size.
+            layer.on('popupopen', () => drawCoverageGapCells(item.id));
+            layer.on('popupclose', () => coverageLayer?.clearLayers());
+        }
+
+        item.buildings.forEach(b => {
+            if (String(b.id) === String(openBuildingId)) return;
+            addSectorBuildingMarker(b, item);
+        });
+    });
 }
 sectorLayer?.on('popupopen', event => {
     const popupEl = event.popup.getElement();
