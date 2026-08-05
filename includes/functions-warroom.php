@@ -1737,6 +1737,63 @@ function loadOpenRestrictedAreaBreachesForUser(int $missionId, int $userId, bool
 }
 
 /**
+ * War Room: same shape as loadOpenRestrictedAreaBreachesForUser() above, but
+ * WITHOUT the resolved_at filter — feeds the admin-facing breach LIST widget,
+ * not the alarm state machine. Kept as a fully separate function rather than
+ * a parameter on the existing one: the alarm machine's "no items at all"
+ * branch depends on genuinely seeing an empty array once nothing is open,
+ * and mixing resolved rows into that same array would break it. A deleted/
+ * resolved zone's breach must not simply vanish from the one place admin
+ * most naturally looks for it — "auto-resolve not auto-erase" already held
+ * at the data layer, this is what makes it hold in the UI too. Capped at 50:
+ * breaches are a rare event compared to e.g. GPS pings, this is headroom,
+ * not an expected real limit.
+ */
+function loadRestrictedAreaBreachHistoryForUser(int $missionId, int $userId, bool $canManageWarRoom): array {
+    $sql = "SELECT b.id, b.area_label, b.lat, b.lng, b.exited_at, b.acknowledged_at, b.resolved_at, b.created_at,
+                   b.user_id, b.team_id, u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
+                   vt.name AS home_team_name, vt.color AS home_team_color,
+                   mt.codename, mt.team_number, ru.name AS resolved_by_name
+            FROM mission_restricted_area_breaches b
+            JOIN users u ON u.id = b.user_id
+            LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+            LEFT JOIN mission_teams mt ON mt.id = b.team_id
+            LEFT JOIN users ru ON ru.id = b.resolved_by
+            WHERE b.mission_id = ?";
+    $params = [$missionId];
+    if (!$canManageWarRoom) {
+        $sql .= " AND b.user_id = ?";
+        $params[] = $userId;
+    }
+    $sql .= " ORDER BY b.created_at DESC LIMIT 50";
+
+    $rows = dbFetchAll($sql, $params);
+    return array_map(function ($row) use ($userId) {
+        [$homeBg, $homeFg] = teamBadgeColors($row['home_team_color']);
+        return [
+            'id'                 => (int) $row['id'],
+            'area_label'         => $row['area_label'],
+            'user_name'          => $row['user_name'],
+            'is_external'        => (bool) $row['is_external'],
+            'guest_org_name'     => $row['guest_org_name'],
+            'home_team_name'     => $row['home_team_name'],
+            'home_team_color_bg' => $homeBg,
+            'home_team_color_fg' => $homeFg,
+            'guest_country_code' => $row['guest_country_code'],
+            'team_label'         => h($row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized')),
+            'lat'                => (float) $row['lat'],
+            'lng'                => (float) $row['lng'],
+            'exited_at'          => $row['exited_at'] ? date('d\m H:i', strtotime($row['exited_at'])) : null,
+            'acknowledged_at'    => $row['acknowledged_at'] ? date('d\m H:i', strtotime($row['acknowledged_at'])) : null,
+            'resolved_at'        => $row['resolved_at'] ? date('d\m H:i', strtotime($row['resolved_at'])) : null,
+            'resolved_by_name'   => $row['resolved_by_name'],
+            'created_at'         => date('d\m H:i', strtotime($row['created_at'])),
+            'is_mine'            => (int) $row['user_id'] === $userId,
+        ];
+    }, $rows);
+}
+
+/**
  * War Room: user_ids currently "present" on this mission's War Room — last
  * touched the 15s ajax poll within the last 2x its interval. Shared by
  * war-room.php's full-page render (initial dot state) and its own ajax

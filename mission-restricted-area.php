@@ -141,7 +141,11 @@ if ($action === 'acknowledge') {
         dbExecute("UPDATE mission_restricted_area_breaches SET acknowledged_at = NOW(), acknowledged_by = ? WHERE id = ?", [$userId, $breachId]);
         logAudit('acknowledge_restricted_area_breach', 'mission_restricted_area_breaches', $breachId, null, ['mission_id' => $missionId]);
     }
-    echo json_encode(['ok' => true, 'breaches' => loadOpenRestrictedAreaBreachesForUser($missionId, $userId, true)]);
+    // History shape (not the open-only one) — the client derives the
+    // open-only subset itself to refresh the alarm state, so the breach
+    // LIST widget can show this one's new acknowledged state without a
+    // second query.
+    echo json_encode(['ok' => true, 'breaches' => loadRestrictedAreaBreachHistoryForUser($missionId, $userId, true)]);
     exit;
 }
 
@@ -162,7 +166,8 @@ if ($action === 'resolve') {
         );
         logAudit('resolve_restricted_area_breach', 'mission_restricted_area_breaches', $breachId, null, ['mission_id' => $missionId]);
     }
-    echo json_encode(['ok' => true, 'breaches' => loadOpenRestrictedAreaBreachesForUser($missionId, $userId, true)]);
+    // History shape — see the same note on the acknowledge action above.
+    echo json_encode(['ok' => true, 'breaches' => loadRestrictedAreaBreachHistoryForUser($missionId, $userId, true)]);
     exit;
 }
 
