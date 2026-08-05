@@ -796,6 +796,40 @@ $loadTeamProximity = function () use ($missionId, $user) {
     return ['nearbyTeams' => $nearbyTeams, 'teamDistances' => computeTeamDistanceMatrix($teamPositions)];
 };
 
+// Field Mode has no map at all (see the !$fieldMode wrap further down), so
+// this is the only place a field volunteer gets any restricted-area
+// awareness — a plain distance list instead of seeing the red zone on a
+// map, same reasoning as $loadTeamProximity/nearbyTeamsCard just above.
+// Kept as its own closure rather than folded into $loadTeamProximity
+// (different subject, would muddy that name) — the small extra "my own
+// latest ping" query this duplicates is cheap and both indexes it needs
+// already exist for $loadTeamProximity's identical lookup.
+$loadRestrictedAreaProximity = function () use ($missionId, $user, &$restrictedAreas) {
+    if (empty($restrictedAreas)) {
+        return [];
+    }
+    $myPing = dbFetchOne(
+        "SELECT vp.lat, vp.lng FROM volunteer_pings vp
+         JOIN shifts s ON s.id = vp.shift_id
+         WHERE s.mission_id = ? AND vp.user_id = ?
+         ORDER BY vp.created_at DESC LIMIT 1",
+        [$missionId, $user['id']]
+    );
+    if (!$myPing) {
+        return [];
+    }
+    $result = [];
+    foreach ($restrictedAreas as $area) {
+        $result[] = [
+            'id'         => $area['id'],
+            'label'      => $area['label'],
+            'distance_m' => pointToPolygonDistanceMeters((float) $myPing['lat'], (float) $myPing['lng'], $area['geo']),
+        ];
+    }
+    usort($result, fn($a, $b) => $a['distance_m'] <=> $b['distance_m']);
+    return $result;
+};
+
 if (get('ajax') === '1') {
     header('Content-Type: application/json');
 
@@ -873,9 +907,15 @@ if (get('ajax') === '1') {
     $annotations = loadMissionAnnotationsForMission($missionId);
     $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
     $sectors = loadMissionSectorsForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
-    $restrictedAreas = $canManageWarRoom ? loadMissionRestrictedAreasForUser($missionId) : [];
+    // Hazard zones are mission-wide, not team/area-scoped (no team_id on
+    // mission_restricted_areas at all) — unlike shortage reports/SOS above,
+    // there's no reason to hide a danger zone's boundary from the very
+    // people who need to physically avoid it. Same (canManageWarRoom ||
+    // isApprovedParticipant) gate this file already uses for incidents/POIs.
+    $restrictedAreas = ($canManageWarRoom || $isApprovedParticipant) ? loadMissionRestrictedAreasForUser($missionId) : [];
     $restrictedAreaBreaches = loadOpenRestrictedAreaBreachesForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $teamProximity = $loadTeamProximity();
+    $restrictedAreaProximity = $loadRestrictedAreaProximity();
 
     echo json_encode([
         'pins' => $pins,
@@ -897,6 +937,7 @@ if (get('ajax') === '1') {
         'sectors' => $sectors,
         'restrictedAreas' => $restrictedAreas,
         'restrictedAreaBreaches' => $restrictedAreaBreaches,
+        'restrictedAreaProximity' => $restrictedAreaProximity,
         'nearbyTeams' => $teamProximity['nearbyTeams'],
         'teamDistances' => $teamProximity['teamDistances'],
     ]);
@@ -963,11 +1004,17 @@ $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOf
 $annotations = loadMissionAnnotationsForMission($missionId);
 $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
 $sectors = loadMissionSectorsForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
-$restrictedAreas = $canManageWarRoom ? loadMissionRestrictedAreasForUser($missionId) : [];
+// Hazard zones are mission-wide, not team/area-scoped (no team_id on
+// mission_restricted_areas at all) — unlike shortage reports/SOS above,
+// there's no reason to hide a danger zone's boundary from the very
+// people who need to physically avoid it. Same (canManageWarRoom ||
+// isApprovedParticipant) gate this file already uses for incidents/POIs.
+$restrictedAreas = ($canManageWarRoom || $isApprovedParticipant) ? loadMissionRestrictedAreasForUser($missionId) : [];
 $restrictedAreaBreaches = loadOpenRestrictedAreaBreachesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $teamProximity = $loadTeamProximity();
 $nearbyTeams = $teamProximity['nearbyTeams'];
 $teamDistances = $teamProximity['teamDistances'];
+$restrictedAreaProximity = $loadRestrictedAreaProximity();
 
 $firstShift = $shifts[0]['start_time'] ?? $mission['start_datetime'];
 $lastShift = !empty($shifts) ? end($shifts)['end_time'] : $mission['end_datetime'];
@@ -2038,6 +2085,18 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
+        <!-- Field Mode's only restricted-area awareness (see the !$fieldMode
+             map wrap further up) — a plain distance list mirroring
+             nearbyTeamsCard just above, instead of seeing the red zone
+             directly on a map that doesn't exist here. Unconditional, same
+             as nearbyTeamsCard: shows in both Field Mode and full view. -->
+        <div class="card shadow-sm mb-4 border-danger" data-card-id="restrictedAreaProximityCard">
+            <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('restricted_area.proximity_card_title') ?></h5></div>
+            <div class="card-body">
+                <div id="restrictedAreaProximityList"></div>
+            </div>
+        </div>
+
         <div class="card shadow-sm mb-4 border-primary" data-card-id="myRouteCard">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-signpost-split-fill me-1"></i><?= t('route.my_panel_title') ?></h5></div>
             <div class="card-body">
@@ -2721,6 +2780,7 @@ let myTasks = <?= json_encode($myTasks) ?>;
 let routes = <?= json_encode($routes) ?>;
 let nearbyTeams = <?= json_encode($nearbyTeams) ?>;
 let teamDistances = <?= json_encode($teamDistances) ?>;
+let restrictedAreaProximity = <?= json_encode($restrictedAreaProximity) ?>;
 // Team rosters for the Route Order composer's member picker — lets an admin
 // narrow a route to a subset of a team (e.g. 2 of 4) instead of always the
 // whole team. See includes/migrations.php v109.
@@ -3306,6 +3366,15 @@ const SECTOR_STATUS_HEX = <?= json_encode(array_map(fn($c) => MISSION_TYPE_COLOR
 // "pay attention" work only for the one case that matters: a sector called
 // done that the GPS record doesn't back up.
 function sectorCoverageBadgeHtml(item) {
+    // Sectors with buildings already have the right ground-truth signal —
+    // the per-building/per-floor checklist (🏢 badge) — so skip the
+    // polygon-sweep % here entirely. It assumes the whole polygon is meant
+    // to be walked, which is wrong once the actual assignment is "check
+    // these N buildings": a volunteer doing exactly that produces a GPS
+    // track clustered tightly around a few points, not spread across the
+    // polygon, so this would read as a false-alarm-low % no matter how
+    // thoroughly the buildings were actually checked.
+    if (item.buildings && item.buildings.length > 0) return '';
     const cov = sectorCoverageById[item.id];
     if (!cov) return '';
     const warn = (item.status === 'completed' && cov.percent < 60)
@@ -4217,6 +4286,35 @@ function renderPins(items) {
 // No existing meters->km or bearing->compass-letter formatter anywhere in
 // this file to reuse (route.distance_from_point only ever shows raw
 // unrounded meters) — both written fresh here.
+// The 100m threshold below is a rough "getting close, pay attention" cue,
+// not the actual safety boundary — the real trigger is entering the zone
+// at all (distance 0), which fires the existing full-screen alarm
+// regardless of Field Mode. This card is purely proactive/informational.
+const RESTRICTED_AREA_PROXIMITY_WARN_METERS = 100;
+let restrictedAreaProximityRenderedSig = null;
+function renderRestrictedAreaProximity(items) {
+    const sig = JSON.stringify(items);
+    if (sig === restrictedAreaProximityRenderedSig) return;
+    restrictedAreaProximityRenderedSig = sig;
+
+    const list = document.getElementById('restrictedAreaProximityList');
+    if (!list) return;
+    if (!items.length) {
+        list.innerHTML = `<p class="text-muted mb-0 small">${t('restricted_area.proximity_empty')}</p>`;
+        return;
+    }
+    list.innerHTML = items.map(area => {
+        const near = area.distance_m <= RESTRICTED_AREA_PROXIMITY_WARN_METERS;
+        const line = area.distance_m <= 0
+            ? `<span class="text-danger fw-bold">${t('restricted_area.proximity_inside')}</span>`
+            : `<span class="${near ? 'text-danger fw-semibold' : 'text-muted'}">${formatDistanceMeters(area.distance_m)}</span>`;
+        return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom">
+            <div><i class="bi bi-exclamation-triangle-fill text-danger me-1"></i>${escapeHtml(area.label)}</div>
+            <div class="text-end small">${line}</div>
+        </div>`;
+    }).join('');
+}
+
 let nearbyTeamsRenderedSig = null;
 function renderNearbyTeams(items) {
     const sig = JSON.stringify(items);
@@ -5794,6 +5892,7 @@ setTimeout(() => {
     renderPointsOfInterest(pointsOfInterest);
     renderSosAlerts(sosAlerts);
     renderNearbyTeams(nearbyTeams);
+    renderRestrictedAreaProximity(restrictedAreaProximity);
     renderBroadcastPhotos(broadcastPhotos);
     if (!fieldMode) updateSosAlarmState(sosAlerts);
     // Ungated (unlike updateSosAlarmState just above) — same reasoning as the
@@ -6806,6 +6905,7 @@ function pollWarRoomData() {
         if (data.onlinePresence) renderPresence(data.onlinePresence);
         if (data.pingStaleness) renderPingStaleness(data.pingStaleness);
         if (data.nearbyTeams) renderNearbyTeams(nearbyTeams = data.nearbyTeams);
+        if (data.restrictedAreaProximity) renderRestrictedAreaProximity(restrictedAreaProximity = data.restrictedAreaProximity);
         if (!fieldMode && data.teamDistances) renderTeamDistances(teamDistances = data.teamDistances);
         if (!fieldMode) document.getElementById('mapRefresh').textContent = data.time || '';
         if (data.banners && data.banners.length) {

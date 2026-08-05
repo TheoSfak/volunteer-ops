@@ -259,6 +259,11 @@ return [
         'restricted_area.notify_message_self' => 'Βρίσκεστε εντός της απαγορευμένης περιοχής «{area}». Απομακρυνθείτε άμεσα.',
         'restricted_area.notify_title_admin' => '🚨 Παραβίαση απαγορευμένης περιοχής — {mission}',
         'restricted_area.notify_message_admin' => 'Η ομάδα {team} ({name}) μπήκε στην απαγορευμένη περιοχή «{area}».',
+        // Field Mode proximity card — no map there, so this is a plain
+        // distance list instead of seeing the zone drawn on the map
+        'restricted_area.proximity_card_title' => 'Απόσταση από Απαγορευμένες Περιοχές',
+        'restricted_area.proximity_empty' => 'Δεν βρίσκεστε κοντά σε καμία απαγορευμένη περιοχή.',
+        'restricted_area.proximity_inside' => 'ΕΝΤΟΣ',
         'history.restricted_area_created' => '{actor} δημιούργησε την απαγορευμένη περιοχή «{label}»',
         'history.restricted_area_breach' => '{actor} ({team}) μπήκε στην απαγορευμένη περιοχή «{label}»',
 
@@ -1187,6 +1192,11 @@ return [
         'restricted_area.notify_message_self' => 'You are inside the restricted area "{area}". Move away immediately.',
         'restricted_area.notify_title_admin' => '🚨 Restricted area breach — {mission}',
         'restricted_area.notify_message_admin' => 'Team {team} ({name}) entered the restricted area "{area}".',
+        // Field Mode proximity card — no map there, so this is a plain
+        // distance list instead of seeing the zone drawn on the map
+        'restricted_area.proximity_card_title' => 'Distance to Restricted Areas',
+        'restricted_area.proximity_empty' => 'You are not near any restricted area.',
+        'restricted_area.proximity_inside' => 'INSIDE',
         'history.restricted_area_created' => '{actor} created restricted area "{label}"',
         'history.restricted_area_breach' => '{actor} ({team}) entered restricted area "{label}"',
 
