@@ -1973,6 +1973,130 @@ function pointInPolygon(float $lat, float $lng, array $geo): bool {
 }
 
 /**
+ * Verified Coverage — ground-truth swept-area estimate for search sectors,
+ * entirely independent of the self-reported status a team leader taps.
+ * Grid-samples each sector polygon at $gridStepMeters resolution: a cell
+ * counts toward the denominator when its center is inside the polygon
+ * (pointInPolygon() above), and counts as covered when any trusted ping
+ * falls within $sweepRadiusMeters of that center (gpsDistanceMeters()
+ * above). This is a deliberate approximation (no polygon clipping/union
+ * math) rather than exact geometry — nothing in this codebase uses a GIS
+ * library or DB spatial functions (the latter has already bitten this repo
+ * once via MariaDB-vs-MySQL syntax gaps, see schema.sql history), and
+ * approximate is plenty for a decision-support signal.
+ *
+ * Ping attribution is purely spatial + mission-wide, NOT filtered by which
+ * team is currently assigned to the sector: mission_search_sectors.team_id
+ * has no time-versioned history (a mid-mission reassignment doesn't always
+ * write a mission_sector_status_log row — see the `assign` action), so
+ * reconstructing "was the *assigned* team here" would have real gaps. "Was a
+ * GPS-tracked person physically here" is both simpler and more honest.
+ *
+ * $sweepRadiusMeters is a starting default, not a tuned value — real
+ * visibility differs hugely between open field and dense forest. Left as a
+ * local constant rather than an admin-facing setting until real usage shows
+ * the default is wrong.
+ */
+function computeMissionSectorCoverage(int $missionId): array {
+    $gridStepMeters = 10;
+    $sweepRadiusMeters = 25;
+    $trustedAccuracyMeters = 100; // same "trustworthy" cutoff checkRestrictedAreaBreach() already uses
+
+    $sectors = dbFetchAll("SELECT id, geo FROM mission_search_sectors WHERE mission_id = ?", [$missionId]);
+    if (empty($sectors)) {
+        return [];
+    }
+
+    $pings = dbFetchAll(
+        "SELECT vp.lat, vp.lng FROM volunteer_pings vp
+         JOIN shifts s ON s.id = vp.shift_id
+         WHERE s.mission_id = ? AND (vp.accuracy_meters IS NULL OR vp.accuracy_meters <= ?)",
+        [$missionId, $trustedAccuracyMeters]
+    );
+    $pings = array_map(fn($p) => ['lat' => (float) $p['lat'], 'lng' => (float) $p['lng']], $pings);
+
+    $result = [];
+    foreach ($sectors as $sector) {
+        $geo = json_decode($sector['geo'], true);
+        if (!is_array($geo) || count($geo) < 3) {
+            continue;
+        }
+
+        $lats = array_column($geo, 0);
+        $lngs = array_column($geo, 1);
+        $minLat = min($lats);
+        $maxLat = max($lats);
+        $minLng = min($lngs);
+        $maxLng = max($lngs);
+
+        // meters -> degrees, latitude-adjusted for longitude — same
+        // flat-Cartesian tradeoff pointInPolygon()'s own doc comment
+        // already accepts as fine at mission scale.
+        $midLat = ($minLat + $maxLat) / 2;
+        $latDegPerMeter = 1 / 111320;
+        $lngDegPerMeter = 1 / (111320 * max(0.01, cos(deg2rad($midLat))));
+
+        $bufferLat = $sweepRadiusMeters * $latDegPerMeter;
+        $bufferLng = $sweepRadiusMeters * $lngDegPerMeter;
+        $bboxMinLat = $minLat - $bufferLat;
+        $bboxMaxLat = $maxLat + $bufferLat;
+        $bboxMinLng = $minLng - $bufferLng;
+        $bboxMaxLng = $maxLng + $bufferLng;
+
+        // Cheap numeric pre-filter before any Haversine calls below — a
+        // mission-wide ping pool can be a few thousand rows, most of them
+        // nowhere near this one sector.
+        $nearbyPings = array_values(array_filter($pings, fn($p) =>
+            $p['lat'] >= $bboxMinLat && $p['lat'] <= $bboxMaxLat &&
+            $p['lng'] >= $bboxMinLng && $p['lng'] <= $bboxMaxLng
+        ));
+
+        $stepLat = $gridStepMeters * $latDegPerMeter;
+        $stepLng = $gridStepMeters * $lngDegPerMeter;
+
+        $totalCells = 0;
+        $coveredCells = 0;
+        $gapCells = [];
+
+        // Always grid-sample, even with zero nearby pings — a completely
+        // unwalked sector must still resolve to a real 0%, not be skipped.
+        for ($lat = $minLat; $lat <= $maxLat; $lat += $stepLat) {
+            for ($lng = $minLng; $lng <= $maxLng; $lng += $stepLng) {
+                $cellLat = $lat + $stepLat / 2;
+                $cellLng = $lng + $stepLng / 2;
+                if (!pointInPolygon($cellLat, $cellLng, $geo)) {
+                    continue;
+                }
+                $totalCells++;
+
+                $covered = false;
+                foreach ($nearbyPings as $p) {
+                    if (gpsDistanceMeters($cellLat, $cellLng, $p['lat'], $p['lng']) <= $sweepRadiusMeters) {
+                        $covered = true;
+                        break;
+                    }
+                }
+                if ($covered) {
+                    $coveredCells++;
+                } else {
+                    $gapCells[] = [
+                        round($lat, 7), round($lng, 7),
+                        round($lat + $stepLat, 7), round($lng + $stepLng, 7),
+                    ];
+                }
+            }
+        }
+
+        $result[(int) $sector['id']] = [
+            'percent'   => $totalCells > 0 ? (int) round($coveredCells / $totalCells * 100) : 0,
+            'gap_cells' => $gapCells,
+        ];
+    }
+
+    return $result;
+}
+
+/**
  * War Room: each team's current position, taken as the most recent ping
  * among its current members — same "team is one unit" convention and same
  * per-team join shape as computeDispatchEta() above, just without that
