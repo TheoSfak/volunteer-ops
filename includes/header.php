@@ -943,9 +943,12 @@ if (isLoggedIn()) {
             object-fit: cover;
             flex-shrink: 0;
         }
-        /* Prominent standalone variant of .team-name-badge for a row/card's
-           upper-right corner (e.g. war-room.php team list) — bigger, bolder,
-           with its own shadow so it reads as a tag rather than inline text.
+        /* Prominent standalone variant of .team-name-badge — bigger, bolder,
+           with its own shadow — for a spot that wants more visual weight
+           than the inline superscript (e.g. war-room.php's team leader line).
+           Stays next to the specific name it describes rather than a row
+           corner: a mission_teams squad can mix people from different home
+           teams, so a corner tag would misread as the whole squad's org.
            See homeTeamCornerBadgeHtml() in functions-warroom.php. */
         .team-name-badge-corner {
             display: inline-flex;

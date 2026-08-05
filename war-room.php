@@ -1815,6 +1815,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                             <span class="badge fs-6 me-2" style="background:<?= h($teamBg) ?>;color:<?= h($teamFg) ?>;"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
                             <?php if ($team['leader_name']): ?>
                             <span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i><?= h($team['leader_name']) ?></span>
+                            <?= homeTeamCornerBadgeHtml($team['leader_home_team_name'], $team['leader_home_team_color'], $team['leader_is_external'], $team['leader_guest_country_code']) ?>
                             <?php endif; ?>
                             <div class="small mt-2">
                                 <?php foreach ($team['members'] as $member): ?>
@@ -1822,22 +1823,17 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                                 <?php endforeach; ?>
                             </div>
                         </div>
-                        <div class="d-flex align-items-start gap-2">
-                            <?php if ($team['leader_name']): ?>
-                            <?= homeTeamCornerBadgeHtml($team['leader_home_team_name'], $team['leader_home_team_color'], $team['leader_is_external'], $team['leader_guest_country_code']) ?>
-                            <?php endif; ?>
-                            <?php if ($canManageWarRoom): ?>
-                            <div class="d-flex gap-1">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editTeamModal-<?= $team['id'] ?>" title="<?= t('common.edit') ?>"><i class="bi bi-pencil"></i></button>
-                                <form method="post" onsubmit="return confirm('<?= h(addslashes(t('teams.delete_confirm', ['team' => teamLabel($team['codename'], $team['team_number'])]))) ?>')">
-                                    <?= csrfField() ?>
-                                    <input type="hidden" name="action" value="delete_team">
-                                    <input type="hidden" name="team_id" value="<?= $team['id'] ?>">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="<?= t('teams.delete_btn_title') ?>"><i class="bi bi-x-lg"></i></button>
-                                </form>
-                            </div>
-                            <?php endif; ?>
+                        <?php if ($canManageWarRoom): ?>
+                        <div class="d-flex gap-1">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editTeamModal-<?= $team['id'] ?>" title="<?= t('common.edit') ?>"><i class="bi bi-pencil"></i></button>
+                            <form method="post" onsubmit="return confirm('<?= h(addslashes(t('teams.delete_confirm', ['team' => teamLabel($team['codename'], $team['team_number'])]))) ?>')">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="delete_team">
+                                <input type="hidden" name="team_id" value="<?= $team['id'] ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="<?= t('teams.delete_btn_title') ?>"><i class="bi bi-x-lg"></i></button>
+                            </form>
                         </div>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <?php endforeach; ?>
