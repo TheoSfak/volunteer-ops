@@ -3383,20 +3383,28 @@ const SECTOR_STATUS_HEX = <?= json_encode(array_map(fn($c) => MISSION_TYPE_COLOR
 // "pay attention" work only for the one case that matters: a sector called
 // done that the GPS record doesn't back up.
 function sectorCoverageBadgeHtml(item) {
-    // Sectors with buildings already have the right ground-truth signal —
-    // the per-building/per-floor checklist (🏢 badge) — so skip the
-    // polygon-sweep % here entirely. It assumes the whole polygon is meant
-    // to be walked, which is wrong once the actual assignment is "check
-    // these N buildings": a volunteer doing exactly that produces a GPS
-    // track clustered tightly around a few points, not spread across the
-    // polygon, so this would read as a false-alarm-low % no matter how
-    // thoroughly the buildings were actually checked.
-    if (item.buildings && item.buildings.length > 0) return '';
     const cov = sectorCoverageById[item.id];
     if (!cov) return '';
+    const groundBadge = `<span class="badge bg-light text-dark border" title="${escapeHtml(t('coverage.badge_tooltip'))}">🛰️ ${cov.percent}%</span>`;
+    // Sectors with buildings show BOTH numbers side by side — ground-sweep %
+    // (same GPS signal as any other sector) plus a buildings % (checked
+    // buildings / total). The ⚠️ stays tied to buildings only, never to the
+    // ground %: when the actual assignment is "check these N buildings," a
+    // volunteer doing exactly that produces a GPS track clustered tightly
+    // around a few points, not spread across the whole polygon, so a ground-%
+    // threshold would read as a false-alarm-low warning no matter how
+    // thoroughly the buildings were actually checked.
+    if (item.buildings && item.buildings.length > 0) {
+        const doneBuildings = item.buildings.filter(b => b.all_required_checked).length;
+        const buildingsPercent = Math.round(doneBuildings / item.buildings.length * 100);
+        const buildingsBadge = `<span class="badge bg-light text-dark border" title="${escapeHtml(t('coverage.buildings_tooltip'))}">🏢 ${buildingsPercent}%</span>`;
+        const warn = (item.status === 'completed' && buildingsPercent < 100)
+            ? ` <span title="${escapeHtml(t('coverage.buildings_incomplete_warning'))}">⚠️</span>` : '';
+        return ` ${groundBadge} ${buildingsBadge}${warn}`;
+    }
     const warn = (item.status === 'completed' && cov.percent < 60)
         ? ` <span title="${escapeHtml(t('coverage.low_coverage_warning'))}">⚠️</span>` : '';
-    return ` <span class="badge bg-light text-dark border" title="${escapeHtml(t('coverage.badge_tooltip'))}">🛰️ ${cov.percent}%</span>${warn}`;
+    return ` ${groundBadge}${warn}`;
 }
 
 function sectorAdminSetStatus(id, status, selectEl) {

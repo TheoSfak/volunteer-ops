@@ -2087,17 +2087,52 @@ function pointToPolygonDistanceMeters(float $lat, float $lng, array $geo): float
 }
 
 /**
+ * Distance in meters from a point to a line segment A-B — same local-flat-
+ * meters-centered-on-the-query-point projection and point-to-segment math as
+ * the inner loop of pointToPolygonDistanceMeters() above, just for one
+ * standalone segment instead of walking a polygon's edges. Used by
+ * computeMissionSectorCoverage() below to credit the ground actually walked
+ * *between* two consecutive GPS pings, not just the ping points themselves.
+ */
+function pointToSegmentDistanceMeters(float $lat, float $lng, float $latA, float $lngA, float $latB, float $lngB): float {
+    $latDegPerMeter = 1 / 111320;
+    $lngDegPerMeter = 1 / (111320 * max(0.01, cos(deg2rad($lat))));
+    $ax = ($lngA - $lng) / $lngDegPerMeter;
+    $ay = ($latA - $lat) / $latDegPerMeter;
+    $bx = ($lngB - $lng) / $lngDegPerMeter;
+    $by = ($latB - $lat) / $latDegPerMeter;
+    $dx = $bx - $ax;
+    $dy = $by - $ay;
+    $lenSq = $dx * $dx + $dy * $dy;
+    $t = $lenSq > 0 ? max(0.0, min(1.0, (-$ax * $dx - $ay * $dy) / $lenSq)) : 0.0;
+    $projX = $ax + $t * $dx;
+    $projY = $ay + $t * $dy;
+    return sqrt($projX * $projX + $projY * $projY);
+}
+
+/**
  * Verified Coverage — ground-truth swept-area estimate for search sectors,
  * entirely independent of the self-reported status a team leader taps.
  * Grid-samples each sector polygon at $gridStepMeters resolution: a cell
  * counts toward the denominator when its center is inside the polygon
- * (pointInPolygon() above), and counts as covered when any trusted ping
- * falls within $sweepRadiusMeters of that center (gpsDistanceMeters()
- * above). This is a deliberate approximation (no polygon clipping/union
- * math) rather than exact geometry — nothing in this codebase uses a GIS
- * library or DB spatial functions (the latter has already bitten this repo
- * once via MariaDB-vs-MySQL syntax gaps, see schema.sql history), and
- * approximate is plenty for a decision-support signal.
+ * (pointInPolygon() above), and counts as covered when it's within
+ * $sweepRadiusMeters of either a trusted ping (gpsDistanceMeters()) or a
+ * "walked segment" between two of the same person's consecutive trusted
+ * pings (pointToSegmentDistanceMeters() above — see below). This is a
+ * deliberate approximation (no polygon clipping/union math) rather than
+ * exact geometry — nothing in this codebase uses a GIS library or DB
+ * spatial functions (the latter has already bitten this repo once via
+ * MariaDB-vs-MySQL syntax gaps, see schema.sql history), and approximate is
+ * plenty for a decision-support signal.
+ *
+ * Walked segments exist because a team is several people but usually one
+ * phone actively pinging, and that phone may only ping every 20-30s while
+ * its carrier keeps moving — crediting only the exact ping points
+ * under-counted the ground genuinely swept between them. Consecutive pings
+ * from the SAME user_id within $maxWalkGapSeconds become a segment; a wider
+ * gap (lost signal, a different sector entirely) is deliberately left as
+ * two disconnected points instead of a straight line through ground nobody
+ * actually walked — mission owner's explicit call on that cutoff.
  *
  * Ping attribution is purely spatial + mission-wide, NOT filtered by which
  * team is currently assigned to the sector: mission_search_sectors.team_id
@@ -2115,19 +2150,40 @@ function computeMissionSectorCoverage(int $missionId): array {
     $gridStepMeters = 10;
     $sweepRadiusMeters = 25;
     $trustedAccuracyMeters = 100; // same "trustworthy" cutoff checkRestrictedAreaBreach() already uses
+    $maxWalkGapSeconds = 1800; // 30 min — see doc comment above
 
     $sectors = dbFetchAll("SELECT id, geo FROM mission_search_sectors WHERE mission_id = ?", [$missionId]);
     if (empty($sectors)) {
         return [];
     }
 
-    $pings = dbFetchAll(
-        "SELECT vp.lat, vp.lng FROM volunteer_pings vp
+    $pingRows = dbFetchAll(
+        "SELECT vp.user_id, vp.lat, vp.lng, vp.created_at FROM volunteer_pings vp
          JOIN shifts s ON s.id = vp.shift_id
-         WHERE s.mission_id = ? AND (vp.accuracy_meters IS NULL OR vp.accuracy_meters <= ?)",
+         WHERE s.mission_id = ? AND (vp.accuracy_meters IS NULL OR vp.accuracy_meters <= ?)
+         ORDER BY vp.user_id, vp.created_at",
         [$missionId, $trustedAccuracyMeters]
     );
-    $pings = array_map(fn($p) => ['lat' => (float) $p['lat'], 'lng' => (float) $p['lng']], $pings);
+
+    $points = [];
+    $segments = [];
+    $prevByUser = [];
+    foreach ($pingRows as $row) {
+        $uid = (int) $row['user_id'];
+        $lat = (float) $row['lat'];
+        $lng = (float) $row['lng'];
+        $points[] = ['lat' => $lat, 'lng' => $lng];
+        if (isset($prevByUser[$uid])) {
+            $gapSeconds = strtotime($row['created_at']) - strtotime($prevByUser[$uid]['created_at']);
+            if ($gapSeconds >= 0 && $gapSeconds <= $maxWalkGapSeconds) {
+                $segments[] = [
+                    'lat1' => $prevByUser[$uid]['lat'], 'lng1' => $prevByUser[$uid]['lng'],
+                    'lat2' => $lat, 'lng2' => $lng,
+                ];
+            }
+        }
+        $prevByUser[$uid] = ['lat' => $lat, 'lng' => $lng, 'created_at' => $row['created_at']];
+    }
 
     $result = [];
     foreach ($sectors as $sector) {
@@ -2157,12 +2213,21 @@ function computeMissionSectorCoverage(int $missionId): array {
         $bboxMinLng = $minLng - $bufferLng;
         $bboxMaxLng = $maxLng + $bufferLng;
 
-        // Cheap numeric pre-filter before any Haversine calls below — a
-        // mission-wide ping pool can be a few thousand rows, most of them
-        // nowhere near this one sector.
-        $nearbyPings = array_values(array_filter($pings, fn($p) =>
-            $p['lat'] >= $bboxMinLat && $p['lat'] <= $bboxMaxLat &&
-            $p['lng'] >= $bboxMinLng && $p['lng'] <= $bboxMaxLng
+        // Cheap numeric pre-filter before any Haversine/segment calls below
+        // — a mission-wide ping pool can be a few thousand rows, most of
+        // them nowhere near this one sector.
+        $inBbox = fn($lat, $lng) =>
+            $lat >= $bboxMinLat && $lat <= $bboxMaxLat && $lng >= $bboxMinLng && $lng <= $bboxMaxLng;
+
+        $nearbyPoints = array_values(array_filter($points, fn($p) => $inBbox($p['lat'], $p['lng'])));
+        // A segment counts as nearby if either endpoint does — cheap and
+        // consistent with the point pre-filter above; a segment that clips
+        // through the bbox with both endpoints just outside it is a real
+        // miss, but rare enough (needs a walked leg longer than roughly
+        // 2x the sweep radius landing exactly either side) not to be worth
+        // a heavier segment-bbox-intersection test here.
+        $nearbySegments = array_values(array_filter($segments, fn($s) =>
+            $inBbox($s['lat1'], $s['lng1']) || $inBbox($s['lat2'], $s['lng2'])
         ));
 
         $stepLat = $gridStepMeters * $latDegPerMeter;
@@ -2184,10 +2249,18 @@ function computeMissionSectorCoverage(int $missionId): array {
                 $totalCells++;
 
                 $covered = false;
-                foreach ($nearbyPings as $p) {
+                foreach ($nearbyPoints as $p) {
                     if (gpsDistanceMeters($cellLat, $cellLng, $p['lat'], $p['lng']) <= $sweepRadiusMeters) {
                         $covered = true;
                         break;
+                    }
+                }
+                if (!$covered) {
+                    foreach ($nearbySegments as $s) {
+                        if (pointToSegmentDistanceMeters($cellLat, $cellLng, $s['lat1'], $s['lng1'], $s['lat2'], $s['lng2']) <= $sweepRadiusMeters) {
+                            $covered = true;
+                            break;
+                        }
                     }
                 }
                 if ($covered) {
