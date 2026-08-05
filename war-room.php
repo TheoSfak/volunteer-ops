@@ -914,6 +914,11 @@ if (get('ajax') === '1') {
     // isApprovedParticipant) gate this file already uses for incidents/POIs.
     $restrictedAreas = ($canManageWarRoom || $isApprovedParticipant) ? loadMissionRestrictedAreasForUser($missionId) : [];
     $restrictedAreaBreaches = loadOpenRestrictedAreaBreachesForUser($missionId, (int)$user['id'], $canManageWarRoom);
+    // Full history (open + resolved) for the breach LIST widget — deliberately
+    // a separate load from $restrictedAreaBreaches above, which must stay
+    // open-only since it drives the alarm state machine's "nothing open at
+    // all" branch.
+    $restrictedAreaBreachHistory = loadRestrictedAreaBreachHistoryForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $teamProximity = $loadTeamProximity();
     $restrictedAreaProximity = $loadRestrictedAreaProximity();
 
@@ -937,6 +942,7 @@ if (get('ajax') === '1') {
         'sectors' => $sectors,
         'restrictedAreas' => $restrictedAreas,
         'restrictedAreaBreaches' => $restrictedAreaBreaches,
+        'restrictedAreaBreachHistory' => $restrictedAreaBreachHistory,
         'restrictedAreaProximity' => $restrictedAreaProximity,
         'nearbyTeams' => $teamProximity['nearbyTeams'],
         'teamDistances' => $teamProximity['teamDistances'],
@@ -1011,6 +1017,8 @@ $sectors = loadMissionSectorsForUser($missionId, (int)$user['id'], $canManageWar
 // isApprovedParticipant) gate this file already uses for incidents/POIs.
 $restrictedAreas = ($canManageWarRoom || $isApprovedParticipant) ? loadMissionRestrictedAreasForUser($missionId) : [];
 $restrictedAreaBreaches = loadOpenRestrictedAreaBreachesForUser($missionId, (int)$user['id'], $canManageWarRoom);
+// See the ajax branch's own copy of this line above for why it's separate.
+$restrictedAreaBreachHistory = loadRestrictedAreaBreachHistoryForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $teamProximity = $loadTeamProximity();
 $nearbyTeams = $teamProximity['nearbyTeams'];
 $teamDistances = $teamProximity['teamDistances'];
@@ -2808,6 +2816,7 @@ let sosAlerts = <?= json_encode($sosAlerts) ?>;
 let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
 let restrictedAreas = <?= json_encode($restrictedAreas) ?>;
 let restrictedAreaBreaches = <?= json_encode($restrictedAreaBreaches) ?>;
+let restrictedAreaBreachHistory = <?= json_encode($restrictedAreaBreachHistory) ?>;
 
 // Drag-and-drop card layout (admin desktop view only — #wrZoneMain/#wrZoneSidebar
 // only exist in the DOM when canManageWarRoom && !fieldMode, so their absence
@@ -3723,6 +3732,11 @@ function renderRestrictedAreasList(items) {
 // breach to already be acknowledged (mirrors mission-restricted-area.php's
 // own resolve action, which COALESCEs acknowledged_at if it was skipped) —
 // an admin force-clearing a stuck alarm shouldn't need two clicks.
+// items is the full history (open + resolved), not the alarm-driving
+// open-only array — a resolved row (whether resolved manually or auto-
+// resolved by deleting its zone) stays visible here, muted and without
+// action buttons, instead of silently vanishing the moment it's no longer
+// "active." "Auto-resolve not auto-erase" holding in the UI, not just the DB.
 function renderRestrictedAreaBreachesList(items) {
     const list = document.getElementById('restrictedAreaBreachesList');
     if (!list) return;
@@ -3730,24 +3744,33 @@ function renderRestrictedAreaBreachesList(items) {
         list.innerHTML = '<p class="text-muted mb-0 small">' + t('restricted_area.breaches_empty') + '</p>';
         return;
     }
-    list.innerHTML = items.map(b => `
-        <div class="border border-danger rounded p-2 mb-2">
-            <div><strong>⚠️ ${b.team_label}</strong> — ${guestNameHtml(b.user_name, b.is_external, b.home_team_name, b.home_team_color_bg, b.home_team_color_fg, b.guest_country_code)}</div>
-            <div class="small">${escapeHtml(b.area_label)}</div>
-            <div class="text-muted" style="font-size:.75rem;">${b.created_at}${b.exited_at ? t('restricted_area.exited_at_prefix', {time: b.exited_at}) : t('restricted_area.still_inside')}${b.acknowledged_at ? t('sos.ack_at_prefix', {time: b.acknowledged_at}) : ''}</div>
-            <div class="mt-1 d-flex gap-1">
+    list.innerHTML = items.map(b => {
+        const resolved = !!b.resolved_at;
+        const statusOrActions = resolved
+            ? `<div class="small fst-italic text-muted">${t('restricted_area.resolved_at_prefix', {time: b.resolved_at})}${b.resolved_by_name ? ` (${escapeHtml(b.resolved_by_name)})` : ''}</div>`
+            : `<div class="mt-1 d-flex gap-1">
                 ${!b.acknowledged_at ? `<button type="button" class="btn btn-sm btn-warning w-100 restricted-area-ack-btn" data-breach-id="${b.id}">${t('banner.ack_btn')}</button>` : ''}
                 <button type="button" class="btn btn-sm btn-success w-100 restricted-area-resolve-btn" data-breach-id="${b.id}">${t('shortage.resolve_btn')}</button>
-            </div>
-        </div>
-    `).join('');
+            </div>`;
+        return `
+        <div class="border ${resolved ? 'border-secondary' : 'border-danger'} rounded p-2 mb-2${resolved ? ' opacity-75' : ''}">
+            <div><strong>${resolved ? '✅' : '⚠️'} ${b.team_label}</strong> — ${guestNameHtml(b.user_name, b.is_external, b.home_team_name, b.home_team_color_bg, b.home_team_color_fg, b.guest_country_code)}</div>
+            <div class="small">${escapeHtml(b.area_label)}</div>
+            <div class="text-muted" style="font-size:.75rem;">${b.created_at}${b.exited_at ? t('restricted_area.exited_at_prefix', {time: b.exited_at}) : t('restricted_area.still_inside')}${b.acknowledged_at ? t('sos.ack_at_prefix', {time: b.acknowledged_at}) : ''}</div>
+            ${statusOrActions}
+        </div>`;
+    }).join('');
     list.querySelectorAll('.restricted-area-ack-btn').forEach(btn => btn.addEventListener('click', () => {
         btn.disabled = true;
         const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'acknowledge', id: btn.dataset.breachId});
         fetch('mission-restricted-area.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
             if (result.ok) {
-                restrictedAreaBreaches = result.breaches;
-                renderRestrictedAreaBreachesList(restrictedAreaBreaches);
+                // Acknowledging doesn't touch resolved_at/exited_at, so the
+                // alarm's own open/anyOpen concept is unaffected — only the
+                // list needs a refresh here, matching this action's original
+                // (pre-history) behavior.
+                restrictedAreaBreachHistory = result.breaches;
+                renderRestrictedAreaBreachesList(restrictedAreaBreachHistory);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
     }));
@@ -3756,8 +3779,12 @@ function renderRestrictedAreaBreachesList(items) {
         const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'resolve', id: btn.dataset.breachId});
         fetch('mission-restricted-area.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
             if (result.ok) {
-                restrictedAreaBreaches = result.breaches;
-                renderRestrictedAreaBreachesList(restrictedAreaBreaches);
+                restrictedAreaBreachHistory = result.breaches;
+                renderRestrictedAreaBreachesList(restrictedAreaBreachHistory);
+                // Resolving DOES remove it from what the alarm considers
+                // open — re-derive that subset from the fresh history rather
+                // than issuing a second request for it.
+                restrictedAreaBreaches = restrictedAreaBreachHistory.filter(b => !b.resolved_at);
                 updateRestrictedAreaAlarmState(restrictedAreaBreaches);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
@@ -5915,7 +5942,7 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 })();
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreaches); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); }
     renderMyTasks(myTasks);
     renderMySectors(sectors);
     renderMyRoutes(routes);
@@ -6016,6 +6043,31 @@ function stopSosSiren() {
     if (sosSirenGain) { sosSirenGain.disconnect(); sosSirenGain = null; }
 }
 
+// Three independent alarm sources (SOS panic button, restricted-area breach,
+// return-to-base) all share the one siren engine above. Each used to decide
+// play-vs-stop unilaterally from only its own state, so on the admin screen
+// a poll tick running "no SOS alerts -> stop" immediately followed by "RA
+// breach still open -> play" nulled and recreated the oscillator every 5s —
+// audible as the siren restarting instead of sounding continuous. Fix: each
+// source exposes a pure "do I want the siren right now" check, and
+// reconcileSharedSiren() is the ONLY place that actually calls
+// playSosSiren()/stopSosSiren() — it plays if ANY source wants it, stops
+// only once NONE do. Every call site below that used to call those two
+// functions directly now calls this instead. (raWantsSirenNow is defined
+// further down with the rest of the RA state — plain function declarations
+// are hoisted, so the forward reference here is safe.)
+function sosWantsSirenNow() {
+    const unacked = sosAlerts.filter(a => !a.acknowledged_at);
+    if (!unacked.length) return false;
+    return !(isSosMuteActive() && unacked.every(a => sosMutedAlertIds.has(a.id)));
+}
+function rtbWantsSirenNow() {
+    return !!document.getElementById('returnToBaseOverlay')?.classList.contains('rtb-active');
+}
+function reconcileSharedSiren() {
+    if (sosWantsSirenNow() || raWantsSirenNow() || rtbWantsSirenNow()) playSosSiren(); else stopSosSiren();
+}
+
 // Local-only siren mute (this device/tab, this browser session — a page
 // reload clears it): for "I'm in a meeting/on a call, I can see the SOS is
 // still active on screen, I just need it quiet for a few minutes", not a
@@ -6035,8 +6087,7 @@ function isSosMuteActive() {
 function muteSosAlerts(alertIds) {
     sosMutedAlertIds = new Set(alertIds);
     sosMuteExpiresAt = Date.now() + SOS_MUTE_DURATION_MS;
-    stopSosSiren();
-    updateSosAlarmState(sosAlerts);
+    updateSosAlarmState(sosAlerts); // reconcileSharedSiren() inside will stop it (unless RA/RTB still want it)
 }
 function unmuteSosAlerts() {
     sosMutedAlertIds = new Set();
@@ -6076,7 +6127,8 @@ document.getElementById('sosOverlayCloseBtn')?.addEventListener('click', dismiss
 // takeover; everything else (acknowledged, or dismissed-but-still-open) =
 // calm static red; no open alerts = fully off. The VISUAL state is never
 // affected by the local mute above — only the siren audio itself is; muting
-// must never look like "no SOS is happening."
+// must never look like "no SOS is happening." Siren decision itself is
+// delegated entirely to reconcileSharedSiren() (see above), not decided here.
 function updateSosAlarmState(items) {
     const overlay = document.getElementById('sosOverlay');
     if (!overlay) return;
@@ -6086,7 +6138,6 @@ function updateSosAlarmState(items) {
     const dismissStillValid = anyUnacked && unacked.every(a => sosDismissedAlertIds.has(a.id));
     if (!items.length) {
         overlay.classList.remove('sos-active', 'sos-calm');
-        stopSosSiren();
         // A fresh SOS later must never inherit today's stale mute/dismiss state.
         sosMutedAlertIds = new Set();
         sosMuteExpiresAt = 0;
@@ -6094,19 +6145,17 @@ function updateSosAlarmState(items) {
     } else if (anyUnacked && !dismissStillValid) {
         overlay.classList.add('sos-active');
         overlay.classList.remove('sos-calm');
-        if (muteStillValid) { stopSosSiren(); } else { playSosSiren(); }
     } else if (anyUnacked) {
         // Dismissed, not acknowledged — still genuinely open, so the siren
         // keeps obeying mute exactly as it would in the full-screen state;
         // only the takeover visual itself steps back.
         overlay.classList.remove('sos-active');
         overlay.classList.add('sos-calm');
-        if (muteStillValid) { stopSosSiren(); } else { playSosSiren(); }
     } else {
         overlay.classList.remove('sos-active');
         overlay.classList.add('sos-calm');
-        stopSosSiren();
     }
+    reconcileSharedSiren();
     const muteBtn = document.getElementById('sosMuteBtn');
     if (muteBtn) {
         if (!anyUnacked) {
@@ -6152,7 +6201,33 @@ function updateSosAlarmState(items) {
 // ever acknowledges. resolved_at (admin's manual force-clear) is the only
 // thing that fully removes an item from `items` in the first place (see
 // loadOpenRestrictedAreaBreachesForUser's WHERE resolved_at IS NULL).
-const RA_MUTE_DURATION_MS = 5 * 60 * 1000;
+//
+// Unlike SOS, the siren does NOT sound continuously for the whole time a
+// breach stays open — a still-open, unmuted breach gets one siren BURST the
+// first time it's seen, then not again until RA_SIREN_REMINDER_INTERVAL_MS
+// has passed since its last burst. Tracked per breach id, which is safe
+// because one continuous "still inside" episode is always exactly one
+// stable row/id (confirmed against checkRestrictedAreaBreach() in
+// functions-warroom.php: a new row is only INSERTed when there's no
+// existing open one for that area+user — every ping in between just
+// re-finds the same row, and leaving/re-entering later gets a genuinely new
+// id, correctly restarting the cadence). Each burst lasts
+// RA_SIREN_BURST_DURATION_MS, tracked via raSirenBurstUntil and checked by
+// raWantsSirenNow() below rather than its own timer — 5s poll-tick
+// granularity is plenty precise at a 15-minute scale. Mute is INDEFINITE
+// here (raMuteExpiresAt = Infinity), unlike SOS's 5-minute quick-mute —
+// "even if the user stays in that area" was the explicit ask, and an admin
+// who deliberately silences one ongoing breach shouldn't have it resume
+// nagging on its own; it's still keyed to specific breach ids exactly like
+// SOS's mute, so a genuinely new/different breach is never silently caught
+// by a stale mute.
+const RA_SIREN_REMINDER_INTERVAL_MS = 15 * 60 * 1000;
+const RA_SIREN_BURST_DURATION_MS = 15 * 1000;
+let raSirenLastPlayedAt = new Map(); // breach id -> ms epoch of its last siren burst
+let raSirenBurstUntil = 0;           // ms epoch; RA wants the siren playing until this time
+function raWantsSirenNow() {
+    return Date.now() < raSirenBurstUntil;
+}
 let raMutedBreachIds = new Set();
 let raMuteExpiresAt = 0;
 function isRaMuteActive() {
@@ -6160,8 +6235,8 @@ function isRaMuteActive() {
 }
 function muteRaAlerts(breachIds) {
     raMutedBreachIds = new Set(breachIds);
-    raMuteExpiresAt = Date.now() + RA_MUTE_DURATION_MS;
-    stopSosSiren();
+    raMuteExpiresAt = Infinity;
+    raSirenBurstUntil = 0; // cut a currently-sounding burst short immediately
     updateRestrictedAreaAlarmState(restrictedAreaBreaches);
 }
 function unmuteRaAlerts() {
@@ -6191,41 +6266,52 @@ function updateRestrictedAreaAlarmState(items) {
     const anyOpen = open.length > 0;
     const muteStillValid = isRaMuteActive() && open.every(b => raMutedBreachIds.has(b.id));
     const dismissStillValid = anyOpen && open.every(b => raDismissedBreachIds.has(b.id));
+
+    // Schedule a siren burst for any open, unmuted breach that's due (never
+    // played yet, or last played >= RA_SIREN_REMINDER_INTERVAL_MS ago) —
+    // this is the ONLY place bursts get scheduled, run on every poll tick
+    // but only actually fires roughly once per 15 minutes per breach.
+    if (!muteStillValid) {
+        const now = Date.now();
+        open.forEach(b => {
+            const last = raSirenLastPlayedAt.get(b.id) || 0;
+            if (now - last >= RA_SIREN_REMINDER_INTERVAL_MS) {
+                raSirenLastPlayedAt.set(b.id, now);
+                raSirenBurstUntil = Math.max(raSirenBurstUntil, now + RA_SIREN_BURST_DURATION_MS);
+            }
+        });
+    }
+
     if (!items.length) {
         overlay.classList.remove('ra-active', 'ra-calm');
-        // Same cross-alarm courtesy triggerReturnToBaseAlarm's own timeout
-        // uses: don't stop the shared siren oscillator out from under a
-        // genuinely separate, still-active SOS. #sosOverlay only exists in
-        // the DOM at all for admins, so this is a safe no-op check for
-        // everyone else.
-        if (!document.getElementById('sosOverlay')?.classList.contains('sos-active')) stopSosSiren();
         raMutedBreachIds = new Set();
         raMuteExpiresAt = 0;
         raDismissedBreachIds = new Set();
+        raSirenLastPlayedAt = new Map();
+        raSirenBurstUntil = 0;
     } else if (anyOpen && !dismissStillValid) {
         overlay.classList.add('ra-active');
         overlay.classList.remove('ra-calm');
-        if (muteStillValid) { stopSosSiren(); } else { playSosSiren(); }
     } else if (anyOpen) {
         overlay.classList.remove('ra-active');
         overlay.classList.add('ra-calm');
-        if (muteStillValid) { stopSosSiren(); } else { playSosSiren(); }
     } else {
         overlay.classList.remove('ra-active');
         overlay.classList.add('ra-calm');
-        stopSosSiren();
+        raSirenBurstUntil = 0; // nothing open anywhere — don't let a stale burst window linger
     }
+    reconcileSharedSiren();
+
     const muteBtn = document.getElementById('raMuteBtn');
     if (muteBtn) {
         if (!anyOpen) {
             muteBtn.className = 'd-none';
         } else if (muteStillValid) {
-            const minutesLeft = Math.max(1, Math.ceil((raMuteExpiresAt - Date.now()) / 60000));
             muteBtn.className = 'sos-mute-active';
-            muteBtn.innerHTML = `<i class="bi bi-volume-mute-fill me-1"></i>${escapeHtml(t('sos.muted_btn', {minutes: minutesLeft}))}`;
+            muteBtn.innerHTML = `<i class="bi bi-volume-mute-fill me-1"></i>${escapeHtml(t('restricted_area.muted_btn'))}`;
         } else {
             muteBtn.className = 'sos-mute-offer';
-            muteBtn.innerHTML = `<i class="bi bi-volume-mute me-1"></i>${escapeHtml(t('sos.mute_btn'))}`;
+            muteBtn.innerHTML = `<i class="bi bi-volume-mute me-1"></i>${escapeHtml(t('restricted_area.mute_btn'))}`;
         }
     }
     const closeBtn = document.getElementById('restrictedAreaOverlayCloseBtn');
@@ -6238,10 +6324,11 @@ function updateRestrictedAreaAlarmState(items) {
 }
 
 // End of Mission / Return to Base — reuses the SOS siren sound engine (via
-// playSosSiren/stopSosSiren) but its own green full-screen overlay (not the
-// SOS red corner pulse) and its own overlay element/timer, so it never reads
-// or clobbers real SOS state. Only stops the siren afterward if a genuine
-// SOS isn't ALSO currently active.
+// reconcileSharedSiren(), which is siren-source-agnostic) but its own green
+// full-screen overlay (not the SOS red corner pulse) and its own overlay
+// element/timer, so it never reads or clobbers real SOS/RA state — it just
+// declares "I want the siren while rtb-active" via rtbWantsSirenNow() above,
+// and lets the shared arbitrator decide whether that's enough to stop it.
 let returnToBaseTimer = null;
 function triggerReturnToBaseAlarm(text) {
     const overlay = document.getElementById('returnToBaseOverlay');
@@ -6249,14 +6336,11 @@ function triggerReturnToBaseAlarm(text) {
     const marqueeText = document.getElementById('returnToBaseMarqueeText');
     if (marqueeText) marqueeText.textContent = text || '';
     overlay.classList.add('rtb-active');
-    playSosSiren();
+    reconcileSharedSiren();
     if (returnToBaseTimer) clearTimeout(returnToBaseTimer);
     returnToBaseTimer = setTimeout(() => {
         overlay.classList.remove('rtb-active');
-        const sosOverlay = document.getElementById('sosOverlay');
-        if (!sosOverlay || !sosOverlay.classList.contains('sos-active')) {
-            stopSosSiren();
-        }
+        reconcileSharedSiren();
     }, 12000);
 }
 
@@ -6926,13 +7010,16 @@ function pollWarRoomData() {
         }
         if (data.restrictedAreaBreaches) {
             restrictedAreaBreaches = data.restrictedAreaBreaches;
-            if (!fieldMode) renderRestrictedAreaBreachesList(restrictedAreaBreaches);
             // Deliberately NOT !fieldMode-gated, unlike updateSosAlarmState just
             // above — SOS is command-only by design, but this alarm's primary
             // audience is the field volunteer's own device. Mirrors how
             // triggerReturnToBaseAlarm (via the banners loop below) already
             // reaches fieldMode unconditionally.
             updateRestrictedAreaAlarmState(restrictedAreaBreaches);
+        }
+        if (data.restrictedAreaBreachHistory) {
+            restrictedAreaBreachHistory = data.restrictedAreaBreachHistory;
+            if (!fieldMode) renderRestrictedAreaBreachesList(restrictedAreaBreachHistory);
         }
         if (data.onlinePresence) renderPresence(data.onlinePresence);
         if (data.pingStaleness) renderPingStaleness(data.pingStaleness);

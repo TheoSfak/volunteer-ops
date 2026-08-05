@@ -264,6 +264,14 @@ return [
         'restricted_area.proximity_card_title' => 'Απόσταση από Απαγορευμένες Περιοχές',
         'restricted_area.proximity_empty' => 'Δεν βρίσκεστε κοντά σε καμία απαγορευμένη περιοχή.',
         'restricted_area.proximity_inside' => 'ΕΝΤΟΣ',
+        // Breach history list — resolved rows (manually or auto-resolved by
+        // deleting the zone) stay visible instead of vanishing
+        'restricted_area.resolved_at_prefix' => 'Επιλύθηκε: {time}',
+        // RA mute is indefinite (until the breach resolves/exits), unlike
+        // SOS's own 5-minute quick-mute (sos.mute_btn/muted_btn literally
+        // advertise "(5λ)" — wrong to reuse here) — own pair, no duration
+        'restricted_area.mute_btn' => 'Σίγαση ήχου',
+        'restricted_area.muted_btn' => 'Σε σίγαση — ενεργοποίηση',
         'history.restricted_area_created' => '{actor} δημιούργησε την απαγορευμένη περιοχή «{label}»',
         'history.restricted_area_breach' => '{actor} ({team}) μπήκε στην απαγορευμένη περιοχή «{label}»',
 
@@ -1197,6 +1205,14 @@ return [
         'restricted_area.proximity_card_title' => 'Distance to Restricted Areas',
         'restricted_area.proximity_empty' => 'You are not near any restricted area.',
         'restricted_area.proximity_inside' => 'INSIDE',
+        // Breach history list — resolved rows (manually or auto-resolved by
+        // deleting the zone) stay visible instead of vanishing
+        'restricted_area.resolved_at_prefix' => 'Resolved: {time}',
+        // RA mute is indefinite (until the breach resolves/exits), unlike
+        // SOS's own 5-minute quick-mute (sos.mute_btn/muted_btn literally
+        // advertise "(5m)" — wrong to reuse here) — own pair, no duration
+        'restricted_area.mute_btn' => 'Mute sound',
+        'restricted_area.muted_btn' => 'Muted — unmute',
         'history.restricted_area_created' => '{actor} created restricted area "{label}"',
         'history.restricted_area_breach' => '{actor} ({team}) entered restricted area "{label}"',
 
