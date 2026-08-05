@@ -923,13 +923,16 @@ function guestNameHtml(string $name, bool $isExternal, ?string $teamName, ?strin
 }
 
 /**
- * Standalone, larger home-team flag+label badge for the upper-right corner of
- * a card/row (e.g. war-room.php's Ομάδες Αποστολής team list), where a
- * prominent corner tag reads better than guestNameHtml()'s inline superscript.
- * Same flag/fallback rules as guestNameHtml(), intentionally duplicated
- * rather than shared so guestNameHtml()'s many other call sites (chat,
- * dispatch, SOS, profile) are untouched. Caller wraps the row in
- * position:relative; pair with the .team-name-badge-corner CSS in header.php.
+ * Standalone, larger home-team flag+label badge — bigger/bolder sibling of
+ * guestNameHtml()'s inline badge, for a spot (e.g. war-room.php's Ομάδες
+ * Αποστολής leader line) that wants more visual weight. Deliberately still
+ * placed right next to the specific person's name it describes, not floated
+ * to a row/card corner: a mission_teams squad can mix people from different
+ * home teams (Επίδρασις + a partner org), so a corner tag reads as "this
+ * whole team belongs to X" — wrong when the team is mixed. Same flag/fallback
+ * rules as guestNameHtml(), intentionally duplicated rather than shared so
+ * guestNameHtml()'s many other call sites (chat, dispatch, SOS, profile) are
+ * untouched. Pairs with the .team-name-badge-corner CSS in header.php.
  */
 function homeTeamCornerBadgeHtml(?string $teamName, ?string $teamColor, bool $isExternal, ?string $countryCode): string {
     if ($teamColor === null) return '';
