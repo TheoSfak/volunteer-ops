@@ -3488,6 +3488,102 @@ function restrictedAreaDelete(id) {
     });
 }
 
+// Dimmed, read-only, tooltip-only reference layers — every composer map that
+// opens as a popup over the live map (dispatch, search-area, divide-into-
+// sectors, split-sector, restricted-area, route) must show everything
+// already on the live map, not just its own specific entity type, so an
+// admin drawing something new is never doing it blind. One small function
+// per entity type (each takes the composer's own ref layer, not a fixed
+// one) plus renderFullMapReference() below as the one-call convenience most
+// composers actually want. Top-level, not nested in any one composer's
+// IIFE, since every composer needs to call these on its own layer.
+function renderPinsReference(layer) {
+    if (!layer) return;
+    const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
+    pins.forEach(pin => {
+        const color = pin.team_color || statusColors[pin.status] || '#2563eb';
+        L.circleMarker([pin.lat, pin.lng], {radius:6, weight:2, color:'#fff', fillColor:color, fillOpacity:0.55, opacity:0.6})
+            .addTo(layer).bindTooltip(escapeHtml(pin.name));
+    });
+}
+function renderDispatchesReference(layer) {
+    if (!layer) return;
+    dispatches.forEach(item => {
+        const tooltip = item.label ? escapeHtml(item.label) : escapeHtml(item.team_label);
+        if (item.type === 'point') {
+            const icon = L.divIcon({className:'', html:'<i class="bi bi-geo-alt-fill" style="font-size:22px;color:#7c3aed;opacity:0.55;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[22,22], iconAnchor:[11,20]});
+            L.marker([item.geo.lat, item.geo.lng], {icon}).addTo(layer).bindTooltip(tooltip);
+        } else if (item.type === 'polygon' && item.geo && item.geo.length) {
+            L.polygon(item.geo, {color:'#7c3aed', weight:2, opacity:0.5, dashArray:'6,4', fillOpacity:0.05}).addTo(layer).bindTooltip(tooltip);
+        }
+    });
+}
+function renderSearchAreasReference(layer) {
+    if (!layer) return;
+    areas.forEach(item => {
+        L.polygon(item.geo, {color:'#495057', weight:2, opacity:0.5, dashArray:'8,5', fillOpacity:0.05}).addTo(layer).bindTooltip(escapeHtml(item.label));
+    });
+}
+function renderSectorsReference(layer) {
+    if (!layer) return;
+    sectors.forEach(item => {
+        const color = SECTOR_STATUS_HEX[item.status] || '#6c757d';
+        L.polygon(item.geo, {color, weight:1.5, opacity:0.5, fillOpacity:0.1}).addTo(layer).bindTooltip(escapeHtml(item.label));
+    });
+}
+function renderRestrictedAreasReference(layer) {
+    if (!layer) return;
+    restrictedAreas.forEach(item => {
+        L.polygon(item.geo, {color:'#dc3545', weight:2, opacity:0.6, dashArray:'4,3', fillOpacity:0.08}).addTo(layer).bindTooltip(escapeHtml(item.label));
+    });
+}
+function renderRoutesReference(layer) {
+    if (!layer) return;
+    (routes || []).filter(r => r.status === 'active' && r.waypoints && r.waypoints.length).forEach(route => {
+        const coords = route.waypoints.map(w => [w.lat, w.lng]);
+        const style = {color: route.team_color_bg || '#0d6efd', weight:2, opacity:0.5, dashArray:'6,6'};
+        const line = (route.is_closed_loop && coords.length >= 3)
+            ? L.polygon(coords, Object.assign({fillOpacity:0}, style))
+            : coords.length >= 2 ? L.polyline(coords, style) : null;
+        if (line) line.addTo(layer).bindTooltip(escapeHtml(route.team_label || ''));
+    });
+}
+// Mirrors renderAnnotations()'s 3 shape types (same ANNOTATION_COLOR) but
+// dimmed and with no click-to-erase handler — read-only reference, same
+// relationship renderRouteComposerAnnotations() already has to the live
+// annotation layer, just parameterized to any composer's own ref layer
+// instead of always routeComposerAnnotationLayer.
+function renderAnnotationsReference(layer) {
+    if (!layer) return;
+    annotations.forEach(item => {
+        if (item.type === 'freehand') {
+            L.polyline(item.geo, {color: ANNOTATION_COLOR, weight:3, opacity:0.55}).addTo(layer);
+        } else if (item.type === 'arrow') {
+            const [p1, p2] = item.geo;
+            L.polyline(item.geo, {color: ANNOTATION_COLOR, weight:2, opacity:0.55}).addTo(layer);
+            const brng = bearing(L.latLng(p1[0], p1[1]), L.latLng(p2[0], p2[1]));
+            const headIcon = L.divIcon({className:'', html:`<div class="wr-anno-arrowhead" style="transform:rotate(${brng}deg);border-bottom-color:${ANNOTATION_COLOR};opacity:.55"></div>`, iconSize:[16,16], iconAnchor:[8,8]});
+            L.marker(p2, {icon: headIcon}).addTo(layer);
+        } else if (item.type === 'text') {
+            const icon = L.divIcon({className:'', html:`<span class="wr-anno-text-label" style="background:${ANNOTATION_COLOR};opacity:.55">${escapeHtml(item.label)}</span>`, iconAnchor:[0, 12]});
+            L.marker([item.geo.lat, item.geo.lng], {icon}).addTo(layer);
+        }
+    });
+}
+// The one-call version most composers actually want: everything, in back-
+// to-front paint order (pins first so later shapes don't visually bury the
+// small dots, but pins still show — bindTooltip works regardless of order).
+function renderFullMapReference(layer) {
+    if (!layer) return;
+    renderSearchAreasReference(layer);
+    renderSectorsReference(layer);
+    renderRestrictedAreasReference(layer);
+    renderRoutesReference(layer);
+    renderAnnotationsReference(layer);
+    renderDispatchesReference(layer);
+    renderPinsReference(layer);
+}
+
 // restrictedAreasCard's flat list of drawn zones — the map popup (above) is
 // the primary way to manage one, this is just a non-map-dependent secondary
 // surface, same relationship sectorsListCard has to renderSectorLayer's
@@ -6559,6 +6655,7 @@ function pollWarRoomData() {
             // (the layers stay null until then).
             renderRouteComposerPins(pins);
             renderRouteComposerAnnotations(annotations);
+            renderRouteComposerAreas();
             if (data.media) {
                 const sig = JSON.stringify(data.media);
                 if (sig !== mediaSignature) {
@@ -6810,22 +6907,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     function renderDispatchContext() {
         if (!refLayer) return;
         refLayer.clearLayers();
-        const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
-        pins.forEach(pin => {
-            const color = pin.team_color || statusColors[pin.status] || '#2563eb';
-            L.circleMarker([pin.lat, pin.lng], {radius:6, weight:2, color:'#fff', fillColor:color, fillOpacity:0.55, opacity:0.6})
-                .addTo(refLayer)
-                .bindTooltip(escapeHtml(pin.name));
-        });
-        dispatches.forEach(item => {
-            const tooltip = item.label ? escapeHtml(item.label) : escapeHtml(item.team_label);
-            if (item.type === 'point') {
-                const icon = L.divIcon({className:'', html:'<i class="bi bi-geo-alt-fill" style="font-size:22px;color:#7c3aed;opacity:0.55;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[22,22], iconAnchor:[11,20]});
-                L.marker([item.geo.lat, item.geo.lng], {icon}).addTo(refLayer).bindTooltip(tooltip);
-            } else if (item.type === 'polygon') {
-                L.polygon(item.geo, {color:'#7c3aed', weight:2, opacity:0.5, fillOpacity:0.1}).addTo(refLayer).bindTooltip(tooltip);
-            }
-        });
+        renderFullMapReference(refLayer);
     }
 
     function resetDrawing() {
@@ -6980,6 +7062,7 @@ document.querySelectorAll('.team-form').forEach(form => {
 
     let composerMap = null;
     let wedgeLayer = null;
+    let refLayer = null;
     let currentArea = null;
     let vertexMarkers = [];
     let hubIndex = null;
@@ -7160,8 +7243,11 @@ document.querySelectorAll('.team-form').forEach(form => {
         if (!composerMap) {
             composerMap = L.map('divideSectorsMap');
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(composerMap);
+            refLayer = L.layerGroup().addTo(composerMap);
             wedgeLayer = L.layerGroup().addTo(composerMap);
         }
+        refLayer.clearLayers();
+        renderFullMapReference(refLayer);
         if (currentArea && currentArea.geo && currentArea.geo.length) {
             composerMap.fitBounds(L.latLngBounds(currentArea.geo), {padding: [30, 30]});
         }
@@ -7196,6 +7282,7 @@ document.querySelectorAll('.team-form').forEach(form => {
 
     let composerMap = null;
     let previewLayer = null;
+    let refLayer = null;
     let currentSector = null;
     // Each is null, or a "ring position": floor(r) = edge index (edge from
     // geo[i] to geo[(i+1)%n]), frac(r) = how far along that edge (0 = right
@@ -7395,9 +7482,12 @@ document.querySelectorAll('.team-form').forEach(form => {
         if (!composerMap) {
             composerMap = L.map('splitSectorMap');
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(composerMap);
+            refLayer = L.layerGroup().addTo(composerMap);
             previewLayer = L.layerGroup().addTo(composerMap);
             composerMap.on('click', onSplitMapClick);
         }
+        refLayer.clearLayers();
+        renderFullMapReference(refLayer);
         if (currentSector && currentSector.geo && currentSector.geo.length) {
             composerMap.fitBounds(L.latLngBounds(currentSector.geo), {padding: [30, 30]});
         }
@@ -7444,16 +7534,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     function renderAreaComposerContext() {
         if (!refLayer) return;
         refLayer.clearLayers();
-        const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
-        pins.forEach(pin => {
-            const color = pin.team_color || statusColors[pin.status] || '#2563eb';
-            L.circleMarker([pin.lat, pin.lng], {radius:6, weight:2, color:'#fff', fillColor:color, fillOpacity:0.55, opacity:0.6})
-                .addTo(refLayer)
-                .bindTooltip(escapeHtml(pin.name));
-        });
-        areas.forEach(item => {
-            L.polygon(item.geo, {color:'#495057', weight:2, opacity:0.5, dashArray:'8,5', fillOpacity:0.05}).addTo(refLayer).bindTooltip(escapeHtml(item.label));
-        });
+        renderFullMapReference(refLayer);
     }
 
     function resetDrawing() {
@@ -7653,19 +7734,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     function renderRestrictedAreaComposerContext() {
         if (!refLayer) return;
         refLayer.clearLayers();
-        const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
-        pins.forEach(pin => {
-            const color = pin.team_color || statusColors[pin.status] || '#2563eb';
-            L.circleMarker([pin.lat, pin.lng], {radius:6, weight:2, color:'#fff', fillColor:color, fillOpacity:0.55, opacity:0.6})
-                .addTo(refLayer)
-                .bindTooltip(escapeHtml(pin.name));
-        });
-        areas.forEach(item => {
-            L.polygon(item.geo, {color:'#495057', weight:2, opacity:0.5, dashArray:'8,5', fillOpacity:0.05}).addTo(refLayer).bindTooltip(escapeHtml(item.label));
-        });
-        restrictedAreas.forEach(item => {
-            L.polygon(item.geo, {color:'#dc3545', weight:2, opacity:0.6, dashArray:'4,3', fillOpacity:0.08}).addTo(refLayer).bindTooltip(escapeHtml(item.label));
-        });
+        renderFullMapReference(refLayer);
     }
 
     function resetDrawing() {
@@ -8110,7 +8179,7 @@ let routeMap = null, routeMarkers = [], routeLine = null;
 // already been marked, without leaving the composer. Created once alongside
 // routeMap itself (shown.bs.modal below); the composer never lets you draw
 // a *new* annotation from here, only see the ones already on the live map.
-let routeComposerPinLayer = null, routeComposerAnnotationLayer = null;
+let routeComposerPinLayer = null, routeComposerAnnotationLayer = null, routeComposerAreasLayer = null;
 let routeComposerPinsRenderedSig = null;
 
 function updateRouteSendState() {
@@ -8190,6 +8259,22 @@ function renderRouteComposerAnnotations(items) {
             L.marker([item.geo.lat, item.geo.lng], {icon}).addTo(routeComposerAnnotationLayer);
         }
     });
+}
+
+// Fills in the rest of renderFullMapReference()'s coverage for the route
+// composer specifically — pins and annotations already have their own
+// dedicated, longer-standing layers/functions above (kept as-is, not
+// replaced), this just adds the pieces those two don't cover: search areas,
+// sectors, restricted areas, dispatches. Called from the same two places
+// (pollWarRoomData() + the initial full-page render) the pin/annotation
+// pair already are, so it stays live even while the modal is closed.
+function renderRouteComposerAreas() {
+    if (!routeComposerAreasLayer) return;
+    routeComposerAreasLayer.clearLayers();
+    renderSearchAreasReference(routeComposerAreasLayer);
+    renderSectorsReference(routeComposerAreasLayer);
+    renderRestrictedAreasReference(routeComposerAreasLayer);
+    renderDispatchesReference(routeComposerAreasLayer);
 }
 
 function renderWaypointPanel() {
@@ -8285,6 +8370,16 @@ function renderWaypointPanel() {
     const sendBtn = document.getElementById('routeSendBtn');
     const teamSelect = document.getElementById('routeTeamSelect');
     const memberPicker = document.getElementById('routeMemberPicker');
+    // routeTeamSelect only exists inside routeOrderCard's own server-side
+    // "teams non-empty" guard — a mission with zero teams never renders it,
+    // so this whole composer (meaningless without a team to address anyway)
+    // has nothing to wire up. Pre-existing gap, not previously hit:
+    // renderRouteMemberPicker() below dereferences teamSelect.value
+    // unconditionally, which throws synchronously at IIFE-load time with no
+    // team on the mission — silently breaking every OTHER listener this
+    // same IIFE would otherwise have attached, including shown.bs.modal, so
+    // the composer's map never initializes at all and nothing ever logs why.
+    if (!teamSelect) return;
 
     // Which of the selected team's members this route actually applies to —
     // defaults to everyone (old whole-team behavior unless the admin
@@ -8382,6 +8477,7 @@ function renderWaypointPanel() {
             // starts clicking points those numbered markers land on top of
             // (not under) the reference pins/annotations, matching Leaflet's
             // added-later-renders-on-top default — no explicit pane needed.
+            routeComposerAreasLayer = L.layerGroup().addTo(routeMap);
             routeComposerPinLayer = L.layerGroup().addTo(routeMap);
             routeComposerAnnotationLayer = L.featureGroup().addTo(routeMap);
             routeMap.on('click', e => {
@@ -8410,6 +8506,7 @@ function renderWaypointPanel() {
         // (polled) the whole time in the background.
         renderRouteComposerPins(pins);
         renderRouteComposerAnnotations(annotations);
+        renderRouteComposerAreas();
         setTimeout(() => routeMap.invalidateSize(), 100);
     });
 
