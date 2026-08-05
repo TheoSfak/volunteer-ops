@@ -923,6 +923,23 @@ function guestNameHtml(string $name, bool $isExternal, ?string $teamName, ?strin
 }
 
 /**
+ * Standalone, larger home-team flag+label badge for the upper-right corner of
+ * a card/row (e.g. war-room.php's Ομάδες Αποστολής team list), where a
+ * prominent corner tag reads better than guestNameHtml()'s inline superscript.
+ * Same flag/fallback rules as guestNameHtml(), intentionally duplicated
+ * rather than shared so guestNameHtml()'s many other call sites (chat,
+ * dispatch, SOS, profile) are untouched. Caller wraps the row in
+ * position:relative; pair with the .team-name-badge-corner CSS in header.php.
+ */
+function homeTeamCornerBadgeHtml(?string $teamName, ?string $teamColor, bool $isExternal, ?string $countryCode): string {
+    if ($teamColor === null) return '';
+    [$bg, $fg] = teamBadgeColors($teamColor);
+    $flag = flagHtml($isExternal ? $countryCode : 'GR');
+    $team = ($teamName !== null && trim($teamName) !== '') ? $teamName : t('guest.org_unknown');
+    return '<span class="team-name-badge-corner" style="background:' . h($bg) . ';color:' . h($fg) . '" title="' . h($team) . '">' . $flag . h($team) . '</span>';
+}
+
+/**
  * War Room: command-staff recipient set for admin-facing alerts (shortage
  * reports, and reusable for similar future cases) — system/dept admins +
  * this mission's shift leaders + the mission's responsible_user_id. Mirrors
