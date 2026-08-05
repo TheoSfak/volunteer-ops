@@ -1973,6 +1973,43 @@ function pointInPolygon(float $lat, float $lng, array $geo): bool {
 }
 
 /**
+ * Distance in meters from a point to the nearest edge of a polygon (0 if
+ * the point is already inside — see pointInPolygon() above). Projects to a
+ * local flat X/Y in meters centered on the query point itself, then takes
+ * the minimum standard point-to-segment distance over every edge — same
+ * flat-Cartesian-at-mission-scale tradeoff pointInPolygon()'s own doc
+ * comment already accepts. Used for the Field Mode restricted-area
+ * proximity card (no map there to just look at the polygon directly).
+ */
+function pointToPolygonDistanceMeters(float $lat, float $lng, array $geo): float {
+    if (pointInPolygon($lat, $lng, $geo)) {
+        return 0.0;
+    }
+
+    $latDegPerMeter = 1 / 111320;
+    $lngDegPerMeter = 1 / (111320 * max(0.01, cos(deg2rad($lat))));
+    $toLocalMeters = fn($pLat, $pLng) => [
+        ($pLng - $lng) / $lngDegPerMeter,
+        ($pLat - $lat) / $latDegPerMeter,
+    ];
+
+    $minDist = INF;
+    $n = count($geo);
+    for ($i = 0, $j = $n - 1; $i < $n; $j = $i++) {
+        [$x1, $y1] = $toLocalMeters($geo[$j][0], $geo[$j][1]);
+        [$x2, $y2] = $toLocalMeters($geo[$i][0], $geo[$i][1]);
+        $dx = $x2 - $x1;
+        $dy = $y2 - $y1;
+        $lenSq = $dx * $dx + $dy * $dy;
+        $t = $lenSq > 0 ? max(0.0, min(1.0, (-$x1 * $dx - $y1 * $dy) / $lenSq)) : 0.0;
+        $projX = $x1 + $t * $dx;
+        $projY = $y1 + $t * $dy;
+        $minDist = min($minDist, sqrt($projX * $projX + $projY * $projY));
+    }
+    return $minDist;
+}
+
+/**
  * Verified Coverage — ground-truth swept-area estimate for search sectors,
  * entirely independent of the self-reported status a team leader taps.
  * Grid-samples each sector polygon at $gridStepMeters resolution: a cell
