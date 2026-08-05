@@ -107,18 +107,13 @@ if ($mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
 }
 
 // A volunteer's own explicit choice (the toggle button below, which sets
-// this cookie) always wins and is remembered from then on. Only on the
-// very first visit, with no cookie yet, do we need a default — and that
-// default should NOT be the desktop command view (map, media panel, full
-// Teams/Participants lists) for someone opening this on their phone for
-// the first time, mid-mission, needing the SOS button without first
-// discovering and tapping a toggle they don't know exists. A simple
-// User-Agent sniff is good enough for a default with a one-tap escape
-// hatch already in place either way — a wrong guess here just costs one
-// extra tap on the existing toggle, never a dead end.
-$fieldMode = isset($_COOKIE['wr_field_mode'])
-    ? $_COOKIE['wr_field_mode'] === '1'
-    : (bool) preg_match('/Mobi|Android|iPhone|iPad|iPod/i', $_SERVER['HTTP_USER_AGENT'] ?? '');
+// this cookie) always wins and is remembered from then on. With no cookie
+// yet, the default is the normal full view on every device, mobile
+// included — a deliberate reversal of this file's earlier User-Agent-sniffed
+// default (mission owner's explicit call): Field Mode stays available as an
+// opt-in, one tap away, but no longer decides silently for a first-time
+// mobile visitor.
+$fieldMode = isset($_COOKIE['wr_field_mode']) && $_COOKIE['wr_field_mode'] === '1';
 
 if (isPost()) {
     verifyCsrf();
@@ -1204,6 +1199,13 @@ include __DIR__ . '/includes/header.php';
     .dispatch-team-label::before { display: none !important; }
     .war-room-hero { background: linear-gradient(135deg, #172554, #b91c1c); color: #fff; border-radius: 14px; }
     .war-room-hero h1 { color: #fff; font-weight: 700; }
+    /* The action row can hold up to ~10 buttons for an admin (report, trail,
+       coverage, field mode, fullscreen, keep-awake, layout lock, manage
+       cards, back) — shrinking them (vs. Bootstrap's default btn size) fits
+       noticeably more per row before flex-wrap kicks in, without hiding any
+       of them behind a menu. Scoped to this hero only, not a global .btn
+       override. */
+    .war-room-hero .btn { padding: .3rem .65rem; font-size: .8125rem; }
     .participant-row { border-left: 4px solid #e2e8f0; }
     .participant-row.needs-help { border-left-color: #dc2626; }
     .presence-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
@@ -1405,38 +1407,43 @@ include __DIR__ . '/includes/header.php';
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
-    <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
+    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
         <div>
             <div class="text-uppercase small fw-semibold opacity-75 mb-1"><i class="bi bi-broadcast-pin me-1"></i><?= t('hero.eyebrow') ?></div>
             <h1 class="h3 mb-2"><?= h($mission['title']) ?></h1>
             <div class="small opacity-75"><i class="bi bi-geo-alt me-1"></i><?= h($mission['location']) ?> · <?= formatDateTime($firstShift) ?> <?= t('hero.until') ?> <?= formatDateTime($lastShift) ?></div>
         </div>
-        <div class="d-flex gap-2 align-items-center flex-wrap justify-content-end">
+        <!-- Status + back-to-ops live in their own top-right group, apart
+             from the tool-buttons row below — neither is an Action Room
+             tool, so mixing them into that row just crowded it. -->
+        <div class="d-flex gap-2 align-items-center flex-shrink-0">
             <span class="badge fs-6 <?= $timeState === 'active' ? 'bg-success' : ($timeState === 'upcoming' ? 'bg-info text-dark' : 'bg-warning text-dark') ?>">
                 <?= $timeState === 'active' ? t('hero.status_active') : ($timeState === 'upcoming' ? t('hero.status_upcoming') : t('hero.status_overdue')) ?>
             </span>
-            <?php if ($canManageWarRoom && !$fieldMode): ?>
-            <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
-            <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i><?= t('hero.btn_team_trail') ?></button>
-            <button type="button" id="coverageModeToggle" class="btn btn-outline-light"><i class="bi bi-broadcast me-1"></i><?= t('hero.btn_verified_coverage') ?></button>
-            <?php endif; ?>
-            <form method="post">
-                <?= csrfField() ?>
-                <input type="hidden" name="action" value="toggle_field_mode">
-                <button type="submit" class="btn btn-outline-light">
-                    <i class="bi bi-<?= $fieldMode ? 'grid-3x3-gap' : 'geo-alt' ?> me-1"></i><?= $fieldMode ? t('hero.btn_full_view') : t('hero.btn_field_mode') ?>
-                </button>
-            </form>
-            <button type="button" id="warRoomFocusToggle" class="btn btn-outline-light"><i class="bi bi-arrows-fullscreen me-1"></i><?= t('hero.btn_fullscreen') ?></button>
-            <button type="button" id="wakeLockToggle" class="btn btn-outline-light d-none"><i class="bi bi-sun me-1"></i><?= t('hero.btn_keep_awake') ?></button>
-            <?php if ($canManageWarRoom && !$fieldMode): ?>
-            <button type="button" id="wrLayoutLockToggle" class="btn btn-outline-light"></button>
-            <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#cardVisibilityModal" title="<?= t('hero.btn_manage_cards') ?>" aria-label="<?= t('hero.btn_manage_cards') ?>">
-                <i class="bi bi-gear-fill"></i>
-            </button>
-            <?php endif; ?>
             <a href="ops-dashboard.php" class="btn btn-light"><i class="bi bi-arrow-left me-1"></i><?= t('hero.btn_back_ops') ?></a>
         </div>
+    </div>
+    <div class="d-flex gap-1 align-items-center flex-wrap justify-content-end">
+        <?php if ($canManageWarRoom && !$fieldMode): ?>
+        <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
+        <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i><?= t('hero.btn_team_trail') ?></button>
+        <button type="button" id="coverageModeToggle" class="btn btn-outline-light"><i class="bi bi-broadcast me-1"></i><?= t('hero.btn_verified_coverage') ?></button>
+        <?php endif; ?>
+        <form method="post">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="toggle_field_mode">
+            <button type="submit" class="btn btn-outline-light">
+                <i class="bi bi-<?= $fieldMode ? 'grid-3x3-gap' : 'geo-alt' ?> me-1"></i><?= $fieldMode ? t('hero.btn_full_view') : t('hero.btn_field_mode') ?>
+            </button>
+        </form>
+        <button type="button" id="warRoomFocusToggle" class="btn btn-outline-light"><i class="bi bi-arrows-fullscreen me-1"></i><?= t('hero.btn_fullscreen') ?></button>
+        <button type="button" id="wakeLockToggle" class="btn btn-outline-light d-none"><i class="bi bi-sun me-1"></i><?= t('hero.btn_keep_awake') ?></button>
+        <?php if ($canManageWarRoom && !$fieldMode): ?>
+        <button type="button" id="wrLayoutLockToggle" class="btn btn-outline-light"></button>
+        <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#cardVisibilityModal" title="<?= t('hero.btn_manage_cards') ?>" aria-label="<?= t('hero.btn_manage_cards') ?>">
+            <i class="bi bi-gear-fill"></i>
+        </button>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -3803,7 +3810,13 @@ function addSectorBuildingMarker(b, item) {
     });
     const canActOnBuildings = item.can_self_report || item.can_manage;
     const delBuildingBtn = item.can_manage ? `<button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-building-delete-btn" data-id="${b.id}">${t('common.delete')}</button>` : '';
-    const bPopupHtml = `<strong>${escapeHtml(b.label)}</strong>${sectorFloorChecklistHtml(b, canActOnBuildings)}${delBuildingBtn}`;
+    // Same navUrl pattern + map.navigate_btn label as a volunteer's own GPS
+    // pin popup (renderPinMarker above) — no origin means Google Maps routes
+    // from the device's current location, so this works without ever asking
+    // this page for geolocation permission.
+    const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=driving`;
+    const navBtn = `<br><a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-1">${t('map.navigate_btn')}</a>`;
+    const bPopupHtml = `<strong>${escapeHtml(b.label)}</strong>${sectorFloorChecklistHtml(b, canActOnBuildings)}${navBtn}${delBuildingBtn}`;
     const bLayer = L.marker([b.lat, b.lng], {icon}).addTo(sectorBuildingLayer).bindPopup(bPopupHtml);
     bLayer.buildingId = b.id;
 }
@@ -3878,7 +3891,13 @@ function renderSectorLayer(items) {
                 buildingsSummary + completePrompt + selfReportBtn + manageHtml;
 
             const layer = L.polygon(item.geo, {pane: 'sectorPane', color, fillColor: color, fillOpacity: 0.35, weight: 2}).addTo(sectorLayer).bindPopup(popupHtml);
-            layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'dispatch-team-label', interactive: false});
+            // Same sectorCoverageBadgeHtml() as the popup above (so the
+            // buildings-suppress-% rule and the ⚠️ low-coverage warning stay
+            // identical in both places) — but only added here, on-map, while
+            // Verified Coverage mode is active, so scanning the map answers
+            // "which sectors still need walking" without opening every popup.
+            const tooltipCoverage = coverageModeActive ? sectorCoverageBadgeHtml(item) : '';
+            layer.bindTooltip(escapeHtml(item.label) + tooltipCoverage, {permanent: true, direction: 'center', className: 'dispatch-team-label', interactive: false});
             layer.sectorId = item.id;
             // Verified Coverage gap-cell detail is only ever drawn for whichever
             // sector's popup is currently open (never all sectors at once — see
