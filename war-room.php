@@ -1363,6 +1363,7 @@ include __DIR__ . '/includes/header.php';
             <?php if ($canManageWarRoom && !$fieldMode): ?>
             <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
             <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i><?= t('hero.btn_team_trail') ?></button>
+            <button type="button" id="coverageModeToggle" class="btn btn-outline-light"><i class="bi bi-broadcast me-1"></i><?= t('hero.btn_verified_coverage') ?></button>
             <?php endif; ?>
             <form method="post">
                 <?= csrfField() ?>
@@ -2700,6 +2701,13 @@ let pendingSplitSectorId = null;
 // server-side via teamLabel().
 let teams = <?= json_encode(array_values(array_map(fn($t) => ['id' => $t['id'], 'label' => teamLabel($t['codename'], $t['team_number'])], $teams))) ?>;
 let sectors = <?= json_encode($sectors) ?>;
+// Verified Coverage — populated only once an admin toggles the layer on
+// (mission-sector-coverage.php), keyed by sector id: {percent, gap_cells}.
+// Kept separate from the `sectors` array itself rather than merged into it,
+// since it's fetched on a completely different cadence (on-demand, not the
+// 5s poll) and must survive across normal sector re-renders.
+let coverageModeActive = false;
+let sectorCoverageById = {};
 let media = <?= json_encode($photos) ?>;
 let broadcastPhotos = <?= json_encode($broadcastPhotos) ?>;
 // Media re-renders every image tag from scratch (mission-photo-view.php is
@@ -2923,7 +2931,7 @@ if (fieldMode) {
         if (document.visibilityState === 'visible') requestWarRoomWakeLock();
     });
 }
-let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null;
+let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
@@ -2948,6 +2956,16 @@ if (!fieldMode) {
     map.getPane('sectorPane').style.zIndex = 350;
     sectorLayer = L.featureGroup().addTo(map);
     sectorBuildingLayer = L.featureGroup().addTo(map);
+    // Verified Coverage gap-cell overlay gets its own pane ABOVE sectorPane
+    // (so translucent gap tint paints over the sector's own status-color
+    // fill) but BELOW the default overlayPane/markerPane (tilePane 200 <
+    // areaPane 340 < sectorPane 350 < coveragePane 360 < overlayPane 400 <
+    // markerPane 600) — live pins must stay visible on top of it. Not
+    // attached to the map here — same never-attached-until-toggled pattern
+    // as trailLayer just below, only shown while coverage mode is active.
+    map.createPane('coveragePane');
+    map.getPane('coveragePane').style.zIndex = 360;
+    coverageLayer = L.featureGroup();
     pinLayer = L.layerGroup().addTo(map);
     // FeatureGroup (not plain LayerGroup) is required here: only FeatureGroup
     // propagates child-layer events like 'popupopen' up to the group's own
@@ -3279,6 +3297,21 @@ dispatchLayer.on('popupopen', event => {
 // php -l (a JS runtime issue, not a PHP one) or by any of the full-view
 // testing done first.
 const SECTOR_STATUS_HEX = <?= json_encode(array_map(fn($c) => MISSION_TYPE_COLOR_HEX[$c] ?? '#6c757d', SECTOR_STATUS_COLORS)) ?>;
+
+// Shared by both the map popup and the sidebar list row so the two never
+// drift apart. Deliberately NOT another red/yellow/green badge — that scale
+// is already spoken for by SECTOR_STATUS_HEX (status) and the building-pin
+// grey/green/red convention (floor checklist), so this uses a plain
+// neutral badge + a satellite icon instead, with the ⚠️ doing the actual
+// "pay attention" work only for the one case that matters: a sector called
+// done that the GPS record doesn't back up.
+function sectorCoverageBadgeHtml(item) {
+    const cov = sectorCoverageById[item.id];
+    if (!cov) return '';
+    const warn = (item.status === 'completed' && cov.percent < 60)
+        ? ` <span title="${escapeHtml(t('coverage.low_coverage_warning'))}">⚠️</span>` : '';
+    return ` <span class="badge bg-light text-dark border" title="${escapeHtml(t('coverage.badge_tooltip'))}">🛰️ ${cov.percent}%</span>${warn}`;
+}
 
 function sectorAdminSetStatus(id, status, selectEl) {
     if (selectEl) selectEl.disabled = true;
@@ -3698,12 +3731,18 @@ function renderSectorLayer(items) {
                 <button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
             </div>` : '';
         const popupHtml = `<strong>${escapeHtml(item.label)}</strong><br>` +
-            `<span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span> ${escapeHtml(item.team_label)}` +
+            `<span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span> ${escapeHtml(item.team_label)}${sectorCoverageBadgeHtml(item)}` +
             buildingsSummary + completePrompt + selfReportBtn + manageHtml;
 
         const layer = L.polygon(item.geo, {pane: 'sectorPane', color, fillColor: color, fillOpacity: 0.35, weight: 2}).addTo(sectorLayer).bindPopup(popupHtml);
         layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'dispatch-team-label', interactive: false});
         layer.sectorId = item.id;
+        // Verified Coverage gap-cell detail is only ever drawn for whichever
+        // sector's popup is currently open (never all sectors at once — see
+        // drawCoverageGapCells) so map SVG node count stays bounded
+        // regardless of mission size.
+        layer.on('popupopen', () => drawCoverageGapCells(item.id));
+        layer.on('popupclose', () => coverageLayer?.clearLayers());
         if (String(item.id) === String(openSectorId)) reopenSectorLayer = layer;
 
         const canActOnBuildings = item.can_self_report || item.can_manage;
@@ -3784,7 +3823,7 @@ function sectorListRowHtml(item) {
     return `<div class="border rounded p-2 mb-2 sector-list-row" data-id="${item.id}" style="cursor:pointer;">
         <div class="d-flex justify-content-between align-items-start">
             <strong>${escapeHtml(item.label)}</strong>
-            <span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span>
+            <span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span>${sectorCoverageBadgeHtml(item)}
         </div>
         <div class="small text-muted">${escapeHtml(item.team_label)}</div>
         ${buildingsSummary}${advanceBtn}${manageHtml}
@@ -3796,7 +3835,13 @@ function sectorListRowHtml(item) {
 // than taking it as a second parameter, matching how this function already
 // reads the `sectors` global directly below instead of just `items`.
 function renderSectorsList(items) {
-    const sig = JSON.stringify(items) + '|' + JSON.stringify(areas);
+    // sectorCoverageById is deliberately part of this signature, not just
+    // items/areas — otherwise this memoization can never detect "coverage
+    // data just arrived" (sectors/areas themselves don't change when
+    // coverage is fetched), so a concurrent 5s poll tick's own
+    // coverage-unaware call can win the race and permanently mask the
+    // badge-bearing render behind a matching-but-stale sig.
+    const sig = JSON.stringify(items) + '|' + JSON.stringify(areas) + '|' + JSON.stringify(sectorCoverageById);
     if (sig === sectorsListRenderedSig) return;
     sectorsListRenderedSig = sig;
 
@@ -4442,6 +4487,58 @@ if (trailModeToggleBtn) {
         }
     });
     document.getElementById('trailApplyBtn').addEventListener('click', enterTrailMode);
+}
+
+// Verified Coverage — same on-demand-fetch-and-toggle idiom as Team Trail
+// just above (no L.control.layers/checkbox system exists anywhere in this
+// app; every toggleable layer here is a plain button flipping a boolean +
+// map.hasLayer()/addTo()/removeLayer()). Unlike Team Trail this doesn't
+// swap out pinLayer — it's an additive overlay, so it only ever adds/removes
+// coverageLayer itself.
+function drawCoverageGapCells(sectorId) {
+    if (!coverageLayer) return;
+    coverageLayer.clearLayers();
+    if (!coverageModeActive) return;
+    const cov = sectorCoverageById[sectorId];
+    if (!cov || !cov.gap_cells) return;
+    // interactive:false is required, not cosmetic — Split Sector's wedge-
+    // preview already proved a filled overlay steals clicks from whatever's
+    // underneath it (the sector polygon's own popup trigger) otherwise.
+    cov.gap_cells.forEach(cell => {
+        L.rectangle([[cell[0], cell[1]], [cell[2], cell[3]]], {
+            pane: 'coveragePane', stroke: false, fillColor: '#000', fillOpacity: 0.35, interactive: false,
+        }).addTo(coverageLayer);
+    });
+}
+function enterCoverageMode() {
+    fetch('mission-sector-coverage.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(result => {
+        if (!result.ok) { alert(result.error || t('coverage.load_failed')); return; }
+        sectorCoverageById = result.coverage || {};
+        coverageModeActive = true;
+        if (!map.hasLayer(coverageLayer)) coverageLayer.addTo(map);
+        renderSectorLayer(sectors);
+        renderSectorsList(sectors);
+    }).catch(() => alert(t('coverage.load_failed')));
+}
+function exitCoverageMode() {
+    coverageModeActive = false;
+    sectorCoverageById = {};
+    coverageLayer.clearLayers();
+    if (map.hasLayer(coverageLayer)) map.removeLayer(coverageLayer);
+    renderSectorLayer(sectors);
+    renderSectorsList(sectors);
+}
+const coverageModeToggleBtn = document.getElementById('coverageModeToggle');
+if (coverageModeToggleBtn) {
+    coverageModeToggleBtn.addEventListener('click', () => {
+        if (coverageModeActive) {
+            exitCoverageMode();
+            coverageModeToggleBtn.innerHTML = '<i class="bi bi-broadcast me-1"></i>' + t('hero.btn_verified_coverage');
+        } else {
+            coverageModeToggleBtn.innerHTML = '<i class="bi bi-x-lg me-1"></i>' + t('coverage.exit_btn');
+            enterCoverageMode();
+        }
+    });
 }
 
 function renderMedia(items) {

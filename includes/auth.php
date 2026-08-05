@@ -78,6 +78,11 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // participant (not just admins) so their own device can drive the
     // personalized full-screen breach alarm.
     'mission-restricted-area.php',
+    // mission-sector-coverage.php (Verified Coverage — GPS ground-truth
+    // grid-sample against sector polygons) — read-only, but still opened
+    // from within a long-open war-room.php tab like every other endpoint on
+    // this list, same background-throttling force-logout risk.
+    'mission-sector-coverage.php',
 ]);
 
 function initSession() {
