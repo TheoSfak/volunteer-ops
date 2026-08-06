@@ -15,7 +15,7 @@ index 00b9e10..fdabcbd 100644
          });
      }
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
-index 85f2a02..a36029b 100644
+index 85f2a02..1c66a37 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 @@ -12,6 +12,7 @@ import android.graphics.Color;
@@ -87,9 +87,11 @@ index 85f2a02..a36029b 100644
          }
          releaseMediaPlayer();
          releaseWakeLock();
-@@ -113,8 +139,9 @@ public class BackgroundGeolocationService extends Service {
+@@ -112,9 +138,11 @@ public class BackgroundGeolocationService extends Service {
+         nativePostUrl = LocationStore.getUrl(context);
          promoteToForeground(LocationStore.getTitle(context), LocationStore.getMessage(context));
          if (client == null || locationCallback == null) {
++            DebugLog.log(context, "onStartCommand_reestablish", "client or callback was null, re-registering");
              acquireWakeLock();
 -            client = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
 +            client = LocationServices.getFusedLocationProviderClient(context);
@@ -98,7 +100,7 @@ index 85f2a02..a36029b 100644
              locationCallback = createLocationListener(this);
              requestLocationUpdates();
              startWatchdog();
-@@ -125,7 +152,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -125,7 +153,7 @@ public class BackgroundGeolocationService extends Service {
      @Override
      public void onDestroy() {
          if (client != null && locationCallback != null) {
@@ -107,7 +109,11 @@ index 85f2a02..a36029b 100644
          }
          super.onDestroy();
          releaseMediaPlayer();
-@@ -186,7 +213,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -183,10 +211,11 @@ public class BackgroundGeolocationService extends Service {
+ 
+     private void restartLocationUpdates() {
+         Logger.debug("Location watchdog timed out, restarting updates");
++        DebugLog.log(getApplicationContext(), "watchdog_restart", "no location received in the last 60s, forcing re-registration");
          if (client == null || locationCallback == null) {
              return;
          }
@@ -116,7 +122,7 @@ index 85f2a02..a36029b 100644
          if (restartRunnable != null) {
              watchdogHandler.removeCallbacks(restartRunnable);
          }
-@@ -194,11 +221,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -194,11 +223,7 @@ public class BackgroundGeolocationService extends Service {
              if (client == null || locationCallback == null) {
                  return;
              }
@@ -129,7 +135,19 @@ index 85f2a02..a36029b 100644
              startWatchdog();
          };
          watchdogHandler.postDelayed(restartRunnable, 10000);
-@@ -240,14 +263,39 @@ public class BackgroundGeolocationService extends Service {
+@@ -223,6 +248,11 @@ public class BackgroundGeolocationService extends Service {
+ 
+     private void handleLocationChanged(android.location.Location location) {
+         startWatchdog();
++        DebugLog.log(
++            getApplicationContext(),
++            "location_received",
++            location.getLatitude() + "," + location.getLongitude() + " acc=" + location.getAccuracy()
++        );
+         if (nativePostUrl != null) {
+             postLocationNatively(location);
+         }
+@@ -240,24 +270,51 @@ public class BackgroundGeolocationService extends Service {
          LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
      }
  
@@ -171,7 +189,11 @@ index 85f2a02..a36029b 100644
          postExecutor.execute(() -> {
              try {
                  LocationStore.sendLocation(context, payload);
-@@ -257,7 +305,7 @@ public class BackgroundGeolocationService extends Service {
++                DebugLog.log(context, "post_success", "");
+             } catch (Exception e) {
+                 Logger.error("Native location POST failed", e);
++                DebugLog.log(context, "post_failed", String.valueOf(e.getMessage()));
+             }
          });
      }
  
@@ -180,7 +202,7 @@ index 85f2a02..a36029b 100644
          JSONObject obj = new JSONObject();
          try {
              obj.put("latitude", location.getLatitude());
-@@ -276,34 +324,58 @@ public class BackgroundGeolocationService extends Service {
+@@ -276,38 +333,64 @@ public class BackgroundGeolocationService extends Service {
              // Lets the server distinguish native-delivered updates from those
              // forwarded by the JavaScript callback.
              obj.put("source", "native");
@@ -245,16 +267,23 @@ index 85f2a02..a36029b 100644
      private void requestLocationUpdates() {
          try {
 -            client.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, currentDistanceFilter, locationCallback);
+-        } catch (SecurityException ignore) {
 +            LocationRequest request = new LocationRequest.Builder(currentIntervalMs)
 +                .setMinUpdateIntervalMillis(currentIntervalMs)
 +                .setMinUpdateDistanceMeters(currentDistanceFilter)
 +                .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
 +                .build();
 +            client.requestLocationUpdates(request, locationCallback, Looper.getMainLooper());
-         } catch (SecurityException ignore) {
++            DebugLog.log(getApplicationContext(), "request_updates_ok", "intervalMs=" + currentIntervalMs);
++        } catch (SecurityException e) {
              // According to Android Studio, this method can throw a Security Exception if
              // permissions are not yet granted. Rather than check the permissions, which is fiddly,
-@@ -344,21 +416,24 @@ public class BackgroundGeolocationService extends Service {
+             // we simply ignore the exception.
++            DebugLog.log(getApplicationContext(), "request_updates_security_exception", String.valueOf(e.getMessage()));
+         }
+     }
+ 
+@@ -344,21 +427,25 @@ public class BackgroundGeolocationService extends Service {
              final String notificationTitle,
              final String notificationMessage,
              float distanceFilter,
@@ -274,6 +303,7 @@ index 85f2a02..a36029b 100644
              nativePostUrl = (url == null || url.isEmpty()) ? null : url;
 -            LocationStore.saveSetup(getApplicationContext(), nativePostUrl, notificationTitle, notificationMessage, distanceFilter);
 +            LocationStore.saveSetup(getApplicationContext(), nativePostUrl, notificationTitle, notificationMessage, distanceFilter, intervalMs, authToken);
++            DebugLog.log(getApplicationContext(), "native_start", "intervalMs=" + intervalMs + " urlSet=" + (nativePostUrl != null));
  
              // The service may already be running (for example after a sticky
              // restart), so drop any previous listener before registering a new one.
@@ -283,7 +313,7 @@ index 85f2a02..a36029b 100644
              }
              locationCallback = createLocationListener(BackgroundGeolocationService.this);
              requestLocationUpdates();
-@@ -369,7 +444,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -369,7 +456,7 @@ public class BackgroundGeolocationService extends Service {
              LocationStore.clear(getApplicationContext());
              nativePostUrl = null;
              stopWatchdog();
@@ -292,6 +322,86 @@ index 85f2a02..a36029b 100644
              stopForeground(true);
              stopSelf();
              releaseMediaPlayer();
+diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java
+new file mode 100644
+index 0000000..1b2b4ad
+--- /dev/null
++++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java
+@@ -0,0 +1,74 @@
++package com.capgo.capacitor_background_geolocation;
++
++import android.content.Context;
++import java.io.OutputStream;
++import java.net.HttpURLConnection;
++import java.net.URL;
++import java.nio.charset.StandardCharsets;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import org.json.JSONObject;
++
++// VolunteerOps patch — TEMPORARY diagnostic aid, not part of the plugin
++// upstream. Exists for one reason: a recurring "native background tracking
++// shows the notification active but no pings arrive" bug kept resisting
++// fixes because this dev environment has no adb/USB access to the real
++// device and no SSH access to the live production domains the app talks
++// to — so instead of guessing again, key lifecycle events get POSTed to
++// mobile-debug-log.php (same server the real GPS pings already go to,
++// same bearer token), where they can be read back from an admin-only page
++// on the live domain. Deliberately on its own executor, never the real
++// postExecutor — a diagnostic call must never be able to displace or delay
++// a real location POST, and every failure here is swallowed. Remove this
++// file and its call sites once the underlying bug is actually closed.
++final class DebugLog {
++
++    private static ExecutorService executor;
++
++    private DebugLog() {}
++
++    static synchronized void log(Context context, String event, String detail) {
++        try {
++            String pingUrl = LocationStore.getUrl(context);
++            String authToken = LocationStore.getAuthToken(context);
++            if (pingUrl == null || pingUrl.isEmpty() || authToken == null || authToken.isEmpty()) {
++                return;
++            }
++            URL parsed = new URL(pingUrl);
++            String debugUrl = parsed.getProtocol() + "://" + parsed.getAuthority() + "/mobile-debug-log.php";
++            if (executor == null) {
++                executor = Executors.newSingleThreadExecutor();
++            }
++            executor.execute(() -> post(debugUrl, authToken, event, detail));
++        } catch (Exception ignore) {}
++    }
++
++    private static void post(String url, String authToken, String event, String detail) {
++        HttpURLConnection connection = null;
++        try {
++            JSONObject body = new JSONObject();
++            body.put("source", "native");
++            body.put("event", event);
++            body.put("detail", detail == null ? "" : detail);
++            byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
++
++            connection = (HttpURLConnection) new URL(url).openConnection();
++            connection.setRequestMethod("POST");
++            connection.setConnectTimeout(5000);
++            connection.setReadTimeout(5000);
++            connection.setDoOutput(true);
++            connection.setRequestProperty("Content-Type", "application/json");
++            connection.setRequestProperty("Authorization", "Bearer " + authToken);
++            try (OutputStream os = connection.getOutputStream()) {
++                os.write(bytes);
++            }
++            connection.getResponseCode();
++        } catch (Exception ignore) {
++            // A diagnostic call must never surface its own error.
++        } finally {
++            if (connection != null) {
++                connection.disconnect();
++            }
++        }
++    }
++}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
 index 2e19afe..ab2d535 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
