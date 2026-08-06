@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.158.0');
+define('APP_VERSION', '3.158.1');
 define('DB_SCHEMA_VERSION', 125);
 
 // Load local config if exists (created by installer)
@@ -92,6 +92,14 @@ define('STATUS_CANCELED', 'CANCELED');
 // shortage-seen / shortage-resolved gap counts as "forgotten"/off-shift
 // rather than merely slow (see computeMissionScore() in functions.php).
 define('MISSION_SCORE_FORGOTTEN_MINUTES', 240);
+
+// War Room battery-alert button (war-room.php's pin popup): the fixed bar
+// for actually sending a "charge your phone" order, deliberately stricter
+// and separate from the configurable war_room_low_battery_pct badge
+// threshold. Single source read by both the JS button's active/inactive
+// state and mission-battery-alert.php's own server-side re-check — never
+// duplicate this number, the whole point is one place to change it.
+define('CHARGE_ALERT_THRESHOLD_PCT', 40);
 
 // Participation statuses
 define('PARTICIPATION_PENDING', 'PENDING');

@@ -4328,6 +4328,13 @@ let pinsRenderedSig = null;
 // Critical tier is always half the warning tier, not a second setting.
 const LOW_BATTERY_PCT = <?= (int) getSetting('war_room_low_battery_pct', '60') ?>;
 const CRITICAL_BATTERY_PCT = Math.floor(LOW_BATTERY_PCT / 2);
+// Deliberately separate from LOW_BATTERY_PCT above, fixed (not a Settings
+// field) — LOW_BATTERY_PCT gates the passive "getting low" badge, this
+// gates the active charge-alert button (below/right of the Navigate
+// button): a stricter, "actually worth bothering them about it" bar.
+// Sourced from the real PHP constant (config.php) — mission-battery-alert.php
+// re-checks the exact same value server-side, never a second hardcoded copy.
+const CHARGE_ALERT_THRESHOLD_PCT = <?= CHARGE_ALERT_THRESHOLD_PCT ?>;
 // First client-side gate needed for admin-only UI built entirely in JS —
 // every other admin branch is server-rendered PHP conditioned directly on
 // $canManageWarRoom around static HTML, but buildPinMarker()'s popup is
@@ -4371,20 +4378,28 @@ function buildPinMarker(pin, interactive = true) {
     const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
         : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
     // Only rendered when actually low — mirrors extraLine above, no "🔋 85%"
-    // clutter on a healthy pin. Button rides inside the same condition (no
-    // reason to offer a charge alert when the badge itself isn't showing);
-    // interactive=false suppresses it on the read-only Route Order composer
-    // map, which reuses this exact function for its own reference pins but
-    // has no popupopen listener wired up to handle a click there.
-    const chargeAlertBtn = (CAN_MANAGE_WAR_ROOM && interactive)
-        ? ` <button type="button" class="btn btn-sm btn-outline-warning pin-charge-alert-btn" data-user-id="${pin.user_id}">${t('map.charge_alert_btn')}</button>`
-        : '';
+    // clutter on a healthy pin. The charge-alert button (below, next to
+    // Navigate) is now fully independent of this badge — it has its own,
+    // stricter threshold and renders regardless of whether this badge does.
     const batteryLine = (pin.battery_level !== null && pin.battery_level !== undefined && pin.battery_level <= LOW_BATTERY_PCT)
-        ? `<br><span class="${pin.battery_level <= CRITICAL_BATTERY_PCT ? 'text-danger' : 'text-warning'} small">🔋 ${t('map.pin_low_battery', {pct: pin.battery_level})}</span>${chargeAlertBtn}`
+        ? `<br><span class="${pin.battery_level <= CRITICAL_BATTERY_PCT ? 'text-danger' : 'text-warning'} small">🔋 ${t('map.pin_low_battery', {pct: pin.battery_level})}</span>`
         : '';
     const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
     const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${pin.lat},${pin.lng}&travelmode=driving`;
-    const navLine = `<br><a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-1">${t('map.navigate_btn')}</a>`;
+    // Always rendered for an admin (unlike batteryLine above), so there's
+    // something to notice/hover even on a healthy pin — deliberately NOT
+    // the native disabled attribute, which would swallow the click
+    // entirely; the click handler still needs to fire on an "inactive"
+    // click so it can explain via a popup why nothing happened, per what
+    // was actually asked for rather than a silently-inert button.
+    // interactive=false still fully suppresses it on the read-only Route
+    // Order composer map (no popupopen listener there to handle a click).
+    const chargeAlertActive = pin.battery_level !== null && pin.battery_level !== undefined && pin.battery_level < CHARGE_ALERT_THRESHOLD_PCT;
+    const chargeAlertTitle = chargeAlertActive ? '' : ` title="${t('map.charge_alert_inactive_hint', {pct: CHARGE_ALERT_THRESHOLD_PCT})}"`;
+    const chargeAlertBtn = (CAN_MANAGE_WAR_ROOM && interactive)
+        ? ` <button type="button" class="btn btn-sm ${chargeAlertActive ? 'btn-outline-warning' : 'btn-outline-secondary'} pin-charge-alert-btn" style="${chargeAlertActive ? '' : 'opacity:.55;'}" data-user-id="${pin.user_id}" data-active="${chargeAlertActive}"${chargeAlertTitle}>${t('map.charge_alert_btn')}</button>`
+        : '';
+    const navLine = `<br><a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-1">${t('map.navigate_btn')}</a>${chargeAlertBtn}`;
     // zIndexOffset keeps a live position dot on top of any other pin type
     // (POI, dispatch, incident) that happens to land on the exact same spot
     // — Leaflet's default z-index is purely latitude-based, so two markers
@@ -4415,18 +4430,27 @@ function renderPins(items) {
     }
 }
 
-// Wires the pin-charge-alert-btn built into buildPinMarker()'s battery line
-// (admin-only, only present when the low-battery badge itself is showing).
-// Mirrors dispatchLayer.on('popupopen', ...) below exactly — same delegated-
-// listener-on-the-group approach, since a marker's popup only exists in the
-// DOM while genuinely open. Field Mode has no map at all, same guard every
-// other pin/layer listener here already uses.
+// Wires the pin-charge-alert-btn built into buildPinMarker() next to the
+// Navigate button (admin-only, always rendered regardless of the battery
+// badge). Mirrors dispatchLayer.on('popupopen', ...) below exactly — same
+// delegated-listener-on-the-group approach, since a marker's popup only
+// exists in the DOM while genuinely open. Field Mode has no map at all,
+// same guard every other pin/layer listener here already uses.
 if (!fieldMode) {
 pinLayer.on('popupopen', event => {
     const popupEl = event.popup.getElement();
     const chargeBtn = popupEl.querySelector('.pin-charge-alert-btn');
     if (chargeBtn) {
         chargeBtn.addEventListener('click', () => {
+            // Deliberately not a native disabled attribute (see
+            // buildPinMarker()) — clicking an "inactive" button (battery
+            // still >= CHARGE_ALERT_THRESHOLD_PCT, or no battery data at
+            // all) explains why via a popup instead of doing nothing, so
+            // it doesn't read as broken.
+            if (chargeBtn.dataset.active !== 'true') {
+                alert(t('map.charge_alert_inactive_hint', {pct: CHARGE_ALERT_THRESHOLD_PCT}));
+                return;
+            }
             chargeBtn.disabled = true;
             const data = new URLSearchParams({csrf_token: csrfToken, action: 'send', mission_id: <?= $missionId ?>, user_id: chargeBtn.dataset.userId});
             fetch('mission-battery-alert.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
