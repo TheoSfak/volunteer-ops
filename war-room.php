@@ -6962,28 +6962,30 @@ document.addEventListener('visibilitychange', () => {
 // Only the FIRST shift found drives native tracking if a volunteer somehow
 // has more than one active shift on this same mission — the web auto-ping
 // above already covers any additional ones whenever the tab is actually open.
+// TEMPORARY diagnostic — see mobile-debug-log.php. Fire-and-forget, must
+// never itself throw/delay the real tracking flow below. Session+CSRF authed
+// (not bearer-token) specifically so it can log the EARLIEST possible
+// lifecycle points too — plugin missing, button missing, token issuance
+// failing — none of which have a bearer token yet. Deliberately declared
+// OUTSIDE the plugin-presence check below, so "the plugin isn't even there"
+// is itself something this can report.
+const bgDebugLog = (event, detail) => {
+    try {
+        fetch('mobile-debug-log.php', {
+            method: 'POST',
+            body: new URLSearchParams({ csrf_token: csrfToken, source: 'js', event, detail: String(detail || '') })
+        }).catch(() => {});
+    } catch (e) {}
+};
+
 if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundGeolocation) {
+    bgDebugLog('plugin_present', '');
     (async () => {
         const { BackgroundGeolocation, Preferences } = window.Capacitor.Plugins;
         const pingButton = document.querySelector('.send-ping');
 
-        // TEMPORARY diagnostic — see mobile-debug-log.php. Fire-and-forget,
-        // must never itself throw/delay the real start() flow below. Only
-        // reaches the server if a bearer token exists, which is the whole
-        // point: it tells us whether start() was even attempted and what
-        // happened, without needing adb/USB access to a real device.
-        const bgDebugLog = (tok, event, detail) => {
-            if (!tok) return;
-            try {
-                fetch('mobile-debug-log.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
-                    body: JSON.stringify({ source: 'js', event, detail: String(detail || '') })
-                }).catch(() => {});
-            } catch (e) {}
-        };
-
         if (!pingButton) {
+            bgDebugLog('no_ping_button', 'not in an active approved participation on an open mission');
             try { await BackgroundGeolocation.stop(); } catch (e) {}
             return;
         }
@@ -7005,8 +7007,11 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
             // No token (issuance failed) — leave native tracking off rather
             // than start a background service that can never authenticate.
             // The web auto-ping above still covers this tab while it's open.
-            if (!token) return;
-            bgDebugLog(token, 'hook_ready', 'pingButton found, token available');
+            if (!token) {
+                bgDebugLog('no_token', 'mobile-token-issue.php did not return a usable token');
+                return;
+            }
+            bgDebugLog('hook_ready', 'pingButton found, token available');
 
             const shiftId = pingButton.dataset.shiftId;
             const pingUrl = window.location.origin + '/mobile-ping-location.php?shift_id=' + encodeURIComponent(shiftId);
@@ -7026,10 +7031,10 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
             };
 
             try {
-                bgDebugLog(token, 'start_attempt', 'intervalMs=' + AUTO_PING_CADENCE_MS + ' url=' + pingUrl);
+                bgDebugLog('start_attempt', 'intervalMs=' + AUTO_PING_CADENCE_MS + ' url=' + pingUrl);
                 await BackgroundGeolocation.start(startOptions, onLocation);
                 await Preferences.set({ key: 'bg_tracking_interval_ms', value: String(AUTO_PING_CADENCE_MS) });
-                bgDebugLog(token, 'start_success', '');
+                bgDebugLog('start_success', '');
             } catch (e) {
                 // The plugin flatly rejects a 2nd start() call within the same
                 // app process as ALREADY_STARTED — confirmed in
@@ -7048,27 +7053,30 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
                 // tracking gap for no reason.
                 if (e && e.code === 'ALREADY_STARTED') {
                     const storedInterval = await Preferences.get({ key: 'bg_tracking_interval_ms' });
-                    bgDebugLog(token, 'already_started', 'storedInterval=' + storedInterval.value + ' wantInterval=' + AUTO_PING_CADENCE_MS);
+                    bgDebugLog('already_started', 'storedInterval=' + storedInterval.value + ' wantInterval=' + AUTO_PING_CADENCE_MS);
                     if (storedInterval.value !== String(AUTO_PING_CADENCE_MS)) {
                         try {
                             await BackgroundGeolocation.stop();
                             await BackgroundGeolocation.start(startOptions, onLocation);
                             await Preferences.set({ key: 'bg_tracking_interval_ms', value: String(AUTO_PING_CADENCE_MS) });
-                            bgDebugLog(token, 'restart_success', '');
+                            bgDebugLog('restart_success', '');
                         } catch (e2) {
                             console.error('[BackgroundGeolocation] restart with new interval failed', e2);
-                            bgDebugLog(token, 'restart_failed', (e2 && (e2.code || e2.message)) || String(e2));
+                            bgDebugLog('restart_failed', (e2 && (e2.code || e2.message)) || String(e2));
                         }
                     }
                 } else {
                     console.error('[BackgroundGeolocation] setup failed', e);
-                    bgDebugLog(token, 'start_failed', (e && (e.code || e.message)) || String(e));
+                    bgDebugLog('start_failed', (e && (e.code || e.message)) || String(e));
                 }
             }
         } catch (e) {
             console.error('[BackgroundGeolocation] setup failed', e);
+            bgDebugLog('hook_exception', (e && e.message) || String(e));
         }
     })();
+} else {
+    bgDebugLog('plugin_missing', 'window.Capacitor.Plugins.BackgroundGeolocation not present');
 }
 
 const FIELD_STATUS_LABEL_KEYS = {on_way: 'status.self_on_way', on_site: 'status.self_on_site', needs_help: 'status.self_sos'};
