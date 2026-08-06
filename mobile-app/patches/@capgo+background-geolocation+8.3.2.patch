@@ -15,7 +15,7 @@ index 00b9e10..fdabcbd 100644
          });
      }
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
-index 85f2a02..90a7ce2 100644
+index 85f2a02..a36029b 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 @@ -12,6 +12,7 @@ import android.graphics.Color;
@@ -26,7 +26,50 @@ index 85f2a02..90a7ce2 100644
  import android.os.Binder;
  import android.os.Build;
  import android.os.Bundle;
-@@ -51,6 +52,8 @@ public class BackgroundGeolocationService extends Service {
+@@ -21,8 +22,20 @@ import android.os.Looper;
+ import android.os.PowerManager;
+ import androidx.localbroadcastmanager.content.LocalBroadcastManager;
+ import com.getcapacitor.Logger;
++// VolunteerOps patch — see the "client"/"locationCallback" field comments
++// below for why this service moved off raw LocationManager.GPS_PROVIDER
++// onto Play Services' fused provider.
++import com.google.android.gms.location.FusedLocationProviderClient;
++import com.google.android.gms.location.LocationCallback;
++import com.google.android.gms.location.LocationRequest;
++import com.google.android.gms.location.LocationResult;
++import com.google.android.gms.location.LocationServices;
++import com.google.android.gms.location.Priority;
+ import java.util.concurrent.ExecutorService;
+ import java.util.concurrent.Executors;
++import java.util.concurrent.LinkedBlockingQueue;
++import java.util.concurrent.ThreadPoolExecutor;
++import java.util.concurrent.TimeUnit;
+ import org.json.JSONObject;
+ 
+ // A bound and started service that is promoted to a foreground service
+@@ -40,8 +53,19 @@ public class BackgroundGeolocationService extends Service {
+ 
+     private String callbackId;
+ 
+-    private LocationManager client;
+-    private LocationListener locationCallback;
++    // VolunteerOps patch: was raw LocationManager.GPS_PROVIDER (direct GPS
++    // chip only — needs open sky, no network-assisted fix, can take minutes
++    // or never lock at all indoors/urban). Real bug found live: this made
++    // background tracking behave completely differently from the in-browser
++    // JS tracking that runs while the screen is on, which goes through the
++    // WebView's navigator.geolocation — backed by this same Play Services
++    // fused provider already bundled here for geofencing (see
++    // LocationServices import usage in BackgroundGeolocation.java). Switched
++    // to match it: GPS+WiFi+cell blended, dramatically faster/more reliable
++    // indoors, exactly the gap between "works while screen is on" and "goes
++    // silent the instant it locks" that was reported.
++    private FusedLocationProviderClient client;
++    private LocationCallback locationCallback;
+     private MediaPlayer mediaPlayer;
+     private double[][] route;
+     private double distanceThreshold;
+@@ -51,6 +75,8 @@ public class BackgroundGeolocationService extends Service {
      private Runnable watchdogRunnable;
      private Runnable restartRunnable;
      private float currentDistanceFilter;
@@ -35,25 +78,92 @@ index 85f2a02..90a7ce2 100644
      private PowerManager.WakeLock wakeLock;
  
      // When set (via the "url" start option), each location is also POSTed to
-@@ -115,6 +118,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -78,7 +104,7 @@ public class BackgroundGeolocationService extends Service {
+             return false;
+         }
+         if (client != null && locationCallback != null) {
+-            client.removeUpdates(locationCallback);
++            client.removeLocationUpdates(locationCallback);
+         }
+         releaseMediaPlayer();
+         releaseWakeLock();
+@@ -113,8 +139,9 @@ public class BackgroundGeolocationService extends Service {
+         promoteToForeground(LocationStore.getTitle(context), LocationStore.getMessage(context));
+         if (client == null || locationCallback == null) {
              acquireWakeLock();
-             client = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+-            client = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
++            client = LocationServices.getFusedLocationProviderClient(context);
              currentDistanceFilter = LocationStore.getDistanceFilter(context);
 +            currentIntervalMs = LocationStore.getIntervalMs(context);
              locationCallback = createLocationListener(this);
              requestLocationUpdates();
              startWatchdog();
-@@ -195,7 +199,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -125,7 +152,7 @@ public class BackgroundGeolocationService extends Service {
+     @Override
+     public void onDestroy() {
+         if (client != null && locationCallback != null) {
+-            client.removeUpdates(locationCallback);
++            client.removeLocationUpdates(locationCallback);
+         }
+         super.onDestroy();
+         releaseMediaPlayer();
+@@ -186,7 +213,7 @@ public class BackgroundGeolocationService extends Service {
+         if (client == null || locationCallback == null) {
+             return;
+         }
+-        client.removeUpdates(locationCallback);
++        client.removeLocationUpdates(locationCallback);
+         if (restartRunnable != null) {
+             watchdogHandler.removeCallbacks(restartRunnable);
+         }
+@@ -194,11 +221,7 @@ public class BackgroundGeolocationService extends Service {
+             if (client == null || locationCallback == null) {
                  return;
              }
-             try {
+-            try {
 -                client.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, currentDistanceFilter, locationCallback);
-+                client.requestLocationUpdates(LocationManager.GPS_PROVIDER, currentIntervalMs, currentDistanceFilter, locationCallback);
-             } catch (SecurityException ignore) {
-                 // Permission issues are handled in the start() method
-             }
-@@ -247,7 +251,7 @@ public class BackgroundGeolocationService extends Service {
-             postExecutor = Executors.newSingleThreadExecutor();
+-            } catch (SecurityException ignore) {
+-                // Permission issues are handled in the start() method
+-            }
++            requestLocationUpdates();
+             startWatchdog();
+         };
+         watchdogHandler.postDelayed(restartRunnable, 10000);
+@@ -240,14 +263,39 @@ public class BackgroundGeolocationService extends Service {
+         LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
+     }
+ 
++    // VolunteerOps patch: real bug found from a field report — a volunteer
++    // whose phone had no signal for a stretch (a bike ride through a dead
++    // zone) stayed shown as offline/stale in the war room for the whole
++    // stretch, then the entire route landed all at once the moment they got
++    // home. Root cause: postExecutor was an UNBOUNDED single-thread queue —
++    // every location fix queued its own POST attempt with nothing to drop
++    // stale ones, so during an outage attempts piled up behind each other
++    // (each blocking for up to the connect/read timeout before failing) and
++    // only drained in a burst once connectivity returned, replaying the
++    // whole backlog before ever catching up to "now". This app's purpose is
++    // live safety status, not a route logger, so a long queue of ancient
++    // positions is worse than losing a few — DiscardOldestPolicy keeps only
++    // the freshest CAP attempts pending, dropping older undelivered ones so
++    // the dot catches up to the volunteer's real current position quickly
++    // once signal returns, capping worst-case catch-up time instead of
++    // replaying an entire outage first.
++    private static final int POST_QUEUE_CAPACITY = 8;
++
+     // Delivers a location to the configured URL from native code, so it works
+     // even when the WebView/JavaScript layer no longer exists.
+     private void postLocationNatively(android.location.Location location) {
+         if (postExecutor == null) {
+-            postExecutor = Executors.newSingleThreadExecutor();
++            postExecutor = new ThreadPoolExecutor(
++                1,
++                1,
++                0L,
++                TimeUnit.MILLISECONDS,
++                new LinkedBlockingQueue<>(POST_QUEUE_CAPACITY),
++                new ThreadPoolExecutor.DiscardOldestPolicy()
++            );
          }
          Context context = getApplicationContext();
 -        JSONObject payload = locationToJson(location);
@@ -61,7 +171,7 @@ index 85f2a02..90a7ce2 100644
          postExecutor.execute(() -> {
              try {
                  LocationStore.sendLocation(context, payload);
-@@ -257,7 +261,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -257,7 +305,7 @@ public class BackgroundGeolocationService extends Service {
          });
      }
  
@@ -70,7 +180,7 @@ index 85f2a02..90a7ce2 100644
          JSONObject obj = new JSONObject();
          try {
              obj.put("latitude", location.getLatitude());
-@@ -276,12 +280,35 @@ public class BackgroundGeolocationService extends Service {
+@@ -276,34 +324,58 @@ public class BackgroundGeolocationService extends Service {
              // Lets the server distinguish native-delivered updates from those
              // forwarded by the JavaScript callback.
              obj.put("source", "native");
@@ -85,6 +195,19 @@ index 85f2a02..90a7ce2 100644
          return obj;
      }
  
+-    // Android API < 30 requires these legacy callbacks to be implemented.
+-    static LocationListener createLocationListener(final BackgroundGeolocationService service) {
+-        return new LocationListener() {
+-            @Override
+-            public void onLocationChanged(android.location.Location location) {
+-                service.handleLocationChanged(location);
+-            }
+-
+-            @Override
+-            public void onStatusChanged(String provider, int status, Bundle extras) {}
+-
+-            @Override
+-            public void onProviderEnabled(String provider) {}
 +    // VolunteerOps patch — see locationToJson() above. BATTERY_PROPERTY_CAPACITY
 +    // returns 0-100 directly in one call, no SDK-version gating needed at this
 +    // module's minSdkVersion 24 — same one-line getSystemService() shape this
@@ -102,20 +225,36 @@ index 85f2a02..90a7ce2 100644
 +            return JSONObject.NULL;
 +        }
 +    }
-+
-     // Android API < 30 requires these legacy callbacks to be implemented.
-     static LocationListener createLocationListener(final BackgroundGeolocationService service) {
-         return new LocationListener() {
-@@ -303,7 +330,7 @@ public class BackgroundGeolocationService extends Service {
+ 
++    // VolunteerOps patch: Play Services' LocationCallback (one onLocationResult
++    // method, may carry several batched fixes) instead of the legacy
++    // android.location.LocationListener this used to implement.
++    static LocationCallback createLocationListener(final BackgroundGeolocationService service) {
++        return new LocationCallback() {
+             @Override
+-            public void onProviderDisabled(String provider) {}
++            public void onLocationResult(LocationResult locationResult) {
++                android.location.Location location = locationResult.getLastLocation();
++                if (location != null) {
++                    service.handleLocationChanged(location);
++                }
++            }
+         };
+     }
  
      private void requestLocationUpdates() {
          try {
 -            client.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, currentDistanceFilter, locationCallback);
-+            client.requestLocationUpdates(LocationManager.GPS_PROVIDER, currentIntervalMs, currentDistanceFilter, locationCallback);
++            LocationRequest request = new LocationRequest.Builder(currentIntervalMs)
++                .setMinUpdateIntervalMillis(currentIntervalMs)
++                .setMinUpdateDistanceMeters(currentDistanceFilter)
++                .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
++                .build();
++            client.requestLocationUpdates(request, locationCallback, Looper.getMainLooper());
          } catch (SecurityException ignore) {
              // According to Android Studio, this method can throw a Security Exception if
              // permissions are not yet granted. Rather than check the permissions, which is fiddly,
-@@ -344,16 +371,19 @@ public class BackgroundGeolocationService extends Service {
+@@ -344,21 +416,24 @@ public class BackgroundGeolocationService extends Service {
              final String notificationTitle,
              final String notificationMessage,
              float distanceFilter,
@@ -126,7 +265,8 @@ index 85f2a02..90a7ce2 100644
          ) {
              releaseMediaPlayer();
              acquireWakeLock();
-             client = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+-            client = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
++            client = LocationServices.getFusedLocationProviderClient(BackgroundGeolocationService.this);
              callbackId = id;
              currentDistanceFilter = distanceFilter;
 +            currentIntervalMs = intervalMs;
@@ -137,8 +277,23 @@ index 85f2a02..90a7ce2 100644
  
              // The service may already be running (for example after a sticky
              // restart), so drop any previous listener before registering a new one.
+             if (locationCallback != null) {
+-                client.removeUpdates(locationCallback);
++                client.removeLocationUpdates(locationCallback);
+             }
+             locationCallback = createLocationListener(BackgroundGeolocationService.this);
+             requestLocationUpdates();
+@@ -369,7 +444,7 @@ public class BackgroundGeolocationService extends Service {
+             LocationStore.clear(getApplicationContext());
+             nativePostUrl = null;
+             stopWatchdog();
+-            client.removeUpdates(locationCallback);
++            client.removeLocationUpdates(locationCallback);
+             stopForeground(true);
+             stopSelf();
+             releaseMediaPlayer();
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
-index 2e19afe..da10f9e 100644
+index 2e19afe..ab2d535 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
 @@ -22,6 +22,19 @@ final class LocationStore {
@@ -196,7 +351,7 @@ index 2e19afe..da10f9e 100644
      // POSTs a single location as JSON to the configured url. Runs synchronously,
      // so callers must invoke it off the main thread.
      static void sendLocation(Context context, JSONObject data) throws IOException {
-@@ -77,6 +100,7 @@ final class LocationStore {
+@@ -77,18 +100,28 @@ final class LocationStore {
          if (urlString == null || urlString.isEmpty()) {
              return;
          }
@@ -204,7 +359,20 @@ index 2e19afe..da10f9e 100644
          HttpURLConnection connection = null;
          try {
              URL url = new URL(urlString);
-@@ -89,6 +113,9 @@ final class LocationStore {
+             byte[] body = data.toString().getBytes(StandardCharsets.UTF_8);
+             connection = (HttpURLConnection) url.openConnection();
+             connection.setRequestMethod("POST");
+-            connection.setConnectTimeout(15000);
+-            connection.setReadTimeout(15000);
++            // VolunteerOps patch: shortened from 15000 — this runs on a
++            // bounded single-thread queue (see BackgroundGeolocationService's
++            // postExecutor), so a single stalled-but-not-fully-dead attempt
++            // (e.g. a weak-signal patch) blocking for the full timeout was
++            // itself part of why a backlog piled up faster than it could
++            // drain during a real field outage.
++            connection.setConnectTimeout(8000);
++            connection.setReadTimeout(8000);
+             connection.setDoOutput(true);
              connection.setRequestProperty("Accept", "application/json");
              connection.setRequestProperty("Content-Type", "application/json");
              connection.setRequestProperty("Content-Length", String.valueOf(body.length));
