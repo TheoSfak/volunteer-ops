@@ -1,9 +1,9 @@
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
 new file mode 100644
-index 0000000..f3cb15c
+index 0000000..4501866
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
-@@ -0,0 +1,237 @@
+@@ -0,0 +1,289 @@
 +package com.capgo.capacitor_background_geolocation;
 +
 +import android.app.Notification;
@@ -17,6 +17,7 @@ index 0000000..f3cb15c
 +import android.net.Uri;
 +import android.media.RingtoneManager;
 +import android.os.Build;
++import android.os.PowerManager;
 +
 +import com.getcapacitor.Logger;
 +
@@ -65,7 +66,15 @@ index 0000000..f3cb15c
 +    private static final String PREFS_NAME = "VolunteerOpsAlertPoller";
 +    private static final String KEY_CURSOR = "alert_cursor";
 +
-+    private static final String CHANNEL_ID = "volunteerops_alerts";
++    // Bumped from "volunteerops_alerts". A NotificationChannel's importance,
++    // sound and vibration are frozen the moment it is first created - not even
++    // the app that made it can change them afterwards, by design, so the user
++    // stays in control. The first version arrived silently on a real device
++    // (some OEM ROMs register channels from background-service apps as silent),
++    // and the only way to re-register with the settings below is a new id.
++    // If this ever needs correcting again, bump the suffix rather than editing
++    // the channel definition, which would silently do nothing.
++    private static final String CHANNEL_ID = "volunteerops_alerts_v2";
 +    // Distinct from the plugin's own silent foreground-service notification
 +    // (NOTIFICATION_ID in BackgroundGeolocationService) so the two never
 +    // overwrite each other.
@@ -211,6 +220,41 @@ index 0000000..f3cb15c
 +        // Unique id per alert so several orders stack instead of replacing
 +        // one another.
 +        manager.notify(NOTIFICATION_ID_BASE + (id % 1000), builder.build());
++
++        if (urgent) {
++            wakeScreen(context);
++        }
++    }
++
++    /**
++     * Lights the screen for an operational order so the notification is seen
++     * rather than merely delivered. Urgent alerts only - the ones that already
++     * trigger the red banner on the web - so routine account notices never
++     * light up a phone in someone's pocket.
++     *
++     * Deliberately NOT a full-screen intent: that takes the phone over like an
++     * incoming call, and on Android 14+ it needs a permission only granted to
++     * calling and alarm apps, so it would cost an extra setup prompt for every
++     * volunteer. This is the proportionate version - the device still stays
++     * locked, because nothing an app does can or should unlock it.
++     *
++     * The 10s timeout is load-bearing: a wake lock leaked by an exception on a
++     * phone already running a location service all shift would be a real
++     * battery problem, so the OS is told up front to release it regardless.
++     */
++    private static void wakeScreen(Context context) {
++        PowerManager.WakeLock lock = null;
++        try {
++            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
++            if (pm == null || pm.isInteractive()) return; // already awake, nothing to do
++            lock = pm.newWakeLock(
++                PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE,
++                "VolunteerOps:alert"
++            );
++            lock.acquire(10000);
++        } catch (Exception e) {
++            Logger.debug("wakeScreen failed: " + e.getMessage());
++        }
 +    }
 +
 +    private static void ensureChannel(NotificationManager manager) {
@@ -227,7 +271,15 @@ index 0000000..f3cb15c
 +        );
 +        channel.setDescription("Εντολές και ειδοποιήσεις από το κέντρο επιχειρήσεων");
 +        channel.enableVibration(true);
++        // An explicit pattern rather than the system default: a single short
++        // buzz is easy to miss on a phone in a jacket pocket in the field,
++        // which is the situation this whole feature exists for.
++        channel.setVibrationPattern(new long[] { 0, 400, 200, 400, 200, 400 });
 +        channel.enableLights(true);
++        // Without this the notification is hidden behind "sensitive content"
++        // on a locked screen on some ROMs - i.e. exactly when it matters.
++        channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
++        channel.setBypassDnd(true);
 +        Uri sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
 +        if (sound != null) {
 +            channel.setSound(
