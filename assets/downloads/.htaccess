@@ -1,1 +1,17 @@
 AddType application/vnd.android.package-archive .apk
+
+# The APK filename is version-stamped (see ANDROID_APK_VERSION in config.php),
+# so each release is already a fresh URL that no cache can hold a stale copy of.
+# This is the second line of defence: the server sends no Cache-Control for
+# these files otherwise, which leaves browsers free to apply heuristic caching
+# based on Last-Modified. That is exactly how a months-old APK kept being
+# served from the previously-fixed epidrasis.apk URL, silently reinstalling the
+# same old version every time "update" was tapped.
+# Wrapped in IfModule deliberately: an unguarded `Header` directive is a hard
+# 500 on the whole directory wherever mod_headers is not loaded, which would
+# take out the download this file exists to serve.
+<IfModule mod_headers.c>
+    <FilesMatch "\.apk$">
+        Header set Cache-Control "no-cache, must-revalidate"
+    </FilesMatch>
+</IfModule>

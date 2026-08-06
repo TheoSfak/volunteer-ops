@@ -97,9 +97,16 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <div class="text-center mb-4">
-        <a href="assets/downloads/epidrasis.apk" class="btn btn-success btn-lg">
+        <a href="assets/downloads/epidrasis-<?= h(ANDROID_APK_VERSION) ?>.apk" class="btn btn-success btn-lg">
             <i class="bi bi-download me-1"></i>Λήψη Εφαρμογής Android
         </a>
+        <?php // Shown so you can tell at a glance whether the download actually
+              // gave you something newer than what is already on the phone —
+              // previously the only way to find out was to install it and go
+              // hunting in Android's app settings. ?>
+        <div class="text-muted small mt-2">
+            Έκδοση <?= h(ANDROID_APK_VERSION) ?> &middot; Δείτε την εγκατεστημένη έκδοση στις Ρυθμίσεις &rarr; Εφαρμογές
+        </div>
     </div>
 
 </div>

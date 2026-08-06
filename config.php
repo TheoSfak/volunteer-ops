@@ -11,8 +11,18 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.158.8');
+define('APP_VERSION', '3.158.9');
 define('DB_SCHEMA_VERSION', 125);
+
+// Android APK versionName, matching mobile-app/android/app/build.gradle.
+// The download filename embeds this on purpose: the APK used to live at a
+// fixed assets/downloads/epidrasis.apk and was replaced in place six times,
+// and since the server sends no Cache-Control for it, browsers happily served
+// a months-old cached copy from that unchanged URL — a real reported bug where
+// tapping "update" reinstalled the exact same old version. A version-stamped
+// filename is a new URL every release, so a stale cache entry cannot exist.
+// Bump this in the same commit as build.gradle's versionName.
+define('ANDROID_APK_VERSION', '1.1.4');
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
