@@ -252,7 +252,7 @@ foreach ($sectorStatusRows as $row) {
 }
 
 // ── orders (location/photo/video/task): sent / acknowledged / fulfilled ───────
-$orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'return_to_base' => '🏁', 'route' => '🧭'];
+$orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'return_to_base' => '🏁', 'route' => '🧭', 'charge_phone' => '🔋'];
 $orderRows = dbFetchAll(
     "SELECT o.order_type, o.task_text, o.created_at AS sent_at, r.team_id, r.acknowledged_at, r.fulfilled_at,
             u.name AS actor_name, mt.codename, mt.team_number
@@ -268,7 +268,7 @@ foreach ($orderRows as $row) {
     $icon = $orderTypeIcons[$row['order_type']] ?? '📋';
     $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team', [], $viewerLang);
     $extra = '';
-    if (in_array($row['order_type'], ['task', 'message', 'route'], true) && $row['task_text']) {
+    if (in_array($row['order_type'], ['task', 'message', 'route', 'charge_phone'], true) && $row['task_text']) {
         $snippet = mb_strlen($row['task_text']) > 120 ? mb_substr($row['task_text'], 0, 117) . '…' : $row['task_text'];
         $extra = t('history.label_suffix_dash', ['label' => h($snippet)], $viewerLang);
     } elseif ($row['order_type'] === 'return_to_base') {

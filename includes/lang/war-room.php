@@ -112,6 +112,17 @@ return [
         'order.task.notify_acknowledged_title' => '👍 Ελήφθη Γενική Εντολή',
         'order.task.notify_acknowledged_message' => '{name} έλαβε τη Γενική Εντολή της αποστολής «{mission}».',
 
+        // Battery alert (charge-phone order)
+        'order.charge_phone.title' => '🔋 Ειδοποίηση Μπαταρίας',
+        'order.charge_phone.message' => 'Ο/Η υπεύθυνος/η της αποστολής «{mission}» σάς ζητά να φορτίσετε το κινητό σας — η μπαταρία σας είναι στο {pct}%.',
+        'order.charge_phone.broadcast' => 'Ζητήθηκε από τον/την {name} να φορτίσει το κινητό του/της (αποστολή «{mission}»).',
+        'order.charge_phone.notify_acknowledged_title' => '👍 Ελήφθη Ειδοποίηση Μπαταρίας',
+        'order.charge_phone.notify_acknowledged_message' => '{name} έλαβε την ειδοποίηση φόρτισης μπαταρίας (αποστολή «{mission}»).',
+        'battery_alert.no_manage_permission' => 'Δεν έχετε δικαίωμα αποστολής ειδοποίησης μπαταρίας.',
+        'battery_alert.no_battery_data' => 'Δεν υπάρχει διαθέσιμη ένδειξη μπαταρίας για αυτόν τον εθελοντή.',
+        'battery_alert.recipient_not_found' => 'Ο εθελοντής δεν βρέθηκε ή δεν είναι πλέον εγκεκριμένος συμμετέχων σε αυτή την αποστολή.',
+        'battery_alert.history_note' => 'Μπαταρία: {pct}%',
+
         // Global message
         'global_message.empty_warning' => 'Γράψτε ένα μήνυμα πριν την αποστολή.',
         'global_message.title' => '📢 Καθολικό μήνυμα — {mission}',
@@ -493,6 +504,7 @@ return [
         'map.mission_point_label' => 'Σημείο αποστολής',
         'map.pin_stale' => 'Παλιό στίγμα',
         'map.pin_low_battery' => 'Χαμηλή μπαταρία ({pct}%)',
+        'map.charge_alert_btn' => '🔌 Ειδοποίηση φόρτισης',
         'map.pin_moving' => 'Σε κίνηση',
         'map.navigate_btn' => '🧭 Πλοήγηση',
         'trail.auto_suffix' => ' (αυτόματο)',
@@ -804,6 +816,7 @@ return [
         'report.type_photo' => '📷 Φωτογραφία',
         'report.type_video' => '🎥 Βίντεο',
         'report.type_task' => '📋 Γενική Εντολή',
+        'report.type_charge_phone' => '🔋 Ειδοποίηση Μπαταρίας',
         'report.type_message' => '📢 Καθολικό Μήνυμα',
         'report.type_dispatch' => '🧭 Εντολή Κίνησης',
         'report.type_return_to_base' => '🏁 Επιστροφή στη Βάση',
@@ -1063,6 +1076,17 @@ return [
         'order.task.sent_flash' => 'Task sent to {count} active volunteers.',
         'order.task.notify_acknowledged_title' => '👍 Task Order acknowledged',
         'order.task.notify_acknowledged_message' => '{name} acknowledged the Task Order for mission "{mission}".',
+
+        // Battery alert (charge-phone order)
+        'order.charge_phone.title' => '🔋 Battery Alert',
+        'order.charge_phone.message' => 'The mission "{mission}" lead is asking you to charge your phone — your battery is at {pct}%.',
+        'order.charge_phone.broadcast' => '{name} was asked to charge their phone (mission "{mission}").',
+        'order.charge_phone.notify_acknowledged_title' => '👍 Battery Alert acknowledged',
+        'order.charge_phone.notify_acknowledged_message' => '{name} acknowledged the Battery Alert for mission "{mission}".',
+        'battery_alert.no_manage_permission' => 'You do not have permission to send a battery alert.',
+        'battery_alert.no_battery_data' => 'No battery reading is available for this volunteer.',
+        'battery_alert.recipient_not_found' => 'The volunteer was not found or is no longer an approved participant in this mission.',
+        'battery_alert.history_note' => 'Battery: {pct}%',
 
         'global_message.empty_warning' => 'Write a message before sending.',
         'global_message.title' => '📢 Broadcast message — {mission}',
@@ -1419,6 +1443,7 @@ return [
         'map.mission_point_label' => 'Mission point',
         'map.pin_stale' => 'Old ping',
         'map.pin_low_battery' => 'Low battery ({pct}%)',
+        'map.charge_alert_btn' => '🔌 Charge alert',
         'map.pin_moving' => 'Moving',
         'map.navigate_btn' => '🧭 Navigate',
         'trail.auto_suffix' => ' (auto)',
@@ -1715,6 +1740,7 @@ return [
         'report.type_photo' => '📷 Photo',
         'report.type_video' => '🎥 Video',
         'report.type_task' => '📋 General Task',
+        'report.type_charge_phone' => '🔋 Battery Alert',
         'report.type_message' => '📢 Broadcast Message',
         'report.type_dispatch' => '🧭 Movement Order',
         'report.type_return_to_base' => '🏁 Return to Base',
