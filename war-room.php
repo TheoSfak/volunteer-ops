@@ -6967,6 +6967,22 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
         const { BackgroundGeolocation, Preferences } = window.Capacitor.Plugins;
         const pingButton = document.querySelector('.send-ping');
 
+        // TEMPORARY diagnostic — see mobile-debug-log.php. Fire-and-forget,
+        // must never itself throw/delay the real start() flow below. Only
+        // reaches the server if a bearer token exists, which is the whole
+        // point: it tells us whether start() was even attempted and what
+        // happened, without needing adb/USB access to a real device.
+        const bgDebugLog = (tok, event, detail) => {
+            if (!tok) return;
+            try {
+                fetch('mobile-debug-log.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
+                    body: JSON.stringify({ source: 'js', event, detail: String(detail || '') })
+                }).catch(() => {});
+            } catch (e) {}
+        };
+
         if (!pingButton) {
             try { await BackgroundGeolocation.stop(); } catch (e) {}
             return;
@@ -6990,6 +7006,7 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
             // than start a background service that can never authenticate.
             // The web auto-ping above still covers this tab while it's open.
             if (!token) return;
+            bgDebugLog(token, 'hook_ready', 'pingButton found, token available');
 
             const shiftId = pingButton.dataset.shiftId;
             const pingUrl = window.location.origin + '/mobile-ping-location.php?shift_id=' + encodeURIComponent(shiftId);
@@ -7009,8 +7026,10 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
             };
 
             try {
+                bgDebugLog(token, 'start_attempt', 'intervalMs=' + AUTO_PING_CADENCE_MS + ' url=' + pingUrl);
                 await BackgroundGeolocation.start(startOptions, onLocation);
                 await Preferences.set({ key: 'bg_tracking_interval_ms', value: String(AUTO_PING_CADENCE_MS) });
+                bgDebugLog(token, 'start_success', '');
             } catch (e) {
                 // The plugin flatly rejects a 2nd start() call within the same
                 // app process as ALREADY_STARTED — confirmed in
@@ -7029,17 +7048,21 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
                 // tracking gap for no reason.
                 if (e && e.code === 'ALREADY_STARTED') {
                     const storedInterval = await Preferences.get({ key: 'bg_tracking_interval_ms' });
+                    bgDebugLog(token, 'already_started', 'storedInterval=' + storedInterval.value + ' wantInterval=' + AUTO_PING_CADENCE_MS);
                     if (storedInterval.value !== String(AUTO_PING_CADENCE_MS)) {
                         try {
                             await BackgroundGeolocation.stop();
                             await BackgroundGeolocation.start(startOptions, onLocation);
                             await Preferences.set({ key: 'bg_tracking_interval_ms', value: String(AUTO_PING_CADENCE_MS) });
+                            bgDebugLog(token, 'restart_success', '');
                         } catch (e2) {
                             console.error('[BackgroundGeolocation] restart with new interval failed', e2);
+                            bgDebugLog(token, 'restart_failed', (e2 && (e2.code || e2.message)) || String(e2));
                         }
                     }
                 } else {
                     console.error('[BackgroundGeolocation] setup failed', e);
+                    bgDebugLog(token, 'start_failed', (e && (e.code || e.message)) || String(e));
                 }
             }
         } catch (e) {
