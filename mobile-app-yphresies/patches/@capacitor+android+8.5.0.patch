@@ -1,28 +1,70 @@
+diff --git a/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/Bridge.java b/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/Bridge.java
+index d4995fb..e8e9058 100644
+--- a/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/Bridge.java
++++ b/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/Bridge.java
+@@ -258,11 +258,33 @@ public class Bridge {
+         return app;
+     }
+ 
++    // VolunteerOps patch: the exact JS that defines window.Capacitor and its
++    // plugins, kept so MainActivity can re-inject it into any page that ends up
++    // without it. Capacitor has TWO injection mechanisms and both can silently
++    // no-op: addDocumentStartJavaScript() needs WebView 106+, and the older
++    // HTML-rewriting fallback (WebViewLocalServer.handleProxyRequest) skips
++    // every non-GET navigation and every request whose separate proxy fetch
++    // fails or times out. When either happens the page still renders perfectly
++    // — only window.Capacitor is missing — so the failure is invisible right up
++    // until something like background GPS silently never starts.
++    private String vopsBridgeScript;
++
++    /**
++     * VolunteerOps patch: see {@link #vopsBridgeScript}. Null only if Capacitor
++     * failed to build its injector at all (which it already logs as fatal).
++     */
++    public String getVopsBridgeScript() {
++        return vopsBridgeScript;
++    }
++
+     private void loadWebView() {
+         final boolean html5mode = this.config.isHTML5Mode();
+ 
+         // Start the local web server
+         JSInjector injector = getJSInjector();
++        if (injector != null) {
++            this.vopsBridgeScript = injector.getScriptString();
++        }
+         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+             String allowedOrigin = Uri.parse(appUrl).buildUpon().path(null).fragment(null).clearQuery().build().toString();
+             try {
 diff --git a/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/WebViewLocalServer.java b/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/WebViewLocalServer.java
-index 0c54800..17c569e 100644
+index 0c54800..91a3ed1 100644
 --- a/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/WebViewLocalServer.java
 +++ b/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/WebViewLocalServer.java
-@@ -510,8 +510,23 @@ public class WebViewLocalServer {
+@@ -510,8 +510,27 @@ public class WebViewLocalServer {
                              conn.setRequestProperty("Cookie", getCookie);
                          }
                          conn.setRequestMethod(method);
 -                        conn.setReadTimeout(30 * 1000);
 -                        conn.setConnectTimeout(30 * 1000);
-+                        // VolunteerOps patch: was 30s. This proxy fetch is what injects
-+                        // window.Capacitor into every full-page navigation for a
-+                        // server.url-configured app (see the SocketTimeoutException
-+                        // branch in Bridge.handleAppUrlLoadError() a few lines below the
-+                        // call site of this file — Capacitor's own code already
-+                        // anticipates this exact failure mode). On timeout, this method
-+                        // just returns null and the WebView silently falls back to
-+                        // loading the real page WITHOUT the bridge injected — page
-+                        // renders completely normally, but window.Capacitor (and every
-+                        // plugin) never exists, invisibly. war-room.php is by far the
-+                        // heaviest page in this app (a large war-room dashboard with many
-+                        // queries) and this real bug was traced to exactly this path:
-+                        // real production latency + shared hosting load pushed it past
-+                        // 30s while local/emulator testing over a fast LAN never came
-+                        // close, which is why this was never caught until now.
++                        // VolunteerOps patch: was 30s. On this legacy injection path
++                        // Capacitor re-fetches each full-page navigation through its own
++                        // HttpURLConnection so it can insert the bridge <script> into the
++                        // response. It is a separate, serial connection that does not
++                        // reuse the WebView's own: measured at ~11s for this app's small
++                        // login page from an emulator on a fast link, so war-room.php on
++                        // mobile data has real headroom to blow a 30s budget. On timeout
++                        // this method just returns null and the WebView loads the page
++                        // directly, with no bridge and no plugins, while the page itself
++                        // renders perfectly — a completely invisible failure.
++                        //
++                        // NOTE: raising this is hardening, NOT the fix for the background
++                        // GPS bug. That was traced (2026-08-06, reproduced on the
++                        // emulator) to this same method skipping every non-GET navigation
++                        // outright — see the `method.equals("GET")` guard above, which
++                        // leaves the page you land on right after any form POST with no
++                        // bridge at all, regardless of timeout. The actual fix is
++                        // MainActivity's re-injection listener; this bound just removes
++                        // one more way the same symptom can appear on a slow connection.
 +                        conn.setReadTimeout(90 * 1000);
 +                        conn.setConnectTimeout(90 * 1000);
                          if (request.getUrl().getUserInfo() != null) {

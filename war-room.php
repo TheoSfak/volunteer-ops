@@ -6978,7 +6978,35 @@ const bgDebugLog = (event, detail) => {
     } catch (e) {}
 };
 
-if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundGeolocation) {
+// The Capacitor bridge is not guaranteed to exist by the time this script
+// runs, and on some WebViews it never arrives on its own at all. Capacitor has
+// two injection mechanisms and BOTH can silently no-op for a server.url app:
+// the modern addDocumentStartJavaScript() needs WebView 106+, and the older
+// fallback re-fetches and rewrites each page through its own connection, which
+// it skips outright for any non-GET navigation (so the page you land on right
+// after submitting a form never gets a bridge) and for any fetch that errors
+// or times out. The Android app's MainActivity now re-injects the bridge when
+// it sees a page without one, but that runs asynchronously and can easily land
+// after this script has already executed.
+//
+// Hence a bounded poll rather than the one-shot check this used to be. The old
+// version tested once at parse time and gave up permanently, so a bridge that
+// showed up even a few hundred ms late was indistinguishable from "not running
+// in the native app" — background GPS simply never started, silently, for the
+// entire shift. That is the bug this whole block exists to prevent.
+const BG_BRIDGE_WAIT_MS = 20000;
+const BG_BRIDGE_POLL_MS = 250;
+
+function bgPluginReady() {
+    return !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.BackgroundGeolocation);
+}
+
+let bgTrackingKickedOff = false;
+
+function startNativeBackgroundTracking() {
+    // Guarded: the poll and the pageshow listener below can both reach here.
+    if (bgTrackingKickedOff) return;
+    bgTrackingKickedOff = true;
     bgDebugLog('plugin_present', '');
     (async () => {
         const { BackgroundGeolocation, Preferences } = window.Capacitor.Plugins;
@@ -7075,7 +7103,15 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
             bgDebugLog('hook_exception', (e && e.message) || String(e));
         }
     })();
-} else {
+}
+
+// Only reached after BG_BRIDGE_WAIT_MS with still no bridge, i.e. this is
+// almost certainly an ordinary browser or the installed PWA rather than the
+// Android app — in which case there is nothing to start and nothing is wrong.
+// It still reports, because the one case that matters is the app failing to
+// inject, and the two are indistinguishable from in here. The user agent is
+// what tells them apart after the fact: a Capacitor WebView says "wv".
+function reportMissingBridge(waitedMs) {
     // Distinguishes "no Capacitor plugins registered at all" (points at
     // BridgeActivity's plugin-loading try/catch swallowing a
     // ClassNotFoundException for SOME plugin — Capacitor's own PluginManager
@@ -7085,27 +7121,42 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
     const pluginKeys = (hasCapacitor && window.Capacitor.Plugins) ? Object.keys(window.Capacitor.Plugins) : [];
     bgDebugLog(
         'plugin_missing',
-        'hasCapacitor=' + hasCapacitor + ' registeredPlugins=[' + pluginKeys.join(',') + ']'
+        'waitedMs=' + waitedMs + ' hasCapacitor=' + hasCapacitor + ' registeredPlugins=[' + pluginKeys.join(',') + ']'
     );
-    // TEMPORARY, one more disambiguation round: Capacitor 8's Android bridge
-    // has TWO separate injection mechanisms — the modern
-    // WebViewCompat.addDocumentStartJavaScript() (used when the device's
-    // WebView supports the DOCUMENT_START_SCRIPT feature, roughly Chrome
-    // 106+) doesn't touch the served HTML at all, vs. the older fallback
-    // that rewrites the HTML response to insert a literal <script> at the
-    // start of <head> (the one with the 30s-now-90s timeout patched
-    // earlier — which visibly made zero difference, meaning that fallback
-    // path likely isn't even the one running here). navigator.userAgent
-    // tells us the actual WebView/Chromium version so we know which
-    // mechanism SHOULD apply; the first slice of <head>'s HTML shows
-    // whether anything actually got prepended into the page markup itself
-    // (only the older mechanism would show up here — the newer one injects
-    // at the JS-engine level, invisible in the DOM source).
+    // Logged unconditionally, not just as a one-off diagnostic round: the
+    // WebView/Chromium version in here is the single fact that decides which
+    // injection mechanism the device can even use (addDocumentStartJavaScript
+    // needs roughly Chrome 106+), so it is worth having attached to every
+    // report rather than needing another build to go find out.
     bgDebugLog('diag_useragent', navigator.userAgent || '');
-    try {
-        bgDebugLog('diag_head_start', document.head.innerHTML.substring(0, 250));
-    } catch (e) {}
 }
+
+// Start immediately when the bridge is already there (the normal case on a
+// modern WebView), otherwise wait for the app's re-injection to land.
+(function awaitCapacitorBridge() {
+    if (bgPluginReady()) {
+        startNativeBackgroundTracking();
+        return;
+    }
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+        if (bgPluginReady()) {
+            clearInterval(timer);
+            bgDebugLog('plugin_late', 'bridge became usable after ' + (Date.now() - startedAt) + 'ms');
+            startNativeBackgroundTracking();
+        } else if (Date.now() - startedAt >= BG_BRIDGE_WAIT_MS) {
+            clearInterval(timer);
+            reportMissingBridge(Date.now() - startedAt);
+        }
+    }, BG_BRIDGE_POLL_MS);
+})();
+
+// Restoring this page from the back/forward cache re-runs no inline script, so
+// without this a volunteer who leaves the app and comes back can sit on a War
+// Room page whose native tracking was never started.
+window.addEventListener('pageshow', () => {
+    if (!bgTrackingKickedOff && bgPluginReady()) startNativeBackgroundTracking();
+});
 
 const FIELD_STATUS_LABEL_KEYS = {on_way: 'status.self_on_way', on_site: 'status.self_on_site', needs_help: 'status.self_sos'};
 
