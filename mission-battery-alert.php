@@ -76,6 +76,17 @@ if ($action === 'send') {
     }
     $batteryLevel = (int) $target['battery_level'];
 
+    // Server-side re-check of the same fixed bar the popup button's own
+    // active/inactive state uses (CHARGE_ALERT_THRESHOLD_PCT, config.php) —
+    // the client-side "inactive" state is deliberately not a native disabled
+    // attribute (so a click can still explain why via a popup), which means
+    // a determined client could still POST here directly; never trust that
+    // gate alone.
+    if ($batteryLevel >= CHARGE_ALERT_THRESHOLD_PCT) {
+        echo json_encode(['ok' => false, 'error' => t('battery_alert.battery_not_low_enough', ['pct' => CHARGE_ALERT_THRESHOLD_PCT])]);
+        exit;
+    }
+
     // Dedup guard: a well-meaning admin re-clicking (or reopening the popup
     // later while the volunteer still hasn't acknowledged) reuses the still-
     // open order instead of spamming a second beep+banner at the same
