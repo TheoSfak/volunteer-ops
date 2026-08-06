@@ -5901,6 +5901,20 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 124,
+            'description' => 'Add battery_level to volunteer_pings (phone battery %, best-effort — same optional/graceful-degradation shape as accuracy_meters, v103) so command staff can spot volunteers whose GPS tracking is at risk of going dark when their phone dies.',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'volunteer_pings' AND COLUMN_NAME = 'battery_level'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE volunteer_pings ADD COLUMN battery_level TINYINT UNSIGNED NULL AFTER accuracy_meters");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

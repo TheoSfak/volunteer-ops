@@ -15,10 +15,18 @@ index 00b9e10..fdabcbd 100644
          });
      }
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
-index 85f2a02..a2efb45 100644
+index 85f2a02..90a7ce2 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
-@@ -51,6 +51,8 @@ public class BackgroundGeolocationService extends Service {
+@@ -12,6 +12,7 @@ import android.graphics.Color;
+ import android.location.LocationListener;
+ import android.location.LocationManager;
+ import android.media.MediaPlayer;
++import android.os.BatteryManager;
+ import android.os.Binder;
+ import android.os.Build;
+ import android.os.Bundle;
+@@ -51,6 +52,8 @@ public class BackgroundGeolocationService extends Service {
      private Runnable watchdogRunnable;
      private Runnable restartRunnable;
      private float currentDistanceFilter;
@@ -27,7 +35,7 @@ index 85f2a02..a2efb45 100644
      private PowerManager.WakeLock wakeLock;
  
      // When set (via the "url" start option), each location is also POSTed to
-@@ -115,6 +117,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -115,6 +118,7 @@ public class BackgroundGeolocationService extends Service {
              acquireWakeLock();
              client = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
              currentDistanceFilter = LocationStore.getDistanceFilter(context);
@@ -35,7 +43,7 @@ index 85f2a02..a2efb45 100644
              locationCallback = createLocationListener(this);
              requestLocationUpdates();
              startWatchdog();
-@@ -195,7 +198,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -195,7 +199,7 @@ public class BackgroundGeolocationService extends Service {
                  return;
              }
              try {
@@ -44,7 +52,61 @@ index 85f2a02..a2efb45 100644
              } catch (SecurityException ignore) {
                  // Permission issues are handled in the start() method
              }
-@@ -303,7 +306,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -247,7 +251,7 @@ public class BackgroundGeolocationService extends Service {
+             postExecutor = Executors.newSingleThreadExecutor();
+         }
+         Context context = getApplicationContext();
+-        JSONObject payload = locationToJson(location);
++        JSONObject payload = locationToJson(location, context);
+         postExecutor.execute(() -> {
+             try {
+                 LocationStore.sendLocation(context, payload);
+@@ -257,7 +261,7 @@ public class BackgroundGeolocationService extends Service {
+         });
+     }
+ 
+-    private static JSONObject locationToJson(android.location.Location location) {
++    private static JSONObject locationToJson(android.location.Location location, Context context) {
+         JSONObject obj = new JSONObject();
+         try {
+             obj.put("latitude", location.getLatitude());
+@@ -276,12 +280,35 @@ public class BackgroundGeolocationService extends Service {
+             // Lets the server distinguish native-delivered updates from those
+             // forwarded by the JavaScript callback.
+             obj.put("source", "native");
++            // VolunteerOps patch: phone battery % at time of ping, read
++            // natively so it's captured even when backgrounded/screen-locked
++            // (same reason "source" above is native-only — the WebView/JS
++            // layer isn't running to read this itself in that state).
++            obj.put("battery_level", getBatteryLevelPct(context));
+         } catch (org.json.JSONException e) {
+             Logger.error("Could not serialize location", e);
+         }
+         return obj;
+     }
+ 
++    // VolunteerOps patch — see locationToJson() above. BATTERY_PROPERTY_CAPACITY
++    // returns 0-100 directly in one call, no SDK-version gating needed at this
++    // module's minSdkVersion 24 — same one-line getSystemService() shape this
++    // file already uses for LOCATION_SERVICE/POWER_SERVICE. Documented to
++    // return -1 as an "unsupported" sentinel on some devices, guarded below
++    // alongside a catch-all for any other OEM-ROM oddity — a failure to read
++    // battery must never break a location POST that already worked without it.
++    private static Object getBatteryLevelPct(Context context) {
++        try {
++            BatteryManager bm = (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE);
++            int pct = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
++            return (pct >= 0 && pct <= 100) ? pct : JSONObject.NULL;
++        } catch (Exception e) {
++            Logger.error("Could not read battery level", e);
++            return JSONObject.NULL;
++        }
++    }
++
+     // Android API < 30 requires these legacy callbacks to be implemented.
+     static LocationListener createLocationListener(final BackgroundGeolocationService service) {
+         return new LocationListener() {
+@@ -303,7 +330,7 @@ public class BackgroundGeolocationService extends Service {
  
      private void requestLocationUpdates() {
          try {
@@ -53,7 +115,7 @@ index 85f2a02..a2efb45 100644
          } catch (SecurityException ignore) {
              // According to Android Studio, this method can throw a Security Exception if
              // permissions are not yet granted. Rather than check the permissions, which is fiddly,
-@@ -344,16 +347,19 @@ public class BackgroundGeolocationService extends Service {
+@@ -344,16 +371,19 @@ public class BackgroundGeolocationService extends Service {
              final String notificationTitle,
              final String notificationMessage,
              float distanceFilter,

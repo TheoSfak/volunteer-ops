@@ -39,4 +39,15 @@ $accuracy = ($rawAccuracy !== null && $rawAccuracy !== '' && is_numeric($rawAccu
     ? min((float) $rawAccuracy, 5000)
     : null;
 
-echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $source));
+// Phone battery percentage (0-100 integer) — optional, read via the Battery
+// Status API (navigator.getBattery()) where the browser supports it. Unlike
+// accuracy's open-ended radius above, 0-100 is a hard bound: an out-of-range
+// value can only be garbage, so it's dropped to null rather than clamped —
+// clamping could disguise a bug as a false "critical battery" reading on
+// what is a safety-relevant signal.
+$rawBattery = post('battery_level');
+$batteryLevel = ($rawBattery !== null && $rawBattery !== '' && is_numeric($rawBattery) && (int) $rawBattery >= 0 && (int) $rawBattery <= 100)
+    ? (int) $rawBattery
+    : null;
+
+echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source));

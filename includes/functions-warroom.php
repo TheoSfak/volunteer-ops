@@ -1036,7 +1036,7 @@ function notifyVolunteerGpsPing(int $missionId, string $missionTitle, ?int $resp
  * $user must be a full users row (id, name, language) — callers resolve it
  * their own way (session vs. token lookup) before calling this.
  */
-function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, ?float $accuracy, string $source): array {
+function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, ?float $accuracy, ?int $batteryLevel, string $source): array {
     $userId = (int) $user['id'];
     $lang = $user['language'] ?? DEFAULT_LANGUAGE;
 
@@ -1060,8 +1060,8 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
 
     try {
         dbInsert(
-            "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, source, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
-            [$userId, $shiftId, $lat, $lng, $accuracy, $source]
+            "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, battery_level, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+            [$userId, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source]
         );
     } catch (Exception $e) {
         return ['ok' => false, 'error' => t('ping.gps_unavailable_migration', [], $lang)];
@@ -2302,7 +2302,7 @@ function loadTeamPositionsForMission(int $missionId): array {
     $positions = [];
     foreach ($teams as $team) {
         $ping = dbFetchOne(
-            "SELECT vp.lat, vp.lng, vp.created_at
+            "SELECT vp.lat, vp.lng, vp.created_at, vp.battery_level
              FROM volunteer_pings vp
              JOIN mission_team_members mtm ON mtm.user_id = vp.user_id
              JOIN shifts s ON s.id = vp.shift_id AND s.mission_id = mtm.mission_id
@@ -2324,6 +2324,9 @@ function loadTeamPositionsForMission(int $missionId): array {
             'lng' => (float) $ping['lng'],
             'time' => date('H:i', strtotime($ping['created_at'])),
             'is_stale' => (time() - strtotime($ping['created_at'])) > 540,
+            // Battery of whoever on the team most recently reported in — a
+            // reasonable proxy for "is this team's tracking about to go dark".
+            'battery_level' => $ping['battery_level'] !== null ? (int) $ping['battery_level'] : null,
         ];
     }
     return $positions;
@@ -2343,11 +2346,16 @@ function computeTeamDistanceMatrix(array $teamPositions): array {
         for ($j = $i + 1; $j < $count; $j++) {
             $a = $teamPositions[$i];
             $b = $teamPositions[$j];
+            $aBat = $a['battery_level'] ?? null;
+            $bBat = $b['battery_level'] ?? null;
             $matrix[] = [
                 'a_label' => $a['label'], 'a_color' => $a['color'],
                 'b_label' => $b['label'], 'b_color' => $b['color'],
                 'distance_m' => gpsDistanceMeters($a['lat'], $a['lng'], $b['lat'], $b['lng']),
                 'is_stale' => $a['is_stale'] || $b['is_stale'],
+                // Worse (lower) of the two sides wins — mirrors the is_stale
+                // OR-rollup just above.
+                'battery_level' => ($aBat !== null && $bBat !== null) ? min($aBat, $bBat) : ($aBat ?? $bBat),
             ];
         }
     }
