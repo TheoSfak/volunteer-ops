@@ -1,3 +1,246 @@
+diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
+new file mode 100644
+index 0000000..f3cb15c
+--- /dev/null
++++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
+@@ -0,0 +1,237 @@
++package com.capgo.capacitor_background_geolocation;
++
++import android.app.Notification;
++import android.app.NotificationChannel;
++import android.app.NotificationManager;
++import android.app.PendingIntent;
++import android.content.Context;
++import android.content.Intent;
++import android.content.SharedPreferences;
++import android.media.AudioAttributes;
++import android.net.Uri;
++import android.media.RingtoneManager;
++import android.os.Build;
++
++import com.getcapacitor.Logger;
++
++import org.json.JSONArray;
++import org.json.JSONObject;
++
++import java.io.BufferedReader;
++import java.io.InputStreamReader;
++import java.net.HttpURLConnection;
++import java.net.URL;
++import java.nio.charset.StandardCharsets;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++/**
++ * VolunteerOps addition (not upstream).
++ *
++ * Raises a real Android notification when command staff send an order, a
++ * dispatch, or a global message, so it reaches a volunteer whose screen is
++ * off. Nothing else in the app can do this: the WebView implements neither
++ * the Push API nor the Notifications API, so Web Push - which works fine in
++ * the PWA - is simply unavailable here, and every in-page alert (banner, beep,
++ * SOS siren) is JavaScript the OS freezes the moment the screen goes dark.
++ *
++ * This piggybacks on the background-location foreground service, which is
++ * already running and already awake with the screen off, so it costs no new
++ * service, no new notification, and no Firebase dependency.
++ */
++final class AlertPoller {
++
++    // Deliberately faster than the GPS cadence (AUTO_PING_CADENCE_MS, 3min):
++    // a location fix has to power up the GNSS radio and settle, whereas this
++    // is a sub-kilobyte HTTPS GET on a connection the service is holding open
++    // anyway, so it is far cheaper per call. 30s bounds the worst case a
++    // volunteer waits to hear about an order at half a minute instead of
++    // three, which is the difference between useful and not for a dispatch.
++    //
++    // Not lower, on purpose: below ~30s the wakeups start to dominate what the
++    // service costs, and this runs for the whole length of a shift.
++    // Not long-polling or SSE either, tempting as instant delivery is - both
++    // hold an Apache worker and a PHP process open per connected volunteer,
++    // and on the shared hosting these domains run on a single busy mission
++    // could exhaust the process pool and take the whole site down with it.
++    static final long POLL_INTERVAL_MS = 30000L;
++
++    private static final String PREFS_NAME = "VolunteerOpsAlertPoller";
++    private static final String KEY_CURSOR = "alert_cursor";
++
++    private static final String CHANNEL_ID = "volunteerops_alerts";
++    // Distinct from the plugin's own silent foreground-service notification
++    // (NOTIFICATION_ID in BackgroundGeolocationService) so the two never
++    // overwrite each other.
++    private static final int NOTIFICATION_ID_BASE = 91000;
++
++    private static ExecutorService executor;
++
++    private AlertPoller() {}
++
++    static synchronized void poll(Context context) {
++        try {
++            String pingUrl = LocationStore.getUrl(context);
++            String authToken = LocationStore.getAuthToken(context);
++            if (pingUrl == null || pingUrl.isEmpty() || authToken == null || authToken.isEmpty()) {
++                return;
++            }
++            URL parsed = new URL(pingUrl);
++            String base = parsed.getProtocol() + "://" + parsed.getAuthority();
++            if (executor == null) {
++                executor = Executors.newSingleThreadExecutor();
++            }
++            Context app = context.getApplicationContext();
++            executor.execute(() -> fetchAndNotify(app, base, authToken));
++        } catch (Exception ignore) {}
++    }
++
++    private static void fetchAndNotify(Context context, String baseUrl, String authToken) {
++        HttpURLConnection connection = null;
++        try {
++            long cursor = prefs(context).getLong(KEY_CURSOR, 0L);
++            String url = baseUrl + "/mobile-alerts.php?since_id=" + cursor;
++
++            connection = (HttpURLConnection) new URL(url).openConnection();
++            connection.setRequestMethod("GET");
++            connection.setConnectTimeout(10000);
++            connection.setReadTimeout(10000);
++            connection.setRequestProperty("Accept", "application/json");
++            connection.setRequestProperty("Authorization", "Bearer " + authToken);
++
++            if (connection.getResponseCode() != 200) {
++                return;
++            }
++
++            StringBuilder sb = new StringBuilder();
++            try (BufferedReader reader = new BufferedReader(
++                new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
++                String line;
++                while ((line = reader.readLine()) != null) {
++                    sb.append(line);
++                }
++            }
++
++            JSONObject body = new JSONObject(sb.toString());
++            if (!body.optBoolean("ok", false)) {
++                return;
++            }
++
++            JSONArray alerts = body.optJSONArray("alerts");
++            if (alerts != null) {
++                for (int i = 0; i < alerts.length(); i++) {
++                    JSONObject alert = alerts.optJSONObject(i);
++                    if (alert == null) continue;
++                    notifyAlert(
++                        context,
++                        alert.optInt("id", i),
++                        alert.optString("title", ""),
++                        alert.optString("message", ""),
++                        alert.optBoolean("urgent", false)
++                    );
++                }
++            }
++
++            // Advanced only after the notifications above have actually been
++            // raised, so a crash mid-loop re-delivers rather than silently
++            // swallowing an order.
++            long newCursor = body.optLong("cursor", cursor);
++            if (newCursor != cursor) {
++                prefs(context).edit().putLong(KEY_CURSOR, newCursor).apply();
++            }
++        } catch (Exception e) {
++            // Never surface: a failed alert check must not disturb the
++            // location tracking this service exists for.
++            Logger.debug("AlertPoller failed: " + e.getMessage());
++        } finally {
++            if (connection != null) {
++                connection.disconnect();
++            }
++        }
++    }
++
++    private static SharedPreferences prefs(Context context) {
++        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
++    }
++
++    private static void notifyAlert(Context context, int id, String title, String message, boolean urgent) {
++        NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
++        if (manager == null) return;
++
++        ensureChannel(manager);
++
++        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
++            ? new Notification.Builder(context, CHANNEL_ID)
++            : new Notification.Builder(context);
++
++        builder
++            .setContentTitle(title.isEmpty() ? context.getString(context.getApplicationInfo().labelRes) : title)
++            .setContentText(message)
++            // Orders carry real text, and a collapsed line truncates it to
++            // uselessness on a lock screen.
++            .setStyle(new Notification.BigTextStyle().bigText(message))
++            .setAutoCancel(true)
++            .setWhen(System.currentTimeMillis());
++
++        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
++            // Pre-O has no channels, so sound/vibration/priority live on the
++            // notification itself.
++            builder.setPriority(urgent ? Notification.PRIORITY_MAX : Notification.PRIORITY_DEFAULT);
++            builder.setDefaults(Notification.DEFAULT_SOUND | Notification.DEFAULT_VIBRATE);
++        }
++
++        try {
++            String name = BackgroundGeolocationService.getAppString(
++                "capacitor_background_geolocation_notification_icon", "mipmap/ic_launcher", context);
++            String[] parts = name.split("/");
++            builder.setSmallIcon(BackgroundGeolocationService.getAppResourceIdentifier(parts[1], parts[0], context));
++        } catch (Exception e) {
++            Logger.error("Could not set alert notification icon", e);
++        }
++
++        // Tapping opens the app rather than the OS app-settings screen, which
++        // is what happens if no content intent is set.
++        Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
++        if (launchIntent != null) {
++            launchIntent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
++            builder.setContentIntent(
++                PendingIntent.getActivity(
++                    context, id, launchIntent,
++                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
++                )
++            );
++        }
++
++        // Unique id per alert so several orders stack instead of replacing
++        // one another.
++        manager.notify(NOTIFICATION_ID_BASE + (id % 1000), builder.build());
++    }
++
++    private static void ensureChannel(NotificationManager manager) {
++        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
++        if (manager.getNotificationChannel(CHANNEL_ID) != null) return;
++
++        NotificationChannel channel = new NotificationChannel(
++            CHANNEL_ID,
++            "Εντολές & Ειδοποιήσεις",
++            // IMPORTANCE_HIGH is what makes it a heads-up notification with
++            // sound - the plugin's own tracking channel is deliberately
++            // silent, and reusing it would make every order silent too.
++            NotificationManager.IMPORTANCE_HIGH
++        );
++        channel.setDescription("Εντολές και ειδοποιήσεις από το κέντρο επιχειρήσεων");
++        channel.enableVibration(true);
++        channel.enableLights(true);
++        Uri sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
++        if (sound != null) {
++            channel.setSound(
++                sound,
++                new AudioAttributes.Builder()
++                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
++                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
++                    .build()
++            );
++        }
++        manager.createNotificationChannel(channel);
++    }
++}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
 index 00b9e10..fdabcbd 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
@@ -15,7 +258,7 @@ index 00b9e10..fdabcbd 100644
          });
      }
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
-index 85f2a02..1c66a37 100644
+index 85f2a02..e04ceac 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 @@ -12,6 +12,7 @@ import android.graphics.Color;
@@ -69,16 +312,19 @@ index 85f2a02..1c66a37 100644
      private MediaPlayer mediaPlayer;
      private double[][] route;
      private double distanceThreshold;
-@@ -51,6 +75,8 @@ public class BackgroundGeolocationService extends Service {
+@@ -50,7 +74,11 @@ public class BackgroundGeolocationService extends Service {
+     private Handler watchdogHandler = new Handler(Looper.getMainLooper());
      private Runnable watchdogRunnable;
      private Runnable restartRunnable;
++    // VolunteerOps addition — repeating alert check, see startAlertPolling().
++    private Runnable alertPollRunnable;
      private float currentDistanceFilter;
 +    // VolunteerOps patch — see LocationStore.KEY_INTERVAL_MS for why.
 +    private long currentIntervalMs = 1000L;
      private PowerManager.WakeLock wakeLock;
  
      // When set (via the "url" start option), each location is also POSTed to
-@@ -78,7 +104,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -78,7 +106,7 @@ public class BackgroundGeolocationService extends Service {
              return false;
          }
          if (client != null && locationCallback != null) {
@@ -87,7 +333,7 @@ index 85f2a02..1c66a37 100644
          }
          releaseMediaPlayer();
          releaseWakeLock();
-@@ -112,9 +138,11 @@ public class BackgroundGeolocationService extends Service {
+@@ -112,9 +140,11 @@ public class BackgroundGeolocationService extends Service {
          nativePostUrl = LocationStore.getUrl(context);
          promoteToForeground(LocationStore.getTitle(context), LocationStore.getMessage(context));
          if (client == null || locationCallback == null) {
@@ -100,7 +346,7 @@ index 85f2a02..1c66a37 100644
              locationCallback = createLocationListener(this);
              requestLocationUpdates();
              startWatchdog();
-@@ -125,7 +153,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -125,7 +155,7 @@ public class BackgroundGeolocationService extends Service {
      @Override
      public void onDestroy() {
          if (client != null && locationCallback != null) {
@@ -109,7 +355,7 @@ index 85f2a02..1c66a37 100644
          }
          super.onDestroy();
          releaseMediaPlayer();
-@@ -183,10 +211,11 @@ public class BackgroundGeolocationService extends Service {
+@@ -183,10 +213,11 @@ public class BackgroundGeolocationService extends Service {
  
      private void restartLocationUpdates() {
          Logger.debug("Location watchdog timed out, restarting updates");
@@ -122,7 +368,7 @@ index 85f2a02..1c66a37 100644
          if (restartRunnable != null) {
              watchdogHandler.removeCallbacks(restartRunnable);
          }
-@@ -194,11 +223,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -194,11 +225,7 @@ public class BackgroundGeolocationService extends Service {
              if (client == null || locationCallback == null) {
                  return;
              }
@@ -135,8 +381,39 @@ index 85f2a02..1c66a37 100644
              startWatchdog();
          };
          watchdogHandler.postDelayed(restartRunnable, 10000);
-@@ -223,6 +248,11 @@ public class BackgroundGeolocationService extends Service {
+@@ -221,8 +248,42 @@ public class BackgroundGeolocationService extends Service {
+         }
+     }
  
++    // VolunteerOps addition — see AlertPoller. Rides this service's existing
++    // handler rather than starting anything of its own: the service is already
++    // alive and holding a wake lock with the screen off, which is the whole
++    // reason alerts can be delivered from here at all. The poll itself only
++    // schedules work on AlertPoller's own executor, so nothing blocks the main
++    // looper the location callbacks also run on.
++    private void startAlertPolling() {
++        stopAlertPolling();
++        if (alertPollRunnable == null) {
++            alertPollRunnable = new Runnable() {
++                @Override
++                public void run() {
++                    AlertPoller.poll(getApplicationContext());
++                    // Re-posted from inside the runnable rather than scheduled
++                    // at a fixed rate, so a slow or hung network call can never
++                    // pile requests up behind itself.
++                    watchdogHandler.postDelayed(this, AlertPoller.POLL_INTERVAL_MS);
++                }
++            };
++        }
++        watchdogHandler.postDelayed(alertPollRunnable, AlertPoller.POLL_INTERVAL_MS);
++    }
++
++    private void stopAlertPolling() {
++        if (alertPollRunnable != null) {
++            watchdogHandler.removeCallbacks(alertPollRunnable);
++        }
++    }
++
      private void handleLocationChanged(android.location.Location location) {
          startWatchdog();
 +        DebugLog.log(
@@ -147,7 +424,7 @@ index 85f2a02..1c66a37 100644
          if (nativePostUrl != null) {
              postLocationNatively(location);
          }
-@@ -240,24 +270,51 @@ public class BackgroundGeolocationService extends Service {
+@@ -240,24 +301,51 @@ public class BackgroundGeolocationService extends Service {
          LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
      }
  
@@ -202,7 +479,7 @@ index 85f2a02..1c66a37 100644
          JSONObject obj = new JSONObject();
          try {
              obj.put("latitude", location.getLatitude());
-@@ -276,38 +333,64 @@ public class BackgroundGeolocationService extends Service {
+@@ -276,38 +364,64 @@ public class BackgroundGeolocationService extends Service {
              // Lets the server distinguish native-delivered updates from those
              // forwarded by the JavaScript callback.
              obj.put("source", "native");
@@ -283,7 +560,7 @@ index 85f2a02..1c66a37 100644
          }
      }
  
-@@ -344,21 +427,25 @@ public class BackgroundGeolocationService extends Service {
+@@ -344,32 +458,42 @@ public class BackgroundGeolocationService extends Service {
              final String notificationTitle,
              final String notificationMessage,
              float distanceFilter,
@@ -313,15 +590,35 @@ index 85f2a02..1c66a37 100644
              }
              locationCallback = createLocationListener(BackgroundGeolocationService.this);
              requestLocationUpdates();
-@@ -369,7 +456,7 @@ public class BackgroundGeolocationService extends Service {
+             promoteToForeground(notificationTitle, notificationMessage);
++            // Started after saveSetup above, which is what puts the URL and
++            // bearer token where AlertPoller reads them from.
++            startAlertPolling();
+         }
+ 
+         String stop() {
              LocationStore.clear(getApplicationContext());
              nativePostUrl = null;
              stopWatchdog();
 -            client.removeUpdates(locationCallback);
++            // Must stop with the service: LocationStore.clear() above wipes the
++            // token, so every later poll would be a guaranteed 401.
++            stopAlertPolling();
 +            client.removeLocationUpdates(locationCallback);
              stopForeground(true);
              stopSelf();
              releaseMediaPlayer();
+@@ -462,7 +586,9 @@ public class BackgroundGeolocationService extends Service {
+     }
+ 
+     // Gets the identifier of the app's resource by name, returning 0 if not found.
+-    private static int getAppResourceIdentifier(String name, String defType, Context context) {
++    // VolunteerOps patch: widened from private to package-private so
++    // AlertPoller can reuse the same launcher icon for its notifications.
++    static int getAppResourceIdentifier(String name, String defType, Context context) {
+         return context.getResources().getIdentifier(name, defType, context.getPackageName());
+     }
+ 
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java
 new file mode 100644
 index 0000000..1b2b4ad
