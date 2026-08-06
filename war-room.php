@@ -7087,6 +7087,24 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
         'plugin_missing',
         'hasCapacitor=' + hasCapacitor + ' registeredPlugins=[' + pluginKeys.join(',') + ']'
     );
+    // TEMPORARY, one more disambiguation round: Capacitor 8's Android bridge
+    // has TWO separate injection mechanisms — the modern
+    // WebViewCompat.addDocumentStartJavaScript() (used when the device's
+    // WebView supports the DOCUMENT_START_SCRIPT feature, roughly Chrome
+    // 106+) doesn't touch the served HTML at all, vs. the older fallback
+    // that rewrites the HTML response to insert a literal <script> at the
+    // start of <head> (the one with the 30s-now-90s timeout patched
+    // earlier — which visibly made zero difference, meaning that fallback
+    // path likely isn't even the one running here). navigator.userAgent
+    // tells us the actual WebView/Chromium version so we know which
+    // mechanism SHOULD apply; the first slice of <head>'s HTML shows
+    // whether anything actually got prepended into the page markup itself
+    // (only the older mechanism would show up here — the newer one injects
+    // at the JS-engine level, invisible in the DOM source).
+    bgDebugLog('diag_useragent', navigator.userAgent || '');
+    try {
+        bgDebugLog('diag_head_start', document.head.innerHTML.substring(0, 250));
+    } catch (e) {}
 }
 
 const FIELD_STATUS_LABEL_KEYS = {on_way: 'status.self_on_way', on_site: 'status.self_on_site', needs_help: 'status.self_sos'};
