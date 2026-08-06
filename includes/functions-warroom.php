@@ -1025,6 +1025,25 @@ function notifyVolunteerGpsPing(int $missionId, string $missionTitle, ?int $resp
 }
 
 /**
+ * Ping staleness threshold in seconds — 3x the configured auto-ping cadence
+ * (war_room_auto_ping_seconds, default 180s), generous enough to not cry
+ * wolf over one missed tick's jitter (the original rationale for 3x) while
+ * still scaling down when an admin configures a faster cadence than the
+ * default. Single source of truth for every "is this GPS ping still fresh"
+ * check in the app — was previously 4 independent hardcoded `540` (9min)
+ * literals across war-room.php and this file, each explicitly commented
+ * "kept manually in sync, update this too if it ever changes." Real bug
+ * found live: an admin lowered the cadence to 30s for tighter tracking, but
+ * every staleness check kept using the stale 540s/9min default anyway — a
+ * volunteer's presence dot and map pin could read "online"/fresh for up to
+ * 9 minutes of real silence, the opposite of what configuring a faster
+ * cadence was for.
+ */
+function warRoomPingStaleThresholdSeconds(): int {
+    return 3 * (int) getSetting('war_room_auto_ping_seconds', '180');
+}
+
+/**
  * Core GPS-ping write path (ownership check + volunteer_pings insert +
  * command-staff notify + order auto-fulfillment) shared by ping-location.php
  * (session + CSRF auth, called from the live war-room.php tab) and
@@ -1906,11 +1925,7 @@ function computeDispatchEta(int $dispatchId, int $teamId, float $destLat, float 
     $pingLng = (float) $ping['lng'];
     $pingCreatedAt = $ping['created_at'];
     $pingAgeSeconds = time() - strtotime($pingCreatedAt);
-    // 540s = 9min, mirrors war-room.php's own $pingStaleThresholdSeconds for
-    // the person-pin staleness badge — not a shared constant today (that one
-    // is a local variable in a different file), just the same number kept
-    // deliberately in sync; if that value ever changes, update this too.
-    $isStale = $pingAgeSeconds > 540;
+    $isStale = $pingAgeSeconds > warRoomPingStaleThresholdSeconds();
 
     $cached = dbFetchOne(
         "SELECT minutes, source, ping_created_at FROM dispatch_eta_cache WHERE dispatch_id = ?",
@@ -2313,9 +2328,6 @@ function loadTeamPositionsForMission(int $missionId): array {
         if (!$ping) {
             continue;
         }
-        // 540s = 9min, mirrors $loadPins/computeDispatchEta()'s own staleness
-        // threshold — not a shared constant anywhere today, kept deliberately
-        // in sync; update all three if this number ever changes.
         $positions[] = [
             'team_id' => (int) $team['id'],
             'label' => teamLabel($team['codename'], $team['team_number']),
@@ -2323,7 +2335,7 @@ function loadTeamPositionsForMission(int $missionId): array {
             'lat' => (float) $ping['lat'],
             'lng' => (float) $ping['lng'],
             'time' => date('H:i', strtotime($ping['created_at'])),
-            'is_stale' => (time() - strtotime($ping['created_at'])) > 540,
+            'is_stale' => (time() - strtotime($ping['created_at'])) > warRoomPingStaleThresholdSeconds(),
             // Battery of whoever on the team most recently reported in — a
             // reasonable proxy for "is this team's tracking about to go dark".
             'battery_level' => $ping['battery_level'] !== null ? (int) $ping['battery_level'] : null,

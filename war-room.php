@@ -619,17 +619,21 @@ $hasFieldStatus = (bool)dbFetchValue(
 );
 
 // A participant's GPS ping (manual or auto) is flagged stale past 3x the
-// passive auto-ping cadence (3 min) — enough headroom to not cry wolf over
-// one missed tick's jitter, but still an honest signal once the gap is real
-// (e.g. the tab got backgrounded/suspended, or geolocation permission was
-// revoked). Shared by the full render and the ajax poll below so both agree.
+// configured auto-ping cadence (warRoomPingStaleThresholdSeconds() —
+// includes/functions-warroom.php, also used by computeDispatchEta() and
+// loadTeamPositionsForMission() so every staleness check in the app scales
+// together with war_room_auto_ping_seconds) — enough headroom to not cry
+// wolf over one missed tick's jitter, but still an honest signal once the
+// gap is real (e.g. the tab got backgrounded/suspended, or geolocation
+// permission was revoked). Shared by the full render and the ajax poll
+// below so both agree.
 //
 // Computed via its own lightweight query (volunteer_id + last_ping_at only)
 // rather than by reusing the full $participants query below — that query
 // (with its name/phone/is_external/guest_org_name/shift-time joins) only
 // exists for the Participants-list UI, which the ajax poll never renders,
 // but every open tab hits this exact computation every 5s regardless.
-$pingStaleThresholdSeconds = 540;
+$pingStaleThresholdSeconds = warRoomPingStaleThresholdSeconds();
 $pingIsStaleByVolunteerId = [];
 // Also doubles as the ajax poll's live-refresh source for the Participants
 // list's ping-time text and status badge — both were previously frozen at
@@ -6923,8 +6927,7 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
 
             const shiftId = pingButton.dataset.shiftId;
             const pingUrl = window.location.origin + '/mobile-ping-location.php?shift_id=' + encodeURIComponent(shiftId);
-
-            await BackgroundGeolocation.start({
+            const startOptions = {
                 backgroundTitle: <?= json_encode(getSetting('app_name', 'VolunteerOps')) ?>,
                 backgroundMessage: t('bgtrack.notification_text'),
                 distanceFilter: 0, // periodic cadence comes from intervalMs below, not movement — a stationary volunteer still needs to stay visible to command staff
@@ -6932,20 +6935,49 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
                 url: pingUrl,
                 authToken: token,
                 requestPermissions: true
-            }, (location, error) => {
+            };
+            const onLocation = (location, error) => {
                 // Native POST already handles delivery; this callback is
                 // mainly useful for debugging via a connected device.
-                if (error) {
-                    console.error('[BackgroundGeolocation] location error', error);
+                if (error) console.error('[BackgroundGeolocation] location error', error);
+            };
+
+            try {
+                await BackgroundGeolocation.start(startOptions, onLocation);
+                await Preferences.set({ key: 'bg_tracking_interval_ms', value: String(AUTO_PING_CADENCE_MS) });
+            } catch (e) {
+                // The plugin flatly rejects a 2nd start() call within the same
+                // app process as ALREADY_STARTED — confirmed in
+                // BackgroundGeolocation.java: it checks serviceConnectionFuture
+                // and rejects BEFORE ever reaching the Service code that would
+                // apply new params, even when intervalMs has genuinely changed
+                // server-side. Real bug found live: an admin lowered the ping
+                // cadence in Settings and it had zero effect on an
+                // already-running session — the device kept pinging at its
+                // stale original interval indefinitely, silently, until the
+                // app was force-closed and reopened. Only force a stop+restart
+                // when the interval actually changed since the last
+                // successful start (tracked in Preferences, since the plugin
+                // has no "read current config" API) — not on every ordinary
+                // reload/tab-refocus, which would otherwise cause a brief
+                // tracking gap for no reason.
+                if (e && e.code === 'ALREADY_STARTED') {
+                    const storedInterval = await Preferences.get({ key: 'bg_tracking_interval_ms' });
+                    if (storedInterval.value !== String(AUTO_PING_CADENCE_MS)) {
+                        try {
+                            await BackgroundGeolocation.stop();
+                            await BackgroundGeolocation.start(startOptions, onLocation);
+                            await Preferences.set({ key: 'bg_tracking_interval_ms', value: String(AUTO_PING_CADENCE_MS) });
+                        } catch (e2) {
+                            console.error('[BackgroundGeolocation] restart with new interval failed', e2);
+                        }
+                    }
+                } else {
+                    console.error('[BackgroundGeolocation] setup failed', e);
                 }
-            });
-        } catch (e) {
-            // Calling start() again while already running (e.g. navigating
-            // back to an open Action Room tab) rejects as ALREADY_STARTED —
-            // expected, tracking is already correctly active, not a real error.
-            if (!e || e.code !== 'ALREADY_STARTED') {
-                console.error('[BackgroundGeolocation] setup failed', e);
             }
+        } catch (e) {
+            console.error('[BackgroundGeolocation] setup failed', e);
         }
     })();
 }
