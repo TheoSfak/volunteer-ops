@@ -631,17 +631,30 @@ $hasFieldStatus = (bool)dbFetchValue(
 // but every open tab hits this exact computation every 5s regardless.
 $pingStaleThresholdSeconds = 540;
 $pingIsStaleByVolunteerId = [];
+// Also doubles as the ajax poll's live-refresh source for the Participants
+// list's ping-time text and status badge — both were previously frozen at
+// page load (the $participants query below only ever runs on a full,
+// non-ajax render), a real gap surfaced by the first real-device test of
+// native background tracking: GPS kept flowing but this card never showed
+// it without a manual reload. Reuses this exact query/scope rather than
+// adding a second one.
+$participantLiveByVolunteerId = [];
 foreach (dbFetchAll(
-    "SELECT pr.volunteer_id,
+    "SELECT pr.volunteer_id" . ($hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status') . ",
             (SELECT MAX(vp.created_at) FROM volunteer_pings vp WHERE vp.user_id = pr.volunteer_id AND vp.shift_id = pr.shift_id) AS last_ping_at
      FROM participation_requests pr
      JOIN shifts s ON s.id = pr.shift_id
      WHERE s.mission_id = ? AND pr.status = ?",
     [$missionId, PARTICIPATION_APPROVED]
 ) as $pingRow) {
-    $pingIsStaleByVolunteerId[(int)$pingRow['volunteer_id']] =
+    $volunteerId = (int)$pingRow['volunteer_id'];
+    $pingIsStaleByVolunteerId[$volunteerId] =
         $pingRow['last_ping_at'] !== null
         && strtotime($pingRow['last_ping_at']) < (time() - $pingStaleThresholdSeconds);
+    $participantLiveByVolunteerId[$volunteerId] = [
+        'last_ping_time' => $pingRow['last_ping_at'] ? date('H:i', strtotime($pingRow['last_ping_at'])) : null,
+        'field_status' => $pingRow['field_status'],
+    ];
 }
 
 // Always returns each participant's LATEST ping regardless of age — a hard
@@ -933,6 +946,7 @@ if (get('ajax') === '1') {
         'pointsOfInterest' => $pointsOfInterest,
         'onlinePresence' => $onlinePresence,
         'pingStaleness' => $pingIsStaleByVolunteerId,
+        'participantLive' => $participantLiveByVolunteerId,
         'annotations' => $annotations,
         'areas' => $areas,
         'sectors' => $sectors,
@@ -1866,9 +1880,9 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             <div class="list-group list-group-flush">
                 <?php foreach ($participants as $participant): ?>
                 <?php $status = $participant['field_status'] ?? ''; ?>
-                <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? 'presence-online' : 'presence-offline' ?>" title="<?= in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => date('H:i', strtotime($participant['last_ping_at']))]) : t('participants.no_ping') ?><?php if ($participant['last_ping_at']): ?><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']] ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span><?php endif; ?></small></div>
-                    <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>">
+                <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap" id="participant-row-<?= (int)$participant['volunteer_id'] ?>">
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? 'presence-online' : 'presence-offline' ?>" title="<?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => date('H:i', strtotime($participant['last_ping_at']))]) : t('participants.no_ping') ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= (!empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span></small></div>
+                    <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>" id="status-badge-<?= (int)$participant['volunteer_id'] ?>">
                         <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
                 </div>
@@ -4303,7 +4317,7 @@ let pinsRenderedSig = null;
 // a pin can appear instead of drifting between two copies.
 // Configurable low-battery warning threshold (Settings → war_room_low_battery_pct).
 // Critical tier is always half the warning tier, not a second setting.
-const LOW_BATTERY_PCT = <?= (int) getSetting('war_room_low_battery_pct', '20') ?>;
+const LOW_BATTERY_PCT = <?= (int) getSetting('war_room_low_battery_pct', '60') ?>;
 const CRITICAL_BATTERY_PCT = Math.floor(LOW_BATTERY_PCT / 2);
 
 function buildPinMarker(pin) {
@@ -5502,11 +5516,20 @@ function updateRouteCountdowns() {
 }
 setInterval(updateRouteCountdowns, 1000);
 
-function renderPresence(onlineIds) {
+function renderPresence(onlineIds, staleness) {
     const onlineSet = new Set((onlineIds || []).map(String));
+    const staleMap = staleness || {};
     document.querySelectorAll('[id^="presence-"]').forEach(el => {
         const uid = el.id.slice('presence-'.length);
-        const isOnline = onlineSet.has(uid);
+        // "Online" means either the browser tab itself is open (heartbeat)
+        // OR GPS is still reporting fresh — including via the native
+        // background path with the screen off/app backgrounded. That
+        // second case is exactly the scenario background tracking exists
+        // for, so it must never read as offline just because the tab isn't
+        // focused (was previously heartbeat-only, real gap found on the
+        // first real-device background-tracking test).
+        const hasFreshPing = Object.prototype.hasOwnProperty.call(staleMap, uid) && !staleMap[uid];
+        const isOnline = onlineSet.has(uid) || hasFreshPing;
         el.classList.toggle('presence-online', isOnline);
         el.classList.toggle('presence-offline', !isOnline);
         el.title = isOnline ? t('common.online') : t('common.offline');
@@ -5517,6 +5540,32 @@ function renderPingStaleness(staleness) {
     document.querySelectorAll('[id^="ping-stale-"]').forEach(el => {
         const uid = el.id.slice('ping-stale-'.length);
         el.classList.toggle('d-none', !staleness[uid]);
+    });
+}
+
+const PARTICIPANT_STATUS_BADGE_META = {
+    needs_help: {cls: 'bg-danger', label: () => t('status.badge_needs_help')},
+    on_site: {cls: 'bg-success', label: () => t('status.badge_on_site')},
+    on_way: {cls: 'bg-warning text-dark', label: () => t('status.badge_on_way')},
+};
+// Keeps the Participants list's ping-time text and status badge live —
+// previously frozen at page load (only the presence dot and stale-warning
+// icon above were poll-patched), so a status/ping update after the initial
+// render stayed invisible until a manual reload.
+function renderParticipantLiveData(data) {
+    Object.keys(data || {}).forEach(uid => {
+        const info = data[uid];
+        const timeEl = document.getElementById('ping-time-' + uid);
+        if (timeEl) timeEl.textContent = info.last_ping_time ? t('participants.last_ping_label', {time: info.last_ping_time}) : t('participants.no_ping');
+
+        const badgeEl = document.getElementById('status-badge-' + uid);
+        if (badgeEl) {
+            const meta = PARTICIPANT_STATUS_BADGE_META[info.field_status];
+            badgeEl.className = 'badge ' + (meta ? meta.cls : 'bg-secondary');
+            badgeEl.textContent = meta ? meta.label() : t('status.badge_none');
+        }
+        const rowEl = document.getElementById('participant-row-' + uid);
+        if (rowEl) rowEl.classList.toggle('needs-help', info.field_status === 'needs_help');
     });
 }
 
@@ -7089,8 +7138,9 @@ function pollWarRoomData() {
             restrictedAreaBreachHistory = data.restrictedAreaBreachHistory;
             if (!fieldMode) renderRestrictedAreaBreachesList(restrictedAreaBreachHistory);
         }
-        if (data.onlinePresence) renderPresence(data.onlinePresence);
+        if (data.onlinePresence) renderPresence(data.onlinePresence, data.pingStaleness);
         if (data.pingStaleness) renderPingStaleness(data.pingStaleness);
+        if (data.participantLive) renderParticipantLiveData(data.participantLive);
         if (data.nearbyTeams) renderNearbyTeams(nearbyTeams = data.nearbyTeams);
         if (data.restrictedAreaProximity) renderRestrictedAreaProximity(restrictedAreaProximity = data.restrictedAreaProximity);
         if (!fieldMode && data.teamDistances) renderTeamDistances(teamDistances = data.teamDistances);
