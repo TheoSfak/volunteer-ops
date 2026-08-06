@@ -5915,6 +5915,14 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 125,
+            'description' => 'Widen mission_orders.order_type ENUM to add charge_phone (per-volunteer "please charge your phone" alert sent from the low-battery badge on their GPS pin popup — single recipient, notifies only the sending admin back on acknowledge, unlike the broadcast-style order types).',
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_orders MODIFY COLUMN order_type ENUM('location','photo','video','task','message','return_to_base','route','charge_phone') NOT NULL");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

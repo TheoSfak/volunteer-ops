@@ -80,7 +80,7 @@ CREATE TABLE `audit_logs` (
   KEY `idx_audit_user_created` (`user_id`,`created_at`),
   KEY `idx_audit_table_rec_date` (`table_name`,`record_id`,`created_at`),
   CONSTRAINT `audit_logs_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=1578 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=1581 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `bug_reports`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -900,7 +900,7 @@ DROP TABLE IF EXISTS `mission_orders`;
 CREATE TABLE `mission_orders` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `mission_id` int(10) unsigned NOT NULL,
-  `order_type` enum('location','photo','video','task','message','return_to_base','route') NOT NULL,
+  `order_type` enum('location','photo','video','task','message','return_to_base','route','charge_phone') NOT NULL,
   `task_text` text DEFAULT NULL,
   `created_by` int(10) unsigned NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
@@ -1459,7 +1459,7 @@ CREATE TABLE `mobile_api_tokens` (
   UNIQUE KEY `unique_token_hash` (`token_hash`),
   KEY `idx_mobile_tokens_user` (`user_id`,`revoked_at`),
   CONSTRAINT `mobile_api_tokens_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `newsletter_presets`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -1623,7 +1623,7 @@ CREATE TABLE `participation_requests` (
   CONSTRAINT `participation_requests_ibfk_2` FOREIGN KEY (`volunteer_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `participation_requests_ibfk_3` FOREIGN KEY (`decided_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `participation_requests_ibfk_4` FOREIGN KEY (`attendance_confirmed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=134 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=137 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `password_reset_tokens`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -1692,7 +1692,7 @@ CREATE TABLE `settings` (
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `setting_key` (`setting_key`)
-) ENGINE=InnoDB AUTO_INCREMENT=155 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=157 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `shift_swap_requests`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -2217,7 +2217,7 @@ CREATE TABLE `volunteer_pings` (
   KEY `idx_pings_user_shift` (`user_id`,`shift_id`),
   CONSTRAINT `volunteer_pings_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `volunteer_pings_ibfk_2` FOREIGN KEY (`shift_id`) REFERENCES `shifts` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=138 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=157 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `volunteer_points`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;

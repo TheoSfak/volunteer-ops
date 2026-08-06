@@ -752,6 +752,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
 
             [$homeBg, $homeFg] = teamBadgeColors($pin['home_team_color']);
             $pins[] = [
+                'user_id' => (int) $pin['user_id'],
                 'lat' => (float) $pin['lat'], 'lng' => (float) $pin['lng'], 'name' => $pin['name'],
                 'status' => $pin['field_status'], 'team_color' => $pin['team_color'],
                 'team_label' => $pin['codename'] ? teamLabel($pin['codename'], $pin['team_number']) : null,
@@ -3062,7 +3063,11 @@ if (!fieldMode) {
     map.createPane('coveragePane');
     map.getPane('coveragePane').style.zIndex = 360;
     coverageLayer = L.featureGroup();
-    pinLayer = L.layerGroup().addTo(map);
+    // FeatureGroup, not plain LayerGroup — required for popupopen to
+    // propagate from a child marker up to the group's own listener (see the
+    // matching dispatchLayer note two lines below), needed by the new
+    // pin-charge-alert-btn wiring.
+    pinLayer = L.featureGroup().addTo(map);
     // FeatureGroup (not plain LayerGroup) is required here: only FeatureGroup
     // propagates child-layer events like 'popupopen' up to the group's own
     // listeners, which is how dispatchLayer.on('popupopen', ...) below wires up
@@ -4323,8 +4328,15 @@ let pinsRenderedSig = null;
 // Critical tier is always half the warning tier, not a second setting.
 const LOW_BATTERY_PCT = <?= (int) getSetting('war_room_low_battery_pct', '60') ?>;
 const CRITICAL_BATTERY_PCT = Math.floor(LOW_BATTERY_PCT / 2);
+// First client-side gate needed for admin-only UI built entirely in JS —
+// every other admin branch is server-rendered PHP conditioned directly on
+// $canManageWarRoom around static HTML, but buildPinMarker()'s popup is
+// pure JS. The mission-battery-alert.php endpoint independently re-checks
+// canManageActionRoom() regardless — this only controls whether the button
+// renders, never trusted as the real gate.
+const CAN_MANAGE_WAR_ROOM = <?= json_encode($canManageWarRoom) ?>;
 
-function buildPinMarker(pin) {
+function buildPinMarker(pin, interactive = true) {
     const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
     // Team color takes priority (the whole point is spotting which team a
     // pin belongs to at a glance); volunteers with no team fall back to the
@@ -4359,9 +4371,16 @@ function buildPinMarker(pin) {
     const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
         : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
     // Only rendered when actually low — mirrors extraLine above, no "🔋 85%"
-    // clutter on a healthy pin.
+    // clutter on a healthy pin. Button rides inside the same condition (no
+    // reason to offer a charge alert when the badge itself isn't showing);
+    // interactive=false suppresses it on the read-only Route Order composer
+    // map, which reuses this exact function for its own reference pins but
+    // has no popupopen listener wired up to handle a click there.
+    const chargeAlertBtn = (CAN_MANAGE_WAR_ROOM && interactive)
+        ? ` <button type="button" class="btn btn-sm btn-outline-warning pin-charge-alert-btn" data-user-id="${pin.user_id}">${t('map.charge_alert_btn')}</button>`
+        : '';
     const batteryLine = (pin.battery_level !== null && pin.battery_level !== undefined && pin.battery_level <= LOW_BATTERY_PCT)
-        ? `<br><span class="${pin.battery_level <= CRITICAL_BATTERY_PCT ? 'text-danger' : 'text-warning'} small">🔋 ${t('map.pin_low_battery', {pct: pin.battery_level})}</span>`
+        ? `<br><span class="${pin.battery_level <= CRITICAL_BATTERY_PCT ? 'text-danger' : 'text-warning'} small">🔋 ${t('map.pin_low_battery', {pct: pin.battery_level})}</span>${chargeAlertBtn}`
         : '';
     const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
     const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${pin.lat},${pin.lng}&travelmode=driving`;
@@ -4394,6 +4413,29 @@ function renderPins(items) {
             map.setView(coords[0], 15);
         }
     }
+}
+
+// Wires the pin-charge-alert-btn built into buildPinMarker()'s battery line
+// (admin-only, only present when the low-battery badge itself is showing).
+// Mirrors dispatchLayer.on('popupopen', ...) below exactly — same delegated-
+// listener-on-the-group approach, since a marker's popup only exists in the
+// DOM while genuinely open. Field Mode has no map at all, same guard every
+// other pin/layer listener here already uses.
+if (!fieldMode) {
+pinLayer.on('popupopen', event => {
+    const popupEl = event.popup.getElement();
+    const chargeBtn = popupEl.querySelector('.pin-charge-alert-btn');
+    if (chargeBtn) {
+        chargeBtn.addEventListener('click', () => {
+            chargeBtn.disabled = true;
+            const data = new URLSearchParams({csrf_token: csrfToken, action: 'send', mission_id: <?= $missionId ?>, user_id: chargeBtn.dataset.userId});
+            fetch('mission-battery-alert.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+                if (result.ok) { map.closePopup(); }
+                else { alert(result.error || t('common.send_failed')); chargeBtn.disabled = false; }
+            }).catch(() => { chargeBtn.disabled = false; });
+        });
+    }
+});
 }
 
 // Nearby Teams (field-card column, both modes — the only place a Field Mode
@@ -8699,7 +8741,10 @@ function renderRouteComposerPins(items) {
     if (sig === routeComposerPinsRenderedSig) return;
     routeComposerPinsRenderedSig = sig;
     routeComposerPinLayer.clearLayers();
-    items.forEach(pin => buildPinMarker(pin).addTo(routeComposerPinLayer));
+    // interactive=false — this map is read-only reference info with no
+    // popupopen listener wired up, so the charge-alert button would render
+    // but silently do nothing if left enabled here.
+    items.forEach(pin => buildPinMarker(pin, false).addTo(routeComposerPinLayer));
 }
 
 // Mirrors renderAnnotations()'s 3 shape types exactly (same ANNOTATION_COLOR,

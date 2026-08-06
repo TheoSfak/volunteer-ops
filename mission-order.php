@@ -99,6 +99,33 @@ if ($action === 'acknowledge') {
                     );
                 }
             }
+        } elseif ($recipient['order_type'] === 'charge_phone') {
+            // Deliberately NOT notifyCommandStaffBanner() (that broadcasts to
+            // the whole command-staff roster, the right call for route/task/
+            // message above) — a battery alert is a one-to-one nudge, so only
+            // the specific admin who sent it should hear it got seen.
+            $order = dbFetchOne(
+                "SELECT o.mission_id, o.created_by, m.title AS mission_title
+                 FROM mission_orders o
+                 JOIN missions m ON m.id = o.mission_id
+                 WHERE o.id = ?",
+                [$orderId]
+            );
+            if ($order && (int) $order['created_by'] !== $userId) {
+                $creatorId = (int) $order['created_by'];
+                $creatorLang = getUserLanguages([$creatorId])[$creatorId] ?? DEFAULT_LANGUAGE;
+                sendNotification(
+                    $creatorId,
+                    t('order.charge_phone.notify_acknowledged_title', [], $creatorLang),
+                    t('order.charge_phone.notify_acknowledged_message', ['name' => getCurrentUser()['name'] ?? '', 'mission' => $order['mission_title']], $creatorLang),
+                    'success', 'mission_battery_alert_acknowledged',
+                    [
+                        'url' => rtrim(BASE_URL, '/') . '/war-room.php?id=' . $order['mission_id'],
+                        'tag' => 'charge_phone-ack-' . $orderId,
+                        'bannerMission' => (int) $order['mission_id'],
+                    ]
+                );
+            }
         }
     }
 

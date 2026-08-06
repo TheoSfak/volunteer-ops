@@ -2402,6 +2402,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
         'dispatch' => t('report.type_dispatch', [], $lang),
         'return_to_base' => t('report.type_return_to_base', [], $lang),
         'route'    => t('report.type_route', [], $lang),
+        'charge_phone' => t('report.type_charge_phone', [], $lang),
     ];
 
     $teamLabels = [];
@@ -2431,7 +2432,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
             'team_label'  => $teamId ? ($teamLabels[$teamId] ?? '—') : t('history.no_team_capitalized', [], $lang),
             'user_id'     => (int) $row['user_id'],
             'user_name'   => $row['user_name'],
-            'label'       => in_array($row['order_type'], ['task', 'message', 'route'], true) ? $row['task_text'] : null,
+            'label'       => in_array($row['order_type'], ['task', 'message', 'route', 'charge_phone'], true) ? $row['task_text'] : null,
             'sent_at'     => $row['sent_at'],
             'ack_at'      => $row['acknowledged_at'],
             'fulfill_at'  => $row['fulfilled_at'],
@@ -4047,7 +4048,7 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         ];
     }
 
-    $orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'return_to_base' => '🏁', 'route' => '🧭'];
+    $orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'return_to_base' => '🏁', 'route' => '🧭', 'charge_phone' => '🔋'];
     $orderRows = dbFetchAll(
         "SELECT o.order_type, o.task_text, o.created_at AS sent_at, r.team_id, r.acknowledged_at, r.fulfilled_at,
                 u.name AS actor_name, mt.codename, mt.team_number
@@ -4062,7 +4063,7 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         $icon = $orderTypeIcons[$row['order_type']] ?? '📋';
         $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'χωρίς ομάδα';
         $extra = '';
-        if (in_array($row['order_type'], ['task', 'message', 'route'], true) && $row['task_text']) {
+        if (in_array($row['order_type'], ['task', 'message', 'route', 'charge_phone'], true) && $row['task_text']) {
             $snippet = mb_strlen($row['task_text']) > 120 ? mb_substr($row['task_text'], 0, 117) . '…' : $row['task_text'];
             $extra = ' — «' . h($snippet) . '»';
         } elseif ($row['order_type'] === 'return_to_base') {
