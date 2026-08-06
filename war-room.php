@@ -665,7 +665,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
         // two-query version did.
         $rawPins = dbFetchAll(
             "SELECT * FROM (
-                SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.created_at, u.name,
+                SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.battery_level, vp.created_at, u.name,
                         u.is_external, u.guest_org_name, u.guest_country_code,
                         ht.name AS home_team_name, ht.color AS home_team_color,
                         mt.color AS team_color, mt.codename, mt.team_number{$field},
@@ -743,6 +743,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 'guest_country_code' => $pin['guest_country_code'],
                 'time' => date('H:i', $pingTs),
                 'is_stale' => $isStale, 'is_moving' => $isMoving, 'heading_deg' => $headingDeg,
+                'battery_level' => $pin['battery_level'] !== null ? (int) $pin['battery_level'] : null,
             ];
         }
         return $pins;
@@ -4300,6 +4301,11 @@ let pinsRenderedSig = null;
 // the Route Order composer's read-only reference layer (renderRouteComposerPins()
 // below), so the team-color/stale/moving styling stays identical everywhere
 // a pin can appear instead of drifting between two copies.
+// Configurable low-battery warning threshold (Settings → war_room_low_battery_pct).
+// Critical tier is always half the warning tier, not a second setting.
+const LOW_BATTERY_PCT = <?= (int) getSetting('war_room_low_battery_pct', '20') ?>;
+const CRITICAL_BATTERY_PCT = Math.floor(LOW_BATTERY_PCT / 2);
+
 function buildPinMarker(pin) {
     const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
     // Team color takes priority (the whole point is spotting which team a
@@ -4334,6 +4340,11 @@ function buildPinMarker(pin) {
     const statusLine = pinStatusLabel(pin.status);
     const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
         : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
+    // Only rendered when actually low — mirrors extraLine above, no "🔋 85%"
+    // clutter on a healthy pin.
+    const batteryLine = (pin.battery_level !== null && pin.battery_level !== undefined && pin.battery_level <= LOW_BATTERY_PCT)
+        ? `<br><span class="${pin.battery_level <= CRITICAL_BATTERY_PCT ? 'text-danger' : 'text-warning'} small">🔋 ${t('map.pin_low_battery', {pct: pin.battery_level})}</span>`
+        : '';
     const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
     const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${pin.lat},${pin.lng}&travelmode=driving`;
     const navLine = `<br><a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-1">${t('map.navigate_btn')}</a>`;
@@ -4344,7 +4355,7 @@ function buildPinMarker(pin) {
     // (depends on which render*() happened to run last that poll tick). A
     // volunteer's own live position should never be the one that silently
     // disappears underneath another marker.
-    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${navLine}`);
+    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${navLine}`);
 }
 
 function renderPins(items) {
@@ -4426,9 +4437,12 @@ function renderNearbyTeams(items) {
             ? `${formatDistanceMeters(team.distance_m)} · ${bearingToCompassAbbr(team.bearing_deg)}`
             : `<span class="text-muted">${t('nearby.no_own_ping')}</span>`;
         const staleNote = team.is_stale ? ` · <span class="text-warning small">${t('map.pin_stale')}</span>` : '';
+        const batteryNote = (team.battery_level !== null && team.battery_level !== undefined && team.battery_level <= LOW_BATTERY_PCT)
+            ? ` · <span class="${team.battery_level <= CRITICAL_BATTERY_PCT ? 'text-danger' : 'text-warning'} small">🔋 ${t('map.pin_low_battery', {pct: team.battery_level})}</span>`
+            : '';
         return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom" style="${dimmed}">
             <div>${swatch}<strong>${escapeHtml(team.label)}</strong></div>
-            <div class="text-end small">${distanceLine}${staleNote}<br><span class="text-muted">${team.time}</span></div>
+            <div class="text-end small">${distanceLine}${staleNote}${batteryNote}<br><span class="text-muted">${team.time}</span></div>
         </div>`;
     }).join('');
 }
@@ -4452,9 +4466,12 @@ function renderTeamDistances(items) {
         const swatchA = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${pair.a_color || '#6c757d'};margin-right:4px;"></span>`;
         const swatchB = `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${pair.b_color || '#6c757d'};margin-right:4px;"></span>`;
         const staleNote = pair.is_stale ? ` <span class="text-warning" title="${t('map.pin_stale')}">⚠</span>` : '';
+        const batteryNote = (pair.battery_level !== null && pair.battery_level !== undefined && pair.battery_level <= LOW_BATTERY_PCT)
+            ? ` <span class="${pair.battery_level <= CRITICAL_BATTERY_PCT ? 'text-danger' : 'text-warning'}" title="${t('map.pin_low_battery', {pct: pair.battery_level})}">🔋</span>`
+            : '';
         return `<div class="d-flex justify-content-between align-items-center py-1">
             <span>${swatchA}${escapeHtml(pair.a_label)} ↔ ${swatchB}${escapeHtml(pair.b_label)}</span>
-            <span class="text-muted">${formatDistanceMeters(pair.distance_m)}${staleNote}</span>
+            <span class="text-muted">${formatDistanceMeters(pair.distance_m)}${staleNote}${batteryNote}</span>
         </div>`;
     }).join('');
 }
@@ -6671,20 +6688,41 @@ function checkSessionAlive(response) {
     return true;
 }
 
+// Battery Status API — Chrome/Android works, disabled in Firefox, never
+// shipped in Safari; irrelevant here since this app's native companion is
+// Android-only. Never rejects/throws, resolving to null when unsupported —
+// matches accuracy's own graceful `|| ''` omission below, must never block
+// or fail a ping over a missing/unsupported reading.
+function getBatteryLevelPct() {
+    try {
+        if (!navigator.getBattery) return Promise.resolve(null);
+        return navigator.getBattery().then(b => Math.round(b.level * 100)).catch(() => null);
+    } catch (e) {
+        return Promise.resolve(null);
+    }
+}
+
 document.querySelectorAll('.send-ping').forEach(button => button.addEventListener('click', () => {
     const status = document.getElementById('pingStatus-' + button.dataset.prId);
     if (!navigator.geolocation) { status.textContent = t('myping.gps_unsupported'); return; }
     button.disabled = true; status.textContent = t('myping.locating');
+    // Fired concurrently with, not chained before, getCurrentPosition() below
+    // so the geolocation call stays the very next thing invoked synchronously
+    // from this click handler — no reason to risk a stricter browser's
+    // user-activation gating over a battery read.
+    const batteryPromise = getBatteryLevelPct();
     navigator.geolocation.getCurrentPosition(position => {
-        const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || ''});
-        fetch('ping-location.php', {method:'POST', body:data}).then(response => {
-            if (!checkSessionAlive(response)) { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; return null; }
-            return response.json();
-        }).then(result => {
-            if (!result) return;
-            status.textContent = result.ok ? t('myping.ping_sent_prefix', {time: result.ts}) : result.error;
-            status.className = 'small mb-2 ' + (result.ok ? 'text-success' : 'text-danger');
-        }).catch(() => { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; }).finally(() => button.disabled = false);
+        batteryPromise.then(batteryLevel => {
+            const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || '', battery_level: batteryLevel ?? ''});
+            fetch('ping-location.php', {method:'POST', body:data}).then(response => {
+                if (!checkSessionAlive(response)) { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; return null; }
+                return response.json();
+            }).then(result => {
+                if (!result) return;
+                status.textContent = result.ok ? t('myping.ping_sent_prefix', {time: result.ts}) : result.error;
+                status.className = 'small mb-2 ' + (result.ok ? 'text-success' : 'text-danger');
+            }).catch(() => { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; }).finally(() => button.disabled = false);
+        });
     }, () => { status.textContent = t('myping.gps_denied'); status.className = 'small mb-2 text-danger'; button.disabled = false; }, {enableHighAccuracy:true, timeout:10000});
 }));
 
@@ -6704,9 +6742,11 @@ function sendAutoPing(position) {
     const buttons = document.querySelectorAll('.send-ping');
     if (!buttons.length) return;
     lastAutoPingSentAt = Date.now();
-    buttons.forEach(button => {
-        const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || '', source: 'auto'});
-        fetch('ping-location.php', {method: 'POST', body: data}).then(checkSessionAlive).catch(() => {});
+    getBatteryLevelPct().then(batteryLevel => {
+        buttons.forEach(button => {
+            const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || '', battery_level: batteryLevel ?? '', source: 'auto'});
+            fetch('ping-location.php', {method: 'POST', body: data}).then(checkSessionAlive).catch(() => {});
+        });
     });
 }
 

@@ -66,16 +66,23 @@ if (stripos($contentType, 'application/json') !== false) {
     $lng      = (float) ($body['longitude'] ?? 0);
     $source   = 'auto'; // this path is only ever the passive background watcher, never the manual "send now" button
     $rawAccuracy = $body['accuracy'] ?? null;
+    $rawBattery  = $body['battery_level'] ?? null;
 } else {
     $shiftId  = (int) post('shift_id');
     $lat      = (float) post('lat');
     $lng      = (float) post('lng');
     $source   = post('source') === 'auto' ? 'auto' : 'manual';
     $rawAccuracy = post('accuracy');
+    $rawBattery  = post('battery_level');
 }
 
 $accuracy = ($rawAccuracy !== null && $rawAccuracy !== '' && is_numeric($rawAccuracy))
     ? min((float) $rawAccuracy, 5000)
     : null;
+// Same hard-bound reject-not-clamp rule as ping-location.php — see the
+// comment there for why an out-of-range battery value is dropped, not capped.
+$batteryLevel = ($rawBattery !== null && $rawBattery !== '' && is_numeric($rawBattery) && (int) $rawBattery >= 0 && (int) $rawBattery <= 100)
+    ? (int) $rawBattery
+    : null;
 
-echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $source));
+echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source));
