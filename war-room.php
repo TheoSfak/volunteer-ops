@@ -7076,7 +7076,17 @@ if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Bac
         }
     })();
 } else {
-    bgDebugLog('plugin_missing', 'window.Capacitor.Plugins.BackgroundGeolocation not present');
+    // Distinguishes "no Capacitor plugins registered at all" (points at
+    // BridgeActivity's plugin-loading try/catch swallowing a
+    // ClassNotFoundException for SOME plugin — Capacitor's own PluginManager
+    // aborts loading the whole list if any single entry's Class.forName()
+    // fails, not just that one) from "only BackgroundGeolocation is missing".
+    const hasCapacitor = !!window.Capacitor;
+    const pluginKeys = (hasCapacitor && window.Capacitor.Plugins) ? Object.keys(window.Capacitor.Plugins) : [];
+    bgDebugLog(
+        'plugin_missing',
+        'hasCapacitor=' + hasCapacitor + ' registeredPlugins=[' + pluginKeys.join(',') + ']'
+    );
 }
 
 const FIELD_STATUS_LABEL_KEYS = {on_way: 'status.self_on_way', on_site: 'status.self_on_site', needs_help: 'status.self_sos'};
