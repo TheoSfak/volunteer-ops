@@ -2627,6 +2627,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title"><i class="bi bi-pin-map-fill me-1"></i><?= t('dispatch.card_title') ?></h5>
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="dispatchSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column">
@@ -2658,6 +2659,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title"><i class="bi bi-scissors me-1"></i><span id="divideSectorsAreaLabel"></span></h5>
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="divideSectorsSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column flex-md-row">
@@ -2680,6 +2682,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title"><i class="bi bi-scissors me-1"></i><span id="splitSectorLabel"></span></h5>
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="splitSectorSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column flex-md-row">
@@ -2712,6 +2715,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title"><i class="bi bi-bounding-box me-1"></i><?= t('sector.area_card_new_btn') ?></h5>
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="areaComposerSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column">
@@ -2743,6 +2747,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i><?= t('restricted_area.new_btn') ?></h5>
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="restrictedAreaSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column">
@@ -2774,6 +2779,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title"><i class="bi bi-signpost-split-fill me-1"></i><?= t('route.composer_title') ?></h5>
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="routeSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column">
@@ -3125,21 +3131,48 @@ if (fieldMode) {
         if (document.visibilityState === 'visible') requestWarRoomWakeLock();
     });
 }
+// Street/satellite base layers, shared by the live map and all 6 composer
+// maps (dispatch/search-area/divide-into-sectors/split-sector/restricted-
+// area/route) — one definition so every map agrees on tile URLs and toggle
+// behavior instead of each composer hand-rolling its own copy. Satellite is
+// Esri World Imagery — free, no API key, no usage cap at this traffic scale
+// (Google/Bing/Mapbox satellite tiles all require a paid key, ruled out on
+// this project's standing "must be free" constraint). Both tile layers are
+// created upfront so toggling is instant add/remove, never a re-fetch; only
+// one is ever attached to a given map at a time. The preference
+// (wr_map_base_layer) is intentionally ONE shared localStorage key across
+// every map, not per-map/per-mission — whichever base a volunteer/admin
+// prefers, they want it everywhere they look or draw, not re-toggled per
+// composer. toggleBtnId is optional — the live map and every composer pass
+// their own button id; icon/title show the action a click would take
+// (globe while on street = click for satellite; map while on satellite =
+// click to go back), matching mapFullscreenToggle's own convention.
+function addMapBaseLayers(targetMap, toggleBtnId) {
+    const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'});
+    const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {attribution: 'Tiles © Esri'});
+    (localStorage.getItem('wr_map_base_layer') === 'satellite' ? satellite : street).addTo(targetMap);
+    const btn = toggleBtnId ? document.getElementById(toggleBtnId) : null;
+    if (btn) {
+        const refreshBtn = () => {
+            const active = targetMap.hasLayer(satellite);
+            btn.innerHTML = active ? '<i class="bi bi-map"></i>' : '<i class="bi bi-globe-americas"></i>';
+            btn.title = active ? t('map.btn_street_view') : t('map.btn_satellite_view');
+        };
+        refreshBtn();
+        btn.addEventListener('click', () => {
+            const goingSatellite = !targetMap.hasLayer(satellite);
+            targetMap.removeLayer(goingSatellite ? street : satellite);
+            targetMap.addLayer(goingSatellite ? satellite : street);
+            try { localStorage.setItem('wr_map_base_layer', goingSatellite ? 'satellite' : 'street'); } catch (e) {}
+            refreshBtn();
+        });
+    }
+    return {street, satellite};
+}
 let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null;
-let streetTileLayer = null, satelliteTileLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
-    // Satellite is Esri World Imagery — free, no API key, no usage cap at
-    // this traffic scale (Google/Bing/Mapbox satellite tiles all require a
-    // paid key, ruled out on this project's standing "must be free"
-    // constraint). Both created upfront so toggling is instant add/remove,
-    // never a re-fetch; only one is ever attached to the map at a time. The
-    // choice is a per-device localStorage preference, not per-mission — an
-    // admin/volunteer who prefers satellite wants it everywhere, not just
-    // on whichever mission they happened to set it on.
-    streetTileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'});
-    satelliteTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {attribution: 'Tiles © Esri'});
-    (localStorage.getItem('wr_map_base_layer') === 'satellite' ? satelliteTileLayer : streetTileLayer).addTo(map);
+    addMapBaseLayers(map, 'mapSatelliteToggle');
     // Search-area boundaries get their own pane BELOW search-sector polygons
     // (tilePane 200 < areaPane 340 < sectorPane 350 < overlayPane 400 <
     // markerPane 600) — an area is the large outer container a sector lives
@@ -6792,30 +6825,6 @@ function hideWarRoomBannerRow(id) {
     });
 })();
 
-// Street/satellite base-layer toggle. Icon shows the action a click would
-// take (matches mapFullscreenToggle's own convention below), not the
-// current state: globe icon while on street (click for satellite), map
-// icon while on satellite (click to go back). map.hasLayer(satelliteTileLayer)
-// is the single source of truth for which is active — read fresh on every
-// click rather than tracked in a separate variable that could drift.
-(function() {
-    const satBtn = document.getElementById('mapSatelliteToggle');
-    if (!satBtn || !map) return;
-    function refreshSatelliteBtn() {
-        const active = map.hasLayer(satelliteTileLayer);
-        satBtn.innerHTML = active ? '<i class="bi bi-map"></i>' : '<i class="bi bi-globe-americas"></i>';
-        satBtn.title = active ? t('map.btn_street_view') : t('map.btn_satellite_view');
-    }
-    refreshSatelliteBtn();
-    satBtn.addEventListener('click', () => {
-        const goingSatellite = !map.hasLayer(satelliteTileLayer);
-        map.removeLayer(goingSatellite ? streetTileLayer : satelliteTileLayer);
-        map.addLayer(goingSatellite ? satelliteTileLayer : streetTileLayer);
-        try { localStorage.setItem('wr_map_base_layer', goingSatellite ? 'satellite' : 'street'); } catch (e) {}
-        refreshSatelliteBtn();
-    });
-})();
-
 // Map-only fullscreen: separate from Focus Mode above (that hides the whole
 // app's sidebar; this just expands the live-map card itself). Driven by our
 // own class rather than the :fullscreen CSS pseudo-class so the "fill the
@@ -7805,7 +7814,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         if (!dispatchMap) {
             const center = missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73];
             dispatchMap = L.map('dispatchMap').setView(center, missionLocation.lat ? 13 : 7);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(dispatchMap);
+            addMapBaseLayers(dispatchMap, 'dispatchSatelliteToggle');
             refLayer = L.layerGroup().addTo(dispatchMap);
             dispatchMap.on('click', onMapClick);
         }
@@ -8060,7 +8069,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         areaLabelEl.textContent = currentArea ? currentArea.label : '';
         if (!composerMap) {
             composerMap = L.map('divideSectorsMap');
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(composerMap);
+            addMapBaseLayers(composerMap, 'divideSectorsSatelliteToggle');
             refLayer = L.layerGroup().addTo(composerMap);
             wedgeLayer = L.layerGroup().addTo(composerMap);
         }
@@ -8299,7 +8308,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         labelEl.textContent = currentSector ? currentSector.label : '';
         if (!composerMap) {
             composerMap = L.map('splitSectorMap');
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(composerMap);
+            addMapBaseLayers(composerMap, 'splitSectorSatelliteToggle');
             refLayer = L.layerGroup().addTo(composerMap);
             previewLayer = L.layerGroup().addTo(composerMap);
             composerMap.on('click', onSplitMapClick);
@@ -8459,7 +8468,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         if (!composerMap) {
             const center = missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73];
             composerMap = L.map('areaComposerMap').setView(center, missionLocation.lat ? 13 : 7);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(composerMap);
+            addMapBaseLayers(composerMap, 'areaComposerSatelliteToggle');
             refLayer = L.layerGroup().addTo(composerMap);
             composerMap.on('click', onMapClick);
         }
@@ -8657,7 +8666,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         if (!composerMap) {
             const center = missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73];
             composerMap = L.map('restrictedAreaComposerMap').setView(center, missionLocation.lat ? 13 : 7);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(composerMap);
+            addMapBaseLayers(composerMap, 'restrictedAreaSatelliteToggle');
             refLayer = L.layerGroup().addTo(composerMap);
             composerMap.on('click', onMapClick);
         }
@@ -9293,7 +9302,7 @@ function renderWaypointPanel() {
         if (!routeMap) {
             const center = missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73];
             routeMap = L.map('routeMap').setView(center, missionLocation.lat ? 13 : 7);
-            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(routeMap);
+            addMapBaseLayers(routeMap, 'routeSatelliteToggle');
             // Added before any waypoint markers exist, so once the admin
             // starts clicking points those numbered markers land on top of
             // (not under) the reference pins/annotations, matching Leaflet's
