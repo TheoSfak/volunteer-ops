@@ -1,13 +1,15 @@
 <?php
 /**
  * VolunteerOps - Certificate Authenticity Verification
- * The one genuinely public, no-login page in this app — reached by anyone
- * scanning the QR code printed on a mission-certificate-print.php document,
- * including people with no account here at all (e.g. an employer or partner
- * org confirming a certificate is real). Every other page in this codebase
- * calls requireLogin(); this deliberately doesn't, matching checkin.php's
- * precedent of bootstrap.php being safe to include without forcing a login
- * redirect.
+ * One of a small number of genuinely public, no-login pages in this app —
+ * reached by anyone scanning the QR code printed on a
+ * mission-certificate-print.php document, including people with no account
+ * here at all (e.g. an employer or partner org confirming a certificate is
+ * real). Every other page in this codebase calls requireLogin(); this
+ * deliberately doesn't, matching bootstrap.php being safe to include
+ * without forcing a login redirect. See also newsletter-unsubscribe.php
+ * (token-driven, same idea) and briefing-view.php (per-team, self-expiring
+ * pre-deployment briefing link).
  *
  * Shows only the same fields already printed in plain text on the physical
  * certificate itself (recipient name, mission, date, language) plus a clear

@@ -178,6 +178,9 @@ CREATE TABLE IF NOT EXISTS `missions` (
     `requirements` TEXT NULL,
     `notes` TEXT NULL,
     `is_urgent` TINYINT(1) DEFAULT 0,
+    `is_special_mission` TINYINT(1) NOT NULL DEFAULT 0,
+    `rv_point_label` VARCHAR(255) NULL,
+    `radio_channel` VARCHAR(100) NULL,
     `coverage_percentage` INT DEFAULT 0,
     `status` ENUM('DRAFT', 'OPEN', 'CLOSED', 'COMPLETED', 'CANCELED') DEFAULT 'DRAFT',
     `created_by` INT UNSIGNED NULL,
@@ -1846,6 +1849,7 @@ CREATE TABLE IF NOT EXISTS `mission_teams` (
     `codename` VARCHAR(20) NOT NULL,
     `team_number` TINYINT UNSIGNED NULL,
     `color` VARCHAR(7) NULL,
+    `briefing_token` CHAR(64) NULL,
     `leader_id` INT UNSIGNED NULL,
     `created_by` INT UNSIGNED NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1853,7 +1857,8 @@ CREATE TABLE IF NOT EXISTS `mission_teams` (
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`leader_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE,
-    UNIQUE KEY `uniq_mission_number` (`mission_id`, `team_number`)
+    UNIQUE KEY `uniq_mission_number` (`mission_id`, `team_number`),
+    UNIQUE KEY `uniq_briefing_token` (`briefing_token`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `mission_team_members` (

@@ -60,6 +60,7 @@ if (isPost()) {
         'requirements' => post('requirements'),
         'notes' => post('notes'),
         'is_urgent' => isset($_POST['is_urgent']) ? 1 : 0,
+        'is_special_mission' => isset($_POST['is_special_mission']) ? 1 : 0,
         'show_in_ops' => isset($_POST['show_in_ops']) ? 1 : 0,
         'status' => post('status') ?: STATUS_DRAFT,
         'responsible_user_id' => post('responsible_user_id') ?: null,
@@ -105,13 +106,13 @@ if (isPost()) {
                             title = ?, description = ?, mission_type_id = ?, department_id = ?,
                             location = ?, location_details = ?, latitude = ?, longitude = ?,
                             start_datetime = ?, end_datetime = ?, requirements = ?, notes = ?,
-                            is_urgent = ?, show_in_ops = ?, status = ?, responsible_user_id = ?, updated_at = NOW()
+                            is_urgent = ?, is_special_mission = ?, show_in_ops = ?, status = ?, responsible_user_id = ?, updated_at = NOW()
                             WHERE id = ?";
                     dbExecute($sql, [
                         $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
                         $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
                         $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
-                        $data['is_urgent'], $data['show_in_ops'], $data['status'], $data['responsible_user_id'], $id
+                        $data['is_urgent'], $data['is_special_mission'], $data['show_in_ops'], $data['status'], $data['responsible_user_id'], $id
                     ]);
 
                     // Exactly one shift: unambiguous which shift should move, so mirror
@@ -254,13 +255,13 @@ if (isPost()) {
                             "INSERT INTO missions
                              (title, description, mission_type_id, department_id, location, location_details,
                               latitude, longitude, start_datetime, end_datetime, requirements, notes,
-                              is_urgent, show_in_ops, status, responsible_user_id, created_by, recurrence_id, recurrence_instance_date, created_at, updated_at)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+                              is_urgent, is_special_mission, show_in_ops, status, responsible_user_id, created_by, recurrence_id, recurrence_instance_date, created_at, updated_at)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
                             [
                                 $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
                                 $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
                                 $instStart, $instEnd, $data['requirements'], $data['notes'],
-                                $data['is_urgent'], $data['show_in_ops'], STATUS_OPEN, $data['responsible_user_id'], $user['id'],
+                                $data['is_urgent'], $data['is_special_mission'], $data['show_in_ops'], STATUS_OPEN, $data['responsible_user_id'], $user['id'],
                                 $recurrenceId, $instanceDate,
                             ]
                         );
@@ -283,16 +284,16 @@ if (isPost()) {
 
                 } else {
                     // ── SINGLE MISSION ───────────────────────────────────────────────
-                    $sql = "INSERT INTO missions 
-                            (title, description, mission_type_id, department_id, location, location_details, 
+                    $sql = "INSERT INTO missions
+                            (title, description, mission_type_id, department_id, location, location_details,
                              latitude, longitude, start_datetime, end_datetime, requirements, notes,
-                             is_urgent, show_in_ops, status, responsible_user_id, created_by, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                             is_urgent, is_special_mission, show_in_ops, status, responsible_user_id, created_by, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
                     $newId = dbInsert($sql, [
                         $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
                         $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
                         $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
-                        $data['is_urgent'], $data['show_in_ops'], $data['status'], $data['responsible_user_id'], $user['id']
+                        $data['is_urgent'], $data['is_special_mission'], $data['show_in_ops'], $data['status'], $data['responsible_user_id'], $user['id']
                     ]);
 
                     // Auto-create a default shift matching the mission's own date/time,
@@ -545,7 +546,16 @@ include __DIR__ . '/includes/header.php';
                         </label>
                         <div class="form-text">Οι Υγειονομικές και Διασωστικές αποστολές επιλέγονται αυτόματα. Για κάθε άλλο τύπο, επιλέξτε το μόνο όταν απαιτείται ζωντανή επιχειρησιακή παρακολούθηση.</div>
                     </div>
-                    
+
+                    <div class="form-check mb-3 border rounded p-3 bg-light">
+                        <input class="form-check-input" type="checkbox" id="is_special_mission" name="is_special_mission"
+                               <?= ($mission['is_special_mission'] ?? post('is_special_mission')) ? 'checked' : '' ?>>
+                        <label class="form-check-label fw-semibold" for="is_special_mission">
+                            <i class="bi bi-signpost-2 text-primary me-1"></i>Ειδική Αποστολή (Σύνδεσμος Ενημέρωσης Ομάδων)
+                        </label>
+                        <div class="form-text">Ενεργοποιεί για κάθε ομάδα μία σελίδα ενημέρωσης χωρίς σύνδεση (σημείο συνάντησης, ασύρματος, συντονιστής, ρόστερ) — για αποστολές με ομάδες ή εθελοντές από το εξωτερικό. Το σημείο συνάντησης και ο ασύρματος ρυθμίζονται αργότερα από το Επιχειρησιακό.</div>
+                    </div>
+
                     <div class="mb-3">
                         <label for="responsible_user_id" class="form-label">Υπεύθυνος Αποστολής</label>
                         <select class="form-select" id="responsible_user_id" name="responsible_user_id">

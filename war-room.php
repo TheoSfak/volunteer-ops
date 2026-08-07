@@ -489,6 +489,26 @@ if (isPost()) {
             setFlash('error', t('common.team_not_found'));
         }
         redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'save_briefing_info') {
+        if (!$canManageWarRoom) {
+            setFlash('error', t('briefing.perm.save'));
+            redirect('war-room.php?id=' . $missionId);
+        }
+        if (empty($mission['is_special_mission'])) {
+            setFlash('error', t('briefing.not_special_mission'));
+            redirect('war-room.php?id=' . $missionId);
+        }
+        $rvPointLabel = mb_substr(trim((string) post('rv_point_label')), 0, 255);
+        $radioChannel = mb_substr(trim((string) post('radio_channel')), 0, 100);
+        dbExecute(
+            "UPDATE missions SET rv_point_label = ?, radio_channel = ?, updated_at = NOW() WHERE id = ?",
+            [$rvPointLabel !== '' ? $rvPointLabel : null, $radioChannel !== '' ? $radioChannel : null, $missionId]
+        );
+        logAudit('save_briefing_info', 'missions', $missionId,
+            ['rv_point_label' => $mission['rv_point_label'], 'radio_channel' => $mission['radio_channel']],
+            ['rv_point_label' => $rvPointLabel, 'radio_channel' => $radioChannel]);
+        setFlash('success', t('briefing.save_success'));
+        redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'report_shortage') {
         if (!$isApprovedParticipant) {
             setFlash('error', t('wr.perm.report_shortage'));
@@ -1055,7 +1075,7 @@ $activeParticipants = array_values(array_filter($participants, fn($participant) 
 
 // ── Mission teams ─────────────────────────────────────────────────────────
 $teamRows = dbFetchAll(
-    "SELECT mt.id, mt.codename, mt.team_number, mt.color, mt.leader_id, l.name AS leader_name,
+    "SELECT mt.id, mt.codename, mt.team_number, mt.color, mt.briefing_token, mt.leader_id, l.name AS leader_name,
             l.is_external AS leader_is_external, l.guest_org_name AS leader_guest_org_name, l.guest_country_code AS leader_guest_country_code,
             lht.name AS leader_home_team_name, lht.color AS leader_home_team_color,
             mtm.user_id, u.name AS member_name, u.is_external AS member_is_external, u.guest_org_name AS member_guest_org_name, u.guest_country_code AS member_guest_country_code,
@@ -1079,6 +1099,7 @@ foreach ($teamRows as $row) {
             'codename' => $row['codename'],
             'team_number' => $row['team_number'],
             'color' => $row['color'],
+            'briefing_token' => $row['briefing_token'],
             'leader_id' => $row['leader_id'] !== null ? (int)$row['leader_id'] : null,
             'leader_name' => $row['leader_name'],
             'leader_is_external' => (bool) $row['leader_is_external'],
@@ -1097,6 +1118,22 @@ foreach ($teamRows as $row) {
             'home_team_name' => $row['member_home_team_name'], 'home_team_color' => $row['member_home_team_color'],
         ];
     }
+}
+
+// Lazy briefing-link generation: a team created before its mission was
+// flagged special (or before this feature existed) simply has a NULL
+// briefing_token — backfilled here on the admin's next War Room view rather
+// than needing a separate "generate" action. Mirrors shift-view.php's own
+// lazy QR-token generation idiom.
+if ($canManageWarRoom && !empty($mission['is_special_mission'])) {
+    foreach ($teams as $tid => &$teamRef) {
+        if (empty($teamRef['briefing_token'])) {
+            $newBriefingToken = bin2hex(random_bytes(32));
+            dbExecute("UPDATE mission_teams SET briefing_token = ? WHERE id = ?", [$newBriefingToken, $tid]);
+            $teamRef['briefing_token'] = $newBriefingToken;
+        }
+    }
+    unset($teamRef);
 }
 
 $teamLabelByUserId = [];
@@ -1175,7 +1212,7 @@ foreach ($participants as $participant) {
 
 require_once __DIR__ . '/includes/war-room-layout.php';
 $warRoomLayout = ($canManageWarRoom && !$fieldMode)
-    ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams))
+    ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams), !empty($mission['is_special_mission']))
     : null;
 
 $pageTitle = 'Action Room — ' . $mission['title'];
@@ -2314,6 +2351,39 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-list-check me-1"></i><?= t('route.admin_panel_title') ?></h5></div>
             <div class="card-body">
                 <div id="routesAdminList"><p class="text-muted mb-0"><?= t('route.admin_empty') ?></p></div>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($canManageWarRoom && !empty($mission['is_special_mission'])): ?>
+        <div class="card shadow-sm mb-4" data-card-id="briefingCard">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-signpost-2 me-1"></i><?= t('briefing.card_title') ?></h5></div>
+            <div class="card-body">
+                <p class="small text-muted"><?= t('briefing.intro') ?></p>
+                <form method="post" class="mb-3">
+                    <?= csrfField() ?><input type="hidden" name="action" value="save_briefing_info">
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold"><?= t('briefing.rv_point_label') ?></label>
+                        <input type="text" class="form-control form-control-sm" name="rv_point_label" maxlength="255" placeholder="<?= t('briefing.rv_point_placeholder') ?>" value="<?= h($mission['rv_point_label'] ?? '') ?>">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold"><?= t('briefing.radio_channel_label') ?></label>
+                        <input type="text" class="form-control form-control-sm" name="radio_channel" maxlength="100" placeholder="<?= t('briefing.radio_channel_placeholder') ?>" value="<?= h($mission['radio_channel'] ?? '') ?>">
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-primary w-100"><?= t('common.save') ?></button>
+                </form>
+                <div class="fw-semibold small mb-2"><?= t('briefing.links_title') ?></div>
+                <?php if (empty($teams)): ?>
+                <p class="small text-muted mb-0"><?= t('briefing.no_teams_yet') ?></p>
+                <?php else: ?>
+                <?php foreach ($teams as $team): [$briefBg, $briefFg] = teamBadgeColors($team['color']); $briefUrl = rtrim(BASE_URL, '/') . '/briefing-view.php?token=' . urlencode($team['briefing_token'] ?? ''); ?>
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span class="badge" style="background:<?= h($briefBg) ?>;color:<?= h($briefFg) ?>;white-space:nowrap;"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
+                    <input type="text" class="form-control form-control-sm wr-briefing-link" readonly value="<?= h($briefUrl) ?>" onclick="this.select()">
+                    <button type="button" class="btn btn-sm btn-outline-secondary wr-briefing-copy-btn" data-copy-text="<?= h($briefUrl) ?>" title="<?= t('briefing.copy_btn') ?>"><i class="bi bi-clipboard"></i></button>
+                </div>
+                <?php endforeach; ?>
+                <?php endif; ?>
             </div>
         </div>
         <?php endif; ?>
@@ -9235,6 +9305,23 @@ function renderWaypointPanel() {
         }).catch(() => alert(t('common.send_failed'))).finally(() => { sendBtn.disabled = false; });
     });
 })();
+
+document.querySelectorAll('.wr-briefing-copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.copyText || '').then(() => {
+            const icon = btn.querySelector('i');
+            const prevClass = icon.className;
+            icon.className = 'bi bi-check-lg';
+            btn.classList.add('btn-success');
+            btn.classList.remove('btn-outline-secondary');
+            setTimeout(() => {
+                icon.className = prevClass;
+                btn.classList.remove('btn-success');
+                btn.classList.add('btn-outline-secondary');
+            }, 1500);
+        });
+    });
+});
 </script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
