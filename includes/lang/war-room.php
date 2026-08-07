@@ -431,6 +431,21 @@ return [
         'dispatch.recipients_label' => 'Παραλήπτες',
         'dispatch.send_btn' => 'Αποστολή Στίγματος',
 
+        // Pre-deployment briefing (special missions only)
+        'briefing.card_title' => 'Ενημέρωση Ανάπτυξης',
+        'briefing.intro' => 'Για αποστολές με ομάδες ή εθελοντές από το εξωτερικό. Κάθε ομάδα παίρνει τον δικό της σύνδεσμο — μία σελίδα χωρίς σύνδεση με το σημείο συγκέντρωσης, τον ασύρματο, τον συντονιστή και το ρόστερ της.',
+        'briefing.rv_point_label' => 'Σημείο Συγκέντρωσης (RV Point)',
+        'briefing.rv_point_placeholder' => 'π.χ. Πλατεία Ελευθερίας, Ηράκλειο',
+        'briefing.radio_channel_label' => 'Κανάλι Ασυρμάτου',
+        'briefing.radio_channel_placeholder' => 'π.χ. CH 4 · 446.0 MHz',
+        'briefing.links_title' => 'Σύνδεσμοι Ομάδων',
+        'briefing.no_teams_yet' => 'Δεν υπάρχουν ακόμα ομάδες σε αυτή την αποστολή.',
+        'briefing.copy_btn' => 'Αντιγραφή',
+        'briefing.copied' => 'Αντιγράφηκε!',
+        'briefing.save_success' => 'Τα στοιχεία ενημέρωσης αποθηκεύτηκαν.',
+        'briefing.perm.save' => 'Δεν έχετε δικαίωμα να αλλάξετε τα στοιχεία ενημέρωσης.',
+        'briefing.not_special_mission' => 'Η αποστολή δεν είναι σημειωμένη ως ειδική.',
+
         // Mission admin
         'admin.mission_mgmt_title' => 'Διαχείριση αποστολής',
         'admin.close_note' => 'Το κλείσιμο αφαιρεί την αποστολή από το Επιχειρησιακό και σταματά τη λήψη νέων στιγμάτων.',
@@ -1377,6 +1392,21 @@ return [
         'dispatch.note' => 'Send a point or an area to the map — it will appear permanently on recipients\' map.',
         'dispatch.recipients_label' => 'Recipients',
         'dispatch.send_btn' => 'Send Point',
+
+        // Pre-deployment briefing (special missions only)
+        'briefing.card_title' => 'Pre-Deployment Briefing',
+        'briefing.intro' => 'For missions with teams or volunteers arriving from abroad. Each team gets its own link — a no-login page showing their RV point, radio channel, coordinator, and roster.',
+        'briefing.rv_point_label' => 'RV Point (Rendezvous)',
+        'briefing.rv_point_placeholder' => 'e.g. Liberty Square, Heraklion',
+        'briefing.radio_channel_label' => 'Radio Channel',
+        'briefing.radio_channel_placeholder' => 'e.g. CH 4 · 446.0 MHz',
+        'briefing.links_title' => 'Team Links',
+        'briefing.no_teams_yet' => 'No teams exist on this mission yet.',
+        'briefing.copy_btn' => 'Copy',
+        'briefing.copied' => 'Copied!',
+        'briefing.save_success' => 'Briefing details saved.',
+        'briefing.perm.save' => 'You do not have permission to change the briefing details.',
+        'briefing.not_special_mission' => 'This mission is not flagged as special.',
 
         'admin.mission_mgmt_title' => 'Mission Management',
         'admin.close_note' => 'Closing removes the mission from Operations and stops accepting new locations.',

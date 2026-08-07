@@ -13,7 +13,7 @@ if (!defined('VOLUNTEEROPS')) {
 }
 
 /**
- * The 33 admin-desktop-view cards, in default reading order, split into the
+ * The 34 admin-desktop-view cards, in default reading order, split into the
  * two drag zones (main/left column, sidebar/right column). This list IS the
  * server-side whitelist — api-war-room-layout.php rejects any card id not
  * present here.
@@ -30,7 +30,7 @@ function warRoomDefaultLayout(): array {
             'mediaCard', 'myLocationCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'myRouteCard',
             'myTasksCard', 'mySectorsCard', 'shiftsCard', 'sosAlertsCard', 'broadcastCard',
             'endMissionCard', 'dispatchCard', 'sectorsCard', 'restrictedAreasCard', 'routeOrderCard',
-            'teamRoutesAdminCard', 'missionMgmtCard',
+            'teamRoutesAdminCard', 'briefingCard', 'missionMgmtCard',
         ],
     ];
 }
@@ -45,7 +45,7 @@ function warRoomAllCardIds(): array {
  * PHP conditionals already in war-room.php (report forms need an approved
  * participant, the two team-routing cards need at least one team to exist).
  */
-function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams): array {
+function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false): array {
     $default = warRoomDefaultLayout();
     $excluded = [];
     if (!$isApprovedParticipant) {
@@ -55,6 +55,9 @@ function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams): ar
     if (!$hasTeams) {
         $excluded[] = 'routeOrderCard';
         $excluded[] = 'teamRoutesAdminCard';
+    }
+    if (!$isSpecialMission) {
+        $excluded[] = 'briefingCard';
     }
     return [
         'main'    => array_values(array_diff($default['main'], $excluded)),
@@ -76,8 +79,8 @@ function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams): ar
  *    no "append missing ids" step — an id absent from 'hidden' is visible
  *    by default, which is already what we want.
  */
-function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool $hasTeams): array {
-    $rendered = warRoomRenderedCardIds($isApprovedParticipant, $hasTeams);
+function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false): array {
+    $rendered = warRoomRenderedCardIds($isApprovedParticipant, $hasTeams, $isSpecialMission);
     $allRenderedIds = array_merge($rendered['main'], $rendered['sidebar']);
 
     $saved = [];
@@ -167,6 +170,7 @@ function warRoomCardLabels(): array {
         'restrictedAreasCard' => t('restricted_area.card_title'),
         'routeOrderCard' => t('route.card_title'),
         'teamRoutesAdminCard' => t('route.admin_panel_title'),
+        'briefingCard' => t('briefing.card_title'),
         'missionMgmtCard' => t('admin.mission_mgmt_title'),
     ];
 }

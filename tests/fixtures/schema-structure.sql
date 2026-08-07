@@ -80,7 +80,7 @@ CREATE TABLE `audit_logs` (
   KEY `idx_audit_user_created` (`user_id`,`created_at`),
   KEY `idx_audit_table_rec_date` (`table_name`,`record_id`,`created_at`),
   CONSTRAINT `audit_logs_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=1581 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=1597 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `bug_reports`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -892,7 +892,7 @@ CREATE TABLE `mission_order_recipients` (
   CONSTRAINT `mission_order_recipients_ibfk_1` FOREIGN KEY (`order_id`) REFERENCES `mission_orders` (`id`) ON DELETE CASCADE,
   CONSTRAINT `mission_order_recipients_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `mission_order_recipients_ibfk_3` FOREIGN KEY (`team_id`) REFERENCES `mission_teams` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=128 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=131 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `mission_orders`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -909,7 +909,7 @@ CREATE TABLE `mission_orders` (
   KEY `idx_order_mission` (`mission_id`,`order_type`),
   CONSTRAINT `mission_orders_ibfk_1` FOREIGN KEY (`mission_id`) REFERENCES `missions` (`id`) ON DELETE CASCADE,
   CONSTRAINT `mission_orders_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=86 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=89 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `mission_photos`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -1364,12 +1364,14 @@ CREATE TABLE `mission_teams` (
   `codename` varchar(20) NOT NULL,
   `team_number` tinyint(3) unsigned DEFAULT NULL,
   `color` varchar(7) DEFAULT NULL,
+  `briefing_token` char(64) DEFAULT NULL,
   `leader_id` int(10) unsigned DEFAULT NULL,
   `created_by` int(10) unsigned NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NULL DEFAULT NULL ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_mission_number` (`mission_id`,`team_number`),
+  UNIQUE KEY `uniq_briefing_token` (`briefing_token`),
   KEY `leader_id` (`leader_id`),
   KEY `created_by` (`created_by`),
   CONSTRAINT `mission_teams_ibfk_1` FOREIGN KEY (`mission_id`) REFERENCES `missions` (`id`) ON DELETE CASCADE,
@@ -1413,6 +1415,9 @@ CREATE TABLE `missions` (
   `requirements` text DEFAULT NULL,
   `notes` text DEFAULT NULL,
   `is_urgent` tinyint(1) DEFAULT 0,
+  `is_special_mission` tinyint(1) NOT NULL DEFAULT 0,
+  `rv_point_label` varchar(255) DEFAULT NULL,
+  `radio_channel` varchar(100) DEFAULT NULL,
   `coverage_percentage` int(11) DEFAULT 0,
   `status` enum('DRAFT','OPEN','CLOSED','COMPLETED','CANCELED') DEFAULT 'DRAFT',
   `created_by` int(10) unsigned DEFAULT NULL,
@@ -1459,7 +1464,7 @@ CREATE TABLE `mobile_api_tokens` (
   UNIQUE KEY `unique_token_hash` (`token_hash`),
   KEY `idx_mobile_tokens_user` (`user_id`,`revoked_at`),
   CONSTRAINT `mobile_api_tokens_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `newsletter_presets`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -1584,7 +1589,7 @@ CREATE TABLE `notifications` (
   KEY `idx_notifications_user_created` (`user_id`,`created_at`),
   KEY `idx_notifications_banner` (`user_id`,`banner_mission_id`,`id`),
   CONSTRAINT `notifications_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=288 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=305 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `participation_requests`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -1623,7 +1628,7 @@ CREATE TABLE `participation_requests` (
   CONSTRAINT `participation_requests_ibfk_2` FOREIGN KEY (`volunteer_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `participation_requests_ibfk_3` FOREIGN KEY (`decided_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `participation_requests_ibfk_4` FOREIGN KEY (`attendance_confirmed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=137 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=142 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `password_reset_tokens`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -1692,7 +1697,7 @@ CREATE TABLE `settings` (
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
   UNIQUE KEY `setting_key` (`setting_key`)
-) ENGINE=InnoDB AUTO_INCREMENT=157 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=158 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `shift_swap_requests`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -2217,7 +2222,7 @@ CREATE TABLE `volunteer_pings` (
   KEY `idx_pings_user_shift` (`user_id`,`shift_id`),
   CONSTRAINT `volunteer_pings_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `volunteer_pings_ibfk_2` FOREIGN KEY (`shift_id`) REFERENCES `shifts` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=157 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=162 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `volunteer_points`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;

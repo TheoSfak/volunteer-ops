@@ -5923,6 +5923,33 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 126,
+            'description' => 'Add pre-deployment briefing feature: missions.is_special_mission/rv_point_label/radio_channel (opt-in per mission, set at creation or later from War Room) + mission_teams.briefing_token (per-team, no-login shareable link so guest/partner-org teams arriving from abroad can see their RV point, radio channel, coordinator and roster before they have app access — see briefing-view.php).',
+            'up' => function () {
+                $col = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'missions' AND COLUMN_NAME = 'is_special_mission'");
+                if (!$col) {
+                    dbExecute("ALTER TABLE missions ADD COLUMN is_special_mission TINYINT(1) NOT NULL DEFAULT 0 AFTER is_urgent");
+                }
+                $col = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'missions' AND COLUMN_NAME = 'rv_point_label'");
+                if (!$col) {
+                    dbExecute("ALTER TABLE missions ADD COLUMN rv_point_label VARCHAR(255) NULL AFTER is_special_mission");
+                }
+                $col = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'missions' AND COLUMN_NAME = 'radio_channel'");
+                if (!$col) {
+                    dbExecute("ALTER TABLE missions ADD COLUMN radio_channel VARCHAR(100) NULL AFTER rv_point_label");
+                }
+                $col = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_teams' AND COLUMN_NAME = 'briefing_token'");
+                if (!$col) {
+                    dbExecute("ALTER TABLE mission_teams ADD COLUMN briefing_token CHAR(64) NULL AFTER color, ADD UNIQUE KEY uniq_briefing_token (briefing_token)");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -12,6 +12,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/functions-ics.php';
 
 if (!isLoggedIn()) {
     http_response_code(401);
@@ -97,45 +98,6 @@ $shifts = dbFetchAll(
     $params
 );
 
-// ── ICS helpers ───────────────────────────────────────────────────────────────
-
-/**
- * Fold long ICS lines at 75 octets (RFC 5545 §3.1).
- */
-function icsFold(string $line): string {
-    $out   = '';
-    $bytes = 0;
-    $chars = mb_str_split($line);
-    foreach ($chars as $ch) {
-        $len = strlen($ch); // byte length
-        if ($bytes + $len > 75) {
-            $out  .= "\r\n ";
-            $bytes = 1; // leading space counts
-        }
-        $out   .= $ch;
-        $bytes += $len;
-    }
-    return $out;
-}
-
-/**
- * Escape ICS text values (commas, semicolons, backslashes, newlines).
- */
-function icsText(string $val): string {
-    $val = str_replace('\\', '\\\\', $val);
-    $val = str_replace(',',  '\\,',  $val);
-    $val = str_replace(';',  '\\;',  $val);
-    $val = str_replace("\n", '\\n',  $val);
-    return $val;
-}
-
-/**
- * Format a MySQL datetime as iCalendar DATETIME (local, no UTC suffix).
- */
-function icsDate(string $mysqlDt): string {
-    return date('Ymd\THis', strtotime($mysqlDt));
-}
-
 // ── Build ICS ─────────────────────────────────────────────────────────────────
 $appName  = getSetting('app_name', 'VolunteerOps');
 $prodId   = '-//VolunteerOps//ShiftCalendar//EL';
@@ -151,23 +113,7 @@ $lines[] = 'X-WR-CALNAME:' . icsText($appName . ' - Βάρδιες');
 $lines[] = 'X-WR-TIMEZONE:' . $tzid;
 
 // VTIMEZONE block for Europe/Athens (EET/EEST)
-$lines[] = 'BEGIN:VTIMEZONE';
-$lines[] = 'TZID:' . $tzid;
-$lines[] = 'BEGIN:STANDARD';
-$lines[] = 'DTSTART:19701025T040000';
-$lines[] = 'RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10';
-$lines[] = 'TZNAME:EET';
-$lines[] = 'TZOFFSETFROM:+0300';
-$lines[] = 'TZOFFSETTO:+0200';
-$lines[] = 'END:STANDARD';
-$lines[] = 'BEGIN:DAYLIGHT';
-$lines[] = 'DTSTART:19700329T030000';
-$lines[] = 'RRULE:FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3';
-$lines[] = 'TZNAME:EEST';
-$lines[] = 'TZOFFSETFROM:+0200';
-$lines[] = 'TZOFFSETTO:+0300';
-$lines[] = 'END:DAYLIGHT';
-$lines[] = 'END:VTIMEZONE';
+array_push($lines, ...icsAthensTimezoneLines());
 
 foreach ($shifts as $s) {
     $title       = ($s['is_urgent'] ? '[ΕΠΕΙΓΟΝ] ' : '') . $s['mission_title'] . ' — Βάρδια #' . $s['id'];
