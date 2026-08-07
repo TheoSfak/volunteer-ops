@@ -1619,6 +1619,9 @@ include __DIR__ . '/includes/header.php';
                         <button type="button" class="btn btn-outline-danger" id="annoToolClearAll" title="<?= t('annotation.tool_clear_all') ?>"><i class="bi bi-trash3"></i></button>
                     </div>
                     <?php endif; ?>
+                    <button type="button" id="mapSatelliteToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.btn_satellite_view') ?>">
+                        <i class="bi bi-globe-americas"></i>
+                    </button>
                     <button type="button" id="mapFullscreenToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.btn_fullscreen') ?>">
                         <i class="bi bi-arrows-fullscreen"></i>
                     </button>
@@ -3123,9 +3126,20 @@ if (fieldMode) {
     });
 }
 let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null;
+let streetTileLayer = null, satelliteTileLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}).addTo(map);
+    // Satellite is Esri World Imagery — free, no API key, no usage cap at
+    // this traffic scale (Google/Bing/Mapbox satellite tiles all require a
+    // paid key, ruled out on this project's standing "must be free"
+    // constraint). Both created upfront so toggling is instant add/remove,
+    // never a re-fetch; only one is ever attached to the map at a time. The
+    // choice is a per-device localStorage preference, not per-mission — an
+    // admin/volunteer who prefers satellite wants it everywhere, not just
+    // on whichever mission they happened to set it on.
+    streetTileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'});
+    satelliteTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {attribution: 'Tiles © Esri'});
+    (localStorage.getItem('wr_map_base_layer') === 'satellite' ? satelliteTileLayer : streetTileLayer).addTo(map);
     // Search-area boundaries get their own pane BELOW search-sector polygons
     // (tilePane 200 < areaPane 340 < sectorPane 350 < overlayPane 400 <
     // markerPane 600) — an area is the large outer container a sector lives
@@ -6775,6 +6789,30 @@ function hideWarRoomBannerRow(id) {
         if (wantsAwake && !wakeLock && document.visibilityState === 'visible') {
             acquireWakeLock();
         }
+    });
+})();
+
+// Street/satellite base-layer toggle. Icon shows the action a click would
+// take (matches mapFullscreenToggle's own convention below), not the
+// current state: globe icon while on street (click for satellite), map
+// icon while on satellite (click to go back). map.hasLayer(satelliteTileLayer)
+// is the single source of truth for which is active — read fresh on every
+// click rather than tracked in a separate variable that could drift.
+(function() {
+    const satBtn = document.getElementById('mapSatelliteToggle');
+    if (!satBtn || !map) return;
+    function refreshSatelliteBtn() {
+        const active = map.hasLayer(satelliteTileLayer);
+        satBtn.innerHTML = active ? '<i class="bi bi-map"></i>' : '<i class="bi bi-globe-americas"></i>';
+        satBtn.title = active ? t('map.btn_street_view') : t('map.btn_satellite_view');
+    }
+    refreshSatelliteBtn();
+    satBtn.addEventListener('click', () => {
+        const goingSatellite = !map.hasLayer(satelliteTileLayer);
+        map.removeLayer(goingSatellite ? streetTileLayer : satelliteTileLayer);
+        map.addLayer(goingSatellite ? satelliteTileLayer : streetTileLayer);
+        try { localStorage.setItem('wr_map_base_layer', goingSatellite ? 'satellite' : 'street'); } catch (e) {}
+        refreshSatelliteBtn();
     });
 })();
 
