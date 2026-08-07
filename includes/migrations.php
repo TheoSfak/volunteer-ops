@@ -6016,6 +6016,25 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 129,
+            'description' => 'Add mission_missing_persons.vehicle/disappearance_circumstances/likely_direction/witness_accounts — investigation-context fields requested after v128 shipped, alongside the identifying/last-seen fields already there.',
+            'up' => function () {
+                $col = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_missing_persons' AND COLUMN_NAME = 'vehicle'");
+                if (!$col) {
+                    // One statement, no split needed — plain ADD COLUMNs, no
+                    // ADD CONSTRAINT FOREIGN KEY involved (that combination is
+                    // the part MariaDB rejects, see v127/v128 above).
+                    dbExecute("ALTER TABLE mission_missing_persons
+                        ADD COLUMN vehicle VARCHAR(255) NULL AFTER clothing_description,
+                        ADD COLUMN disappearance_circumstances TEXT NULL AFTER last_seen_at,
+                        ADD COLUMN likely_direction VARCHAR(255) NULL AFTER disappearance_circumstances,
+                        ADD COLUMN witness_accounts TEXT NULL AFTER likely_direction");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

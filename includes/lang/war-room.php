@@ -475,6 +475,10 @@ return [
         'missing_person.last_seen_at_prefix' => 'Τελευταία εμφάνιση: {time}',
         'missing_person.pick_map_instructions' => 'Κάντε κλικ στον χάρτη για να ορίσετε το σημείο τελευταίας εμφάνισης.',
         'missing_person.pick_confirm_btn' => 'Χρήση αυτού του σημείου',
+        'missing_person.vehicle_label' => 'Όχημα',
+        'missing_person.circumstances_label' => 'Συνθήκες Εξαφάνισης',
+        'missing_person.likely_direction_label' => 'Πιθανή Κατεύθυνση',
+        'missing_person.witness_accounts_label' => 'Μαρτυρίες',
 
         // Mission admin
         'admin.mission_mgmt_title' => 'Διαχείριση αποστολής',
@@ -1467,6 +1471,10 @@ return [
         'missing_person.last_seen_at_prefix' => 'Last seen: {time}',
         'missing_person.pick_map_instructions' => 'Click on the map to set the last-known-seen point.',
         'missing_person.pick_confirm_btn' => 'Use this point',
+        'missing_person.vehicle_label' => 'Vehicle',
+        'missing_person.circumstances_label' => 'Circumstances of Disappearance',
+        'missing_person.likely_direction_label' => 'Likely Direction',
+        'missing_person.witness_accounts_label' => 'Witness Accounts',
 
         'admin.mission_mgmt_title' => 'Mission Management',
         'admin.close_note' => 'Closing removes the mission from Operations and stops accepting new locations.',
