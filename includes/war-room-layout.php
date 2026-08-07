@@ -13,7 +13,7 @@ if (!defined('VOLUNTEEROPS')) {
 }
 
 /**
- * The 34 admin-desktop-view cards, in default reading order, split into the
+ * The 35 admin-desktop-view cards, in default reading order, split into the
  * two drag zones (main/left column, sidebar/right column). This list IS the
  * server-side whitelist — api-war-room-layout.php rejects any card id not
  * present here.
@@ -21,7 +21,7 @@ if (!defined('VOLUNTEEROPS')) {
 function warRoomDefaultLayout(): array {
     return [
         'main' => [
-            'mapCard', 'trailEventsCard', 'shortageFormCard', 'incidentFormCard',
+            'mapCard', 'missingPersonCard', 'trailEventsCard', 'shortageFormCard', 'incidentFormCard',
             'shortageListCard', 'incidentsListCard', 'poiListCard', 'sectorsListCard', 'teamsCard',
             'participantsCard', 'requestLocationCard', 'requestPhotoCard',
             'requestVideoCard', 'requestTaskCard', 'activityCard', 'chatCard',
@@ -45,7 +45,7 @@ function warRoomAllCardIds(): array {
  * PHP conditionals already in war-room.php (report forms need an approved
  * participant, the two team-routing cards need at least one team to exist).
  */
-function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false): array {
+function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false): array {
     $default = warRoomDefaultLayout();
     $excluded = [];
     if (!$isApprovedParticipant) {
@@ -58,6 +58,9 @@ function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, boo
     }
     if (!$isSpecialMission) {
         $excluded[] = 'briefingCard';
+    }
+    if (!$isMissingPersonMission) {
+        $excluded[] = 'missingPersonCard';
     }
     return [
         'main'    => array_values(array_diff($default['main'], $excluded)),
@@ -79,8 +82,8 @@ function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, boo
  *    no "append missing ids" step — an id absent from 'hidden' is visible
  *    by default, which is already what we want.
  */
-function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false): array {
-    $rendered = warRoomRenderedCardIds($isApprovedParticipant, $hasTeams, $isSpecialMission);
+function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false): array {
+    $rendered = warRoomRenderedCardIds($isApprovedParticipant, $hasTeams, $isSpecialMission, $isMissingPersonMission);
     $allRenderedIds = array_merge($rendered['main'], $rendered['sidebar']);
 
     $saved = [];
@@ -139,6 +142,7 @@ function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool 
 function warRoomCardLabels(): array {
     return [
         'mapCard' => t('map.title'),
+        'missingPersonCard' => t('missing_person.card_title'),
         'trailEventsCard' => t('trail.events_title'),
         'shortageFormCard' => t('shortage.card_title'),
         'incidentFormCard' => t('incident.card_title'),

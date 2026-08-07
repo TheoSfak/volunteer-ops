@@ -97,6 +97,7 @@ $isApprovedParticipant = (bool)dbFetchValue(
      WHERE s.mission_id = ? AND pr.volunteer_id = ? AND pr.status = ?",
     [$missionId, $user['id'], PARTICIPATION_APPROVED]
 );
+$isMissingPersonMission = ((int)($mission['mission_type_id'] ?? 0) === MISSION_TYPE_MISSING_PERSON_SEARCH);
 if (!$canManageWarRoom && !$isApprovedParticipant) {
     setFlash('error', t('wr.access_denied'));
     redirect('dashboard.php');
@@ -508,6 +509,108 @@ if (isPost()) {
             ['rv_point_label' => $mission['rv_point_label'], 'radio_channel' => $mission['radio_channel']],
             ['rv_point_label' => $rvPointLabel, 'radio_channel' => $radioChannel]);
         setFlash('success', t('briefing.save_success'));
+        redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'save_missing_person_info') {
+        if (!$canManageWarRoom) {
+            setFlash('error', t('missing_person.perm.save'));
+            redirect('war-room.php?id=' . $missionId);
+        }
+        if (!$isMissingPersonMission) {
+            setFlash('error', t('missing_person.not_missing_person_mission'));
+            redirect('war-room.php?id=' . $missionId);
+        }
+        $fullName = mb_substr(trim((string) post('full_name')), 0, 255);
+        if ($fullName === '') {
+            setFlash('error', t('missing_person.name_required'));
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $ageRaw = post('age');
+        $age = ($ageRaw !== '' && $ageRaw !== null && is_numeric($ageRaw)) ? max(0, min(150, (int) $ageRaw)) : null;
+
+        $description = trim((string) post('description'));
+        $description = $description !== '' ? mb_substr($description, 0, 5000) : null;
+        $clothingDescription = trim((string) post('clothing_description'));
+        $clothingDescription = $clothingDescription !== '' ? mb_substr($clothingDescription, 0, 2000) : null;
+        $lastSeenLabel = trim((string) post('last_seen_label'));
+        $lastSeenLabel = $lastSeenLabel !== '' ? mb_substr($lastSeenLabel, 0, 255) : null;
+
+        $lastSeenAtRaw = trim((string) post('last_seen_at'));
+        $lastSeenAt = null;
+        if ($lastSeenAtRaw !== '') {
+            $ts = strtotime($lastSeenAtRaw);
+            if ($ts !== false) {
+                $lastSeenAt = date('Y-m-d H:i:s', $ts);
+            }
+        }
+
+        // Same validation/clamping as mission-photo.php's GPS handling.
+        $latRaw = post('last_seen_lat');
+        $lngRaw = post('last_seen_lng');
+        $lat = ($latRaw !== '' && $latRaw !== null && is_numeric($latRaw)) ? (float) $latRaw : null;
+        $lng = ($lngRaw !== '' && $lngRaw !== null && is_numeric($lngRaw)) ? (float) $lngRaw : null;
+        if ($lat !== null && ($lat < -90 || $lat > 90)) { $lat = null; }
+        if ($lng !== null && ($lng < -180 || $lng > 180)) { $lng = null; }
+        if ($lat === 0.0 && $lng === 0.0) { $lat = null; $lng = null; }
+        if ($lat === null || $lng === null) { $lat = null; $lng = null; }
+
+        $existing = dbFetchOne("SELECT id, photo FROM mission_missing_persons WHERE mission_id = ?", [$missionId]);
+
+        // Photo is optional on every save — only touched (validated, stored,
+        // old file unlinked) when a new one was actually chosen. $newPhoto
+        // stays null otherwise, so the upsert's COALESCE below keeps
+        // whatever was already on file.
+        $newPhoto = null;
+        if (!empty($_FILES['photo']['name']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
+            $file = $_FILES['photo'];
+            $photoExt = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+            $photoMime = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+            $ext = strtolower(pathinfo(basename($file['name']), PATHINFO_EXTENSION));
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $mime = $finfo->file($file['tmp_name']);
+
+            if (!in_array($ext, $photoExt, true) || !in_array($mime, $photoMime, true)) {
+                setFlash('error', t('photo.invalid_type'));
+                redirect('war-room.php?id=' . $missionId);
+            }
+            if ($file['size'] > UPLOAD_MAX_SIZE) {
+                setFlash('error', t('photo.file_too_large', ['size' => UPLOAD_MAX_SIZE / 1024 / 1024]));
+                redirect('war-room.php?id=' . $missionId);
+            }
+
+            $destDir = __DIR__ . '/uploads/missing-persons/';
+            if (!is_dir($destDir)) {
+                mkdir($destDir, 0755, true);
+            }
+            $storedName = 'mperson_' . $missionId . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+            if (!move_uploaded_file($file['tmp_name'], $destDir . $storedName)) {
+                setFlash('error', t('photo.save_failed'));
+                redirect('war-room.php?id=' . $missionId);
+            }
+            $newPhoto = $storedName;
+
+            if ($existing && !empty($existing['photo'])) {
+                $oldPath = $destDir . basename($existing['photo']);
+                if (is_file($oldPath)) {
+                    unlink($oldPath);
+                }
+            }
+        }
+
+        dbExecute(
+            "INSERT INTO mission_missing_persons
+                (mission_id, full_name, age, description, clothing_description, photo, last_seen_label, last_seen_lat, last_seen_lng, last_seen_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE
+                full_name = VALUES(full_name), age = VALUES(age), description = VALUES(description),
+                clothing_description = VALUES(clothing_description),
+                photo = COALESCE(VALUES(photo), photo),
+                last_seen_label = VALUES(last_seen_label), last_seen_lat = VALUES(last_seen_lat),
+                last_seen_lng = VALUES(last_seen_lng), last_seen_at = VALUES(last_seen_at), updated_at = NOW()",
+            [$missionId, $fullName, $age, $description, $clothingDescription, $newPhoto, $lastSeenLabel, $lat, $lng, $lastSeenAt]
+        );
+        logAudit('save_missing_person_info', 'mission_missing_persons', $existing['id'] ?? null, null, ['mission_id' => $missionId, 'full_name' => $fullName]);
+        setFlash('success', t('missing_person.save_success'));
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'report_shortage') {
         if (!$isApprovedParticipant) {
@@ -943,6 +1046,7 @@ if (get('ajax') === '1') {
     $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
     $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
     $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
+    $missingPerson = ($isMissingPersonMission && ($canManageWarRoom || $isApprovedParticipant)) ? loadMissingPersonForMission($missionId) : null;
     $onlinePresence = loadOnlinePresenceUserIds($missionId);
     $annotations = loadMissionAnnotationsForMission($missionId);
     $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
@@ -975,6 +1079,7 @@ if (get('ajax') === '1') {
         'incidents' => $incidents,
         'sosAlerts' => $sosAlerts,
         'pointsOfInterest' => $pointsOfInterest,
+        'missingPerson' => $missingPerson,
         'onlinePresence' => $onlinePresence,
         'pingStaleness' => $pingIsStaleByVolunteerId,
         'participantLive' => $participantLiveByVolunteerId,
@@ -1048,6 +1153,7 @@ $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($
 $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
+$missingPerson = ($isMissingPersonMission && ($canManageWarRoom || $isApprovedParticipant)) ? loadMissingPersonForMission($missionId) : null;
 $annotations = loadMissionAnnotationsForMission($missionId);
 $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
 $sectors = loadMissionSectorsForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
@@ -1212,7 +1318,7 @@ foreach ($participants as $participant) {
 
 require_once __DIR__ . '/includes/war-room-layout.php';
 $warRoomLayout = ($canManageWarRoom && !$fieldMode)
-    ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams), !empty($mission['is_special_mission']))
+    ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams), !empty($mission['is_special_mission']), $isMissingPersonMission)
     : null;
 
 $pageTitle = 'Action Room — ' . $mission['title'];
@@ -2181,6 +2287,99 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
+        <!-- Missing-person profile: structured, pinned card for the
+             "Αναζήτηση Αγνοουμένου" mission type — distinct from the
+             free-text briefingCard. Unconditional visibility (like My
+             Location/broadcastPhotoCard right below it): shows in both
+             Field Mode and full view to every approved participant, not just
+             admins, since every field volunteer needs to know who they're
+             looking for. Only $canManageWarRoom gets the edit trigger/modal. -->
+        <?php if ($isMissingPersonMission): ?>
+        <div class="card shadow-sm mb-4 border-danger" data-card-id="missingPersonCard">
+            <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-person-bounding-box me-1"></i><?= t('missing_person.card_title') ?></h5>
+                <?php if ($canManageWarRoom): ?>
+                <button type="button" class="btn btn-sm btn-light" data-bs-toggle="modal" data-bs-target="#missingPersonEditModal">
+                    <i class="bi bi-pencil"></i> <?= t('missing_person.edit_btn') ?>
+                </button>
+                <?php endif; ?>
+            </div>
+            <div class="card-body" id="missingPersonDisplay"></div>
+        </div>
+
+        <?php if ($canManageWarRoom): ?>
+        <div class="modal fade" id="missingPersonEditModal" tabindex="-1">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <form method="post" enctype="multipart/form-data" id="missingPersonForm">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="save_missing_person_info">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="bi bi-person-bounding-box me-1"></i><?= t('missing_person.card_title') ?></h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold"><?= t('missing_person.full_name_label') ?> *</label>
+                                <input type="text" class="form-control" name="full_name" maxlength="255" required value="<?= h($missingPerson['full_name'] ?? '') ?>">
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label small fw-semibold"><?= t('missing_person.age_label') ?></label>
+                                    <input type="number" class="form-control" name="age" min="0" max="150" value="<?= h((string)($missingPerson['age'] ?? '')) ?>">
+                                </div>
+                                <div class="col-md-8 mb-3">
+                                    <label class="form-label small fw-semibold"><?= t('missing_person.photo_label') ?></label>
+                                    <input type="file" class="form-control" name="photo" accept="image/jpeg,image/png,image/gif,image/webp">
+                                    <?php if (!empty($missingPerson['photo'])): ?>
+                                    <div class="form-text"><?= t('missing_person.photo_replace_note') ?></div>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold"><?= t('missing_person.description_label') ?></label>
+                                <textarea class="form-control" name="description" rows="2" maxlength="5000"><?= h($missingPerson['description'] ?? '') ?></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold"><?= t('missing_person.clothing_label') ?></label>
+                                <textarea class="form-control" name="clothing_description" rows="2" maxlength="2000"><?= h($missingPerson['clothing_description'] ?? '') ?></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold"><?= t('missing_person.last_seen_place_label') ?></label>
+                                <input type="text" class="form-control" name="last_seen_label" maxlength="255" value="<?= h($missingPerson['last_seen_label'] ?? '') ?>">
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label small fw-semibold"><?= t('missing_person.last_seen_at_label') ?></label>
+                                    <input type="datetime-local" class="form-control" name="last_seen_at" value="<?= h($missingPerson['last_seen_at_raw'] ?? '') ?>">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label small fw-semibold"><?= t('missing_person.last_seen_location_label') ?></label>
+                                    <?php if (!$fieldMode): ?>
+                                    <div class="d-flex gap-2 flex-wrap">
+                                        <button type="button" class="btn btn-outline-primary btn-sm" id="missingPersonPickOnMapBtn"><i class="bi bi-crosshair"></i> <?= t('missing_person.pick_on_map_btn') ?></button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="missingPersonUseMapCenterBtn"><?= t('missing_person.use_map_center_btn') ?></button>
+                                    </div>
+                                    <div class="small text-muted mt-1" id="missingPersonLocationPreview"></div>
+                                    <?php else: ?>
+                                    <div class="small text-muted"><?= t('missing_person.location_needs_full_view') ?></div>
+                                    <?php endif; ?>
+                                    <input type="hidden" name="last_seen_lat" id="missingPersonLat" value="<?= h((string)($missingPerson['last_seen_lat'] ?? '')) ?>">
+                                    <input type="hidden" name="last_seen_lng" id="missingPersonLng" value="<?= h((string)($missingPerson['last_seen_lng'] ?? '')) ?>">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= t('common.cancel') ?></button>
+                            <button type="submit" class="btn btn-primary"><?= t('common.save') ?></button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+        <?php endif; ?>
+
         <!-- Broadcast reference photo (e.g. a missing person's photo relayed
              to the coordination center) — read-only here, sent via the
              Καθολικό Μήνυμα composer further down (command staff only).
@@ -2970,6 +3169,7 @@ let missionIncidents = <?= json_encode($incidents) ?>;
 const canManageIncidents = <?= json_encode($canManageWarRoom) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
 let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
+let missingPerson = <?= json_encode($missingPerson) ?>;
 let restrictedAreas = <?= json_encode($restrictedAreas) ?>;
 let restrictedAreaBreaches = <?= json_encode($restrictedAreaBreaches) ?>;
 let restrictedAreaBreachHistory = <?= json_encode($restrictedAreaBreachHistory) ?>;
@@ -3194,7 +3394,7 @@ function addMapBaseLayers(targetMap, toggleBtnId) {
     }
     return {street, satellite};
 }
-let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null;
+let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null, missingPersonLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
     addMapBaseLayers(map, 'mapSatelliteToggle');
@@ -3261,6 +3461,7 @@ if (!fieldMode) {
     routeLayer = L.featureGroup().addTo(map);
     incidentLayer = L.featureGroup().addTo(map);
     poiLayer = L.featureGroup().addTo(map);
+    missingPersonLayer = L.featureGroup().addTo(map);
     // Restricted (hazard/danger) areas render ABOVE literally everything else
     // on the map, including annotationPane (610, itself already above every
     // default Leaflet pane) — the user's own explicit ask. 700 leaves headroom
@@ -3304,6 +3505,13 @@ let arrowStart = null, arrowStartMarker = null;
 // next click, not a persistent toggleable tool). Consumed and cleared by
 // the map click handler below.
 let addingBuildingToSectorId = null;
+// Missing-person "pick last-known location on map" — same one-shot,
+// consumed-on-next-click idea as addingBuildingToSectorId above, but with no
+// id to carry through (there's only ever one missing-person profile per
+// mission). Armed by missingPersonPickOnMapBtn below, which hides the edit
+// modal first (so the click actually reaches the map); the click handler
+// reopens it.
+let pickingMissingPersonLocation = false;
 function cancelActiveDrawing() {
     if (map) { map.dragging.enable(); map.doubleClickZoom.enable(); }
     if (annotationDrawLayer) annotationDrawLayer.clearLayers();
@@ -4387,9 +4595,41 @@ map.on('click', e => {
             };
             document.getElementById('sectorBuildingSave')?.addEventListener('click', save);
         }, 0);
+    } else if (pickingMissingPersonLocation) {
+        pickingMissingPersonLocation = false;
+        document.getElementById('mapCard')?.classList.remove('wr-draw-active');
+        document.getElementById('missingPersonLat').value = e.latlng.lat;
+        document.getElementById('missingPersonLng').value = e.latlng.lng;
+        updateMissingPersonLocationPreview();
+        new bootstrap.Modal(document.getElementById('missingPersonEditModal')).show();
     }
 });
 if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup('<strong>' + t('map.mission_point_label') + '</strong><br><?= h(addslashes($mission['title'])) ?>');
+
+function updateMissingPersonLocationPreview() {
+    // Guards every lookup, not just the first — none of these ids exist in
+    // the DOM at all for a viewer who isn't $canManageWarRoom (the edit
+    // modal is admin-only), and this runs unconditionally at map-init time
+    // regardless of role.
+    const preview = document.getElementById('missingPersonLocationPreview');
+    const latEl = document.getElementById('missingPersonLat');
+    const lngEl = document.getElementById('missingPersonLng');
+    if (!preview || !latEl || !lngEl) return;
+    const lat = latEl.value, lng = lngEl.value;
+    preview.textContent = (lat && lng) ? `${parseFloat(lat).toFixed(5)}, ${parseFloat(lng).toFixed(5)}` : '';
+}
+document.getElementById('missingPersonPickOnMapBtn')?.addEventListener('click', () => {
+    bootstrap.Modal.getInstance(document.getElementById('missingPersonEditModal'))?.hide();
+    pickingMissingPersonLocation = true;
+    document.getElementById('mapCard')?.classList.add('wr-draw-active');
+});
+document.getElementById('missingPersonUseMapCenterBtn')?.addEventListener('click', () => {
+    const center = map.getCenter();
+    document.getElementById('missingPersonLat').value = center.lat;
+    document.getElementById('missingPersonLng').value = center.lng;
+    updateMissingPersonLocationPreview();
+});
+updateMissingPersonLocationPreview();
 }
 
 // Search-sector functions that MUST work in field mode (no map involved,
@@ -6091,6 +6331,59 @@ function renderPoiLayer(items) {
     });
 }
 
+// Dark/bi-person-fill marker, deliberately distinct from POI's blue
+// bi-search above, for the single last-known-location pin of the mission's
+// missing person (if staff have set one). Same divIcon anchoring technique
+// (tip at the true coordinate) as renderPoiLayer.
+function renderMissingPersonMarker(item) {
+    if (!missingPersonLayer) return;
+    missingPersonLayer.clearLayers();
+    if (!item || item.last_seen_lat === null || item.last_seen_lat === undefined
+        || item.last_seen_lng === null || item.last_seen_lng === undefined) return;
+    const icon = L.divIcon({
+        className: '',
+        html: `<div style="position:relative;width:26px;height:34px;">
+            <div style="width:26px;height:26px;background:#212529;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 1px 4px #0008;"><i class="bi bi-person-fill"></i></div>
+            <div style="position:absolute;left:50%;top:24px;transform:translateX(-50%);width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:10px solid #212529;"></div>
+        </div>`,
+        iconSize: [26, 34], iconAnchor: [13, 34],
+    });
+    const popupHtml = `<strong>${escapeHtml(item.full_name)}</strong>` +
+        (item.last_seen_label ? `<br>${escapeHtml(item.last_seen_label)}` : '') +
+        (item.last_seen_at ? `<br><span class="small text-muted">${t('missing_person.last_seen_at_prefix', {time: item.last_seen_at})}</span>` : '');
+    L.marker([item.last_seen_lat, item.last_seen_lng], {icon}).addTo(missingPersonLayer).bindPopup(popupHtml);
+}
+
+// Updates only the read-only #missingPersonDisplay block — never touches the
+// edit modal's form inputs (those are pre-filled once, server-side, from the
+// page-load value), so a poll landing mid-edit can never clobber an admin's
+// unsaved changes. Mirrors renderBroadcastPhotos' empty-container-in-PHP,
+// JS-renders-everything pattern.
+function renderMissingPersonCard(item) {
+    const el = document.getElementById('missingPersonDisplay');
+    if (!el) return;
+    if (!item) {
+        el.innerHTML = `<p class="text-muted mb-0 small">${t('missing_person.no_profile_yet')}</p>`;
+        return;
+    }
+    const photoHtml = item.photo
+        ? `<img src="uploads/missing-persons/${encodeURIComponent(item.photo)}" alt="" class="rounded" style="width:100px;height:100px;object-fit:cover;flex-shrink:0;">`
+        : '';
+    const ageHtml = (item.age !== null && item.age !== undefined)
+        ? ` <span class="text-muted fs-6">(${item.age} ${t('missing_person.years_short')})</span>` : '';
+    const descHtml = item.description ? `<div class="small mt-1">${escapeHtml(item.description).replace(/\n/g, '<br>')}</div>` : '';
+    const clothingHtml = item.clothing_description
+        ? `<div class="small mt-1"><strong>${t('missing_person.clothing_label')}:</strong> ${escapeHtml(item.clothing_description).replace(/\n/g, '<br>')}</div>` : '';
+    const lastSeenHtml = (item.last_seen_label || item.last_seen_at)
+        ? `<div class="small mt-1 text-danger"><i class="bi bi-geo-alt-fill"></i> ${escapeHtml(item.last_seen_label || '')}${item.last_seen_at ? ' — ' + item.last_seen_at : ''}</div>`
+        : '';
+    el.innerHTML = `<div class="d-flex gap-3">${photoHtml}<div class="flex-grow-1" style="min-width:0;">
+        <div class="fs-5 fw-bold">${escapeHtml(item.full_name)}${ageHtml}</div>
+        ${descHtml}${clothingHtml}${lastSeenHtml}
+        <div class="small text-muted mt-2">${t('missing_person.updated_at_prefix', {time: item.updated_at})}</div>
+    </div></div>`;
+}
+
 // Same whole-array-JSON signature technique as the other render*() functions.
 let sosAlertsRenderedSig = null;
 function renderSosAlerts(items) {
@@ -6316,7 +6609,7 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 })();
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); }
     renderMyTasks(myTasks);
     renderMySectors(sectors);
     renderMyRoutes(routes);
@@ -6327,6 +6620,7 @@ setTimeout(() => {
     renderNearbyTeams(nearbyTeams);
     renderRestrictedAreaProximity(restrictedAreaProximity);
     renderBroadcastPhotos(broadcastPhotos);
+    renderMissingPersonCard(missingPerson);
     if (!fieldMode) updateSosAlarmState(sosAlerts);
     // Ungated (unlike updateSosAlarmState just above) — same reasoning as the
     // poll-path wiring in pollWarRoomData(): this alarm's primary audience is
@@ -7532,6 +7826,15 @@ function pollWarRoomData() {
             pointsOfInterest = data.pointsOfInterest;
             renderPointsOfInterest(pointsOfInterest);
             if (!fieldMode) renderPoiLayer(pointsOfInterest);
+        }
+        // !== undefined, not a truthy check like the blocks above/below —
+        // null is this field's normal "no profile filled in yet" value, not
+        // an absent-key sentinel, since the PHP side always includes the key
+        // (object or null) whenever isMissingPersonMission is true.
+        if (data.missingPerson !== undefined) {
+            missingPerson = data.missingPerson;
+            renderMissingPersonCard(missingPerson);
+            if (!fieldMode) renderMissingPersonMarker(missingPerson);
         }
         if (data.areas) areas = data.areas;
         if (data.sectors) {

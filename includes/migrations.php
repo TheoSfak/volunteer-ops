@@ -5972,6 +5972,50 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 128,
+            'description' => 'Add mission_missing_persons (one profile per mission: name/age/description/clothing/photo/last-seen location+time) backing the new Action Room "missing person" card, plus the mission_types row (id 7, "Αναζήτηση Αγνοουμένου") that gates it — distinct from is_special_mission, which already means something else (guest-team briefing links).',
+            'up' => function () {
+                // Plain CREATE TABLE IF NOT EXISTS, no split ALTER TABLE needed —
+                // the ADD COLUMN + ADD CONSTRAINT MariaDB errno-1823 gotcha (see
+                // v127 above) only bites ALTER TABLE, not a fresh CREATE TABLE
+                // with its FK declared inline.
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_missing_persons (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    full_name VARCHAR(255) NOT NULL,
+                    age SMALLINT UNSIGNED NULL,
+                    description TEXT NULL,
+                    clothing_description TEXT NULL,
+                    photo VARCHAR(255) NULL,
+                    last_seen_label VARCHAR(255) NULL,
+                    last_seen_lat DECIMAL(10,7) NULL,
+                    last_seen_lng DECIMAL(10,7) NULL,
+                    last_seen_at DATETIME NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    UNIQUE KEY uq_missing_person_mission (mission_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                // Explicit id 7 (matches how schema.sql seeds ids 1-6) so
+                // MISSION_TYPE_MISSING_PERSON_SEARCH in config.php can stay a
+                // plain constant instead of a runtime lookup. Guarded by name,
+                // not id, for idempotency — if id 7 is ever already taken by a
+                // custom type an admin created via mission-types.php, this
+                // INSERT fails loudly (caught by this runner's existing
+                // retry-after-cooldown handler below) rather than silently
+                // drifting from the constant.
+                $existingType = dbFetchOne("SELECT id FROM mission_types WHERE name = ?", ['Αναζήτηση Αγνοουμένου']);
+                if (!$existingType) {
+                    dbExecute(
+                        "INSERT INTO mission_types (id, name, description, color, icon, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        [7, 'Αναζήτηση Αγνοουμένου', 'Επιχείρηση αναζήτησης αγνοούμενου προσώπου', 'dark', 'bi-person-bounding-box', 7, 1]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

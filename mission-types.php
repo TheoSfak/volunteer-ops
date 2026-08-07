@@ -101,6 +101,7 @@ $iconOptions = [
     'bi-tools' => 'Εργαλεία',
     'bi-megaphone' => 'Ενημέρωση',
     'bi-globe' => 'Περιβάλλον',
+    'bi-person-bounding-box' => 'Αναζήτηση Προσώπου',
 ];
 
 include __DIR__ . '/includes/header.php';
