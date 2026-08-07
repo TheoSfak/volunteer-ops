@@ -532,6 +532,8 @@ if (isPost()) {
         $description = $description !== '' ? mb_substr($description, 0, 5000) : null;
         $clothingDescription = trim((string) post('clothing_description'));
         $clothingDescription = $clothingDescription !== '' ? mb_substr($clothingDescription, 0, 2000) : null;
+        $vehicle = trim((string) post('vehicle'));
+        $vehicle = $vehicle !== '' ? mb_substr($vehicle, 0, 255) : null;
         $lastSeenLabel = trim((string) post('last_seen_label'));
         $lastSeenLabel = $lastSeenLabel !== '' ? mb_substr($lastSeenLabel, 0, 255) : null;
 
@@ -553,6 +555,13 @@ if (isPost()) {
         if ($lng !== null && ($lng < -180 || $lng > 180)) { $lng = null; }
         if ($lat === 0.0 && $lng === 0.0) { $lat = null; $lng = null; }
         if ($lat === null || $lng === null) { $lat = null; $lng = null; }
+
+        $disappearanceCircumstances = trim((string) post('disappearance_circumstances'));
+        $disappearanceCircumstances = $disappearanceCircumstances !== '' ? mb_substr($disappearanceCircumstances, 0, 3000) : null;
+        $likelyDirection = trim((string) post('likely_direction'));
+        $likelyDirection = $likelyDirection !== '' ? mb_substr($likelyDirection, 0, 255) : null;
+        $witnessAccounts = trim((string) post('witness_accounts'));
+        $witnessAccounts = $witnessAccounts !== '' ? mb_substr($witnessAccounts, 0, 5000) : null;
 
         $existing = dbFetchOne("SELECT id, photo FROM mission_missing_persons WHERE mission_id = ?", [$missionId]);
 
@@ -599,15 +608,22 @@ if (isPost()) {
 
         dbExecute(
             "INSERT INTO mission_missing_persons
-                (mission_id, full_name, age, description, clothing_description, photo, last_seen_label, last_seen_lat, last_seen_lng, last_seen_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                (mission_id, full_name, age, description, clothing_description, vehicle, photo,
+                 last_seen_label, last_seen_lat, last_seen_lng, last_seen_at,
+                 disappearance_circumstances, likely_direction, witness_accounts, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
              ON DUPLICATE KEY UPDATE
                 full_name = VALUES(full_name), age = VALUES(age), description = VALUES(description),
-                clothing_description = VALUES(clothing_description),
+                clothing_description = VALUES(clothing_description), vehicle = VALUES(vehicle),
                 photo = COALESCE(VALUES(photo), photo),
                 last_seen_label = VALUES(last_seen_label), last_seen_lat = VALUES(last_seen_lat),
-                last_seen_lng = VALUES(last_seen_lng), last_seen_at = VALUES(last_seen_at), updated_at = NOW()",
-            [$missionId, $fullName, $age, $description, $clothingDescription, $newPhoto, $lastSeenLabel, $lat, $lng, $lastSeenAt]
+                last_seen_lng = VALUES(last_seen_lng), last_seen_at = VALUES(last_seen_at),
+                disappearance_circumstances = VALUES(disappearance_circumstances),
+                likely_direction = VALUES(likely_direction), witness_accounts = VALUES(witness_accounts),
+                updated_at = NOW()",
+            [$missionId, $fullName, $age, $description, $clothingDescription, $vehicle, $newPhoto,
+             $lastSeenLabel, $lat, $lng, $lastSeenAt,
+             $disappearanceCircumstances, $likelyDirection, $witnessAccounts]
         );
         logAudit('save_missing_person_info', 'mission_missing_persons', $existing['id'] ?? null, null, ['mission_id' => $missionId, 'full_name' => $fullName]);
         setFlash('success', t('missing_person.save_success'));
@@ -2311,7 +2327,20 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <div class="modal fade" id="missingPersonEditModal" tabindex="-1">
             <div class="modal-dialog modal-lg modal-dialog-scrollable">
                 <div class="modal-content">
-                    <form method="post" enctype="multipart/form-data" id="missingPersonForm">
+                    <!-- display:contents so this <form> wrapper doesn't interpose in
+                         .modal-content's flex layout — modal-dialog-scrollable relies
+                         on .modal-header/.modal-body/.modal-footer being direct flex
+                         children of .modal-content (that's what makes .modal-body the
+                         one part that scrolls, keeping the footer/save button fixed
+                         in view); a <form> wrapping them here would otherwise become
+                         that flex child instead, and it isn't itself a flex container,
+                         so .modal-body's flex:1 1 auto has nothing to size against —
+                         it renders at full natural height and everything past the
+                         dialog's height limit just gets clipped by modal-content's
+                         overflow:hidden, save button included. The form's own submit
+                         behavior is unaffected; display:contents only removes its box
+                         from the layout/paint tree, not its DOM/event semantics. -->
+                    <form method="post" enctype="multipart/form-data" id="missingPersonForm" style="display:contents;">
                         <?= csrfField() ?>
                         <input type="hidden" name="action" value="save_missing_person_info">
                         <div class="modal-header">
@@ -2345,6 +2374,10 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                                 <textarea class="form-control" name="clothing_description" rows="2" maxlength="2000"><?= h($missingPerson['clothing_description'] ?? '') ?></textarea>
                             </div>
                             <div class="mb-3">
+                                <label class="form-label small fw-semibold"><?= t('missing_person.vehicle_label') ?></label>
+                                <input type="text" class="form-control" name="vehicle" maxlength="255" value="<?= h($missingPerson['vehicle'] ?? '') ?>">
+                            </div>
+                            <div class="mb-3">
                                 <label class="form-label small fw-semibold"><?= t('missing_person.last_seen_place_label') ?></label>
                                 <input type="text" class="form-control" name="last_seen_label" maxlength="255" value="<?= h($missingPerson['last_seen_label'] ?? '') ?>">
                             </div>
@@ -2366,6 +2399,18 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                                     <input type="hidden" name="last_seen_lat" id="missingPersonLat" value="<?= h((string)($missingPerson['last_seen_lat'] ?? '')) ?>">
                                     <input type="hidden" name="last_seen_lng" id="missingPersonLng" value="<?= h((string)($missingPerson['last_seen_lng'] ?? '')) ?>">
                                 </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold"><?= t('missing_person.circumstances_label') ?></label>
+                                <textarea class="form-control" name="disappearance_circumstances" rows="2" maxlength="3000"><?= h($missingPerson['disappearance_circumstances'] ?? '') ?></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold"><?= t('missing_person.likely_direction_label') ?></label>
+                                <input type="text" class="form-control" name="likely_direction" maxlength="255" value="<?= h($missingPerson['likely_direction'] ?? '') ?>">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold"><?= t('missing_person.witness_accounts_label') ?></label>
+                                <textarea class="form-control" name="witness_accounts" rows="3" maxlength="5000"><?= h($missingPerson['witness_accounts'] ?? '') ?></textarea>
                             </div>
                         </div>
                         <div class="modal-footer">
@@ -6470,12 +6515,20 @@ function renderMissingPersonCard(item) {
     const descHtml = item.description ? `<div class="small mt-1">${escapeHtml(item.description).replace(/\n/g, '<br>')}</div>` : '';
     const clothingHtml = item.clothing_description
         ? `<div class="small mt-1"><strong>${t('missing_person.clothing_label')}:</strong> ${escapeHtml(item.clothing_description).replace(/\n/g, '<br>')}</div>` : '';
+    const vehicleHtml = item.vehicle
+        ? `<div class="small mt-1"><strong>${t('missing_person.vehicle_label')}:</strong> ${escapeHtml(item.vehicle)}</div>` : '';
     const lastSeenHtml = (item.last_seen_label || item.last_seen_at)
         ? `<div class="small mt-1 text-danger"><i class="bi bi-geo-alt-fill"></i> ${escapeHtml(item.last_seen_label || '')}${item.last_seen_at ? ' — ' + item.last_seen_at : ''}</div>`
         : '';
+    const circumstancesHtml = item.disappearance_circumstances
+        ? `<div class="small mt-1"><strong>${t('missing_person.circumstances_label')}:</strong> ${escapeHtml(item.disappearance_circumstances).replace(/\n/g, '<br>')}</div>` : '';
+    const directionHtml = item.likely_direction
+        ? `<div class="small mt-1"><strong>${t('missing_person.likely_direction_label')}:</strong> ${escapeHtml(item.likely_direction)}</div>` : '';
+    const witnessHtml = item.witness_accounts
+        ? `<div class="small mt-1"><strong>${t('missing_person.witness_accounts_label')}:</strong> ${escapeHtml(item.witness_accounts).replace(/\n/g, '<br>')}</div>` : '';
     el.innerHTML = `<div class="d-flex gap-3">${photoHtml}<div class="flex-grow-1" style="min-width:0;">
         <div class="fs-5 fw-bold">${escapeHtml(item.full_name)}${ageHtml}</div>
-        ${descHtml}${clothingHtml}${lastSeenHtml}
+        ${descHtml}${clothingHtml}${vehicleHtml}${lastSeenHtml}${circumstancesHtml}${directionHtml}${witnessHtml}
         <div class="small text-muted mt-2">${t('missing_person.updated_at_prefix', {time: item.updated_at})}</div>
     </div></div>`;
 }
