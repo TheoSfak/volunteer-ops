@@ -1231,6 +1231,23 @@ include __DIR__ . '/includes/header.php';
     .presence-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
     .presence-dot.presence-online { background: #28a745; }
     .presence-dot.presence-offline { background: #adb5bd; }
+    /* 8+ approved volunteers: split the roster into 2 columns so it fills
+       height-wise (8 -> 4+4, 9 -> 5+4, ...) instead of one long scroll.
+       CSS grid with an explicit row count (set inline from PHP, since it
+       depends on the actual participant count) fills column 1 top-to-
+       bottom first, then column 2 — deterministic, unlike column-count's
+       height-balanced auto-split, which real testing showed silently
+       flips to e.g. 4+5 once row heights vary (guest badges, team
+       badges, stale-ping warnings all change a row's height). Phones
+       stay single-column below sm — the card is already narrow there
+       and a name + timestamp doesn't fit two-up. */
+    @media (min-width: 576px) {
+        /* .list-group is display:flex (Bootstrap 5's default) — grid
+           overrides that here. Confirmed via computed-style inspection
+           that flex silently no-ops both column-count AND grid-auto-flow
+           unless display is forced off flex first. */
+        .wr-participants-cols { display: grid; grid-auto-flow: column; grid-template-columns: 1fr 1fr; column-gap: 20px; }
+    }
     #annotationToolbar button.active { background: #1f2937; color: #fff; border-color: #1f2937; }
     #mapCard.wr-draw-active #warRoomMap { cursor: crosshair; }
     #mapCard.wr-draw-active .leaflet-marker-pane,
@@ -1882,7 +1899,8 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 
         <div class="card shadow-sm" data-card-id="participantsCard">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-people me-1"></i><?= t('participants.panel_title', ['count' => count($participants)]) ?></h5></div>
-            <div class="list-group list-group-flush">
+            <?php $participantSplitRows = count($participants) >= 8 ? (int)ceil(count($participants) / 2) : 0; ?>
+            <div class="list-group list-group-flush<?= $participantSplitRows ? ' wr-participants-cols' : '' ?>"<?= $participantSplitRows ? ' style="grid-template-rows: repeat(' . $participantSplitRows . ', auto);"' : '' ?>>
                 <?php foreach ($participants as $participant): ?>
                 <?php $status = $participant['field_status'] ?? ''; ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap" id="participant-row-<?= (int)$participant['volunteer_id'] ?>">
