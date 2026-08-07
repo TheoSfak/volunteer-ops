@@ -652,9 +652,15 @@ foreach (dbFetchAll(
     [$missionId, PARTICIPATION_APPROVED]
 ) as $pingRow) {
     $volunteerId = (int)$pingRow['volunteer_id'];
-    $pingIsStaleByVolunteerId[$volunteerId] =
-        $pingRow['last_ping_at'] !== null
-        && strtotime($pingRow['last_ping_at']) < (time() - $pingStaleThresholdSeconds);
+    // Only set a staleness entry when a ping actually exists. A missing
+    // key (never a false one) is how renderPresence()'s hasFreshPing
+    // check tells "no ping ever" apart from "pinged recently" — both
+    // used to collapse to the same `false`, which the client read as
+    // "not stale" i.e. fresh, marking every never-pinged volunteer
+    // online within one 5s poll tick.
+    if ($pingRow['last_ping_at'] !== null) {
+        $pingIsStaleByVolunteerId[$volunteerId] = strtotime($pingRow['last_ping_at']) < (time() - $pingStaleThresholdSeconds);
+    }
     $participantLiveByVolunteerId[$volunteerId] = [
         'last_ping_time' => $pingRow['last_ping_at'] ? date('H:i', strtotime($pingRow['last_ping_at'])) : null,
         'field_status' => $pingRow['field_status'],
