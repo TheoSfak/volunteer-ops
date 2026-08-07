@@ -3978,6 +3978,24 @@ function renderSectorLayer(items) {
             openBuildingId = layer.buildingId;
         }
     });
+    // The "leave it untouched" protection above only makes sense while the
+    // open sector/building still exists — a split deletes the original
+    // sector (cascading its buildings) the moment the two halves are
+    // created, and nothing else ever re-checks a preserved layer against
+    // fresh data. Without this, an open-popup sector/building that gets
+    // deleted out from under itself leaves its polygon (and permanent
+    // label tooltip) orphaned on the map forever, since it's simultaneously
+    // never rebuilt (it's "the open one") and never removed (it's not "the
+    // open one" from the removal pass's perspective either, once it no
+    // longer matches anything real).
+    if (openSectorId !== null && !items.some(item => String(item.id) === String(openSectorId))) {
+        openSectorLayer = null;
+        openSectorId = null;
+    }
+    if (openBuildingId !== null && !items.some(item => item.buildings.some(b => String(b.id) === String(openBuildingId)))) {
+        openBuildingLayer = null;
+        openBuildingId = null;
+    }
 
     sectorLayer.eachLayer(layer => { if (layer !== openSectorLayer) sectorLayer.removeLayer(layer); });
     sectorBuildingLayer.eachLayer(layer => { if (layer !== openBuildingLayer) sectorBuildingLayer.removeLayer(layer); });
