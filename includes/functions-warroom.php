@@ -1621,6 +1621,44 @@ function loadPointsOfInterestForMission(int $missionId): array {
 }
 
 /**
+ * The single missing-person profile for this mission (mission_missing_persons
+ * is one row per mission_id, UNIQUE-constrained), or null if staff haven't
+ * filled one in yet. Called only for missions of the "Αναζήτηση Αγνοουμένου"
+ * type — see MISSION_TYPE_MISSING_PERSON_SEARCH in config.php.
+ */
+function loadMissingPersonForMission(int $missionId): ?array {
+    $p = dbFetchOne(
+        "SELECT id, full_name, age, description, clothing_description, photo,
+                last_seen_label, last_seen_lat, last_seen_lng, last_seen_at, updated_at
+         FROM mission_missing_persons WHERE mission_id = ?",
+        [$missionId]
+    );
+    if (!$p) {
+        return null;
+    }
+    return [
+        'id'                    => (int) $p['id'],
+        'full_name'             => $p['full_name'],
+        'age'                   => $p['age'] !== null ? (int) $p['age'] : null,
+        'description'           => $p['description'],
+        'clothing_description'  => $p['clothing_description'],
+        'photo'                 => $p['photo'],
+        'last_seen_label'       => $p['last_seen_label'],
+        'last_seen_lat'         => $p['last_seen_lat'] !== null ? (float) $p['last_seen_lat'] : null,
+        'last_seen_lng'         => $p['last_seen_lng'] !== null ? (float) $p['last_seen_lng'] : null,
+        // Human display format (d/m/Y H:i) isn't safely round-trippable back
+        // into an <input type="datetime-local"> (strtotime() on an ambiguous
+        // d/m/Y string risks misparsing as m/d/Y) — _raw carries the
+        // unambiguous MySQL value straight through for the edit form only;
+        // every display use (this file's initial render and the poll's live
+        // JS update) uses the formatted key instead.
+        'last_seen_at'          => $p['last_seen_at'] ? date('d/m/Y H:i', strtotime($p['last_seen_at'])) : null,
+        'last_seen_at_raw'      => $p['last_seen_at'] ? date('Y-m-d\TH:i', strtotime($p['last_seen_at'])) : null,
+        'updated_at'            => date('d/m H:i', strtotime($p['updated_at'])),
+    ];
+}
+
+/**
  * mission-report-print.php: every incident from the mission (resolved or not
  * — unlike loadUnresolvedIncidentsForMission() above, a closed-mission PDF
  * must show the full history), always masked (PDF is print/export, never

@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.162.3');
-define('DB_SCHEMA_VERSION', 127);
+define('APP_VERSION', '3.163.0');
+define('DB_SCHEMA_VERSION', 128);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
 // The download filename embeds this on purpose: the APK used to live at a
@@ -174,6 +174,13 @@ define('MISSION_TYPES', [
     'VOLUNTEER' => 'Εθελοντική',
     'MEDICAL' => 'Υγειονομική',
 ]);
+
+// mission_types.id for "Αναζήτηση Αγνοουμένου" (Missing Person Search) — the
+// row itself is seeded by migration v128. Unrelated to MISSION_TYPES above,
+// which labels the legacy missions.type ENUM ('VOLUNTEER'/'MEDICAL'), a
+// different column from missions.mission_type_id (FK to the mission_types
+// table) that this constant refers to.
+define('MISSION_TYPE_MISSING_PERSON_SEARCH', 7);
 
 define('VOLUNTEER_TYPE_LABELS', [
     VTYPE_TRAINEE => 'Δόκιμος Διασώστης',

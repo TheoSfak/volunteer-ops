@@ -156,7 +156,8 @@ INSERT INTO `mission_types` (`id`, `name`, `description`, `color`, `icon`, `sort
 (3, 'Εκπαιδευτική', 'Εκπαιδευτική αποστολή και ασκήσεις', 'info', 'bi-mortarboard', 3),
 (4, 'Διασωστική', 'Επιχείρηση διάσωσης και αντιμετώπιση κινδύνων', 'warning', 'bi-shield-exclamation', 4),
 (5, 'Τ.Ε.Π.', 'Αποστολές Τμήματος Επειγόντων Περιστατικών — Νοσοκομείο', 'purple', 'bi-hospital', 5),
-(6, 'Επανεκπαίδευση Εθελοντών', 'Αποστολές επανεκπαίδευσης εθελοντών', 'teal', 'bi-arrow-repeat', 6);
+(6, 'Επανεκπαίδευση Εθελοντών', 'Αποστολές επανεκπαίδευσης εθελοντών', 'teal', 'bi-arrow-repeat', 6),
+(7, 'Αναζήτηση Αγνοουμένου', 'Επιχείρηση αναζήτησης αγνοούμενου προσώπου', 'dark', 'bi-person-bounding-box', 7);
 
 -- =============================================
 -- MISSIONS TABLE
@@ -2361,6 +2362,30 @@ ALTER TABLE `mission_photos`
 -- several notes, one from each reporter, same as it carries several photos.
 ALTER TABLE `mission_photos`
     ADD COLUMN `poi_note` TEXT NULL AFTER `poi_id`;
+
+-- =============================================
+-- MISSION MISSING PERSONS (War Room: one profile per mission — name, age,
+-- description, clothing, photo, last-seen location+time — backing the
+-- pinned "missing person" card shown for the "Αναζήτηση Αγνοουμένου"
+-- mission type. See MISSION_TYPE_MISSING_PERSON_SEARCH in config.php.)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_missing_persons` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `full_name` VARCHAR(255) NOT NULL,
+    `age` SMALLINT UNSIGNED NULL,
+    `description` TEXT NULL,
+    `clothing_description` TEXT NULL,
+    `photo` VARCHAR(255) NULL,
+    `last_seen_label` VARCHAR(255) NULL,
+    `last_seen_lat` DECIMAL(10,7) NULL,
+    `last_seen_lng` DECIMAL(10,7) NULL,
+    `last_seen_at` DATETIME NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY `uq_missing_person_mission` (`mission_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
 -- MISSION PRESENCE (War Room live "who has this open" tracking)
