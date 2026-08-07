@@ -1260,6 +1260,18 @@ include __DIR__ . '/includes/header.php';
        pill (inline-styled per team in dispatchTeamLabelHtml()) shows through. */
     .dispatch-team-label { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
     .dispatch-team-label::before { display: none !important; }
+    /* Search-area/sector/restricted-area polygon name labels — same
+       box/arrow-stripping as dispatch-team-label above, but its own class
+       rather than reusing that one: these are plain text (no inline-styled
+       pill of their own to fall back on), so they need their OWN color/
+       weight here, and dispatch-team-label's name means "styled for
+       dispatch team pills" — piggybacking its color onto that class would
+       silently recolor dispatch labels too the day anyone adds one there.
+       Red (matches the polygon outlines themselves — #dc3545 is already the
+       search-area/restricted-area border color) + bold: plain grey text was
+       reported hard to read against the map. */
+    .wr-polygon-label { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; color: #dc3545; font-weight: 700; }
+    .wr-polygon-label::before { display: none !important; }
     .war-room-hero { background: linear-gradient(135deg, #172554, #b91c1c); color: #fff; border-radius: 14px; }
     .war-room-hero h1 { color: #fff; font-weight: 700; }
     /* The action row can hold up to ~10 buttons for an admin (report, trail,
@@ -3717,7 +3729,7 @@ function renderAreaLayer(items) {
         const popupHtml = `<strong>${escapeHtml(item.label)}</strong>${rollup}${manageHtml}`;
 
         const layer = L.polygon(item.geo, {pane: 'areaPane', color: '#dc3545', weight: 4, dashArray: '10,6', fillColor: '#dc3545', fillOpacity: 0.06}).addTo(areaLayer).bindPopup(popupHtml);
-        layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'dispatch-team-label', interactive: false});
+        layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'wr-polygon-label', interactive: false});
         layer.areaId = item.id;
         if (String(item.id) === String(openAreaId)) reopenAreaLayer = layer;
     });
@@ -3764,7 +3776,7 @@ function renderRestrictedAreaLayer(items) {
                 <button type="button" class="btn btn-sm btn-outline-danger restricted-area-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
             </div>` : '');
         const layer = L.polygon(item.geo, {pane: 'restrictedAreaPane', color: '#dc3545', weight: 3, fillColor: 'url(#restrictedHatch)', fillOpacity: 0.55}).addTo(restrictedAreaLayer).bindPopup(popupHtml);
-        layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'dispatch-team-label', interactive: false});
+        layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'wr-polygon-label', interactive: false});
         layer.restrictedAreaId = item.id;
         if (String(item.id) === String(openId)) reopenLayer = layer;
     });
@@ -4091,7 +4103,7 @@ function renderSectorLayer(items) {
             // Verified Coverage mode is active, so scanning the map answers
             // "which sectors still need walking" without opening every popup.
             const tooltipCoverage = coverageModeActive ? sectorCoverageBadgeHtml(item) : '';
-            layer.bindTooltip(escapeHtml(item.label) + tooltipCoverage, {permanent: true, direction: 'center', className: 'dispatch-team-label', interactive: false});
+            layer.bindTooltip(escapeHtml(item.label) + tooltipCoverage, {permanent: true, direction: 'center', className: 'wr-polygon-label', interactive: false});
             layer.sectorId = item.id;
             // Verified Coverage gap-cell detail is only ever drawn for whichever
             // sector's popup is currently open (never all sectors at once — see
