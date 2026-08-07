@@ -473,6 +473,8 @@ return [
         'missing_person.years_short' => 'ετών',
         'missing_person.updated_at_prefix' => 'Ενημερώθηκε: {time}',
         'missing_person.last_seen_at_prefix' => 'Τελευταία εμφάνιση: {time}',
+        'missing_person.pick_map_instructions' => 'Κάντε κλικ στον χάρτη για να ορίσετε το σημείο τελευταίας εμφάνισης.',
+        'missing_person.pick_confirm_btn' => 'Χρήση αυτού του σημείου',
 
         // Mission admin
         'admin.mission_mgmt_title' => 'Διαχείριση αποστολής',
@@ -1463,6 +1465,8 @@ return [
         'missing_person.years_short' => 'y/o',
         'missing_person.updated_at_prefix' => 'Updated: {time}',
         'missing_person.last_seen_at_prefix' => 'Last seen: {time}',
+        'missing_person.pick_map_instructions' => 'Click on the map to set the last-known-seen point.',
+        'missing_person.pick_confirm_btn' => 'Use this point',
 
         'admin.mission_mgmt_title' => 'Mission Management',
         'admin.close_note' => 'Closing removes the mission from Operations and stops accepting new locations.',

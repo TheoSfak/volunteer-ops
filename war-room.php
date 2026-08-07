@@ -2356,9 +2356,8 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label small fw-semibold"><?= t('missing_person.last_seen_location_label') ?></label>
                                     <?php if (!$fieldMode): ?>
-                                    <div class="d-flex gap-2 flex-wrap">
+                                    <div>
                                         <button type="button" class="btn btn-outline-primary btn-sm" id="missingPersonPickOnMapBtn"><i class="bi bi-crosshair"></i> <?= t('missing_person.pick_on_map_btn') ?></button>
-                                        <button type="button" class="btn btn-outline-secondary btn-sm" id="missingPersonUseMapCenterBtn"><?= t('missing_person.use_map_center_btn') ?></button>
                                     </div>
                                     <div class="small text-muted mt-1" id="missingPersonLocationPreview"></div>
                                     <?php else: ?>
@@ -2377,6 +2376,38 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 </div>
             </div>
         </div>
+
+        <!-- Dedicated map picker for the last-known-location field above —
+             mirrors dispatchMapModal's own pattern (fullscreen, own lazily-
+             initialized Leaflet map, satellite toggle, renderFullMapReference
+             context layer) instead of reusing/hijacking the page's main map,
+             so picking a point doesn't require finding+scrolling to the main
+             map card first. Field-mode-gated like every other map-drawing
+             feature (the trigger button above already is too; this also
+             skips shipping an unusable map container in that mode's DOM). -->
+        <?php if (!$fieldMode): ?>
+        <div class="modal fade" id="missingPersonPickMapModal" tabindex="-1">
+            <div class="modal-dialog modal-fullscreen">
+                <div class="modal-content">
+                    <div class="modal-header py-2">
+                        <h5 class="modal-title"><i class="bi bi-geo-alt-fill me-1"></i><?= t('missing_person.last_seen_location_label') ?></h5>
+                        <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="missingPersonPickSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body p-0 d-flex flex-column">
+                        <div class="small text-muted px-2 py-1 bg-light border-bottom">
+                            <?= t('missing_person.pick_map_instructions') ?>
+                        </div>
+                        <div id="missingPersonPickMap" style="flex:1;min-height:0;"></div>
+                        <div class="p-2 border-top d-flex gap-2 justify-content-end bg-light">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="missingPersonPickUseCenterBtn"><?= t('missing_person.use_map_center_btn') ?></button>
+                            <button type="button" class="btn btn-success btn-sm" id="missingPersonPickConfirmBtn" disabled><i class="bi bi-check-lg me-1"></i><?= t('missing_person.pick_confirm_btn') ?></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
         <?php endif; ?>
         <?php endif; ?>
 
@@ -3505,13 +3536,6 @@ let arrowStart = null, arrowStartMarker = null;
 // next click, not a persistent toggleable tool). Consumed and cleared by
 // the map click handler below.
 let addingBuildingToSectorId = null;
-// Missing-person "pick last-known location on map" — same one-shot,
-// consumed-on-next-click idea as addingBuildingToSectorId above, but with no
-// id to carry through (there's only ever one missing-person profile per
-// mission). Armed by missingPersonPickOnMapBtn below, which hides the edit
-// modal first (so the click actually reaches the map); the click handler
-// reopens it.
-let pickingMissingPersonLocation = false;
 function cancelActiveDrawing() {
     if (map) { map.dragging.enable(); map.doubleClickZoom.enable(); }
     if (annotationDrawLayer) annotationDrawLayer.clearLayers();
@@ -4105,6 +4129,17 @@ function renderAnnotationsReference(layer) {
         }
     });
 }
+// Single dimmed reference pin for the mission's missing person (if the
+// mission is that type and a last-known location has been set) — every
+// composer (dispatch, sector split, new search area, restricted area,
+// route) needs this as context, e.g. "don't route the team away from where
+// they were last seen", without duplicating the lookup in each one.
+function renderMissingPersonReference(layer) {
+    if (!layer) return;
+    if (!missingPerson || missingPerson.last_seen_lat === null || missingPerson.last_seen_lat === undefined) return;
+    const icon = L.divIcon({className:'', html:'<i class="bi bi-person-fill" style="font-size:22px;color:#212529;opacity:0.6;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[22,22], iconAnchor:[11,20]});
+    L.marker([missingPerson.last_seen_lat, missingPerson.last_seen_lng], {icon}).addTo(layer).bindTooltip(escapeHtml(missingPerson.full_name));
+}
 // The one-call version most composers actually want: everything, in back-
 // to-front paint order (pins first so later shapes don't visually bury the
 // small dots, but pins still show — bindTooltip works regardless of order).
@@ -4117,6 +4152,7 @@ function renderFullMapReference(layer) {
     renderAnnotationsReference(layer);
     renderDispatchesReference(layer);
     renderPinsReference(layer);
+    renderMissingPersonReference(layer);
 }
 
 // restrictedAreasCard's flat list of drawn zones — the map popup (above) is
@@ -4595,13 +4631,6 @@ map.on('click', e => {
             };
             document.getElementById('sectorBuildingSave')?.addEventListener('click', save);
         }, 0);
-    } else if (pickingMissingPersonLocation) {
-        pickingMissingPersonLocation = false;
-        document.getElementById('mapCard')?.classList.remove('wr-draw-active');
-        document.getElementById('missingPersonLat').value = e.latlng.lat;
-        document.getElementById('missingPersonLng').value = e.latlng.lng;
-        updateMissingPersonLocationPreview();
-        new bootstrap.Modal(document.getElementById('missingPersonEditModal')).show();
     }
 });
 if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup('<strong>' + t('map.mission_point_label') + '</strong><br><?= h(addslashes($mission['title'])) ?>');
@@ -4618,16 +4647,66 @@ function updateMissingPersonLocationPreview() {
     const lat = latEl.value, lng = lngEl.value;
     preview.textContent = (lat && lng) ? `${parseFloat(lat).toFixed(5)}, ${parseFloat(lng).toFixed(5)}` : '';
 }
+// Dedicated map-picker modal for the last-known-location field — mirrors
+// dispatchMapModal's lazy-init-on-first-open pattern (map creation is
+// expensive, and the container has no real size until the modal has
+// actually faded in, hence the invalidateSize() below). A single marker,
+// not a shape/polygon like dispatch's — every click just replaces it.
+(function() {
+    const pickModalEl = document.getElementById('missingPersonPickMapModal');
+    if (!pickModalEl) return;
+    let pickMap = null, pickMarker = null, pickRefLayer = null;
+    const confirmBtn = document.getElementById('missingPersonPickConfirmBtn');
+
+    function setPickMarker(lat, lng) {
+        if (pickMarker) pickMap.removeLayer(pickMarker);
+        pickMarker = L.marker([lat, lng]).addTo(pickMap);
+        confirmBtn.disabled = false;
+    }
+
+    pickModalEl.addEventListener('shown.bs.modal', () => {
+        if (!pickMap) {
+            const center = missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73];
+            pickMap = L.map('missingPersonPickMap').setView(center, missionLocation.lat ? 13 : 7);
+            addMapBaseLayers(pickMap, 'missingPersonPickSatelliteToggle');
+            pickRefLayer = L.layerGroup().addTo(pickMap);
+            pickMap.on('click', e => setPickMarker(e.latlng.lat, e.latlng.lng));
+        }
+        pickRefLayer.clearLayers();
+        renderFullMapReference(pickRefLayer);
+        // Re-seed from the form's current hidden values every open (not just
+        // once at map-creation) — editing an existing point should show
+        // where it currently is, not wherever it was left from a previous
+        // pick-then-cancel in the same page visit.
+        if (pickMarker) { pickMap.removeLayer(pickMarker); pickMarker = null; }
+        confirmBtn.disabled = true;
+        const curLat = document.getElementById('missingPersonLat').value;
+        const curLng = document.getElementById('missingPersonLng').value;
+        if (curLat && curLng) {
+            setPickMarker(parseFloat(curLat), parseFloat(curLng));
+            pickMap.setView([parseFloat(curLat), parseFloat(curLng)], 15);
+        }
+        setTimeout(() => pickMap.invalidateSize(), 100);
+    });
+
+    document.getElementById('missingPersonPickUseCenterBtn').addEventListener('click', () => {
+        const c = pickMap.getCenter();
+        setPickMarker(c.lat, c.lng);
+    });
+
+    confirmBtn.addEventListener('click', () => {
+        if (!pickMarker) return;
+        const ll = pickMarker.getLatLng();
+        document.getElementById('missingPersonLat').value = ll.lat;
+        document.getElementById('missingPersonLng').value = ll.lng;
+        updateMissingPersonLocationPreview();
+        bootstrap.Modal.getInstance(pickModalEl)?.hide();
+        new bootstrap.Modal(document.getElementById('missingPersonEditModal')).show();
+    });
+})();
 document.getElementById('missingPersonPickOnMapBtn')?.addEventListener('click', () => {
     bootstrap.Modal.getInstance(document.getElementById('missingPersonEditModal'))?.hide();
-    pickingMissingPersonLocation = true;
-    document.getElementById('mapCard')?.classList.add('wr-draw-active');
-});
-document.getElementById('missingPersonUseMapCenterBtn')?.addEventListener('click', () => {
-    const center = map.getCenter();
-    document.getElementById('missingPersonLat').value = center.lat;
-    document.getElementById('missingPersonLng').value = center.lng;
-    updateMissingPersonLocationPreview();
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('missingPersonPickMapModal')).show();
 });
 updateMissingPersonLocationPreview();
 }
@@ -6331,6 +6410,17 @@ function renderPoiLayer(items) {
     });
 }
 
+// Reuses the existing #mediaViewModal lightbox — openMediaViewModal() above
+// builds its <img> src from a mission_photos id, but this feature's photo is
+// a plain filename on mission_missing_persons instead (no mission_photos row
+// at all), so this sets the same target elements directly rather than
+// forcing that id-based helper to support a second URL shape.
+function openMissingPersonPhoto(photo) {
+    const body = document.getElementById('mediaViewModalBody');
+    body.innerHTML = `<img src="uploads/missing-persons/${encodeURIComponent(photo)}" style="max-width:100%;max-height:80vh;">`;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('mediaViewModal')).show();
+}
+
 // Dark/bi-person-fill marker, deliberately distinct from POI's blue
 // bi-search above, for the single last-known-location pin of the mission's
 // missing person (if staff have set one). Same divIcon anchoring technique
@@ -6348,7 +6438,13 @@ function renderMissingPersonMarker(item) {
         </div>`,
         iconSize: [26, 34], iconAnchor: [13, 34],
     });
-    const popupHtml = `<strong>${escapeHtml(item.full_name)}</strong>` +
+    // Clicking the marker opens this popup (default Leaflet behavior for a
+    // bound popup) — the photo thumbnail inside it is the actual "open the
+    // photo" affordance the marker icon itself can't carry on its own.
+    const photoHtml = item.photo
+        ? `<img src="uploads/missing-persons/${encodeURIComponent(item.photo)}" alt="" style="width:100%;max-width:200px;border-radius:4px;cursor:pointer;display:block;margin-bottom:4px;" onclick='openMissingPersonPhoto(${JSON.stringify(item.photo)})'>`
+        : '';
+    const popupHtml = `${photoHtml}<strong>${escapeHtml(item.full_name)}</strong>` +
         (item.last_seen_label ? `<br>${escapeHtml(item.last_seen_label)}` : '') +
         (item.last_seen_at ? `<br><span class="small text-muted">${t('missing_person.last_seen_at_prefix', {time: item.last_seen_at})}</span>` : '');
     L.marker([item.last_seen_lat, item.last_seen_lng], {icon}).addTo(missingPersonLayer).bindPopup(popupHtml);
@@ -6367,7 +6463,7 @@ function renderMissingPersonCard(item) {
         return;
     }
     const photoHtml = item.photo
-        ? `<img src="uploads/missing-persons/${encodeURIComponent(item.photo)}" alt="" class="rounded" style="width:100px;height:100px;object-fit:cover;flex-shrink:0;">`
+        ? `<img src="uploads/missing-persons/${encodeURIComponent(item.photo)}" alt="" class="rounded" style="width:100px;height:100px;object-fit:cover;flex-shrink:0;cursor:pointer;" onclick='openMissingPersonPhoto(${JSON.stringify(item.photo)})'>`
         : '';
     const ageHtml = (item.age !== null && item.age !== undefined)
         ? ` <span class="text-muted fs-6">(${item.age} ${t('missing_person.years_short')})</span>` : '';
@@ -9433,6 +9529,7 @@ function renderRouteComposerAreas() {
     renderSectorsReference(routeComposerAreasLayer);
     renderRestrictedAreasReference(routeComposerAreasLayer);
     renderDispatchesReference(routeComposerAreasLayer);
+    renderMissingPersonReference(routeComposerAreasLayer);
 }
 
 function renderWaypointPanel() {
