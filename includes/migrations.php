@@ -5950,6 +5950,28 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 127,
+            'description' => 'Add mission_search_sectors.acknowledged_at/acknowledged_by (team explicitly confirms it saw a sector assignment — separate from status, same split as mission_route_progress\'s departed_at/arrived_at rather than collapsing "seen it" and "moving" into one status) and widen status ENUM (+ mission_sector_status_log\'s from/to_status) with en_route, inserted between assigned and in_progress so a team can self-report "heading to the sector" before "actively searching it".',
+            'up' => function () {
+                $col = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_search_sectors' AND COLUMN_NAME = 'acknowledged_at'");
+                if (!$col) {
+                    // Two separate ALTERs, not ADD COLUMN + ADD FOREIGN KEY combined in
+                    // one statement — that combo is a MariaDB-only rejection (errno 1823),
+                    // already hit once by the mission_photos.poi_id migration (see
+                    // sql/schema.sql fresh-install fix notes).
+                    dbExecute("ALTER TABLE mission_search_sectors
+                        ADD COLUMN acknowledged_at TIMESTAMP NULL AFTER status_updated_by,
+                        ADD COLUMN acknowledged_by INT UNSIGNED NULL AFTER acknowledged_at");
+                    dbExecute("ALTER TABLE mission_search_sectors ADD CONSTRAINT fk_sector_acknowledged_by FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL");
+                }
+                dbExecute("ALTER TABLE mission_search_sectors MODIFY COLUMN status ENUM('not_started','assigned','en_route','in_progress','completed','needs_recheck') NOT NULL DEFAULT 'not_started'");
+                dbExecute("ALTER TABLE mission_sector_status_log MODIFY COLUMN from_status ENUM('not_started','assigned','en_route','in_progress','completed','needs_recheck') NOT NULL");
+                dbExecute("ALTER TABLE mission_sector_status_log MODIFY COLUMN to_status ENUM('not_started','assigned','en_route','in_progress','completed','needs_recheck') NOT NULL");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

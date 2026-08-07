@@ -3990,6 +3990,9 @@ function renderSectorLayer(items) {
                 : '';
             const completePrompt = (item.buildings.length && item.all_buildings_complete && item.can_self_report)
                 ? `<div class="small text-success fw-semibold mt-1">${t('sector.all_floors_checked_prompt')}</div>` : '';
+            const ackBtn = item.can_acknowledge
+                ? `<br><button type="button" class="btn btn-sm btn-warning w-100 mt-1 sector-ack-btn" data-id="${item.id}">${t('banner.ack_btn')}</button>`
+                : '';
             const selfReportBtn = item.can_self_report
                 ? `<br><div class="mt-1 sector-advance-group">
                     <input type="text" class="form-control form-control-sm mb-1 sector-advance-note" placeholder="${t('sector.note_placeholder')}" maxlength="500">
@@ -4006,7 +4009,7 @@ function renderSectorLayer(items) {
                         ${teams.map(tm => `<option value="${tm.id}" ${String(tm.id) === String(item.team_id) ? 'selected' : ''}>${escapeHtml(tm.label)}</option>`).join('')}
                     </select>
                     <select class="form-select form-select-sm sector-status-select" data-id="${item.id}">
-                        ${['not_started','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
+                        ${['not_started','en_route','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
                     </select>
                     <button type="button" class="btn btn-sm btn-outline-primary mt-1 sector-add-building-btn" data-id="${item.id}"><i class="bi bi-building-add me-1"></i>${t('sector.add_building_btn')}</button>
                     ${item.status === 'not_started' && !item.buildings.length ? `<button type="button" class="btn btn-sm btn-outline-secondary mt-1 sector-split-btn" data-id="${item.id}"><i class="bi bi-scissors me-1"></i>${t('sector.split_btn')}</button>` : ''}
@@ -4014,7 +4017,7 @@ function renderSectorLayer(items) {
                 </div>` : '';
             const popupHtml = `<strong>${escapeHtml(item.label)}</strong><br>` +
                 `<span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span> ${escapeHtml(item.team_label)}${sectorCoverageBadgeHtml(item)}` +
-                buildingsSummary + completePrompt + selfReportBtn + manageHtml;
+                buildingsSummary + completePrompt + ackBtn + selfReportBtn + manageHtml;
 
             const layer = L.polygon(item.geo, {pane: 'sectorPane', color, fillColor: color, fillOpacity: 0.35, weight: 2}).addTo(sectorLayer).bindPopup(popupHtml);
             // Same sectorCoverageBadgeHtml() as the popup above (so the
@@ -4041,6 +4044,8 @@ function renderSectorLayer(items) {
 }
 sectorLayer?.on('popupopen', event => {
     const popupEl = event.popup.getElement();
+    const ackBtn = popupEl.querySelector('.sector-ack-btn');
+    if (ackBtn) ackBtn.addEventListener('click', () => sectorAcknowledge(ackBtn.dataset.id, ackBtn));
     const advBtn = popupEl.querySelector('.sector-advance-btn');
     if (advBtn) advBtn.addEventListener('click', () => sectorSelfAdvance(advBtn.dataset.id, advBtn.dataset.status, advBtn));
     const teamSelect = popupEl.querySelector('.sector-team-select');
@@ -4078,6 +4083,9 @@ let sectorsListRenderedSig = null;
 function sectorListRowHtml(item) {
     const buildingsSummary = item.buildings.length
         ? `<div class="small">🏢 ${item.buildings.filter(b => b.all_required_checked).length}/${item.buildings.length}</div>` : '';
+    const ackBtn = item.can_acknowledge
+        ? `<button type="button" class="btn btn-sm btn-warning w-100 mt-1 sector-ack-btn" data-id="${item.id}">${t('banner.ack_btn')}</button>`
+        : '';
     const advanceBtn = item.can_self_report
         ? `<div class="mt-1 sector-advance-group">
             <input type="text" class="form-control form-control-sm mb-1 sector-advance-note" placeholder="${t('sector.note_placeholder')}" maxlength="500">
@@ -4090,7 +4098,7 @@ function sectorListRowHtml(item) {
             ${teams.map(tm => `<option value="${tm.id}" ${String(tm.id) === String(item.team_id) ? 'selected' : ''}>${escapeHtml(tm.label)}</option>`).join('')}
         </select>
         <select class="form-select form-select-sm mt-1 sector-status-select" data-id="${item.id}">
-            ${['not_started','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
+            ${['not_started','en_route','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
         </select>
         ${item.status === 'not_started' && !item.buildings.length ? `<button type="button" class="btn btn-sm btn-outline-secondary mt-1 sector-split-btn" data-id="${item.id}"><i class="bi bi-scissors me-1"></i>${t('sector.split_btn')}</button>` : ''}
         <button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-delete-btn" data-id="${item.id}">${t('common.delete')}</button>` : '';
@@ -4100,7 +4108,7 @@ function sectorListRowHtml(item) {
             <span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span>${sectorCoverageBadgeHtml(item)}
         </div>
         <div class="small text-muted">${escapeHtml(item.team_label)}</div>
-        ${buildingsSummary}${advanceBtn}${manageHtml}
+        ${buildingsSummary}${ackBtn}${advanceBtn}${manageHtml}
     </div>`;
 }
 // Grouped by area (every sector belongs to exactly one) rather than one flat
@@ -4148,6 +4156,7 @@ function renderSectorsList(items) {
             sectorLayer.eachLayer(l => { if (String(l.sectorId) === row.dataset.id) l.openPopup(); });
         }
     }));
+    list.querySelectorAll('.sector-ack-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); sectorAcknowledge(btn.dataset.id, btn); }));
     list.querySelectorAll('.sector-advance-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); sectorSelfAdvance(btn.dataset.id, btn.dataset.status, btn); }));
     list.querySelectorAll('.sector-team-select').forEach(sel => sel.addEventListener('change', () => sectorAdminSetTeam(sel.dataset.id, sel.value, sel)));
     list.querySelectorAll('.sector-status-select').forEach(sel => sel.addEventListener('change', () => sectorAdminSetStatus(sel.dataset.id, sel.value, sel)));
@@ -4305,6 +4314,18 @@ function sectorRefreshAfter(newSectors, newAreas) {
     if (!fieldMode) { renderSectorLayer(sectors); renderSectorsList(sectors); renderAreaLayer(areas); }
     renderMySectors(sectors);
 }
+// Separate from sectorSelfAdvance below — acknowledging a fresh assignment
+// is its own explicit step, gated server-side (can_acknowledge / the
+// `acknowledge` action) before the advance button even becomes available,
+// same two-step shape as Route Orders' own ack-then-depart.
+function sectorAcknowledge(id, btnEl) {
+    if (btnEl) btnEl.disabled = true;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'acknowledge', id});
+    fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+        if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
+        else { alert(result.error || t('common.send_failed')); if (btnEl) btnEl.disabled = false; }
+    });
+}
 function sectorSelfAdvance(id, status, btnEl) {
     if (btnEl) btnEl.disabled = true;
     // Optional note, entered in the sibling input right next to the button —
@@ -4333,7 +4354,8 @@ function sectorFloorToggle(floorId, action, btnEl) {
 // "resume" and show the wrong label for one of them.
 function sectorActionLabel(currentStatus) {
     return {
-        'assigned': t('sector.action.start'),
+        'assigned': t('sector.action.depart'),
+        'en_route': t('sector.action.arrived'),
         'in_progress': t('sector.action.complete'),
         'completed': t('sector.action.flag_recheck'),
         'needs_recheck': t('sector.action.resume'),
@@ -4369,6 +4391,9 @@ function renderMySectors(items) {
         return;
     }
     list.innerHTML = mine.map(item => {
+        const ackBtn = item.can_acknowledge
+            ? `<button type="button" class="btn btn-sm btn-warning w-100 mt-1 sector-ack-btn" data-id="${item.id}">${t('banner.ack_btn')}</button>`
+            : '';
         const advanceBtn = item.can_self_report
             ? `<div class="mt-1 sector-advance-group">
                 <input type="text" class="form-control form-control-sm mb-1 sector-advance-note" placeholder="${t('sector.note_placeholder')}" maxlength="500">
@@ -4393,10 +4418,11 @@ function renderMySectors(items) {
                 <strong>${escapeHtml(item.label)}</strong>
                 <span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span>
             </div>
-            ${buildingsHtml}${completePrompt}${advanceBtn}
+            ${buildingsHtml}${completePrompt}${ackBtn}${advanceBtn}
         </div>`;
     }).join('');
 
+    list.querySelectorAll('.sector-ack-btn').forEach(btn => btn.addEventListener('click', () => sectorAcknowledge(btn.dataset.id, btn)));
     list.querySelectorAll('.sector-advance-btn').forEach(btn => btn.addEventListener('click', () => sectorSelfAdvance(btn.dataset.id, btn.dataset.status, btn)));
     list.querySelectorAll('.sector-floor-btn').forEach(btn => btn.addEventListener('click', () => sectorFloorToggle(btn.dataset.id, btn.dataset.action, btn)));
 }

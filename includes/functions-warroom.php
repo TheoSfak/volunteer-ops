@@ -258,8 +258,10 @@ function loadMissionSearchAreasForUser(int $missionId, bool $canManageWarRoom): 
  * War Room search-sector coverage tracking — polygon sub-divisions of a
  * search area (see loadMissionSearchAreasForUser() above), optionally
  * assigned to a team, tracked through a
- * not_started/assigned/in_progress/completed/needs_recheck lifecycle, with
- * an optional per-building/per-floor checklist for urban sectors.
+ * not_started/assigned/en_route/in_progress/completed/needs_recheck
+ * lifecycle (self-report additionally gated on acknowledged_at while still
+ * 'assigned' — see $needsAcknowledgeFirst below), with an optional
+ * per-building/per-floor checklist for urban sectors.
  *
  * Deliberately UNIVERSAL visibility (no team_id filter at all), unlike
  * loadMissionDispatchesForUser() above — the whole point of this feature is
@@ -270,11 +272,13 @@ function loadMissionSearchAreasForUser(int $missionId, bool $canManageWarRoom): 
 function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
     $rows = dbFetchAll(
         "SELECT s.id, s.area_id, s.team_id, s.label, s.geo, s.status, s.status_updated_at,
-                su.name AS status_updated_by_name, s.created_at, cu.name AS created_by_name,
+                su.name AS status_updated_by_name, s.acknowledged_at, au.name AS acknowledged_by_name,
+                s.created_at, cu.name AS created_by_name,
                 mt.codename, mt.team_number, mt.color
          FROM mission_search_sectors s
          LEFT JOIN mission_teams mt ON mt.id = s.team_id
          LEFT JOIN users su ON su.id = s.status_updated_by
+         LEFT JOIN users au ON au.id = s.acknowledged_by
          LEFT JOIN users cu ON cu.id = s.created_by
          WHERE s.mission_id = ?
          ORDER BY s.created_at",
@@ -385,6 +389,11 @@ function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageW
             && array_reduce($buildings, fn($carry, $b) => $carry && $b['all_required_checked'], true);
 
         $nextStatus = sectorSelfReportNextStatus($row['status']);
+        // A freshly-assigned, not-yet-acknowledged sector must be acknowledged
+        // before the team can advance it further — same two-step shape as
+        // Route Orders' separate ack-then-depart (mission_order_recipients
+        // .acknowledged_at gating mission_route_progress.departed_at).
+        $needsAcknowledgeFirst = $row['status'] === 'assigned' && !$row['acknowledged_at'];
 
         return [
             'id'                     => $sectorId,
@@ -396,13 +405,16 @@ function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageW
             'status_color'           => SECTOR_STATUS_COLORS[$row['status']] ?? 'secondary',
             'status_updated_at'      => $row['status_updated_at'] ? date('d/m H:i', strtotime($row['status_updated_at'])) : null,
             'status_updated_by_name' => $row['status_updated_by_name'],
+            'acknowledged_at'        => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
+            'acknowledged_by_name'   => $row['acknowledged_by_name'],
             'team_id'                => $teamId,
             'team_label'             => $teamId ? teamLabel($row['codename'], $row['team_number']) : t('sector.unassigned_option'),
             'team_color_bg'          => $teamColorBg,
             'team_color_fg'          => $teamColorFg,
             'is_my_team'             => $isMyTeam,
             'can_manage'             => $canManageWarRoom,
-            'can_self_report'        => $isApprovedParticipant && $isMyTeam && $nextStatus !== null,
+            'can_acknowledge'        => $isApprovedParticipant && $isMyTeam && $needsAcknowledgeFirst,
+            'can_self_report'        => $isApprovedParticipant && $isMyTeam && $nextStatus !== null && !$needsAcknowledgeFirst,
             'next_status'            => $nextStatus,
             'next_status_label'      => $nextStatus ? sectorStatusLabel($nextStatus) : null,
             'buildings'              => $buildings,
@@ -424,7 +436,8 @@ function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageW
  */
 function sectorSelfReportNextStatus(string $currentStatus): ?string {
     return [
-        'assigned'      => 'in_progress',
+        'assigned'      => 'en_route',
+        'en_route'      => 'in_progress',
         'in_progress'   => 'completed',
         'completed'     => 'needs_recheck',
         'needs_recheck' => 'in_progress',

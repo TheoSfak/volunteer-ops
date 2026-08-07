@@ -2173,10 +2173,14 @@ CREATE TABLE IF NOT EXISTS `mission_search_areas` (
 -- =============================================
 -- MISSION SEARCH SECTORS (War Room search-area coverage tracking — polygon
 -- sub-divisions of a search area, assigned to a team, tracked not_started/
--- assigned/in_progress/completed/needs_recheck; team_id is SET NULL not
--- CASCADE, unlike dispatch, since a sector is the durable coverage record and
--- must survive a team being deleted/recreated mid-mission. area_id IS
--- CASCADE — an area's sectors have no purpose once the area itself is gone)
+-- assigned/en_route/in_progress/completed/needs_recheck; team_id is SET NULL
+-- not CASCADE, unlike dispatch, since a sector is the durable coverage record
+-- and must survive a team being deleted/recreated mid-mission. area_id IS
+-- CASCADE — an area's sectors have no purpose once the area itself is gone.
+-- acknowledged_at/by (v127) is a separate explicit "the team saw this
+-- assignment" confirmation, deliberately not folded into the status chain —
+-- mirrors mission_route_progress's own split of departed_at/arrived_at
+-- rather than collapsing "seen it" and "moving" into one status)
 -- =============================================
 CREATE TABLE IF NOT EXISTS `mission_search_sectors` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -2185,9 +2189,11 @@ CREATE TABLE IF NOT EXISTS `mission_search_sectors` (
     `team_id` INT UNSIGNED NULL,
     `label` VARCHAR(255) NOT NULL,
     `geo` TEXT NOT NULL,
-    `status` ENUM('not_started','assigned','in_progress','completed','needs_recheck') NOT NULL DEFAULT 'not_started',
+    `status` ENUM('not_started','assigned','en_route','in_progress','completed','needs_recheck') NOT NULL DEFAULT 'not_started',
     `status_updated_at` TIMESTAMP NULL,
     `status_updated_by` INT UNSIGNED NULL,
+    `acknowledged_at` TIMESTAMP NULL,
+    `acknowledged_by` INT UNSIGNED NULL,
     `created_by` INT UNSIGNED NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
@@ -2195,6 +2201,7 @@ CREATE TABLE IF NOT EXISTS `mission_search_sectors` (
     FOREIGN KEY (`area_id`) REFERENCES `mission_search_areas`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`status_updated_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`acknowledged_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     INDEX `idx_sector_mission` (`mission_id`, `status`),
     INDEX `idx_sector_area` (`area_id`),
@@ -2208,8 +2215,8 @@ CREATE TABLE IF NOT EXISTS `mission_search_sectors` (
 CREATE TABLE IF NOT EXISTS `mission_sector_status_log` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `sector_id` INT UNSIGNED NOT NULL,
-    `from_status` ENUM('not_started','assigned','in_progress','completed','needs_recheck') NOT NULL,
-    `to_status` ENUM('not_started','assigned','in_progress','completed','needs_recheck') NOT NULL,
+    `from_status` ENUM('not_started','assigned','en_route','in_progress','completed','needs_recheck') NOT NULL,
+    `to_status` ENUM('not_started','assigned','en_route','in_progress','completed','needs_recheck') NOT NULL,
     `team_id` INT UNSIGNED NULL,
     `user_id` INT UNSIGNED NULL,
     `note` VARCHAR(500) NULL,

@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.160.0');
-define('DB_SCHEMA_VERSION', 126);
+define('APP_VERSION', '3.161.0');
+define('DB_SCHEMA_VERSION', 127);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
 // The download filename embeds this on purpose: the APK used to live at a
@@ -331,6 +331,7 @@ define('SHORTAGE_SEVERITY_COLORS', [
 define('SECTOR_STATUS_LABELS', [
     'not_started'   => 'Δεν έχει ξεκινήσει',
     'assigned'      => 'Ανατέθηκε',
+    'en_route'      => 'Καθ\' οδόν',
     'in_progress'   => 'Σε εξέλιξη',
     'completed'     => 'Ολοκληρώθηκε',
     'needs_recheck' => 'Χρειάζεται επανέλεγχο',
@@ -339,6 +340,7 @@ define('SECTOR_STATUS_LABELS', [
 define('SECTOR_STATUS_COLORS', [
     'not_started'   => 'secondary',
     'assigned'      => 'info',
+    'en_route'      => 'primary',
     'in_progress'   => 'warning',
     'completed'     => 'success',
     'needs_recheck' => 'danger',
