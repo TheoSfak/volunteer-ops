@@ -1267,11 +1267,24 @@ include __DIR__ . '/includes/header.php';
        weight here, and dispatch-team-label's name means "styled for
        dispatch team pills" — piggybacking its color onto that class would
        silently recolor dispatch labels too the day anyone adds one there.
-       Red (matches the polygon outlines themselves — #dc3545 is already the
-       search-area/restricted-area border color) + bold: plain grey text was
-       reported hard to read against the map. */
-    .wr-polygon-label { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; color: #dc3545; font-weight: 700; }
+       Red (matches the search-area polygon outline — #dc3545 is already its
+       border color) + bold: plain grey text was reported hard to read
+       against the map. font-weight 900 (not 700) and 14px (not Leaflet's
+       12px default) per direct follow-up feedback that even red+bold-700
+       still read too small/light at a glance. */
+    .wr-polygon-label { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; color: #dc3545; font-weight: 900; font-size: 14px; }
     .wr-polygon-label::before { display: none !important; }
+    /* Restricted areas are already solid red (border + hatch fill, see
+       renderRestrictedAreaLayer) — red text on that background is exactly
+       the low-contrast problem wr-polygon-label above was created to fix,
+       just recreated in a different way. Orange instead (#fd7e14, this
+       project's existing "orange" — already the default team color, see
+       schema.sql's volunteer_teams seed row) reuses everything else
+       (stripped box/arrow, bold, size) from wr-polygon-label via a second
+       class on the same tooltip rather than a full separate copy. Must be
+       declared after wr-polygon-label above — same specificity, so source
+       order decides which color wins. */
+    .wr-polygon-label-restricted { color: #fd7e14; }
     .war-room-hero { background: linear-gradient(135deg, #172554, #b91c1c); color: #fff; border-radius: 14px; }
     .war-room-hero h1 { color: #fff; font-weight: 700; }
     /* The action row can hold up to ~10 buttons for an admin (report, trail,
@@ -3776,7 +3789,7 @@ function renderRestrictedAreaLayer(items) {
                 <button type="button" class="btn btn-sm btn-outline-danger restricted-area-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
             </div>` : '');
         const layer = L.polygon(item.geo, {pane: 'restrictedAreaPane', color: '#dc3545', weight: 3, fillColor: 'url(#restrictedHatch)', fillOpacity: 0.55}).addTo(restrictedAreaLayer).bindPopup(popupHtml);
-        layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'wr-polygon-label', interactive: false});
+        layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'wr-polygon-label wr-polygon-label-restricted', interactive: false});
         layer.restrictedAreaId = item.id;
         if (String(item.id) === String(openId)) reopenLayer = layer;
     });
