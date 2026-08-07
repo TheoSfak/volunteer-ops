@@ -2,10 +2,13 @@
 /**
  * VolunteerOps - Search-Area Coverage Tracking Endpoint
  * War Room: admin draws polygon "sectors" on the shared map and assigns them
- * to a team; the assigned team (or admin) self-reports status through a
- * not_started/assigned/in_progress/completed/needs_recheck lifecycle. Urban
- * sectors can also carry a per-building/per-floor checklist. GET polls for
- * sectors visible to the caller, POST mutates. AJAX only.
+ * to a team; the team first acknowledges the assignment (`acknowledge`
+ * action, separate from status — mirrors mission_route_progress's own split
+ * of departed_at/arrived_at), then self-reports status through a
+ * not_started/assigned/en_route/in_progress/completed/needs_recheck
+ * lifecycle. Urban sectors can also carry a per-building/per-floor
+ * checklist. GET polls for sectors visible to the caller, POST mutates.
+ * AJAX only.
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -153,7 +156,7 @@ if ($action === 'status') {
     $note = trim((string) post('note'));
     $note = $note !== '' ? mb_substr($note, 0, 500) : null;
 
-    $sector = dbFetchOne("SELECT id, team_id, status, label FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
+    $sector = dbFetchOne("SELECT id, team_id, status, acknowledged_at, label FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
     if (!$sector) {
         echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
@@ -173,6 +176,15 @@ if ($action === 'status') {
             echo json_encode(['ok' => false, 'error' => t('sector.not_your_team')]);
             exit;
         }
+        // Must explicitly acknowledge a fresh assignment (the `acknowledge`
+        // action below) before advancing it any further — mirrors
+        // can_acknowledge/can_self_report's own gating in
+        // loadMissionSectorsForUser(); enforced here too since the UI
+        // hiding the advance button is not itself a real guarantee.
+        if ($sector['status'] === 'assigned' && !$sector['acknowledged_at']) {
+            echo json_encode(['ok' => false, 'error' => t('sector.must_acknowledge_first')]);
+            exit;
+        }
         if ($targetStatus !== sectorSelfReportNextStatus($sector['status'])) {
             echo json_encode(['ok' => false, 'error' => t('sector.invalid_transition')]);
             exit;
@@ -184,7 +196,7 @@ if ($action === 'status') {
         // create an inconsistent "assigned but nobody's assigned" state).
         // No adjacency restriction otherwise — full override, including
         // backward moves.
-        if (!in_array($targetStatus, ['not_started', 'in_progress', 'completed', 'needs_recheck'], true)) {
+        if (!in_array($targetStatus, ['not_started', 'en_route', 'in_progress', 'completed', 'needs_recheck'], true)) {
             echo json_encode(['ok' => false, 'error' => t('sector.invalid_transition')]);
             exit;
         }
@@ -215,6 +227,38 @@ if ($action === 'status') {
         $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null,
         $sector, $targetStatus, $userId, $canManageWarRoom
     );
+
+    echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
+    exit;
+}
+
+if ($action === 'acknowledge') {
+    $sectorId = (int) post('id');
+    $sector = dbFetchOne("SELECT id, team_id, acknowledged_at FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
+    if (!$sector) {
+        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+        exit;
+    }
+
+    if (!$canManageWarRoom) {
+        if (!$isApprovedParticipant) {
+            echo json_encode(['ok' => false, 'error' => t('sector.no_manage_permission')]);
+            exit;
+        }
+        $myTeamId = getUserTeamIdForMission($missionId, $userId);
+        if (!$sector['team_id'] || (int) $sector['team_id'] !== $myTeamId) {
+            echo json_encode(['ok' => false, 'error' => t('sector.not_your_team')]);
+            exit;
+        }
+    }
+
+    // Idempotent, same shape as mission-order.php's own acknowledge — a
+    // retry (flaky connection, double-tap) must not overwrite who/when
+    // first acknowledged.
+    if (!$sector['acknowledged_at']) {
+        dbExecute("UPDATE mission_search_sectors SET acknowledged_at = NOW(), acknowledged_by = ? WHERE id = ?", [$userId, $sectorId]);
+        logAudit('acknowledge_mission_sector', 'mission_search_sectors', $sectorId, null, ['mission_id' => $missionId]);
+    }
 
     echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
@@ -401,6 +445,17 @@ if ($action === 'assign') {
             "INSERT INTO mission_sector_status_log (sector_id, from_status, to_status, team_id, user_id, created_at) VALUES (?, 'assigned', 'not_started', ?, ?, NOW())",
             [$sectorId, $oldTeamId, $userId]
         );
+    }
+
+    // A team hand-off while the sector is still sitting at 'assigned'
+    // (whether it already was, or the branch above just promoted it from
+    // not_started) means whoever's attached now hasn't confirmed anything
+    // yet — an earlier team's acknowledgment must not carry over onto them.
+    // Sectors already past 'assigned' (en_route+) keep acknowledged_at
+    // untouched, same "don't erase recorded progress" spirit as status above.
+    $resultingStatus = ($newTeamId && $sector['status'] === 'not_started') ? 'assigned' : $sector['status'];
+    if ($newTeamId !== $oldTeamId && $resultingStatus === 'assigned') {
+        dbExecute("UPDATE mission_search_sectors SET acknowledged_at = NULL, acknowledged_by = NULL WHERE id = ?", [$sectorId]);
     }
 
     if ($newTeamId && $newTeamId !== $oldTeamId) {
