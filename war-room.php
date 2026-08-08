@@ -1076,6 +1076,11 @@ if (get('ajax') === '1') {
     $annotations = loadMissionAnnotationsForMission($missionId);
     $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
     $sectors = loadMissionSectorsForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
+    // Only the id/leader/roster fields the live Teams card actually
+    // re-renders are needed here (see renderTeamRosters() further down) —
+    // array_values() so this comes through as a JSON array, not an object
+    // keyed by team id like the full-page render's own $teams stays as.
+    $teams = array_values(loadMissionTeamsForMission($missionId));
     // Hazard zones are mission-wide, not team/area-scoped (no team_id on
     // mission_restricted_areas at all) — unlike shortage reports/SOS above,
     // there's no reason to hide a danger zone's boundary from the very
@@ -1111,6 +1116,7 @@ if (get('ajax') === '1') {
         'annotations' => $annotations,
         'areas' => $areas,
         'sectors' => $sectors,
+        'teams' => $teams,
         'restrictedAreas' => $restrictedAreas,
         'restrictedAreaBreaches' => $restrictedAreaBreaches,
         'restrictedAreaBreachHistory' => $restrictedAreaBreachHistory,
@@ -1205,51 +1211,7 @@ $activeParticipants = array_values(array_filter($participants, fn($participant) 
 ));
 
 // ── Mission teams ─────────────────────────────────────────────────────────
-$teamRows = dbFetchAll(
-    "SELECT mt.id, mt.codename, mt.team_number, mt.color, mt.briefing_token, mt.leader_id, l.name AS leader_name,
-            l.is_external AS leader_is_external, l.guest_org_name AS leader_guest_org_name, l.guest_country_code AS leader_guest_country_code,
-            lht.name AS leader_home_team_name, lht.color AS leader_home_team_color,
-            mtm.user_id, u.name AS member_name, u.is_external AS member_is_external, u.guest_org_name AS member_guest_org_name, u.guest_country_code AS member_guest_country_code,
-            mht.name AS member_home_team_name, mht.color AS member_home_team_color
-     FROM mission_teams mt
-     LEFT JOIN users l ON l.id = mt.leader_id
-     LEFT JOIN volunteer_teams lht ON lht.id = l.volunteer_team_id
-     LEFT JOIN mission_team_members mtm ON mtm.team_id = mt.id
-     LEFT JOIN users u ON u.id = mtm.user_id
-     LEFT JOIN volunteer_teams mht ON mht.id = u.volunteer_team_id
-     WHERE mt.mission_id = ?
-     ORDER BY mt.created_at, u.name",
-    [$missionId]
-);
-$teams = [];
-foreach ($teamRows as $row) {
-    $tid = (int)$row['id'];
-    if (!isset($teams[$tid])) {
-        $teams[$tid] = [
-            'id' => $tid,
-            'codename' => $row['codename'],
-            'team_number' => $row['team_number'],
-            'color' => $row['color'],
-            'briefing_token' => $row['briefing_token'],
-            'leader_id' => $row['leader_id'] !== null ? (int)$row['leader_id'] : null,
-            'leader_name' => $row['leader_name'],
-            'leader_is_external' => (bool) $row['leader_is_external'],
-            'leader_guest_org_name' => $row['leader_guest_org_name'],
-            'leader_guest_country_code' => $row['leader_guest_country_code'],
-            'leader_home_team_name' => $row['leader_home_team_name'],
-            'leader_home_team_color' => $row['leader_home_team_color'],
-            'members' => [],
-        ];
-    }
-    if ($row['user_id'] !== null) {
-        $teams[$tid]['members'][] = [
-            'user_id' => (int)$row['user_id'], 'name' => $row['member_name'],
-            'is_external' => (bool) $row['member_is_external'], 'guest_org_name' => $row['member_guest_org_name'],
-            'guest_country_code' => $row['member_guest_country_code'],
-            'home_team_name' => $row['member_home_team_name'], 'home_team_color' => $row['member_home_team_color'],
-        ];
-    }
-}
+$teams = loadMissionTeamsForMission($missionId);
 
 // Lazy briefing-link generation: a team created before its mission was
 // flagged special (or before this feature existed) simply has a NULL
@@ -2055,9 +2017,9 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             <div class="list-group list-group-flush">
                 <?php foreach ($teams as $team): ?>
                 <?php [$teamBg, $teamFg] = teamBadgeColors($team['color']); ?>
-                <div class="list-group-item">
+                <div class="list-group-item" data-team-id="<?= $team['id'] ?>">
                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
-                        <div>
+                        <div class="wr-team-roster">
                             <span class="badge fs-6 me-2" style="background:<?= h($teamBg) ?>;color:<?= h($teamFg) ?>;"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
                             <?php if ($team['leader_name']): ?>
                             <span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i><?= h($team['leader_name']) ?></span>
@@ -3701,6 +3663,61 @@ function flagHtml(countryCode) {
     if (!countryCode || !/^[A-Za-z]{2}$/.test(countryCode)) return '';
     return `<img class="flag-icon" src="${FLAG_ASSET_BASE}${countryCode.toLowerCase()}.svg" alt="">`;
 }
+// Mirrors teamBadgeColors()/teamLabel() in includes/functions-warroom.php —
+// needed client-side so the Teams card's roster can be live-refreshed from
+// the poll (renderTeamRosters() below) without a full page reload.
+const TEAM_COLOR_TEXT = {'#008300': '#fff', '#4a3aa7': '#fff'};
+function teamBadgeColorsJs(color) {
+    if (!color) return ['#212529', '#fff'];
+    return [color, TEAM_COLOR_TEXT[color] || '#000'];
+}
+function teamLabel(codename, teamNumber) {
+    if (!codename) return '';
+    return (teamNumber !== null && teamNumber !== undefined && teamNumber !== '') ? (codename + ' ' + teamNumber) : codename;
+}
+// Mirrors homeTeamCornerBadgeHtml() in includes/functions-warroom.php —
+// intentionally duplicated rather than reusing guestNameHtml()'s inline
+// badge, same reasoning as the PHP version's own doc comment.
+function homeTeamCornerBadgeHtml(teamName, teamColor, isExternal, countryCode) {
+    if (teamColor === null || teamColor === undefined) return '';
+    const [bg, fg] = teamBadgeColorsJs(teamColor);
+    const flag = flagHtml(isExternal ? countryCode : 'GR');
+    const team = (teamName && String(teamName).trim() !== '') ? teamName : t('guest.org_unknown');
+    return `<span class="team-name-badge-corner" style="background:${bg};color:${fg}" title="${escapeHtml(team)}">${flag}${escapeHtml(team)}</span>`;
+}
+// Rebuilds one team's roster HTML (badge, leader line, member badges) —
+// exactly what the PHP template's own #teamsCard loop renders for
+// .wr-team-roster, kept in sync by hand since this is client-only data.
+function teamRosterHtml(team) {
+    const [teamBg, teamFg] = teamBadgeColorsJs(team.color);
+    let html = `<span class="badge fs-6 me-2" style="background:${teamBg};color:${teamFg};">${escapeHtml(teamLabel(team.codename, team.team_number))}</span>`;
+    if (team.leader_name) {
+        html += `<span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i>${escapeHtml(team.leader_name)}</span>`;
+        html += homeTeamCornerBadgeHtml(team.leader_home_team_name, team.leader_home_team_color, team.leader_is_external, team.leader_guest_country_code);
+    }
+    html += '<div class="small mt-2">' + team.members.map(m => {
+        const [mBg, mFg] = teamBadgeColorsJs(m.home_team_color);
+        return `<span class="badge bg-light text-dark border me-1 mb-1">${guestNameHtml(m.name, m.is_external, m.home_team_name, mBg, mFg, m.guest_country_code)}${m.user_id === team.leader_id ? ' ⭐' : ''}</span>`;
+    }).join('') + '</div>';
+    return html;
+}
+// Live-refreshes each EXISTING team's roster from the poll, so another
+// admin's edit (add/remove a member, change leader) shows up here within
+// one poll cycle instead of needing a manual reload. Deliberately doesn't
+// add a row for a brand-new team created by someone else — its Edit button
+// has no matching #editTeamModal-{id} in this tab's DOM to open, and
+// building one here would duplicate the PHP template's own eligible-member
+// pool logic. A disbanded team's row IS removed live though — that's just
+// deleting a DOM node, no modal involved.
+function renderTeamRosters(items) {
+    const byId = new Map(items.map(team => [String(team.id), team]));
+    document.querySelectorAll('[data-card-id="teamsCard"] [data-team-id]').forEach(row => {
+        const team = byId.get(row.dataset.teamId);
+        if (!team) { row.remove(); return; }
+        const rosterEl = row.querySelector('.wr-team-roster');
+        if (rosterEl) rosterEl.innerHTML = teamRosterHtml(team);
+    });
+}
 // Small colored pill (team's own badge color, or the dark "all teams" fallback
 // teamBadgeColors() already returns for a null team) shown as a permanent —
 // not hover/click-only — Leaflet tooltip, so which team a dispatch point/area
@@ -4032,19 +4049,23 @@ document.getElementById('sectorsCardClearAllBtn')?.addEventListener('click', () 
         }
     });
 });
-// Search areas get their permanent label OUTSIDE the polygon (just above
-// its bounding box) instead of centered like every other polygon label on
-// this map — once an area is divided, a sector's own centered label can
-// land right on the area's centroid too, and the two used to overlap into
-// unreadable text. Sectors keep direction:'center' — a sector never has
-// another label competing for its own centroid, only the area does.
+// Search areas get their permanent label OUTSIDE the polygon (just past its
+// own northernmost corner) instead of centered like every other polygon
+// label on this map — once an area is divided, a sector's own centered
+// label can land right on the area's centroid too, and the two used to
+// overlap into unreadable text. Sectors keep direction:'center' — a sector
+// never has another label competing for its own centroid, only the area
+// does. Anchored to the polygon's own northernmost vertex (a real corner of
+// the shape) with a small FIXED nudge, not scaled by the polygon's size —
+// a first version scaled the offset with the area's own height and drifted
+// far enough from a realistically-sized area to start overlapping a
+// different, unrelated area drawn further north on the same map.
 function areaLabelAnchor(geo) {
-    const lats = geo.map(p => p[0]);
-    const lngs = geo.map(p => p[1]);
-    const maxLat = Math.max(...lats);
-    const minLat = Math.min(...lats);
-    const midLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
-    return [maxLat + Math.max((maxLat - minLat) * 0.12, 0.0006), midLng];
+    let north = geo[0];
+    for (const pt of geo) {
+        if (pt[0] > north[0]) north = pt;
+    }
+    return [north[0] + 0.00025, north[1]];
 }
 
 let areasRenderedSig = null;
@@ -8121,6 +8142,7 @@ function pollWarRoomData() {
             if (!fieldMode) renderMissingPersonMarker(missingPerson);
         }
         if (data.areas) areas = data.areas;
+        if (!fieldMode && data.teams) renderTeamRosters(data.teams);
         if (data.sectors) {
             sectors = data.sectors;
             renderMySectors(sectors);

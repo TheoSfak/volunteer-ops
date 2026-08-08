@@ -956,6 +956,63 @@ function homeTeamCornerBadgeHtml(?string $teamName, ?string $teamColor, bool $is
 }
 
 /**
+ * War Room: every mission team with its leader and full member roster, keyed
+ * by team id (not a plain 0-indexed array — war-room.php's lazy
+ * briefing-token backfill on the full-page render still needs the id as the
+ * array key). Shared by that full-page render and the live ajax=1 poll, so a
+ * team's membership or leader changing reaches every other open War Room tab
+ * within one poll cycle instead of needing a manual reload.
+ */
+function loadMissionTeamsForMission(int $missionId): array {
+    $teamRows = dbFetchAll(
+        "SELECT mt.id, mt.codename, mt.team_number, mt.color, mt.briefing_token, mt.leader_id, l.name AS leader_name,
+                l.is_external AS leader_is_external, l.guest_org_name AS leader_guest_org_name, l.guest_country_code AS leader_guest_country_code,
+                lht.name AS leader_home_team_name, lht.color AS leader_home_team_color,
+                mtm.user_id, u.name AS member_name, u.is_external AS member_is_external, u.guest_org_name AS member_guest_org_name, u.guest_country_code AS member_guest_country_code,
+                mht.name AS member_home_team_name, mht.color AS member_home_team_color
+         FROM mission_teams mt
+         LEFT JOIN users l ON l.id = mt.leader_id
+         LEFT JOIN volunteer_teams lht ON lht.id = l.volunteer_team_id
+         LEFT JOIN mission_team_members mtm ON mtm.team_id = mt.id
+         LEFT JOIN users u ON u.id = mtm.user_id
+         LEFT JOIN volunteer_teams mht ON mht.id = u.volunteer_team_id
+         WHERE mt.mission_id = ?
+         ORDER BY mt.created_at, u.name",
+        [$missionId]
+    );
+    $teams = [];
+    foreach ($teamRows as $row) {
+        $tid = (int) $row['id'];
+        if (!isset($teams[$tid])) {
+            $teams[$tid] = [
+                'id' => $tid,
+                'codename' => $row['codename'],
+                'team_number' => $row['team_number'],
+                'color' => $row['color'],
+                'briefing_token' => $row['briefing_token'],
+                'leader_id' => $row['leader_id'] !== null ? (int) $row['leader_id'] : null,
+                'leader_name' => $row['leader_name'],
+                'leader_is_external' => (bool) $row['leader_is_external'],
+                'leader_guest_org_name' => $row['leader_guest_org_name'],
+                'leader_guest_country_code' => $row['leader_guest_country_code'],
+                'leader_home_team_name' => $row['leader_home_team_name'],
+                'leader_home_team_color' => $row['leader_home_team_color'],
+                'members' => [],
+            ];
+        }
+        if ($row['user_id'] !== null) {
+            $teams[$tid]['members'][] = [
+                'user_id' => (int) $row['user_id'], 'name' => $row['member_name'],
+                'is_external' => (bool) $row['member_is_external'], 'guest_org_name' => $row['member_guest_org_name'],
+                'guest_country_code' => $row['member_guest_country_code'],
+                'home_team_name' => $row['member_home_team_name'], 'home_team_color' => $row['member_home_team_color'],
+            ];
+        }
+    }
+    return $teams;
+}
+
+/**
  * War Room: command-staff recipient set for admin-facing alerts (shortage
  * reports, and reusable for similar future cases) — system/dept admins +
  * this mission's shift leaders + the mission's responsible_user_id. Mirrors
