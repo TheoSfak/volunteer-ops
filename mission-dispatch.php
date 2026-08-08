@@ -203,12 +203,13 @@ if ($action === 'create') {
     $teamId = ($teamIdRaw !== '' && $teamIdRaw !== null) ? (int) $teamIdRaw : null;
     $team = null;
     if ($teamId) {
-        $team = dbFetchOne("SELECT id FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
+        $team = dbFetchOne("SELECT id, codename, team_number FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
         if (!$team) {
             echo json_encode(['ok' => false, 'error' => t('common.team_not_found')]);
             exit;
         }
     }
+    $teamLabel = $team ? teamLabel($team['codename'], $team['team_number']) : null;
 
     $type = post('type');
     $label = trim((string) post('label'));
@@ -294,6 +295,32 @@ if ($action === 'create') {
             'tag' => 'dispatch-point-mission-' . $missionId,
             'bannerMission' => $missionId,
         ]);
+    }
+
+    // Every System Administrator not already a real recipient above (not on
+    // the targeted team, or not even an approved participant of this mission
+    // at all) still gets the identical banner + sound alert, worded as a
+    // third-person FYI naming who the real target was — admins watching any
+    // Action Room see/hear everything in it, same rule now applied to
+    // createMissionOrderAndNotify() for the other admin-to-user order types.
+    $adminBystanderIds = array_values(array_diff(getSystemAdminIds((int) $userId), $recipientIds));
+    if ($adminBystanderIds) {
+        $fyiLangs = getUserLanguages($adminBystanderIds);
+        foreach ($adminBystanderIds as $adminId) {
+            $lang = $fyiLangs[$adminId] ?? DEFAULT_LANGUAGE;
+            $fyiMessage = t('dispatch.create_admin_fyi', [
+                'actor' => $user['name'],
+                'kind' => t($kindKey, [], $lang),
+                'mission' => $mission['title'],
+                'label_suffix' => $labelSuffix,
+                'target' => $teamLabel ?: t('common.all_teams', [], $lang),
+            ], $lang);
+            sendNotification($adminId, t($titleKey, [], $lang), $fyiMessage, 'info', '', [
+                'url' => $warRoomUrl,
+                'tag' => 'dispatch-point-mission-' . $missionId,
+                'bannerMission' => $missionId,
+            ]);
+        }
     }
 
     echo json_encode(['ok' => true, 'id' => (int) $dispatchId]);
