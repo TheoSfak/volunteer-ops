@@ -803,7 +803,7 @@ foreach (dbFetchAll(
         $pingIsStaleByVolunteerId[$volunteerId] = strtotime($pingRow['last_ping_at']) < (time() - $pingStaleThresholdSeconds);
     }
     $participantLiveByVolunteerId[$volunteerId] = [
-        'last_ping_time' => $pingRow['last_ping_at'] ? date('H:i', strtotime($pingRow['last_ping_at'])) : null,
+        'last_ping_time' => $pingRow['last_ping_at'] ? formatDateTime($pingRow['last_ping_at'], 'H:i d/m/Y') : null,
         'field_status' => $pingRow['field_status'],
         'continuous_field_minutes' => $continuousFieldMinutesByVolunteerId[$volunteerId] ?? null,
     ];
@@ -907,7 +907,12 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 'is_external' => (bool) $pin['is_external'], 'guest_org_name' => $pin['guest_org_name'],
                 'home_team_name' => $pin['home_team_name'], 'home_team_color_bg' => $homeBg, 'home_team_color_fg' => $homeFg,
                 'guest_country_code' => $pin['guest_country_code'],
-                'time' => date('H:i', $pingTs),
+                // Includes the date, not just H:i — same reasoning already
+                // applied to the GPS trail's own 'time' field (see
+                // loadMissionTrailForMission()): a shift, and therefore its
+                // last ping, can be from a completely different day (or, for
+                // an old/reopened mission, a different year) than "now".
+                'time' => date('H:i d/m/Y', $pingTs),
                 'is_stale' => $isStale, 'is_moving' => $isMoving, 'heading_deg' => $headingDeg,
                 'battery_level' => $pin['battery_level'] !== null ? (int) $pin['battery_level'] : null,
                 'continuous_field_minutes' => $continuousFieldMinutesByVolunteerId[(int) $pin['user_id']] ?? null,
@@ -2108,7 +2113,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 $fatigueM = $fatigueMinutes !== null ? $fatigueMinutes % 60 : 0;
                 ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap" id="participant-row-<?= (int)$participant['volunteer_id'] ?>">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? 'presence-online' : 'presence-offline' ?>" title="<?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => date('H:i', strtotime($participant['last_ping_at']))]) : t('participants.no_ping') ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= (!empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= $isFatigued ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? 'presence-online' : 'presence-offline' ?>" title="<?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping') ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= (!empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= $isFatigued ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>" id="status-badge-<?= (int)$participant['volunteer_id'] ?>">
                         <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
@@ -2146,7 +2151,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                                     <?php foreach ($activeParticipants as $participant): ?>
                                     <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
                                         <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
-                                        <small class="text-muted"><?= $participant['last_ping_at'] ? date('H:i', strtotime($participant['last_ping_at'])) : t('common.no_ping_short') ?></small>
+                                        <small class="text-muted"><?= $participant['last_ping_at'] ? formatDateTime($participant['last_ping_at'], 'H:i d/m/Y') : t('common.no_ping_short') ?></small>
                                     </label>
                                     <?php endforeach; ?>
                                 </div>
@@ -4027,6 +4032,21 @@ document.getElementById('sectorsCardClearAllBtn')?.addEventListener('click', () 
         }
     });
 });
+// Search areas get their permanent label OUTSIDE the polygon (just above
+// its bounding box) instead of centered like every other polygon label on
+// this map — once an area is divided, a sector's own centered label can
+// land right on the area's centroid too, and the two used to overlap into
+// unreadable text. Sectors keep direction:'center' — a sector never has
+// another label competing for its own centroid, only the area does.
+function areaLabelAnchor(geo) {
+    const lats = geo.map(p => p[0]);
+    const lngs = geo.map(p => p[1]);
+    const maxLat = Math.max(...lats);
+    const minLat = Math.min(...lats);
+    const midLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
+    return [maxLat + Math.max((maxLat - minLat) * 0.12, 0.0006), midLng];
+}
+
 let areasRenderedSig = null;
 function renderAreaLayer(items) {
     if (!areaLayer) return;
@@ -4054,7 +4074,9 @@ function renderAreaLayer(items) {
         const popupHtml = `<strong>${escapeHtml(item.label)}</strong>${rollup}${manageHtml}`;
 
         const layer = L.polygon(item.geo, {pane: 'areaPane', color: '#dc3545', weight: 4, dashArray: '10,6', fillColor: '#dc3545', fillOpacity: 0.06}).addTo(areaLayer).bindPopup(popupHtml);
-        layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'wr-polygon-label', interactive: false});
+        L.marker(areaLabelAnchor(item.geo), {icon: L.divIcon({className: '', iconSize: [0, 0]}), interactive: false})
+            .bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'wr-polygon-label', interactive: false})
+            .addTo(areaLayer);
         layer.areaId = item.id;
         if (String(item.id) === String(openAreaId)) reopenAreaLayer = layer;
     });
