@@ -549,6 +549,13 @@ return [
         'map.mission_point_label' => 'Σημείο αποστολής',
         'map.pin_stale' => 'Παλιό στίγμα',
         'map.pin_low_battery' => 'Χαμηλή μπαταρία ({pct}%)',
+        // Three fixed tiers for the pin popup's always-shown battery badge
+        // (batteryTier() in war-room.php) — separate from map.pin_low_battery
+        // above, which stays reserved for the low-battery-only badges in
+        // Nearby Teams / Team Distances.
+        'map.pin_battery_charged' => 'Φορτισμένη μπαταρία ({pct}%)',
+        'map.pin_battery_moderate' => 'Μέτρια μπαταρία ({pct}%)',
+        'map.pin_battery_low' => 'Χαμηλή μπαταρία – Προσοχή! ({pct}%)',
         'map.charge_alert_btn' => 'Φόρτισε!',
         'map.charge_alert_inactive_hint' => 'Αυτό το κουμπί ενεργοποιείται όταν η μπαταρία είναι κάτω από {pct}%.',
         'map.pin_moving' => 'Σε κίνηση',
@@ -1545,6 +1552,13 @@ return [
         'map.mission_point_label' => 'Mission point',
         'map.pin_stale' => 'Old ping',
         'map.pin_low_battery' => 'Low battery ({pct}%)',
+        // Three fixed tiers for the pin popup's always-shown battery badge
+        // (batteryTier() in war-room.php) — separate from map.pin_low_battery
+        // above, which stays reserved for the low-battery-only badges in
+        // Nearby Teams / Team Distances.
+        'map.pin_battery_charged' => 'Charged battery ({pct}%)',
+        'map.pin_battery_moderate' => 'Moderate battery ({pct}%)',
+        'map.pin_battery_low' => 'Low battery – Attention! ({pct}%)',
         'map.charge_alert_btn' => 'Charge!',
         'map.charge_alert_inactive_hint' => 'This button activates when battery is below {pct}%.',
         'map.pin_moving' => 'Moving',
