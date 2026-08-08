@@ -141,8 +141,7 @@ if (isPost()) {
         } else {
             createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'location', $user['id'], $requestedIds,
-                'order.location.title', [], null, 'order.location.message', ['mission' => $mission['title']],
-                'order.location.broadcast', ['mission' => $mission['title']]
+                'order.location.title', [], null, 'order.location.message', ['mission' => $mission['title']]
             );
             logAudit('request_mission_location', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
             setFlash('success', t('order.location.sent_flash', ['count' => count($requestedIds)]));
@@ -161,8 +160,7 @@ if (isPost()) {
         } else {
             createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'photo', $user['id'], $requestedIds,
-                'order.photo.title', [], null, 'order.photo.message', ['mission' => $mission['title']],
-                'order.photo.broadcast', ['mission' => $mission['title']]
+                'order.photo.title', [], null, 'order.photo.message', ['mission' => $mission['title']]
             );
             logAudit('request_mission_photo', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
             setFlash('success', t('order.photo.sent_flash', ['count' => count($requestedIds)]));
@@ -181,8 +179,7 @@ if (isPost()) {
         } else {
             createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'video', $user['id'], $requestedIds,
-                'order.video.title', [], null, 'order.video.message', ['mission' => $mission['title']],
-                'order.video.broadcast', ['mission' => $mission['title']]
+                'order.video.title', [], null, 'order.video.message', ['mission' => $mission['title']]
             );
             logAudit('request_mission_video', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
             setFlash('success', t('order.video.sent_flash', ['count' => count($requestedIds)]));
@@ -207,7 +204,6 @@ if (isPost()) {
             createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'task', $user['id'], $requestedIds,
                 'order.task.title', ['mission' => $mission['title']], $taskText, '', [],
-                'order.task.broadcast', ['mission' => $mission['title'], 'text' => $taskText],
                 $taskText
             );
             logAudit('request_mission_task', 'missions', $missionId, null, ['recipient_ids' => $requestedIds, 'task_text' => $taskText]);
@@ -281,7 +277,6 @@ if (isPost()) {
             $orderId = createMissionOrderAndNotify(
                 $missionId, $mission['title'], 'message', $user['id'], $recipientIds,
                 'global_message.title', ['mission' => $mission['title']], $broadcastText !== '' ? $broadcastText : t('global_message.photo_only_text'), '', [],
-                'global_message.broadcast', ['mission' => $mission['title']],
                 $broadcastText !== '' ? $broadcastText : null
             );
 
@@ -317,7 +312,6 @@ if (isPost()) {
         createMissionOrderAndNotify(
             $missionId, $mission['title'], 'return_to_base', $user['id'], $recipientIds,
             'end_mission_broadcast.title', ['mission' => $mission['title']], null,
-            'end_mission_broadcast.message', ['mission' => $mission['title']],
             'end_mission_broadcast.message', ['mission' => $mission['title']],
             null, 'return_to_base'
         );
