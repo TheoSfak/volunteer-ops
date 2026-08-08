@@ -1060,6 +1060,29 @@ return [
         // Guest org-name tooltip (shown on a guest's name everywhere in Action Room)
         'guest.org_tooltip' => 'Ομάδα guest: {org}',
         'guest.org_unknown' => 'Εξωτερική ομάδα',
+
+        // Weather card + wind-direction map control (weather_map_compass_enabled)
+        'weather.card_title' => 'Πρόβλεψη Καιρού',
+        'weather.forecast_for_prefix' => 'Πρόβλεψη για {time}',
+        'weather.source_owm' => 'Πηγή: OpenWeatherMap',
+        'weather.fallback_location_note' => 'Ενδεικτική τοποθεσία (Ηράκλειο) — η αποστολή δεν έχει συντεταγμένες',
+        'weather.wind_label' => 'Άνεμος',
+        'weather.wind_from_prefix' => 'Άνεμος από {dir}',
+        'weather.wind_calm' => 'ήρεμος',
+        'weather.wind_warning' => 'δυνατός',
+        'weather.wind_danger' => 'επικίνδυνος',
+        // compass.n/ne/e/se/s/sw/w/nw already exist above (near common.unit_km) — reused as-is.
+
+        // Exposure-urgency estimate (exposure_urgency_enabled, missing-person
+        // missions only) — deliberately no "survival"/death wording anywhere
+        // here, see the setting's own description in settings.php.
+        'exposure.section_title' => 'Εκτίμηση Επείγοντος λόγω Έκθεσης',
+        'exposure.margin_label' => 'εκτιμώμενο περιθώριο δράσης',
+        'exposure.monitoring_only' => 'Μόνο παρακολούθηση — ήπιες συνθήκες',
+        'exposure.overdue_label' => 'πέραν του ενδεικτικού παραθύρου — μέγιστη προτεραιότητα',
+        'exposure.overdue_suffix' => 'υπέρβαση',
+        'exposure.hm_format' => '{h}ω {m}λ',
+        'exposure.note' => 'Ενδεικτικός υπολογισμός από θερμοκρασία, άνεμο και ηλικία — όχι κλινική πρόγνωση.',
     ],
     'en' => [
         'common.mission_not_found' => 'Mission not found.',
@@ -2058,5 +2081,28 @@ return [
         // Guest org-name tooltip (shown on a guest's name everywhere in Action Room)
         'guest.org_tooltip' => 'Guest team: {org}',
         'guest.org_unknown' => 'External team',
+
+        // Weather card + wind-direction map control (weather_map_compass_enabled)
+        'weather.card_title' => 'Weather Forecast',
+        'weather.forecast_for_prefix' => 'Forecast for {time}',
+        'weather.source_owm' => 'Source: OpenWeatherMap',
+        'weather.fallback_location_note' => 'Approximate location (Heraklion) — this mission has no coordinates',
+        'weather.wind_label' => 'Wind',
+        'weather.wind_from_prefix' => 'Wind from {dir}',
+        'weather.wind_calm' => 'calm',
+        'weather.wind_warning' => 'strong',
+        'weather.wind_danger' => 'dangerous',
+        // compass.n/ne/e/se/s/sw/w/nw already exist above (near common.unit_km) — reused as-is.
+
+        // Exposure-urgency estimate (exposure_urgency_enabled, missing-person
+        // missions only) — deliberately no "survival"/death wording anywhere
+        // here, see the setting's own description in settings.php.
+        'exposure.section_title' => 'Exposure Urgency Estimate',
+        'exposure.margin_label' => 'estimated action margin',
+        'exposure.monitoring_only' => 'Monitoring only — mild conditions',
+        'exposure.overdue_label' => 'past the indicative window — maximum priority',
+        'exposure.overdue_suffix' => 'overdue',
+        'exposure.hm_format' => '{h}h {m}m',
+        'exposure.note' => 'Indicative estimate from temperature, wind and age — not a clinical prognosis.',
     ],
 ];
