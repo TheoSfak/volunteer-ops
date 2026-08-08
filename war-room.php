@@ -782,6 +782,14 @@ $pingIsStaleByVolunteerId = [];
 // it without a manual reload. Reuses this exact query/scope rather than
 // adding a second one.
 $participantLiveByVolunteerId = [];
+// War Room fatigue flag: minutes each currently-on-duty volunteer has been
+// continuously in the field on this mission. Computed once here (same shape
+// as $pingIsStaleByVolunteerId above) and merged into $participantLiveByVolunteerId
+// below so it rides the existing ajax-poll + full-render plumbing rather than
+// needing its own JSON key.
+$continuousFieldMinutesByVolunteerId = computeContinuousFieldMinutesByVolunteerId($missionId);
+$warRoomMaxShiftMinutes = (int) getSetting('war_room_max_shift_minutes', '480');
+$warRoomCriticalShiftMinutes = (int) round($warRoomMaxShiftMinutes * 1.5);
 foreach (dbFetchAll(
     "SELECT pr.volunteer_id" . ($hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status') . ",
             (SELECT MAX(vp.created_at) FROM volunteer_pings vp WHERE vp.user_id = pr.volunteer_id AND vp.shift_id = pr.shift_id) AS last_ping_at
@@ -803,6 +811,7 @@ foreach (dbFetchAll(
     $participantLiveByVolunteerId[$volunteerId] = [
         'last_ping_time' => $pingRow['last_ping_at'] ? date('H:i', strtotime($pingRow['last_ping_at'])) : null,
         'field_status' => $pingRow['field_status'],
+        'continuous_field_minutes' => $continuousFieldMinutesByVolunteerId[$volunteerId] ?? null,
     ];
 }
 
@@ -812,7 +821,7 @@ foreach (dbFetchAll(
 // has no such cutoff) still showed them. The map now shows every last-known
 // position always, marking it 'is_stale' (reusing the same $pingStaleThresholdSeconds
 // as the sidebar list) once it's past due, rather than hiding it outright.
-$loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds) {
+$loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds, $continuousFieldMinutesByVolunteerId) {
     try {
         $field = $hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status';
         // Was: 1 query for the latest ping per volunteer, PLUS one extra
@@ -907,6 +916,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 'time' => date('H:i', $pingTs),
                 'is_stale' => $isStale, 'is_moving' => $isMoving, 'heading_deg' => $headingDeg,
                 'battery_level' => $pin['battery_level'] !== null ? (int) $pin['battery_level'] : null,
+                'continuous_field_minutes' => $continuousFieldMinutesByVolunteerId[(int) $pin['user_id']] ?? null,
             ];
         }
         return $pins;
@@ -918,8 +928,8 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
 // Nearby Teams (field-card column, both modes) + Team Distances (Teams
 // panel, full view only). Same "define once, call from both the ajax
 // branch and the full-page seed" shape as $loadPins above.
-$loadTeamProximity = function () use ($missionId, $user) {
-    $teamPositions = loadTeamPositionsForMission($missionId);
+$loadTeamProximity = function () use ($missionId, $user, $continuousFieldMinutesByVolunteerId) {
+    $teamPositions = loadTeamPositionsForMission($missionId, $continuousFieldMinutesByVolunteerId);
 
     $myPing = dbFetchOne(
         "SELECT vp.lat, vp.lng FROM volunteer_pings vp
@@ -2095,12 +2105,24 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             <?php $participantSplitRows = count($participants) >= 8 ? (int)ceil(count($participants) / 2) : 0; ?>
             <div class="list-group list-group-flush<?= $participantSplitRows ? ' wr-participants-cols' : '' ?>"<?= $participantSplitRows ? ' style="grid-template-rows: repeat(' . $participantSplitRows . ', auto);"' : '' ?>>
                 <?php foreach ($participants as $participant): ?>
-                <?php $status = $participant['field_status'] ?? ''; ?>
+                <?php
+                $status = $participant['field_status'] ?? '';
+                $fatigueMinutes = $continuousFieldMinutesByVolunteerId[(int)$participant['volunteer_id']] ?? null;
+                $isFatigued = $fatigueMinutes !== null && $fatigueMinutes > $warRoomMaxShiftMinutes;
+                $isCriticalFatigue = $isFatigued && $fatigueMinutes >= $warRoomCriticalShiftMinutes;
+                $fatigueH = $fatigueMinutes !== null ? intdiv($fatigueMinutes, 60) : 0;
+                $fatigueM = $fatigueMinutes !== null ? $fatigueMinutes % 60 : 0;
+                ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap" id="participant-row-<?= (int)$participant['volunteer_id'] ?>">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? 'presence-online' : 'presence-offline' ?>" title="<?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => date('H:i', strtotime($participant['last_ping_at']))]) : t('participants.no_ping') ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= (!empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? 'presence-online' : 'presence-offline' ?>" title="<?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => date('H:i', strtotime($participant['last_ping_at']))]) : t('participants.no_ping') ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= (!empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= $isFatigued ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>" id="status-badge-<?= (int)$participant['volunteer_id'] ?>">
                         <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
+                    <?php if ($canManageWarRoom): ?>
+                    <button type="button" class="btn btn-sm btn-outline-danger suggest-replacement-btn <?= $isFatigued ? '' : 'd-none' ?>" id="suggest-replacement-btn-<?= (int)$participant['volunteer_id'] ?>" data-volunteer-id="<?= (int)$participant['volunteer_id'] ?>" data-volunteer-name="<?= h($participant['name']) ?>" title="<?= t('fatigue.suggest_replacement_btn') ?>">
+                        <i class="bi bi-arrow-left-right"></i>
+                    </button>
+                    <?php endif; ?>
                 </div>
                 <?php endforeach; ?>
                 <?php if (empty($participants)): ?><div class="list-group-item text-muted"><?= t('participants.empty') ?></div><?php endif; ?>
@@ -2921,6 +2943,25 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         </div>
     </div>
 </div>
+
+<?php if ($canManageWarRoom): ?>
+<div class="modal fade" id="suggestReplacementModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-arrow-left-right me-1"></i><?= t('fatigue.suggest_replacement_modal_title') ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="suggestReplacementList"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= t('common.close') ?></button>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <div class="modal fade" id="dispatchMapModal" tabindex="-1">
     <div class="modal-dialog modal-fullscreen">
@@ -4902,6 +4943,13 @@ let pinsRenderedSig = null;
 // Critical tier is always half the warning tier, not a second setting.
 const LOW_BATTERY_PCT = <?= (int) getSetting('war_room_low_battery_pct', '60') ?>;
 const CRITICAL_BATTERY_PCT = Math.floor(LOW_BATTERY_PCT / 2);
+// Configurable max-continuous-shift warning threshold (Settings →
+// war_room_max_shift_minutes). Critical tier is 1.5x the warning tier, not a
+// second setting — mirrors CRITICAL_BATTERY_PCT above, but INVERTED: higher
+// minutes is worse (battery's critical tier is lower pct = worse).
+const WR_MAX_SHIFT_MINUTES = <?= (int) getSetting('war_room_max_shift_minutes', '480') ?>;
+const WR_CRITICAL_SHIFT_MINUTES = Math.round(WR_MAX_SHIFT_MINUTES * 1.5);
+function fatigueHm(minutes) { return {h: Math.floor(minutes / 60), m: minutes % 60}; }
 // Deliberately separate from LOW_BATTERY_PCT above, fixed (not a Settings
 // field) — LOW_BATTERY_PCT gates the passive "getting low" badge, this
 // gates the active charge-alert button (below/right of the Navigate
@@ -4958,6 +5006,10 @@ function buildPinMarker(pin, interactive = true) {
     const batteryLine = (pin.battery_level !== null && pin.battery_level !== undefined && pin.battery_level <= LOW_BATTERY_PCT)
         ? `<br><span class="${pin.battery_level <= CRITICAL_BATTERY_PCT ? 'text-danger' : 'text-warning'} small">🔋 ${t('map.pin_low_battery', {pct: pin.battery_level})}</span>`
         : '';
+    // Fatigue: same "only rendered when actually over" idiom as batteryLine above.
+    const fatigueLine = (pin.continuous_field_minutes !== null && pin.continuous_field_minutes !== undefined && pin.continuous_field_minutes > WR_MAX_SHIFT_MINUTES)
+        ? `<br><span class="${pin.continuous_field_minutes >= WR_CRITICAL_SHIFT_MINUTES ? 'text-danger' : 'text-warning'} small">⏱ ${t('fatigue.pin_line', fatigueHm(pin.continuous_field_minutes))}</span>`
+        : '';
     const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
     const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${pin.lat},${pin.lng}&travelmode=driving`;
     // Always rendered for an admin (unlike batteryLine above), so there's
@@ -4981,7 +5033,7 @@ function buildPinMarker(pin, interactive = true) {
     // (depends on which render*() happened to run last that poll tick). A
     // volunteer's own live position should never be the one that silently
     // disappears underneath another marker.
-    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${navLine}`);
+    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
 }
 
 function renderPins(items) {
@@ -5098,9 +5150,12 @@ function renderNearbyTeams(items) {
         const batteryNote = (team.battery_level !== null && team.battery_level !== undefined && team.battery_level <= LOW_BATTERY_PCT)
             ? ` · <span class="${team.battery_level <= CRITICAL_BATTERY_PCT ? 'text-danger' : 'text-warning'} small">🔋 ${t('map.pin_low_battery', {pct: team.battery_level})}</span>`
             : '';
+        const fatigueNote = (team.continuous_field_minutes !== null && team.continuous_field_minutes !== undefined && team.continuous_field_minutes > WR_MAX_SHIFT_MINUTES)
+            ? ` · <span class="${team.continuous_field_minutes >= WR_CRITICAL_SHIFT_MINUTES ? 'text-danger' : 'text-warning'} small">⏱ ${t('fatigue.pin_line', fatigueHm(team.continuous_field_minutes))}</span>`
+            : '';
         return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom" style="${dimmed}">
             <div>${swatch}<strong>${escapeHtml(team.label)}</strong></div>
-            <div class="text-end small">${distanceLine}${staleNote}${batteryNote}<br><span class="text-muted">${team.time}</span></div>
+            <div class="text-end small">${distanceLine}${staleNote}${batteryNote}${fatigueNote}<br><span class="text-muted">${team.time}</span></div>
         </div>`;
     }).join('');
 }
@@ -5127,9 +5182,12 @@ function renderTeamDistances(items) {
         const batteryNote = (pair.battery_level !== null && pair.battery_level !== undefined && pair.battery_level <= LOW_BATTERY_PCT)
             ? ` <span class="${pair.battery_level <= CRITICAL_BATTERY_PCT ? 'text-danger' : 'text-warning'}" title="${t('map.pin_low_battery', {pct: pair.battery_level})}">🔋</span>`
             : '';
+        const fatigueNote = (pair.continuous_field_minutes !== null && pair.continuous_field_minutes !== undefined && pair.continuous_field_minutes > WR_MAX_SHIFT_MINUTES)
+            ? ` <span class="${pair.continuous_field_minutes >= WR_CRITICAL_SHIFT_MINUTES ? 'text-danger' : 'text-warning'}" title="${t('fatigue.pin_line', fatigueHm(pair.continuous_field_minutes))}">⏱</span>`
+            : '';
         return `<div class="d-flex justify-content-between align-items-center py-1">
             <span>${swatchA}${escapeHtml(pair.a_label)} ↔ ${swatchB}${escapeHtml(pair.b_label)}</span>
-            <span class="text-muted">${formatDistanceMeters(pair.distance_m)}${staleNote}${batteryNote}</span>
+            <span class="text-muted">${formatDistanceMeters(pair.distance_m)}${staleNote}${batteryNote}${fatigueNote}</span>
         </div>`;
     }).join('');
 }
@@ -6210,6 +6268,26 @@ function renderParticipantLiveData(data) {
         }
         const rowEl = document.getElementById('participant-row-' + uid);
         if (rowEl) rowEl.classList.toggle('needs-help', info.field_status === 'needs_help');
+
+        // Fatigue flag — recomputed every poll tick (unlike battery_level,
+        // continuous_field_minutes keeps growing while someone stays out).
+        // The button is always in the DOM (see roster row markup), only its
+        // d-none class is toggled here, so someone who crosses the threshold
+        // mid-poll (not just at page load) still gets a working button.
+        const fatigueEl = document.getElementById('fatigue-badge-' + uid);
+        const suggestBtn = document.getElementById('suggest-replacement-btn-' + uid);
+        const minutes = info.continuous_field_minutes;
+        const isFatigued = minutes !== null && minutes !== undefined && minutes > WR_MAX_SHIFT_MINUTES;
+        if (fatigueEl) {
+            fatigueEl.classList.toggle('d-none', !isFatigued);
+            if (isFatigued) {
+                const isCritical = minutes >= WR_CRITICAL_SHIFT_MINUTES;
+                fatigueEl.classList.toggle('text-danger', isCritical);
+                fatigueEl.classList.toggle('text-warning', !isCritical);
+                fatigueEl.innerHTML = `<i class="bi bi-clock-history"></i> ${t('fatigue.badge_label', fatigueHm(minutes))}`;
+            }
+        }
+        if (suggestBtn) suggestBtn.classList.toggle('d-none', !isFatigued);
     });
 }
 
@@ -7428,6 +7506,47 @@ if (reportModalEl) {
         }).catch(() => {
             summaryBody.innerHTML = '<tr><td colspan="6" class="text-danger small">' + t('common.load_failed') + '</td></tr>';
         });
+    });
+}
+
+// "Suggest replacement" — read-only lookup for a fatigued volunteer's roster
+// row/button (see renderParticipantLiveData above for how the button itself
+// shows/hides). Deliberately never writes anything (no swap request, no
+// notification) — api-suggest-replacement.php just hands back a phone list
+// for the admin to call manually. See suggestReplacementModal markup.
+document.querySelectorAll('.suggest-replacement-btn').forEach(btn => {
+    btn.addEventListener('click', () => openSuggestReplacementModal(btn.dataset.volunteerId, btn.dataset.volunteerName));
+});
+
+function openSuggestReplacementModal(volunteerId, volunteerName) {
+    const modalEl = document.getElementById('suggestReplacementModal');
+    if (!modalEl) return;
+    const list = document.getElementById('suggestReplacementList');
+    const header = `<p class="text-muted small mb-2">${t('fatigue.suggest_replacement_for', {name: volunteerName})}</p>`;
+    list.innerHTML = header + `<p class="text-muted small">${t('common.loading')}</p>`;
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+    const body = new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>', volunteer_id: volunteerId});
+    fetch('api-suggest-replacement.php', {method: 'POST', body}).then(r => r.json()).then(result => {
+        if (result.error) {
+            list.innerHTML = header + `<p class="text-danger small">${escapeHtml(result.error)}</p>`;
+            return;
+        }
+        const rows = result.volunteers || [];
+        if (!rows.length) {
+            list.innerHTML = header + `<p class="text-muted small">${t('fatigue.suggest_replacement_empty')}</p>`;
+            return;
+        }
+        list.innerHTML = header + '<div class="list-group list-group-flush">' + rows.map(v => `
+            <div class="list-group-item d-flex justify-content-between align-items-center">
+                <span>${escapeHtml(v.name)}</span>
+                ${v.phone
+                    ? `<a href="tel:${escapeHtml(v.phone)}" class="btn btn-sm btn-outline-success"><i class="bi bi-telephone-fill me-1"></i>${escapeHtml(v.phone)}</a>`
+                    : `<span class="text-muted small">${t('fatigue.no_phone')}</span>`}
+            </div>
+        `).join('') + '</div>';
+    }).catch(() => {
+        list.innerHTML = header + `<p class="text-danger small">${t('common.load_failed')}</p>`;
     });
 }
 

@@ -35,6 +35,7 @@ $defaults = [
     'war_room_banner_font_size' => '1.35',
     'war_room_auto_ping_seconds' => '180',
     'war_room_low_battery_pct' => '60',
+    'war_room_max_shift_minutes' => '480',
     'admin_email' => '',
     'developer_email' => '',
     'timezone' => 'Europe/Athens',
@@ -524,7 +525,7 @@ if (isPost()) {
         
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes',
             'admin_email', 'developer_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
@@ -555,6 +556,14 @@ if (isPost()) {
             // client-side timer) trusts whatever is stored here directly.
             if ($field === 'session_timeout_minutes') {
                 $value = (string) max(5, min(1440, (int) $value ?: 120));
+            }
+
+            // Same "form attribute is only a browser hint" reasoning as
+            // session_timeout_minutes above — this value drives the War
+            // Room fatigue flag shown to every viewer, so it's worth
+            // clamping server-side too.
+            if ($field === 'war_room_max_shift_minutes') {
+                $value = (string) max(30, min(2880, (int) $value ?: 480));
             }
 
             // Don't overwrite API key if form was submitted empty (acts like a "keep existing" field)
@@ -1138,6 +1147,12 @@ include __DIR__ . '/includes/header.php';
                         <input type="number" class="form-control" style="max-width:160px;" name="war_room_low_battery_pct"
                                value="<?= h($settings['war_room_low_battery_pct']) ?>" min="0" max="100" step="5">
                         <small class="text-muted">Ποσοστό μπαταρίας κινητού κάτω από το οποίο εμφανίζεται προειδοποίηση στο στίγμα εθελοντή στο Action Room (χάρτης, Κοντινές Ομάδες, Αποστάσεις Ομάδων). Η "κρίσιμη" ένδειξη (κόκκινο) εμφανίζεται στο μισό αυτού του ποσοστού.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Όριο Συνεχόμενης Βάρδιας Action Room (λεπτά)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_max_shift_minutes"
+                               value="<?= h($settings['war_room_max_shift_minutes']) ?>" min="30" max="2880" step="30">
+                        <small class="text-muted">Λεπτά συνεχόμενης παρουσίας εθελοντή σε αλυσίδα εγκεκριμένων βαρδιών στην ίδια αποστολή, πάνω από τα οποία εμφανίζεται προειδοποίηση κόπωσης στο Action Room (ρόστερ, χάρτης, Κοντινές Ομάδες, Αποστάσεις Ομάδων) και προτείνεται αντικατάσταση. Προεπιλογή 480 = 8 ώρες. Η "κρίσιμη" ένδειξη (κόκκινο) εμφανίζεται στο 1,5x του ορίου.</small>
                     </div>
                 </div>
             </div>

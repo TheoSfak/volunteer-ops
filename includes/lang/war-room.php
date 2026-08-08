@@ -558,6 +558,18 @@ return [
         'map.charge_alert_inactive_hint' => 'Αυτό το κουμπί ενεργοποιείται όταν η μπαταρία είναι κάτω από {pct}%.',
         'map.pin_moving' => 'Σε κίνηση',
         'map.navigate_btn' => '🧭 Πλοήγηση',
+        // Fatigue / max-continuous-shift flag — shared by the map pin popup,
+        // Nearby Teams, Team Distances (fatigue.pin_line) and the roster row
+        // + live-poll patch (fatigue.badge_label), same "one key reused
+        // everywhere" convention as map.pin_low_battery above.
+        'fatigue.badge_label' => 'Κόπωση ({h}ω {m}λ)',
+        'fatigue.pin_line' => 'Κόπωση ({h}ω {m}λ)',
+        'fatigue.tooltip' => 'Συνεχόμενη υπηρεσία χωρίς αντικατάσταση πάνω από το όριο που έχει οριστεί στις Ρυθμίσεις',
+        'fatigue.suggest_replacement_btn' => 'Πρόταση αντικατάστασης',
+        'fatigue.suggest_replacement_modal_title' => 'Διαθέσιμοι για αντικατάσταση',
+        'fatigue.suggest_replacement_for' => 'Αντικατάσταση για: {name}',
+        'fatigue.suggest_replacement_empty' => 'Δεν βρέθηκαν διαθέσιμοι εθελοντές αυτή τη στιγμή.',
+        'fatigue.no_phone' => 'Χωρίς τηλέφωνο',
         'trail.auto_suffix' => ' (αυτόματο)',
         'trail.load_failed' => 'Αποτυχία φόρτωσης πορείας.',
         'trail.exit_btn' => 'Ζωντανή Προβολή',
@@ -1548,6 +1560,17 @@ return [
         'map.charge_alert_inactive_hint' => 'This button activates when battery is below {pct}%.',
         'map.pin_moving' => 'Moving',
         'map.navigate_btn' => '🧭 Navigate',
+        // Fatigue / max-continuous-shift flag — see the el block for the
+        // sharing convention (fatigue.pin_line/fatigue.badge_label reused
+        // across every render spot, same as map.pin_low_battery).
+        'fatigue.badge_label' => 'Fatigue ({h}h {m}m)',
+        'fatigue.pin_line' => 'Fatigue ({h}h {m}m)',
+        'fatigue.tooltip' => 'Continuously on duty with no relief past the threshold set in Settings',
+        'fatigue.suggest_replacement_btn' => 'Suggest replacement',
+        'fatigue.suggest_replacement_modal_title' => 'Available for replacement',
+        'fatigue.suggest_replacement_for' => 'Replacement for: {name}',
+        'fatigue.suggest_replacement_empty' => 'No available volunteers found right now.',
+        'fatigue.no_phone' => 'No phone on file',
         'trail.auto_suffix' => ' (auto)',
         'trail.load_failed' => 'Failed to load trail.',
         'trail.exit_btn' => 'Live View',
