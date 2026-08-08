@@ -408,6 +408,41 @@ foreach ($statusRows as $row) {
     ];
 }
 
+// ── SOS lifecycle continued: acknowledge / resolve ─────────────────────────
+// The trigger itself is already the 'needs_help' field-status event just
+// above (same created_at, same source action) — only acknowledge/resolve add
+// new information, previously entirely absent from this feed even though
+// mission-sos.php tracks both. Same predicate-2 visibility as the trigger
+// event above (own report, own team, or admin) — NOT the stricter admin-only
+// gate loadOpenSosAlertsForMission() uses for the live map overlay/siren,
+// which is about exact GPS + dispatch, not this plain text line.
+$sosRows = dbFetchAll(
+    "SELECT a.acknowledged_at, a.resolved_at, a.team_id, u.name AS actor_name
+     FROM mission_sos_alerts a
+     JOIN users u ON u.id = a.user_id
+     WHERE a.mission_id = ? AND (? = 1 OR a.user_id = ? OR a.team_id = ?)
+     ORDER BY a.created_at DESC LIMIT 200",
+    [$missionId, $isAdminParam, $userId, $viewerTeamId]
+);
+foreach ($sosRows as $row) {
+    if ($row['acknowledged_at']) {
+        $events[] = [
+            'icon' => '👁️',
+            'text' => t('history.sos_seen', ['actor' => h($row['actor_name'])], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row['acknowledged_at'])),
+            'ts'   => strtotime($row['acknowledged_at']),
+        ];
+    }
+    if ($row['resolved_at']) {
+        $events[] = [
+            'icon' => '✅',
+            'text' => t('history.sos_resolved', ['actor' => h($row['actor_name'])], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row['resolved_at'])),
+            'ts'   => strtotime($row['resolved_at']),
+        ];
+    }
+}
+
 // ── GPS pings ("στίγματα") ─────────────────────────────────────────────────────
 $pingRows = dbFetchAll(
     "SELECT vp.created_at, u.name AS actor_name, mtm.team_id AS actor_team_id
@@ -536,6 +571,49 @@ foreach ($poiPhotoRows as $row) {
         'ts'   => strtotime($row['created_at']),
     ];
 }
+
+// ── field photos/videos: everything mission_photos captures that ISN'T a
+// POI report above (poi_id IS NULL) — a plain "send a photo/video" order
+// fulfillment, or a Route Order waypoint's own photo/video deliverable.
+// Unscoped (visible mission-wide), matching the live media gallery's own
+// policy (loadMissionPhotosForUser() has no team filter either) and the
+// POI/incident precedent just above. Previously entirely absent from this
+// feed — a route waypoint's proof-of-arrival photo left no trace here even
+// though the waypoint's own arrive/complete events above did.
+$fieldMediaRows = dbFetchAll(
+    "SELECT ph.media_type, ph.created_at, ph.route_waypoint_id, w.seq AS waypoint_seq, w.label AS waypoint_label,
+            r.team_id AS route_team_id, mt.codename, mt.team_number, u.name AS actor_name
+     FROM mission_photos ph
+     JOIN users u ON u.id = ph.user_id
+     LEFT JOIN mission_route_waypoints w ON w.id = ph.route_waypoint_id
+     LEFT JOIN mission_routes r ON r.id = w.route_id
+     LEFT JOIN mission_teams mt ON mt.id = r.team_id
+     WHERE ph.mission_id = ? AND ph.poi_id IS NULL
+     ORDER BY ph.created_at DESC LIMIT 200",
+    [$missionId]
+);
+foreach ($fieldMediaRows as $row) {
+    $icon = $row['media_type'] === 'video' ? '🎥' : '📷';
+    $kind = t($row['media_type'] === 'video' ? 'photo.kind_video' : 'photo.kind_photo', [], $viewerLang);
+    if ($row['route_waypoint_id']) {
+        $pointLabel = $row['waypoint_label'] !== null && $row['waypoint_label'] !== '' ? $row['waypoint_label'] : t('route.waypoint_fallback_label', ['seq' => $row['waypoint_seq']], $viewerLang);
+        $teamLabel = $row['route_team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team', [], $viewerLang);
+        $events[] = [
+            'icon' => $icon,
+            'text' => t('history.route_media_sent', ['actor' => h($row['actor_name']), 'kind' => $kind, 'label' => h($pointLabel), 'team' => h($teamLabel)], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row['created_at'])),
+            'ts'   => strtotime($row['created_at']),
+        ];
+    } else {
+        $events[] = [
+            'icon' => $icon,
+            'text' => t('history.media_sent', ['actor' => h($row['actor_name']), 'kind' => $kind], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row['created_at'])),
+            'ts'   => strtotime($row['created_at']),
+        ];
+    }
+}
+
 $poiCheckedRows = dbFetchAll(
     "SELECT checked_at FROM mission_points_of_interest WHERE mission_id = ? AND checked_at IS NOT NULL ORDER BY checked_at DESC LIMIT 200",
     [$missionId]
