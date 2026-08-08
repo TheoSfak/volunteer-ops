@@ -1349,16 +1349,23 @@ function notifyRestrictedAreaBreach(int $missionId, int $userId, ?int $teamId, s
  * War Room: persist a trackable order (mission_orders + one mission_order_recipients
  * row per recipient, snapshotting each recipient's team) then notify them, threading
  * orderId into the pushData so the alert banner can offer an "Ελήφθη" button. Shared
- * by request_location/request_photo/request_video/task (war-room.php) and the Route
- * Order composer (mission-route.php) — the only difference between them is
- * order_type + notification copy. Lives here (not war-room.php, where it was first
- * written) specifically so a standalone endpoint like mission-route.php — which only
+ * by request_location/request_photo/request_video/task (war-room.php), the Route
+ * Order composer (mission-route.php), and the battery-charge alert
+ * (mission-battery-alert.php) — the only difference between them is order_type +
+ * notification copy. Lives here (not war-room.php, where it was first written)
+ * specifically so a standalone endpoint like mission-route.php — which only
  * requires bootstrap.php, never war-room.php itself — can call it too.
+ *
+ * Only $recipientIds get the banner + alert sound — same "a targeted order
+ * shouldn't sound an alarm for people it wasn't sent to" rule already applied to
+ * team-targeted dispatch (mission-dispatch.php's create action, v3.153.18). An
+ * earlier version also broadcast a quieter FYI banner to every other approved
+ * participant; removed per explicit request, no replacement.
  */
 function createMissionOrderAndNotify(
     int $missionId, string $missionTitle, string $orderType, int $createdBy, array $recipientIds,
     string $titleKey, array $titleVars, ?string $rawMessage, string $messageKey, array $messageVars,
-    string $broadcastKey, array $broadcastVars, ?string $taskText = null, ?string $alarmStyle = null
+    ?string $taskText = null, ?string $alarmStyle = null
 ): int {
     $orderId = dbInsert(
         "INSERT INTO mission_orders (mission_id, order_type, task_text, created_by, created_at) VALUES (?, ?, ?, ?, NOW())",
@@ -1388,35 +1395,6 @@ function createMissionOrderAndNotify(
             $pushData['alarmStyle'] = $alarmStyle;
         }
         sendNotification($recipientId, t($titleKey, $titleVars, $lang), $message, 'warning', '', $pushData);
-    }
-
-    // Every order also scrolls as a banner for every other approved participant of the
-    // mission, not just whoever it was actually addressed to, so the whole mission stays
-    // aware of what's being asked. No orderId here — no order row, no "Ελήφθη" button —
-    // this is informational only, unlike the real recipients notified above.
-    $allApproved = dbFetchAll(
-        "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
-         JOIN shifts s ON s.id = pr.shift_id
-         WHERE s.mission_id = ? AND pr.status = ?",
-        [$missionId, PARTICIPATION_APPROVED]
-    );
-    $bystanderIds = array_diff(
-        array_map('intval', array_column($allApproved, 'volunteer_id')),
-        $recipientIds,
-        [$createdBy]
-    );
-    $bystanderLangs = getUserLanguages($bystanderIds);
-    foreach ($bystanderIds as $bystanderId) {
-        $lang = $bystanderLangs[$bystanderId] ?? DEFAULT_LANGUAGE;
-        $bystanderPushData = [
-            'url' => $warRoomUrl,
-            'tag' => $orderType . '-request-mission-' . $missionId,
-            'bannerMission' => $missionId,
-        ];
-        if ($alarmStyle) {
-            $bystanderPushData['alarmStyle'] = $alarmStyle;
-        }
-        sendNotification($bystanderId, t($titleKey, $titleVars, $lang), t($broadcastKey, $broadcastVars, $lang), 'info', '', $bystanderPushData);
     }
 
     return (int) $orderId;

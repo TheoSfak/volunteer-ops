@@ -394,7 +394,6 @@ if ($action === 'create') {
         $missionId, $mission['title'], 'route', $userId, $recipientIds,
         'order.route.title', ['team' => $teamLbl],
         null, 'order.route.message', ['team' => $teamLbl, 'count' => count($waypoints)],
-        'order.route.broadcast', ['team' => $teamLbl, 'mission' => $mission['title']],
         $summary
     );
     dbExecute("UPDATE mission_routes SET order_id = ? WHERE id = ?", [$orderId, $routeId]);

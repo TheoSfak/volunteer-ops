@@ -108,7 +108,6 @@ if ($action === 'send') {
         $missionId, $mission['title'], 'charge_phone', $userId, [$targetUserId],
         'order.charge_phone.title', [],
         null, 'order.charge_phone.message', ['mission' => $mission['title'], 'pct' => $batteryLevel],
-        'order.charge_phone.broadcast', ['mission' => $mission['title'], 'name' => $target['name']],
         t('battery_alert.history_note', ['pct' => $batteryLevel])
     );
     logAudit('send_battery_alert', 'mission_orders', $orderId, null, ['mission_id' => $missionId, 'recipient_id' => $targetUserId, 'battery_level' => $batteryLevel]);
