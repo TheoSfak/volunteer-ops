@@ -271,21 +271,22 @@ if (isPost()) {
                         logAudit('update', 'citizens', $id);
                     }
 
-                    // Duplicate email check (only when citizen has email)
+                    // Duplicate check (only when citizen has email) — scoped to email + certificate
+                    // type, so a citizen completing a different seminar still gets a new certificate
                     $citizenEmail = trim($citizen['email'] ?? '');
+                    $certTypeId = (int) post('certificate_type_id') ?: null;
                     $isDuplicate = false;
                     if ($citizenEmail !== '') {
                         $dupCount = (int) dbFetchValue(
-                            "SELECT COUNT(*) FROM citizen_certificates WHERE email = ?",
-                            [$citizenEmail]
+                            "SELECT COUNT(*) FROM citizen_certificates WHERE email = ? AND certificate_type_id <=> ?",
+                            [$citizenEmail, $certTypeId]
                         );
                         $isDuplicate = $dupCount > 0;
                     }
 
                     if ($isDuplicate) {
-                        setFlash('warning', 'Ο πολίτης σημειώθηκε ως ολοκληρωμένος, αλλά δεν δημιουργήθηκε πιστοποιητικό γιατί υπάρχει ήδη εγγραφή με το ίδιο email.');
+                        setFlash('warning', 'Ο πολίτης σημειώθηκε ως ολοκληρωμένος, αλλά δεν δημιουργήθηκε πιστοποιητικό γιατί υπάρχει ήδη πιστοποιητικό ίδιου τύπου με το ίδιο email.');
                     } else {
-                        $certTypeId = (int) post('certificate_type_id') ?: null;
                         $issueDate  = post('issue_date')  ?: date('Y-m-d');
                         $expiryDate = post('expiry_date') ?: date('Y-m-d', strtotime('+3 years'));
                         // Validate date format — fallback to defaults if malformed
