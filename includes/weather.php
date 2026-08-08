@@ -24,6 +24,12 @@
  *   forecast_dt       – int, Unix timestamp of the chosen forecast slot
  *   warnings          – string[], Greek warning messages
  *   severity          – 'none' | 'warning' | 'danger'
+ *
+ * Second entry point: computeExposureUrgency(array $missingPerson, array $weather): ?array
+ * Indicative (NOT clinically validated) exposure-urgency estimate for a
+ * missing person, gated behind its own 'exposure_urgency_enabled' setting —
+ * see settings.php and the Action Room weather/exposure artifact for the
+ * full model writeup and caveats.
  */
 
 // ─── Cache TTL (seconds) ─────────────────────────────────────────────────────
@@ -124,6 +130,73 @@ function getWeatherForMission(array $mission): ?array
     }
 
     return $data;
+}
+
+/**
+ * Rough exposure-urgency estimate combining wind chill (from $weather) with
+ * the missing person's age and elapsed time since last_seen_at. Indicative
+ * only — a simplified band model, not a clinical prognosis. Callers must
+ * gate this behind its own settings toggle and surface the caveat in the UI;
+ * this function itself has no opinion about whether it's safe to show.
+ *
+ * Returns null if there isn't enough data to compute anything (no valid
+ * weather, or no last_seen_at on the profile).
+ */
+function computeExposureUrgency(array $missingPerson, array $weather): ?array
+{
+    if (($weather['status'] ?? '') !== 'ok') {
+        return null;
+    }
+    if (empty($missingPerson['last_seen_at'])) {
+        return null;
+    }
+
+    $temp    = (float) ($weather['temp'] ?? 20);
+    $windKmh = (float) ($weather['wind_speed'] ?? 0) * 3.6;
+
+    // NWS wind chill formula — only meaningful for temp <= 10C and wind >
+    // 4.8 km/h; outside that range, plain air temp is the better signal.
+    if ($temp <= 10 && $windKmh > 4.8) {
+        $windChill = 13.12 + 0.6215 * $temp - 11.37 * ($windKmh ** 0.16) + 0.3965 * $temp * ($windKmh ** 0.16);
+    } else {
+        $windChill = $temp;
+    }
+
+    if ($windChill >= 10) {
+        $band = 'low';
+        $baselineHours = null; // monitoring only — no countdown shown
+    } elseif ($windChill >= 0) {
+        $band = 'moderate';
+        $baselineHours = 10.0;
+    } elseif ($windChill >= -10) {
+        $band = 'high';
+        $baselineHours = 5.0;
+    } else {
+        $band = 'critical';
+        $baselineHours = 2.0;
+    }
+
+    $age = $missingPerson['age'] ?? null;
+    $ageMultiplier = ($age !== null && ((int) $age < 12 || (int) $age > 70)) ? 0.7 : 1.0;
+
+    $elapsedHours = (time() - strtotime($missingPerson['last_seen_at'])) / 3600;
+
+    $result = [
+        'wind_chill'      => round($windChill, 1),
+        'band'            => $band,
+        'elapsed_hours'   => round($elapsedHours, 2),
+        'age_multiplier'  => $ageMultiplier,
+        'baseline_hours'  => null,
+        'remaining_hours' => null,
+    ];
+
+    if ($baselineHours !== null) {
+        $adjustedBaseline = $baselineHours * $ageMultiplier;
+        $result['baseline_hours']  = round($adjustedBaseline, 2);
+        $result['remaining_hours'] = round($adjustedBaseline - $elapsedHours, 2);
+    }
+
+    return $result;
 }
 
 // ─── Internal helpers ────────────────────────────────────────────────────────

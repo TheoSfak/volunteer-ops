@@ -533,13 +533,13 @@ if (isPost()) {
             'session_timeout_minutes',
             'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled',
             'qr_checkin_enabled',
-            'openweathermap_api_key',
+            'openweathermap_api_key', 'weather_map_compass_enabled', 'exposure_urgency_enabled',
         ];
-        
+
         foreach ($fieldsToUpdate as $field) {
             $value = isset($_POST[$field]) ? $_POST[$field] : '';
-            
-            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled'])) {
+
+            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled'])) {
                 $value = isset($_POST[$field]) ? '1' : '0';
             }
 
@@ -1371,6 +1371,25 @@ include __DIR__ . '/includes/header.php';
                         <i class="bi bi-info-circle me-1"></i>Χωρίς API key η πρόβλεψη καιρού δεν εμφανίζεται στις αποστολές
                     </div>
                     <?php endif; ?>
+
+                    <hr>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="weather_map_compass_enabled" id="weatherCompassEnabled"
+                               <?= ($settings['weather_map_compass_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="weatherCompassEnabled">
+                            <strong>Πυξίδα Ανέμου στον Χάρτη Action Room</strong>
+                        </label>
+                        <div class="form-text">Κατεύθυνση και ένταση ανέμου ως στοιχείο ελέγχου στον χάρτη κάθε αποστολής. Χρησιμοποιεί το ίδιο API key παραπάνω — καμία επιπλέον ρύθμιση.</div>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="exposure_urgency_enabled" id="exposureUrgencyEnabled"
+                               <?= ($settings['exposure_urgency_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="exposureUrgencyEnabled">
+                            <strong>Ένδειξη Επείγοντος λόγω Έκθεσης</strong>
+                        </label>
+                        <div class="form-text">Μόνο σε αποστολές τύπου «Αγνοούμενο άτομο». Ενδεικτικός υπολογισμός από ηλικία, θερμοκρασία και άνεμο — <strong>όχι κλινική πρόγνωση</strong>. Προτείνεται έλεγχος πριν την ενεργοποίηση σε πραγματική επιχείρηση.</div>
+                    </div>
                 </div>
             </div>
         </div>

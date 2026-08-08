@@ -5,6 +5,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/weather.php';
 requireLogin();
 
 $missionId = (int)get('id');
@@ -1072,6 +1073,20 @@ if (get('ajax') === '1') {
     $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
     $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
     $missingPerson = ($isMissingPersonMission && ($canManageWarRoom || $isApprovedParticipant)) ? loadMissingPersonForMission($missionId) : null;
+    // Both gated behind their own Settings toggle (default off) — see the
+    // Action Room weather/exposure artifact for why these are two separate
+    // flags rather than one. getWeatherForMission() has its own 3h DB cache,
+    // so calling it every 5s poll costs one indexed SELECT, not an API hit.
+    $weatherCompassOn = getSetting('weather_map_compass_enabled', '0') === '1';
+    $exposureUrgencyOn = $isMissingPersonMission && getSetting('exposure_urgency_enabled', '0') === '1';
+    $weather = ($weatherCompassOn || $exposureUrgencyOn) ? getWeatherForMission($mission) : null;
+    // Formatted here (not in weather.php) so the label travels as-is through
+    // json_encode to every poll tick — mission-view.php's own date() call
+    // stays untouched since this is an added key, not a changed one.
+    if ($weather && ($weather['status'] ?? '') === 'ok') {
+        $weather['forecast_dt_label'] = date('d/m H:i', $weather['forecast_dt']);
+    }
+    $exposureUrgency = ($exposureUrgencyOn && $missingPerson && $weather) ? computeExposureUrgency($missingPerson, $weather) : null;
     $onlinePresence = loadOnlinePresenceUserIds($missionId);
     $annotations = loadMissionAnnotationsForMission($missionId);
     $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
@@ -1110,6 +1125,8 @@ if (get('ajax') === '1') {
         'sosAlerts' => $sosAlerts,
         'pointsOfInterest' => $pointsOfInterest,
         'missingPerson' => $missingPerson,
+        'weather' => $weather,
+        'exposureUrgency' => $exposureUrgency,
         'onlinePresence' => $onlinePresence,
         'pingStaleness' => $pingIsStaleByVolunteerId,
         'participantLive' => $participantLiveByVolunteerId,
@@ -1185,6 +1202,15 @@ $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncid
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
 $missingPerson = ($isMissingPersonMission && ($canManageWarRoom || $isApprovedParticipant)) ? loadMissingPersonForMission($missionId) : null;
+// See the ajax branch's own copy of this block above for why these two are
+// separately gated settings rather than one flag.
+$weatherCompassOn = getSetting('weather_map_compass_enabled', '0') === '1';
+$exposureUrgencyOn = $isMissingPersonMission && getSetting('exposure_urgency_enabled', '0') === '1';
+$weather = ($weatherCompassOn || $exposureUrgencyOn) ? getWeatherForMission($mission) : null;
+if ($weather && ($weather['status'] ?? '') === 'ok') {
+    $weather['forecast_dt_label'] = date('d/m H:i', $weather['forecast_dt']);
+}
+$exposureUrgency = ($exposureUrgencyOn && $missingPerson && $weather) ? computeExposureUrgency($missingPerson, $weather) : null;
 $annotations = loadMissionAnnotationsForMission($missionId);
 $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
 $sectors = loadMissionSectorsForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
@@ -1305,7 +1331,7 @@ foreach ($participants as $participant) {
 
 require_once __DIR__ . '/includes/war-room-layout.php';
 $warRoomLayout = ($canManageWarRoom && !$fieldMode)
-    ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams), !empty($mission['is_special_mission']), $isMissingPersonMission)
+    ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams), !empty($mission['is_special_mission']), $isMissingPersonMission, $weatherCompassOn)
     : null;
 
 $pageTitle = 'Action Room — ' . $mission['title'];
@@ -1437,6 +1463,12 @@ include __DIR__ . '/includes/header.php';
     #mapCard.wr-draw-active .leaflet-area-pane .leaflet-interactive { pointer-events: none; }
     .wr-anno-arrowhead { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 16px solid; filter: drop-shadow(0 1px 2px #0008); }
     .wr-anno-text-label { display: inline-block; padding: 2px 8px; border-radius: 4px; color: #fff; font-weight: 600; font-size: .78rem; white-space: nowrap; box-shadow: 0 1px 3px #0006; }
+    .wr-weather-ctl { background: #fff; padding: .5rem .6rem .45rem; }
+    .wr-weather-ctl-label { font-size: .6rem; letter-spacing: .05em; text-transform: uppercase; color: #6c757d; text-align: center; margin-bottom: .25rem; }
+    .wr-weather-ctl-reading { display: flex; align-items: baseline; justify-content: center; gap: .25rem; margin-top: .25rem; }
+    .wr-weather-ctl-reading .v { font-weight: 700; font-size: .9rem; }
+    .wr-weather-ctl-reading .u { font-size: .65rem; color: #6c757d; }
+    .wr-weather-ctl-sev { margin-top: .3rem; text-align: center; font-size: .62rem; font-weight: 600; padding: .12rem .35rem; border-radius: 4px; }
     .war-room-banner { display: none; flex-direction: column; background: #000; border-bottom: 2px solid #dc2626; position: relative; z-index: 1900; max-height: 40vh; overflow-y: auto; }
     .war-room-banner-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
     .war-room-banner-row + .war-room-banner-row { border-top: 1px solid rgba(255,59,48,.35); }
@@ -2285,6 +2317,24 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <?php endif; ?>
             </div>
         </div>
+
+        <!-- Weather (+ exposure-urgency, missing-person missions only): any
+             mission type, gated behind its own weather_map_compass_enabled
+             Settings toggle (default off) — independent of the exposure
+             toggle, which only affects whether exposureUrgency is non-null.
+             Placed before the missing-person card so general conditions
+             read before person-specific ones. Starts hidden via inline
+             style, not a PHP if, when there's no forecast yet on first
+             paint (no API key, cache cold) — JS shows/hides it exactly like
+             the poll loop keeps it in sync afterwards. -->
+        <?php if ($weatherCompassOn): ?>
+        <div class="card shadow-sm mb-4" data-card-id="weatherCard" id="weatherCardWrap" style="<?= $weather ? '' : 'display:none;' ?>">
+            <div class="card-header d-flex justify-content-between align-items-center" id="weatherCardHeader">
+                <h5 class="mb-0"><i class="bi bi-cloud-sun me-1"></i><?= t('weather.card_title') ?></h5>
+            </div>
+            <div class="card-body" id="weatherCardDisplay"></div>
+        </div>
+        <?php endif; ?>
 
         <!-- Missing-person profile: structured, pinned card for the
              "Αναζήτηση Αγνοουμένου" mission type — distinct from the
@@ -3248,6 +3298,12 @@ const canManageIncidents = <?= json_encode($canManageWarRoom) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
 let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
 let missingPerson = <?= json_encode($missingPerson) ?>;
+// weather can be non-null purely because exposureUrgencyOn fetched it for the
+// exposure card, even while the compass toggle itself is off — so the
+// compass control needs its own explicit flag, not just `if (weather)`.
+const weatherCompassEnabled = <?= json_encode($weatherCompassOn) ?>;
+let weather = <?= json_encode($weather) ?>;
+let exposureUrgency = <?= json_encode($exposureUrgency) ?>;
 let restrictedAreas = <?= json_encode($restrictedAreas) ?>;
 let restrictedAreaBreaches = <?= json_encode($restrictedAreaBreaches) ?>;
 let restrictedAreaBreachHistory = <?= json_encode($restrictedAreaBreachHistory) ?>;
@@ -6626,6 +6682,174 @@ function renderMissingPersonMarker(item) {
 // page-load value), so a poll landing mid-edit can never clobber an admin's
 // unsaved changes. Mirrors renderBroadcastPhotos' empty-container-in-PHP,
 // JS-renders-everything pattern.
+// deg -> localized 8-point compass abbreviation, meteorological convention
+// (the direction the wind is blowing FROM, same as OpenWeatherMap's wind_deg).
+function compassLabel(deg) {
+    const keys = ['compass.n', 'compass.ne', 'compass.e', 'compass.se', 'compass.s', 'compass.sw', 'compass.w', 'compass.nw'];
+    return t(keys[Math.round(((deg % 360) + 360) % 360 / 45) % 8]);
+}
+
+// h (float hours, possibly negative) -> "Xω Yλ" / "Xh Ym" via t(), rounded
+// to the minute. Caller decides sign/prefix framing (remaining vs overdue).
+function formatHoursMinutes(h) {
+    const abs = Math.abs(h);
+    let hh = Math.floor(abs);
+    let mm = Math.round((abs - hh) * 60);
+    if (mm === 60) { mm = 0; hh += 1; }
+    return t('exposure.hm_format', {h: hh, m: mm});
+}
+
+// Deliberately NOT called "survival clock" anywhere in UI copy (that's the
+// SAR-literature term used only in internal docs/commit messages) — this is
+// framed as an operational action-margin estimate, never a survival/death
+// prediction. See exposure_urgency_enabled's own settings.php caveat text.
+function renderExposureBlock(eu) {
+    if (!eu) return '';
+    const hasCountdown = eu.remaining_hours !== null && eu.remaining_hours !== undefined;
+    let numText, labelText, ink, ringColor;
+    if (!hasCountdown) {
+        numText = '—';
+        labelText = t('exposure.monitoring_only');
+        ink = '#495057'; ringColor = '#adb5bd';
+    } else if (eu.remaining_hours > 1) {
+        numText = formatHoursMinutes(eu.remaining_hours);
+        labelText = t('exposure.margin_label');
+        ink = '#664d03'; ringColor = '#ffc107';
+    } else if (eu.remaining_hours > 0) {
+        numText = formatHoursMinutes(eu.remaining_hours);
+        labelText = t('exposure.margin_label');
+        ink = '#842029'; ringColor = '#dc3545';
+    } else {
+        numText = formatHoursMinutes(eu.remaining_hours) + ' ' + t('exposure.overdue_suffix');
+        labelText = t('exposure.overdue_label');
+        ink = '#7a1220'; ringColor = '#7a1220';
+    }
+    const fraction = (hasCountdown && eu.baseline_hours) ? Math.max(0, Math.min(1, eu.remaining_hours / eu.baseline_hours)) : 0;
+    const circumference = 2 * Math.PI * 32;
+    const offset = (circumference * (1 - fraction)).toFixed(2);
+    return `
+        <div class="mt-3 pt-3 border-top">
+            <div class="text-muted small mb-2">${t('exposure.section_title')}</div>
+            <div class="d-flex align-items-center gap-3">
+                <svg width="68" height="68" viewBox="0 0 76 76" aria-hidden="true">
+                    <circle cx="38" cy="38" r="32" fill="none" stroke="#e9ecef" stroke-width="7"/>
+                    ${hasCountdown ? `<circle cx="38" cy="38" r="32" fill="none" stroke="${ringColor}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${circumference.toFixed(2)}" stroke-dashoffset="${offset}" transform="rotate(-90 38 38)"/>` : ''}
+                </svg>
+                <div style="min-width:0;">
+                    <div class="fw-bold" style="font-size:1.3rem;color:${ink};">${escapeHtml(numText)}</div>
+                    <div class="text-muted" style="font-size:.72rem;max-width:18ch;">${escapeHtml(labelText)}</div>
+                </div>
+            </div>
+            <div class="text-muted fst-italic mt-2" style="font-size:.7rem;line-height:1.4;">${t('exposure.note')}</div>
+        </div>`;
+}
+
+function renderWeatherCard(w, eu) {
+    const wrap = document.getElementById('weatherCardWrap');
+    const el = document.getElementById('weatherCardDisplay');
+    const header = document.getElementById('weatherCardHeader');
+    if (!wrap || !el) return;
+    if (!w || w.status !== 'ok') { wrap.style.display = 'none'; return; }
+    wrap.style.display = '';
+    if (header) {
+        header.className = 'card-header d-flex justify-content-between align-items-center'
+            + (w.severity === 'danger' ? ' bg-danger bg-opacity-10' : (w.severity === 'warning' ? ' bg-warning bg-opacity-10' : ''));
+    }
+
+    const warningsHtml = (w.warnings && w.warnings.length)
+        ? `<div class="alert ${w.severity === 'danger' ? 'alert-danger' : 'alert-warning'} py-2 px-3 mt-2 mb-0 small">`
+            + w.warnings.map(msg => `<div><i class="bi bi-exclamation-triangle-fill me-1"></i>${escapeHtml(msg)}</div>`).join('')
+            + `</div>`
+        : '';
+    const fallbackHtml = w.fallback_location
+        ? `<div class="text-muted mt-1" style="font-size:.7rem;"><i class="bi bi-info-circle me-1"></i>${t('weather.fallback_location_note')}</div>`
+        : '';
+
+    el.innerHTML = `
+        <div class="d-flex align-items-center gap-2">
+            <img src="https://openweathermap.org/img/wn/${encodeURIComponent(w.icon)}@2x.png" width="46" height="46" alt="">
+            <div>
+                <div class="fw-bold" style="font-size:1.2rem;">${w.temp}&deg;C</div>
+                <div class="text-muted small">${escapeHtml(w.description)}</div>
+            </div>
+        </div>
+        <div class="d-flex gap-3 mt-2 small">
+            <span><i class="bi bi-thermometer-half me-1"></i>${w.feels_like}&deg;C</span>
+            <span><i class="bi bi-wind me-1"></i>${w.wind_speed} m/s</span>
+            <span><i class="bi bi-droplet-half me-1"></i>${w.humidity}%</span>
+        </div>
+        ${warningsHtml}
+        ${fallbackHtml}
+        <div class="text-muted mt-2" style="font-size:.72rem;">${t('weather.forecast_for_prefix', {time: w.forecast_dt_label || ''})} &middot; ${t('weather.source_owm')}</div>
+        ${renderExposureBlock(eu)}
+    `;
+}
+
+// Custom Leaflet control (bottom-left, alongside no other control today —
+// see the artifact's own placement note) showing wind direction/speed.
+// Created once, then just has its inner HTML swapped on every update — same
+// "stable DOM, refresh content" approach as the popups elsewhere in this
+// file, cheaper than destroying/re-adding the Leaflet control each poll.
+let weatherControlInstance = null;
+let weatherControlEl = null;
+function ensureWeatherControl() {
+    if (weatherControlInstance || !map) return;
+    const WeatherControl = L.Control.extend({
+        options: {position: 'bottomleft'},
+        onAdd: function () {
+            const div = L.DomUtil.create('div', 'leaflet-control leaflet-bar wr-weather-ctl');
+            L.DomEvent.disableClickPropagation(div);
+            weatherControlEl = div;
+            return div;
+        },
+    });
+    weatherControlInstance = new WeatherControl();
+    weatherControlInstance.addTo(map);
+}
+
+function renderWeatherControl(w) {
+    if (!weatherCompassEnabled) return;
+    if (!w || w.status !== 'ok') {
+        if (weatherControlInstance) {
+            map.removeControl(weatherControlInstance);
+            weatherControlInstance = null;
+            weatherControlEl = null;
+        }
+        return;
+    }
+    ensureWeatherControl();
+    if (!weatherControlEl) return;
+
+    const sevBg = w.severity === 'danger' ? '#f8d7da' : (w.severity === 'warning' ? '#fff3cd' : '#f1f3f5');
+    const sevInk = w.severity === 'danger' ? '#842029' : (w.severity === 'warning' ? '#664d03' : '#495057');
+    const sevLabel = w.severity === 'danger' ? t('weather.wind_danger') : (w.severity === 'warning' ? t('weather.wind_warning') : t('weather.wind_calm'));
+    const dirLabel = compassLabel(w.wind_deg);
+    // Caveat from the design artifact: when the mission has no coordinates,
+    // weather.php silently falls back to Heraklion — the direction shown
+    // here would then have nothing to do with the actual mission location,
+    // so that MUST be visible on the control itself, not just in the card.
+    const fallbackTitle = w.fallback_location ? ' — ' + t('weather.fallback_location_note') : '';
+
+    weatherControlEl.innerHTML = `
+        <div class="wr-weather-ctl-inner" title="${escapeHtml(t('weather.wind_from_prefix', {dir: dirLabel}) + fallbackTitle)}">
+            <div class="wr-weather-ctl-label">${w.fallback_location ? '⚠ ' : ''}${t('weather.wind_label')}</div>
+            <svg width="52" height="52" viewBox="0 0 72 72" aria-hidden="true">
+                <circle cx="36" cy="36" r="30" fill="none" stroke="#ced4da" stroke-width="1.5"/>
+                <text x="36" y="12" text-anchor="middle" font-size="9" fill="#6c757d">${t('compass.n')}</text>
+                <text x="63" y="39.5" text-anchor="middle" font-size="9" fill="#6c757d">${t('compass.e')}</text>
+                <text x="36" y="66" text-anchor="middle" font-size="9" fill="#6c757d">${t('compass.s')}</text>
+                <text x="9" y="39.5" text-anchor="middle" font-size="9" fill="#6c757d">${t('compass.w')}</text>
+                <g transform="rotate(${w.wind_deg} 36 36)">
+                    <line x1="36" y1="36" x2="36" y2="14" stroke="${sevInk}" stroke-width="3" stroke-linecap="round"/>
+                    <path d="M36,10 L31,20 L41,20 Z" fill="${sevInk}"/>
+                </g>
+                <circle cx="36" cy="36" r="3.5" fill="#495057"/>
+            </svg>
+            <div class="wr-weather-ctl-reading"><span class="v">${w.wind_speed}</span><span class="u">m/s</span></div>
+            <div class="wr-weather-ctl-sev" style="background:${sevBg};color:${sevInk};">${escapeHtml(dirLabel)} &middot; ${escapeHtml(sevLabel)}</div>
+        </div>`;
+}
+
 function renderMissingPersonCard(item) {
     const el = document.getElementById('missingPersonDisplay');
     if (!el) return;
@@ -6884,7 +7108,7 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 })();
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); renderWeatherControl(weather); }
     renderMyTasks(myTasks);
     renderMySectors(sectors);
     renderMyRoutes(routes);
@@ -6896,6 +7120,7 @@ setTimeout(() => {
     renderRestrictedAreaProximity(restrictedAreaProximity);
     renderBroadcastPhotos(broadcastPhotos);
     renderMissingPersonCard(missingPerson);
+    renderWeatherCard(weather, exposureUrgency);
     if (!fieldMode) updateSosAlarmState(sosAlerts);
     // Ungated (unlike updateSosAlarmState just above) — same reasoning as the
     // poll-path wiring in pollWarRoomData(): this alarm's primary audience is
@@ -8151,6 +8376,12 @@ function pollWarRoomData() {
             missingPerson = data.missingPerson;
             renderMissingPersonCard(missingPerson);
             if (!fieldMode) renderMissingPersonMarker(missingPerson);
+        }
+        if (data.weather !== undefined) {
+            weather = data.weather;
+            exposureUrgency = data.exposureUrgency;
+            renderWeatherCard(weather, exposureUrgency);
+            if (!fieldMode) renderWeatherControl(weather);
         }
         if (data.areas) areas = data.areas;
         if (!fieldMode && data.teams) renderTeamRosters(data.teams);

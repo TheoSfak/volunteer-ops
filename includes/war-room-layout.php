@@ -21,7 +21,7 @@ if (!defined('VOLUNTEEROPS')) {
 function warRoomDefaultLayout(): array {
     return [
         'main' => [
-            'mapCard', 'missingPersonCard', 'trailEventsCard', 'shortageFormCard', 'incidentFormCard',
+            'mapCard', 'weatherCard', 'missingPersonCard', 'trailEventsCard', 'shortageFormCard', 'incidentFormCard',
             'shortageListCard', 'incidentsListCard', 'poiListCard', 'sectorsListCard', 'teamsCard',
             'participantsCard', 'requestLocationCard', 'requestPhotoCard',
             'requestVideoCard', 'requestTaskCard', 'activityCard', 'chatCard',
@@ -45,7 +45,7 @@ function warRoomAllCardIds(): array {
  * PHP conditionals already in war-room.php (report forms need an approved
  * participant, the two team-routing cards need at least one team to exist).
  */
-function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false): array {
+function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false, bool $weatherEnabled = false): array {
     $default = warRoomDefaultLayout();
     $excluded = [];
     if (!$isApprovedParticipant) {
@@ -61,6 +61,9 @@ function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, boo
     }
     if (!$isMissingPersonMission) {
         $excluded[] = 'missingPersonCard';
+    }
+    if (!$weatherEnabled) {
+        $excluded[] = 'weatherCard';
     }
     return [
         'main'    => array_values(array_diff($default['main'], $excluded)),
@@ -82,8 +85,8 @@ function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, boo
  *    no "append missing ids" step — an id absent from 'hidden' is visible
  *    by default, which is already what we want.
  */
-function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false): array {
-    $rendered = warRoomRenderedCardIds($isApprovedParticipant, $hasTeams, $isSpecialMission, $isMissingPersonMission);
+function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false, bool $weatherEnabled = false): array {
+    $rendered = warRoomRenderedCardIds($isApprovedParticipant, $hasTeams, $isSpecialMission, $isMissingPersonMission, $weatherEnabled);
     $allRenderedIds = array_merge($rendered['main'], $rendered['sidebar']);
 
     $saved = [];
@@ -142,6 +145,7 @@ function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool 
 function warRoomCardLabels(): array {
     return [
         'mapCard' => t('map.title'),
+        'weatherCard' => t('weather.card_title'),
         'missingPersonCard' => t('missing_person.card_title'),
         'trailEventsCard' => t('trail.events_title'),
         'shortageFormCard' => t('shortage.card_title'),
