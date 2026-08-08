@@ -915,6 +915,10 @@ return [
         'history.incident_resolved' => 'Η αναφορά περιστατικού ({type}) έκλεισε',
         'history.poi_reported' => '{actor} ανέφερε Σημείο Ενδιαφέροντος',
         'history.poi_checked' => 'Ελέγχθηκε Σημείο Ενδιαφέροντος',
+        'history.media_sent' => '{actor} έστειλε {kind}',
+        'history.route_media_sent' => '{actor} έστειλε {kind} από «{label}» ({team})',
+        'history.sos_seen' => 'Ελήφθη το SOS — {actor}',
+        'history.sos_resolved' => 'Λύθηκε το SOS — {actor}',
 
         // missions.php (guest-reachable via bootstrap.php allow-list)
         'missions_page.title' => 'Αποστολές',
@@ -1912,6 +1916,10 @@ return [
         'history.incident_resolved' => 'Incident report ({type}) was closed',
         'history.poi_reported' => '{actor} reported a Point of Interest',
         'history.poi_checked' => 'Point of Interest checked',
+        'history.media_sent' => '{actor} sent a {kind}',
+        'history.route_media_sent' => '{actor} sent a {kind} from "{label}" ({team})',
+        'history.sos_seen' => 'SOS acknowledged — {actor}',
+        'history.sos_resolved' => 'SOS resolved — {actor}',
 
         'missions_page.title' => 'Missions',
         'missions_page.export_csv' => 'Export CSV',

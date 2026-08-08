@@ -4416,6 +4416,27 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         $events[] = ['icon' => $fieldStatusIcons[$row['action']] ?? '📶', 'text' => h($row['actor_name']) . ' → ' . $fieldStatusText[$row['action']], 'ts' => strtotime($row['created_at'])];
     }
 
+    // SOS lifecycle continued: the trigger itself is already the 'needs_help'
+    // event just above (same created_at, same source action in
+    // volunteer-status.php) — only acknowledge/resolve add new information,
+    // previously entirely absent from this timeline even though
+    // mission-sos.php tracks both.
+    $sosEventRows = dbFetchAll(
+        "SELECT a.acknowledged_at, a.resolved_at, u.name AS actor_name
+         FROM mission_sos_alerts a
+         JOIN users u ON u.id = a.user_id
+         WHERE a.mission_id = ?",
+        [$missionId]
+    );
+    foreach ($sosEventRows as $row) {
+        if ($row['acknowledged_at']) {
+            $events[] = ['icon' => '👁️', 'text' => 'Ελήφθη το SOS — ' . h($row['actor_name']), 'ts' => strtotime($row['acknowledged_at'])];
+        }
+        if ($row['resolved_at']) {
+            $events[] = ['icon' => '✅', 'text' => 'Λύθηκε το SOS — ' . h($row['actor_name']), 'ts' => strtotime($row['resolved_at'])];
+        }
+    }
+
     $pingRows = dbFetchAll(
         "SELECT vp.created_at, u.name AS actor_name
          FROM volunteer_pings vp
@@ -4491,6 +4512,45 @@ function loadMissionActivityEventsForReport(int $missionId): array {
         $noteSuffix = $row['poi_note'] ? ' — «' . h($row['poi_note']) . '»' : '';
         $events[] = ['icon' => '📍', 'text' => h($row['actor_name']) . ' ανέφερε Σημείο Ενδιαφέροντος' . $noteSuffix, 'ts' => strtotime($row['created_at'])];
     }
+
+    // Regular field photos/videos — every mission_photos row NOT already
+    // covered by the POI block above (poi_id IS NULL): a plain "send a
+    // photo/video" order fulfillment, or a Route Order waypoint's own
+    // photo/video deliverable (mission-route.php's require_photo/require_video).
+    // Previously entirely absent from this timeline — a route waypoint's
+    // proof-of-arrival photo left no trace here even though the waypoint's
+    // own arrive/complete events above did.
+    $fieldMediaRows = dbFetchAll(
+        "SELECT ph.media_type, ph.created_at, ph.route_waypoint_id, w.seq AS waypoint_seq, w.label AS waypoint_label,
+                r.team_id, mt.codename, mt.team_number, u.name AS actor_name
+         FROM mission_photos ph
+         JOIN users u ON u.id = ph.user_id
+         LEFT JOIN mission_route_waypoints w ON w.id = ph.route_waypoint_id
+         LEFT JOIN mission_routes r ON r.id = w.route_id
+         LEFT JOIN mission_teams mt ON mt.id = r.team_id
+         WHERE ph.mission_id = ? AND ph.poi_id IS NULL",
+        [$missionId]
+    );
+    foreach ($fieldMediaRows as $row) {
+        $icon = $row['media_type'] === 'video' ? '🎥' : '📷';
+        $kind = $row['media_type'] === 'video' ? 'βίντεο' : 'φωτογραφία';
+        if ($row['route_waypoint_id']) {
+            $pointLabel = $row['waypoint_label'] !== null && $row['waypoint_label'] !== '' ? $row['waypoint_label'] : ('Σημείο ' . $row['waypoint_seq']);
+            $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'χωρίς ομάδα';
+            $events[] = [
+                'icon' => $icon,
+                'text' => h($row['actor_name']) . ' έστειλε ' . $kind . ' από «' . h($pointLabel) . '» (' . h($teamLabel) . ')',
+                'ts'   => strtotime($row['created_at']),
+            ];
+        } else {
+            $events[] = [
+                'icon' => $icon,
+                'text' => h($row['actor_name']) . ' έστειλε ' . $kind,
+                'ts'   => strtotime($row['created_at']),
+            ];
+        }
+    }
+
     $poiCheckedEventRows = dbFetchAll(
         "SELECT checked_at FROM mission_points_of_interest WHERE mission_id = ? AND checked_at IS NOT NULL",
         [$missionId]
