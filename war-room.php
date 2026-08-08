@@ -8488,38 +8488,98 @@ document.querySelectorAll('.team-form').forEach(form => {
     let refLayer = null;
     let currentArea = null;
     let vertexMarkers = [];
-    let hubIndex = null;
-    let cutIndices = [];
-    // Undo history for this session only — {type:'hub'|'cut', index}. A
-    // second click on an already-selected vertex is deliberately a no-op
-    // (not a toggle-off) so this stack is always the single source of truth
-    // for what a Ctrl+Z should reverse; a click-to-remove path would let the
-    // stack and the actual state drift apart.
-    let actionStack = [];
+    // Each entry is [aIndex, bIndex] — a straight line between two of the
+    // area's own vertices. Lines don't need to share a common point like
+    // the old hub-and-spoke model required; any two vertices can be
+    // connected as long as the line doesn't cross one already drawn.
+    let chords = [];
+    // First vertex of a line in progress, or null between clicks.
+    let pendingFirst = null;
 
-    // Given the area's own vertex list + a chosen hub + chosen cut vertices,
-    // returns the wedge polygons: boundary walked starting right after the
-    // hub back around to just before it, split at each cut. Zero cuts
-    // degenerates to exactly one wedge — the whole area, re-ordered to start
-    // at the hub — so this same function covers the "one sector = whole
-    // area" case with no special-casing.
-    function computeWedges() {
-        if (hubIndex === null || !currentArea) return [];
+    function edgeKey(a, b) { return a < b ? a + '_' + b : b + '_' + a; }
+
+    // A vertex pair is rejected before it ever reaches the crossing math
+    // below if it's already an edge of the original area (adjacent
+    // vertices — a "line" between them has zero width) or duplicates a
+    // line already drawn.
+    function isEdgeAlready(a, b) {
         const n = currentArea.geo.length;
-        const hub = currentArea.geo[hubIndex];
-        const boundary = [];
-        for (let k = 1; k < n; k++) boundary.push(currentArea.geo[(hubIndex + k) % n]);
-        const cutPositions = cutIndices
-            .map(ci => ((ci - hubIndex + n) % n) - 1)
-            .sort((a, b) => a - b);
-        const wedges = [];
-        let start = 0;
-        cutPositions.forEach(cp => {
-            wedges.push([hub, ...boundary.slice(start, cp + 1)]);
-            start = cp;
+        const diff = Math.abs(a - b);
+        if (diff === 1 || diff === n - 1) return true;
+        return chords.some(([ca, cb]) => edgeKey(ca, cb) === edgeKey(a, b));
+    }
+
+    // Standard orientation/on-segment test so both a proper crossing and a
+    // collinear overlap are caught, not just simple transversal crossings.
+    function orientation(p, q, r) {
+        const val = (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1]);
+        if (Math.abs(val) < 1e-12) return 0;
+        return val > 0 ? 1 : 2;
+    }
+    function onSegment(p, q, r) {
+        return Math.min(p[0], r[0]) - 1e-12 <= q[0] && q[0] <= Math.max(p[0], r[0]) + 1e-12 &&
+               Math.min(p[1], r[1]) - 1e-12 <= q[1] && q[1] <= Math.max(p[1], r[1]) + 1e-12;
+    }
+    function segmentsCross(p1, p2, p3, p4) {
+        const o1 = orientation(p1, p2, p3), o2 = orientation(p1, p2, p4);
+        const o3 = orientation(p3, p4, p1), o4 = orientation(p3, p4, p2);
+        if (o1 !== o2 && o3 !== o4) return true;
+        if (o1 === 0 && onSegment(p1, p3, p2)) return true;
+        if (o2 === 0 && onSegment(p1, p4, p2)) return true;
+        if (o3 === 0 && onSegment(p3, p1, p4)) return true;
+        if (o4 === 0 && onSegment(p3, p2, p4)) return true;
+        return false;
+    }
+
+    // Whether a new line a-b is allowed: not already an edge/duplicate, and
+    // doesn't cross any line already drawn. Lines sharing one endpoint
+    // (e.g. A-F and F-C) are fine — only pairs with 4 distinct vertices are
+    // checked for crossing.
+    function isValidChord(a, b) {
+        if (a === b || isEdgeAlready(a, b)) return false;
+        const [pa, pb] = [currentArea.geo[a], currentArea.geo[b]];
+        return !chords.some(([ca, cb]) => {
+            if (ca === a || ca === b || cb === a || cb === b) return false;
+            return segmentsCross(pa, pb, currentArea.geo[ca], currentArea.geo[cb]);
         });
-        wedges.push([hub, ...boundary.slice(start)]);
-        return wedges;
+    }
+
+    // Walks a cyclic vertex-index ring forward from a to b and from b to a,
+    // giving the two rings that result from splitting it at that line.
+    function splitRing(ring, a, b) {
+        const n = ring.length;
+        const ia = ring.indexOf(a), ib = ring.indexOf(b);
+        const arc1 = [];
+        for (let k = ia; ; k = (k + 1) % n) {
+            arc1.push(ring[k]);
+            if (k === ib) break;
+        }
+        const arc2 = [];
+        for (let k = ib; ; k = (k + 1) % n) {
+            arc2.push(ring[k]);
+            if (k === ia) break;
+        }
+        return [arc1, arc2];
+    }
+
+    // Starts from the whole area as a single face and cuts it once per
+    // drawn line, splitting whichever current face contains that line's
+    // two endpoints. Because lines are validated as non-crossing up front,
+    // that face is always unique — this same function covers the old
+    // "one sector = whole area" case with zero lines drawn, and the old
+    // hub-and-spoke fan as the special case where every line shares a
+    // vertex.
+    function computeWedges() {
+        if (!currentArea) return [];
+        const n = currentArea.geo.length;
+        let faces = [Array.from({length: n}, (_, i) => i)];
+        chords.forEach(([a, b]) => {
+            const fi = faces.findIndex(f => f.includes(a) && f.includes(b));
+            if (fi === -1) return; // shouldn't happen for validated chords
+            const [arc1, arc2] = splitRing(faces[fi], a, b);
+            faces.splice(fi, 1, arc1, arc2);
+        });
+        return faces.map(ring => ring.map(idx => currentArea.geo[idx]));
     }
 
     function wedgeCentroid(poly) {
@@ -8533,37 +8593,36 @@ document.querySelectorAll('.team-form').forEach(form => {
         vertexMarkers = [];
         if (!currentArea) return;
         currentArea.geo.forEach((pt, idx) => {
-            const isHub = idx === hubIndex;
-            const isCut = cutIndices.includes(idx);
-            const color = isHub ? '#212529' : (isCut ? '#6c757d' : '#0d6efd');
-            const marker = L.circleMarker(pt, {radius: isHub ? 10 : 7, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1}).addTo(composerMap);
+            const isPending = idx === pendingFirst;
+            const marker = L.circleMarker(pt, {radius: isPending ? 10 : 7, color: '#fff', weight: 2, fillColor: isPending ? '#212529' : '#0d6efd', fillOpacity: 1}).addTo(composerMap);
             marker.on('click', () => onVertexClick(idx));
             vertexMarkers.push(marker);
         });
     }
 
     function onVertexClick(idx) {
-        if (hubIndex === null) {
-            hubIndex = idx;
-            actionStack.push({type: 'hub', index: idx});
-        } else if (idx === hubIndex || cutIndices.includes(idx)) {
-            return;
+        if (pendingFirst === null) {
+            pendingFirst = idx;
+        } else if (idx === pendingFirst) {
+            pendingFirst = null; // clicking the pending point again cancels it
+        } else if (isValidChord(pendingFirst, idx)) {
+            chords.push([pendingFirst, idx]);
+            pendingFirst = null;
         } else {
-            cutIndices.push(idx);
-            actionStack.push({type: 'cut', index: idx});
+            alert(t('sector.line_invalid'));
+            return;
         }
         renderVertexMarkers();
         renderWedges();
     }
 
     function undo() {
-        if (!actionStack.length) return;
-        const last = actionStack.pop();
-        if (last.type === 'cut') {
-            cutIndices = cutIndices.filter(i => i !== last.index);
+        if (pendingFirst !== null) {
+            pendingFirst = null;
+        } else if (chords.length) {
+            chords.pop();
         } else {
-            hubIndex = null;
-            cutIndices = [];
+            return;
         }
         renderVertexMarkers();
         renderWedges();
@@ -8620,9 +8679,8 @@ document.querySelectorAll('.team-form').forEach(form => {
     }
 
     function resetDivision() {
-        hubIndex = null;
-        cutIndices = [];
-        actionStack = [];
+        chords = [];
+        pendingFirst = null;
         renderVertexMarkers();
         renderWedges();
     }

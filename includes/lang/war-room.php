@@ -207,7 +207,8 @@ return [
         'sector.area_empty_list' => 'Δεν έχουν οριστεί περιοχές έρευνας.',
         // Divide-into-sectors tool — cut an area into sectors from its own vertices
         'sector.divide_btn' => 'Χωρισμός σε Τομείς',
-        'sector.hub_hint' => 'Κάντε κλικ σε μια κορυφή για να οριστεί ως κέντρο, μετά κάντε κλικ σε άλλες κορυφές για να προσθέσετε γραμμές διαχωρισμού. Ctrl+Z αναιρεί το τελευταίο βήμα.',
+        'sector.hub_hint' => 'Κάντε κλικ σε μια κορυφή και μετά σε μια δεύτερη για να σχεδιάσετε μια γραμμή διαχωρισμού. Επαναλάβετε για να προσθέσετε κι άλλες γραμμές, από όποιες κορυφές θέλετε, αρκεί να μην τέμνονται μεταξύ τους. Ctrl+Z αναιρεί το τελευταίο βήμα.',
+        'sector.line_invalid' => 'Αυτή η γραμμή δεν επιτρέπεται — τέμνει άλλη γραμμή διαχωρισμού ή είναι ήδη πλευρά της περιοχής. Επιλέξτε άλλη κορυφή.',
         'sector.wedge_label_placeholder' => 'Τομέας {letter}',
         'sector.divide_save_btn' => 'Αποθήκευση Τομέων',
         'sector.clear_area_sectors_btn' => 'Καθαρισμός Τομέων',
@@ -1227,7 +1228,8 @@ return [
         'sector.area_empty_list' => 'No search areas have been defined.',
         // Divide-into-sectors tool — cut an area into sectors from its own vertices
         'sector.divide_btn' => 'Divide into Sectors',
-        'sector.hub_hint' => 'Click a vertex to set it as the hub, then click other vertices to add cut lines. Ctrl+Z undoes the last step.',
+        'sector.hub_hint' => 'Click a vertex, then a second one, to draw a dividing line. Repeat to add more lines from any vertices you like, as long as they don\'t cross each other. Ctrl+Z undoes the last step.',
+        'sector.line_invalid' => 'That line isn\'t allowed — it crosses another dividing line, or is already an edge of the area. Pick a different vertex.',
         'sector.wedge_label_placeholder' => 'Sector {letter}',
         'sector.divide_save_btn' => 'Save Sectors',
         'sector.clear_area_sectors_btn' => 'Clear Sectors',
