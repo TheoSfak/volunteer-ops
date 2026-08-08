@@ -1403,6 +1403,33 @@ function notifyRestrictedAreaBreach(int $missionId, int $userId, ?int $teamId, s
 }
 
 /**
+ * War Room: every active System Administrator, minus $excludeUserId. This is
+ * the "sees/hears absolutely everything happening in every Action Room" tier
+ * — deliberately narrower than getMissionCommandStaffIds() (department admins
+ * + this mission's shift leaders, used for routine "FYI" pings elsewhere) and
+ * deliberately mission-independent: a system admin is looped in on a
+ * mission's admin-to-user alerts even without being that mission's own
+ * responsible_user_id or an approved participant on it, since they may just
+ * be watching the Action Room without being on its roster.
+ */
+function getSystemAdminIds(int $excludeUserId = 0): array {
+    $rows = dbFetchAll("SELECT id FROM users WHERE role = ? AND is_active = 1", [ROLE_SYSTEM_ADMIN]);
+    return array_values(array_diff(array_map('intval', array_column($rows, 'id')), [$excludeUserId]));
+}
+
+/**
+ * War Room: capped, human-readable name list for an admin FYI message
+ * ("Maria, Giorgos, Nikos +3 ακόμη") — who a targeted order/dispatch actually
+ * went to, shown to a system admin who wasn't one of them.
+ */
+function formatAdminFyiRecipientList(array $names, string $lang): string {
+    $names = array_values(array_filter($names, fn($n) => $n !== null && $n !== ''));
+    if (empty($names)) return '';
+    if (count($names) <= 3) return implode(', ', $names);
+    return implode(', ', array_slice($names, 0, 3)) . ' ' . t('common.and_n_more', ['n' => count($names) - 3], $lang);
+}
+
+/**
  * War Room: persist a trackable order (mission_orders + one mission_order_recipients
  * row per recipient, snapshotting each recipient's team) then notify them, threading
  * orderId into the pushData so the alert banner can offer an "Ελήφθη" button. Shared
@@ -1413,11 +1440,19 @@ function notifyRestrictedAreaBreach(int $missionId, int $userId, ?int $teamId, s
  * specifically so a standalone endpoint like mission-route.php — which only
  * requires bootstrap.php, never war-room.php itself — can call it too.
  *
- * Only $recipientIds get the banner + alert sound — same "a targeted order
- * shouldn't sound an alarm for people it wasn't sent to" rule already applied to
- * team-targeted dispatch (mission-dispatch.php's create action, v3.153.18). An
- * earlier version also broadcast a quieter FYI banner to every other approved
- * participant; removed per explicit request, no replacement.
+ * $recipientIds get the real banner + alert sound + orderId (the "Ελήφθη"
+ * button) — same "a targeted order shouldn't sound an alarm for people it
+ * wasn't sent to" rule already applied to team-targeted dispatch
+ * (mission-dispatch.php's create action, v3.153.18). An earlier version also
+ * broadcast a quieter FYI banner to every other *approved participant*;
+ * removed per explicit request (v3.165.1), no replacement — that part stays
+ * gone. But v3.165.1 went one step too far and also silenced every *other
+ * System Administrator* watching a different browser tab/session — every
+ * such admin now still gets the identical banner+sound alert too, worded as
+ * a third-person FYI naming the real recipient(s) instead of the 2nd-person
+ * "you" text meant for them, and with no orderId (a bystander admin has no
+ * mission_order_recipients row, so no "Ελήφθη" button — mission-order.php's
+ * acknowledge action would just reject it as "not your request" anyway).
  */
 function createMissionOrderAndNotify(
     int $missionId, string $missionTitle, string $orderType, int $createdBy, array $recipientIds,
@@ -1452,6 +1487,46 @@ function createMissionOrderAndNotify(
             $pushData['alarmStyle'] = $alarmStyle;
         }
         sendNotification($recipientId, t($titleKey, $titleVars, $lang), $message, 'warning', '', $pushData);
+    }
+
+    static $adminFyiKeys = [
+        'location'       => 'order.location.admin_fyi',
+        'photo'          => 'order.photo.admin_fyi',
+        'video'          => 'order.video.admin_fyi',
+        'task'           => 'order.task.admin_fyi',
+        'message'        => 'global_message.admin_fyi',
+        'return_to_base' => 'end_mission_broadcast.admin_fyi',
+        'route'          => 'order.route.admin_fyi',
+        'charge_phone'   => 'order.charge_phone.admin_fyi',
+    ];
+    $fyiKey = $adminFyiKeys[$orderType] ?? null;
+    $adminBystanderIds = $fyiKey ? array_values(array_diff(getSystemAdminIds($createdBy), $recipientIds)) : [];
+    if ($adminBystanderIds) {
+        $actorName = (string) dbFetchValue("SELECT name FROM users WHERE id = ?", [$createdBy]);
+        $recipientNamePlaceholders = implode(',', array_fill(0, count($recipientIds), '?'));
+        $recipientNames = array_column(
+            dbFetchAll("SELECT name FROM users WHERE id IN ($recipientNamePlaceholders)", $recipientIds),
+            'name'
+        );
+        $fyiLangs = getUserLanguages($adminBystanderIds);
+        foreach ($adminBystanderIds as $adminId) {
+            $lang = $fyiLangs[$adminId] ?? DEFAULT_LANGUAGE;
+            $fyiMessage = t($fyiKey, [
+                'actor'      => $actorName,
+                'recipients' => formatAdminFyiRecipientList($recipientNames, $lang),
+                'mission'    => $missionTitle,
+                'text'       => $rawMessage ?? '',
+            ], $lang);
+            $fyiPushData = [
+                'url' => $warRoomUrl,
+                'tag' => $orderType . '-request-mission-' . $missionId,
+                'bannerMission' => $missionId,
+            ];
+            if ($alarmStyle) {
+                $fyiPushData['alarmStyle'] = $alarmStyle;
+            }
+            sendNotification($adminId, t($titleKey, $titleVars, $lang), $fyiMessage, 'info', '', $fyiPushData);
+        }
     }
 
     return (int) $orderId;
