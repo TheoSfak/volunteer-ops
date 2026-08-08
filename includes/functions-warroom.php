@@ -1057,6 +1057,90 @@ function warRoomPingStaleThresholdSeconds(): int {
 }
 
 /**
+ * War Room fatigue flag: minutes each currently-on-duty volunteer has been
+ * continuously in the field on this mission — a CHAIN of back-to-back
+ * APPROVED shifts (gap <= $toleranceMinutes between one shift's end_time and
+ * the next's start_time doesn't break the chain; a real gap does).
+ *
+ * "Currently on duty" gives a shift's end_time the SAME gap tolerance as any
+ * other link in the chain — a shift that ended a few minutes ago with no
+ * follow-on shift approved yet still counts as on-duty for up to
+ * $toleranceMinutes past its end_time. Without this, the flag would vanish
+ * the instant a shift's end_time passes if nobody has approved the next
+ * shift yet, which is exactly the scenario this feature exists to catch
+ * (nobody replaced them). Past that grace window with still no new shift,
+ * the volunteer drops out of this array entirely.
+ *
+ * Returns [volunteerId => continuousMinutes] — ONLY for volunteers currently
+ * on duty per the rule above. Doubles as the "who's currently deployed on
+ * this mission" set for api-suggest-replacement.php's exclusion filter.
+ */
+function computeContinuousFieldMinutesByVolunteerId(int $missionId, int $toleranceMinutes = 30): array {
+    $rows = dbFetchAll(
+        "SELECT pr.volunteer_id, s.start_time, s.end_time
+         FROM participation_requests pr
+         JOIN shifts s ON s.id = pr.shift_id
+         WHERE s.mission_id = ? AND pr.status = ?
+         ORDER BY pr.volunteer_id, s.start_time",
+        [$missionId, PARTICIPATION_APPROVED]
+    );
+
+    $shiftsByVolunteer = [];
+    foreach ($rows as $row) {
+        $shiftsByVolunteer[(int) $row['volunteer_id']][] = [
+            'start' => strtotime($row['start_time']),
+            'end'   => strtotime($row['end_time']),
+        ];
+    }
+
+    $toleranceSeconds = $toleranceMinutes * 60;
+    $now = time();
+    $result = [];
+
+    foreach ($shiftsByVolunteer as $volunteerId => $shifts) {
+        // Already ORDER BY s.start_time from the query — cheap
+        // belt-and-braces re-sort (each volunteer has at most a handful of
+        // rows on one mission), not trusted-away in case grouping order
+        // ever changes.
+        usort($shifts, fn($a, $b) => $a['start'] <=> $b['start']);
+
+        // Last shift that has already started. Shifts are sorted ascending,
+        // so the last one found is the most recent start <= now.
+        $chainEndIndex = null;
+        foreach ($shifts as $i => $shift) {
+            if ($shift['start'] <= $now) {
+                $chainEndIndex = $i;
+            } else {
+                break;
+            }
+        }
+        if ($chainEndIndex === null) {
+            continue; // no shift has started yet
+        }
+        $chainEnd = $shifts[$chainEndIndex];
+        if ($now - $chainEnd['end'] > $toleranceSeconds) {
+            continue; // last-started shift ended too long ago — not on duty
+        }
+
+        // Walk backward, extending the chain while each earlier shift's
+        // end_time is within tolerance of the next one's start_time.
+        $chainStart = $chainEnd;
+        for ($i = $chainEndIndex; $i > 0; $i--) {
+            $current = $shifts[$i];
+            $prev = $shifts[$i - 1];
+            if ($current['start'] - $prev['end'] > $toleranceSeconds) {
+                break; // real gap — chain stops here
+            }
+            $chainStart = $prev;
+        }
+
+        $result[$volunteerId] = (int) floor(($now - $chainStart['start']) / 60);
+    }
+
+    return $result;
+}
+
+/**
  * Core GPS-ping write path (ownership check + volunteer_pings insert +
  * command-staff notify + order auto-fulfillment) shared by ping-location.php
  * (session + CSRF auth, called from the live war-room.php tab) and
@@ -2364,7 +2448,7 @@ function computeMissionSectorCoverage(int $missionId): array {
  * null position — callers (Nearby Teams, Team Distances) both treat
  * "not in this array" as the correct empty state.
  */
-function loadTeamPositionsForMission(int $missionId): array {
+function loadTeamPositionsForMission(int $missionId, array $continuousFieldMinutesByVolunteerId = []): array {
     $teams = dbFetchAll(
         "SELECT id, codename, team_number, color FROM mission_teams WHERE mission_id = ? ORDER BY codename",
         [$missionId]
@@ -2373,7 +2457,7 @@ function loadTeamPositionsForMission(int $missionId): array {
     $positions = [];
     foreach ($teams as $team) {
         $ping = dbFetchOne(
-            "SELECT vp.lat, vp.lng, vp.created_at, vp.battery_level
+            "SELECT vp.user_id, vp.lat, vp.lng, vp.created_at, vp.battery_level
              FROM volunteer_pings vp
              JOIN mission_team_members mtm ON mtm.user_id = vp.user_id
              JOIN shifts s ON s.id = vp.shift_id AND s.mission_id = mtm.mission_id
@@ -2395,6 +2479,10 @@ function loadTeamPositionsForMission(int $missionId): array {
             // Battery of whoever on the team most recently reported in — a
             // reasonable proxy for "is this team's tracking about to go dark".
             'battery_level' => $ping['battery_level'] !== null ? (int) $ping['battery_level'] : null,
+            // Fatigue of whoever's ping this position is based on — same
+            // "reasonable proxy, not a guarantee" tradeoff already accepted
+            // for battery_level just above.
+            'continuous_field_minutes' => $continuousFieldMinutesByVolunteerId[(int) $ping['user_id']] ?? null,
         ];
     }
     return $positions;
@@ -2416,6 +2504,8 @@ function computeTeamDistanceMatrix(array $teamPositions): array {
             $b = $teamPositions[$j];
             $aBat = $a['battery_level'] ?? null;
             $bBat = $b['battery_level'] ?? null;
+            $aFatigue = $a['continuous_field_minutes'] ?? null;
+            $bFatigue = $b['continuous_field_minutes'] ?? null;
             $matrix[] = [
                 'a_label' => $a['label'], 'a_color' => $a['color'],
                 'b_label' => $b['label'], 'b_color' => $b['color'],
@@ -2424,6 +2514,9 @@ function computeTeamDistanceMatrix(array $teamPositions): array {
                 // Worse (lower) of the two sides wins — mirrors the is_stale
                 // OR-rollup just above.
                 'battery_level' => ($aBat !== null && $bBat !== null) ? min($aBat, $bBat) : ($aBat ?? $bBat),
+                // Worse (HIGHER) of the two sides wins — opposite of
+                // battery_level above, since for fatigue more minutes is worse.
+                'continuous_field_minutes' => ($aFatigue !== null && $bFatigue !== null) ? max($aFatigue, $bFatigue) : ($aFatigue ?? $bFatigue),
             ];
         }
     }
