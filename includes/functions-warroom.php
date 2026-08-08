@@ -2452,7 +2452,10 @@ function loadTeamPositionsForMission(int $missionId, array $continuousFieldMinut
             'color' => $team['color'],
             'lat' => (float) $ping['lat'],
             'lng' => (float) $ping['lng'],
-            'time' => date('H:i', strtotime($ping['created_at'])),
+            // Includes the date — same reasoning as the live pin popup's own
+            // 'time' field (war-room.php's $loadPins): a team's last-known
+            // ping can be from a different day than "now".
+            'time' => date('H:i d/m/Y', strtotime($ping['created_at'])),
             'is_stale' => (time() - strtotime($ping['created_at'])) > warRoomPingStaleThresholdSeconds(),
             // Battery of whoever on the team most recently reported in — a
             // reasonable proxy for "is this team's tracking about to go dark".
