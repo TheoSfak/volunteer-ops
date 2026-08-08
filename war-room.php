@@ -4987,6 +4987,15 @@ const CRITICAL_BATTERY_PCT = Math.floor(LOW_BATTERY_PCT / 2);
 const WR_MAX_SHIFT_MINUTES = <?= (int) getSetting('war_room_max_shift_minutes', '480') ?>;
 const WR_CRITICAL_SHIFT_MINUTES = Math.round(WR_MAX_SHIFT_MINUTES * 1.5);
 function fatigueHm(minutes) { return {h: Math.floor(minutes / 60), m: minutes % 60}; }
+// Three fixed tiers for the pin popup's battery badge (below) — deliberately
+// independent of the configurable LOW_BATTERY_PCT/CRITICAL_BATTERY_PCT above,
+// which still gate the separate low-battery-only badges in Nearby Teams /
+// Team Distances and the charge-alert button; this one is always shown.
+function batteryTier(pct) {
+    if (pct >= 65) return {cls: 'text-success', key: 'map.pin_battery_charged'};
+    if (pct >= 35) return {cls: 'text-warning', key: 'map.pin_battery_moderate'};
+    return {cls: 'text-danger', key: 'map.pin_battery_low'};
+}
 // Deliberately separate from LOW_BATTERY_PCT above, fixed (not a Settings
 // field) — LOW_BATTERY_PCT gates the passive "getting low" badge, this
 // gates the active charge-alert button (below/right of the Navigate
@@ -5036,12 +5045,14 @@ function buildPinMarker(pin, interactive = true) {
     const statusLine = pinStatusLabel(pin.status);
     const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
         : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
-    // Only rendered when actually low — mirrors extraLine above, no "🔋 85%"
-    // clutter on a healthy pin. The charge-alert button (below, next to
-    // Navigate) is now fully independent of this badge — it has its own,
-    // stricter threshold and renders regardless of whether this badge does.
-    const batteryLine = (pin.battery_level !== null && pin.battery_level !== undefined && pin.battery_level <= LOW_BATTERY_PCT)
-        ? `<br><span class="${pin.battery_level <= CRITICAL_BATTERY_PCT ? 'text-danger' : 'text-warning'} small">🔋 ${t('map.pin_low_battery', {pct: pin.battery_level})}</span>`
+    // Always rendered when a reading exists (percentage should always be
+    // visible per ops request) — unlike extraLine/fatigueLine, which stay
+    // hidden unless actually triggered. The charge-alert button (below,
+    // next to Navigate) is fully independent of this badge — it has its
+    // own, stricter threshold and renders regardless of this badge's tier.
+    const batteryPinTier = (pin.battery_level !== null && pin.battery_level !== undefined) ? batteryTier(pin.battery_level) : null;
+    const batteryLine = batteryPinTier
+        ? `<br><span class="${batteryPinTier.cls} small">🔋 ${t(batteryPinTier.key, {pct: pin.battery_level})}</span>`
         : '';
     // Fatigue: same "only rendered when actually over" idiom as batteryLine above.
     const fatigueLine = (pin.continuous_field_minutes !== null && pin.continuous_field_minutes !== undefined && pin.continuous_field_minutes > WR_MAX_SHIFT_MINUTES)
@@ -5049,7 +5060,7 @@ function buildPinMarker(pin, interactive = true) {
         : '';
     const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
     const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${pin.lat},${pin.lng}&travelmode=driving`;
-    // Always rendered for an admin (unlike batteryLine above), so there's
+    // Always rendered for an admin regardless of battery level, so there's
     // something to notice/hover even on a healthy pin — deliberately NOT
     // the native disabled attribute, which would swallow the click
     // entirely; the click handler still needs to fire on an "inactive"
