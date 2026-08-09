@@ -6181,6 +6181,23 @@ function handleRouteActionResult(result, retry) {
     }
 }
 
+// Shared by the card's ack button and the map popup's — mutates the
+// already-loaded `routes` array in place (no need to wait for the next
+// poll) and refreshes both surfaces that read it, so acknowledging from
+// either place immediately reveals depart/arrive/complete in the other too.
+function routeAcknowledge(routeId, orderId, btn) {
+    btn.disabled = true;
+    const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge', order_id: orderId});
+    fetch('mission-order.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+        if (result.ok) {
+            const route = routes.find(r => String(r.id) === String(routeId));
+            if (route) route.my_acknowledged_at = true;
+            renderMyRoutes(routes);
+            if (!fieldMode) renderRouteLayer(routes);
+        } else { btn.disabled = false; alert(result.error || t('common.failed')); }
+    }).catch(() => { btn.disabled = false; });
+}
+
 function routeDepart(waypointId, confirmed) {
     postRouteActionQueueable('depart', waypointId, confirmed ? {confirm_out_of_sequence: '1'} : {})
         .then(result => handleRouteActionResult(result, () => routeDepart(waypointId, true)));
@@ -6216,15 +6233,22 @@ function findRouteWaypointById(waypointId) {
     }
     return null;
 }
-function routeComplete(waypointId, confirmed) {
-    const noteInput = document.querySelector(`.route-note-input[data-id="${waypointId}"]`);
+// scopeEl narrows the note-input/button lookup to the container this call
+// came from (the card's #myRoutesList, or a specific waypoint popup's own
+// element) — needed now that the same waypoint's "current" block can be
+// on-screen twice at once (card + map popup); an unscoped document-wide
+// query would silently grab whichever instance happens to sit first in the
+// DOM regardless of which one the volunteer actually typed a note into.
+function routeComplete(waypointId, confirmed, scopeEl) {
+    const scope = scopeEl || document;
+    const noteInput = scope.querySelector(`.route-note-input[data-id="${waypointId}"]`);
     const noteValue = noteInput ? noteInput.value.trim() : '';
     const wp = findRouteWaypointById(waypointId);
     if (wp) {
         const missing = missingRouteDeliverablesClientSide(wp, noteValue);
         if (missing.length) {
             alert(t('route.missing_deliverables', {items: missing.join(', ')}));
-            const group = document.querySelector(`.route-complete-btn[data-id="${waypointId}"]`);
+            const group = scope.querySelector(`.route-complete-btn[data-id="${waypointId}"]`);
             if (group) group.disabled = false;
             return;
         }
@@ -6233,7 +6257,7 @@ function routeComplete(waypointId, confirmed) {
     if (noteValue !== '') extra.note = noteValue;
     if (confirmed) extra.confirm_out_of_sequence = '1';
     postRouteActionQueueable('complete', waypointId, extra)
-        .then(result => handleRouteActionResult(result, () => routeComplete(waypointId, true)));
+        .then(result => handleRouteActionResult(result, () => routeComplete(waypointId, true, scopeEl)));
 }
 
 function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
@@ -6257,6 +6281,7 @@ function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
                     }
                 }
                 renderMyRoutes(routes);
+                if (!fieldMode) renderRouteLayer(routes);
             } else {
                 if (statusEl) { statusEl.textContent = result.error || t('common.send_failed'); statusEl.className = 'small text-danger'; }
             }
@@ -6437,20 +6462,10 @@ function renderMyRoutes(allRoutes) {
         </div>`;
     }).join('');
 
-    list.querySelectorAll('.route-ack-btn').forEach(btn => btn.addEventListener('click', () => {
-        btn.disabled = true;
-        const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge', order_id: btn.dataset.orderId});
-        fetch('mission-order.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
-            if (result.ok) {
-                const route = allRoutes.find(r => String(r.id) === btn.dataset.id);
-                if (route) route.my_acknowledged_at = true;
-                renderMyRoutes(allRoutes);
-            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
-    }));
+    list.querySelectorAll('.route-ack-btn').forEach(btn => btn.addEventListener('click', () => routeAcknowledge(btn.dataset.id, btn.dataset.orderId, btn)));
     list.querySelectorAll('.route-depart-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeDepart(btn.dataset.id, false); }));
     list.querySelectorAll('.route-arrive-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeArrive(btn.dataset.id, false); }));
-    list.querySelectorAll('.route-complete-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeComplete(btn.dataset.id, false); }));
+    list.querySelectorAll('.route-complete-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeComplete(btn.dataset.id, false, list); }));
     list.querySelectorAll('.route-jump-btn').forEach(btn => btn.addEventListener('click', () => {
         if (confirm(t('route.confirm_out_of_sequence'))) routeDepart(btn.dataset.id, true);
     }));
@@ -9917,9 +9932,32 @@ function routeWaypointColor(wp, isCurrent) {
     return isCurrent ? '#6c757d' : '#adb5bd';
 }
 
+// Same whole-array-JSON signature technique as renderMyRoutes — a route
+// member's waypoint popup can now hold the exact same live note textarea the
+// card does (see below), so skipping the rebuild on an unchanged poll tick
+// protects in-progress typing here too, not just in the card.
+let routeLayerRenderedSig = null;
 function renderRouteLayer(allRoutes) {
     if (!routeLayer) return;
+    const sig = JSON.stringify(allRoutes);
+    if (sig === routeLayerRenderedSig) return;
+    routeLayerRenderedSig = sig;
+
+    // A poll tick (or a teammate's own action elsewhere, since routes are
+    // shared state) can land while this viewer has a waypoint popup open —
+    // clearLayers() below would otherwise silently kill it and any button
+    // inside mid-tap, same problem renderDispatches() already solved for
+    // dispatch pins. Remember which waypoint was open and reopen its
+    // freshly-rendered marker afterward.
+    let openWaypointId = null;
+    routeLayer.eachLayer(layer => {
+        if (layer.waypointId !== undefined && layer.isPopupOpen && layer.isPopupOpen()) {
+            openWaypointId = layer.waypointId;
+        }
+    });
+
     routeLayer.clearLayers();
+    let reopenLayer = null;
     // Live map only — a completed route (like a cancelled one) drops off
     // here once done, so numbered waypoint pins/lines from finished patrols
     // don't accumulate over a long multi-team mission. Nothing is lost: the
@@ -9936,17 +9974,42 @@ function renderRouteLayer(allRoutes) {
                 html: `<div style="background:${color};color:#fff;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;border:2px solid #fff;box-shadow:0 1px 4px #0008;">${wp.seq}</div>`,
                 iconSize: [24, 24], iconAnchor: [12, 12],
             });
-            const statusText = wp.skipped_at ? t('route.skipped_prefix')
-                : wp.completed_at ? t('route.completed_at_prefix', {time: wp.completed_at_display})
-                : wp.arrived_at ? t('route.onsite_since_prefix', {time: wp.arrived_at_display})
-                : wp.departed_at ? t('route.enroute_since_prefix', {time: wp.departed_at_display})
-                : '';
-            const label = wp.label ? escapeHtml(wp.label) : t('route.waypoint_fallback_label', {seq: wp.seq});
-            const popupHtml = `<strong>${escapeHtml(route.team_label || '')} — ${wp.seq}. ${label}</strong>` +
-                (wp.instructions ? `<br><span class="small">${escapeHtml(wp.instructions)}</span>` : '') +
-                (statusText ? `<br><span class="small text-muted">${statusText}</span>` : '') +
-                `<br><a href="${routeWaypointDirectionsUrl(wp)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
-            L.marker([wp.lat, wp.lng], {icon}).addTo(routeLayer).bindPopup(popupHtml);
+            let popupHtml;
+            // Route member (one of their own waypoints): the popup becomes a
+            // full "Η Πορεία μου" card entry for this stop — same ack gate,
+            // same depart/arrive/deliverables/complete buttons, reusing the
+            // exact same render functions and click handlers as the card —
+            // so every action is reachable right from the pin and nobody has
+            // to scroll down to the card to act. Command staff / non-members
+            // keep today's plain read-only popup.
+            if (route.is_route_member) {
+                const teamPrefix = route.team_label ? `<div class="small text-muted mb-1">${escapeHtml(route.team_label)}</div>` : '';
+                if (!route.my_acknowledged_at) {
+                    const label = wp.label ? escapeHtml(wp.label) : t('route.waypoint_fallback_label', {seq: wp.seq});
+                    popupHtml = teamPrefix + `<strong class="small">${wp.seq}. ${label}</strong><br>` +
+                        `<button type="button" class="btn btn-sm wr-touch-btn btn-warning w-100 mt-1 route-ack-btn" data-id="${route.id}" data-order-id="${route.order_id}"><i class="bi bi-check2 me-1"></i>${t('banner.ack_btn')}</button>`;
+                } else if (wp.completed_at || wp.skipped_at) {
+                    popupHtml = teamPrefix + renderRouteWaypointClosed(wp);
+                } else if (wp.seq === currentSeq) {
+                    popupHtml = teamPrefix + renderRouteWaypointCurrent(wp);
+                } else {
+                    popupHtml = teamPrefix + renderRouteWaypointUpcoming(wp);
+                }
+            } else {
+                const statusText = wp.skipped_at ? t('route.skipped_prefix')
+                    : wp.completed_at ? t('route.completed_at_prefix', {time: wp.completed_at_display})
+                    : wp.arrived_at ? t('route.onsite_since_prefix', {time: wp.arrived_at_display})
+                    : wp.departed_at ? t('route.enroute_since_prefix', {time: wp.departed_at_display})
+                    : '';
+                const label = wp.label ? escapeHtml(wp.label) : t('route.waypoint_fallback_label', {seq: wp.seq});
+                popupHtml = `<strong>${escapeHtml(route.team_label || '')} — ${wp.seq}. ${label}</strong>` +
+                    (wp.instructions ? `<br><span class="small">${escapeHtml(wp.instructions)}</span>` : '') +
+                    (statusText ? `<br><span class="small text-muted">${statusText}</span>` : '') +
+                    `<br><a href="${routeWaypointDirectionsUrl(wp)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
+            }
+            const marker = L.marker([wp.lat, wp.lng], {icon}).addTo(routeLayer).bindPopup(popupHtml, {minWidth: 220});
+            marker.waypointId = wp.id;
+            if (String(wp.id) === String(openWaypointId)) reopenLayer = marker;
         });
         const coords = route.waypoints.map(w => [w.lat, w.lng]);
         if (route.is_closed_loop && coords.length >= 3) {
@@ -9958,6 +10021,33 @@ function renderRouteLayer(allRoutes) {
             L.polyline(coords, {color: route.team_color_bg || '#0d6efd', weight: 3, opacity: 0.7, dashArray: '6,6'}).addTo(routeLayer);
         }
     });
+    if (reopenLayer) reopenLayer.openPopup();
+}
+
+// Delegated the same way dispatchLayer's popup buttons are (see that block
+// above): rebuilt into a fresh DOM node every render, so listeners are wired
+// on 'popupopen' rather than at creation time. Route-member-only actions —
+// admin/command-staff popups render no buttons for these selectors to match
+// (see renderRouteLayer above), so this handler simply finds nothing and
+// does nothing on their popups.
+if (!fieldMode) {
+routeLayer.on('popupopen', event => {
+    const popupEl = event.popup.getElement();
+    const ackBtn = popupEl.querySelector('.route-ack-btn');
+    if (ackBtn) ackBtn.addEventListener('click', () => routeAcknowledge(ackBtn.dataset.id, ackBtn.dataset.orderId, ackBtn));
+    const departBtn = popupEl.querySelector('.route-depart-btn');
+    if (departBtn) departBtn.addEventListener('click', () => { departBtn.disabled = true; routeDepart(departBtn.dataset.id, false); });
+    const arriveBtn = popupEl.querySelector('.route-arrive-btn');
+    if (arriveBtn) arriveBtn.addEventListener('click', () => { arriveBtn.disabled = true; routeArrive(arriveBtn.dataset.id, false); });
+    const completeBtn = popupEl.querySelector('.route-complete-btn');
+    if (completeBtn) completeBtn.addEventListener('click', () => { completeBtn.disabled = true; routeComplete(completeBtn.dataset.id, false, popupEl); });
+    const jumpBtn = popupEl.querySelector('.route-jump-btn');
+    if (jumpBtn) jumpBtn.addEventListener('click', () => { if (confirm(t('route.confirm_out_of_sequence'))) routeDepart(jumpBtn.dataset.id, true); });
+    popupEl.querySelectorAll('.route-media-btn').forEach(btn => btn.addEventListener('click', () => {
+        const statusEl = btn.closest('.d-flex').nextElementSibling;
+        triggerWaypointUpload(btn.dataset.id, btn.dataset.mediaType, statusEl);
+    }));
+});
 }
 
 // ── Route Order admin sidebar list (every team's routes, cancel/skip) ───────
