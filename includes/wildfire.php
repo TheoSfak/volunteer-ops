@@ -188,7 +188,11 @@ function _firmsFetchArea(string $apiKey, string $source, string $bbox, ?string &
         return null;
     }
 
-    $header = str_getcsv($lines[0]);
+    // Explicit $escape (PHP 8.4 deprecates the implicit default, and on this
+    // host the deprecation notice prints straight into the response body,
+    // corrupting the JSON output for every caller — settings.php's test
+    // button and the live Action Room poll alike).
+    $header = str_getcsv($lines[0], ',', '"', '\\');
     $header = array_map('strtolower', $header);
     if (!in_array('latitude', $header, true) || !in_array('longitude', $header, true)) {
         // Not a valid CSV header — almost always an invalid/expired MAP_KEY
@@ -202,7 +206,7 @@ function _firmsFetchArea(string $apiKey, string $source, string $bbox, ?string &
         if (trim($lines[$i]) === '') {
             continue;
         }
-        $fields = str_getcsv($lines[$i]);
+        $fields = str_getcsv($lines[$i], ',', '"', '\\');
         if (count($fields) !== count($header)) {
             continue;
         }

@@ -1351,10 +1351,16 @@ include __DIR__ . '/includes/header.php';
                 <div class="card-body">
                     <div class="mb-3">
                         <label class="form-label" for="weatherApiKey">OpenWeatherMap API Key</label>
-                        <input type="password" class="form-control" id="weatherApiKey"
-                               name="openweathermap_api_key"
-                               autocomplete="new-password"
-                               placeholder="<?= !empty($settings['openweathermap_api_key'] ?? '') ? '••••••••' : 'Εισάγετε το API key σας' ?>">
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="weatherApiKey"
+                                   name="openweathermap_api_key"
+                                   autocomplete="new-password"
+                                   value="<?= h($settings['openweathermap_api_key'] ?? '') ?>"
+                                   placeholder="Εισάγετε το API key σας">
+                            <button type="button" class="btn btn-outline-secondary" onclick="toggleKeyVisibility('weatherApiKey')" tabindex="-1">
+                                <i class="bi bi-eye" id="eye-weatherApiKey"></i>
+                            </button>
+                        </div>
                         <div class="form-text">
                             Απαιτείται για την εμφάνιση πρόβλεψης καιρού στις αποστολές.
                             <a href="https://openweathermap.org/appid" target="_blank" rel="noopener noreferrer">Δωρεάν εγγραφή στο OpenWeatherMap</a>
@@ -1405,10 +1411,16 @@ include __DIR__ . '/includes/header.php';
                 <div class="card-body">
                     <div class="mb-3">
                         <label class="form-label" for="firmsApiKey">NASA FIRMS MAP_KEY</label>
-                        <input type="password" class="form-control" id="firmsApiKey"
-                               name="nasa_firms_api_key"
-                               autocomplete="new-password"
-                               placeholder="<?= !empty($settings['nasa_firms_api_key'] ?? '') ? '••••••••' : 'Εισάγετε το MAP_KEY σας' ?>">
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="firmsApiKey"
+                                   name="nasa_firms_api_key"
+                                   autocomplete="new-password"
+                                   value="<?= h($settings['nasa_firms_api_key'] ?? '') ?>"
+                                   placeholder="Εισάγετε το MAP_KEY σας">
+                            <button type="button" class="btn btn-outline-secondary" onclick="toggleKeyVisibility('firmsApiKey')" tabindex="-1">
+                                <i class="bi bi-eye" id="eye-firmsApiKey"></i>
+                            </button>
+                        </div>
                         <div class="form-text">
                             Απαιτείται λογαριασμός NASA Earthdata Login πριν τη δημιουργία του MAP_KEY.
                             <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener noreferrer">Δωρεάν εγγραφή στο NASA FIRMS</a>
@@ -2776,6 +2788,25 @@ function confirmReset() {
 }
 </script>
 <?php endif; ?>
+
+<script>
+// Shared by both API-key fields (OpenWeatherMap, NASA FIRMS) — same
+// show/hide idiom as reset-password.php's togglePass(), reused under a
+// distinct name since this file's inputs use id-based lookup directly
+// rather than that file's id+'-confirm' pairing.
+function toggleKeyVisibility(id) {
+    const input = document.getElementById(id);
+    const eye = document.getElementById('eye-' + id);
+    if (!input || !eye) return;
+    if (input.type === 'password') {
+        input.type = 'text';
+        eye.className = 'bi bi-eye-slash';
+    } else {
+        input.type = 'password';
+        eye.className = 'bi bi-eye';
+    }
+}
+</script>
 
 <?php if (!empty($settings['openweathermap_api_key'] ?? '')): ?>
 <script>
