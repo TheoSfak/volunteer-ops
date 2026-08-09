@@ -45,7 +45,17 @@ if ($enabled && empty(trim(getSetting('nasa_firms_api_key', '')))) {
     exit;
 }
 
-dbExecute("UPDATE missions SET fires_overlay_enabled = ? WHERE id = ?", [$enabled, $missionId]);
-logAudit('toggle_fires_overlay', 'missions', $missionId, $enabled ? 'on' : 'off');
+// Wrapped: a DB hiccup here (e.g. a pending migration not applied yet) must
+// never dump a raw PHP error into this response — that corrupts the JSON
+// for the fetch() caller just like the str_getcsv bug did for wildfire.php,
+// same lesson, applied here proactively rather than after another report.
+try {
+    dbExecute("UPDATE missions SET fires_overlay_enabled = ? WHERE id = ?", [$enabled, $missionId]);
+    logAudit('toggle_fires_overlay', 'missions', $missionId, $enabled ? 'on' : 'off');
+} catch (Throwable $e) {
+    error_log('mission-fires.php toggle failed (mission ' . $missionId . '): ' . $e->getMessage());
+    echo json_encode(['ok' => false, 'error' => t('fires.toggle_failed')]);
+    exit;
+}
 
 echo json_encode(['ok' => true, 'enabled' => (bool) $enabled]);

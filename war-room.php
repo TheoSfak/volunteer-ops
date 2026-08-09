@@ -5647,6 +5647,12 @@ if (firesOverlayToggleBtn) {
             } else {
                 alert(result.error || t('fires.no_api_key'));
             }
+        }).catch(() => {
+            // A raw PHP error/non-JSON response (the class of bug this app
+            // hit twice already this same day) must still tell the admin
+            // SOMETHING, not fail invisibly like it did before this line
+            // existed.
+            alert(t('fires.toggle_failed'));
         }).finally(() => { firesOverlayToggleBtn.disabled = false; });
     });
 }
