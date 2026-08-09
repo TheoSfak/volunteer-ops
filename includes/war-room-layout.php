@@ -27,7 +27,7 @@ function warRoomDefaultLayout(): array {
             'requestVideoCard', 'requestTaskCard', 'activityCard', 'chatCard',
         ],
         'sidebar' => [
-            'mediaCard', 'myLocationCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'myRouteCard',
+            'myLocationCard', 'mediaCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'myRouteCard',
             'myTasksCard', 'mySectorsCard', 'shiftsCard', 'sosAlertsCard', 'broadcastCard',
             'endMissionCard', 'dispatchCard', 'sectorsCard', 'restrictedAreasCard', 'routeOrderCard',
             'teamRoutesAdminCard', 'briefingCard', 'missionMgmtCard',
