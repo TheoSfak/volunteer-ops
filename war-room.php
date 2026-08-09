@@ -6,6 +6,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/weather.php';
+require_once __DIR__ . '/includes/wildfire.php';
 requireLogin();
 
 $missionId = (int)get('id');
@@ -1101,6 +1102,19 @@ if (get('ajax') === '1') {
         $weather['forecast_dt_label'] = date('d/m H:i', $weather['forecast_dt']);
     }
     $exposureUrgency = ($exposureUrgencyOn && $missingPerson && $weather) ? computeExposureUrgency($missingPerson, $weather) : null;
+    // Per-mission flag (not a global Settings toggle like the weather compass
+    // above) — flipped live by admins from inside the Action Room itself via
+    // mission-fires.php, so every viewer picks up the change on their next
+    // poll tick. Same defensive try/catch reasoning as getWeatherForMission()
+    // just above: a NASA FIRMS/DB hiccup here must degrade to "no fire data",
+    // never take down the rest of this poll.
+    $firesOverlayOn = !empty($mission['fires_overlay_enabled']);
+    try {
+        $fireHotspots = $firesOverlayOn ? getFireHotspotsForMission($mission) : null;
+    } catch (Throwable $e) {
+        error_log('getFireHotspotsForMission() failed (ajax poll, mission ' . $missionId . '): ' . $e->getMessage());
+        $fireHotspots = null;
+    }
     $onlinePresence = loadOnlinePresenceUserIds($missionId);
     $annotations = loadMissionAnnotationsForMission($missionId);
     $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
@@ -1141,6 +1155,8 @@ if (get('ajax') === '1') {
         'missingPerson' => $missingPerson,
         'weather' => $weather,
         'exposureUrgency' => $exposureUrgency,
+        'firesOverlayOn' => $firesOverlayOn,
+        'fireHotspots' => $fireHotspots,
         'onlinePresence' => $onlinePresence,
         'pingStaleness' => $pingIsStaleByVolunteerId,
         'participantLive' => $participantLiveByVolunteerId,
@@ -1231,6 +1247,15 @@ if ($weather && ($weather['status'] ?? '') === 'ok') {
     $weather['forecast_dt_label'] = date('d/m H:i', $weather['forecast_dt']);
 }
 $exposureUrgency = ($exposureUrgencyOn && $missingPerson && $weather) ? computeExposureUrgency($missingPerson, $weather) : null;
+// See the ajax branch's own copy of this block above — per-mission flag,
+// not a global setting, flipped live from within the Action Room itself.
+$firesOverlayOn = !empty($mission['fires_overlay_enabled']);
+try {
+    $fireHotspots = $firesOverlayOn ? getFireHotspotsForMission($mission) : null;
+} catch (Throwable $e) {
+    error_log('getFireHotspotsForMission() failed (full page load, mission ' . $missionId . '): ' . $e->getMessage());
+    $fireHotspots = null;
+}
 $annotations = loadMissionAnnotationsForMission($missionId);
 $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
 $sectors = loadMissionSectorsForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
@@ -1678,6 +1703,13 @@ include __DIR__ . '/includes/header.php';
         <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
         <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i><?= t('hero.btn_team_trail') ?></button>
         <button type="button" id="coverageModeToggle" class="btn btn-outline-light"><i class="bi bi-broadcast me-1"></i><?= t('hero.btn_verified_coverage') ?></button>
+        <!-- Unlike its neighbors above (Team Trail/Verified Coverage, both
+             local-only per-browser view toggles), this one is a per-mission
+             DB flag — its active/inactive class is re-applied from server
+             state on every poll tick (updateFiresToggleBtn()), not just
+             flipped locally on click, so it stays correct if a second admin
+             toggles it from another session. -->
+        <button type="button" id="firesOverlayToggle" class="btn btn-outline-light<?= $firesOverlayOn ? ' active' : '' ?>"><i class="bi bi-fire me-1"></i><?= t('hero.btn_fires_overlay') ?></button>
         <?php endif; ?>
         <form method="post">
             <?= csrfField() ?>
@@ -3324,6 +3356,11 @@ let missingPerson = <?= json_encode($missingPerson) ?>;
 const weatherCompassEnabled = <?= json_encode($weatherCompassOn) ?>;
 let weather = <?= json_encode($weather) ?>;
 let exposureUrgency = <?= json_encode($exposureUrgency) ?>;
+// Unlike weatherCompassEnabled (a page-load-only global setting),
+// firesOverlayOn is per-mission and can change live from another admin's
+// click, so it's a `let` re-assigned every poll tick — not a `const`.
+let firesOverlayOn = <?= json_encode($firesOverlayOn) ?>;
+let fireHotspots = <?= json_encode($fireHotspots) ?>;
 let restrictedAreas = <?= json_encode($restrictedAreas) ?>;
 let restrictedAreaBreaches = <?= json_encode($restrictedAreaBreaches) ?>;
 let restrictedAreaBreachHistory = <?= json_encode($restrictedAreaBreachHistory) ?>;
@@ -3548,7 +3585,7 @@ function addMapBaseLayers(targetMap, toggleBtnId) {
     }
     return {street, satellite};
 }
-let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null, missingPersonLayer = null;
+let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null, missingPersonLayer = null, fireLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
     addMapBaseLayers(map, 'mapSatelliteToggle');
@@ -3616,6 +3653,7 @@ if (!fieldMode) {
     incidentLayer = L.featureGroup().addTo(map);
     poiLayer = L.featureGroup().addTo(map);
     missingPersonLayer = L.featureGroup().addTo(map);
+    fireLayer = L.featureGroup().addTo(map);
     // Restricted (hazard/danger) areas render ABOVE literally everything else
     // on the map, including annotationPane (610, itself already above every
     // default Leaflet pane) — the user's own explicit ask. 700 leaves headroom
@@ -5583,6 +5621,36 @@ if (coverageModeToggleBtn) {
     });
 }
 
+// Reflects server-driven firesOverlayOn on the toolbar button — called both
+// right after this admin's own click and every poll tick (in case a second
+// admin flipped it from another session), never assumed from local state
+// alone.
+function updateFiresToggleBtn() {
+    const btn = document.getElementById('firesOverlayToggle');
+    if (!btn) return;
+    btn.classList.toggle('active', !!firesOverlayOn);
+}
+const firesOverlayToggleBtn = document.getElementById('firesOverlayToggle');
+if (firesOverlayToggleBtn) {
+    firesOverlayToggleBtn.addEventListener('click', () => {
+        const nextEnabled = !firesOverlayOn;
+        firesOverlayToggleBtn.disabled = true;
+        const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, enabled: nextEnabled ? '1' : '0'});
+        fetch('mission-fires.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                firesOverlayOn = result.enabled;
+                updateFiresToggleBtn();
+                // Turning off clears immediately for instant feedback; turning
+                // on waits for the next poll tick to actually populate
+                // fireHotspots (this endpoint is write-only, see mission-fires.php).
+                if (!firesOverlayOn) { fireHotspots = null; if (!fieldMode) renderFireLayer(null); }
+            } else {
+                alert(result.error || t('fires.no_api_key'));
+            }
+        }).finally(() => { firesOverlayToggleBtn.disabled = false; });
+    });
+}
+
 function renderMedia(items) {
     const list = document.getElementById('mediaList');
     if (!items.length) {
@@ -6870,6 +6938,45 @@ function renderWeatherControl(w) {
         </div>`;
 }
 
+// NASA FIRMS satellite hotspot markers — cleared/rebuilt every poll tick,
+// same idiom as renderPoiLayer above. Driven entirely by server state
+// (firesOverlayOn/fireHotspots come from the ajax=1 poll, per-mission, not
+// a local toggle), so this has no on/off logic of its own: an empty/null
+// hotspots value from the server already means "layer should be empty".
+function renderFireLayer(fireData) {
+    if (!fireLayer) return;
+    fireLayer.clearLayers();
+    // fireData is the full ['status' => ..., 'hotspots' => [...]] shape from
+    // getFireHotspotsForMission() — same wrapper convention as `weather`, not
+    // a bare array — so a non-'ok' status (no_key/api_error, or firesOverlayOn
+    // itself false → fireHotspots null) just clears the layer, same as
+    // renderWeatherControl's own status check.
+    if (!fireData || fireData.status !== 'ok') return;
+    const confidenceColor = {high: '#d62828', nominal: '#f77f00', low: '#ffb703'};
+    (fireData.hotspots || []).forEach(h => {
+        const color = confidenceColor[h.confidence] || confidenceColor.nominal;
+        // Same teardrop divIcon shape as renderPoiLayer, bi-fire instead of
+        // bi-search — keeps every map marker in this app visually consistent.
+        const icon = L.divIcon({
+            className: '',
+            html: `<div style="position:relative;width:26px;height:34px;">
+                <div style="width:26px;height:26px;background:${color};color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 1px 4px #0008;"><i class="bi bi-fire"></i></div>
+                <div style="position:absolute;left:50%;top:24px;transform:translateX(-50%);width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:10px solid ${color};"></div>
+            </div>`,
+            iconSize: [26, 34], iconAnchor: [13, 34],
+        });
+        const confidenceLabel = t('fires.confidence_' + (h.confidence || 'nominal'));
+        const frpHtml = (h.frp !== null && h.frp !== undefined) ? `<br>${t('fires.popup_frp_label')}: ${h.frp} MW` : '';
+        const brightnessHtml = (h.brightness !== null && h.brightness !== undefined) ? `<br>${t('fires.popup_brightness_label')}: ${h.brightness} K` : '';
+        const popupHtml = `<strong>${t('fires.popup_title')}</strong><br>` +
+            `${escapeHtml(h.satellite || '')} (${escapeHtml(h.instrument || '')}) &middot; ${confidenceLabel}` +
+            brightnessHtml + frpHtml +
+            `<br>${t('fires.popup_detected_label')}: ${escapeHtml(h.acq_date || '')} ${escapeHtml(h.acq_time || '')} UTC` +
+            `<br><span class="small fst-italic text-muted">${t('fires.caveat')}</span>`;
+        L.marker([h.lat, h.lng], {icon}).addTo(fireLayer).bindPopup(popupHtml);
+    });
+}
+
 function renderMissingPersonCard(item) {
     const el = document.getElementById('missingPersonDisplay');
     if (!el) return;
@@ -7128,7 +7235,7 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 })();
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); renderWeatherControl(weather); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); renderWeatherControl(weather); renderFireLayer(fireHotspots); }
     renderMyTasks(myTasks);
     renderMySectors(sectors);
     renderMyRoutes(routes);
@@ -8402,6 +8509,12 @@ function pollWarRoomData() {
             exposureUrgency = data.exposureUrgency;
             renderWeatherCard(weather, exposureUrgency);
             if (!fieldMode) renderWeatherControl(weather);
+        }
+        if (data.firesOverlayOn !== undefined) {
+            firesOverlayOn = data.firesOverlayOn;
+            fireHotspots = data.fireHotspots;
+            updateFiresToggleBtn();
+            if (!fieldMode) renderFireLayer(fireHotspots);
         }
         if (data.areas) areas = data.areas;
         if (!fieldMode && data.teams) renderTeamRosters(data.teams);
