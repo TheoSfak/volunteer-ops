@@ -23,9 +23,6 @@
  *     satellite         – string, e.g. 'N', '1', '2' (NOAA-20/21 use 1/2)
  *     instrument        – string, e.g. 'VIIRS'
  *     daynight          – 'D' | 'N'
- *   fallback_location – bool, true when the mission had no coordinates and
- *                        this used the Heraklion default instead — same
- *                        caveat shape as includes/weather.php
  *
  * Detections are satellite passes, not confirmed fires — every consumer of
  * this data must keep that caveat visible, never present it as a live fire
@@ -36,9 +33,13 @@
 // often a new satellite pass can actually change this data ─────────────────
 define('FIRE_CACHE_TTL', 15 * 60);
 
-// ─── Bounding box half-width in degrees around the mission's coordinates —
-// ~0.5° is roughly 100km square, a static constant for v1 ──────────────────
-define('FIRE_BBOX_DEGREES', 0.5);
+// ─── Fixed all-Greece bounding box (west,south,east,north) — deliberately
+// NOT scoped to the individual mission's own coordinates (that was v1's
+// design; changed same-day after the user pointed out a mission-radius
+// query misses fires anywhere else in the country, which is exactly the
+// situational awareness this feature is for). Covers the Ionian islands
+// through the Dodecanese and Crete through the Evros border, with margin.
+define('FIRE_BBOX_GREECE', '19.0,34.5,29.7,41.8');
 
 // Combining three VIIRS NRT sources (SNPP + both NOAA JPSS satellites) for
 // better coverage than a single satellite — each is a separate API call,
@@ -70,25 +71,7 @@ function getFireHotspotsForMission(array $mission): array
         }
     }
 
-    // Resolve coordinates — same fallback idiom as includes/weather.php:
-    // mission's own lat/lng, else Heraklion, flagged so the UI can say so.
-    $lat = isset($mission['latitude'])  && $mission['latitude']  !== null ? (float)$mission['latitude']  : null;
-    $lon = isset($mission['longitude']) && $mission['longitude'] !== null ? (float)$mission['longitude'] : null;
-
-    $fallbackLocation = false;
-    if ($lat === null || $lon === null) {
-        $lat = 35.3387;
-        $lon = 25.1442;
-        $fallbackLocation = true;
-    }
-
-    $bbox = sprintf(
-        '%.4f,%.4f,%.4f,%.4f',
-        $lon - FIRE_BBOX_DEGREES,
-        $lat - FIRE_BBOX_DEGREES,
-        $lon + FIRE_BBOX_DEGREES,
-        $lat + FIRE_BBOX_DEGREES
-    );
+    $bbox = FIRE_BBOX_GREECE;
 
     $hotspots   = [];
     $lastError  = '';
@@ -126,9 +109,6 @@ function getFireHotspotsForMission(array $mission): array
         'status'   => 'ok',
         'hotspots' => $hotspots,
     ];
-    if ($fallbackLocation) {
-        $data['fallback_location'] = true;
-    }
 
     // Persist to cache (upsert) — same shape as includes/weather.php
     $json = json_encode($data);
@@ -151,7 +131,129 @@ function getFireHotspotsForMission(array $mission): array
     return $data;
 }
 
+/**
+ * Human-readable "Fire Xkm <direction> from <place>" location for one
+ * hotspot popup — deliberately NOT precomputed for every hotspot on every
+ * cache refresh (would mean dozens of sequential Nominatim calls against
+ * their fair-use-policy free public instance every 15 minutes); called
+ * on-demand, once, only when a marker's popup is actually opened, same
+ * lazy-fetch shape as this app's dispatch/sector popup action buttons.
+ *
+ * Returns ['place' => string, 'distance_km' => float, 'direction' => 'n'|'ne'|
+ * 'e'|'se'|'s'|'sw'|'w'|'nw'] or null if no place could be resolved.
+ */
+function reverseGeocodeFireLocation(float $lat, float $lng): ?array
+{
+    if (!function_exists('curl_init')) {
+        return null;
+    }
+
+    // zoom=14 (settlement level) — low enough to reliably hit a genuinely
+    // separate, named place with its own center point (so the distance below
+    // isn't just ~0), high enough to usually land a real village/hamlet name
+    // in nominative case rather than only the broader administrative-unit
+    // polygon (see the field-priority comment below for why that matters).
+    $url = sprintf(
+        'https://nominatim.openstreetmap.org/reverse?format=json&lat=%s&lon=%s&zoom=14&accept-language=el',
+        $lat,
+        $lng
+    );
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 8,
+        CURLOPT_SSL_VERIFYPEER => true,
+        // Same descriptive User-Agent as geocode-address.php's existing
+        // Nominatim caller — required by their usage policy.
+        CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; VolunteerOps/' . APP_VERSION . ')',
+    ]);
+    $response  = curl_exec($ch);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlError || empty($response)) {
+        return null;
+    }
+
+    $data = json_decode($response, true);
+    if (!is_array($data) || !isset($data['lat'], $data['lon'])) {
+        return null;
+    }
+
+    $address = $data['address'] ?? [];
+    // Prefer an actual named settlement (nominative case in Greek OSM
+    // tagging, e.g. "Άνω Σουσάκι") over the broader administrative-unit
+    // fields — Greek OSM tags those as "Δημοτική Ενότητα X" / "Κοινότητα X"
+    // / "Δήμος X" ("Municipal Unit of X" / "Community of X" / "Municipality
+    // of X"), which are grammatically genitive constructions, not a place
+    // name on their own. Stripped as a fallback below when no simple
+    // settlement name exists nearby (common in remote/forested areas).
+    $placeName = $address['village'] ?? $address['town'] ?? $address['hamlet']
+        ?? $address['suburb'] ?? null;
+    if (!$placeName) {
+        $adminRaw = $address['city_district'] ?? $address['city'] ?? $address['municipality'] ?? null;
+        if (!$adminRaw) {
+            return null;
+        }
+        $placeName = trim(str_replace(['Δημοτική Ενότητα', 'Κοινότητα', 'Δήμος'], '', $adminRaw));
+    }
+    // "Περιφερειακή Ενότητα" (Regional Unit) is the usual county-level tag;
+    // Athens/Thessaloniki's own metro areas use "Μητροπολιτική Ενότητα"
+    // (Metropolitan Unit) instead — both are the same "of <name>" shape.
+    $regionRaw = $address['county'] ?? $address['state'] ?? '';
+    $region = trim(str_replace(['Περιφερειακή Ενότητα', 'Μητροπολιτική Ενότητα'], '', $regionRaw));
+    $place  = trim($placeName . ' ' . $region);
+
+    $placeLat = (float) $data['lat'];
+    $placeLng = (float) $data['lon'];
+
+    return [
+        'place'       => $place,
+        'distance_km' => round(_haversineKm($placeLat, $placeLng, $lat, $lng), 1),
+        'direction'   => _bearingToDirectionKey(_initialBearingDeg($placeLat, $placeLng, $lat, $lng)),
+    ];
+}
+
 // ─── Internal helpers ────────────────────────────────────────────────────────
+
+/**
+ * Great-circle distance in km between two lat/lng points (haversine).
+ */
+function _haversineKm(float $lat1, float $lon1, float $lat2, float $lon2): float
+{
+    $earthRadiusKm = 6371.0;
+    $dLat = deg2rad($lat2 - $lat1);
+    $dLon = deg2rad($lon2 - $lon1);
+    $a = sin($dLat / 2) ** 2
+        + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2) ** 2;
+    return $earthRadiusKm * 2 * atan2(sqrt($a), sqrt(1 - $a));
+}
+
+/**
+ * Initial compass bearing (0-360°, 0=North) travelling from point 1 to
+ * point 2.
+ */
+function _initialBearingDeg(float $lat1, float $lon1, float $lat2, float $lon2): float
+{
+    $lat1r = deg2rad($lat1);
+    $lat2r = deg2rad($lat2);
+    $dLon  = deg2rad($lon2 - $lon1);
+    $y = sin($dLon) * cos($lat2r);
+    $x = cos($lat1r) * sin($lat2r) - sin($lat1r) * cos($lat2r) * cos($dLon);
+    return fmod(rad2deg(atan2($y, $x)) + 360, 360);
+}
+
+/**
+ * Maps a bearing in degrees to one of 8 direction-key suffixes, matching
+ * the new fires.direction_* translation keys in includes/lang/war-room.php.
+ */
+function _bearingToDirectionKey(float $bearingDeg): string
+{
+    $keys = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw'];
+    $index = (int) round($bearingDeg / 45) % 8;
+    return $keys[$index];
+}
 
 /**
  * Fetch and parse one FIRMS area/csv source for the given bounding box

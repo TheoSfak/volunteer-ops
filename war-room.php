@@ -1709,7 +1709,7 @@ include __DIR__ . '/includes/header.php';
              state on every poll tick (updateFiresToggleBtn()), not just
              flipped locally on click, so it stays correct if a second admin
              toggles it from another session. -->
-        <button type="button" id="firesOverlayToggle" class="btn btn-outline-light<?= $firesOverlayOn ? ' active' : '' ?>"><i class="bi bi-fire me-1"></i><?= t('hero.btn_fires_overlay') ?></button>
+        <button type="button" id="firesOverlayToggle" class="btn btn-outline-light<?= $firesOverlayOn ? ' active' : '' ?>">🔥 <?= t('hero.btn_fires_overlay') ?></button>
         <?php endif; ?>
         <form method="post">
             <?= csrfField() ?>
@@ -6961,27 +6961,69 @@ function renderFireLayer(fireData) {
     const confidenceColor = {high: '#d62828', nominal: '#f77f00', low: '#ffb703'};
     (fireData.hotspots || []).forEach(h => {
         const color = confidenceColor[h.confidence] || confidenceColor.nominal;
-        // Same teardrop divIcon shape as renderPoiLayer, bi-fire instead of
-        // bi-search — keeps every map marker in this app visually consistent.
+        // Same teardrop divIcon shape as renderPoiLayer, a flame emoji
+        // instead of a Bootstrap icon glyph (user's explicit ask — matches
+        // the rest of this app's existing emoji-as-marker-glyph convention,
+        // e.g. the 📷/🎥 media icons) — colored ring still encodes confidence.
         const icon = L.divIcon({
             className: '',
             html: `<div style="position:relative;width:26px;height:34px;">
-                <div style="width:26px;height:26px;background:${color};color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 1px 4px #0008;"><i class="bi bi-fire"></i></div>
+                <div style="width:26px;height:26px;background:${color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;border:2px solid #fff;box-shadow:0 1px 4px #0008;">🔥</div>
                 <div style="position:absolute;left:50%;top:24px;transform:translateX(-50%);width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:10px solid ${color};"></div>
             </div>`,
             iconSize: [26, 34], iconAnchor: [13, 34],
         });
-        const confidenceLabel = t('fires.confidence_' + (h.confidence || 'nominal'));
+        // Confidence shown as NASA's own raw term (Low/Nominal/High), not a
+        // Greek translation — matches the exact wording the user pointed to
+        // on NASA's own FIRMS map, deliberately not localized.
+        const confidenceRaw = (h.confidence || 'nominal');
+        const confidenceLabel = confidenceRaw.charAt(0).toUpperCase() + confidenceRaw.slice(1);
         const frpHtml = (h.frp !== null && h.frp !== undefined) ? `<br>${t('fires.popup_frp_label')}: ${h.frp} MW` : '';
         const brightnessHtml = (h.brightness !== null && h.brightness !== undefined) ? `<br>${t('fires.popup_brightness_label')}: ${h.brightness} K` : '';
-        const popupHtml = `<strong>${t('fires.popup_title')}</strong><br>` +
-            `${escapeHtml(h.satellite || '')} (${escapeHtml(h.instrument || '')}) &middot; ${confidenceLabel}` +
+        // acq_date 'YYYY-MM-DD' + acq_time 'HHMM' (UTC) -> 'DD/MM/YYYY HH:MM',
+        // matching the exact format the user pointed to on NASA's own site.
+        const dateParts = (h.acq_date || '').split('-');
+        const dateLabel = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : (h.acq_date || '');
+        const timeRaw = (h.acq_time || '').padStart(4, '0');
+        const timeLabel = timeRaw.length === 4 ? `${timeRaw.slice(0, 2)}:${timeRaw.slice(2)}` : timeRaw;
+        // Location line is filled in lazily on popupopen (see fireLayer.on
+        // below) — a reverse-geocode call per marker up front would mean
+        // dozens of sequential Nominatim requests on every 15-min cache
+        // refresh, well past their free-tier fair-use policy.
+        const popupHtml = `<div class="fire-location-line small fw-semibold mb-1" data-lat="${h.lat}" data-lng="${h.lng}">${t('fires.location_loading')}</div>` +
+            `${t('fires.popup_coords_label')}: ${h.lat.toFixed(4)}, ${h.lng.toFixed(4)}<br>` +
+            `${t('fires.popup_detected_label')}: ${dateLabel} ${timeLabel} UTC<br>` +
+            `${t('fires.popup_confidence_label')}: ${escapeHtml(confidenceLabel)}<br>` +
+            `${t('fires.popup_source_label')}: NASA ${escapeHtml(h.instrument || 'VIIRS')}` +
             brightnessHtml + frpHtml +
-            `<br>${t('fires.popup_detected_label')}: ${escapeHtml(h.acq_date || '')} ${escapeHtml(h.acq_time || '')} UTC` +
             `<br><span class="small fst-italic text-muted">${t('fires.caveat')}</span>`;
         L.marker([h.lat, h.lng], {icon}).addTo(fireLayer).bindPopup(popupHtml);
     });
 }
+// Lazy reverse-geocode: fills in the "Fire Xkm <direction> from <place>"
+// line only when a marker's popup is actually opened, same delegated-
+// listener-on-the-group idiom as dispatchLayer.on('popupopen', ...) above.
+fireLayer?.on('popupopen', event => {
+    const popupEl = event.popup.getElement();
+    const line = popupEl.querySelector('.fire-location-line');
+    if (!line) return;
+    const lat = line.dataset.lat, lng = line.dataset.lng;
+    fetch(`api-fire-location.php?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`)
+        .then(r => r.json())
+        .then(result => {
+            if (result.ok) {
+                const distanceLabel = Number(result.distance_km).toLocaleString(jsLocale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+                line.textContent = t('fires.location_line', {
+                    distance: distanceLabel,
+                    direction: t('fires.direction_' + result.direction),
+                    place: result.place,
+                });
+            } else {
+                line.textContent = t('fires.location_unavailable');
+            }
+        })
+        .catch(() => { line.textContent = t('fires.location_unavailable'); });
+});
 
 function renderMissingPersonCard(item) {
     const el = document.getElementById('missingPersonDisplay');
