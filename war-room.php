@@ -1899,46 +1899,43 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <div class="col-12 col-lg-4">
-        <div class="card shadow-sm h-100" data-card-id="mediaCard">
-            <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('media.panel_title') ?></h5></div>
-            <div class="card-body d-flex flex-column" style="height:520px;">
-                <?php if ($isApprovedParticipant): ?>
-                <div class="d-flex gap-2 mb-2">
-                    <label class="btn btn-primary w-100 mb-0">
-                        <i class="bi bi-camera-fill me-1"></i><?= t('media.photo_btn') ?>
-                        <input type="file" id="photoCaptureInput" accept="image/*" capture="environment" class="d-none">
-                    </label>
-                    <label class="btn btn-outline-primary w-100 mb-0">
-                        <i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?>
-                        <input type="file" id="photoGalleryInput" accept="image/*" class="d-none">
-                    </label>
-                </div>
-                <div class="d-flex gap-2 mb-2">
-                    <label class="btn btn-primary w-100 mb-0">
-                        <i class="bi bi-camera-reels-fill me-1"></i><?= t('media.video_btn') ?>
-                        <input type="file" id="videoCaptureInput" accept="video/*" capture="environment" class="d-none">
-                    </label>
-                    <label class="btn btn-outline-primary w-100 mb-0">
-                        <i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?>
-                        <input type="file" id="videoGalleryInput" accept="video/*" class="d-none">
-                    </label>
-                </div>
-                <!-- Camera capture only, no gallery variant — a Point of
-                     Interest is "I found this right here, right now"; an
-                     old photo picked from the gallery would attach today's
-                     GPS to a find from god-knows-when/where, which defeats
-                     the entire point of the feature. -->
-                <div class="mb-2">
-                    <input type="text" id="poiNoteInput" class="form-control form-control-sm mb-1" maxlength="500" placeholder="<?= t('poi.note_placeholder') ?>">
-                    <label class="btn btn-outline-danger w-100 mb-0">
-                        <i class="bi bi-search me-1"></i><?= t('poi.capture_btn') ?>
-                        <input type="file" id="poiCaptureInput" accept="image/*" capture="environment" class="d-none">
-                    </label>
-                    <button type="button" id="poiSendBtn" class="btn btn-danger w-100 mt-1 d-none" disabled></button>
-                </div>
-                <div class="small mb-2" id="mediaUploadStatus"></div>
+        <!-- Offline queue status. Sits above every field card rather than inside
+             the Route Order one (where it used to live) because the queue now
+             also carries field-status/SOS taps, which are reported from the
+             card below and can happen on a mission with no route at all.
+             Rendered here except for the admin-desktop drag/zone view, which
+             already rendered these same two ids once, above, next to
+             #wrZoneSidebar — never both, since duplicate ids would break
+             every getElementById() lookup that targets them. -->
+        <?php if (!($canManageWarRoom && !$fieldMode)): ?>
+        <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
+        <div id="offlineQueueFailures"></div>
+        <?php endif; ?>
+
+        <div class="card shadow-sm mb-4 border-primary" data-card-id="myLocationCard">
+            <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-geo-alt-fill me-1"></i><?= t('myping.panel_title') ?></h5></div>
+            <div class="card-body">
+                <?php if (empty($myAssignments)): ?>
+                    <p class="text-muted mb-0"><?= t('myping.no_shift') ?></p>
+                <?php else: ?>
+                    <p class="small text-muted"><?= t('myping.select_shift_note') ?></p>
+                    <?php foreach ($myAssignments as $assignment): ?>
+                    <button type="button" class="btn btn-primary w-100 mb-2 send-ping" data-shift-id="<?= $assignment['shift_id'] ?>" data-pr-id="<?= $assignment['pr_id'] ?>">
+                        <i class="bi bi-send-fill me-1"></i><?= t('myping.send_btn', ['time' => date('H:i', strtotime($assignment['start_time']))]) ?>
+                    </button>
+                    <div class="small mb-2" id="pingStatus-<?= $assignment['pr_id'] ?>"></div>
+                    <?php $myFieldStatus = $assignment['field_status'] ?? null; ?>
+                    <div class="small mb-1" id="statusBadge-<?= $assignment['pr_id'] ?>">
+                        <?= $myFieldStatus ? h(['on_way' => t('status.self_on_way'), 'on_site' => t('status.self_on_site'), 'needs_help' => t('status.self_sos')][$myFieldStatus] ?? '') : t('status.self_none') ?>
+                    </div>
+                    <div class="btn-group w-100 mb-3" role="group" id="statusBtns-<?= $assignment['pr_id'] ?>">
+                        <button type="button" class="btn btn-sm wr-touch-btn <?= $myFieldStatus === 'on_way' ? 'btn-warning' : 'btn-outline-warning' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_way')"><?= t('myping.btn_on_way') ?></button>
+                        <button type="button" class="btn btn-sm wr-touch-btn <?= $myFieldStatus === 'on_site' ? 'btn-success' : 'btn-outline-success' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_site')"><?= t('myping.btn_on_site') ?></button>
+                        <button type="button" class="btn btn-sm wr-touch-btn <?= $myFieldStatus === 'needs_help' ? 'btn-danger' : 'btn-outline-danger' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'needs_help')"><?= t('myping.btn_sos') ?></button>
+                    </div>
+                    <?php endforeach; ?>
+                    <p class="small text-muted mb-0"><?= t('myping.auto_note') ?></p>
                 <?php endif; ?>
-                <div id="mediaList" class="flex-grow-1 overflow-auto"></div>
             </div>
         </div>
     </div>
@@ -2332,43 +2329,46 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
     <?php endif; ?>
 
     <div class="<?= $fieldMode ? 'col-12 col-lg-6 mx-auto' : 'col-12 col-lg-4' ?>">
-        <!-- Offline queue status. Sits above every field card rather than inside
-             the Route Order one (where it used to live) because the queue now
-             also carries field-status/SOS taps, which are reported from the
-             card below and can happen on a mission with no route at all.
-             Rendered here except for the admin-desktop drag/zone view, which
-             already rendered these same two ids once, above, next to
-             #wrZoneSidebar — never both, since duplicate ids would break
-             every getElementById() lookup that targets them. -->
-        <?php if (!($canManageWarRoom && !$fieldMode)): ?>
-        <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
-        <div id="offlineQueueFailures"></div>
-        <?php endif; ?>
-
-        <div class="card shadow-sm mb-4 border-primary" data-card-id="myLocationCard">
-            <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-geo-alt-fill me-1"></i><?= t('myping.panel_title') ?></h5></div>
-            <div class="card-body">
-                <?php if (empty($myAssignments)): ?>
-                    <p class="text-muted mb-0"><?= t('myping.no_shift') ?></p>
-                <?php else: ?>
-                    <p class="small text-muted"><?= t('myping.select_shift_note') ?></p>
-                    <?php foreach ($myAssignments as $assignment): ?>
-                    <button type="button" class="btn btn-primary w-100 mb-2 send-ping" data-shift-id="<?= $assignment['shift_id'] ?>" data-pr-id="<?= $assignment['pr_id'] ?>">
-                        <i class="bi bi-send-fill me-1"></i><?= t('myping.send_btn', ['time' => date('H:i', strtotime($assignment['start_time']))]) ?>
-                    </button>
-                    <div class="small mb-2" id="pingStatus-<?= $assignment['pr_id'] ?>"></div>
-                    <?php $myFieldStatus = $assignment['field_status'] ?? null; ?>
-                    <div class="small mb-1" id="statusBadge-<?= $assignment['pr_id'] ?>">
-                        <?= $myFieldStatus ? h(['on_way' => t('status.self_on_way'), 'on_site' => t('status.self_on_site'), 'needs_help' => t('status.self_sos')][$myFieldStatus] ?? '') : t('status.self_none') ?>
-                    </div>
-                    <div class="btn-group w-100 mb-3" role="group" id="statusBtns-<?= $assignment['pr_id'] ?>">
-                        <button type="button" class="btn btn-sm wr-touch-btn <?= $myFieldStatus === 'on_way' ? 'btn-warning' : 'btn-outline-warning' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_way')"><?= t('myping.btn_on_way') ?></button>
-                        <button type="button" class="btn btn-sm wr-touch-btn <?= $myFieldStatus === 'on_site' ? 'btn-success' : 'btn-outline-success' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'on_site')"><?= t('myping.btn_on_site') ?></button>
-                        <button type="button" class="btn btn-sm wr-touch-btn <?= $myFieldStatus === 'needs_help' ? 'btn-danger' : 'btn-outline-danger' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'needs_help')"><?= t('myping.btn_sos') ?></button>
-                    </div>
-                    <?php endforeach; ?>
-                    <p class="small text-muted mb-0"><?= t('myping.auto_note') ?></p>
+        <div class="card shadow-sm h-100" data-card-id="mediaCard">
+            <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('media.panel_title') ?></h5></div>
+            <div class="card-body d-flex flex-column" style="height:520px;">
+                <?php if ($isApprovedParticipant): ?>
+                <div class="d-flex gap-2 mb-2">
+                    <label class="btn btn-primary w-100 mb-0">
+                        <i class="bi bi-camera-fill me-1"></i><?= t('media.photo_btn') ?>
+                        <input type="file" id="photoCaptureInput" accept="image/*" capture="environment" class="d-none">
+                    </label>
+                    <label class="btn btn-outline-primary w-100 mb-0">
+                        <i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?>
+                        <input type="file" id="photoGalleryInput" accept="image/*" class="d-none">
+                    </label>
+                </div>
+                <div class="d-flex gap-2 mb-2">
+                    <label class="btn btn-primary w-100 mb-0">
+                        <i class="bi bi-camera-reels-fill me-1"></i><?= t('media.video_btn') ?>
+                        <input type="file" id="videoCaptureInput" accept="video/*" capture="environment" class="d-none">
+                    </label>
+                    <label class="btn btn-outline-primary w-100 mb-0">
+                        <i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?>
+                        <input type="file" id="videoGalleryInput" accept="video/*" class="d-none">
+                    </label>
+                </div>
+                <!-- Camera capture only, no gallery variant — a Point of
+                     Interest is "I found this right here, right now"; an
+                     old photo picked from the gallery would attach today's
+                     GPS to a find from god-knows-when/where, which defeats
+                     the entire point of the feature. -->
+                <div class="mb-2">
+                    <input type="text" id="poiNoteInput" class="form-control form-control-sm mb-1" maxlength="500" placeholder="<?= t('poi.note_placeholder') ?>">
+                    <label class="btn btn-outline-danger w-100 mb-0">
+                        <i class="bi bi-search me-1"></i><?= t('poi.capture_btn') ?>
+                        <input type="file" id="poiCaptureInput" accept="image/*" capture="environment" class="d-none">
+                    </label>
+                    <button type="button" id="poiSendBtn" class="btn btn-danger w-100 mt-1 d-none" disabled></button>
+                </div>
+                <div class="small mb-2" id="mediaUploadStatus"></div>
                 <?php endif; ?>
+                <div id="mediaList" class="flex-grow-1 overflow-auto"></div>
             </div>
         </div>
 
