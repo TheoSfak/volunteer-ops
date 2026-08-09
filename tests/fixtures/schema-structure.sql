@@ -920,6 +920,7 @@ CREATE TABLE `mission_photos` (
   `user_id` int(10) unsigned NOT NULL,
   `media_type` enum('photo','video') NOT NULL DEFAULT 'photo',
   `stored_name` varchar(255) NOT NULL,
+  `thumb_stored_name` varchar(255) DEFAULT NULL,
   `original_name` varchar(255) DEFAULT NULL,
   `mime_type` varchar(100) NOT NULL,
   `file_size` int(10) unsigned NOT NULL,

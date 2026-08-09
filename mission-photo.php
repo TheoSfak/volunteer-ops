@@ -211,6 +211,28 @@ if ($action === 'upload') {
         exit;
     }
 
+    // Optional client-generated poster frame for a video, captured via a
+    // hidden <video>+<canvas> in war-room.php's captureVideoThumbnail()
+    // before upload — mobile browsers/WebViews frequently fail to
+    // auto-paint a bare <video preload="metadata"> element's first frame
+    // the way desktop browsers do, leaving the preview as a broken-looking
+    // placeholder with no thumbnail at all. Best-effort only: an invalid,
+    // oversized, or missing thumb never fails the actual video upload, it
+    // just leaves thumb_stored_name NULL and the preview falls back to the
+    // old browser-default rendering (no worse than before this existed).
+    $thumbStoredName = null;
+    if ($mediaType === 'video' && !empty($_FILES['thumb']['name']) && $_FILES['thumb']['error'] === UPLOAD_ERR_OK) {
+        $thumbFile = $_FILES['thumb'];
+        $thumbFinfo = new finfo(FILEINFO_MIME_TYPE);
+        $thumbMime = $thumbFinfo->file($thumbFile['tmp_name']);
+        if ($thumbMime === 'image/jpeg' && $thumbFile['size'] > 0 && $thumbFile['size'] <= 2 * 1024 * 1024) {
+            $candidateThumbName = 'mphoto_' . $missionId . '_' . time() . '_' . bin2hex(random_bytes(4)) . '_thumb.jpg';
+            if (move_uploaded_file($thumbFile['tmp_name'], $destDir . $candidateThumbName)) {
+                $thumbStoredName = $candidateThumbName;
+            }
+        }
+    }
+
     // Optional: this upload is the photo/video deliverable for one Route Order
     // waypoint (war-room.php's "Η Πορεία μου" card — field mode has no map/media
     // panel, so that card ships its own upload button hitting this same action).
@@ -268,9 +290,9 @@ if ($action === 'upload') {
     }
 
     $photoId = dbInsert(
-        "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, original_name, mime_type, file_size, lat, lng, route_waypoint_id, poi_id, poi_note, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $userId, $mediaType, $storedName, $origName, $mime, (int) $file['size'], $lat, $lng, $routeWaypointId, $poiId, $poiNote]
+        "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, thumb_stored_name, original_name, mime_type, file_size, lat, lng, route_waypoint_id, poi_id, poi_note, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $userId, $mediaType, $storedName, $thumbStoredName, $origName, $mime, (int) $file['size'], $lat, $lng, $routeWaypointId, $poiId, $poiNote]
     );
     logAudit('upload_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId, 'media_type' => $mediaType, 'route_waypoint_id' => $routeWaypointId, 'poi_id' => $poiId]);
 
@@ -302,6 +324,7 @@ if ($action === 'upload') {
     echo json_encode(['ok' => true, 'media' => [
         'id'                 => (int) $photoId,
         'media_type'         => $mediaType,
+        'has_thumb'          => $thumbStoredName !== null,
         'user_name'          => $user['name'],
         'is_external'        => (bool) $user['is_external'],
         'guest_org_name'     => $user['guest_org_name'],
@@ -321,7 +344,7 @@ if ($action === 'upload') {
 
 if ($action === 'delete') {
     $photoId = (int) post('id');
-    $photo = dbFetchOne("SELECT id, user_id, stored_name, poi_id FROM mission_photos WHERE id = ? AND mission_id = ?", [$photoId, $missionId]);
+    $photo = dbFetchOne("SELECT id, user_id, stored_name, thumb_stored_name, poi_id FROM mission_photos WHERE id = ? AND mission_id = ?", [$photoId, $missionId]);
     if (!$photo) {
         echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
@@ -334,6 +357,12 @@ if ($action === 'delete') {
     $filePath = __DIR__ . '/uploads/mission-photos/' . basename($photo['stored_name']);
     if (is_file($filePath)) {
         unlink($filePath);
+    }
+    if (!empty($photo['thumb_stored_name'])) {
+        $thumbPath = __DIR__ . '/uploads/mission-photos/' . basename($photo['thumb_stored_name']);
+        if (is_file($thumbPath)) {
+            unlink($thumbPath);
+        }
     }
     dbExecute("DELETE FROM mission_photos WHERE id = ?", [$photoId]);
     logAudit('delete_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId]);

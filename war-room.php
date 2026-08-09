@@ -1918,10 +1918,9 @@ include __DIR__ . '/includes/header.php';
                 <?php if (empty($myAssignments)): ?>
                     <p class="text-muted mb-0"><?= t('myping.no_shift') ?></p>
                 <?php else: ?>
-                    <p class="small text-muted"><?= t('myping.select_shift_note') ?></p>
                     <?php foreach ($myAssignments as $assignment): ?>
                     <button type="button" class="btn btn-primary w-100 mb-2 send-ping" data-shift-id="<?= $assignment['shift_id'] ?>" data-pr-id="<?= $assignment['pr_id'] ?>">
-                        <i class="bi bi-send-fill me-1"></i><?= t('myping.send_btn', ['time' => date('H:i', strtotime($assignment['start_time']))]) ?>
+                        <i class="bi bi-send-fill me-1"></i><?= t('myping.send_btn') ?>
                     </button>
                     <div class="small mb-2" id="pingStatus-<?= $assignment['pr_id'] ?>"></div>
                     <?php $myFieldStatus = $assignment['field_status'] ?? null; ?>
@@ -1934,7 +1933,10 @@ include __DIR__ . '/includes/header.php';
                         <button type="button" class="btn btn-sm wr-touch-btn <?= $myFieldStatus === 'needs_help' ? 'btn-danger' : 'btn-outline-danger' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'needs_help')"><?= t('myping.btn_sos') ?></button>
                     </div>
                     <?php endforeach; ?>
-                    <p class="small text-muted mb-0"><?= t('myping.auto_note') ?></p>
+                    <?php $autoPingSeconds = (int) getSetting('war_room_auto_ping_seconds', '180'); ?>
+                    <p class="small text-muted mb-0"><?= $autoPingSeconds >= 60
+                        ? t('myping.auto_note_minutes', ['n' => (int) round($autoPingSeconds / 60)])
+                        : t('myping.auto_note_seconds', ['n' => $autoPingSeconds]) ?></p>
                 <?php endif; ?>
             </div>
         </div>
@@ -5744,7 +5746,7 @@ function renderMedia(items) {
         <div class="card position-relative">
             ${m.is_poi ? `<span class="badge bg-danger position-absolute top-0 end-0 m-1" style="z-index:1;" title="${t('poi.popup_title')}"><i class="bi bi-search"></i></span>` : ''}
             ${m.media_type === 'video'
-                ? `<video src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="video" style="height:90px;object-fit:cover;background:#000;cursor:pointer;" preload="metadata"></video>`
+                ? `<video src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="video" style="height:90px;object-fit:cover;background:#000;cursor:pointer;" preload="metadata"${m.has_thumb ? ` poster="mission-photo-view.php?id=${m.id}&thumb=1"` : ''}></video>`
                 : `<img src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="photo" style="height:90px;object-fit:cover;cursor:pointer;">`}
             <div class="card-body p-2">
                 ${whoBlock}
@@ -6387,7 +6389,7 @@ function renderRouteWaypointClosed(wp) {
     const mediaHtml = (wp.photo || wp.video)
         ? `<div class="d-flex gap-2 mt-1">
             ${wp.photo ? `<img src="mission-photo-view.php?id=${wp.photo.id}" style="max-height:70px;border-radius:4px;">` : ''}
-            ${wp.video ? `<video src="mission-photo-view.php?id=${wp.video.id}" style="max-height:70px;border-radius:4px;" muted></video>` : ''}
+            ${wp.video ? `<video src="mission-photo-view.php?id=${wp.video.id}" style="max-height:70px;border-radius:4px;" muted${wp.video.has_thumb ? ` poster="mission-photo-view.php?id=${wp.video.id}&thumb=1"` : ''}></video>` : ''}
           </div>`
         : '';
     const distanceHtml = routeDistanceBadgeHtml(wp);
@@ -6746,7 +6748,7 @@ function renderPointsOfInterest(items) {
             ? t('poi.reported_by_multiple', {count: String(p.reporter_names.length), names: p.reporter_names.map(escapeHtml).join(', ')})
             : t('poi.reported_by_one', {name: escapeHtml(p.reporter_names[0] || '—')});
         const thumbs = p.photos.map(photo => photo.media_type === 'video'
-            ? `<video src="mission-photo-view.php?id=${photo.id}" class="media-view-trigger" data-id="${photo.id}" data-media-type="video" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;background:#000;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}" preload="metadata"></video>`
+            ? `<video src="mission-photo-view.php?id=${photo.id}" class="media-view-trigger" data-id="${photo.id}" data-media-type="video" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;background:#000;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}" preload="metadata"${photo.has_thumb ? ` poster="mission-photo-view.php?id=${photo.id}&thumb=1"` : ''}></video>`
             : `<img src="mission-photo-view.php?id=${photo.id}" class="media-view-trigger" data-id="${photo.id}" data-media-type="photo" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}">`
         ).join('');
         // One line per note, attributed — a merged POI can have a note from
@@ -7198,6 +7200,59 @@ function renderSosAlerts(items) {
     }));
 }
 
+// Best-effort client-side poster frame for a video upload, grabbed via a
+// hidden <video>+<canvas> from the same local file about to be uploaded.
+// Needed because mobile browsers/WebViews (unlike desktop) frequently don't
+// auto-paint a <video> element's first frame under preload="metadata" alone
+// with no poster set, leaving the preview as a bare broken-play-button
+// placeholder with no visible frame at all. Resolves null (never rejects)
+// on any failure/timeout, so a thumbnail miss never blocks or fails the
+// actual video upload — this only ever improves on the old behavior, never
+// makes it worse.
+function captureVideoThumbnail(file) {
+    return new Promise(resolve => {
+        const url = URL.createObjectURL(file);
+        const videoEl = document.createElement('video');
+        videoEl.muted = true;
+        videoEl.playsInline = true;
+        videoEl.preload = 'metadata';
+        videoEl.src = url;
+
+        let settled = false;
+        const finish = blob => {
+            if (settled) return;
+            settled = true;
+            URL.revokeObjectURL(url);
+            resolve(blob);
+        };
+        const timeoutId = setTimeout(() => finish(null), 5000);
+
+        videoEl.addEventListener('error', () => finish(null));
+        videoEl.addEventListener('loadedmetadata', () => {
+            // A hair past frame 0 — some encoders leave the very first frame
+            // black/unreadable, a fraction of a second in is more reliable.
+            try {
+                videoEl.currentTime = Math.min(0.3, (videoEl.duration || 1) / 2);
+            } catch (e) {
+                finish(null);
+            }
+        });
+        videoEl.addEventListener('seeked', () => {
+            clearTimeout(timeoutId);
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = videoEl.videoWidth;
+                canvas.height = videoEl.videoHeight;
+                if (!canvas.width || !canvas.height) { finish(null); return; }
+                canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+                canvas.toBlob(blob => finish(blob), 'image/jpeg', 0.7);
+            } catch (e) {
+                finish(null); // tainted canvas or decode failure
+            }
+        });
+    });
+}
+
 function wireMediaInput(inputId, sentLabel) {
     const input = document.getElementById(inputId);
     if (!input) return;
@@ -7208,12 +7263,27 @@ function wireMediaInput(inputId, sentLabel) {
         status.textContent = t('media.uploading');
         status.className = 'small mb-2';
 
-        const send = (lat, lng) => {
+        // Geolocation and thumbnail capture run concurrently (Promise.all)
+        // rather than one after the other — they're independent, and
+        // sequencing them would stack up to 5s of thumbnail-timeout on top
+        // of geolocation's own 8s timeout for no reason.
+        const thumbPromise = file.type.startsWith('video/') ? captureVideoThumbnail(file) : Promise.resolve(null);
+        const geoPromise = new Promise(resolve => {
+            if (!navigator.geolocation) { resolve([null, null]); return; }
+            navigator.geolocation.getCurrentPosition(
+                position => resolve([position.coords.latitude, position.coords.longitude]),
+                () => resolve([null, null]),
+                {enableHighAccuracy: true, timeout: 8000}
+            );
+        });
+
+        Promise.all([geoPromise, thumbPromise]).then(([[lat, lng], thumbBlob]) => {
             const data = new FormData();
             data.append('csrf_token', csrfToken);
             data.append('action', 'upload');
             data.append('mission_id', '<?= $missionId ?>');
             data.append('media', file);
+            if (thumbBlob) data.append('thumb', thumbBlob, 'thumb.jpg');
             if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
             fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
                 if (result.ok) {
@@ -7227,17 +7297,7 @@ function wireMediaInput(inputId, sentLabel) {
                 }
                 input.value = '';
             }).catch(() => { status.textContent = t('common.send_failed'); status.className = 'small mb-2 text-danger'; input.value = ''; });
-        };
-
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-                position => send(position.coords.latitude, position.coords.longitude),
-                () => send(null, null),
-                {enableHighAccuracy: true, timeout: 8000}
-            );
-        } else {
-            send(null, null);
-        }
+        });
     });
 }
 wireMediaInput('photoCaptureInput', t('media.photo_label'));
@@ -10089,7 +10149,7 @@ function renderRouteAdminWaypointsList(route) {
         const mediaHtml = (wp.photo || wp.video)
             ? `<div class="d-flex gap-2 mt-1">
                 ${wp.photo ? `<img src="mission-photo-view.php?id=${wp.photo.id}" class="route-media-view" data-id="${wp.photo.id}" data-media-type="photo" style="max-height:50px;border-radius:4px;cursor:pointer;">` : ''}
-                ${wp.video ? `<video src="mission-photo-view.php?id=${wp.video.id}" class="route-media-view" data-id="${wp.video.id}" data-media-type="video" style="max-height:50px;border-radius:4px;cursor:pointer;" muted></video>` : ''}
+                ${wp.video ? `<video src="mission-photo-view.php?id=${wp.video.id}" class="route-media-view" data-id="${wp.video.id}" data-media-type="video" style="max-height:50px;border-radius:4px;cursor:pointer;" muted${wp.video.has_thumb ? ` poster="mission-photo-view.php?id=${wp.video.id}&thumb=1"` : ''}></video>` : ''}
               </div>`
             : '';
         const noteHtml = wp.note ? `<div class="small fst-italic mt-1">"${escapeHtml(wp.note)}"</div>` : '';

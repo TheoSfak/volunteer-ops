@@ -2376,6 +2376,18 @@ ALTER TABLE `mission_photos`
 ALTER TABLE `mission_photos`
     ADD COLUMN `poi_note` TEXT NULL AFTER `poi_id`;
 
+-- Client-generated JPEG poster frame for a video upload, captured via a
+-- hidden <video>+<canvas> at upload time (see mission-photo.php's 'upload'
+-- action) and served by mission-photo-view.php?thumb=1. Needed because
+-- mobile browsers/WebViews frequently fail to auto-paint a <video>
+-- element's first frame under preload="metadata" alone (unlike desktop
+-- browsers), leaving the preview as a bare broken-play-button placeholder
+-- with no thumbnail. NULL for photos always, and for videos whose
+-- client-side capture failed — falls back to the old browser-default
+-- rendering in that case, no worse than before.
+ALTER TABLE `mission_photos`
+    ADD COLUMN `thumb_stored_name` VARCHAR(255) NULL AFTER `stored_name`;
+
 -- =============================================
 -- MISSION MISSING PERSONS (War Room: one profile per mission — name, age,
 -- description, clothing, photo, last-seen location+time — backing the
