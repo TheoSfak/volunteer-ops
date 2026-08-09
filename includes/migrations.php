@@ -6008,10 +6008,36 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                 // drifting from the constant.
                 $existingType = dbFetchOne("SELECT id FROM mission_types WHERE name = ?", ['Αναζήτηση Αγνοουμένου']);
                 if (!$existingType) {
-                    dbExecute(
-                        "INSERT INTO mission_types (id, name, description, color, icon, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        [7, 'Αναζήτηση Αγνοουμένου', 'Επιχείρηση αναζήτησης αγνοούμενου προσώπου', 'dark', 'bi-person-bounding-box', 7, 1]
-                    );
+                    // Real production incident (found 2026-08-09, months after
+                    // this migration first shipped): on epidrasis.iloveweb.gr,
+                    // id 7 was already taken by a genuine, actively-used type
+                    // ("Τ.Ε.Π.", 61 real missions) — an admin must have created
+                    // custom types via mission-types.php before this migration
+                    // ever got a chance to run there. The INSERT below threw a
+                    // duplicate-PK error every single retry, and because this
+                    // runner stops at the first failure in sequence, that alone
+                    // silently blocked EVERY migration after v128 forever (v129,
+                    // v130, v131 all never ran) — the original "fail loudly"
+                    // design intent from this migration's own first version had
+                    // a much bigger blast radius than intended. Checking id
+                    // existence too now, and skipping (not crashing) when it's
+                    // taken by something else, so this migration can no longer
+                    // hold the entire queue hostage. The missing-person mission
+                    // type genuinely does NOT exist on an environment that hits
+                    // this branch — MISSION_TYPE_MISSING_PERSON_SEARCH (config.php)
+                    // will not resolve to anything real there until a human
+                    // decides how to reconcile it (recreate at a free id + update
+                    // the constant, or free up id 7) — not something to silently
+                    // paper over here.
+                    $idTaken = dbFetchOne("SELECT id FROM mission_types WHERE id = 7");
+                    if (!$idTaken) {
+                        dbExecute(
+                            "INSERT INTO mission_types (id, name, description, color, icon, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            [7, 'Αναζήτηση Αγνοουμένου', 'Επιχείρηση αναζήτησης αγνοούμενου προσώπου', 'dark', 'bi-person-bounding-box', 7, 1]
+                        );
+                    } else {
+                        error_log('[migrations] v128: mission_types id 7 already taken by another type — skipped creating the missing-person type. Needs manual reconciliation.');
+                    }
                 }
             },
         ],
