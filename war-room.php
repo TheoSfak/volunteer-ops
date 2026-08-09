@@ -2147,7 +2147,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 
         <div class="card shadow-sm" data-card-id="participantsCard">
             <div class="card-header wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#participantsCollapse" role="button" aria-expanded="false" aria-controls="participantsCollapse">
-                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-people me-1"></i><?= t('participants.panel_title', ['count' => count($participants)]) ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-people me-1"></i><?= t('participants.panel_title', ['count' => count($participants)]) ?></span><i class="bi bi-chevron-down wr-collapsible-chevron"></i></h5>
             </div>
             <?php $participantSplitRows = count($participants) >= 8 ? (int)ceil(count($participants) / 2) : 0; ?>
             <div class="list-group list-group-flush collapse<?= $participantSplitRows ? ' wr-participants-cols' : '' ?>" id="participantsCollapse"<?= $participantSplitRows ? ' style="grid-template-rows: repeat(' . $participantSplitRows . ', auto);"' : '' ?>>
@@ -2316,7 +2316,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 
         <div class="card shadow-sm mt-4" data-card-id="activityCard">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#activityCollapse" role="button" aria-expanded="false" aria-controls="activityCollapse"><i class="bi bi-activity me-1"></i><?= t('activity.panel_title') ?><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron ms-1"></i></h5>
+                <h5 class="mb-0 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#activityCollapse" role="button" aria-expanded="false" aria-controls="activityCollapse"><i class="bi bi-activity me-1"></i><?= t('activity.panel_title') ?><i class="bi bi-chevron-down wr-collapsible-chevron ms-1"></i></h5>
                 <div class="d-flex align-items-center gap-2">
                     <a href="exports/export-mission-activity.php?mission_id=<?= $missionId ?>" class="btn btn-sm btn-outline-secondary" title="<?= t('activity.export_btn') ?>">
                         <i class="bi bi-file-earmark-excel me-1"></i><?= t('activity.export_btn') ?>
@@ -2324,7 +2324,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     <small class="text-muted"><?= t('common.updated_label') ?> <span id="activityRefresh"></span></small>
                 </div>
             </div>
-            <div class="card-body collapse d-lg-block" id="activityCollapse">
+            <div class="card-body collapse" id="activityCollapse">
                 <div id="activityList" style="max-height:420px;overflow-y:auto;"><div class="text-muted small"><?= t('common.loading') ?></div></div>
             </div>
         </div>
