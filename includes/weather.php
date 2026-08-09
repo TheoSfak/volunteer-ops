@@ -33,7 +33,15 @@
  */
 
 // ─── Cache TTL (seconds) ─────────────────────────────────────────────────────
-define('WEATHER_CACHE_TTL', 3 * 3600);  // 3 hours
+// 1 hour, not 3 — the wind compass is meant for real-time situational
+// awareness (which way is the wind blowing right now), not a one-time
+// forecast glance; 3h let a stale reading sit on screen for most of a
+// shift. OWM's own free-tier forecast slots are still only 3-hourly, so
+// this won't always fetch a genuinely different number, but it keeps this
+// app re-checking often enough to catch OWM's own slot revisions and to
+// re-evaluate which slot is "closest to now" (see the start-time note
+// below) as a mission actually progresses through the day.
+define('WEATHER_CACHE_TTL', 3600);  // 1 hour
 
 // ─── Main entry point ────────────────────────────────────────────────────────
 
@@ -49,8 +57,15 @@ function getWeatherForMission(array $mission): ?array
 
     $startTs = strtotime($mission['start_datetime']);
 
-    // Do not show weather for missions that ended more than 1 hour ago
-    if ($startTs < time() - 3600) {
+    // Do not show weather for missions that ended more than 1 hour ago.
+    // Real bug, found and fixed same day as the cache-TTL/target-time
+    // changes above: this used to check $startTs here instead of the
+    // mission's end_datetime, so the comment's own stated intent ("ended
+    // more than 1h ago") was never actually what the code did — any
+    // mission longer than ~1h would have its weather silently vanish
+    // partway through, while it was still actively running.
+    $endTs = strtotime($mission['end_datetime']);
+    if ($endTs < time() - 3600) {
         return null;
     }
 
@@ -96,9 +111,15 @@ function getWeatherForMission(array $mission): ?array
         $fallbackLocation = true;
     }
 
-    // Fetch forecast
+    // Fetch forecast — target "now" once the mission is actually underway
+    // (start time already in the past, but within the 1h grace window
+    // above), not the original start time. Otherwise an active mission
+    // running for hours would keep showing the forecast slot for whenever
+    // it *began*, never the slot closest to current conditions, which
+    // defeats the point of a live wind compass.
+    $targetTs = max($startTs, time());
     $fetchError = '';
-    $data = _owmFetchForecast($lat, $lon, $startTs, $apiKey, $fetchError);
+    $data = _owmFetchForecast($lat, $lon, $targetTs, $apiKey, $fetchError);
     if ($data === null) {
         return ['status' => 'api_error', 'message' => $fetchError ?: 'Αποτυχία ανάκτησης δεδομένων καιρού'];
     }
