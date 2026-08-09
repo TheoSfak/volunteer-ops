@@ -1079,7 +1079,21 @@ if (get('ajax') === '1') {
     // so calling it every 5s poll costs one indexed SELECT, not an API hit.
     $weatherCompassOn = getSetting('weather_map_compass_enabled', '0') === '1';
     $exposureUrgencyOn = $isMissingPersonMission && getSetting('exposure_urgency_enabled', '0') === '1';
-    $weather = ($weatherCompassOn || $exposureUrgencyOn) ? getWeatherForMission($mission) : null;
+    // Wrapped: getWeatherForMission() hits weather_cache via a plain SELECT
+    // with no table-existence check of its own, so an environment where that
+    // table wasn't provisioned (e.g. a migration that only ever shipped as a
+    // standalone sql/migrations/*.sql file, never picked up by a deploy path
+    // that doesn't run update.php's migration runner) would otherwise throw
+    // an uncaught PDOException here and take down this entire ajax poll —
+    // every other live card, not just the weather one. Degrade to "no
+    // weather data" instead; this toggle must never be able to break the
+    // rest of the Action Room.
+    try {
+        $weather = ($weatherCompassOn || $exposureUrgencyOn) ? getWeatherForMission($mission) : null;
+    } catch (Throwable $e) {
+        error_log('getWeatherForMission() failed (ajax poll, mission ' . $missionId . '): ' . $e->getMessage());
+        $weather = null;
+    }
     // Formatted here (not in weather.php) so the label travels as-is through
     // json_encode to every poll tick — mission-view.php's own date() call
     // stays untouched since this is an added key, not a changed one.
@@ -1203,10 +1217,16 @@ $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
 $missingPerson = ($isMissingPersonMission && ($canManageWarRoom || $isApprovedParticipant)) ? loadMissingPersonForMission($missionId) : null;
 // See the ajax branch's own copy of this block above for why these two are
-// separately gated settings rather than one flag.
+// separately gated settings rather than one flag, and why the call is
+// try/caught (a missing weather_cache table must not fail the whole page).
 $weatherCompassOn = getSetting('weather_map_compass_enabled', '0') === '1';
 $exposureUrgencyOn = $isMissingPersonMission && getSetting('exposure_urgency_enabled', '0') === '1';
-$weather = ($weatherCompassOn || $exposureUrgencyOn) ? getWeatherForMission($mission) : null;
+try {
+    $weather = ($weatherCompassOn || $exposureUrgencyOn) ? getWeatherForMission($mission) : null;
+} catch (Throwable $e) {
+    error_log('getWeatherForMission() failed (full page load, mission ' . $missionId . '): ' . $e->getMessage());
+    $weather = null;
+}
 if ($weather && ($weather['status'] ?? '') === 'ok') {
     $weather['forecast_dt_label'] = date('d/m H:i', $weather['forecast_dt']);
 }

@@ -6035,6 +6035,24 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 130,
+            'description' => 'Add weather_cache table (OpenWeatherMap forecast cache backing the Action Room wind-direction compass + exposure-urgency estimate, v3.167.0). Previously only shipped as sql/migrations/2026_04_03_001_add_weather_cache.sql, which is applied by update.php\'s separate GitHub-release updater, not this auto-migration runner — so any deploy path that doesn\'t go through that updater (e.g. a plain git pull) never got the table, and enabling either weather Settings toggle would throw on the very first getWeatherForMission() call. Moved here so it actually applies automatically, "as always", on the next request after this code deploys.',
+            'up' => function () {
+                // Plain CREATE TABLE IF NOT EXISTS, no split ALTER TABLE needed —
+                // same reasoning as v128 above (FK declared inline, so the
+                // ADD CONSTRAINT FOREIGN KEY errno-1823 gotcha doesn't apply).
+                dbExecute("CREATE TABLE IF NOT EXISTS weather_cache (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    weather_json TEXT NOT NULL,
+                    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uq_weather_mission (mission_id),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
