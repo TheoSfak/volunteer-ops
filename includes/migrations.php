@@ -6108,6 +6108,20 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 132,
+            'description' => 'Add mission_photos.thumb_stored_name — a client-generated JPEG poster frame captured via a hidden <video>+<canvas> at video-upload time (war-room.php\'s wireMediaInput/captureVideoThumbnail), served by mission-photo-view.php?thumb=1 and wired as every video preview\'s poster= attribute. Fixes video previews rendering as a bare broken-play-button placeholder with no visible frame on mobile browsers/WebViews — unlike desktop browsers, they frequently fail to auto-paint a <video> element\'s first frame from preload="metadata" alone, which is all the app previously relied on.',
+            'up' => function () {
+                $columnExists = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_photos' AND COLUMN_NAME = 'thumb_stored_name'"
+                );
+                if (!$columnExists) {
+                    dbExecute("ALTER TABLE mission_photos ADD COLUMN thumb_stored_name VARCHAR(255) NULL AFTER stored_name");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

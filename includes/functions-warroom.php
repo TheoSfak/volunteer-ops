@@ -527,10 +527,10 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
     if (!empty($waypointIds)) {
         $wpPlaceholders = implode(',', array_fill(0, count($waypointIds), '?'));
         foreach (dbFetchAll(
-            "SELECT route_waypoint_id, id, media_type, created_at FROM mission_photos WHERE route_waypoint_id IN ($wpPlaceholders) ORDER BY created_at ASC",
+            "SELECT route_waypoint_id, id, media_type, thumb_stored_name, created_at FROM mission_photos WHERE route_waypoint_id IN ($wpPlaceholders) ORDER BY created_at ASC",
             $waypointIds
         ) as $ph) {
-            $entry = ['id' => (int) $ph['id'], 'time' => date('d/m H:i', strtotime($ph['created_at']))];
+            $entry = ['id' => (int) $ph['id'], 'has_thumb' => $ph['thumb_stored_name'] !== null, 'time' => date('d/m H:i', strtotime($ph['created_at']))];
             if ($ph['media_type'] === 'video') {
                 $videosByWaypoint[(int) $ph['route_waypoint_id']] = $entry;
             } else {
@@ -741,7 +741,7 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
  */
 function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canManageWarRoom, int $limit = 30): array {
     $rows = dbFetchAll(
-        "SELECT p.id, p.user_id, p.media_type, p.lat, p.lng, p.created_at, p.poi_id, p.poi_note,
+        "SELECT p.id, p.user_id, p.media_type, p.thumb_stored_name, p.lat, p.lng, p.created_at, p.poi_id, p.poi_note,
                 u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
                 vt.name AS home_team_name, vt.color AS home_team_color,
                 mt.codename, mt.team_number
@@ -761,6 +761,7 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
         return [
             'id'                 => (int) $row['id'],
             'media_type'         => $row['media_type'],
+            'has_thumb'          => $row['thumb_stored_name'] !== null,
             'user_name'          => $row['user_name'],
             'is_external'        => (bool) $row['is_external'],
             'guest_org_name'     => $row['guest_org_name'],
@@ -1761,7 +1762,7 @@ function loadPointsOfInterestForMission(int $missionId): array {
     $poiIds = array_map('intval', array_column($pois, 'id'));
     $placeholders = implode(',', array_fill(0, count($poiIds), '?'));
     $photoRows = dbFetchAll(
-        "SELECT ph.id, ph.poi_id, ph.media_type, ph.user_id, ph.poi_note, ph.created_at,
+        "SELECT ph.id, ph.poi_id, ph.media_type, ph.thumb_stored_name, ph.user_id, ph.poi_note, ph.created_at,
                 u.name AS reporter_name, u.is_external, u.guest_org_name, u.guest_country_code,
                 vt.name AS home_team_name, vt.color AS home_team_color
          FROM mission_photos ph
@@ -1777,6 +1778,7 @@ function loadPointsOfInterestForMission(int $missionId): array {
         $photosByPoi[(int) $row['poi_id']][] = [
             'id'                 => (int) $row['id'],
             'media_type'         => $row['media_type'],
+            'has_thumb'          => $row['thumb_stored_name'] !== null,
             'reporter_name'      => $row['reporter_name'],
             'is_external'        => (bool) $row['is_external'],
             'guest_org_name'     => $row['guest_org_name'],
