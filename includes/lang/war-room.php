@@ -1089,6 +1089,7 @@ return [
         // Action Room toolbar, synced to every viewer via the ajax=1 poll.
         'hero.btn_fires_overlay' => 'Πυρκαγιές',
         'fires.no_api_key' => 'Δεν έχει οριστεί NASA FIRMS MAP_KEY στις Ρυθμίσεις',
+        'fires.toggle_failed' => 'Αποτυχία αλλαγής — δοκιμάστε ξανά σε λίγο',
         'fires.popup_title' => 'Δορυφορική Ένδειξη Πυρκαγιάς',
         'fires.popup_brightness_label' => 'Θερμοκρασία',
         'fires.popup_frp_label' => 'Ισχύς Ακτινοβολίας',
@@ -2122,6 +2123,7 @@ return [
         // NASA FIRMS wildfire hotspot overlay
         'hero.btn_fires_overlay' => 'Fires',
         'fires.no_api_key' => 'No NASA FIRMS MAP_KEY configured in Settings',
+        'fires.toggle_failed' => 'Failed to change — try again shortly',
         'fires.popup_title' => 'Satellite Fire Detection',
         'fires.popup_brightness_label' => 'Brightness',
         'fires.popup_frp_label' => 'Fire Radiative Power',
