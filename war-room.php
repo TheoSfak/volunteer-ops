@@ -2150,7 +2150,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-people me-1"></i><?= t('participants.panel_title', ['count' => count($participants)]) ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
             </div>
             <?php $participantSplitRows = count($participants) >= 8 ? (int)ceil(count($participants) / 2) : 0; ?>
-            <div class="list-group list-group-flush collapse d-lg-block<?= $participantSplitRows ? ' wr-participants-cols' : '' ?>" id="participantsCollapse"<?= $participantSplitRows ? ' style="grid-template-rows: repeat(' . $participantSplitRows . ', auto);"' : '' ?>>
+            <div class="list-group list-group-flush collapse<?= $participantSplitRows ? ' wr-participants-cols' : '' ?>" id="participantsCollapse"<?= $participantSplitRows ? ' style="grid-template-rows: repeat(' . $participantSplitRows . ', auto);"' : '' ?>>
                 <?php foreach ($participants as $participant): ?>
                 <?php
                 $status = $participant['field_status'] ?? '';
@@ -5659,16 +5659,16 @@ if (firesOverlayToggleBtn) {
     });
 }
 
-// Share links reuse the same authenticated mission-photo-view.php URL the
-// card's own thumbnail already loads — a real limitation worth knowing:
-// whoever opens the shared link on WhatsApp/Telegram/Viber/Messenger still
-// needs to be logged into this app to actually see it (no public/token link
-// exists for this media), so this is really "forward to a teammate who
-// already has an account", not "share outside the organization". Facebook
-// Messenger's own official share dialog needs a registered Facebook App ID
-// (none configured here) — using its plain mobile deep link instead, which
-// only does anything on a phone with Messenger installed; same caveat as
-// Viber's own forward:// scheme. Plain <a> tags, no JS wiring needed.
+// One Share button, not five. Prefers the OS's own native share sheet
+// (navigator.share with an actual file attached) — that sends the real
+// photo/video bytes, not a link, so the recipient doesn't need an account
+// on this app at all, and lets the user pick WhatsApp/Telegram/Viber/
+// Messenger/anything else installed from one native picker, matching what
+// the user asked for exactly ("a share icon, then a popup to choose where").
+// Only falls back to a manual Bootstrap dropdown of app-specific LINK
+// shares (same login caveat as before) on browsers with no file-share
+// support — mainly desktop; every mobile browser that matters here
+// supports it.
 function buildMediaShareButtonsHtml(m) {
     const url = location.origin + '/mission-photo-view.php?id=' + m.id;
     const caption = (m.media_type === 'video' ? '🎥' : '📷') + ' ' + t('media.share_caption');
@@ -5676,11 +5676,42 @@ function buildMediaShareButtonsHtml(m) {
     return `
         <div class="d-flex gap-1 mt-1 flex-wrap">
             <a class="btn btn-sm btn-outline-secondary p-1" href="mission-photo-view.php?id=${m.id}" download title="${t('media.download_title')}"><i class="bi bi-download" style="font-size:.7rem;"></i></a>
-            <a class="btn btn-sm btn-outline-success p-1" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(shareText)}" title="WhatsApp"><i class="bi bi-whatsapp" style="font-size:.7rem;"></i></a>
-            <a class="btn btn-sm btn-outline-info p-1" target="_blank" rel="noopener" href="https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(caption)}" title="Telegram"><i class="bi bi-telegram" style="font-size:.7rem;"></i></a>
-            <a class="btn btn-sm btn-outline-primary p-1" href="viber://forward?text=${encodeURIComponent(shareText)}" title="Viber"><i class="bi bi-chat-dots-fill" style="font-size:.7rem;"></i></a>
-            <a class="btn btn-sm btn-outline-primary p-1" href="fb-messenger://share/?link=${encodeURIComponent(url)}" title="Messenger"><i class="bi bi-messenger" style="font-size:.7rem;"></i></a>
+            <div class="dropdown">
+                <button type="button" class="btn btn-sm btn-outline-primary p-1 media-share-btn" data-id="${m.id}" data-media-type="${m.media_type}" data-url="${escapeHtml(url)}" data-caption="${escapeHtml(caption)}" data-share-text="${escapeHtml(shareText)}" title="${t('media.share_title')}"><i class="bi bi-share-fill" style="font-size:.7rem;"></i></button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(shareText)}"><i class="bi bi-whatsapp me-2"></i>WhatsApp</a></li>
+                    <li><a class="dropdown-item" target="_blank" rel="noopener" href="https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(caption)}"><i class="bi bi-telegram me-2"></i>Telegram</a></li>
+                    <li><a class="dropdown-item" href="viber://forward?text=${encodeURIComponent(shareText)}"><i class="bi bi-chat-dots-fill me-2"></i>Viber</a></li>
+                    <li><a class="dropdown-item" href="fb-messenger://share/?link=${encodeURIComponent(url)}"><i class="bi bi-messenger me-2"></i>Messenger</a></li>
+                </ul>
+            </div>
         </div>`;
+}
+
+// Fetches the actual media bytes and hands them to the OS share sheet —
+// see buildMediaShareButtonsHtml's comment for why this is preferred over
+// the link-based dropdown. Falls back to opening that same button's
+// Bootstrap dropdown (the manual per-platform LINK list) when the browser
+// can't share files, or the user's own device has no share targets at all
+// for that file type — genuinely not an error, so no alert() for that case.
+async function shareMediaItem(btn) {
+    const { id, mediaType, url, caption } = btn.dataset;
+    if (navigator.canShare) {
+        try {
+            const res = await fetch(`mission-photo-view.php?id=${id}`);
+            const blob = await res.blob();
+            const ext = {'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif','video/mp4':'mp4','video/webm':'webm','video/quicktime':'mov'}[blob.type] || (mediaType === 'video' ? 'mp4' : 'jpg');
+            const file = new File([blob], `field-${id}.${ext}`, {type: blob.type});
+            if (navigator.canShare({files: [file]})) {
+                await navigator.share({files: [file], text: caption});
+                return;
+            }
+        } catch (e) {
+            if (e.name === 'AbortError') return; // user closed the native picker — not an error
+            // Any other failure (fetch, blob, unsupported) falls through to the dropdown below.
+        }
+    }
+    bootstrap.Dropdown.getOrCreateInstance(btn).toggle();
 }
 
 function renderMedia(items) {
@@ -5737,6 +5768,7 @@ function renderMedia(items) {
             else alert(result.error || t('common.delete_failed'));
         });
     }));
+    list.querySelectorAll('.media-share-btn').forEach(btn => btn.addEventListener('click', () => shareMediaItem(btn)));
 }
 
 // Reference photos attached to a Καθολικό Μήνυμα — coordinator-to-field
