@@ -6095,13 +6095,28 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
         try {
             ($migration['up'])();
             $highest = max($highest, $migration['version']);
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
+            // Throwable, not Exception — a stuck migration that throws a
+            // plain Error (TypeError, ArgumentCountError, etc.) instead of
+            // an Exception subtype would otherwise bypass this catch
+            // entirely and fatal the whole page, not just fail gracefully.
             // Log but don't crash the app — migration will retry after cooldown
             error_log(
                 "[migrations] Failed migration v{$migration['version']} " .
                 "({$migration['description']}): " . $e->getMessage()
             );
-            // Record failure time to enable cooldown (5 min before retry)
+            // Record failure time (for cooldown) + the actual message
+            // (diagnostic only, readable via _dbcheck.php — this app has no
+            // server-log access from the deploy side, so this is the only
+            // way to see WHY a migration is stuck without guessing).
+            try {
+                dbExecute(
+                    "INSERT INTO settings (setting_key, setting_value, updated_at)
+                     VALUES ('migration_last_error', ?, NOW())
+                     ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()",
+                    ['v' . $migration['version'] . ': ' . $e->getMessage()]
+                );
+            } catch (Throwable $ignore) {}
             try {
                 dbExecute(
                     "INSERT INTO settings (setting_key, setting_value, updated_at)

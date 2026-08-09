@@ -76,9 +76,13 @@ echo "\n--- Migration Failure ---\n";
 try {
     $failTime = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'migration_last_failure'");
     if ($failTime) {
-        echo "  Last failure: {$failTime}\n";
+        echo "  Last failure: {$failTime} (" . date('Y-m-d H:i:s', (int)$failTime) . ")\n";
     } else {
         echo "  No failures recorded.\n";
+    }
+    $failMsg = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'migration_last_error'");
+    if ($failMsg) {
+        echo "  Last error: {$failMsg}\n";
     }
 } catch (Exception $e) {
     echo "  (could not check)\n";
