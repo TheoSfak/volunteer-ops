@@ -194,6 +194,7 @@ CREATE TABLE IF NOT EXISTS `missions` (
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `recurrence_id` INT UNSIGNED NULL,
     `recurrence_instance_date` DATE NULL,
+    `fires_overlay_enabled` TINYINT(1) NOT NULL DEFAULT 0,
     FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`mission_type_id`) REFERENCES `mission_types`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
@@ -1838,6 +1839,18 @@ CREATE TABLE IF NOT EXISTS `weather_cache` (
     `weather_json` TEXT NOT NULL,
     `fetched_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY `uq_weather_mission` (`mission_id`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ==================================================
+-- FIRE HOTSPOT CACHE TABLE (NASA FIRMS)
+-- ==================================================
+CREATE TABLE IF NOT EXISTS `fire_hotspot_cache` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `hotspots_json` TEXT NOT NULL,
+    `fetched_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_fire_mission` (`mission_id`),
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

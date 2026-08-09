@@ -1083,6 +1083,20 @@ return [
         'exposure.overdue_suffix' => 'υπέρβαση',
         'exposure.hm_format' => '{h}ω {m}λ',
         'exposure.note' => 'Ενδεικτικός υπολογισμός από θερμοκρασία, άνεμο και ηλικία — όχι κλινική πρόγνωση.',
+
+        // NASA FIRMS wildfire hotspot overlay — per-mission toggle
+        // (missions.fires_overlay_enabled), flipped live by admins from the
+        // Action Room toolbar, synced to every viewer via the ajax=1 poll.
+        'hero.btn_fires_overlay' => 'Πυρκαγιές',
+        'fires.no_api_key' => 'Δεν έχει οριστεί NASA FIRMS MAP_KEY στις Ρυθμίσεις',
+        'fires.popup_title' => 'Δορυφορική Ένδειξη Πυρκαγιάς',
+        'fires.popup_brightness_label' => 'Θερμοκρασία',
+        'fires.popup_frp_label' => 'Ισχύς Ακτινοβολίας',
+        'fires.popup_detected_label' => 'Ανιχνεύθηκε',
+        'fires.confidence_low' => 'χαμηλή βεβαιότητα',
+        'fires.confidence_nominal' => 'μέτρια βεβαιότητα',
+        'fires.confidence_high' => 'υψηλή βεβαιότητα',
+        'fires.caveat' => 'Ενδεικτικά δορυφορικά δεδομένα (NASA FIRMS) — όχι επιβεβαιωμένη πυρκαγιά.',
     ],
     'en' => [
         'common.mission_not_found' => 'Mission not found.',
@@ -2104,5 +2118,17 @@ return [
         'exposure.overdue_suffix' => 'overdue',
         'exposure.hm_format' => '{h}h {m}m',
         'exposure.note' => 'Indicative estimate from temperature, wind and age — not a clinical prognosis.',
+
+        // NASA FIRMS wildfire hotspot overlay
+        'hero.btn_fires_overlay' => 'Fires',
+        'fires.no_api_key' => 'No NASA FIRMS MAP_KEY configured in Settings',
+        'fires.popup_title' => 'Satellite Fire Detection',
+        'fires.popup_brightness_label' => 'Brightness',
+        'fires.popup_frp_label' => 'Fire Radiative Power',
+        'fires.popup_detected_label' => 'Detected',
+        'fires.confidence_low' => 'low confidence',
+        'fires.confidence_nominal' => 'nominal confidence',
+        'fires.confidence_high' => 'high confidence',
+        'fires.caveat' => 'Indicative satellite data (NASA FIRMS) — not a confirmed fire.',
     ],
 ];

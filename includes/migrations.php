@@ -6053,6 +6053,29 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 131,
+            'description' => 'Add missions.fires_overlay_enabled + fire_hotspot_cache table for the NASA FIRMS wildfire-hotspot map overlay. Unlike the weather compass (a global Settings toggle), this one is a per-mission flag flipped live by admins from inside the Action Room itself (mission-fires.php), synced to every viewer through the existing ajax=1 poll — same reasoning as v130\'s weather_cache, kept here rather than only in sql/migrations/ so it actually auto-applies on a plain git-deploy.',
+            'up' => function () {
+                $col = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'missions' AND COLUMN_NAME = 'fires_overlay_enabled'");
+                if (!$col) {
+                    dbExecute("ALTER TABLE missions ADD COLUMN fires_overlay_enabled TINYINT(1) NOT NULL DEFAULT 0");
+                }
+
+                // Same shape as v130's weather_cache — short TTL is handled in
+                // application code (includes/wildfire.php), not here.
+                dbExecute("CREATE TABLE IF NOT EXISTS fire_hotspot_cache (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    hotspots_json TEXT NOT NULL,
+                    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uq_fire_mission (mission_id),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
