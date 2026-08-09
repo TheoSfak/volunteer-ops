@@ -2146,9 +2146,11 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         </div>
 
         <div class="card shadow-sm" data-card-id="participantsCard">
-            <div class="card-header"><h5 class="mb-0"><i class="bi bi-people me-1"></i><?= t('participants.panel_title', ['count' => count($participants)]) ?></h5></div>
+            <div class="card-header wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#participantsCollapse" role="button" aria-expanded="false" aria-controls="participantsCollapse">
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-people me-1"></i><?= t('participants.panel_title', ['count' => count($participants)]) ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
+            </div>
             <?php $participantSplitRows = count($participants) >= 8 ? (int)ceil(count($participants) / 2) : 0; ?>
-            <div class="list-group list-group-flush<?= $participantSplitRows ? ' wr-participants-cols' : '' ?>"<?= $participantSplitRows ? ' style="grid-template-rows: repeat(' . $participantSplitRows . ', auto);"' : '' ?>>
+            <div class="list-group list-group-flush collapse d-lg-block<?= $participantSplitRows ? ' wr-participants-cols' : '' ?>" id="participantsCollapse"<?= $participantSplitRows ? ' style="grid-template-rows: repeat(' . $participantSplitRows . ', auto);"' : '' ?>>
                 <?php foreach ($participants as $participant): ?>
                 <?php
                 $status = $participant['field_status'] ?? '';
@@ -5657,6 +5659,30 @@ if (firesOverlayToggleBtn) {
     });
 }
 
+// Share links reuse the same authenticated mission-photo-view.php URL the
+// card's own thumbnail already loads — a real limitation worth knowing:
+// whoever opens the shared link on WhatsApp/Telegram/Viber/Messenger still
+// needs to be logged into this app to actually see it (no public/token link
+// exists for this media), so this is really "forward to a teammate who
+// already has an account", not "share outside the organization". Facebook
+// Messenger's own official share dialog needs a registered Facebook App ID
+// (none configured here) — using its plain mobile deep link instead, which
+// only does anything on a phone with Messenger installed; same caveat as
+// Viber's own forward:// scheme. Plain <a> tags, no JS wiring needed.
+function buildMediaShareButtonsHtml(m) {
+    const url = location.origin + '/mission-photo-view.php?id=' + m.id;
+    const caption = (m.media_type === 'video' ? '🎥' : '📷') + ' ' + t('media.share_caption');
+    const shareText = caption + ' ' + url;
+    return `
+        <div class="d-flex gap-1 mt-1 flex-wrap">
+            <a class="btn btn-sm btn-outline-secondary p-1" href="mission-photo-view.php?id=${m.id}" download title="${t('media.download_title')}"><i class="bi bi-download" style="font-size:.7rem;"></i></a>
+            <a class="btn btn-sm btn-outline-success p-1" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(shareText)}" title="WhatsApp"><i class="bi bi-whatsapp" style="font-size:.7rem;"></i></a>
+            <a class="btn btn-sm btn-outline-info p-1" target="_blank" rel="noopener" href="https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(caption)}" title="Telegram"><i class="bi bi-telegram" style="font-size:.7rem;"></i></a>
+            <a class="btn btn-sm btn-outline-primary p-1" href="viber://forward?text=${encodeURIComponent(shareText)}" title="Viber"><i class="bi bi-chat-dots-fill" style="font-size:.7rem;"></i></a>
+            <a class="btn btn-sm btn-outline-primary p-1" href="fb-messenger://share/?link=${encodeURIComponent(url)}" title="Messenger"><i class="bi bi-messenger" style="font-size:.7rem;"></i></a>
+        </div>`;
+}
+
 function renderMedia(items) {
     const list = document.getElementById('mediaList');
     if (!items.length) {
@@ -5692,6 +5718,7 @@ function renderMedia(items) {
                         ${m.can_delete ? `<button type="button" class="btn btn-sm btn-outline-danger media-delete-btn p-1" data-id="${m.id}" title="${t('common.delete')}"><i class="bi bi-trash" style="font-size:.7rem;"></i></button>` : ''}
                     </div>
                 </div>
+                ${buildMediaShareButtonsHtml(m)}
             </div>
         </div>
     `;
