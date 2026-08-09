@@ -5711,7 +5711,14 @@ async function shareMediaItem(btn) {
             // Any other failure (fetch, blob, unsupported) falls through to the dropdown below.
         }
     }
-    bootstrap.Dropdown.getOrCreateInstance(btn).toggle();
+    // strategy:'fixed' is required here — the media card this button lives
+    // in has its own overflow:hidden (clips card-img-top's corners, see
+    // #mediaList's own CSS comment above), which silently clips Popper's
+    // default absolutely-positioned menu to invisible. Fixed positioning is
+    // relative to the viewport, not any clipped ancestor, so the menu
+    // actually renders on top of everything instead of opening "successfully"
+    // but nowhere visible.
+    bootstrap.Dropdown.getOrCreateInstance(btn, {popperConfig: {strategy: 'fixed'}}).toggle();
 }
 
 function renderMedia(items) {
