@@ -6979,7 +6979,9 @@ function renderFireLayer(fireData) {
         const confidenceRaw = (h.confidence || 'nominal');
         const confidenceLabel = confidenceRaw.charAt(0).toUpperCase() + confidenceRaw.slice(1);
         const frpHtml = (h.frp !== null && h.frp !== undefined) ? `<br>${t('fires.popup_frp_label')}: ${h.frp} MW` : '';
-        const brightnessHtml = (h.brightness !== null && h.brightness !== undefined) ? `<br>${t('fires.popup_brightness_label')}: ${h.brightness} K` : '';
+        // FIRMS reports brightness in Kelvin; converted to °C for display —
+        // European audience, Kelvin isn't the intuitive unit here.
+        const brightnessHtml = (h.brightness !== null && h.brightness !== undefined) ? `<br>${t('fires.popup_brightness_label')}: ${(h.brightness - 273.15).toFixed(1)}°C` : '';
         // acq_date 'YYYY-MM-DD' + acq_time 'HHMM' (UTC) -> 'DD/MM/YYYY HH:MM',
         // matching the exact format the user pointed to on NASA's own site.
         const dateParts = (h.acq_date || '').split('-');
