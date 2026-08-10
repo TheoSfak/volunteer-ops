@@ -83,6 +83,12 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // from within a long-open war-room.php tab like every other endpoint on
     // this list, same background-throttling force-logout risk.
     'mission-sector-coverage.php',
+    // war-room-keepalive.php — the ONE poll on this page that isn't gated on
+    // `!document.hidden` (see its own docblock), so it's also the one whose
+    // exemption matters most: a delayed ping landing right as the timeout
+    // elapses must still refresh last_activity and return normally instead
+    // of hitting the idle check itself and logging the session out.
+    'war-room-keepalive.php',
 ]);
 
 function initSession() {
