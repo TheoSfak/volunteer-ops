@@ -6081,19 +6081,21 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
 
         [
             'version'     => 131,
-            'description' => 'Add missions.fires_overlay_enabled + fire_hotspot_cache table for the NASA FIRMS wildfire-hotspot map overlay. Unlike the weather compass (a global Settings toggle), this one is a per-mission flag flipped live by admins from inside the Action Room itself (mission-fires.php), synced to every viewer through the existing ajax=1 poll — same reasoning as v130\'s weather_cache, kept here rather than only in sql/migrations/ so it actually auto-applies on a plain git-deploy.',
+            'description' => 'Add missions.fires_overlay_enabled + fire_hotspot_cache table for the NASA FIRMS wildfire-hotspot map overlay. Unlike the weather compass (a global Settings toggle), this one is a per-mission flag flipped live by admins from inside the Action Room itself (mission-fires.php), synced to every viewer through the existing ajax=1 poll — same reasoning as v130\'s weather_cache, kept here rather than only in sql/migrations/ so it actually auto-applies on a plain git-deploy. 2026-08-11: rewrote the column-add to use the standard INFORMATION_SCHEMA pre-check — the original "MariaDB-native IF NOT EXISTS" version was root-causing this migration\'s own previously-unexplained production failures: that ALTER syntax is a hard SQL syntax error on real MySQL 8 (confirmed against a mysql:8.0.46 container), and since the runner stops at the first failure, it was silently blocking every later migration too on any MySQL-backed install, not just this one\'s own two changes.',
             'up' => function () {
-                // MariaDB-native IF NOT EXISTS (supported since 10.0.2, this
-                // app requires MariaDB already per every other migration's own
-                // comments) instead of the usual INFORMATION_SCHEMA.COLUMNS
-                // pre-check — this migration kept silently failing on
-                // production (confirmed via a live "Unknown column" fatal
-                // from mission-fires.php, caught by this runner's own
-                // try/catch so it never crashed a page load, just never
-                // actually created the column either) for a reason never
-                // pinned down; removing the extra metadata round-trip is the
-                // safer fix regardless of the exact cause.
-                dbExecute("ALTER TABLE missions ADD COLUMN IF NOT EXISTS fires_overlay_enabled TINYINT(1) NOT NULL DEFAULT 0");
+                // Standard existence-check-then-plain-ALTER idiom, matching
+                // every other migration in this file (see v129/v133) — the
+                // MariaDB-only "ADD COLUMN IF NOT EXISTS" form this used to be
+                // is a syntax error on real MySQL, which is almost certainly
+                // what the "kept silently failing on production" symptom
+                // below was actually caused by.
+                $columnExists = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'missions' AND COLUMN_NAME = 'fires_overlay_enabled'"
+                );
+                if (!$columnExists) {
+                    dbExecute("ALTER TABLE missions ADD COLUMN fires_overlay_enabled TINYINT(1) NOT NULL DEFAULT 0");
+                }
 
                 // Same shape as v130's weather_cache — short TTL is handled in
                 // application code (includes/wildfire.php), not here.
