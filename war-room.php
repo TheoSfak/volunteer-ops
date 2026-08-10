@@ -7,6 +7,7 @@
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/weather.php';
 require_once __DIR__ . '/includes/wildfire.php';
+require_once __DIR__ . '/includes/lpb-rings.php';
 requireLogin();
 
 $missionId = (int)get('id');
@@ -559,6 +560,12 @@ if (isPost()) {
         $witnessAccounts = trim((string) post('witness_accounts'));
         $witnessAccounts = $witnessAccounts !== '' ? mb_substr($witnessAccounts, 0, 5000) : null;
 
+        // Drives the "LPB search rings" map layer — must be one of
+        // LPB_RING_TABLE's keys (includes/lpb-rings.php) or null, never
+        // free text, since it's used as a direct lookup key client-side.
+        $subjectCategoryRaw = trim((string) post('subject_category'));
+        $subjectCategory = in_array($subjectCategoryRaw, array_keys(LPB_RING_TABLE), true) ? $subjectCategoryRaw : null;
+
         $existing = dbFetchOne("SELECT id, photo FROM mission_missing_persons WHERE mission_id = ?", [$missionId]);
 
         // Photo is optional on every save — only touched (validated, stored,
@@ -605,20 +612,21 @@ if (isPost()) {
         dbExecute(
             "INSERT INTO mission_missing_persons
                 (mission_id, full_name, age, description, clothing_description, vehicle, photo,
-                 last_seen_label, last_seen_lat, last_seen_lng, last_seen_at,
+                 last_seen_label, last_seen_lat, last_seen_lng, last_seen_at, subject_category,
                  disappearance_circumstances, likely_direction, witness_accounts, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
              ON DUPLICATE KEY UPDATE
                 full_name = VALUES(full_name), age = VALUES(age), description = VALUES(description),
                 clothing_description = VALUES(clothing_description), vehicle = VALUES(vehicle),
                 photo = COALESCE(VALUES(photo), photo),
                 last_seen_label = VALUES(last_seen_label), last_seen_lat = VALUES(last_seen_lat),
                 last_seen_lng = VALUES(last_seen_lng), last_seen_at = VALUES(last_seen_at),
+                subject_category = VALUES(subject_category),
                 disappearance_circumstances = VALUES(disappearance_circumstances),
                 likely_direction = VALUES(likely_direction), witness_accounts = VALUES(witness_accounts),
                 updated_at = NOW()",
             [$missionId, $fullName, $age, $description, $clothingDescription, $vehicle, $newPhoto,
-             $lastSeenLabel, $lat, $lng, $lastSeenAt,
+             $lastSeenLabel, $lat, $lng, $lastSeenAt, $subjectCategory,
              $disappearanceCircumstances, $likelyDirection, $witnessAccounts]
         );
         logAudit('save_missing_person_info', 'mission_missing_persons', $existing['id'] ?? null, null, ['mission_id' => $missionId, 'full_name' => $fullName]);
@@ -1080,6 +1088,10 @@ if (get('ajax') === '1') {
     // so calling it every 5s poll costs one indexed SELECT, not an API hit.
     $weatherCompassOn = getSetting('weather_map_compass_enabled', '0') === '1';
     $exposureUrgencyOn = $isMissingPersonMission && getSetting('exposure_urgency_enabled', '0') === '1';
+    // "LPB search rings" — same off-by-default posture, but no weather
+    // dependency at all (pure static lookup keyed by subject_category), so
+    // it doesn't join the $weather fetch below.
+    $searchRingsOn = $isMissingPersonMission && getSetting('search_rings_enabled', '0') === '1';
     // Wrapped: getWeatherForMission() hits weather_cache via a plain SELECT
     // with no table-existence check of its own, so an environment where that
     // table wasn't provisioned (e.g. a migration that only ever shipped as a
@@ -1237,6 +1249,8 @@ $missingPerson = ($isMissingPersonMission && ($canManageWarRoom || $isApprovedPa
 // try/caught (a missing weather_cache table must not fail the whole page).
 $weatherCompassOn = getSetting('weather_map_compass_enabled', '0') === '1';
 $exposureUrgencyOn = $isMissingPersonMission && getSetting('exposure_urgency_enabled', '0') === '1';
+// See the ajax branch's own copy of this block above.
+$searchRingsOn = $isMissingPersonMission && getSetting('search_rings_enabled', '0') === '1';
 try {
     $weather = ($weatherCompassOn || $exposureUrgencyOn) ? getWeatherForMission($mission) : null;
 } catch (Throwable $e) {
@@ -2455,6 +2469,16 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                                 </div>
                             </div>
                             <div class="mb-3">
+                                <label class="form-label small fw-semibold"><?= t('missing_person.subject_category_label') ?></label>
+                                <select class="form-select" name="subject_category">
+                                    <option value=""><?= t('missing_person.subject_category_placeholder') ?></option>
+                                    <?php foreach (LPB_RING_TABLE as $key => $radii): ?>
+                                    <option value="<?= h($key) ?>" <?= ($missingPerson['subject_category'] ?? '') === $key ? 'selected' : '' ?>><?= h(lpbCategoryLabel($key)) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <div class="form-text"><?= t('missing_person.subject_category_help') ?></div>
+                            </div>
+                            <div class="mb-3">
                                 <label class="form-label small fw-semibold"><?= t('missing_person.description_label') ?></label>
                                 <textarea class="form-control" name="description" rows="2" maxlength="5000"><?= h($missingPerson['description'] ?? '') ?></textarea>
                             </div>
@@ -3381,6 +3405,11 @@ let missingPerson = <?= json_encode($missingPerson) ?>;
 // exposure card, even while the compass toggle itself is off — so the
 // compass control needs its own explicit flag, not just `if (weather)`.
 const weatherCompassEnabled = <?= json_encode($weatherCompassOn) ?>;
+// LPB_RING_TABLE is the server-side PHP constant (includes/lpb-rings.php)
+// reused as-is, so the ring radii JS draws can never drift from the ones the
+// subject_category <select> was built from.
+const searchRingsEnabled = <?= json_encode($searchRingsOn) ?>;
+const LPB_RING_TABLE = <?= json_encode(LPB_RING_TABLE) ?>;
 let weather = <?= json_encode($weather) ?>;
 let exposureUrgency = <?= json_encode($exposureUrgency) ?>;
 // Unlike weatherCompassEnabled (a page-load-only global setting),
@@ -3612,7 +3641,7 @@ function addMapBaseLayers(targetMap, toggleBtnId) {
     }
     return {street, satellite};
 }
-let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null, missingPersonLayer = null, fireLayer = null;
+let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null, missingPersonLayer = null, fireLayer = null, searchRingsLayer = null;
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
     addMapBaseLayers(map, 'mapSatelliteToggle');
@@ -3680,6 +3709,12 @@ if (!fieldMode) {
     incidentLayer = L.featureGroup().addTo(map);
     poiLayer = L.featureGroup().addTo(map);
     missingPersonLayer = L.featureGroup().addTo(map);
+    // No custom pane — L.circle defaults to the standard overlayPane (z=400),
+    // which already sits exactly where these rings should stack: above
+    // coveragePane/sectorPane/areaPane, below markerPane/annotationPane/
+    // restrictedAreaPane. Same as dispatchLayer/routeLayer/trailLayer, none
+    // of which use a custom pane either.
+    searchRingsLayer = L.featureGroup().addTo(map);
     fireLayer = L.featureGroup().addTo(map);
     // Restricted (hazard/danger) areas render ABOVE literally everything else
     // on the map, including annotationPane (610, itself already above every
@@ -4404,6 +4439,24 @@ function renderMissingPersonReference(layer) {
     const icon = L.divIcon({className:'', html:'<i class="bi bi-person-fill" style="font-size:22px;color:#212529;opacity:0.6;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[22,22], iconAnchor:[11,20]});
     L.marker([missingPerson.last_seen_lat, missingPerson.last_seen_lng], {icon}).addTo(layer).bindTooltip(escapeHtml(missingPerson.full_name));
 }
+// Same LPB_RING_TABLE-driven rings as renderSearchRingsLayer() on the live
+// map, but dimmed/tooltip-only like every other reference layer above, and
+// gated by searchRingsEnabled — the first reference layer that needs its own
+// settings check, since none of the others here are settings-gated.
+function renderSearchRingsReference(layer) {
+    if (!layer) return;
+    if (!searchRingsEnabled) return;
+    if (!missingPerson || missingPerson.last_seen_lat === null || missingPerson.last_seen_lat === undefined) return;
+    const radii = LPB_RING_TABLE[missingPerson.subject_category];
+    if (!radii) return;
+    const center = [missingPerson.last_seen_lat, missingPerson.last_seen_lng];
+    const pct = [25, 50, 75, 95];
+    for (let i = 3; i >= 0; i--) {
+        const km = (radii[i] / 1000).toLocaleString(jsLocale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+        L.circle(center, {radius: radii[i], color:'#7c3aed', weight:1, opacity:0.35, fillColor:'#7c3aed', fillOpacity:0.03})
+            .addTo(layer).bindTooltip(t('missing_person.ring_tooltip', {pct: pct[i], km}));
+    }
+}
 // The one-call version most composers actually want: everything, in back-
 // to-front paint order (pins first so later shapes don't visually bury the
 // small dots, but pins still show — bindTooltip works regardless of order).
@@ -4417,6 +4470,7 @@ function renderFullMapReference(layer) {
     renderDispatchesReference(layer);
     renderPinsReference(layer);
     renderMissingPersonReference(layer);
+    renderSearchRingsReference(layer);
 }
 
 // restrictedAreasCard's flat list of drawn zones — the map popup (above) is
@@ -6947,6 +7001,47 @@ function renderMissingPersonMarker(item) {
     L.marker([item.last_seen_lat, item.last_seen_lng], {icon}).addTo(missingPersonLayer).bindPopup(popupHtml);
 }
 
+// "LPB search rings" — 4 statistical concentric circles around the missing
+// person's last-seen point, sized by LPB_RING_TABLE[item.subject_category].
+// Purely a planning aid (see includes/lpb-rings.php's header comment for the
+// caveats) — gated behind searchRingsEnabled (Settings, default off).
+function renderSearchRingsLayer(item) {
+    if (!searchRingsLayer) return;
+    searchRingsLayer.clearLayers();
+    if (!searchRingsEnabled || !item || item.last_seen_lat === null || item.last_seen_lat === undefined
+        || item.last_seen_lng === null || item.last_seen_lng === undefined) return;
+    const radii = LPB_RING_TABLE[item.subject_category];
+    if (!radii) return;
+
+    const center = [item.last_seen_lat, item.last_seen_lng];
+    const pct = [25, 50, 75, 95];
+    const fillOpacity = [0.12, 0.08, 0.05, 0.03];
+    const strokeOpacity = [0.9, 0.7, 0.5, 0.35];
+    // Largest first so smaller rings paint on top — hovering inside the 25%
+    // ring must resolve to the 25% ring's own tooltip, not the 95% one
+    // underneath it (same overlapping-shape gotcha as drawCoverageGapCells()).
+    for (let i = 3; i >= 0; i--) {
+        const km = (radii[i] / 1000).toLocaleString(jsLocale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+        const label = t('missing_person.ring_tooltip', {pct: pct[i], km});
+        const circle = L.circle(center, {
+            radius: radii[i],
+            color: '#7c3aed',
+            weight: i === 0 ? 2 : 1.5,
+            opacity: strokeOpacity[i],
+            fillColor: '#7c3aed',
+            fillOpacity: fillOpacity[i],
+        }).addTo(searchRingsLayer);
+        if (i === 3) {
+            // Outermost ring only: an always-visible caption (not just a
+            // hover tooltip) so the feature reads as self-explanatory the
+            // first time anyone opens this map.
+            circle.bindTooltip(`${label} — ${t('missing_person.ring_caption')}`, {permanent: true, direction: 'top', className: 'search-rings-caption'});
+        } else {
+            circle.bindTooltip(label, {sticky: true});
+        }
+    }
+}
+
 // Updates only the read-only #missingPersonDisplay block — never touches the
 // edit modal's form inputs (those are pre-filled once, server-side, from the
 // page-load value), so a poll landing mid-edit can never clobber an admin's
@@ -7826,7 +7921,7 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 })();
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); renderWeatherControl(weather); renderFireLayer(fireHotspots); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); renderSearchRingsLayer(missingPerson); renderWeatherControl(weather); renderFireLayer(fireHotspots); }
     renderMyTasks(myTasks);
     renderMySectors(sectors);
     renderMyRoutes(routes);
@@ -9093,7 +9188,7 @@ function pollWarRoomData() {
         if (data.missingPerson !== undefined) {
             missingPerson = data.missingPerson;
             renderMissingPersonCard(missingPerson);
-            if (!fieldMode) renderMissingPersonMarker(missingPerson);
+            if (!fieldMode) { renderMissingPersonMarker(missingPerson); renderSearchRingsLayer(missingPerson); }
         }
         if (data.weather !== undefined) {
             weather = data.weather;
@@ -10839,6 +10934,7 @@ function renderRouteComposerAreas() {
     renderRestrictedAreasReference(routeComposerAreasLayer);
     renderDispatchesReference(routeComposerAreasLayer);
     renderMissingPersonReference(routeComposerAreasLayer);
+    renderSearchRingsReference(routeComposerAreasLayer);
 }
 
 function renderWaypointPanel() {

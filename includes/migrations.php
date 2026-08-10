@@ -6122,6 +6122,20 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 133,
+            'description' => 'Add mission_missing_persons.subject_category — feeds the new "LPB search rings" Action Room map layer (includes/lpb-rings.php), which draws statistical concentric circles around a missing person\'s last-seen position sized by subject type (child/hiker/hunter/dementia/etc). Nullable and free-text-keyed (VARCHAR, not ENUM) on purpose: the category list itself is a provisional illustrative table pending review by someone with SAR training, so it needs to stay editable without a schema change.',
+            'up' => function () {
+                $columnExists = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_missing_persons' AND COLUMN_NAME = 'subject_category'"
+                );
+                if (!$columnExists) {
+                    dbExecute("ALTER TABLE mission_missing_persons ADD COLUMN subject_category VARCHAR(40) NULL AFTER age");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
