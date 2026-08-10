@@ -28,6 +28,20 @@
  * actively PROTECTS every other tab's session too for as long as it's
  * open — not just itself.
  *
+ * That localStorage heartbeat only ever reaches THIS browser's other tabs —
+ * it makes no network request, so it does nothing for the actual
+ * server-side session ($_SESSION['last_activity'], checked in
+ * includes/auth.php). War Room's own live-data polls normally keep that
+ * fresh as a side effect of hitting the server every few seconds, but they
+ * all gate on `if (!document.hidden)` and go completely silent the instant
+ * this tab isn't the focused one. Confirmed live: with Action Room open but
+ * backgrounded, the server-side session aged untouched until an unrelated
+ * tab's own request found it stale and killed the shared session out from
+ * under everyone, Action Room included. Action Room therefore also runs an
+ * unconditional (visibility-independent) war-room-keepalive.php ping below,
+ * purely so the server side of "Action Room is open" is exactly as durable
+ * as the client side already was.
+ *
  * Uses a plain emoji rather than a Bootstrap Icons class in the warning
  * banner — some of this partial's includers (mission-certificate-print.php,
  * inventory-print.php, inventory-shelf-print.php) never load that font.
@@ -56,6 +70,31 @@ if (function_exists('isLoggedIn') && isLoggedIn()):
     // itself go silent at the worst possible moment.
     touchActivity();
     setInterval(touchActivity, 20000);
+
+    // Network half of the same heartbeat. The localStorage touch above only
+    // ever protects OTHER tabs' own client-side clocks — it never reaches
+    // the server, so it does nothing for $_SESSION['last_activity']. War
+    // Room's own live-data polls (pollWarRoomData/pollRoom/loadActivity in
+    // war-room.php) are the only thing that normally does that, and all
+    // three deliberately skip themselves via `if (!document.hidden)`
+    // whenever this tab isn't the focused one. Confirmed live: with this
+    // tab backgrounded, none of them fired again after initial load, so
+    // last_activity just sat there aging until a request from a genuinely
+    // idle OTHER tab found it stale and killed the whole shared session —
+    // Action Room included, despite it still being open. This runs
+    // regardless of visibility for exactly that reason. 60s still leaves a
+    // >4x margin inside the shortest allowed timeout (5 minutes).
+    function warRoomServerKeepAlive() {
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        fetch('war-room-keepalive.php', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'csrf_token=' + encodeURIComponent(meta ? meta.getAttribute('content') : '')
+        }).catch(function() {});
+    }
+    warRoomServerKeepAlive();
+    setInterval(warRoomServerKeepAlive, 60000);
     <?php else: ?>
     var timeoutMinutes = <?= (int)(getSetting('session_timeout_minutes', '120')) ?>;
     // Same 5–1440 range settings.php's form advertises and now enforces on
