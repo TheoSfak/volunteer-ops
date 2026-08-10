@@ -60,6 +60,43 @@ function missingRouteDeliverablesClientSide(wp, noteValue) {
     return missing;
 }
 
+// Decides whether compressVideoForUpload() (war-room.php) should even
+// attempt a re-encode. Two independent reasons to skip, either one is
+// enough: the source is already small enough that re-encoding risks making
+// it *bigger* for no real benefit, or it's long enough that a realtime-
+// bound compression pass (roughly 1x duration) would make someone wait
+// longer than just letting the original upload in the background would
+// have taken. Unknown/malformed duration (NaN, 0, Infinity — some devices
+// report this) is treated as "skip", not "assume short enough to compress".
+function shouldSkipVideoCompression(sizeBytes, durationSeconds) {
+    const SKIP_AT_OR_UNDER_BYTES = 4 * 1024 * 1024;
+    const SKIP_OVER_SECONDS = 120;
+    if (sizeBytes <= SKIP_AT_OR_UNDER_BYTES) return true;
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return true;
+    if (durationSeconds > SKIP_OVER_SECONDS) return true;
+    return false;
+}
+
+// Picks the first MediaRecorder output mimeType this browser can actually
+// produce, most- to least-preferred. isSupportedFn is injected (real
+// callers pass MediaRecorder.isTypeSupported) since that API doesn't exist
+// outside a browser, and this function otherwise has nothing browser-
+// specific about it.
+function pickVideoCompressionMimeType(candidates, isSupportedFn) {
+    for (const candidate of candidates) {
+        if (isSupportedFn(candidate)) return candidate;
+    }
+    return null;
+}
+
+// The container can legitimately change across compression (e.g. a .mov
+// source re-encoded to webm output), so the upload filename's extension
+// must come from the negotiated output mimeType, never copied from the
+// original file's own extension.
+function videoExtensionForMimeType(mimeType) {
+    return mimeType && mimeType.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         bearing,
@@ -68,5 +105,8 @@ if (typeof module !== 'undefined' && module.exports) {
         formatDistanceMeters,
         bearingToCompassAbbr,
         missingRouteDeliverablesClientSide,
+        shouldSkipVideoCompression,
+        pickVideoCompressionMimeType,
+        videoExtensionForMimeType,
     };
 }

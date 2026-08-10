@@ -28,6 +28,9 @@ const {
     formatDistanceMeters,
     bearingToCompassAbbr,
     missingRouteDeliverablesClientSide,
+    shouldSkipVideoCompression,
+    pickVideoCompressionMimeType,
+    videoExtensionForMimeType,
 } = require('../../assets/js/war-room-utils.js');
 
 test('bearing() points east from due-west movement', () => {
@@ -125,4 +128,50 @@ test('missingRouteDeliverablesClientSide() rejects a whitespace-only note', () =
 test('missingRouteDeliverablesClientSide() can flag all three at once', () => {
     const wp = { require_photo: true, photo: null, require_video: true, video: null, require_note: true, note: '' };
     assert.deepEqual(missingRouteDeliverablesClientSide(wp, ''), ['φωτογραφία', 'βίντεο', 'σημείωση']);
+});
+
+test('shouldSkipVideoCompression() skips a file at or under the 4MB floor', () => {
+    assert.equal(shouldSkipVideoCompression(4 * 1024 * 1024, 6), true);
+    assert.equal(shouldSkipVideoCompression(1024, 6), true);
+});
+
+test('shouldSkipVideoCompression() attempts compression for a large-enough, short-enough video', () => {
+    assert.equal(shouldSkipVideoCompression(20 * 1024 * 1024, 6), false);
+});
+
+test('shouldSkipVideoCompression() attempts compression exactly at the 120s ceiling', () => {
+    assert.equal(shouldSkipVideoCompression(20 * 1024 * 1024, 120), false);
+});
+
+test('shouldSkipVideoCompression() skips once duration exceeds the 120s ceiling', () => {
+    assert.equal(shouldSkipVideoCompression(20 * 1024 * 1024, 121), true);
+});
+
+test('shouldSkipVideoCompression() skips unknown/malformed duration rather than assuming it is short', () => {
+    assert.equal(shouldSkipVideoCompression(20 * 1024 * 1024, NaN), true);
+    assert.equal(shouldSkipVideoCompression(20 * 1024 * 1024, 0), true);
+    assert.equal(shouldSkipVideoCompression(20 * 1024 * 1024, Infinity), true);
+});
+
+test('pickVideoCompressionMimeType() returns the first supported candidate in priority order', () => {
+    const candidates = ['video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    const isSupported = mt => mt !== 'video/mp4';
+    assert.equal(pickVideoCompressionMimeType(candidates, isSupported), 'video/webm;codecs=vp8,opus');
+});
+
+test('pickVideoCompressionMimeType() returns null when nothing is supported', () => {
+    assert.equal(pickVideoCompressionMimeType(['video/mp4', 'video/webm'], () => false), null);
+});
+
+test('videoExtensionForMimeType() maps an mp4 mimeType (with codecs) to mp4', () => {
+    assert.equal(videoExtensionForMimeType('video/mp4;codecs=h264,aac'), 'mp4');
+});
+
+test('videoExtensionForMimeType() maps a webm mimeType to webm', () => {
+    assert.equal(videoExtensionForMimeType('video/webm;codecs=vp8,opus'), 'webm');
+});
+
+test('videoExtensionForMimeType() defaults to webm for empty/missing input', () => {
+    assert.equal(videoExtensionForMimeType(''), 'webm');
+    assert.equal(videoExtensionForMimeType(null), 'webm');
 });
