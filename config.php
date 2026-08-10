@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.170.5');
+define('APP_VERSION', '3.170.6');
 define('DB_SCHEMA_VERSION', 132);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
@@ -22,7 +22,7 @@ define('DB_SCHEMA_VERSION', 132);
 // tapping "update" reinstalled the exact same old version. A version-stamped
 // filename is a new URL every release, so a stale cache entry cannot exist.
 // Bump this in the same commit as build.gradle's versionName.
-define('ANDROID_APK_VERSION', '1.1.6');
+define('ANDROID_APK_VERSION', '1.1.7');
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {
