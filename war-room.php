@@ -5713,28 +5713,76 @@ function buildMediaShareButtonsHtml(m) {
         </div>`;
 }
 
-// Fetches the actual media bytes and hands them to the OS share sheet —
+// Fetches the actual media bytes and hands them to a real OS share sheet —
 // see buildMediaShareButtonsHtml's comment for why this is preferred over
-// the link-based dropdown. Falls back to opening that same button's
-// Bootstrap dropdown (the manual per-platform LINK list) when the browser
-// can't share files, or the user's own device has no share targets at all
-// for that file type — genuinely not an error, so no alert() for that case.
+// the link-based dropdown. Two different native paths, not one: Android
+// WebView (unlike an actual mobile browser) implements NO Web Share API at
+// all — not even text/url, let alone files, a WebView-specific gap tracked
+// upstream as Chromium issue 765923 — so navigator.canShare is always
+// undefined inside the installed Action Room app, and this was silently
+// falling back to the link dropdown on every single share, not just flaky
+// ones. Capacitor.Plugins.Share (native picker via Filesystem+Share, same
+// raw-bridge convention as BackgroundGeolocation above — no ES imports,
+// see that block's comment) covers the app; navigator.share covers
+// everywhere it's actually implemented (real mobile browsers). Falls back
+// to opening that same button's Bootstrap dropdown (the manual per-platform
+// LINK list) only when neither path is available, or the user's own device
+// has no share targets at all for that file type — genuinely not an error,
+// so no alert() for that case.
+async function fetchMediaBlob(id, mediaType) {
+    const res = await fetch(`mission-photo-view.php?id=${id}`);
+    const blob = await res.blob();
+    const ext = {'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif','video/mp4':'mp4','video/webm':'webm','video/quicktime':'mov'}[blob.type] || (mediaType === 'video' ? 'mp4' : 'jpg');
+    return { blob, ext };
+}
+
+// The @capacitor/filesystem NPM package's writeFile() accepts a raw Blob
+// for `data` because that package's own JS wrapper base64-encodes it before
+// crossing the bridge. Capacitor.Plugins.Filesystem (the raw bridge this
+// file uses, no ES imports — see BackgroundGeolocation's comment above) skips
+// that wrapper entirely, so a Blob reaches native as an unserializable
+// object and writeFile rejects with "input parameters aren't valid" —
+// confirmed live via mobile-debug-log.php against a real device. Encoding it
+// to base64 here ourselves is the fix.
+function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(String(reader.result).split(',')[1] || '');
+        reader.onerror = () => reject(reader.error || new Error('blobToBase64 failed'));
+        reader.readAsDataURL(blob);
+    });
+}
+
 async function shareMediaItem(btn) {
     const { id, mediaType, url, caption } = btn.dataset;
-    if (navigator.canShare) {
-        try {
-            const res = await fetch(`mission-photo-view.php?id=${id}`);
-            const blob = await res.blob();
-            const ext = {'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif','video/mp4':'mp4','video/webm':'webm','video/quicktime':'mov'}[blob.type] || (mediaType === 'video' ? 'mp4' : 'jpg');
+    try {
+        if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
+            const { Filesystem, Share } = window.Capacitor.Plugins || {};
+            if (Filesystem && Share) {
+                const { blob, ext } = await fetchMediaBlob(id, mediaType);
+                const base64Data = await blobToBase64(blob);
+                const written = await Filesystem.writeFile({ path: `field-${id}.${ext}`, data: base64Data, directory: 'CACHE' });
+                await Share.share({ files: [written.uri], text: caption });
+                return;
+            }
+            bgDebugLog('share_plugin_missing', Object.keys(window.Capacitor.Plugins || {}).join(','));
+        } else if (navigator.canShare) {
+            const { blob, ext } = await fetchMediaBlob(id, mediaType);
             const file = new File([blob], `field-${id}.${ext}`, {type: blob.type});
             if (navigator.canShare({files: [file]})) {
                 await navigator.share({files: [file], text: caption});
                 return;
             }
-        } catch (e) {
-            if (e.name === 'AbortError') return; // user closed the native picker — not an error
-            // Any other failure (fetch, blob, unsupported) falls through to the dropdown below.
         }
+    } catch (e) {
+        // Web cancel throws AbortError; the native Capacitor Share sheet
+        // instead rejects with a plain Error whose message is literally
+        // "Share canceled" — both mean the user closed the picker on
+        // purpose, not a real failure, so neither should fall through to
+        // popping the dropdown open right after they dismissed one already.
+        if (e.name === 'AbortError' || /cancel/i.test(e.message || '')) return;
+        bgDebugLog('share_failed', e.message || String(e));
+        // Any other failure (fetch, blob, unsupported) falls through to the dropdown below.
     }
     // strategy:'fixed' is required here — the media card this button lives
     // in has its own overflow:hidden (clips card-img-top's corners, see
