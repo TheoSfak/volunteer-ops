@@ -3265,6 +3265,29 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
     </div>
 </div>
 
+<!-- Shared compress/upload progress popup — one global instance, used by
+     every place a photo or video gets sent (main media buttons, a Route
+     Order waypoint's own capture button, Point of Interest capture), so the
+     user always sees the same real-percentage feedback regardless of which
+     card triggered the send. Left dismissible (default Bootstrap backdrop/
+     Esc behavior, no backdrop:static) deliberately: dismissing it early
+     doesn't cancel the underlying compression/upload, it just hides the
+     progress display, so there's never a way for this to trap the user
+     behind an un-closeable dialog if some edge case left it open longer
+     than expected. -->
+<div class="modal fade" id="mediaProgressModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:300px;">
+        <div class="modal-content">
+            <div class="modal-body text-center py-4">
+                <div class="mb-2 fw-bold" id="mediaProgressLabel"></div>
+                <div class="progress" style="height:20px;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" id="mediaProgressBar" role="progressbar" style="width:0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-utils.js?v=<?= APP_VERSION ?>"></script>
 <script>
@@ -6265,15 +6288,18 @@ function routeComplete(waypointId, confirmed, scopeEl) {
 function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
     const isVideo = mediaType === 'video';
     if (statusEl) { statusEl.textContent = isVideo ? t('media.compressing') : t('media.uploading'); statusEl.className = 'small text-muted'; }
+    showMediaProgressModal(isVideo ? t('media.compressing') : t('media.uploading'));
 
-    // Same shared compressVideoForUpload() as wireMediaInput's own upload
-    // flow, composed the same way (compression + geolocation concurrent,
-    // one CPU-bound, one a GPS wait) — this is the *other* independent
-    // upload path (a Route Order waypoint's own self-contained capture
-    // button, used because field mode has no map/media panel), and without
-    // this it would keep the exact same slow-upload problem for a required
-    // deliverable video.
-    const compressPromise = isVideo ? compressVideoForUpload(file) : Promise.resolve(file);
+    // Same shared compressVideoForUpload()/compressPhotoForUpload() as
+    // wireMediaInput's own upload flow, composed the same way (compression
+    // + geolocation concurrent, one CPU-bound, one a GPS wait) — this is
+    // the *other* independent upload path (a Route Order waypoint's own
+    // self-contained capture button, used because field mode has no map/
+    // media panel), and without this it would keep the exact same
+    // slow-upload problem for a required deliverable photo/video.
+    const compressPromise = isVideo
+        ? compressVideoForUpload(file, pct => setMediaProgress(pct))
+        : compressPhotoForUpload(file);
     const geoPromise = new Promise(resolve => {
         if (!navigator.geolocation) { resolve([null, null]); return; }
         navigator.geolocation.getCurrentPosition(
@@ -6285,6 +6311,7 @@ function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
 
     compressPromise.then(finalFile => {
         if (statusEl) statusEl.textContent = t('media.uploading');
+        setMediaProgress(0, t('media.uploading'));
         geoPromise.then(([lat, lng]) => {
             const data = new FormData();
             data.append('csrf_token', csrfToken);
@@ -6293,7 +6320,8 @@ function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
             data.append('media', finalFile);
             data.append('route_waypoint_id', String(waypointId));
             if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
-            fetch('mission-photo.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            postFormDataWithProgress('mission-photo.php', data, pct => setMediaProgress(pct)).then(result => {
+                hideMediaProgressModal();
                 if (result.ok) {
                     for (const r of routes) {
                         const wp = r.waypoints.find(w => w.id === waypointId);
@@ -6308,7 +6336,7 @@ function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
                 } else {
                     if (statusEl) { statusEl.textContent = result.error || t('common.send_failed'); statusEl.className = 'small text-danger'; }
                 }
-            }).catch(() => { if (statusEl) { statusEl.textContent = t('common.send_failed'); statusEl.className = 'small text-danger'; } });
+            }).catch(() => { hideMediaProgressModal(); if (statusEl) { statusEl.textContent = t('common.send_failed'); statusEl.className = 'small text-danger'; } });
         });
     });
 }
@@ -7217,6 +7245,53 @@ function renderSosAlerts(items) {
     }));
 }
 
+// #mediaProgressModal helpers — one shared popup used by every place a
+// photo/video gets sent (see the modal's own HTML comment for why it's a
+// single global instance rather than one per card).
+function showMediaProgressModal(labelText) {
+    setMediaProgress(0, labelText);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('mediaProgressModal')).show();
+}
+function setMediaProgress(percent, labelText) {
+    const bar = document.getElementById('mediaProgressBar');
+    bar.style.width = percent + '%';
+    bar.textContent = percent + '%';
+    bar.setAttribute('aria-valuenow', percent);
+    if (labelText !== undefined) document.getElementById('mediaProgressLabel').textContent = labelText;
+}
+function hideMediaProgressModal() {
+    const instance = bootstrap.Modal.getInstance(document.getElementById('mediaProgressModal'));
+    if (instance) instance.hide();
+}
+
+// fetch() has no reliable cross-browser API for upload progress (only
+// download/response progress, via a ReadableStream response body) — actual
+// bytes-sent progress during the POST itself needs XMLHttpRequest's
+// upload.onprogress, the well-established way to do this. Mirrors
+// fetch(url,{method:'POST',body:formData}).then(r=>r.json())'s own
+// resolve/reject shape so it drops into the existing .then()/.catch()
+// chains at each upload call site unchanged.
+function postFormDataWithProgress(url, formData, onProgress) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url);
+        if (onProgress) {
+            xhr.upload.addEventListener('progress', e => {
+                if (e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100));
+            });
+        }
+        xhr.addEventListener('load', () => {
+            try {
+                resolve(JSON.parse(xhr.responseText));
+            } catch (e) {
+                reject(e);
+            }
+        });
+        xhr.addEventListener('error', () => reject(new Error('network error')));
+        xhr.send(formData);
+    });
+}
+
 // Best-effort client-side poster frame for a video upload, grabbed via a
 // hidden <video>+<canvas> from the same local file about to be uploaded.
 // Needed because mobile browsers/WebViews (unlike desktop) frequently don't
@@ -7270,6 +7345,68 @@ function captureVideoThumbnail(file) {
     });
 }
 
+// Best-effort client-side downscale+re-encode of a photo to a smaller JPEG
+// before upload — same motivation as compressVideoForUpload just below
+// (the phone's raw camera photo, often several MB at full sensor
+// resolution, going out over the same slow field connections), but much
+// simpler: a single decode+draw+encode, not a realtime capture loop, so
+// none of that function's watchdog/frame-count-safeguard machinery is
+// needed here — there's no sustained playback to stall or get throttled.
+// Always resolves with a File — either a genuinely smaller re-encode, or
+// the original file completely unchanged — and never rejects, same
+// contract as compressVideoForUpload/captureVideoThumbnail. Always
+// outputs JPEG regardless of input format (png/webp/non-animated gif all
+// normalize to it) — fine for real-world camera/gallery photos, which are
+// essentially never transparency-dependent graphics in this app's actual
+// use (field documentation photos, not graphic design assets).
+function compressPhotoForUpload(file) {
+    return new Promise(resolve => {
+        const finishOriginal = () => resolve(file);
+
+        if (typeof createImageBitmap === 'undefined'
+            || shouldSkipPhotoCompression(file.size, file.type)) {
+            finishOriginal();
+            return;
+        }
+
+        createImageBitmap(file).then(bitmap => {
+            // Idempotent close — several paths below (early-return, normal
+            // completion, catch) can each want to release the bitmap, and
+            // ImageBitmap.close() throws if called twice.
+            let bitmapClosed = false;
+            const closeBitmap = () => { if (!bitmapClosed) { bitmapClosed = true; try { bitmap.close(); } catch (e) {} } };
+
+            try {
+                // Cap the long edge, aspect-preserved, never upscale —
+                // same reasoning as compressVideoForUpload's own resolution
+                // cap: plenty of detail for field review, a fraction of a
+                // full-sensor original's pixel count.
+                const TARGET_LONG_EDGE = 1920;
+                const scale = Math.min(1, TARGET_LONG_EDGE / Math.max(bitmap.width, bitmap.height));
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.round(bitmap.width * scale);
+                canvas.height = Math.round(bitmap.height * scale);
+                if (!canvas.width || !canvas.height) { closeBitmap(); finishOriginal(); return; }
+                canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+                closeBitmap();
+                canvas.toBlob(blob => {
+                    // Never make it worse — an edge-case input that doesn't
+                    // actually shrink falls back to the original untouched.
+                    if (!blob || !blob.size || blob.size >= file.size) { finishOriginal(); return; }
+                    // canvas.toBlob()'s output is a bare Blob with no
+                    // .name, same as MediaRecorder's — FormData would send
+                    // filename "blob" with no extension otherwise, which
+                    // mission-photo.php's pathinfo()-based check rejects.
+                    resolve(new File([blob], 'field-photo.jpg', {type: 'image/jpeg'}));
+                }, 'image/jpeg', 0.85);
+            } catch (e) {
+                closeBitmap();
+                finishOriginal();
+            }
+        }).catch(finishOriginal);
+    });
+}
+
 // Best-effort client-side re-encode of a video to a much smaller file
 // before upload. There's no way to constrain a native camera app's own
 // recording quality from a plain <input capture> file, and no ffmpeg
@@ -7282,7 +7419,11 @@ function captureVideoThumbnail(file) {
 // must never block or fail the actual upload. Shared by both upload call
 // sites (wireMediaInput below, and uploadWaypointMedia's own route-order
 // deliverable flow) so neither one is left with the slow-upload problem.
-function compressVideoForUpload(file) {
+// Optional onProgress(percent) is called from real playback position
+// (currentTime/duration) while actively re-encoding — never called at all
+// when compression is skipped, since there's no meaningful "compressing"
+// phase to report in that case.
+function compressVideoForUpload(file, onProgress) {
     return new Promise(resolve => {
         let settled = false;
         let watchdogId = null;
@@ -7418,6 +7559,12 @@ function compressVideoForUpload(file) {
                     if (recorder.state !== 'inactive') recorder.stop();
                 });
 
+                if (onProgress) {
+                    videoEl.addEventListener('timeupdate', () => {
+                        onProgress(Math.min(100, Math.round(videoEl.currentTime / videoEl.duration * 100)));
+                    });
+                }
+
                 // Start recording only once playback has genuinely begun,
                 // so the first captured frame is real — and play at normal
                 // speed (never touch playbackRate: capture is wall-clock-
@@ -7446,16 +7593,20 @@ function wireMediaInput(inputId, sentLabel) {
         const isVideo = file.type.startsWith('video/');
         status.textContent = isVideo ? t('media.compressing') : t('media.uploading');
         status.className = 'small mb-2';
+        showMediaProgressModal(isVideo ? t('media.compressing') : t('media.uploading'));
 
-        // Compression (video only) and geolocation run concurrently — one's
-        // CPU-bound, the other's a GPS/network wait, they don't contend for
-        // the same resource. Thumbnail capture runs AFTER compression
-        // settles, against whichever file will actually be uploaded —
-        // deliberately not run concurrently against the original file too:
-        // two concurrent video decodes on a weak Android SoC is untested
+        // Compression and geolocation run concurrently — one's CPU-bound,
+        // the other's a GPS/network wait, they don't contend for the same
+        // resource. Thumbnail capture runs AFTER compression settles,
+        // against whichever file will actually be uploaded — deliberately
+        // not run concurrently against the original video file too: two
+        // concurrent video decodes on a weak Android SoC is untested
         // territory, and compression already dominates the wall-clock cost
-        // here regardless.
-        const compressPromise = isVideo ? compressVideoForUpload(file) : Promise.resolve(file);
+        // here regardless. Photo compression is a single decode+draw+
+        // encode, not a realtime loop, so it has no such contention concern.
+        const compressPromise = isVideo
+            ? compressVideoForUpload(file, pct => setMediaProgress(pct))
+            : compressPhotoForUpload(file);
         const geoPromise = new Promise(resolve => {
             if (!navigator.geolocation) { resolve([null, null]); return; }
             navigator.geolocation.getCurrentPosition(
@@ -7467,6 +7618,7 @@ function wireMediaInput(inputId, sentLabel) {
 
         compressPromise.then(finalFile => {
             status.textContent = t('media.uploading');
+            setMediaProgress(0, t('media.uploading'));
             const thumbPromise = finalFile.type.startsWith('video/') ? captureVideoThumbnail(finalFile) : Promise.resolve(null);
             Promise.all([geoPromise, thumbPromise]).then(([[lat, lng], thumbBlob]) => {
                 const data = new FormData();
@@ -7476,7 +7628,8 @@ function wireMediaInput(inputId, sentLabel) {
                 data.append('media', finalFile);
                 if (thumbBlob) data.append('thumb', thumbBlob, 'thumb.jpg');
                 if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
-                fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+                postFormDataWithProgress('mission-photo.php', data, pct => setMediaProgress(pct)).then(result => {
+                    hideMediaProgressModal();
                     if (result.ok) {
                         status.textContent = '✓ ' + sentLabel + t('media.sent_suffix');
                         status.className = 'small mb-2 text-success';
@@ -7487,7 +7640,7 @@ function wireMediaInput(inputId, sentLabel) {
                         status.className = 'small mb-2 text-danger';
                     }
                     input.value = '';
-                }).catch(() => { status.textContent = t('common.send_failed'); status.className = 'small mb-2 text-danger'; input.value = ''; });
+                }).catch(() => { hideMediaProgressModal(); status.textContent = t('common.send_failed'); status.className = 'small mb-2 text-danger'; input.value = ''; });
             });
         });
     });
@@ -7568,32 +7721,39 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
         sendBtn.disabled = true;
         status.textContent = t('media.uploading');
         status.className = 'small mb-2';
-        const data = new FormData();
-        data.append('csrf_token', csrfToken);
-        data.append('action', 'upload');
-        data.append('mission_id', '<?= $missionId ?>');
-        data.append('media', stagedFile);
-        data.append('is_poi', '1');
-        data.append('note', note);
-        data.append('lat', stagedCoords.lat);
-        data.append('lng', stagedCoords.lng);
-        fetch('mission-photo.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
-            if (result.ok) {
-                status.textContent = '✓ ' + t('poi.sent_confirmation');
-                status.className = 'small mb-2 text-success';
-                renderMedia(media = [result.media, ...media]);
-                mediaSignature = JSON.stringify(media);
-                if (noteInput) noteInput.value = '';
-                pollWarRoomData();
-            } else {
-                status.textContent = result.error || t('common.send_failed');
+        showMediaProgressModal(t('media.uploading'));
+        // POI capture is photo-only (input's own accept="image/*"), so this
+        // is always compressPhotoForUpload — no isVideo branch needed here.
+        compressPhotoForUpload(stagedFile).then(finalFile => {
+            const data = new FormData();
+            data.append('csrf_token', csrfToken);
+            data.append('action', 'upload');
+            data.append('mission_id', '<?= $missionId ?>');
+            data.append('media', finalFile);
+            data.append('is_poi', '1');
+            data.append('note', note);
+            data.append('lat', stagedCoords.lat);
+            data.append('lng', stagedCoords.lng);
+            postFormDataWithProgress('mission-photo.php', data, pct => setMediaProgress(pct)).then(result => {
+                hideMediaProgressModal();
+                if (result.ok) {
+                    status.textContent = '✓ ' + t('poi.sent_confirmation');
+                    status.className = 'small mb-2 text-success';
+                    renderMedia(media = [result.media, ...media]);
+                    mediaSignature = JSON.stringify(media);
+                    if (noteInput) noteInput.value = '';
+                    pollWarRoomData();
+                } else {
+                    status.textContent = result.error || t('common.send_failed');
+                    status.className = 'small mb-2 text-danger';
+                }
+                resetStage();
+            }).catch(() => {
+                hideMediaProgressModal();
+                status.textContent = t('common.send_failed');
                 status.className = 'small mb-2 text-danger';
-            }
-            resetStage();
-        }).catch(() => {
-            status.textContent = t('common.send_failed');
-            status.className = 'small mb-2 text-danger';
-            resetStage();
+                resetStage();
+            });
         });
     });
 })();

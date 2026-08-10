@@ -31,6 +31,7 @@ const {
     shouldSkipVideoCompression,
     pickVideoCompressionMimeType,
     videoExtensionForMimeType,
+    shouldSkipPhotoCompression,
 } = require('../../assets/js/war-room-utils.js');
 
 test('bearing() points east from due-west movement', () => {
@@ -174,4 +175,22 @@ test('videoExtensionForMimeType() maps a webm mimeType to webm', () => {
 test('videoExtensionForMimeType() defaults to webm for empty/missing input', () => {
     assert.equal(videoExtensionForMimeType(''), 'webm');
     assert.equal(videoExtensionForMimeType(null), 'webm');
+});
+
+test('shouldSkipPhotoCompression() skips a file at or under the 1.5MB floor', () => {
+    assert.equal(shouldSkipPhotoCompression(1.5 * 1024 * 1024, 'image/jpeg'), true);
+    assert.equal(shouldSkipPhotoCompression(1024, 'image/jpeg'), true);
+});
+
+test('shouldSkipPhotoCompression() attempts compression for a large-enough jpeg', () => {
+    assert.equal(shouldSkipPhotoCompression(5 * 1024 * 1024, 'image/jpeg'), false);
+});
+
+test('shouldSkipPhotoCompression() attempts compression for a large-enough png/webp', () => {
+    assert.equal(shouldSkipPhotoCompression(5 * 1024 * 1024, 'image/png'), false);
+    assert.equal(shouldSkipPhotoCompression(5 * 1024 * 1024, 'image/webp'), false);
+});
+
+test('shouldSkipPhotoCompression() always skips gif, even when large, to protect animation', () => {
+    assert.equal(shouldSkipPhotoCompression(5 * 1024 * 1024, 'image/gif'), true);
 });

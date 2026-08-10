@@ -97,6 +97,21 @@ function videoExtensionForMimeType(mimeType) {
     return mimeType && mimeType.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
 }
 
+// Decides whether compressPhotoForUpload() (war-room.php) should even
+// attempt a re-encode. Two independent reasons to skip: already small
+// enough that re-encoding risks making it *bigger* for no benefit (same
+// reasoning as shouldSkipVideoCompression's own size floor, just a lower
+// number — photos start out much smaller than raw video), or a GIF, whose
+// animation would silently break — a canvas draw only ever captures a
+// single current frame, so "compressing" an animated GIF would ship a
+// still image with no warning that the animation was lost.
+function shouldSkipPhotoCompression(sizeBytes, mimeType) {
+    const SKIP_AT_OR_UNDER_BYTES = 1.5 * 1024 * 1024;
+    if (sizeBytes <= SKIP_AT_OR_UNDER_BYTES) return true;
+    if (mimeType === 'image/gif') return true;
+    return false;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         bearing,
@@ -108,5 +123,6 @@ if (typeof module !== 'undefined' && module.exports) {
         shouldSkipVideoCompression,
         pickVideoCompressionMimeType,
         videoExtensionForMimeType,
+        shouldSkipPhotoCompression,
     };
 }
