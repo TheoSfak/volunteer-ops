@@ -1825,7 +1825,7 @@ function loadPointsOfInterestForMission(int $missionId): array {
 function loadMissingPersonForMission(int $missionId): ?array {
     $p = dbFetchOne(
         "SELECT id, full_name, age, description, clothing_description, vehicle, photo,
-                last_seen_label, last_seen_lat, last_seen_lng, last_seen_at,
+                last_seen_label, last_seen_lat, last_seen_lng, last_seen_at, subject_category,
                 disappearance_circumstances, likely_direction, witness_accounts, updated_at
          FROM mission_missing_persons WHERE mission_id = ?",
         [$missionId]
@@ -1841,6 +1841,9 @@ function loadMissingPersonForMission(int $missionId): ?array {
         'clothing_description'  => $p['clothing_description'],
         'vehicle'               => $p['vehicle'],
         'photo'                 => $p['photo'],
+        // Drives the "LPB search rings" map layer (includes/lpb-rings.php) —
+        // null until staff pick a category on the edit form.
+        'subject_category'      => $p['subject_category'],
         'last_seen_label'       => $p['last_seen_label'],
         'last_seen_lat'         => $p['last_seen_lat'] !== null ? (float) $p['last_seen_lat'] : null,
         'last_seen_lng'         => $p['last_seen_lng'] !== null ? (float) $p['last_seen_lng'] : null,

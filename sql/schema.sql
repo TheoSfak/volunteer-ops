@@ -2416,6 +2416,11 @@ CREATE TABLE IF NOT EXISTS `mission_missing_persons` (
     UNIQUE KEY `uq_missing_person_mission` (`mission_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- subject_category: added post-launch (migration v133) to drive the "LPB search
+-- rings" statistical planning-aid layer on the live map (see includes/lpb-rings.php
+-- for the illustrative, non-clinical distance table keyed by this column).
+ALTER TABLE `mission_missing_persons` ADD COLUMN `subject_category` VARCHAR(40) NULL AFTER `age`;
+
 -- =============================================
 -- MISSION PRESENCE (War Room live "who has this open" tracking)
 -- =============================================

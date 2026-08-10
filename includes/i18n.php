@@ -104,6 +104,15 @@ function incidentGenderLabel(string $gender, ?string $lang = null): string {
     return $translated !== $key ? $translated : (INCIDENT_GENDER_LABELS[$gender] ?? $gender);
 }
 
+// Same translated-key-with-constant-fallback shape as the labels above.
+// LPB_CATEGORY_LABELS lives in includes/lpb-rings.php, not config.php — see
+// that file's header comment for why (provisional table, needs SAR review).
+function lpbCategoryLabel(string $category, ?string $lang = null): string {
+    $key = 'missing_person.subject_category.' . $category;
+    $translated = t($key, [], $lang);
+    return $translated !== $key ? $translated : (LPB_CATEGORY_LABELS[$category] ?? $category);
+}
+
 /**
  * Search-sector coverage status — same translated-key-with-constant-fallback
  * shape as the other War Room status labels above. Matters more than usual

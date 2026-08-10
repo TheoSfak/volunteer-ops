@@ -534,13 +534,13 @@ if (isPost()) {
             'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled',
             'qr_checkin_enabled',
             'openweathermap_api_key', 'weather_map_compass_enabled', 'exposure_urgency_enabled',
-            'nasa_firms_api_key',
+            'nasa_firms_api_key', 'search_rings_enabled',
         ];
 
         foreach ($fieldsToUpdate as $field) {
             $value = isset($_POST[$field]) ? $_POST[$field] : '';
 
-            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled'])) {
+            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled'])) {
                 $value = isset($_POST[$field]) ? '1' : '0';
             }
 
@@ -1443,6 +1443,25 @@ include __DIR__ . '/includes/header.php';
                     <?php endif; ?>
                     <div class="form-text mt-2">
                         Δεν υπάρχει διακόπτης ενεργοποίησης εδώ — η εμφάνιση/απόκρυψη του επιπέδου πυρκαγιών γίνεται ζωντανά από διαχειριστές μέσα από το ίδιο το Action Room κάθε αποστολής, ανά αποστολή. Ενδεικτικά δορυφορικά δεδομένα (NASA FIRMS) — <strong>όχι επιβεβαιωμένη πυρκαγιά</strong>.
+                    </div>
+                </div>
+            </div>
+
+            <!-- LPB Search Rings Settings -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-bullseye me-1"></i>Ρυθμίσεις Ζωνών Αναζήτησης (LPB Rings)</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="search_rings_enabled" id="searchRingsEnabled"
+                               <?= ($settings['search_rings_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="searchRingsEnabled">
+                            <strong>Ενδεικτικές Ζώνες Αναζήτησης στον Χάρτη</strong>
+                        </label>
+                        <div class="form-text">
+                            Μόνο σε αποστολές τύπου «Αγνοούμενο άτομο». Σχεδιάζει ομόκεντρους κύκλους γύρω από το σημείο τελευταίας θέασης, με ακτίνα ανάλογη της κατηγορίας ατόμου (παιδί, πεζοπόρος, άτομο με άνοια κ.λπ.). <strong>Ενδεικτικό εργαλείο σχεδιασμού, όχι επιχειρησιακή βεβαιότητα</strong> — οι αποστάσεις είναι κατά προσέγγιση τιμές από γενική βιβλιογραφία SAR, όχι επικυρωμένα δεδομένα. Συνιστάται έλεγχος από άτομο με εκπαίδευση SAR πριν τη χρήση σε πραγματική επιχείρηση.
+                        </div>
                     </div>
                 </div>
             </div>

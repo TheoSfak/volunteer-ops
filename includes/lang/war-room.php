@@ -483,6 +483,24 @@ return [
         'missing_person.likely_direction_label' => 'Πιθανή Κατεύθυνση',
         'missing_person.witness_accounts_label' => 'Μαρτυρίες',
 
+        // "LPB search rings" — subject-category picker + the map-ring labels
+        // it drives (includes/lpb-rings.php). See that file's header comment
+        // for why the category list/distances are flagged as illustrative.
+        'missing_person.subject_category_label' => 'Κατηγορία Ατόμου (Ζώνες Αναζήτησης)',
+        'missing_person.subject_category_placeholder' => '— Επιλέξτε κατηγορία —',
+        'missing_person.subject_category_help' => 'Καθορίζει τις ενδεικτικές ζώνες αναζήτησης γύρω από το σημείο τελευταίας θέασης στον χάρτη, όταν είναι ενεργές (Ρυθμίσεις). Ενδεικτικό εργαλείο σχεδιασμού, όχι επιχειρησιακή βεβαιότητα.',
+        'missing_person.subject_category.child_1_6' => 'Παιδί (1–6 ετών)',
+        'missing_person.subject_category.child_7_12' => 'Παιδί (7–12 ετών)',
+        'missing_person.subject_category.despondent' => 'Άτομο σε ψυχολογική κρίση',
+        'missing_person.subject_category.dementia' => 'Άτομο με άνοια / Alzheimer',
+        'missing_person.subject_category.elderly' => 'Ηλικιωμένος/η',
+        'missing_person.subject_category.hiker' => 'Πεζοπόρος',
+        'missing_person.subject_category.hunter' => 'Κυνηγός',
+        'missing_person.subject_category.climber_biker' => 'Ορειβάτης / Ποδηλάτης βουνού',
+        'missing_person.subject_category.other' => 'Άλλο / άγνωστο',
+        'missing_person.ring_tooltip' => '{pct}% εντός {km} χλμ',
+        'missing_person.ring_caption' => 'ενδεικτικές ζώνες αναζήτησης (LPB)',
+
         // Mission admin
         'admin.mission_mgmt_title' => 'Διαχείριση αποστολής',
         'admin.close_note' => 'Το κλείσιμο αφαιρεί την αποστολή από το Επιχειρησιακό και σταματά τη λήψη νέων στιγμάτων.',
@@ -1561,6 +1579,22 @@ return [
         'missing_person.circumstances_label' => 'Circumstances of Disappearance',
         'missing_person.likely_direction_label' => 'Likely Direction',
         'missing_person.witness_accounts_label' => 'Witness Accounts',
+
+        // "LPB search rings" — see the 'el' block's comment above.
+        'missing_person.subject_category_label' => 'Subject Category (Search Rings)',
+        'missing_person.subject_category_placeholder' => '— Select category —',
+        'missing_person.subject_category_help' => 'Drives the illustrative search-ring rings around the last-seen point on the map, when enabled (Settings). A planning aid, not operational certainty.',
+        'missing_person.subject_category.child_1_6' => 'Child (1–6 years)',
+        'missing_person.subject_category.child_7_12' => 'Child (7–12 years)',
+        'missing_person.subject_category.despondent' => 'Despondent / at-risk adult',
+        'missing_person.subject_category.dementia' => 'Dementia / Alzheimer\'s',
+        'missing_person.subject_category.elderly' => 'Elderly',
+        'missing_person.subject_category.hiker' => 'Hiker',
+        'missing_person.subject_category.hunter' => 'Hunter',
+        'missing_person.subject_category.climber_biker' => 'Climber / mountain biker',
+        'missing_person.subject_category.other' => 'Other / unknown',
+        'missing_person.ring_tooltip' => '{pct}% within {km} km',
+        'missing_person.ring_caption' => 'illustrative search zones (LPB)',
 
         'admin.mission_mgmt_title' => 'Mission Management',
         'admin.close_note' => 'Closing removes the mission from Operations and stops accepting new locations.',
