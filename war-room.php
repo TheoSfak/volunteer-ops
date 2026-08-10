@@ -6263,37 +6263,54 @@ function routeComplete(waypointId, confirmed, scopeEl) {
 }
 
 function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
-    if (statusEl) { statusEl.textContent = t('media.uploading'); statusEl.className = 'small text-muted'; }
-    const send = (lat, lng) => {
-        const data = new FormData();
-        data.append('csrf_token', csrfToken);
-        data.append('action', 'upload');
-        data.append('mission_id', '<?= $missionId ?>');
-        data.append('media', file);
-        data.append('route_waypoint_id', String(waypointId));
-        if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
-        fetch('mission-photo.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
-            if (result.ok) {
-                for (const r of routes) {
-                    const wp = r.waypoints.find(w => w.id === waypointId);
-                    if (wp) {
-                        const entry = {id: result.media.id, time: result.media.time};
-                        if (result.media.media_type === 'video') wp.video = entry; else wp.photo = entry;
-                        break;
+    const isVideo = mediaType === 'video';
+    if (statusEl) { statusEl.textContent = isVideo ? t('media.compressing') : t('media.uploading'); statusEl.className = 'small text-muted'; }
+
+    // Same shared compressVideoForUpload() as wireMediaInput's own upload
+    // flow, composed the same way (compression + geolocation concurrent,
+    // one CPU-bound, one a GPS wait) — this is the *other* independent
+    // upload path (a Route Order waypoint's own self-contained capture
+    // button, used because field mode has no map/media panel), and without
+    // this it would keep the exact same slow-upload problem for a required
+    // deliverable video.
+    const compressPromise = isVideo ? compressVideoForUpload(file) : Promise.resolve(file);
+    const geoPromise = new Promise(resolve => {
+        if (!navigator.geolocation) { resolve([null, null]); return; }
+        navigator.geolocation.getCurrentPosition(
+            pos => resolve([pos.coords.latitude, pos.coords.longitude]),
+            () => resolve([null, null]),
+            {enableHighAccuracy: true, timeout: 8000}
+        );
+    });
+
+    compressPromise.then(finalFile => {
+        if (statusEl) statusEl.textContent = t('media.uploading');
+        geoPromise.then(([lat, lng]) => {
+            const data = new FormData();
+            data.append('csrf_token', csrfToken);
+            data.append('action', 'upload');
+            data.append('mission_id', '<?= $missionId ?>');
+            data.append('media', finalFile);
+            data.append('route_waypoint_id', String(waypointId));
+            if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
+            fetch('mission-photo.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+                if (result.ok) {
+                    for (const r of routes) {
+                        const wp = r.waypoints.find(w => w.id === waypointId);
+                        if (wp) {
+                            const entry = {id: result.media.id, time: result.media.time};
+                            if (result.media.media_type === 'video') wp.video = entry; else wp.photo = entry;
+                            break;
+                        }
                     }
+                    renderMyRoutes(routes);
+                    if (!fieldMode) renderRouteLayer(routes);
+                } else {
+                    if (statusEl) { statusEl.textContent = result.error || t('common.send_failed'); statusEl.className = 'small text-danger'; }
                 }
-                renderMyRoutes(routes);
-                if (!fieldMode) renderRouteLayer(routes);
-            } else {
-                if (statusEl) { statusEl.textContent = result.error || t('common.send_failed'); statusEl.className = 'small text-danger'; }
-            }
-        }).catch(() => { if (statusEl) { statusEl.textContent = t('common.send_failed'); statusEl.className = 'small text-danger'; } });
-    };
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(pos => send(pos.coords.latitude, pos.coords.longitude), () => send(null, null), {enableHighAccuracy: true, timeout: 8000});
-    } else {
-        send(null, null);
-    }
+            }).catch(() => { if (statusEl) { statusEl.textContent = t('common.send_failed'); statusEl.className = 'small text-danger'; } });
+        });
+    });
 }
 
 function triggerWaypointUpload(waypointId, mediaType, statusEl) {
@@ -7253,6 +7270,172 @@ function captureVideoThumbnail(file) {
     });
 }
 
+// Best-effort client-side re-encode of a video to a much smaller file
+// before upload. There's no way to constrain a native camera app's own
+// recording quality from a plain <input capture> file, and no ffmpeg
+// available server-side on this shared host — so this is the only place
+// compression can happen at all: client-side, before the network request
+// the original slow-upload complaint was actually about. Always resolves
+// with a File — either a genuinely smaller re-encode, or the original file
+// completely unchanged — and never rejects, same contract as
+// captureVideoThumbnail: a failed/unsupported/not-worth-it compression
+// must never block or fail the actual upload. Shared by both upload call
+// sites (wireMediaInput below, and uploadWaypointMedia's own route-order
+// deliverable flow) so neither one is left with the slow-upload problem.
+function compressVideoForUpload(file) {
+    return new Promise(resolve => {
+        let settled = false;
+        let watchdogId = null;
+        const finish = result => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(watchdogId);
+            resolve(result);
+        };
+        const finishOriginal = () => finish(file);
+
+        if (typeof MediaRecorder === 'undefined'
+            || !HTMLCanvasElement.prototype.captureStream
+            || !HTMLVideoElement.prototype.captureStream) {
+            finishOriginal();
+            return;
+        }
+
+        const url = URL.createObjectURL(file);
+        const videoEl = document.createElement('video');
+        // Sustained real-time playback (unlike captureVideoThumbnail's
+        // instant single seek) needs the element actually attached to the
+        // document to reliably advance/complete in every engine — confirmed
+        // live: fully DOM-detached, playback silently never reached 'ended'
+        // even though .play() itself resolved; attached (off-screen, never
+        // visible) it played through and fired 'ended' normally. Removed
+        // again in cleanup either way.
+        videoEl.style.cssText = 'position:fixed;top:-9999px;width:1px;height:1px;';
+        document.body.appendChild(videoEl);
+        const cleanupUrl = () => { URL.revokeObjectURL(url); videoEl.remove(); };
+        videoEl.muted = true;
+        videoEl.playsInline = true;
+        videoEl.preload = 'auto';
+        videoEl.src = url;
+
+        videoEl.addEventListener('error', () => { cleanupUrl(); finishOriginal(); });
+
+        videoEl.addEventListener('loadedmetadata', () => {
+            if (shouldSkipVideoCompression(file.size, videoEl.duration)) {
+                cleanupUrl();
+                finishOriginal();
+                return;
+            }
+
+            try {
+                const mimeType = pickVideoCompressionMimeType(
+                    ['video/mp4;codecs=h264,aac', 'video/webm;codecs=vp8,opus', 'video/webm'],
+                    candidate => MediaRecorder.isTypeSupported(candidate)
+                );
+                if (!mimeType) { cleanupUrl(); finishOriginal(); return; }
+
+                // A several-second realtime capture is exposed to the phone
+                // locking, a call coming in, or the tab backgrounding — none
+                // of which the instant thumbnail-grab above ever had to
+                // worry about. Bound the worst case rather than risk a hung
+                // upload.
+                watchdogId = setTimeout(() => { cleanupUrl(); finishOriginal(); }, videoEl.duration * 3000 + 10000);
+
+                // Cap the long edge, aspect-preserved — never upscale, and
+                // never force a fixed landscape frame (phone video shot in
+                // portrait, very common, must stay portrait).
+                const TARGET_LONG_EDGE = 720;
+                const scale = Math.min(1, TARGET_LONG_EDGE / Math.max(videoEl.videoWidth, videoEl.videoHeight));
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.round(videoEl.videoWidth * scale);
+                canvas.height = Math.round(videoEl.videoHeight * scale);
+                if (!canvas.width || !canvas.height) { cleanupUrl(); finishOriginal(); return; }
+                const ctx = canvas.getContext('2d');
+
+                // videoEl stays muted (so .play() isn't blocked by autoplay
+                // policy, and nothing plays out the speaker) — captureStream()
+                // taps the decoded media pipeline, not the speaker output, so
+                // the audio track pulled here still carries real audio.
+                const canvasStream = canvas.captureStream();
+                const audioTracks = videoEl.captureStream().getAudioTracks();
+                const combinedStream = new MediaStream([...canvasStream.getVideoTracks(), ...audioTracks]);
+                const recorder = new MediaRecorder(combinedStream, {
+                    mimeType,
+                    videoBitsPerSecond: 2000000,
+                    audioBitsPerSecond: 64000,
+                });
+
+                const chunks = [];
+                let frameCount = 0;
+                recorder.addEventListener('dataavailable', e => {
+                    if (e.data && e.data.size > 0) chunks.push(e.data);
+                });
+                recorder.addEventListener('error', () => { cleanupUrl(); finishOriginal(); });
+                recorder.addEventListener('stop', () => {
+                    cleanupUrl();
+                    if (settled) return;
+                    // requestVideoFrameCallback/requestAnimationFrame can be
+                    // throttled to near-zero by the browser (backgrounded
+                    // tab, screen off, some OS power-saving modes) without
+                    // pausing playback or the recorder itself — confirmed
+                    // live: a recording can finish with the right size and
+                    // duration while having drawn only its first frame,
+                    // producing a frozen/broken result that otherwise looks
+                    // completely successful. A healthy real-device capture
+                    // clears this floor by a wide margin, so this only ever
+                    // catches the genuinely-broken case.
+                    const MIN_FRAMES = Math.max(2, Math.floor(videoEl.duration * 2));
+                    if (frameCount < MIN_FRAMES) { finishOriginal(); return; }
+                    const blob = new Blob(chunks, {type: mimeType});
+                    // Never make it worse — an edge-case input that doesn't
+                    // actually shrink falls back to the original untouched.
+                    if (!blob.size || blob.size >= file.size) { finishOriginal(); return; }
+                    const ext = videoExtensionForMimeType(mimeType);
+                    finish(new File([blob], 'field-video.' + ext, {type: mimeType}));
+                });
+
+                // Draw-driven capture (canvas.captureStream() with no fps
+                // argument) rather than a fixed-timer sample, driven by
+                // requestVideoFrameCallback (fires once per real decoded
+                // frame) where available so an unchanged frame isn't
+                // redundantly redrawn at display refresh rate for nothing.
+                let drawing = true;
+                const drawFrame = () => {
+                    if (!drawing) return;
+                    try {
+                        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+                        frameCount++;
+                    } catch (e) { /* a single missed frame isn't fatal, keep going */ }
+                    if (videoEl.requestVideoFrameCallback) {
+                        videoEl.requestVideoFrameCallback(drawFrame);
+                    } else {
+                        requestAnimationFrame(drawFrame);
+                    }
+                };
+
+                videoEl.addEventListener('ended', () => {
+                    drawing = false;
+                    if (recorder.state !== 'inactive') recorder.stop();
+                });
+
+                // Start recording only once playback has genuinely begun,
+                // so the first captured frame is real — and play at normal
+                // speed (never touch playbackRate: capture is wall-clock-
+                // timestamped, not source-timestamped, so a faster playback
+                // rate produces a fast-motion/pitch-shifted *output*, not a
+                // faster compression).
+                videoEl.play().then(() => {
+                    recorder.start();
+                    drawFrame();
+                }).catch(() => { cleanupUrl(); finishOriginal(); });
+            } catch (e) {
+                cleanupUrl();
+                finishOriginal();
+            }
+        });
+    });
+}
+
 function wireMediaInput(inputId, sentLabel) {
     const input = document.getElementById(inputId);
     if (!input) return;
@@ -7260,14 +7443,19 @@ function wireMediaInput(inputId, sentLabel) {
         const file = input.files[0];
         if (!file) return;
         const status = document.getElementById('mediaUploadStatus');
-        status.textContent = t('media.uploading');
+        const isVideo = file.type.startsWith('video/');
+        status.textContent = isVideo ? t('media.compressing') : t('media.uploading');
         status.className = 'small mb-2';
 
-        // Geolocation and thumbnail capture run concurrently (Promise.all)
-        // rather than one after the other — they're independent, and
-        // sequencing them would stack up to 5s of thumbnail-timeout on top
-        // of geolocation's own 8s timeout for no reason.
-        const thumbPromise = file.type.startsWith('video/') ? captureVideoThumbnail(file) : Promise.resolve(null);
+        // Compression (video only) and geolocation run concurrently — one's
+        // CPU-bound, the other's a GPS/network wait, they don't contend for
+        // the same resource. Thumbnail capture runs AFTER compression
+        // settles, against whichever file will actually be uploaded —
+        // deliberately not run concurrently against the original file too:
+        // two concurrent video decodes on a weak Android SoC is untested
+        // territory, and compression already dominates the wall-clock cost
+        // here regardless.
+        const compressPromise = isVideo ? compressVideoForUpload(file) : Promise.resolve(file);
         const geoPromise = new Promise(resolve => {
             if (!navigator.geolocation) { resolve([null, null]); return; }
             navigator.geolocation.getCurrentPosition(
@@ -7277,26 +7465,30 @@ function wireMediaInput(inputId, sentLabel) {
             );
         });
 
-        Promise.all([geoPromise, thumbPromise]).then(([[lat, lng], thumbBlob]) => {
-            const data = new FormData();
-            data.append('csrf_token', csrfToken);
-            data.append('action', 'upload');
-            data.append('mission_id', '<?= $missionId ?>');
-            data.append('media', file);
-            if (thumbBlob) data.append('thumb', thumbBlob, 'thumb.jpg');
-            if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
-            fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
-                if (result.ok) {
-                    status.textContent = '✓ ' + sentLabel + t('media.sent_suffix');
-                    status.className = 'small mb-2 text-success';
-                    renderMedia(media = [result.media, ...media]);
-                    mediaSignature = JSON.stringify(media);
-                } else {
-                    status.textContent = result.error || t('common.send_failed');
-                    status.className = 'small mb-2 text-danger';
-                }
-                input.value = '';
-            }).catch(() => { status.textContent = t('common.send_failed'); status.className = 'small mb-2 text-danger'; input.value = ''; });
+        compressPromise.then(finalFile => {
+            status.textContent = t('media.uploading');
+            const thumbPromise = finalFile.type.startsWith('video/') ? captureVideoThumbnail(finalFile) : Promise.resolve(null);
+            Promise.all([geoPromise, thumbPromise]).then(([[lat, lng], thumbBlob]) => {
+                const data = new FormData();
+                data.append('csrf_token', csrfToken);
+                data.append('action', 'upload');
+                data.append('mission_id', '<?= $missionId ?>');
+                data.append('media', finalFile);
+                if (thumbBlob) data.append('thumb', thumbBlob, 'thumb.jpg');
+                if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
+                fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+                    if (result.ok) {
+                        status.textContent = '✓ ' + sentLabel + t('media.sent_suffix');
+                        status.className = 'small mb-2 text-success';
+                        renderMedia(media = [result.media, ...media]);
+                        mediaSignature = JSON.stringify(media);
+                    } else {
+                        status.textContent = result.error || t('common.send_failed');
+                        status.className = 'small mb-2 text-danger';
+                    }
+                    input.value = '';
+                }).catch(() => { status.textContent = t('common.send_failed'); status.className = 'small mb-2 text-danger'; input.value = ''; });
+            });
         });
     });
 }
