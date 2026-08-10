@@ -443,8 +443,8 @@ include __DIR__ . '/includes/header.php';
     .citizens-table td { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: .45rem 0; border: 0; border-bottom: 1px solid var(--bs-border-color-translucent); text-align: right !important; white-space: normal !important; max-width: none !important; }
     .citizens-table td:last-child { border-bottom: 0; }
     .citizens-table td::before { flex: 0 0 38%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
-    .citizens-table td:nth-child(1)::before { content: "Όνομα"; }
-    .citizens-table td:nth-child(2)::before { content: "Επίθετο"; }
+    .citizens-table td:nth-child(1)::before { content: "Επίθετο"; }
+    .citizens-table td:nth-child(2)::before { content: "Όνομα"; }
     .citizens-table td:nth-child(3)::before { content: "Email / Τηλέφωνο"; }
     .citizens-table td:nth-child(4)::before { content: "Σεμινάριο"; }
     .citizens-table td:nth-child(5)::before { content: "Γέννηση"; }
@@ -537,8 +537,8 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
 ?>
                 <thead class="table-light">
                     <tr>
-                        <th><?= sortLink('first_name_gr',  'Όνομα',      $sortCol, $sortDir, $__f) ?></th>
                         <th><?= sortLink('last_name_gr',   'Επίθετο',    $sortCol, $sortDir, $__f) ?></th>
+                        <th><?= sortLink('first_name_gr',  'Όνομα',      $sortCol, $sortDir, $__f) ?></th>
                         <th>Email / Τηλ.</th>
                         <th><?= sortLink('seminar_type',   'Σεμινάριο',  $sortCol, $sortDir, $__f) ?></th>
                         <th>Γέννηση</th>
@@ -556,15 +556,15 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                     <?php foreach ($citizens as $i => $c): ?>
                     <tr>
                         <td>
-                            <div class="fw-semibold"><?= h($c['first_name_gr']) ?></div>
-                            <?php if (!empty($c['first_name_lat'])): ?>
-                            <small class="text-muted"><?= h($c['first_name_lat']) ?></small>
-                            <?php endif; ?>
-                        </td>
-                        <td>
                             <div class="fw-semibold"><?= h($c['last_name_gr']) ?></div>
                             <?php if (!empty($c['last_name_lat'])): ?>
                             <small class="text-muted"><?= h($c['last_name_lat']) ?></small>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <div class="fw-semibold"><?= h($c['first_name_gr']) ?></div>
+                            <?php if (!empty($c['first_name_lat'])): ?>
+                            <small class="text-muted"><?= h($c['first_name_lat']) ?></small>
                             <?php endif; ?>
                         </td>
                         <td>
