@@ -62,6 +62,7 @@ $canManageShifts    = hasPagePermission('shifts_manage');   // approve/reject pa
 // Non-admins can only view OPEN missions; users with missions_view see all statuses
 $allowedStatuses = [STATUS_OPEN, STATUS_CLOSED];
 $isResponsible = !empty($mission['responsible_user_id']) && $mission['responsible_user_id'] == $user['id'];
+$isMissingPersonMission = ((int)($mission['mission_type_id'] ?? 0) === MISSION_TYPE_MISSING_PERSON_SEARCH);
 if (!$canViewAllMissions && !$isResponsible && !in_array($mission['status'], $allowedStatuses)) {
     setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή την αποστολή.');
     redirect('missions.php');
@@ -664,6 +665,11 @@ include __DIR__ . '/includes/header.php';
         <?php if (!empty($mission['show_in_ops']) && $mission['status'] === STATUS_OPEN && ($canManageMissions || $isResponsible || $isApprovedParticipant)): ?>
             <a href="war-room.php?id=<?= $mission['id'] ?>" class="btn btn-danger">
                 <i class="bi bi-broadcast-pin me-1"></i>Action Room
+            </a>
+        <?php endif; ?>
+        <?php if ($isMissingPersonMission): ?>
+            <a href="missing-person-guide.php?mission_id=<?= $mission['id'] ?>" target="_blank" class="btn btn-outline-info">
+                <i class="bi bi-question-circle me-1"></i>Οδηγός SAR
             </a>
         <?php endif; ?>
         <?php if ($canManageMissions || $isResponsible):
