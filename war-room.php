@@ -4238,7 +4238,30 @@ function openRouteForRing(ringIndex) {
     const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
     const points = circleToPolygonPoints(center, radius, ringPolygonPointCount(radius));
     const pct = [25, 50, 75, 95][ringIndex];
-    pendingRouteSeed = {points, label: t('missing_person.ring_generated_label', {pct})};
+    pendingRouteSeed = {points, label: t('missing_person.ring_generated_label', {pct}), closed: true};
+    map.closePopup();
+    const modalEl = document.getElementById('routeComposerModal');
+    if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+// "Sweep this ring's interior" — seeds the route composer with a coarse
+// outward spiral (spiralSweepPoints(), war-room-utils.js) from the point
+// last seen out to this ring's radius, instead of openRouteForRing()'s
+// boundary-only trace above. Fixed 24 points / 3 loops regardless of the
+// ring's actual radius — mission-route.php's 30-waypoint cap leaves no room
+// to scale finer for the largest categories' outer rings anyway, and this
+// was always meant as an illustrative sweep pattern (same "start from PLS,
+// work outward" idea as the guide page's own general rules), not a precise
+// track. Open path, not a loop — ends out at the radius with nothing
+// sensible to close back to, unlike the perimeter trace.
+function openInteriorSweepForRing(ringIndex) {
+    if (!missingPerson || !missingPerson.subject_category) return;
+    const radii = LPB_RING_TABLE[missingPerson.subject_category];
+    if (!radii) return;
+    const radius = radii[ringIndex];
+    const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
+    const points = spiralSweepPoints(center, radius, 24, 3);
+    const pct = [25, 50, 75, 95][ringIndex];
+    pendingRouteSeed = {points, label: t('missing_person.ring_interior_generated_label', {pct}), closed: false};
     map.closePopup();
     const modalEl = document.getElementById('routeComposerModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -7137,9 +7160,10 @@ function renderSearchRingsLayer(item) {
         const km = (radii[i] / 1000).toLocaleString(jsLocale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
         const label = t('missing_person.ring_tooltip', {pct: pct[i], km}) + ringCoverageBadgeHtml(i);
         const actionButtons = CAN_MANAGE_WAR_ROOM
-            ? `<div class="mt-2 d-flex gap-1">
+            ? `<div class="mt-2 d-flex flex-wrap gap-1">
                 <button type="button" class="btn btn-sm btn-outline-primary ring-dispatch-btn" data-ring-index="${i}">${t('missing_person.ring_dispatch_btn')}</button>
                 <button type="button" class="btn btn-sm btn-outline-primary ring-route-btn" data-ring-index="${i}">${t('missing_person.ring_route_btn')}</button>
+                <button type="button" class="btn btn-sm btn-outline-primary ring-interior-sweep-btn" data-ring-index="${i}">${t('missing_person.ring_interior_sweep_btn')}</button>
             </div>`
             : '';
         const circle = L.circle(center, {
@@ -7176,13 +7200,16 @@ function renderSearchRingsLayer(item) {
 // Delegated the same way sectorLayer's own popupopen listener is — buttons
 // are inert HTML until a popup actually opens, then this wires them up by
 // querying the open popup's own DOM node. openDispatchForRing()/
-// openRouteForRing() are defined further down, near openDivideSectorsForArea().
+// openRouteForRing()/openInteriorSweepForRing() are defined further down,
+// near openDivideSectorsForArea().
 searchRingsLayer?.on('popupopen', event => {
     const popupEl = event.popup.getElement();
     const dispatchBtn = popupEl.querySelector('.ring-dispatch-btn');
     if (dispatchBtn) dispatchBtn.addEventListener('click', () => { map.closePopup(); openDispatchForRing(parseInt(dispatchBtn.dataset.ringIndex, 10)); });
     const routeBtn = popupEl.querySelector('.ring-route-btn');
     if (routeBtn) routeBtn.addEventListener('click', () => { map.closePopup(); openRouteForRing(parseInt(routeBtn.dataset.ringIndex, 10)); });
+    const interiorSweepBtn = popupEl.querySelector('.ring-interior-sweep-btn');
+    if (interiorSweepBtn) interiorSweepBtn.addEventListener('click', () => { map.closePopup(); openInteriorSweepForRing(parseInt(interiorSweepBtn.dataset.ringIndex, 10)); });
 });
 
 // Updates only the read-only #missingPersonDisplay block — never touches the
@@ -11340,16 +11367,21 @@ function renderWaypointPanel() {
         renderRouteComposerPins(pins);
         renderRouteComposerAnnotations(annotations);
         renderRouteComposerAreas();
-        // Pre-fill from a ring's "sweep this ring" button (openRouteForRing()
-        // in the !fieldMode block) — same one-shot consume-then-null pattern
-        // as the dispatch composer's own pendingDispatchSeed handling above.
+        // Pre-fill from a ring's "sweep perimeter"/"sweep interior" buttons
+        // (openRouteForRing()/openInteriorSweepForRing(), in the !fieldMode
+        // block) — same one-shot consume-then-null pattern as the dispatch
+        // composer's own pendingDispatchSeed handling above.
         // addRouteWaypoint() alone never sets routeClosed (that only happens
         // via the "click near point 1" gesture above), so it must be set
         // explicitly here too, or the send payload's is_closed_loop stays '0'
-        // and the map draws an open line instead of the intended loop.
+        // regardless of what the seed actually traced. The two ring entry
+        // points want opposite values — the perimeter trace is a loop back to
+        // its own start (closed: true), the interior spiral ends out at the
+        // ring's radius with nothing sensible to close back to (closed:
+        // false) — so this reads it from the seed rather than assuming.
         if (pendingRouteSeed) {
             pendingRouteSeed.points.forEach(pt => addRouteWaypoint(pt[0], pt[1]));
-            routeClosed = true;
+            routeClosed = pendingRouteSeed.closed;
             renderRouteComposerMap();
             renderWaypointPanel();
             titleInput.value = pendingRouteSeed.label;

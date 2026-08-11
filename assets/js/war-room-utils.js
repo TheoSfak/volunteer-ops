@@ -64,6 +64,29 @@ function circleToPolygonPoints(center, radiusMeters, numPoints) {
     return points;
 }
 
+// Coarse outward Archimedean spiral from center to maxRadiusMeters, used to
+// seed a route with an "interior sweep" pattern (as opposed to
+// circleToPolygonPoints()'s boundary-only trace) — mirrors the standard SAR
+// expanding-circle technique of starting at the point last seen and working
+// outward. numPoints/numLoops are required, not defaulted: this is always
+// called with fixed constants sized to fit mission-route.php's 30-waypoint
+// cap (see war-room.php's caller) rather than scaled by radius the way
+// circleToPolygonPoints() is — a spiral is inherently an illustrative
+// search-pattern aid, not a precision boundary trace, so the same coarse
+// point count reads fine at any ring radius. t=0 lands exactly on center
+// (radius 0, so destinationPoint()'s bearing term is moot); t=1 lands
+// exactly maxRadiusMeters out, after numLoops full turns.
+function spiralSweepPoints(center, maxRadiusMeters, numPoints, numLoops) {
+    const points = [];
+    const totalAngle = numLoops * 360;
+    for (let i = 0; i < numPoints; i++) {
+        const t = numPoints === 1 ? 0 : i / (numPoints - 1);
+        const pt = destinationPoint(center, (totalAngle * t) % 360, maxRadiusMeters * t);
+        points.push([pt.lat, pt.lng]);
+    }
+    return points;
+}
+
 function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 }
@@ -160,6 +183,7 @@ if (typeof module !== 'undefined' && module.exports) {
         bearing,
         destinationPoint,
         circleToPolygonPoints,
+        spiralSweepPoints,
         escapeHtml,
         parseCoordsInput,
         formatDistanceMeters,
