@@ -142,6 +142,34 @@ function formatKmForGuide(int $meters, string $lang): string {
             <li><?= t('guide.rules_coverage') ?></li>
         </ul>
     </div>
+
+    <div class="guide-card">
+        <h2><i class="bi bi-people me-1"></i> <?= t('guide.category_rules_section_title') ?></h2>
+        <p class="text-muted small"><?= t('guide.category_rules_intro') ?></p>
+        <div class="accordion" id="categoryRulesAccordion">
+            <?php foreach (LPB_RING_TABLE as $catKey => $catRadii): $isCurrentCat = $catKey === $missionCategory; ?>
+            <div class="accordion-item">
+                <h3 class="accordion-header">
+                    <button class="accordion-button<?= $isCurrentCat ? '' : ' collapsed' ?>" type="button" data-bs-toggle="collapse" data-bs-target="#catRule-<?= h($catKey) ?>" aria-expanded="<?= $isCurrentCat ? 'true' : 'false' ?>">
+                        <?= h(lpbCategoryLabel($catKey, $viewerLang)) ?>
+                        <?php if ($isCurrentCat): ?><span class="badge bg-primary ms-2"><?= t('guide.category_rules_current_badge') ?></span><?php endif; ?>
+                    </button>
+                </h3>
+                <div id="catRule-<?= h($catKey) ?>" class="accordion-collapse collapse<?= $isCurrentCat ? ' show' : '' ?>" data-bs-parent="#categoryRulesAccordion">
+                    <div class="accordion-body">
+                        <ul class="guide-rules mb-0">
+                            <li><?= t('guide.category_rules.' . $catKey . '.1') ?></li>
+                            <li><?= t('guide.category_rules.' . $catKey . '.2') ?></li>
+                            <li><?= t('guide.category_rules.' . $catKey . '.3') ?></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+        <div class="guide-caveat mt-3"><i class="bi bi-exclamation-triangle me-1"></i> <?= t('guide.category_rules_caveat') ?></div>
+    </div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
 </body>
 </html>
