@@ -6,9 +6,14 @@
  * Read-only/GET only — see computeMissionSectorCoverage() in
  * functions-warroom.php for the algorithm. Admin-only decision support, same
  * gate as mission-track.php.
+ * Also returns the same estimate for the 4 LPB search rings (if enabled) —
+ * see computeMissionRingCoverage(), same file. Kept in this one endpoint
+ * rather than a separate file since it's the same feature applied to a
+ * second shape type, not a distinct one.
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/lpb-rings.php';
 requireLogin();
 
 header('Content-Type: application/json');
@@ -30,4 +35,10 @@ if (!canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['respo
     exit;
 }
 
-echo json_encode(['ok' => true, 'coverage' => computeMissionSectorCoverage($missionId)]);
+echo json_encode([
+    'ok' => true,
+    'coverage' => computeMissionSectorCoverage($missionId),
+    // Always present, even as [] when the feature's off, so the client never
+    // has to special-case a missing key.
+    'rings' => getSetting('search_rings_enabled', '0') === '1' ? computeMissionRingCoverage($missionId) : [],
+]);

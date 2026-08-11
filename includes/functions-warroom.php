@@ -2554,6 +2554,175 @@ function computeMissionSectorCoverage(int $missionId): array {
 }
 
 /**
+ * Same "Verified Coverage" idea as computeMissionSectorCoverage() above, but
+ * for the 4 concentric LPB search rings (includes/lpb-rings.php) instead of
+ * hand-drawn sector polygons. Unlike sectors, rings have no DB row of their
+ * own — they're derived purely from mission_missing_persons + LPB_RING_TABLE,
+ * the same way war-room.php's renderSearchRingsLayer() computes them
+ * client-side — so this function re-derives the same center+radii itself and
+ * keys its result by ring index (0-3, matching the existing pct=[25,50,75,95]
+ * ordering already used client-side) rather than a database id.
+ *
+ * Deliberately simpler than the sector version in two ways:
+ *  - Single grid pass over the LARGEST ring's bounding box, bucketing each
+ *    cell's covered/not-covered status into every ring whose radius contains
+ *    it (rings are concentric — ring i's disc is a strict subset of ring
+ *    i+1's), rather than 4 independent passes. Cuts the dominant cost
+ *    (the per-cell nearby-ping scan) roughly 4x.
+ *  - Flat-Cartesian distance instead of gpsDistanceMeters()'s Haversine for
+ *    the ring-membership test itself (not the covered-check, which still
+ *    uses the real Haversine/segment helpers) — cheaper, and the same
+ *    approximation pointToSegmentDistanceMeters() already makes at this
+ *    scale.
+ *  - No gap_cells: wasn't asked for, and a multi-km-radius disc's gap set
+ *    would be "almost the whole grid" — a real payload/SVG-node risk sector
+ *    coverage never faces since hand-drawn sectors are naturally small.
+ *
+ * RING_COVERAGE_MAX_RADIUS_METERS (includes/lpb-rings.php) skips computing a
+ * ring entirely once its radius exceeds that cap — grid cell count is
+ * already bounded regardless of radius (see $gridStepMeters below), but the
+ * covered-check cost scales with how many volunteer_pings fall inside the
+ * ring's bbox, and a ring's bbox — unlike a hand-drawn sector's — has zero
+ * admin discretion capping how large it gets.
+ */
+function computeMissionRingCoverage(int $missionId): array {
+    $person = loadMissingPersonForMission($missionId);
+    if (!$person || $person['last_seen_lat'] === null || $person['last_seen_lng'] === null) {
+        return [];
+    }
+    $radii = LPB_RING_TABLE[$person['subject_category'] ?? ''] ?? null;
+    if (!$radii) {
+        return [];
+    }
+
+    $centerLat = $person['last_seen_lat'];
+    $centerLng = $person['last_seen_lng'];
+    $maxRadius = max($radii);
+    if ($maxRadius > RING_COVERAGE_MAX_RADIUS_METERS) {
+        // Still compute the rings that DO fit under the cap, if any —
+        // e.g. a category whose 25%/50% rings are small but 95% is huge
+        // shouldn't lose its inner badges just because the outer one is
+        // too expensive to grid-sample.
+        $maxRadius = RING_COVERAGE_MAX_RADIUS_METERS;
+    }
+
+    $sweepRadiusMeters = 25;
+    $trustedAccuracyMeters = 100;
+    $maxWalkGapSeconds = 1800;
+    $gridStepMeters = max(10, (int) round($maxRadius / 150));
+
+    $pingRows = dbFetchAll(
+        "SELECT vp.user_id, vp.lat, vp.lng, vp.created_at FROM volunteer_pings vp
+         JOIN shifts s ON s.id = vp.shift_id
+         WHERE s.mission_id = ? AND (vp.accuracy_meters IS NULL OR vp.accuracy_meters <= ?)
+         ORDER BY vp.user_id, vp.created_at",
+        [$missionId, $trustedAccuracyMeters]
+    );
+
+    $points = [];
+    $segments = [];
+    $prevByUser = [];
+    foreach ($pingRows as $row) {
+        $uid = (int) $row['user_id'];
+        $lat = (float) $row['lat'];
+        $lng = (float) $row['lng'];
+        $points[] = ['lat' => $lat, 'lng' => $lng];
+        if (isset($prevByUser[$uid])) {
+            $gapSeconds = strtotime($row['created_at']) - strtotime($prevByUser[$uid]['created_at']);
+            if ($gapSeconds >= 0 && $gapSeconds <= $maxWalkGapSeconds) {
+                $segments[] = [
+                    'lat1' => $prevByUser[$uid]['lat'], 'lng1' => $prevByUser[$uid]['lng'],
+                    'lat2' => $lat, 'lng2' => $lng,
+                ];
+            }
+        }
+        $prevByUser[$uid] = ['lat' => $lat, 'lng' => $lng, 'created_at' => $row['created_at']];
+    }
+
+    $latDegPerMeter = 1 / 111320;
+    $lngDegPerMeter = 1 / (111320 * max(0.01, cos(deg2rad($centerLat))));
+
+    $bufferLat = $sweepRadiusMeters * $latDegPerMeter;
+    $bufferLng = $sweepRadiusMeters * $lngDegPerMeter;
+    $radiusLat = $maxRadius * $latDegPerMeter;
+    $radiusLng = $maxRadius * $lngDegPerMeter;
+    $bboxMinLat = $centerLat - $radiusLat - $bufferLat;
+    $bboxMaxLat = $centerLat + $radiusLat + $bufferLat;
+    $bboxMinLng = $centerLng - $radiusLng - $bufferLng;
+    $bboxMaxLng = $centerLng + $radiusLng + $bufferLng;
+
+    $inBbox = fn($lat, $lng) =>
+        $lat >= $bboxMinLat && $lat <= $bboxMaxLat && $lng >= $bboxMinLng && $lng <= $bboxMaxLng;
+
+    $nearbyPoints = array_values(array_filter($points, fn($p) => $inBbox($p['lat'], $p['lng'])));
+    $nearbySegments = array_values(array_filter($segments, fn($s) =>
+        $inBbox($s['lat1'], $s['lng1']) || $inBbox($s['lat2'], $s['lng2'])
+    ));
+
+    $stepLat = $gridStepMeters * $latDegPerMeter;
+    $stepLng = $gridStepMeters * $lngDegPerMeter;
+
+    $totalByRing = [0, 0, 0, 0];
+    $coveredByRing = [0, 0, 0, 0];
+
+    for ($lat = $centerLat - $radiusLat; $lat <= $centerLat + $radiusLat; $lat += $stepLat) {
+        for ($lng = $centerLng - $radiusLng; $lng <= $centerLng + $radiusLng; $lng += $stepLng) {
+            $cellLat = $lat + $stepLat / 2;
+            $cellLng = $lng + $stepLng / 2;
+
+            // Flat-Cartesian distance-from-center in meters — cheap
+            // membership test, evaluated before any Haversine/segment call.
+            $dx = ($cellLng - $centerLng) / $lngDegPerMeter;
+            $dy = ($cellLat - $centerLat) / $latDegPerMeter;
+            $distMeters = sqrt($dx * $dx + $dy * $dy);
+            if ($distMeters > $maxRadius) {
+                continue;
+            }
+
+            $covered = false;
+            foreach ($nearbyPoints as $p) {
+                if (gpsDistanceMeters($cellLat, $cellLng, $p['lat'], $p['lng']) <= $sweepRadiusMeters) {
+                    $covered = true;
+                    break;
+                }
+            }
+            if (!$covered) {
+                foreach ($nearbySegments as $s) {
+                    if (pointToSegmentDistanceMeters($cellLat, $cellLng, $s['lat1'], $s['lng1'], $s['lat2'], $s['lng2']) <= $sweepRadiusMeters) {
+                        $covered = true;
+                        break;
+                    }
+                }
+            }
+
+            // Bucket this one cell's already-computed status into every
+            // ring whose radius contains it — rings are concentric, so a
+            // cell inside the 25% ring is also inside 50%/75%/95%.
+            for ($i = 0; $i < 4; $i++) {
+                if ($radii[$i] > RING_COVERAGE_MAX_RADIUS_METERS || $distMeters > $radii[$i]) {
+                    continue;
+                }
+                $totalByRing[$i]++;
+                if ($covered) {
+                    $coveredByRing[$i]++;
+                }
+            }
+        }
+    }
+
+    $result = [];
+    for ($i = 0; $i < 4; $i++) {
+        if ($radii[$i] > RING_COVERAGE_MAX_RADIUS_METERS) {
+            continue; // no percent for a ring too large to have been sampled
+        }
+        $result[$i] = [
+            'percent' => $totalByRing[$i] > 0 ? (int) round($coveredByRing[$i] / $totalByRing[$i] * 100) : 0,
+        ];
+    }
+    return $result;
+}
+
+/**
  * War Room: each team's current position, taken as the most recent ping
  * among its current members — same "team is one unit" convention and same
  * per-team join shape as computeDispatchEta() above, just without that

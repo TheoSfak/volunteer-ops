@@ -23,6 +23,8 @@ global.t = function (key) {
 
 const {
     bearing,
+    destinationPoint,
+    circleToPolygonPoints,
     escapeHtml,
     parseCoordsInput,
     formatDistanceMeters,
@@ -34,6 +36,19 @@ const {
     shouldSkipPhotoCompression,
 } = require('../../assets/js/war-room-utils.js');
 
+// Local-only Haversine, not exported by war-room-utils.js — this file has no
+// distance function to import (bearing() only computes direction), so this
+// is purely a test-side check that destinationPoint()/circleToPolygonPoints()
+// actually land where they claim to.
+function haversineMeters(a, b) {
+    const R = 6371000;
+    const dLat = (b.lat - a.lat) * Math.PI / 180;
+    const dLng = (b.lng - a.lng) * Math.PI / 180;
+    const lat1 = a.lat * Math.PI / 180, lat2 = b.lat * Math.PI / 180;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 test('bearing() points east from due-west movement', () => {
     const deg = bearing({ lat: 0, lng: 0 }, { lat: 0, lng: 1 });
     assert.ok(Math.abs(deg - 90) < 0.01, `expected ~90, got ${deg}`);
@@ -42,6 +57,55 @@ test('bearing() points east from due-west movement', () => {
 test('bearing() points north', () => {
     const deg = bearing({ lat: 0, lng: 0 }, { lat: 1, lng: 0 });
     assert.ok(Math.abs(deg - 0) < 0.01, `expected ~0, got ${deg}`);
+});
+
+test('destinationPoint() bearing 0 moves due north (lng unchanged)', () => {
+    const start = { lat: 35.0, lng: 24.0 };
+    const end = destinationPoint(start, 0, 1000);
+    assert.ok(end.lat > start.lat, `expected lat to increase, got ${end.lat}`);
+    assert.ok(Math.abs(end.lng - start.lng) < 1e-9, `expected lng unchanged, got ${end.lng}`);
+});
+
+test('destinationPoint() bearing 90 moves due east (lat ~unchanged)', () => {
+    const start = { lat: 35.0, lng: 24.0 };
+    const end = destinationPoint(start, 90, 1000);
+    assert.ok(end.lng > start.lng, `expected lng to increase, got ${end.lng}`);
+    assert.ok(Math.abs(end.lat - start.lat) < 0.001, `expected lat ~unchanged, got ${end.lat}`);
+});
+
+test('destinationPoint() lands ~distanceMeters away, per independent Haversine check', () => {
+    const start = { lat: 35.0, lng: 24.0 };
+    for (const bearingDeg of [0, 45, 90, 180, 270]) {
+        const end = destinationPoint(start, bearingDeg, 2000);
+        const dist = haversineMeters(start, end);
+        assert.ok(Math.abs(dist - 2000) < 1, `bearing ${bearingDeg}: expected ~2000m, got ${dist}`);
+    }
+});
+
+test('circleToPolygonPoints() returns numPoints points, each ~radiusMeters from center', () => {
+    const center = { lat: 35.0, lng: 24.0 };
+    const radius = 800;
+    const points = circleToPolygonPoints(center, radius, 12);
+    assert.equal(points.length, 12);
+    for (const [lat, lng] of points) {
+        const dist = haversineMeters(center, { lat, lng });
+        assert.ok(Math.abs(dist - radius) < 1, `expected ~${radius}m, got ${dist}`);
+    }
+});
+
+test('circleToPolygonPoints() spaces points evenly around the circle', () => {
+    const center = { lat: 35.0, lng: 24.0 };
+    const radius = 500;
+    const points = circleToPolygonPoints(center, radius, 4);
+    // 4 points 90° apart on a circle: adjacent points (p0-p1) are a chord of
+    // 2r·sin(45°) ≈ 707m apart; the opposite point (p0-p2) is the full
+    // diameter, 2r = 1000m. Checking both distinguishes "evenly spaced
+    // around the circle" from points bunched up or duplicated.
+    const [p0, p1, p2] = points.map(([lat, lng]) => ({ lat, lng }));
+    const dAdjacent = haversineMeters(p0, p1);
+    const dOpposite = haversineMeters(p0, p2);
+    assert.ok(Math.abs(dAdjacent - radius * Math.SQRT2) < 1, `expected ~${radius * Math.SQRT2}m between adjacent points, got ${dAdjacent}`);
+    assert.ok(Math.abs(dOpposite - radius * 2) < 1, `expected ~${radius * 2}m between opposite points, got ${dOpposite}`);
 });
 
 test('escapeHtml() escapes all five special characters', () => {
