@@ -2416,7 +2416,12 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <?php if ($isMissingPersonMission): ?>
         <div class="card shadow-sm mb-4 border-danger" data-card-id="missingPersonCard">
             <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-person-bounding-box me-1"></i><?= t('missing_person.card_title') ?></h5>
+                <div class="d-flex align-items-center gap-2">
+                    <h5 class="mb-0"><i class="bi bi-person-bounding-box me-1"></i><?= t('missing_person.card_title') ?></h5>
+                    <a href="missing-person-guide.php?mission_id=<?= $missionId ?>" target="_blank" class="text-white" title="<?= h(t('guide.link_label')) ?>">
+                        <i class="bi bi-question-circle"></i>
+                    </a>
+                </div>
                 <?php if ($canManageWarRoom): ?>
                 <button type="button" class="btn btn-sm btn-light" data-bs-toggle="modal" data-bs-target="#missingPersonEditModal">
                     <i class="bi bi-pencil"></i> <?= t('missing_person.edit_btn') ?>
@@ -3347,6 +3352,14 @@ let pendingDivideAreaId = null;
 // openSplitSectorModal() (inside the !fieldMode block) and read by the
 // splitSectorModal IIFE (a separate top-level scope further down the file).
 let pendingSplitSectorId = null;
+// Same cross-scope requirement again — set by openDispatchForRing()/
+// openRouteForRing() (near openDivideSectorsForArea(), inside the !fieldMode
+// block) and consumed once, one-shot, inside dispatchMapModal's/
+// routeComposerModal's own shown.bs.modal handlers (separate top-level IIFE
+// scopes further down the file). Shape: null, or {points: [[lat,lng],...],
+// label: string}.
+let pendingDispatchSeed = null;
+let pendingRouteSeed = null;
 // Team assignment moved from the (now-removed) sector composer's own select
 // to a per-sector control in its popup/list row instead (see sectorAdminSetTeam
 // below) — needs the team roster available client-side for that <select>'s
@@ -3361,6 +3374,10 @@ let sectors = <?= json_encode($sectors) ?>;
 // 5s poll) and must survive across normal sector re-renders.
 let coverageModeActive = false;
 let sectorCoverageById = {};
+// Same idea as sectorCoverageById, but for the 4 LPB search rings — keyed by
+// ring index (0-3, matching pct=[25,50,75,95] elsewhere), not a DB id, since
+// rings have no row of their own. See computeMissionRingCoverage().
+let ringCoverageById = {};
 let media = <?= json_encode($photos) ?>;
 let broadcastPhotos = <?= json_encode($broadcastPhotos) ?>;
 // Media re-renders every image tag from scratch (mission-photo-view.php is
@@ -4106,6 +4123,15 @@ function sectorCoverageBadgeHtml(item) {
         ? ` <span title="${escapeHtml(t('coverage.low_coverage_warning'))}">⚠️</span>` : '';
     return ` ${groundBadge}${warn}`;
 }
+// Same badge idiom as sectorCoverageBadgeHtml(), reusing the same generic
+// coverage.badge_tooltip key — no ring-specific translation needed. Returns
+// '' when coverage mode is off or this particular ring has no percent (e.g.
+// its radius exceeded RING_COVERAGE_MAX_RADIUS_METERS server-side).
+function ringCoverageBadgeHtml(ringIndex) {
+    const cov = ringCoverageById[ringIndex];
+    if (!coverageModeActive || !cov) return '';
+    return ` <span class="badge bg-light text-dark border" title="${escapeHtml(t('coverage.badge_tooltip'))}">🛰️ ${cov.percent}%</span>`;
+}
 
 function sectorAdminSetStatus(id, status, selectEl) {
     if (selectEl) selectEl.disabled = true;
@@ -4163,6 +4189,58 @@ function openDivideSectorsForArea(areaId) {
 function openSplitSectorModal(sectorId) {
     pendingSplitSectorId = sectorId;
     const modalEl = document.getElementById('splitSectorModal');
+    if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+// How many boundary points to sample a ring's circumference into — a fixed
+// count breaks down badly across the radius range (12,000m radius is ~75km
+// around, 12 points would be ~6.3km apart and wouldn't remotely trace a
+// circle). Targets one point roughly every 280m instead, clamped to
+// [8, 30] — 30 is mission-route.php's real hard server-side waypoint cap
+// (dispatch's polygon path has no such cap, but using the same clamp keeps
+// the two visually/operationally consistent).
+function ringPolygonPointCount(radiusMeters) {
+    return Math.min(30, Math.max(8, Math.round(2 * Math.PI * radiusMeters / 280)));
+}
+// "Send a team to this ring" — seeds the dispatch composer with a polygon
+// tracing the ring's boundary (so the team is assigned the whole disc area),
+// then opens it exactly like clicking the normal "New Dispatch" button would.
+// Deliberately does NOT pre-pick a team: only the tedious geometry is
+// automated, the admin still chooses who and confirms send.
+function openDispatchForRing(ringIndex) {
+    if (!missingPerson || !missingPerson.subject_category) return;
+    const radii = LPB_RING_TABLE[missingPerson.subject_category];
+    if (!radii) return;
+    const radius = radii[ringIndex];
+    const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
+    const points = circleToPolygonPoints(center, radius, ringPolygonPointCount(radius));
+    const pct = [25, 50, 75, 95][ringIndex];
+    pendingDispatchSeed = {points, label: t('missing_person.ring_generated_label', {pct})};
+    map.closePopup();
+    const modalEl = document.getElementById('dispatchMapModal');
+    if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+// "Sweep this ring's perimeter" — seeds the route composer with waypoints
+// sampled around the ring's circumference (a boundary-sweep search pattern),
+// then opens it like the normal "New Route" flow. Same "geometry only, admin
+// still picks the team/members" scope as openDispatchForRing() above.
+function openRouteForRing(ringIndex) {
+    if (!missingPerson || !missingPerson.subject_category) return;
+    // No team-existence check here on purpose: the route composer itself now
+    // tolerates opening with zero teams on the mission (lets the map/
+    // waypoint-planning parts work regardless) and only shows a clear
+    // "no teams yet" message at actual send time, when a team genuinely
+    // becomes required — see the composer's own setup IIFE for the full
+    // explanation. Keeping this a single, composer-owned check rather than
+    // duplicating it at every entry point that can open this modal.
+    const radii = LPB_RING_TABLE[missingPerson.subject_category];
+    if (!radii) return;
+    const radius = radii[ringIndex];
+    const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
+    const points = circleToPolygonPoints(center, radius, ringPolygonPointCount(radius));
+    const pct = [25, 50, 75, 95][ringIndex];
+    pendingRouteSeed = {points, label: t('missing_person.ring_generated_label', {pct})};
+    map.closePopup();
+    const modalEl = document.getElementById('routeComposerModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 function areaDelete(id) {
@@ -5675,19 +5753,23 @@ function enterCoverageMode() {
     fetch('mission-sector-coverage.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(result => {
         if (!result.ok) { alert(result.error || t('coverage.load_failed')); return; }
         sectorCoverageById = result.coverage || {};
+        ringCoverageById = result.rings || {};
         coverageModeActive = true;
         if (!map.hasLayer(coverageLayer)) coverageLayer.addTo(map);
         renderSectorLayer(sectors);
         renderSectorsList(sectors);
+        renderSearchRingsLayer(missingPerson);
     }).catch(() => alert(t('coverage.load_failed')));
 }
 function exitCoverageMode() {
     coverageModeActive = false;
     sectorCoverageById = {};
+    ringCoverageById = {};
     coverageLayer.clearLayers();
     if (map.hasLayer(coverageLayer)) map.removeLayer(coverageLayer);
     renderSectorLayer(sectors);
     renderSectorsList(sectors);
+    renderSearchRingsLayer(missingPerson);
 }
 const coverageModeToggleBtn = document.getElementById('coverageModeToggle');
 if (coverageModeToggleBtn) {
@@ -7007,22 +7089,59 @@ function renderMissingPersonMarker(item) {
 // caveats) — gated behind searchRingsEnabled (Settings, default off).
 function renderSearchRingsLayer(item) {
     if (!searchRingsLayer) return;
-    searchRingsLayer.clearLayers();
-    if (!searchRingsEnabled || !item || item.last_seen_lat === null || item.last_seen_lat === undefined
-        || item.last_seen_lng === null || item.last_seen_lng === undefined) return;
-    const radii = LPB_RING_TABLE[item.subject_category];
-    if (!radii) return;
 
+    // Preserve whichever ring's popup is currently open — same rationale as
+    // renderSectorLayer's guard above: now that each ring carries a popup
+    // with real action buttons (send dispatch / sweep route), an
+    // unconditional clearLayers()+rebuild every ~5s poll would silently
+    // close it on the admin mid-click. Rings have no stable DB id to key by
+    // (unlike sectors) — mission_missing_persons is UNIQUE-per-mission, at
+    // most one row — so identity is: this ring's index (0-3) AND the exact
+    // (subject_category, last_seen_lat, last_seen_lng) tuple that produced
+    // its current geometry still matching the incoming item. An unrelated
+    // profile edit (description, clothing, etc.) while a ring popup is open
+    // correctly leaves it alone, since those fields don't affect ring
+    // geometry/labels.
+    let openRingLayer = null, openRingIndex = null;
+    searchRingsLayer.eachLayer(layer => {
+        if (layer.ringIndex !== undefined && layer.isPopupOpen && layer.isPopupOpen()) {
+            openRingLayer = layer;
+            openRingIndex = layer.ringIndex;
+        }
+    });
+    const stillValid = searchRingsEnabled && item && item.last_seen_lat !== null && item.last_seen_lat !== undefined
+        && item.last_seen_lng !== null && item.last_seen_lng !== undefined && LPB_RING_TABLE[item.subject_category];
+    const sameSubject = openRingLayer && stillValid
+        && openRingLayer.ringSubjectCategory === item.subject_category
+        && openRingLayer.ringLat === item.last_seen_lat
+        && openRingLayer.ringLng === item.last_seen_lng;
+    if (!sameSubject) { openRingLayer = null; openRingIndex = null; }
+
+    searchRingsLayer.eachLayer(layer => { if (layer !== openRingLayer) searchRingsLayer.removeLayer(layer); });
+    if (!stillValid) return;
+
+    const radii = LPB_RING_TABLE[item.subject_category];
     const center = [item.last_seen_lat, item.last_seen_lng];
     const pct = [25, 50, 75, 95];
     const fillOpacity = [0.12, 0.08, 0.05, 0.03];
     const strokeOpacity = [0.9, 0.7, 0.5, 0.35];
-    // Largest first so smaller rings paint on top — hovering inside the 25%
-    // ring must resolve to the 25% ring's own tooltip, not the 95% one
-    // underneath it (same overlapping-shape gotcha as drawCoverageGapCells()).
+    const layersByIndex = {};
+    if (openRingLayer) layersByIndex[openRingIndex] = openRingLayer;
+
+    // Largest first so smaller rings paint on top — hovering/clicking inside
+    // the 25% ring must resolve to the 25% ring's own tooltip/popup, not the
+    // 95% one underneath it (same overlapping-shape gotcha as
+    // drawCoverageGapCells()).
     for (let i = 3; i >= 0; i--) {
+        if (i === openRingIndex) continue; // preserved above, left untouched
         const km = (radii[i] / 1000).toLocaleString(jsLocale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
-        const label = t('missing_person.ring_tooltip', {pct: pct[i], km});
+        const label = t('missing_person.ring_tooltip', {pct: pct[i], km}) + ringCoverageBadgeHtml(i);
+        const actionButtons = CAN_MANAGE_WAR_ROOM
+            ? `<div class="mt-2 d-flex gap-1">
+                <button type="button" class="btn btn-sm btn-outline-primary ring-dispatch-btn" data-ring-index="${i}">${t('missing_person.ring_dispatch_btn')}</button>
+                <button type="button" class="btn btn-sm btn-outline-primary ring-route-btn" data-ring-index="${i}">${t('missing_person.ring_route_btn')}</button>
+            </div>`
+            : '';
         const circle = L.circle(center, {
             radius: radii[i],
             color: '#7c3aed',
@@ -7031,6 +7150,11 @@ function renderSearchRingsLayer(item) {
             fillColor: '#7c3aed',
             fillOpacity: fillOpacity[i],
         }).addTo(searchRingsLayer);
+        circle.ringIndex = i;
+        circle.ringSubjectCategory = item.subject_category;
+        circle.ringLat = item.last_seen_lat;
+        circle.ringLng = item.last_seen_lng;
+        circle.bindPopup(`${label}${actionButtons}`);
         if (i === 3) {
             // Outermost ring only: an always-visible caption (not just a
             // hover tooltip) so the feature reads as self-explanatory the
@@ -7039,8 +7163,27 @@ function renderSearchRingsLayer(item) {
         } else {
             circle.bindTooltip(label, {sticky: true});
         }
+        layersByIndex[i] = circle;
     }
+
+    // Re-impose largest-at-bottom/smallest-on-top paint order. The preserved
+    // layer (if any) kept its OLD DOM position — required, so its open popup
+    // doesn't get torn down — which means a freshly-created larger ring could
+    // otherwise land on top of it in the SVG, breaking click targeting until
+    // that popup next closes.
+    for (let i = 3; i >= 0; i--) { layersByIndex[i]?.bringToFront(); }
 }
+// Delegated the same way sectorLayer's own popupopen listener is — buttons
+// are inert HTML until a popup actually opens, then this wires them up by
+// querying the open popup's own DOM node. openDispatchForRing()/
+// openRouteForRing() are defined further down, near openDivideSectorsForArea().
+searchRingsLayer?.on('popupopen', event => {
+    const popupEl = event.popup.getElement();
+    const dispatchBtn = popupEl.querySelector('.ring-dispatch-btn');
+    if (dispatchBtn) dispatchBtn.addEventListener('click', () => { map.closePopup(); openDispatchForRing(parseInt(dispatchBtn.dataset.ringIndex, 10)); });
+    const routeBtn = popupEl.querySelector('.ring-route-btn');
+    if (routeBtn) routeBtn.addEventListener('click', () => { map.closePopup(); openRouteForRing(parseInt(routeBtn.dataset.ringIndex, 10)); });
+});
 
 // Updates only the read-only #missingPersonDisplay block — never touches the
 // edit modal's form inputs (those are pre-filled once, server-side, from the
@@ -9514,6 +9657,21 @@ document.querySelectorAll('.team-form').forEach(form => {
             dispatchMap.on('click', onMapClick);
         }
         renderDispatchContext();
+        // Pre-fill from a ring's "send team here" button (openDispatchForRing()
+        // in the !fieldMode block) — one-shot, same consume-then-null pattern
+        // pendingDivideAreaId uses. addDrawPoint() alone leaves isClosed false
+        // and Send disabled (it only tracks point count, never shape-closedness
+        // on its own) so both must be set explicitly here, same as the
+        // "click near point 1" gesture already does for a hand-drawn polygon.
+        if (pendingDispatchSeed) {
+            pendingDispatchSeed.points.forEach(pt => addDrawPoint(pt[0], pt[1]));
+            isClosed = true;
+            updateShapePreview();
+            updateSendState();
+            noteInput.value = pendingDispatchSeed.label;
+            if (drawPoints.length) dispatchMap.fitBounds(L.latLngBounds(drawPoints), {padding: [30, 30]});
+            pendingDispatchSeed = null;
+        }
         setTimeout(() => dispatchMap.invalidateSize(), 100);
     });
 
@@ -11030,16 +11188,29 @@ function renderWaypointPanel() {
     const sendBtn = document.getElementById('routeSendBtn');
     const teamSelect = document.getElementById('routeTeamSelect');
     const memberPicker = document.getElementById('routeMemberPicker');
-    // routeTeamSelect only exists inside routeOrderCard's own server-side
-    // "teams non-empty" guard — a mission with zero teams never renders it,
-    // so this whole composer (meaningless without a team to address anyway)
-    // has nothing to wire up. Pre-existing gap, not previously hit:
-    // renderRouteMemberPicker() below dereferences teamSelect.value
-    // unconditionally, which throws synchronously at IIFE-load time with no
-    // team on the mission — silently breaking every OTHER listener this
-    // same IIFE would otherwise have attached, including shown.bs.modal, so
-    // the composer's map never initializes at all and nothing ever logs why.
-    if (!teamSelect) return;
+    // routeTeamSelect/routeMemberPicker live in routeOrderCard — the SIDEBAR
+    // card, not this modal's own HTML — and that whole card only renders
+    // inside a server-side "teams non-empty" guard (war-room.php ~2742). On
+    // a zero-team mission neither element exists at all.
+    //
+    // Used to be a hard `if (!teamSelect) return;` right here, which — since
+    // this is the top of the IIFE — meant shown.bs.modal never got attached
+    // and this entire composer (map, waypoint drawing, everything) silently
+    // did nothing, no error, no explanation. That was never hit in practice
+    // while the ONLY way to open this modal was routeOrderCard's own "New
+    // Route" button, itself behind the identical guard — but a second entry
+    // point now exists (a ring's "sweep this ring" button, openRouteForRing()
+    // near openDivideSectorsForArea()) that can open this modal on a mission
+    // with a missing-person profile but no teams yet, a genuinely plausible
+    // early-incident state.
+    //
+    // Fix: let the team-independent parts of the composer (the map, drawing/
+    // pre-filling waypoints, the title/address/coords fields) work regardless
+    // — there's real value in being able to plan a route's shape before a
+    // team exists to send it to. Only the parts that genuinely can't mean
+    // anything without a team (renderRouteMemberPicker, and send itself) are
+    // individually guarded below, each degrading to the same clear
+    // "no teams yet" message rather than a silent no-op or a thrown error.
 
     // Which of the selected team's members this route actually applies to —
     // defaults to everyone (old whole-team behavior unless the admin
@@ -11087,8 +11258,10 @@ function renderWaypointPanel() {
             </label>
         `).join('') || `<span class="text-muted">${t('route.team_has_no_members')}</span>`;
     }
-    renderRouteMemberPicker();
-    teamSelect.addEventListener('change', renderRouteMemberPicker);
+    if (teamSelect) {
+        renderRouteMemberPicker();
+        teamSelect.addEventListener('change', renderRouteMemberPicker);
+    }
 
     // Shared by real map clicks and the manual coordinates field below — same
     // reasoning as the dispatch composer's addDrawPoint().
@@ -11167,6 +11340,22 @@ function renderWaypointPanel() {
         renderRouteComposerPins(pins);
         renderRouteComposerAnnotations(annotations);
         renderRouteComposerAreas();
+        // Pre-fill from a ring's "sweep this ring" button (openRouteForRing()
+        // in the !fieldMode block) — same one-shot consume-then-null pattern
+        // as the dispatch composer's own pendingDispatchSeed handling above.
+        // addRouteWaypoint() alone never sets routeClosed (that only happens
+        // via the "click near point 1" gesture above), so it must be set
+        // explicitly here too, or the send payload's is_closed_loop stays '0'
+        // and the map draws an open line instead of the intended loop.
+        if (pendingRouteSeed) {
+            pendingRouteSeed.points.forEach(pt => addRouteWaypoint(pt[0], pt[1]));
+            routeClosed = true;
+            renderRouteComposerMap();
+            renderWaypointPanel();
+            titleInput.value = pendingRouteSeed.label;
+            if (routeWaypoints.length) routeMap.fitBounds(L.latLngBounds(routeWaypoints.map(wp => [wp.lat, wp.lng])), {padding: [30, 30]});
+            pendingRouteSeed = null;
+        }
         setTimeout(() => routeMap.invalidateSize(), 100);
     });
 
@@ -11196,6 +11385,12 @@ function renderWaypointPanel() {
 
     sendBtn.addEventListener('click', () => {
         if (!routeWaypoints.length) return;
+        // A route fundamentally has nowhere to go without a team to pick
+        // recipients from — same "no teams yet" message openDispatchForRing's
+        // sibling used to show up-front before this fix, now surfaced here
+        // instead so the map/waypoint-planning part of the composer stays
+        // usable even before a team exists (see the top-of-IIFE comment).
+        if (!teamSelect) { alert(t('briefing.no_teams_yet')); return; }
         const payload = routeWaypoints.map(wp => ({
             lat: wp.lat, lng: wp.lng, label: wp.label, instructions: wp.instructions,
             dwell_minutes: wp.dwell_minutes, require_photo: wp.require_photo ? 1 : 0,

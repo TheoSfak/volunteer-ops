@@ -21,6 +21,49 @@ function bearing(latlng1, latlng2) {
     return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
+// Inverse of bearing() above — the direct/forward geodesic problem (given a
+// start point, a bearing, and a distance, where do you end up), not the
+// inverse one (given two points, what's the bearing between them). Standard
+// spherical trig, Earth radius 6371000m matching gpsDistanceMeters()
+// (includes/functions-warroom.php) elsewhere in this app. Longitude is
+// normalized to [-180, 180] since the raw formula can wrap past the
+// antimeridian for a large distance/bearing combination.
+function destinationPoint(latlng, bearingDeg, distanceMeters) {
+    const R = 6371000;
+    const δ = distanceMeters / R;
+    const θ = bearingDeg * Math.PI / 180;
+    const φ1 = latlng.lat * Math.PI / 180;
+    const λ1 = latlng.lng * Math.PI / 180;
+
+    const φ2 = Math.asin(Math.sin(φ1) * Math.cos(δ) + Math.cos(φ1) * Math.sin(δ) * Math.cos(θ));
+    const λ2 = λ1 + Math.atan2(
+        Math.sin(θ) * Math.sin(δ) * Math.cos(φ1),
+        Math.cos(δ) - Math.sin(φ1) * Math.sin(φ2)
+    );
+
+    return {
+        lat: φ2 * 180 / Math.PI,
+        lng: (λ2 * 180 / Math.PI + 540) % 360 - 180,
+    };
+}
+
+// Approximates a circle as an N-point polygon by sampling destinationPoint()
+// evenly around 360° — used to seed a dispatch polygon or a route's
+// waypoints from an LPB search ring's boundary (war-room.php), reusing
+// mission-dispatch.php/mission-route.php's existing [[lat,lng],...] shape
+// verbatim. numPoints is a required argument, not defaulted: how many points
+// meaningfully trace a circle depends entirely on its radius (a small ring
+// needs far fewer than a multi-km one) — see the callers in war-room.php for
+// how numPoints is actually chosen.
+function circleToPolygonPoints(center, radiusMeters, numPoints) {
+    const points = [];
+    for (let i = 0; i < numPoints; i++) {
+        const pt = destinationPoint(center, (360 / numPoints) * i, radiusMeters);
+        points.push([pt.lat, pt.lng]);
+    }
+    return points;
+}
+
 function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 }
@@ -115,6 +158,8 @@ function shouldSkipPhotoCompression(sizeBytes, mimeType) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         bearing,
+        destinationPoint,
+        circleToPolygonPoints,
         escapeHtml,
         parseCoordsInput,
         formatDistanceMeters,

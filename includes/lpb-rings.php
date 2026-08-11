@@ -41,6 +41,18 @@ define('LPB_RING_TABLE', [
     'other'         => [500,  1500, 3500, 8000],
 ]);
 
+// Safety valve for computeMissionRingCoverage() (includes/functions-warroom.php)
+// — above this radius, coverage % is simply not computed for that ring (no
+// error, just no badge). Grid cell count is already bounded regardless of
+// radius, but the covered-check cost scales with how many volunteer_pings
+// fall inside the ring's bounding box, and a ring's bbox has zero admin
+// discretion the way a hand-drawn sector's does — an uncapped 12km-radius
+// ring on a well-attended multi-hour mission is a real synchronous-PHP-
+// timeout risk, not a hypothetical one. 5000m keeps every category's 25%/50%
+// ring meaningful and most categories' 75% ring too, while bounding
+// worst-case bbox to 10km×10km. One named constant, easy to retune later.
+define('RING_COVERAGE_MAX_RADIUS_METERS', 5000);
+
 // Greek fallback labels, used by lpbCategoryLabel() only when no
 // missing_person.subject_category.<key> translation key is set — kept here
 // rather than config.php's other *_LABELS constants so the whole
