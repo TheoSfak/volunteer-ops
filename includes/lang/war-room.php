@@ -502,7 +502,9 @@ return [
         'missing_person.ring_caption' => 'ενδεικτικές ζώνες αναζήτησης (LPB)',
         'missing_person.ring_dispatch_btn' => 'Αποστολή Ομάδας',
         'missing_person.ring_route_btn' => 'Πορεία Περιμέτρου',
+        'missing_person.ring_interior_sweep_btn' => 'Σάρωση Εσωτερικού',
         'missing_person.ring_generated_label' => 'Ζώνη {pct}%',
+        'missing_person.ring_interior_generated_label' => 'Σάρωση εσωτερικού {pct}%',
 
         // missing-person-guide.php — bilingual explainer page linked from the
         // missing-person card, explains the ring/exposure/weather tools plus
@@ -1666,7 +1668,9 @@ return [
         'missing_person.ring_caption' => 'illustrative search zones (LPB)',
         'missing_person.ring_dispatch_btn' => 'Send Team',
         'missing_person.ring_route_btn' => 'Perimeter Route',
+        'missing_person.ring_interior_sweep_btn' => 'Interior Sweep',
         'missing_person.ring_generated_label' => 'Zone {pct}%',
+        'missing_person.ring_interior_generated_label' => 'Interior sweep {pct}%',
 
         // See the 'el' block's comment above.
         'guide.page_title' => 'Missing Person Search Guide',

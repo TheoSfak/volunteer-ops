@@ -25,6 +25,7 @@ const {
     bearing,
     destinationPoint,
     circleToPolygonPoints,
+    spiralSweepPoints,
     escapeHtml,
     parseCoordsInput,
     formatDistanceMeters,
@@ -106,6 +107,29 @@ test('circleToPolygonPoints() spaces points evenly around the circle', () => {
     const dOpposite = haversineMeters(p0, p2);
     assert.ok(Math.abs(dAdjacent - radius * Math.SQRT2) < 1, `expected ~${radius * Math.SQRT2}m between adjacent points, got ${dAdjacent}`);
     assert.ok(Math.abs(dOpposite - radius * 2) < 1, `expected ~${radius * 2}m between opposite points, got ${dOpposite}`);
+});
+
+test('spiralSweepPoints() starts at center and ends ~maxRadiusMeters out', () => {
+    const center = { lat: 35.0, lng: 24.0 };
+    const maxRadius = 3000;
+    const points = spiralSweepPoints(center, maxRadius, 24, 3);
+    assert.equal(points.length, 24);
+    const [firstLat, firstLng] = points[0];
+    assert.ok(haversineMeters(center, { lat: firstLat, lng: firstLng }) < 1, 'first point should be ~at center');
+    const [lastLat, lastLng] = points[points.length - 1];
+    const endDist = haversineMeters(center, { lat: lastLat, lng: lastLng });
+    assert.ok(Math.abs(endDist - maxRadius) < 1, `expected last point ~${maxRadius}m out, got ${endDist}`);
+});
+
+test('spiralSweepPoints() distance from center never decreases (monotonic outward spiral)', () => {
+    const center = { lat: 35.0, lng: 24.0 };
+    const points = spiralSweepPoints(center, 2000, 24, 3);
+    let prevDist = -1;
+    for (const [lat, lng] of points) {
+        const dist = haversineMeters(center, { lat, lng });
+        assert.ok(dist >= prevDist - 0.001, `distance from center went backwards: ${prevDist} -> ${dist}`);
+        prevDist = dist;
+    }
 });
 
 test('escapeHtml() escapes all five special characters', () => {
