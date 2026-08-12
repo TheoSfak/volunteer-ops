@@ -569,7 +569,7 @@ $__f = ['search' => $search, 'contact' => $filterContact, 'payment' => $filterPa
                         </td>
                         <td>
                             <?php if (!empty($c['email'])): ?><div style="word-break:break-all;"><i class="bi bi-envelope text-muted me-1"></i><?= h($c['email']) ?></div><?php endif; ?>
-                            <?php if (!empty($c['phone'])): ?><div class="text-nowrap"><i class="bi bi-telephone text-muted me-1"></i><?= h($c['phone']) ?></div><?php endif; ?>
+                            <?php if (!empty($c['phone'])): ?><div class="text-nowrap"><i class="bi bi-telephone text-muted me-1"></i><a href="tel:<?= h($c['phone']) ?>"><?= h($c['phone']) ?></a></div><?php endif; ?>
                             <?php if (empty($c['email']) && empty($c['phone'])): ?><span class="text-muted">—</span><?php endif; ?>
                         </td>
                         <td><?= !empty($c['seminar_type']) ? '<span class="badge bg-info text-dark">' . h($c['seminar_type']) . '</span>' : '<span class="text-muted">—</span>' ?></td>
