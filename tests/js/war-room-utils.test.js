@@ -25,7 +25,7 @@ const {
     bearing,
     destinationPoint,
     circleToPolygonPoints,
-    spiralSweepPoints,
+    annulusBoustrophedonPoints,
     escapeHtml,
     parseCoordsInput,
     formatDistanceMeters,
@@ -109,26 +109,35 @@ test('circleToPolygonPoints() spaces points evenly around the circle', () => {
     assert.ok(Math.abs(dOpposite - radius * 2) < 1, `expected ~${radius * 2}m between opposite points, got ${dOpposite}`);
 });
 
-test('spiralSweepPoints() starts at center and ends ~maxRadiusMeters out', () => {
+test('annulusBoustrophedonPoints() returns laneCount*pointsPerLane points', () => {
     const center = { lat: 35.0, lng: 24.0 };
-    const maxRadius = 3000;
-    const points = spiralSweepPoints(center, maxRadius, 24, 3);
-    assert.equal(points.length, 24);
-    const [firstLat, firstLng] = points[0];
-    assert.ok(haversineMeters(center, { lat: firstLat, lng: firstLng }) < 1, 'first point should be ~at center');
-    const [lastLat, lastLng] = points[points.length - 1];
-    const endDist = haversineMeters(center, { lat: lastLat, lng: lastLng });
-    assert.ok(Math.abs(endDist - maxRadius) < 1, `expected last point ~${maxRadius}m out, got ${endDist}`);
+    const points = annulusBoustrophedonPoints(center, 500, 2000, 3, 6);
+    assert.equal(points.length, 18);
 });
 
-test('spiralSweepPoints() distance from center never decreases (monotonic outward spiral)', () => {
+// The bug this replaced: a center-to-edge spiral always starts at radius 0
+// regardless of which ring it's sweeping, so for ring 2/3/4 it re-walked
+// ground already assigned to the smaller ring(s) inside it. Every point
+// staying >= innerRadiusMeters out is the regression test for that fix.
+test('annulusBoustrophedonPoints() never places a point closer to center than innerRadiusMeters', () => {
     const center = { lat: 35.0, lng: 24.0 };
-    const points = spiralSweepPoints(center, 2000, 24, 3);
-    let prevDist = -1;
+    const innerRadius = 800;
+    const points = annulusBoustrophedonPoints(center, innerRadius, 3500, 4, 6);
     for (const [lat, lng] of points) {
         const dist = haversineMeters(center, { lat, lng });
-        assert.ok(dist >= prevDist - 0.001, `distance from center went backwards: ${prevDist} -> ${dist}`);
-        prevDist = dist;
+        assert.ok(dist >= innerRadius - 1, `expected >= ${innerRadius}m from center, got ${dist}`);
+    }
+});
+
+test('annulusBoustrophedonPoints() outermost lane lands exactly on outerRadiusMeters', () => {
+    const center = { lat: 35.0, lng: 24.0 };
+    const outerRadius = 3500;
+    const pointsPerLane = 6;
+    const points = annulusBoustrophedonPoints(center, 800, outerRadius, 4, pointsPerLane);
+    const outerLane = points.slice(-pointsPerLane);
+    for (const [lat, lng] of outerLane) {
+        const dist = haversineMeters(center, { lat, lng });
+        assert.ok(Math.abs(dist - outerRadius) < 1, `expected ~${outerRadius}m from center, got ${dist}`);
     }
 });
 

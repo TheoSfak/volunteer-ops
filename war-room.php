@@ -4243,23 +4243,32 @@ function openRouteForRing(ringIndex) {
     const modalEl = document.getElementById('routeComposerModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
-// "Sweep this ring's interior" — seeds the route composer with a coarse
-// outward spiral (spiralSweepPoints(), war-room-utils.js) from the point
-// last seen out to this ring's radius, instead of openRouteForRing()'s
-// boundary-only trace above. Fixed 24 points / 3 loops regardless of the
-// ring's actual radius — mission-route.php's 30-waypoint cap leaves no room
-// to scale finer for the largest categories' outer rings anyway, and this
-// was always meant as an illustrative sweep pattern (same "start from PLS,
-// work outward" idea as the guide page's own general rules), not a precise
-// track. Open path, not a loop — ends out at the radius with nothing
-// sensible to close back to, unlike the perimeter trace.
+// "Sweep this ring's band" — seeds the route composer with a concentric-arc
+// boustrophedon (annulusBoustrophedonPoints(), war-room-utils.js) confined
+// between the previous ring's radius (0 for the first ring) and this ring's
+// own radius, instead of openRouteForRing()'s boundary-only trace above.
+// Deliberately NOT a center-to-edge spiral: that always starts at radius 0
+// no matter which ring it's sweeping, so for ring 2/3/4 it would re-walk
+// ground already assigned to the smaller ring(s) inside it. laneCount
+// targets one lane roughly every 200m of band width (illustrative default —
+// real lane spacing should track effective sweep width for the actual
+// terrain, same "needs SAR review" caveat LPB_RING_TABLE itself carries,
+// includes/lpb-rings.php), clamped to [2, 4] so a wide outer ring's lanes
+// still leave room for a reasonable points-per-lane density under mission-
+// route.php's 30-waypoint cap; pointsPerLane splits ringPolygonPointCount()'s
+// own circumference-based budget for this ring's radius across the lanes.
+// Open path, not a loop, same as before — ends out at the radius with
+// nothing sensible to close back to, unlike the perimeter trace.
 function openInteriorSweepForRing(ringIndex) {
     if (!missingPerson || !missingPerson.subject_category) return;
     const radii = LPB_RING_TABLE[missingPerson.subject_category];
     if (!radii) return;
+    const innerRadius = ringIndex > 0 ? radii[ringIndex - 1] : 0;
     const radius = radii[ringIndex];
     const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
-    const points = spiralSweepPoints(center, radius, 24, 3);
+    const laneCount = Math.min(4, Math.max(2, Math.round((radius - innerRadius) / 200)));
+    const pointsPerLane = Math.max(4, Math.floor(ringPolygonPointCount(radius) / laneCount));
+    const points = annulusBoustrophedonPoints(center, innerRadius, radius, laneCount, pointsPerLane);
     const pct = [25, 50, 75, 95][ringIndex];
     pendingRouteSeed = {points, label: t('missing_person.ring_interior_generated_label', {pct}), closed: false};
     map.closePopup();
