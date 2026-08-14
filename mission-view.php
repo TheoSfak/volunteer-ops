@@ -62,7 +62,7 @@ $canManageShifts    = hasPagePermission('shifts_manage');   // approve/reject pa
 // Non-admins can only view OPEN missions; users with missions_view see all statuses
 $allowedStatuses = [STATUS_OPEN, STATUS_CLOSED];
 $isResponsible = !empty($mission['responsible_user_id']) && $mission['responsible_user_id'] == $user['id'];
-$isMissingPersonMission = ((int)($mission['mission_type_id'] ?? 0) === MISSION_TYPE_MISSING_PERSON_SEARCH);
+$isMissingPersonMission = ((int)($mission['mission_type_id'] ?? 0) === missingPersonMissionTypeId());
 if (!$canViewAllMissions && !$isResponsible && !in_array($mission['status'], $allowedStatuses)) {
     setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή την αποστολή.');
     redirect('missions.php');

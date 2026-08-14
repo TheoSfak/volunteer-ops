@@ -100,7 +100,7 @@ $isApprovedParticipant = (bool)dbFetchValue(
      WHERE s.mission_id = ? AND pr.volunteer_id = ? AND pr.status = ?",
     [$missionId, $user['id'], PARTICIPATION_APPROVED]
 );
-$isMissingPersonMission = ((int)($mission['mission_type_id'] ?? 0) === MISSION_TYPE_MISSING_PERSON_SEARCH);
+$isMissingPersonMission = ((int)($mission['mission_type_id'] ?? 0) === missingPersonMissionTypeId());
 if (!$canManageWarRoom && !$isApprovedParticipant) {
     setFlash('error', t('wr.access_denied'));
     redirect('dashboard.php');

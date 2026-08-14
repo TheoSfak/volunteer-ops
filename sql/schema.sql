@@ -2392,7 +2392,7 @@ ALTER TABLE `mission_photos`
 -- MISSION MISSING PERSONS (War Room: one profile per mission — name, age,
 -- description, clothing, photo, last-seen location+time — backing the
 -- pinned "missing person" card shown for the "Αναζήτηση Αγνοουμένου"
--- mission type. See MISSION_TYPE_MISSING_PERSON_SEARCH in config.php.)
+-- mission type. See missingPersonMissionTypeId() in functions-warroom.php.)
 -- =============================================
 CREATE TABLE IF NOT EXISTS `mission_missing_persons` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

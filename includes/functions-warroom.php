@@ -1817,10 +1817,37 @@ function loadPointsOfInterestForMission(int $missionId): array {
 }
 
 /**
+ * Resolves mission_types.id for "Αναζήτηση Αγνοουμένου" (Missing Person
+ * Search) by name instead of a hardcoded id. Migration v128 originally
+ * pinned this to a shared constant (id 7), assuming every deployment's
+ * mission_types table would assign it the same id — broke on any database
+ * that already had a different custom type sitting at id 7 (real incident:
+ * epidrasi.iloveweb.gr's admin-created "Τ.Ε.Π." type, 61 real missions —
+ * see v128's own comment, includes/migrations.php, for the full story).
+ * Migration v134 creates the row wherever it's still missing, without
+ * pinning an id, so each database can have it at whatever id it lands on —
+ * this function is what makes that safe to do. Cached per-request (same
+ * static-cache shape as getSetting(), functions-core.php) since both
+ * callers (war-room.php, mission-view.php) check this on every page load.
+ * Returns null if the type doesn't exist yet on this database (hasn't
+ * reached v134 yet) — every caller compares the result with a strict ===
+ * against an int, so null just means "no mission currently matches", not a
+ * crash.
+ */
+function missingPersonMissionTypeId(): ?int {
+    static $cached = false; // false = not looked up yet; null = looked up, doesn't exist
+    if ($cached === false) {
+        $row = dbFetchOne("SELECT id FROM mission_types WHERE name = ?", ['Αναζήτηση Αγνοουμένου']);
+        $cached = $row ? (int) $row['id'] : null;
+    }
+    return $cached;
+}
+
+/**
  * The single missing-person profile for this mission (mission_missing_persons
  * is one row per mission_id, UNIQUE-constrained), or null if staff haven't
  * filled one in yet. Called only for missions of the "Αναζήτηση Αγνοουμένου"
- * type — see MISSION_TYPE_MISSING_PERSON_SEARCH in config.php.
+ * type — see missingPersonMissionTypeId() above.
  */
 function loadMissingPersonForMission(int $missionId): ?array {
     $p = dbFetchOne(

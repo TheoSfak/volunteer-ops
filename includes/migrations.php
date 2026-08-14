@@ -6138,6 +6138,20 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 134,
+            'description' => 'Create the "Αναζήτηση Αγνοουμένου" mission_types row wherever v128 left it missing — without pinning an id. v128 hardcoded id 7 for this row on the assumption MISSION_TYPE_MISSING_PERSON_SEARCH (config.php) could stay one shared constant across every deployment; that broke for good on epidrasi.iloveweb.gr, where id 7 was already a real, actively-used custom type ("Τ.Ε.Π.", 61 missions) created via mission-types.php before v128 ever ran there — see v128\'s own comment above for the full incident. That constant is now retired: missingPersonMissionTypeId() (includes/functions-warroom.php) resolves the row by name at runtime instead, so it no longer matters which id this INSERT lands on, or whether it differs between deployments.',
+            'up' => function () {
+                $existingType = dbFetchOne("SELECT id FROM mission_types WHERE name = ?", ['Αναζήτηση Αγνοουμένου']);
+                if (!$existingType) {
+                    dbExecute(
+                        "INSERT INTO mission_types (name, description, color, icon, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?)",
+                        ['Αναζήτηση Αγνοουμένου', 'Επιχείρηση αναζήτησης αγνοούμενου προσώπου', 'dark', 'bi-person-bounding-box', 7, 1]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
