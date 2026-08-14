@@ -4275,6 +4275,55 @@ function openInteriorSweepForRing(ringIndex) {
     const modalEl = document.getElementById('routeComposerModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
+// Angular granularity (15°) for "divide this ring into sectors" below — NOT
+// ringPolygonPointCount()'s arc-length-scaled count. That function targets
+// roughly-constant distance between points, which matters once points
+// become an actual patrol boundary/route; here what matters is how fine an
+// angular cut an admin can make, which has nothing to do with the ring's
+// physical radius. 24 also matches the divideSectorsModal IIFE's own
+// GREEK_LETTERS.length, so wedge lettering never wraps even if every
+// available cut is used.
+const RING_SECTOR_DIVISION_POINTS = 24;
+// "Divide this ring into sectors" — creates a mission_search_areas row
+// shaped like the ring's full disc (ringDiscPolygonPoints(), war-room-
+// utils.js) and immediately opens the existing, unmodified divide-into-
+// sectors tool (openDivideSectorsForArea() above) against it. Automates
+// only the geometry, same scope as the three ring buttons above — from here
+// the admin uses the normal chord-drawing tool to cut pie-slice sectors,
+// which save as ordinary mission_search_sectors rows with the app's
+// existing assign/self-report/coverage-tracking, no different from a
+// hand-drawn sector. Unlike the three buttons above, this one needs a real
+// round trip before there's anything to act on, so it disables itself and
+// reports failure inline instead of closing the popup optimistically.
+function openDivideRingIntoSectors(ringIndex, btnEl) {
+    if (!missingPerson || !missingPerson.subject_category) return;
+    const radii = LPB_RING_TABLE[missingPerson.subject_category];
+    if (!radii) return;
+    const radius = radii[ringIndex];
+    const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
+    const geo = ringDiscPolygonPoints(center, radius, RING_SECTOR_DIVISION_POINTS);
+    const pct = [25, 50, 75, 95][ringIndex];
+    if (btnEl) btnEl.disabled = true;
+    const data = new URLSearchParams({
+        csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create_area',
+        geo: JSON.stringify(geo), label: t('missing_person.ring_sectors_area_label', {pct}),
+    });
+    fetch('mission-sector.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+        if (result.ok) {
+            map.closePopup();
+            // Required, not just cleanup: openDivideSectorsForArea()'s own
+            // shown.bs.modal handler resolves currentArea via a synchronous
+            // areas.find(a => a.id === pendingDivideAreaId) — without
+            // refreshing the client-side areas array first, that lookup
+            // returns null and the modal opens against nothing.
+            sectorRefreshAfter(result.sectors, result.areas);
+            openDivideSectorsForArea(result.id);
+        } else {
+            alert(result.error || t('common.send_failed'));
+            if (btnEl) btnEl.disabled = false;
+        }
+    }).catch(() => { alert(t('common.send_failed')); if (btnEl) btnEl.disabled = false; });
+}
 function areaDelete(id) {
     const area = areas.find(a => String(a.id) === String(id));
     if (!confirm(t('sector.area_delete_confirm', {label: area ? area.label : '', count: area ? area.sector_count : 0}))) return;
@@ -7173,6 +7222,7 @@ function renderSearchRingsLayer(item) {
                 <button type="button" class="btn btn-sm btn-outline-primary ring-dispatch-btn" data-ring-index="${i}">${t('missing_person.ring_dispatch_btn')}</button>
                 <button type="button" class="btn btn-sm btn-outline-primary ring-route-btn" data-ring-index="${i}">${t('missing_person.ring_route_btn')}</button>
                 <button type="button" class="btn btn-sm btn-outline-primary ring-interior-sweep-btn" data-ring-index="${i}">${t('missing_person.ring_interior_sweep_btn')}</button>
+                <button type="button" class="btn btn-sm btn-outline-primary ring-divide-sectors-btn" data-ring-index="${i}">${t('missing_person.ring_divide_sectors_btn')}</button>
             </div>`
             : '';
         const circle = L.circle(center, {
@@ -7219,6 +7269,12 @@ searchRingsLayer?.on('popupopen', event => {
     if (routeBtn) routeBtn.addEventListener('click', () => { map.closePopup(); openRouteForRing(parseInt(routeBtn.dataset.ringIndex, 10)); });
     const interiorSweepBtn = popupEl.querySelector('.ring-interior-sweep-btn');
     if (interiorSweepBtn) interiorSweepBtn.addEventListener('click', () => { map.closePopup(); openInteriorSweepForRing(parseInt(interiorSweepBtn.dataset.ringIndex, 10)); });
+    // No map.closePopup() here, deliberately unlike the three above — this
+    // one needs a network round trip before there's anything to show, so
+    // the popup only closes on confirmed success, inside the function
+    // itself (openDivideRingIntoSectors(), further up this file).
+    const divideSectorsBtn = popupEl.querySelector('.ring-divide-sectors-btn');
+    if (divideSectorsBtn) divideSectorsBtn.addEventListener('click', () => { openDivideRingIntoSectors(parseInt(divideSectorsBtn.dataset.ringIndex, 10), divideSectorsBtn); });
 });
 
 // Updates only the read-only #missingPersonDisplay block — never touches the
@@ -9887,7 +9943,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         if (!currentArea) return;
         currentArea.geo.forEach((pt, idx) => {
             const isPending = idx === pendingFirst;
-            const marker = L.circleMarker(pt, {radius: isPending ? 10 : 7, color: '#fff', weight: 2, fillColor: isPending ? '#212529' : '#0d6efd', fillOpacity: 1}).addTo(composerMap);
+            const marker = L.circleMarker(pt, {pane: 'sectorVertexPane', radius: isPending ? 10 : 7, color: '#fff', weight: 2, fillColor: isPending ? '#212529' : '#0d6efd', fillOpacity: 1}).addTo(composerMap);
             marker.on('click', () => onVertexClick(idx));
             vertexMarkers.push(marker);
         });
@@ -10019,6 +10075,21 @@ document.querySelectorAll('.team-form').forEach(form => {
             addMapBaseLayers(composerMap, 'divideSectorsSatelliteToggle');
             refLayer = L.layerGroup().addTo(composerMap);
             wedgeLayer = L.layerGroup().addTo(composerMap);
+            // Leaflet's built-in marker-pane (icon markers, e.g. the
+            // missing-person pin drawn by renderFullMapReference() below)
+            // sits at z-index 600, above the built-in overlay-pane (SVG
+            // shapes, including the L.circleMarker vertex dots
+            // renderVertexMarkers() draws) at z-index 400 — a fixed Leaflet
+            // pane ordering that no per-layer bringToFront() can cross. For
+            // a hand-drawn area that never mattered much, but a ring's
+            // "divide into sectors" container polygon (war-room-utils.js's
+            // ringDiscPolygonPoints()) always has its center vertex at the
+            // exact same coordinate as the missing-person marker — without
+            // this, that vertex would be permanently unclickable, buried
+            // under the pin, every single time. A dedicated pane above both
+            // fixes it for every area, not just ring-generated ones.
+            composerMap.createPane('sectorVertexPane');
+            composerMap.getPane('sectorVertexPane').style.zIndex = 650;
         }
         refLayer.clearLayers();
         renderFullMapReference(refLayer);

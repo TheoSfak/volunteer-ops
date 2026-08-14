@@ -97,6 +97,30 @@ function annulusBoustrophedonPoints(center, innerRadiusMeters, outerRadiusMeters
     return points;
 }
 
+// Builds a mission_search_areas-shaped geo array (a flat [[lat,lng],...]
+// polygon, same shape circleToPolygonPoints() already produces) tracing an
+// LPB ring's full disc — center point, then numPoints boundary points from
+// circleToPolygonPoints(), then the FIRST boundary point again as one extra
+// trailing vertex. That trailing duplicate is required, not decorative: a
+// polygon's last vertex implicitly closes back to its first one, so a plain
+// [center, ...boundary] array closes from the LAST boundary point straight
+// back to center — never from the last boundary point back to the FIRST
+// one — which silently leaves one boundary arc's worth of area out of the
+// shape entirely (not "uncut": genuinely absent, since a straight cut
+// between two existing vertices can only ever split area a polygon already
+// has, never add area it doesn't). Repeating the first boundary point gives
+// that missing arc a real edge of its own (lastBoundaryPoint ->
+// duplicatedFirstBoundaryPoint), so the shape becomes a complete disc and
+// every boundary point becomes reachable as an independent center-to-vertex
+// cut. Fed as-is into war-room.php's existing divideSectorsModal chord tool
+// (built for hand-drawn mission_search_areas polygons, unmodified here), a
+// center-to-boundary-vertex chord is exactly a radial spoke, so that tool
+// produces true pie-slice sectors with zero changes of its own.
+function ringDiscPolygonPoints(center, radiusMeters, numPoints) {
+    const boundary = circleToPolygonPoints(center, radiusMeters, numPoints);
+    return [[center.lat, center.lng], ...boundary, boundary[0]];
+}
+
 function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 }
@@ -194,6 +218,7 @@ if (typeof module !== 'undefined' && module.exports) {
         destinationPoint,
         circleToPolygonPoints,
         annulusBoustrophedonPoints,
+        ringDiscPolygonPoints,
         escapeHtml,
         parseCoordsInput,
         formatDistanceMeters,

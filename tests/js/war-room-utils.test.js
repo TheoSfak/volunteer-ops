@@ -26,6 +26,7 @@ const {
     destinationPoint,
     circleToPolygonPoints,
     annulusBoustrophedonPoints,
+    ringDiscPolygonPoints,
     escapeHtml,
     parseCoordsInput,
     formatDistanceMeters,
@@ -139,6 +140,35 @@ test('annulusBoustrophedonPoints() outermost lane lands exactly on outerRadiusMe
         const dist = haversineMeters(center, { lat, lng });
         assert.ok(Math.abs(dist - outerRadius) < 1, `expected ~${outerRadius}m from center, got ${dist}`);
     }
+});
+
+test('ringDiscPolygonPoints() returns numPoints+2 points: center, boundary, then a repeat of the first boundary point', () => {
+    const center = { lat: 35.0, lng: 24.0 };
+    const points = ringDiscPolygonPoints(center, 500, 8);
+    assert.equal(points.length, 10);
+    assert.deepEqual(points[0], [center.lat, center.lng]);
+    assert.deepEqual(points[9], points[1]); // the seam duplicate
+});
+
+// Regression test for a real geometry bug caught before shipping: a plain
+// [center, ...boundary] array (no duplicated seam point) closes from the
+// LAST boundary point straight back to center, never back to the FIRST
+// boundary point - silently excluding one boundary arc's worth of area from
+// the shape, with no way to recover it afterward (a straight cut between
+// two existing vertices can only ever split area a polygon already has).
+// Checked via shoelace area rather than eyeballing coordinates, since this
+// is exactly the kind of bug that looks fine in a screenshot (a circle of
+// vertex markers still renders) but leaves one slice permanently uncuttable.
+test('ringDiscPolygonPoints() traces the full disc, not (numPoints-1)/numPoints of it', () => {
+    const center = { lat: 0, lng: 0 };
+    const points = ringDiscPolygonPoints(center, 1000, 8);
+    const shoelaceArea = poly => Math.abs(poly.reduce((sum, [x1, y1], i) => {
+        const [x2, y2] = poly[(i + 1) % poly.length];
+        return sum + (x1 * y2 - x2 * y1);
+    }, 0)) / 2;
+    const fullDiscArea = shoelaceArea(points);
+    const missingSeamArea = shoelaceArea(points.slice(0, -1)); // the old, buggy shape
+    assert.ok(fullDiscArea > missingSeamArea * 1.05, `expected the seam-duplicated polygon (${fullDiscArea}) to enclose meaningfully more area than the un-duplicated one (${missingSeamArea})`);
 });
 
 test('escapeHtml() escapes all five special characters', () => {
