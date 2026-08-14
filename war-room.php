@@ -4203,10 +4203,13 @@ function ringPolygonPointCount(radiusMeters) {
 }
 // "Send a team to this ring" — seeds the dispatch composer with a polygon
 // tracing the ring's boundary (so the team is assigned the whole disc area),
-// then opens it exactly like clicking the normal "New Dispatch" button would.
-// Deliberately does NOT pre-pick a team: only the tedious geometry is
-// automated, the admin still chooses who and confirms send.
-function openDispatchForRing(ringIndex) {
+// then opens it exactly like clicking the normal "New Dispatch" button
+// would. teamId comes from the ring popup's own team select (required —
+// the button that calls this stays disabled until one is chosen, see the
+// popupopen listener below) and is carried on pendingDispatchSeed so the
+// dispatch modal's own team select ends up pre-set to match, same one-shot
+// consume-then-null pattern the points/label already use.
+function openDispatchForRing(ringIndex, teamId) {
     if (!missingPerson || !missingPerson.subject_category) return;
     const radii = LPB_RING_TABLE[missingPerson.subject_category];
     if (!radii) return;
@@ -4214,31 +4217,24 @@ function openDispatchForRing(ringIndex) {
     const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
     const points = circleToPolygonPoints(center, radius, ringPolygonPointCount(radius));
     const pct = [25, 50, 75, 95][ringIndex];
-    pendingDispatchSeed = {points, label: t('missing_person.ring_generated_label', {pct})};
+    pendingDispatchSeed = {points, label: t('missing_person.ring_generated_label', {pct}), teamId};
     map.closePopup();
     const modalEl = document.getElementById('dispatchMapModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 // "Sweep this ring's perimeter" — seeds the route composer with waypoints
 // sampled around the ring's circumference (a boundary-sweep search pattern),
-// then opens it like the normal "New Route" flow. Same "geometry only, admin
-// still picks the team/members" scope as openDispatchForRing() above.
-function openRouteForRing(ringIndex) {
+// then opens it like the normal "New Route" flow. Same team-preselection
+// scope as openDispatchForRing() above.
+function openRouteForRing(ringIndex, teamId) {
     if (!missingPerson || !missingPerson.subject_category) return;
-    // No team-existence check here on purpose: the route composer itself now
-    // tolerates opening with zero teams on the mission (lets the map/
-    // waypoint-planning parts work regardless) and only shows a clear
-    // "no teams yet" message at actual send time, when a team genuinely
-    // becomes required — see the composer's own setup IIFE for the full
-    // explanation. Keeping this a single, composer-owned check rather than
-    // duplicating it at every entry point that can open this modal.
     const radii = LPB_RING_TABLE[missingPerson.subject_category];
     if (!radii) return;
     const radius = radii[ringIndex];
     const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
     const points = circleToPolygonPoints(center, radius, ringPolygonPointCount(radius));
     const pct = [25, 50, 75, 95][ringIndex];
-    pendingRouteSeed = {points, label: t('missing_person.ring_generated_label', {pct}), closed: true};
+    pendingRouteSeed = {points, label: t('missing_person.ring_generated_label', {pct}), closed: true, teamId};
     map.closePopup();
     const modalEl = document.getElementById('routeComposerModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -4259,7 +4255,7 @@ function openRouteForRing(ringIndex) {
 // own circumference-based budget for this ring's radius across the lanes.
 // Open path, not a loop, same as before — ends out at the radius with
 // nothing sensible to close back to, unlike the perimeter trace.
-function openInteriorSweepForRing(ringIndex) {
+function openInteriorSweepForRing(ringIndex, teamId) {
     if (!missingPerson || !missingPerson.subject_category) return;
     const radii = LPB_RING_TABLE[missingPerson.subject_category];
     if (!radii) return;
@@ -4270,7 +4266,7 @@ function openInteriorSweepForRing(ringIndex) {
     const pointsPerLane = Math.max(4, Math.floor(ringPolygonPointCount(radius) / laneCount));
     const points = annulusBoustrophedonPoints(center, innerRadius, radius, laneCount, pointsPerLane);
     const pct = [25, 50, 75, 95][ringIndex];
-    pendingRouteSeed = {points, label: t('missing_person.ring_interior_generated_label', {pct}), closed: false};
+    pendingRouteSeed = {points, label: t('missing_person.ring_interior_generated_label', {pct}), closed: false, teamId};
     map.closePopup();
     const modalEl = document.getElementById('routeComposerModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -7217,12 +7213,28 @@ function renderSearchRingsLayer(item) {
         if (i === openRingIndex) continue; // preserved above, left untouched
         const km = (radii[i] / 1000).toLocaleString(jsLocale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
         const label = t('missing_person.ring_tooltip', {pct: pct[i], km}) + ringCoverageBadgeHtml(i);
+        // Dispatch/Perimeter/Interior-sweep are all single-team actions, so
+        // they share one team picker right here in the popup — asking "which
+        // team" and "what kind of sweep" together, instead of silently
+        // reusing whatever the separate New Dispatch/New Route sidebar cards'
+        // own team selects happen to already be set to (easy to miss, easy
+        // to send to the wrong team without noticing). Those 3 buttons start
+        // disabled until a team is actually picked (wired in the popupopen
+        // listener below); Divide into Sectors is deliberately excluded —
+        // splitting a ring is inherently a multi-team action, it gets its
+        // own per-wedge team picker inside the divide-sectors modal instead.
         const actionButtons = CAN_MANAGE_WAR_ROOM
-            ? `<div class="mt-2 d-flex flex-wrap gap-1">
-                <button type="button" class="btn btn-sm btn-outline-primary ring-dispatch-btn" data-ring-index="${i}">${t('missing_person.ring_dispatch_btn')}</button>
-                <button type="button" class="btn btn-sm btn-outline-primary ring-route-btn" data-ring-index="${i}">${t('missing_person.ring_route_btn')}</button>
-                <button type="button" class="btn btn-sm btn-outline-primary ring-interior-sweep-btn" data-ring-index="${i}">${t('missing_person.ring_interior_sweep_btn')}</button>
-                <button type="button" class="btn btn-sm btn-outline-primary ring-divide-sectors-btn" data-ring-index="${i}">${t('missing_person.ring_divide_sectors_btn')}</button>
+            ? `<div class="mt-2">
+                <select class="form-select form-select-sm mb-1 ring-team-select" data-ring-index="${i}">
+                    <option value="">${escapeHtml(t('missing_person.ring_team_select_label'))}</option>
+                    ${teams.map(tm => `<option value="${tm.id}">${escapeHtml(tm.label)}</option>`).join('')}
+                </select>
+                <div class="d-flex flex-wrap gap-1">
+                    <button type="button" class="btn btn-sm btn-outline-primary ring-dispatch-btn" data-ring-index="${i}" disabled>${t('missing_person.ring_dispatch_btn')}</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary ring-route-btn" data-ring-index="${i}" disabled>${t('missing_person.ring_route_btn')}</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary ring-interior-sweep-btn" data-ring-index="${i}" disabled>${t('missing_person.ring_interior_sweep_btn')}</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary ring-divide-sectors-btn" data-ring-index="${i}">${t('missing_person.ring_divide_sectors_btn')}</button>
+                </div>
             </div>`
             : '';
         const circle = L.circle(center, {
@@ -7263,12 +7275,24 @@ function renderSearchRingsLayer(item) {
 // near openDivideSectorsForArea().
 searchRingsLayer?.on('popupopen', event => {
     const popupEl = event.popup.getElement();
+    const teamSelect = popupEl.querySelector('.ring-team-select');
     const dispatchBtn = popupEl.querySelector('.ring-dispatch-btn');
-    if (dispatchBtn) dispatchBtn.addEventListener('click', () => { map.closePopup(); openDispatchForRing(parseInt(dispatchBtn.dataset.ringIndex, 10)); });
     const routeBtn = popupEl.querySelector('.ring-route-btn');
-    if (routeBtn) routeBtn.addEventListener('click', () => { map.closePopup(); openRouteForRing(parseInt(routeBtn.dataset.ringIndex, 10)); });
     const interiorSweepBtn = popupEl.querySelector('.ring-interior-sweep-btn');
-    if (interiorSweepBtn) interiorSweepBtn.addEventListener('click', () => { map.closePopup(); openInteriorSweepForRing(parseInt(interiorSweepBtn.dataset.ringIndex, 10)); });
+    // The 3 single-team buttons stay disabled until a real team is picked —
+    // see the actionButtons template above for why Divide into Sectors is
+    // excluded from this gate.
+    if (teamSelect) {
+        teamSelect.addEventListener('change', () => {
+            const hasTeam = teamSelect.value !== '';
+            if (dispatchBtn) dispatchBtn.disabled = !hasTeam;
+            if (routeBtn) routeBtn.disabled = !hasTeam;
+            if (interiorSweepBtn) interiorSweepBtn.disabled = !hasTeam;
+        });
+    }
+    if (dispatchBtn) dispatchBtn.addEventListener('click', () => { map.closePopup(); openDispatchForRing(parseInt(dispatchBtn.dataset.ringIndex, 10), teamSelect.value); });
+    if (routeBtn) routeBtn.addEventListener('click', () => { map.closePopup(); openRouteForRing(parseInt(routeBtn.dataset.ringIndex, 10), teamSelect.value); });
+    if (interiorSweepBtn) interiorSweepBtn.addEventListener('click', () => { map.closePopup(); openInteriorSweepForRing(parseInt(interiorSweepBtn.dataset.ringIndex, 10), teamSelect.value); });
     // No map.closePopup() here, deliberately unlike the three above — this
     // one needs a network round trip before there's anything to show, so
     // the popup only closes on confirmed success, inside the function
@@ -9761,6 +9785,11 @@ document.querySelectorAll('.team-form').forEach(form => {
             updateShapePreview();
             updateSendState();
             noteInput.value = pendingDispatchSeed.label;
+            // Pre-select the team chosen in the ring popup itself, in this
+            // same dropdown the normal "New Dispatch" sidebar card flow
+            // already uses at send time — no other change needed for the
+            // send handler to pick it up correctly.
+            if (pendingDispatchSeed.teamId) teamSelect.value = pendingDispatchSeed.teamId;
             if (drawPoints.length) dispatchMap.fitBounds(L.latLngBounds(drawPoints), {padding: [30, 30]});
             pendingDispatchSeed = null;
         }
@@ -9989,6 +10018,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         wedgeLayer.clearLayers();
         const wedges = computeWedges();
         const existingValues = Array.from(wedgeListEl.querySelectorAll('.wedge-label-input')).map(inp => inp.value);
+        const existingTeamIds = Array.from(wedgeListEl.querySelectorAll('.wedge-team-select')).map(sel => sel.value);
         wedgeListEl.innerHTML = '';
         wedges.forEach((poly, i) => {
             const color = WEDGE_COLORS[i % WEDGE_COLORS.length];
@@ -10020,8 +10050,22 @@ document.querySelectorAll('.team-form').forEach(form => {
             // across a re-render (e.g. after adding one more cut) rather
             // than clobbering it back to the auto-suggested default.
             input.value = existingValues[i] || t('sector.wedge_label_placeholder', {letter});
+            // Per-wedge, not a single picker for the whole ring like the
+            // dispatch/route ring-popup buttons get — dividing a ring into
+            // sectors is inherently about assigning DIFFERENT wedges to
+            // DIFFERENT teams, so there's no one sensible upfront team to
+            // preselect here. Same value-preservation-across-re-renders
+            // treatment as the label input just above, same unassigned
+            // default as .sector-team-select elsewhere (renderSectorLayer).
+            const teamSelect = document.createElement('select');
+            teamSelect.className = 'form-select wedge-team-select';
+            teamSelect.style.cssText = 'max-width:40%;';
+            teamSelect.innerHTML = `<option value="">${escapeHtml(t('sector.unassigned_option'))}</option>` +
+                teams.map(tm => `<option value="${tm.id}">${escapeHtml(tm.label)}</option>`).join('');
+            teamSelect.value = existingTeamIds[i] || '';
             row.appendChild(swatch);
             row.appendChild(input);
+            row.appendChild(teamSelect);
             wedgeListEl.appendChild(row);
         });
         saveBtn.disabled = wedges.length === 0;
@@ -10040,6 +10084,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         const wedges = computeWedges();
         if (!wedges.length || !currentArea) return;
         const labelInputs = wedgeListEl.querySelectorAll('.wedge-label-input');
+        const teamSelects = wedgeListEl.querySelectorAll('.wedge-team-select');
         saveBtn.disabled = true;
         const posts = wedges.map((poly, i) => {
             const label = (labelInputs[i] ? labelInputs[i].value.trim() : '') || `${t('sector.wedge_label_placeholder', {letter: GREEK_LETTERS[i % GREEK_LETTERS.length]})}`;
@@ -10047,6 +10092,13 @@ document.querySelectorAll('.team-form').forEach(form => {
                 csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
                 area_id: currentArea.id, label, geo: JSON.stringify(poly),
             });
+            // mission-sector.php's create action already accepts team_id and
+            // sets status to 'assigned' when it's present (same as any
+            // hand-drawn sector assigned at creation) - blank/unassigned
+            // just omits it, same as leaving .sector-team-select on "—" does
+            // elsewhere, so no extra branching needed here.
+            const teamId = teamSelects[i] ? teamSelects[i].value : '';
+            if (teamId) data.set('team_id', teamId);
             return fetch('mission-sector.php', {method: 'POST', body: data}).then(r => r.json());
         });
         Promise.all(posts).then(results => {
@@ -11465,6 +11517,19 @@ function renderWaypointPanel() {
             renderRouteComposerMap();
             renderWaypointPanel();
             titleInput.value = pendingRouteSeed.label;
+            // Pre-select the team chosen in the ring popup — but unlike the
+            // dispatch composer above, this select drives a cascading member
+            // picker (renderRouteMemberPicker(), wired to this select's own
+            // 'change' listener a few lines up) that already ran once, for
+            // the OLD selection, as part of this same modal opening. Setting
+            // .value alone doesn't fire that listener, so a real change
+            // event is dispatched to re-run it correctly for the new team —
+            // renderRouteMemberPicker() itself is closure-local, not
+            // reachable from here any other way.
+            if (pendingRouteSeed.teamId && teamSelect) {
+                teamSelect.value = pendingRouteSeed.teamId;
+                teamSelect.dispatchEvent(new Event('change'));
+            }
             if (routeWaypoints.length) routeMap.fitBounds(L.latLngBounds(routeWaypoints.map(wp => [wp.lat, wp.lng])), {padding: [30, 30]});
             pendingRouteSeed = null;
         }
