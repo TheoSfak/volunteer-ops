@@ -64,25 +64,35 @@ function circleToPolygonPoints(center, radiusMeters, numPoints) {
     return points;
 }
 
-// Coarse outward Archimedean spiral from center to maxRadiusMeters, used to
-// seed a route with an "interior sweep" pattern (as opposed to
-// circleToPolygonPoints()'s boundary-only trace) — mirrors the standard SAR
-// expanding-circle technique of starting at the point last seen and working
-// outward. numPoints/numLoops are required, not defaulted: this is always
-// called with fixed constants sized to fit mission-route.php's 30-waypoint
-// cap (see war-room.php's caller) rather than scaled by radius the way
-// circleToPolygonPoints() is — a spiral is inherently an illustrative
-// search-pattern aid, not a precision boundary trace, so the same coarse
-// point count reads fine at any ring radius. t=0 lands exactly on center
-// (radius 0, so destinationPoint()'s bearing term is moot); t=1 lands
-// exactly maxRadiusMeters out, after numLoops full turns.
-function spiralSweepPoints(center, maxRadiusMeters, numPoints, numLoops) {
+// Concentric-arc "boustrophedon" (lawnmower) sweep confined to the annulus
+// between innerRadiusMeters and outerRadiusMeters — an interior-sweep
+// pattern (as opposed to circleToPolygonPoints()'s boundary-only trace) that
+// stays inside its own ring's band. Traces laneCount full loops at evenly
+// stepped radii — the innermost stepped in from innerRadiusMeters, the
+// outermost landing exactly on outerRadiusMeters — alternating direction so
+// consecutive lanes meet at the same bearing (a radial step out, not a jump
+// across the annulus). Replaces an earlier center-to-edge spiral: a spiral
+// always starts at radius 0 regardless of which ring it's sweeping, so for
+// every ring past the first it re-walked ground already assigned to the
+// smaller ring(s) inside it. Starting laps at innerRadiusMeters instead
+// fixes that by construction — this never dips inside the previous ring's
+// own outer boundary. Mirrors the standard ground-SAR parallel-track
+// technique (lanes spaced apart, walked end-to-end) adapted to polar
+// coordinates, since a ring's search area is an annulus, not a rectangle.
+// laneCount/pointsPerLane are required, not defaulted — same "caller sizes
+// it from the actual geometry" convention as circleToPolygonPoints()'s
+// numPoints (see war-room.php's caller for how they're chosen).
+function annulusBoustrophedonPoints(center, innerRadiusMeters, outerRadiusMeters, laneCount, pointsPerLane) {
     const points = [];
-    const totalAngle = numLoops * 360;
-    for (let i = 0; i < numPoints; i++) {
-        const t = numPoints === 1 ? 0 : i / (numPoints - 1);
-        const pt = destinationPoint(center, (totalAngle * t) % 360, maxRadiusMeters * t);
-        points.push([pt.lat, pt.lng]);
+    const bandWidth = outerRadiusMeters - innerRadiusMeters;
+    for (let lane = 0; lane < laneCount; lane++) {
+        const radius = innerRadiusMeters + bandWidth * (lane + 1) / laneCount;
+        const reverse = lane % 2 === 1;
+        for (let i = 0; i < pointsPerLane; i++) {
+            const t = pointsPerLane === 1 ? 0 : i / (pointsPerLane - 1);
+            const pt = destinationPoint(center, reverse ? 360 * (1 - t) : 360 * t, radius);
+            points.push([pt.lat, pt.lng]);
+        }
     }
     return points;
 }
@@ -183,7 +193,7 @@ if (typeof module !== 'undefined' && module.exports) {
         bearing,
         destinationPoint,
         circleToPolygonPoints,
-        spiralSweepPoints,
+        annulusBoustrophedonPoints,
         escapeHtml,
         parseCoordsInput,
         formatDistanceMeters,
