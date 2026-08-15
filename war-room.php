@@ -2423,9 +2423,16 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     </a>
                 </div>
                 <?php if ($canManageWarRoom): ?>
-                <button type="button" class="btn btn-sm btn-light" data-bs-toggle="modal" data-bs-target="#missingPersonEditModal">
-                    <i class="bi bi-pencil"></i> <?= t('missing_person.edit_btn') ?>
-                </button>
+                <div class="d-flex gap-1">
+                    <?php if ($searchRingsOn): ?>
+                    <button type="button" class="btn btn-sm btn-light" id="ringResetBtn" title="<?= h(t('missing_person.ring_reset_btn')) ?>">
+                        <i class="bi bi-arrow-counterclockwise"></i>
+                    </button>
+                    <?php endif; ?>
+                    <button type="button" class="btn btn-sm btn-light" data-bs-toggle="modal" data-bs-target="#missingPersonEditModal">
+                        <i class="bi bi-pencil"></i> <?= t('missing_person.edit_btn') ?>
+                    </button>
+                </div>
                 <?php endif; ?>
             </div>
             <div class="card-body" id="missingPersonDisplay"></div>
@@ -4217,7 +4224,7 @@ function openDispatchForRing(ringIndex, teamId) {
     const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
     const points = circleToPolygonPoints(center, radius, ringPolygonPointCount(radius));
     const pct = [25, 50, 75, 95][ringIndex];
-    pendingDispatchSeed = {points, label: t('missing_person.ring_generated_label', {pct}), teamId};
+    pendingDispatchSeed = {points, label: t('missing_person.ring_generated_label', {pct}), teamId, ringIndex};
     map.closePopup();
     const modalEl = document.getElementById('dispatchMapModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -4234,7 +4241,7 @@ function openRouteForRing(ringIndex, teamId) {
     const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
     const points = circleToPolygonPoints(center, radius, ringPolygonPointCount(radius));
     const pct = [25, 50, 75, 95][ringIndex];
-    pendingRouteSeed = {points, label: t('missing_person.ring_generated_label', {pct}), closed: true, teamId};
+    pendingRouteSeed = {points, label: t('missing_person.ring_generated_label', {pct}), closed: true, teamId, ringIndex};
     map.closePopup();
     const modalEl = document.getElementById('routeComposerModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -4266,7 +4273,7 @@ function openInteriorSweepForRing(ringIndex, teamId) {
     const pointsPerLane = Math.max(4, Math.floor(ringPolygonPointCount(radius) / laneCount));
     const points = annulusBoustrophedonPoints(center, innerRadius, radius, laneCount, pointsPerLane);
     const pct = [25, 50, 75, 95][ringIndex];
-    pendingRouteSeed = {points, label: t('missing_person.ring_interior_generated_label', {pct}), closed: false, teamId};
+    pendingRouteSeed = {points, label: t('missing_person.ring_interior_generated_label', {pct}), closed: false, teamId, ringIndex};
     map.closePopup();
     const modalEl = document.getElementById('routeComposerModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -4303,6 +4310,7 @@ function openDivideRingIntoSectors(ringIndex, btnEl) {
     const data = new URLSearchParams({
         csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create_area',
         geo: JSON.stringify(geo), label: t('missing_person.ring_sectors_area_label', {pct}),
+        ring_index: ringIndex,
     });
     fetch('mission-sector.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
         if (result.ok) {
@@ -4320,6 +4328,127 @@ function openDivideRingIntoSectors(ringIndex, btnEl) {
         }
     }).catch(() => { alert(t('common.send_failed')); if (btnEl) btnEl.disabled = false; });
 }
+// "Auto-assign this ring" — the smart version of openDivideRingIntoSectors()
+// above: instead of the admin manually cutting wedges, this divides the
+// ring itself, sizing each team's angular share proportionally to how many
+// members it has (a 5-person team gets ~2.5x the width of a 2-person team),
+// and for each team creates BOTH a full-disc sector (weightedWedgePolygonPoints(),
+// war-room-utils.js — same 0-to-this-ring's-radius coverage the manual tool's
+// wedges get) assigned to that team, AND a lawnmower-pattern route confined
+// to that team's wedge AND to the band between the previous ring's radius
+// and this one (annulusBoustrophedonPoints()'s new startBearingDeg/sweepDeg
+// params) — same "don't re-walk the smaller ring(s)" reasoning
+// openInteriorSweepForRing() already applies, just per-team here. Teams
+// with 0 members are skipped entirely (nothing to meaningfully assign);
+// ties in member count resolve by team creation order (missionTeamsForRoute's
+// own natural order), no extra logic needed.
+//
+// Sequential, not Promise.all: each team's sector needs the area id its own
+// create_area call just returned, and sequential-with-stop keeps a partial
+// failure legible (report which team failed and how many succeeded before
+// it, point at the Reset button above to clean up and retry) rather than
+// needing any client-side rollback — every step here already reuses fully
+// audited, notification-sending create actions, so there's nothing to roll
+// back that the server doesn't already know about.
+// var, not `async function ...` — this whole region turns out to sit
+// inside the `if (!fieldMode) { ... }` block opened way above (its real
+// closing brace is 1300+ lines down, near updateMissingPersonLocationPreview
+// — the block is far bigger than several nearby comments assume). Plain
+// `function` declarations there still end up global via legacy sloppy-mode
+// Annex B block-hoisting, which is how every other ring helper here already
+// gets away with it, but Annex B explicitly excludes async functions, so a
+// same-shape `async function` declaration stays invisible to the popup's
+// button handler outside the block. `var` sidesteps that: it hoists to the
+// enclosing script scope regardless of which block it's textually inside.
+var openAutoAssignForRing = async function(ringIndex, btnEl) {
+    if (!missingPerson || !missingPerson.subject_category) return;
+    const radii = LPB_RING_TABLE[missingPerson.subject_category];
+    if (!radii) return;
+    const radius = radii[ringIndex];
+    const innerRadius = ringIndex > 0 ? radii[ringIndex - 1] : 0;
+    const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
+    const pct = [25, 50, 75, 95][ringIndex];
+
+    const eligible = missionTeamsForRoute.filter(tm => tm.members.length > 0);
+    if (!eligible.length) {
+        alert(t('missing_person.ring_auto_assign_no_eligible_teams'));
+        return;
+    }
+
+    const totalMembers = eligible.reduce((sum, tm) => sum + tm.members.length, 0);
+    let cursor = 0;
+    const wedges = eligible.map(team => {
+        const sweepDeg = 360 * team.members.length / totalMembers;
+        const startBearingDeg = cursor;
+        cursor += sweepDeg;
+        return {team, startBearingDeg, sweepDeg};
+    });
+
+    // laneCount is band-width-driven (same formula openInteriorSweepForRing
+    // uses), shared by every team's wedge in this ring. basePointCount is
+    // the same circumference-based budget ringPolygonPointCount() already
+    // gives a full-circle sweep — each team's own share below scales it down
+    // by their wedge's fraction of the full circumference, since a narrower
+    // wedge sweeps proportionally less arc.
+    const laneCount = Math.min(4, Math.max(2, Math.round((radius - innerRadius) / 200)));
+    const basePointCount = ringPolygonPointCount(radius);
+
+    map.closePopup();
+    if (btnEl) btnEl.disabled = true;
+
+    let completedCount = 0;
+    for (const {team, startBearingDeg, sweepDeg} of wedges) {
+        const areaNumPoints = Math.max(3, Math.round(basePointCount * sweepDeg / 360));
+        const wedgeGeo = weightedWedgePolygonPoints(center, radius, startBearingDeg, sweepDeg, areaNumPoints);
+        const areaLabel = t('missing_person.ring_auto_assign_area_label', {pct, team: team.label});
+
+        const areaResult = await fetch('mission-sector.php', {method: 'POST', body: new URLSearchParams({
+            csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create_area',
+            geo: JSON.stringify(wedgeGeo), label: areaLabel, ring_index: ringIndex,
+        })}).then(r => r.json()).catch(() => ({ok: false}));
+        if (!areaResult.ok) {
+            alert(t('missing_person.ring_auto_assign_partial_failure', {team: team.label, count: completedCount}));
+            if (btnEl) btnEl.disabled = false;
+            return;
+        }
+
+        const sectorResult = await fetch('mission-sector.php', {method: 'POST', body: new URLSearchParams({
+            csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create',
+            area_id: areaResult.id, label: areaLabel, geo: JSON.stringify(wedgeGeo), team_id: team.id,
+        })}).then(r => r.json()).catch(() => ({ok: false}));
+        if (!sectorResult.ok) {
+            alert(t('missing_person.ring_auto_assign_partial_failure', {team: team.label, count: completedCount}));
+            if (btnEl) btnEl.disabled = false;
+            return;
+        }
+
+        const pointsPerLane = Math.max(4, Math.floor(basePointCount * sweepDeg / 360 / laneCount));
+        const routeWaypoints = annulusBoustrophedonPoints(center, innerRadius, radius, laneCount, pointsPerLane, startBearingDeg, sweepDeg)
+            .map(([lat, lng]) => ({lat, lng}));
+        const routeResult = await fetch('mission-route.php', {method: 'POST', body: new URLSearchParams({
+            csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create',
+            team_id: team.id, title: t('missing_person.ring_auto_assign_route_label', {pct, team: team.label}),
+            waypoints: JSON.stringify(routeWaypoints), is_closed_loop: '0', ring_index: ringIndex,
+        })}).then(r => r.json()).catch(() => ({ok: false}));
+        if (!routeResult.ok) {
+            alert(t('missing_person.ring_auto_assign_partial_failure', {team: team.label, count: completedCount}));
+            if (btnEl) btnEl.disabled = false;
+            return;
+        }
+
+        completedCount++;
+        // Each create action already returns the mission's full fresh
+        // areas/sectors/routes state (same as any other admin action would),
+        // so the last team processed leaves the client fully in sync — no
+        // separate refresh fetch needed.
+        sectorRefreshAfter(sectorResult.sectors, sectorResult.areas);
+        routes = routeResult.routes;
+        renderMyRoutes(routes);
+        if (!fieldMode) { renderRoutesAdmin(routes); renderRouteLayer(routes); }
+    }
+
+    if (btnEl) btnEl.disabled = false;
+};
 function areaDelete(id) {
     const area = areas.find(a => String(a.id) === String(id));
     if (!confirm(t('sector.area_delete_confirm', {label: area ? area.label : '', count: area ? area.sector_count : 0}))) return;
@@ -4365,6 +4494,38 @@ document.getElementById('sectorsCardDivideBtn')?.addEventListener('click', () =>
         alert(t('sector.pick_area_on_map'));
     }
 });
+// "Reset ring assignments" — bulk-undoes everything created via a ring
+// shortcut (dispatch/route/divide-into-sectors/auto-assign) across ALL 4
+// rings at once, without touching anything hand-drawn. Fires the 3
+// independent clear_ring_generated actions in parallel (unlike auto-assign
+// below, nothing here depends on another call's result) and refreshes each
+// area's own client state from its own response.
+document.getElementById('ringResetBtn')?.addEventListener('click', () => {
+    const areaCount = areas.filter(a => a.ring_index !== null && a.ring_index !== undefined).length;
+    const dispatchCount = dispatches.filter(d => d.ring_index !== null && d.ring_index !== undefined).length;
+    const routeCount = routes.filter(r => r.ring_index !== null && r.ring_index !== undefined && r.status === 'active').length;
+    if (!confirm(t('missing_person.ring_reset_confirm', {areas: areaCount, dispatches: dispatchCount, routes: routeCount}))) return;
+    const btn = document.getElementById('ringResetBtn');
+    btn.disabled = true;
+    Promise.all([
+        fetch('mission-sector.php', {method: 'POST', body: new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_ring_generated'})}).then(r => r.json()),
+        fetch('mission-dispatch.php', {method: 'POST', body: new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_ring_generated'})}).then(r => r.json()),
+        fetch('mission-route.php', {method: 'POST', body: new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_ring_generated'})}).then(r => r.json()),
+    ]).then(([sectorResult, dispatchResult, routeResult]) => {
+        btn.disabled = false;
+        if (map) map.closePopup();
+        if (sectorResult.ok) sectorRefreshAfter(sectorResult.sectors, sectorResult.areas);
+        if (dispatchResult.ok && dispatchResult.dispatches) renderDispatches(dispatches = dispatchResult.dispatches);
+        if (routeResult.ok && routeResult.routes) {
+            routes = routeResult.routes;
+            renderMyRoutes(routes);
+            if (!fieldMode) { renderRoutesAdmin(routes); renderRouteLayer(routes); }
+        }
+        const failed = [sectorResult, dispatchResult, routeResult].find(r => !r.ok);
+        if (failed) alert(failed.error || t('common.send_failed'));
+    }).catch(() => { btn.disabled = false; alert(t('common.send_failed')); });
+});
+
 document.getElementById('sectorsCardClearAllBtn')?.addEventListener('click', () => {
     const sectorTotal = areas.reduce((sum, a) => sum + a.sector_count, 0);
     if (!confirm(t('sector.clear_all_confirm', {areas: areas.length, sectors: sectorTotal}))) return;
@@ -7204,6 +7365,10 @@ function renderSearchRingsLayer(item) {
     const strokeOpacity = [0.9, 0.7, 0.5, 0.35];
     const layersByIndex = {};
     if (openRingLayer) layersByIndex[openRingIndex] = openRingLayer;
+    // Same across all 4 rings for a given render pass — computed once here
+    // rather than inside the loop below. Gates the Auto-assign button:
+    // nothing meaningful to divide up if no team has anyone on it yet.
+    const eligibleTeamCount = missionTeamsForRoute.filter(tm => tm.members.length > 0).length;
 
     // Largest first so smaller rings paint on top — hovering/clicking inside
     // the 25% ring must resolve to the 25% ring's own tooltip/popup, not the
@@ -7234,6 +7399,7 @@ function renderSearchRingsLayer(item) {
                     <button type="button" class="btn btn-sm btn-outline-primary ring-route-btn" data-ring-index="${i}" disabled>${t('missing_person.ring_route_btn')}</button>
                     <button type="button" class="btn btn-sm btn-outline-primary ring-interior-sweep-btn" data-ring-index="${i}" disabled>${t('missing_person.ring_interior_sweep_btn')}</button>
                     <button type="button" class="btn btn-sm btn-outline-primary ring-divide-sectors-btn" data-ring-index="${i}">${t('missing_person.ring_divide_sectors_btn')}</button>
+                    <button type="button" class="btn btn-sm btn-outline-success ring-auto-assign-btn" data-ring-index="${i}" ${eligibleTeamCount ? '' : 'disabled'}>${t('missing_person.ring_auto_assign_btn')}</button>
                 </div>
             </div>`
             : '';
@@ -7299,6 +7465,12 @@ searchRingsLayer?.on('popupopen', event => {
     // itself (openDivideRingIntoSectors(), further up this file).
     const divideSectorsBtn = popupEl.querySelector('.ring-divide-sectors-btn');
     if (divideSectorsBtn) divideSectorsBtn.addEventListener('click', () => { openDivideRingIntoSectors(parseInt(divideSectorsBtn.dataset.ringIndex, 10), divideSectorsBtn); });
+    // Same "no optimistic close" reasoning as Divide into Sectors above —
+    // this one makes several round trips (one team at a time), so the popup
+    // only closes once openAutoAssignForRing() itself confirms the first
+    // step succeeded.
+    const autoAssignBtn = popupEl.querySelector('.ring-auto-assign-btn');
+    if (autoAssignBtn) autoAssignBtn.addEventListener('click', () => { openAutoAssignForRing(parseInt(autoAssignBtn.dataset.ringIndex, 10), autoAssignBtn); });
 });
 
 // Updates only the read-only #missingPersonDisplay block — never touches the
@@ -9678,6 +9850,12 @@ document.querySelectorAll('.team-form').forEach(form => {
     let shapeLayer = null;
     let isClosed = false;
     let lastAddressLabel = '';
+    // Set from pendingDispatchSeed.ringIndex when opened via a ring shortcut
+    // (openDispatchForRing(), !fieldMode block), null for the normal "New
+    // Dispatch" sidebar-card flow — sent as-is either way so a hand-drawn
+    // dispatch correctly gets no ring_index. Reset in hidden.bs.modal, same
+    // one-shot lifetime as the seed it came from.
+    let pendingRingIndex = null;
 
     // Dimmed, read-only copy of what the live map currently shows (volunteer
     // pings + existing dispatch points/areas) so the admin isn't drawing a
@@ -9790,6 +9968,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             // already uses at send time — no other change needed for the
             // send handler to pick it up correctly.
             if (pendingDispatchSeed.teamId) teamSelect.value = pendingDispatchSeed.teamId;
+            pendingRingIndex = pendingDispatchSeed.ringIndex ?? null;
             if (drawPoints.length) dispatchMap.fitBounds(L.latLngBounds(drawPoints), {padding: [30, 30]});
             pendingDispatchSeed = null;
         }
@@ -9803,6 +9982,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         lastAddressLabel = '';
         coordsInput.value = '';
         noteInput.value = '';
+        pendingRingIndex = null;
     });
 
     clearBtn.addEventListener('click', resetDrawing);
@@ -9830,6 +10010,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         const data = new URLSearchParams({
             csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
             team_id: teamSelect.value, type: type, geo: JSON.stringify(geo), label: combinedLabel,
+            ring_index: pendingRingIndex ?? '',
         });
         sendBtn.disabled = true;
         fetch('mission-dispatch.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
@@ -11153,6 +11334,12 @@ let routeMap = null, routeMarkers = [], routeLine = null;
 // a *new* annotation from here, only see the ones already on the live map.
 let routeComposerPinLayer = null, routeComposerAnnotationLayer = null, routeComposerAreasLayer = null;
 let routeComposerPinsRenderedSig = null;
+// Set from pendingRouteSeed.ringIndex when opened via a ring shortcut
+// (openRouteForRing()/openInteriorSweepForRing(), !fieldMode block), null
+// for the normal "New Route" sidebar-card flow — sent as-is either way so a
+// hand-drawn route correctly gets no ring_index. Reset in hidden.bs.modal,
+// same one-shot lifetime as the seed it came from.
+let pendingRouteRingIndex = null;
 
 function updateRouteSendState() {
     const sendBtn = document.getElementById('routeSendBtn');
@@ -11530,6 +11717,7 @@ function renderWaypointPanel() {
                 teamSelect.value = pendingRouteSeed.teamId;
                 teamSelect.dispatchEvent(new Event('change'));
             }
+            pendingRouteRingIndex = pendingRouteSeed.ringIndex ?? null;
             if (routeWaypoints.length) routeMap.fitBounds(L.latLngBounds(routeWaypoints.map(wp => [wp.lat, wp.lng])), {padding: [30, 30]});
             pendingRouteSeed = null;
         }
@@ -11542,6 +11730,7 @@ function renderWaypointPanel() {
         addressInput.value = '';
         addressStatus.textContent = '';
         coordsInput.value = '';
+        pendingRouteRingIndex = null;
     });
 
     clearBtn.addEventListener('click', resetRouteComposer);
@@ -11583,6 +11772,7 @@ function renderWaypointPanel() {
             team_id: teamSelect.value, title: titleInput.value.trim(), waypoints: JSON.stringify(payload),
             is_closed_loop: routeClosed ? '1' : '0', member_ids: JSON.stringify(memberIds),
             add_return_waypoint: document.getElementById('routeReturnToStartCheck').checked ? '1' : '0',
+            ring_index: pendingRouteRingIndex ?? '',
         });
         sendBtn.disabled = true;
         fetch('mission-route.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {

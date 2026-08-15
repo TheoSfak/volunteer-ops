@@ -332,11 +332,22 @@ if ($action === 'create_area') {
     }
     $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
 
+    // 0-3, matching LPB_RING_TABLE's own [25,50,75,95] index — set only by
+    // the war-room.php ring shortcuts (openDivideRingIntoSectors(),
+    // openAutoAssignForRing()), null for a hand-drawn area. Backs the
+    // "reset ring assignments" bulk-clear (see clear_ring_generated below).
+    $ringIndexRaw = post('ring_index');
+    $ringIndex = ($ringIndexRaw !== '' && $ringIndexRaw !== null) ? (int) $ringIndexRaw : null;
+    if ($ringIndex !== null && ($ringIndex < 0 || $ringIndex > 3)) {
+        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+        exit;
+    }
+
     $areaId = dbInsert(
-        "INSERT INTO mission_search_areas (mission_id, label, geo, created_by, created_at) VALUES (?, ?, ?, ?, NOW())",
-        [$missionId, $label, json_encode($geo), $userId]
+        "INSERT INTO mission_search_areas (mission_id, label, geo, ring_index, created_by, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
+        [$missionId, $label, json_encode($geo), $ringIndex, $userId]
     );
-    logAudit('create_mission_search_area', 'mission_search_areas', $areaId, null, ['mission_id' => $missionId]);
+    logAudit('create_mission_search_area', 'mission_search_areas', $areaId, null, ['mission_id' => $missionId, 'ring_index' => $ringIndex]);
 
     echo json_encode(['ok' => true, 'id' => (int) $areaId] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
@@ -525,6 +536,24 @@ if ($action === 'clear_all_areas') {
         'mission_id' => $missionId, 'area_count' => $areaCount, 'sector_count' => $sectorCount,
     ]);
     echo json_encode(['ok' => true]);
+    exit;
+}
+
+// Part of the "reset ring assignments" button on the missing-person card
+// (war-room.php) — exact mirror of clear_all_areas above, just scoped to
+// ring-generated areas only. area_id is ON DELETE CASCADE, so deleting a
+// ring-origin area already removes its sectors too.
+if ($action === 'clear_ring_generated') {
+    $areaCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_search_areas WHERE mission_id = ? AND ring_index IS NOT NULL", [$missionId]);
+    $sectorCount = (int) dbFetchValue(
+        "SELECT COUNT(*) FROM mission_search_sectors s JOIN mission_search_areas a ON a.id = s.area_id WHERE a.mission_id = ? AND a.ring_index IS NOT NULL",
+        [$missionId]
+    );
+    dbExecute("DELETE FROM mission_search_areas WHERE mission_id = ? AND ring_index IS NOT NULL", [$missionId]);
+    logAudit('clear_ring_generated_mission_search_areas', 'mission_search_areas', null, null, [
+        'mission_id' => $missionId, 'area_count' => $areaCount, 'sector_count' => $sectorCount,
+    ]);
+    echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 

@@ -238,6 +238,17 @@ if ($action === 'create') {
         }
     }
 
+    // 0-3, matching LPB_RING_TABLE's own [25,50,75,95] index — set only by
+    // the war-room.php ring shortcuts, null for a hand-drawn route. Backs
+    // the "reset ring assignments" bulk-clear (see the clear_ring_generated
+    // action further down).
+    $ringIndexRaw = post('ring_index');
+    $ringIndex = ($ringIndexRaw !== '' && $ringIndexRaw !== null) ? (int) $ringIndexRaw : null;
+    if ($ringIndex !== null && ($ringIndex < 0 || $ringIndex > 3)) {
+        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+        exit;
+    }
+
     $title = trim((string) post('title'));
     $title = $title !== '' ? mb_substr($title, 0, 255) : null;
 
@@ -375,8 +386,8 @@ if ($action === 'create') {
     $isClosedLoop = (post('is_closed_loop') === '1' && count($waypoints) >= 3) ? 1 : 0;
 
     $routeId = dbInsert(
-        "INSERT INTO mission_routes (mission_id, team_id, title, is_closed_loop, created_by, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
-        [$missionId, $teamId, $title, $isClosedLoop, $userId]
+        "INSERT INTO mission_routes (mission_id, team_id, title, is_closed_loop, ring_index, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $teamId, $title, $isClosedLoop, $ringIndex, $userId]
     );
     foreach ($recipientIds as $memberId) {
         dbInsert("INSERT INTO mission_route_members (route_id, user_id, added_at) VALUES (?, ?, NOW())", [$routeId, $memberId]);
@@ -409,7 +420,7 @@ if ($action === 'create') {
         $seq++;
     }
 
-    logAudit('create_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'member_ids' => $recipientIds, 'waypoints' => count($waypoints)]);
+    logAudit('create_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'member_ids' => $recipientIds, 'waypoints' => count($waypoints), 'ring_index' => $ringIndex]);
 
     echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
     exit;
@@ -445,6 +456,38 @@ if ($action === 'cancel') {
     notifyRouteTeam($missionId, $routeId, $userId, 'mission_route_cancelled', 'route.notify_cancelled_title', [], 'route.notify_cancelled_message', ['mission' => $mission['title']]);
     logAudit('cancel_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $missionId, 'reason' => $reason]);
 
+    echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
+    exit;
+}
+
+// Part of the "reset ring assignments" button on the missing-person card
+// (war-room.php). Cancels rather than deletes — this file has no delete
+// precedent for a route anywhere (only the single-route cancel() above),
+// and a hard delete would orphan mission_orders/mission_order_recipients
+// rows a route's creation produces; cancelling reaches the same "gone from
+// the live map" result loadRoutesForUser()/renderRoutesReference() already
+// give a cancelled route, via the exact same per-route steps cancel() above
+// takes, just looped. Only ever touches routes with a real ring_index still
+// open (not already cancelled/completed), so a hand-drawn or already-closed
+// route is never at risk here.
+if ($action === 'clear_ring_generated') {
+    if (!$canManageWarRoom) {
+        echo json_encode(['ok' => false, 'error' => t('dispatch.no_manage_permission')]);
+        exit;
+    }
+    $rows = dbFetchAll(
+        "SELECT id, order_id FROM mission_routes WHERE mission_id = ? AND ring_index IS NOT NULL AND cancelled_at IS NULL AND completed_at IS NULL",
+        [$missionId]
+    );
+    $reason = t('missing_person.ring_reset_cancel_reason');
+    foreach ($rows as $route) {
+        dbExecute("UPDATE mission_routes SET cancelled_at = NOW(), cancelled_by = ?, cancel_reason = ? WHERE id = ?", [$userId, $reason, $route['id']]);
+        if ($route['order_id']) {
+            dbExecute("UPDATE mission_order_recipients SET fulfilled_at = NOW() WHERE order_id = ? AND fulfilled_at IS NULL", [$route['order_id']]);
+        }
+        notifyRouteTeam($missionId, (int) $route['id'], $userId, 'mission_route_cancelled', 'route.notify_cancelled_title', [], 'route.notify_cancelled_message', ['mission' => $mission['title']]);
+    }
+    logAudit('clear_ring_generated_mission_routes', 'mission_routes', null, null, ['mission_id' => $missionId, 'count' => count($rows)]);
     echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
     exit;
 }

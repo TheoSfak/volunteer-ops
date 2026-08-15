@@ -82,7 +82,20 @@ function circleToPolygonPoints(center, radiusMeters, numPoints) {
 // laneCount/pointsPerLane are required, not defaulted — same "caller sizes
 // it from the actual geometry" convention as circleToPolygonPoints()'s
 // numPoints (see war-room.php's caller for how they're chosen).
-function annulusBoustrophedonPoints(center, innerRadiusMeters, outerRadiusMeters, laneCount, pointsPerLane) {
+//
+// startBearingDeg/sweepDeg (optional, default the original full circle)
+// confine every lane to an angular slice instead of the whole 360° — used
+// by openAutoAssignForRing() (war-room.php) to keep an auto-generated
+// team's lawnmower route inside that team's own wedge of the ring, not the
+// whole thing. Substituting startBearingDeg + sweepDeg*t for 360*t (and the
+// reversed lane's 360*(1-t) the same way) is a strict generalization: at
+// the defaults (0, 360) every expression reduces back to the original, so
+// openInteriorSweepForRing()'s existing 5-argument calls are unaffected.
+// The lane-to-lane "radial hop, not a diagonal cut" property is preserved
+// at both ends the same way — a forward lane ends at t=1 (bearing
+// startBearingDeg+sweepDeg), the next, reversed lane starts at t=0 with the
+// same (1-t) substitution, landing on that identical bearing.
+function annulusBoustrophedonPoints(center, innerRadiusMeters, outerRadiusMeters, laneCount, pointsPerLane, startBearingDeg = 0, sweepDeg = 360) {
     const points = [];
     const bandWidth = outerRadiusMeters - innerRadiusMeters;
     for (let lane = 0; lane < laneCount; lane++) {
@@ -90,11 +103,38 @@ function annulusBoustrophedonPoints(center, innerRadiusMeters, outerRadiusMeters
         const reverse = lane % 2 === 1;
         for (let i = 0; i < pointsPerLane; i++) {
             const t = pointsPerLane === 1 ? 0 : i / (pointsPerLane - 1);
-            const pt = destinationPoint(center, reverse ? 360 * (1 - t) : 360 * t, radius);
+            const bearingDeg = startBearingDeg + sweepDeg * (reverse ? (1 - t) : t);
+            const pt = destinationPoint(center, bearingDeg, radius);
             points.push([pt.lat, pt.lng]);
         }
     }
     return points;
+}
+
+// One angular wedge of an LPB ring's full disc (center to this ring's own
+// radius, matching what the manual divide-into-sectors tool's wedges
+// cover) — center, then numPoints boundary points evenly spaced INCLUSIVE
+// of both startBearingDeg and startBearingDeg+sweepDeg. Used directly as a
+// finished mission_search_areas polygon by openAutoAssignForRing()
+// (war-room.php), not fed into the interactive chord-cutting tool, so —
+// unlike ringDiscPolygonPoints() above — it needs no duplicated seam point.
+// That function's seam issue comes from circleToPolygonPoints() sampling
+// EXCLUSIVE of the wrap-around point (bearing 360 is never reached); here
+// sampling is inclusive of both endpoints by construction, so the last
+// boundary point genuinely IS the wedge's far edge, and the polygon's
+// implicit closing edge (last vertex -> center) is the wedge's own second
+// radial edge, not a shortcut that discards area. Holds even at
+// sweepDeg=360 (a single team gets the whole ring): the first and last
+// boundary points land on the same physical bearing, naturally closing the
+// disc the same way ringDiscPolygonPoints()'s explicit duplicate does.
+function weightedWedgePolygonPoints(center, radiusMeters, startBearingDeg, sweepDeg, numPoints) {
+    const boundary = [];
+    for (let i = 0; i < numPoints; i++) {
+        const bearingDeg = startBearingDeg + sweepDeg * i / (numPoints - 1);
+        const pt = destinationPoint(center, bearingDeg, radiusMeters);
+        boundary.push([pt.lat, pt.lng]);
+    }
+    return [[center.lat, center.lng], ...boundary];
 }
 
 // Builds a mission_search_areas-shaped geo array (a flat [[lat,lng],...]
@@ -219,6 +259,7 @@ if (typeof module !== 'undefined' && module.exports) {
         circleToPolygonPoints,
         annulusBoustrophedonPoints,
         ringDiscPolygonPoints,
+        weightedWedgePolygonPoints,
         escapeHtml,
         parseCoordsInput,
         formatDistanceMeters,

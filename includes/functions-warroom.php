@@ -94,7 +94,7 @@ function flagHtml(?string $countryCode): string {
  */
 function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
     $rows = dbFetchAll(
-        "SELECT d.id, d.team_id, d.type, d.geo, d.label, mt.codename, mt.team_number, mt.color
+        "SELECT d.id, d.team_id, d.type, d.geo, d.label, d.ring_index, mt.codename, mt.team_number, mt.color
          FROM mission_dispatch_points d
          LEFT JOIN mission_teams mt ON mt.id = d.team_id
          WHERE d.mission_id = ?
@@ -183,6 +183,7 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'geo'         => $geo,
             'eta'         => $eta,
             'label'       => $row['label'],
+            'ring_index'  => $row['ring_index'] !== null ? (int) $row['ring_index'] : null,
             'team_label'  => $teamId ? teamLabel($row['codename'], $row['team_number']) : t('common.all_teams'),
             'team_color_bg' => $teamColorBg,
             'team_color_fg' => $teamColorFg,
@@ -212,7 +213,7 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
  */
 function loadMissionSearchAreasForUser(int $missionId, bool $canManageWarRoom): array {
     $rows = dbFetchAll(
-        "SELECT a.id, a.label, a.geo, a.created_at, cu.name AS created_by_name
+        "SELECT a.id, a.label, a.geo, a.ring_index, a.created_at, cu.name AS created_by_name
          FROM mission_search_areas a
          LEFT JOIN users cu ON cu.id = a.created_by
          WHERE a.mission_id = ?
@@ -245,6 +246,7 @@ function loadMissionSearchAreasForUser(int $missionId, bool $canManageWarRoom): 
             'id'              => $areaId,
             'label'           => $row['label'],
             'geo'             => json_decode($row['geo'], true),
+            'ring_index'      => $row['ring_index'] !== null ? (int) $row['ring_index'] : null,
             'sector_count'    => $rollup['total'],
             'completed_count' => $rollup['completed_count'],
             'can_manage'      => $canManageWarRoom,
@@ -471,7 +473,7 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
     }
 
     $routes = dbFetchAll(
-        "SELECT r.id, r.team_id, r.order_id, r.title, r.is_closed_loop, r.created_at, r.completed_at, r.cancelled_at, r.cancel_reason,
+        "SELECT r.id, r.team_id, r.order_id, r.title, r.is_closed_loop, r.ring_index, r.created_at, r.completed_at, r.cancelled_at, r.cancel_reason,
                 mt.codename, mt.team_number, mt.color, cu.name AS created_by_name
          FROM mission_routes r
          LEFT JOIN mission_teams mt ON mt.id = r.team_id
@@ -636,6 +638,7 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
             'team_color_fg'         => $teamColorFg,
             'title'                 => $r['title'],
             'is_closed_loop'        => (bool) $r['is_closed_loop'],
+            'ring_index'            => $r['ring_index'] !== null ? (int) $r['ring_index'] : null,
             'status'                => $r['cancelled_at'] ? 'cancelled' : ($r['completed_at'] ? 'completed' : 'active'),
             'created_at_display'    => date('d/m H:i', strtotime($r['created_at'])),
             'created_by_name'       => $r['created_by_name'],
