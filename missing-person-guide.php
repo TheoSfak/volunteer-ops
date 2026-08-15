@@ -2,7 +2,8 @@
 /**
  * VolunteerOps - Missing Person Search Guide
  * Standalone bilingual explainer (viewer's own language, via t()) for the
- * missing-person-specific Action Room tools — LPB search rings, exposure
+ * missing-person-specific Action Room tools — LPB search rings, the sector-
+ * search pattern those rings' auto-generated routes follow, exposure
  * urgency, weather compass — plus general search rules. Linked from the
  * missing-person card's header (war-room.php, missingPersonCard). Own
  * doctype, no shared header.php/sidebar, same structural shape as
@@ -117,6 +118,13 @@ function formatKmForGuide(int $meters, string $lang): string {
         </table>
 
         <div class="guide-caveat"><i class="bi bi-exclamation-triangle me-1"></i> <?= t('guide.rings_caveat') ?></div>
+    </div>
+
+    <div class="guide-card">
+        <h2><i class="bi bi-diagram-3 me-1"></i> <?= t('guide.sector_search_section_title') ?></h2>
+        <p><?= t('guide.sector_search_explainer') ?></p>
+        <p><?= t('guide.sector_search_why') ?></p>
+        <div class="guide-caveat"><i class="bi bi-exclamation-triangle me-1"></i> <?= t('guide.sector_search_caveat') ?></div>
     </div>
 
     <div class="guide-card">

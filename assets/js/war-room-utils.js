@@ -64,51 +64,67 @@ function circleToPolygonPoints(center, radiusMeters, numPoints) {
     return points;
 }
 
-// Concentric-arc "boustrophedon" (lawnmower) sweep confined to the annulus
-// between innerRadiusMeters and outerRadiusMeters — an interior-sweep
-// pattern (as opposed to circleToPolygonPoints()'s boundary-only trace) that
-// stays inside its own ring's band. Traces laneCount full loops at evenly
-// stepped radii — the innermost stepped in from innerRadiusMeters, the
-// outermost landing exactly on outerRadiusMeters — alternating direction so
-// consecutive lanes meet at the same bearing (a radial step out, not a jump
-// across the annulus). Replaces an earlier center-to-edge spiral: a spiral
-// always starts at radius 0 regardless of which ring it's sweeping, so for
-// every ring past the first it re-walked ground already assigned to the
-// smaller ring(s) inside it. Starting laps at innerRadiusMeters instead
-// fixes that by construction — this never dips inside the previous ring's
-// own outer boundary. Mirrors the standard ground-SAR parallel-track
-// technique (lanes spaced apart, walked end-to-end) adapted to polar
-// coordinates, since a ring's search area is an annulus, not a rectangle.
-// laneCount/pointsPerLane are required, not defaulted — same "caller sizes
-// it from the actual geometry" convention as circleToPolygonPoints()'s
-// numPoints (see war-room.php's caller for how they're chosen).
+// Sector search — straight radial legs from a ring's inner boundary to its
+// outer boundary, stepping to the next bearing and back, like spokes on a
+// wheel. This is the actual SAR-doctrine pattern for searching a circular
+// area radiating from a KNOWN datum point (IAMSAR/NASAR "sector search",
+// the maritime "Victor Sierra" pattern: search unit travels straight out
+// from center, turns, travels back in, turns again — recommended
+// specifically when the target's position is known with reasonable
+// confidence, which is exactly what an LPB percentage ring already is: a
+// probability contour computed FROM a known last-seen point, not a vague
+// search box). Two earlier attempts at this function got the shape wrong
+// by not grounding it in that doctrine first: concentric arcs at fixed
+// radius (confirmed live to read as scattered, disconnected numbers rather
+// than a path) and, before that was even shipped, a from-scratch Cartesian
+// zigzag that would have needed real line-vs-circle/wedge clipping to
+// avoid re-walking a smaller inner ring's ground. Radial legs need none of
+// that clipping — a leg is BY CONSTRUCTION already confined between
+// innerRadiusMeters and outerRadiusMeters (it's defined as going from one
+// to the other) and, for a wedge, already confined to
+// [startBearingDeg, startBearingDeg+sweepDeg] (legs are only ever placed at
+// bearings inside that range) — so both constraints hold for free, no
+// intersection math required.
 //
-// startBearingDeg/sweepDeg (optional, default the original full circle)
-// confine every lane to an angular slice instead of the whole 360° — used
-// by openAutoAssignForRing() (war-room.php) to keep an auto-generated
-// team's lawnmower route inside that team's own wedge of the ring, not the
-// whole thing. Substituting startBearingDeg + sweepDeg*t for 360*t (and the
-// reversed lane's 360*(1-t) the same way) is a strict generalization: at
-// the defaults (0, 360) every expression reduces back to the original, so
-// openInteriorSweepForRing()'s existing 5-argument calls are unaffected.
-// The lane-to-lane "radial hop, not a diagonal cut" property is preserved
-// at both ends the same way — a forward lane ends at t=1 (bearing
-// startBearingDeg+sweepDeg), the next, reversed lane starts at t=0 with the
-// same (1-t) substitution, landing on that identical bearing.
-function annulusBoustrophedonPoints(center, innerRadiusMeters, outerRadiusMeters, laneCount, pointsPerLane, startBearingDeg = 0, sweepDeg = 360) {
+// Only 2 points per leg: a leg is a straight radial line, not a curve, so
+// there's nothing to approximate — unlike the old arcs, which needed
+// several points each just to look round. Legs alternate direction
+// (in→out, then out→in) so consecutive legs meet at whichever radius they
+// share, keeping the connecting "step" short instead of a diagonal cut
+// across the whole band.
+//
+// startBearingDeg/sweepDeg default to a full circle. sweepDeg >= 360 uses
+// EXCLUSIVE angular spacing (legCount legs spread sweepDeg/legCount apart)
+// so the last leg doesn't land back on the same bearing as the first —
+// circleToPolygonPoints()'s own convention, for the same reason. A
+// narrower wedge instead spaces INCLUSIVE of both edges (legCount==1 skips
+// the division) — weightedWedgePolygonPoints()'s convention — so a team's
+// route actually reaches both edges of their assigned wedge, not stopping
+// short of it.
+function sectorSearchLegPoints(center, innerRadiusMeters, outerRadiusMeters, legCount, startBearingDeg = 0, sweepDeg = 360) {
     const points = [];
-    const bandWidth = outerRadiusMeters - innerRadiusMeters;
-    for (let lane = 0; lane < laneCount; lane++) {
-        const radius = innerRadiusMeters + bandWidth * (lane + 1) / laneCount;
-        const reverse = lane % 2 === 1;
-        for (let i = 0; i < pointsPerLane; i++) {
-            const t = pointsPerLane === 1 ? 0 : i / (pointsPerLane - 1);
-            const bearingDeg = startBearingDeg + sweepDeg * (reverse ? (1 - t) : t);
-            const pt = destinationPoint(center, bearingDeg, radius);
-            points.push([pt.lat, pt.lng]);
-        }
+    const isFullCircle = sweepDeg >= 360;
+    for (let leg = 0; leg < legCount; leg++) {
+        const t = isFullCircle ? leg / legCount : (legCount === 1 ? 0 : leg / (legCount - 1));
+        const bearingDeg = startBearingDeg + sweepDeg * t;
+        const reverse = leg % 2 === 1;
+        const nearRadius = reverse ? outerRadiusMeters : innerRadiusMeters;
+        const farRadius = reverse ? innerRadiusMeters : outerRadiusMeters;
+        const near = destinationPoint(center, bearingDeg, nearRadius);
+        const far = destinationPoint(center, bearingDeg, farRadius);
+        points.push([near.lat, near.lng], [far.lat, far.lng]);
     }
     return points;
+}
+// How many radial legs sectorSearchLegPoints() above should use, given how
+// many degrees the sweep covers. Doctrine's own minimum for a full circle
+// is 3 legs at 120° apart (the classic Victor Sierra pattern); this targets
+// a finer 45° step (8 legs for a full circle) since these are walking
+// teams, not aircraft, but keeps that same floor of 3 so even a narrow
+// auto-assign wedge gets a real sector-search shape, not a single there-
+// and-back line.
+function sectorSearchLegCount(sweepDeg) {
+    return Math.max(3, Math.round(sweepDeg / 45));
 }
 
 // One angular wedge of an LPB ring's full disc (center to this ring's own
@@ -257,7 +273,8 @@ if (typeof module !== 'undefined' && module.exports) {
         bearing,
         destinationPoint,
         circleToPolygonPoints,
-        annulusBoustrophedonPoints,
+        sectorSearchLegPoints,
+        sectorSearchLegCount,
         ringDiscPolygonPoints,
         weightedWedgePolygonPoints,
         escapeHtml,

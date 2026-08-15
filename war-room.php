@@ -4246,20 +4246,20 @@ function openRouteForRing(ringIndex, teamId) {
     const modalEl = document.getElementById('routeComposerModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
-// "Sweep this ring's band" — seeds the route composer with a concentric-arc
-// boustrophedon (annulusBoustrophedonPoints(), war-room-utils.js) confined
-// between the previous ring's radius (0 for the first ring) and this ring's
-// own radius, instead of openRouteForRing()'s boundary-only trace above.
-// Deliberately NOT a center-to-edge spiral: that always starts at radius 0
-// no matter which ring it's sweeping, so for ring 2/3/4 it would re-walk
-// ground already assigned to the smaller ring(s) inside it. laneCount
-// targets one lane roughly every 200m of band width (illustrative default —
-// real lane spacing should track effective sweep width for the actual
-// terrain, same "needs SAR review" caveat LPB_RING_TABLE itself carries,
-// includes/lpb-rings.php), clamped to [2, 4] so a wide outer ring's lanes
-// still leave room for a reasonable points-per-lane density under mission-
-// route.php's 30-waypoint cap; pointsPerLane splits ringPolygonPointCount()'s
-// own circumference-based budget for this ring's radius across the lanes.
+// "Sweep this ring's band" — seeds the route composer with a sector-search
+// pattern (sectorSearchLegPoints(), war-room-utils.js): straight radial legs
+// from the previous ring's radius (0 for the first ring) out to this ring's
+// own radius, stepping to the next bearing and back, like spokes on a
+// wheel. This is the actual SAR-doctrine pattern for a circular area
+// radiating from a known datum — an LPB ring IS exactly that, a probability
+// contour computed from a known last-seen point — not a homegrown pattern;
+// see sectorSearchLegPoints()'s own comment for the full reasoning and an
+// earlier concentric-arc attempt that read as scattered numbers rather than
+// a path (confirmed live) because it wasn't grounded in that doctrine.
+// Deliberately NOT a center-to-edge spiral either: that always starts at
+// radius 0 no matter which ring it's sweeping, so for ring 2/3/4 it would
+// re-walk ground already assigned to the smaller ring(s) inside it — legs
+// confined to [innerRadius, radius] can't do that by construction.
 // Open path, not a loop, same as before — ends out at the radius with
 // nothing sensible to close back to, unlike the perimeter trace.
 function openInteriorSweepForRing(ringIndex, teamId) {
@@ -4269,9 +4269,8 @@ function openInteriorSweepForRing(ringIndex, teamId) {
     const innerRadius = ringIndex > 0 ? radii[ringIndex - 1] : 0;
     const radius = radii[ringIndex];
     const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
-    const laneCount = Math.min(4, Math.max(2, Math.round((radius - innerRadius) / 200)));
-    const pointsPerLane = Math.max(4, Math.floor(ringPolygonPointCount(radius) / laneCount));
-    const points = annulusBoustrophedonPoints(center, innerRadius, radius, laneCount, pointsPerLane);
+    const legCount = sectorSearchLegCount(360);
+    const points = sectorSearchLegPoints(center, innerRadius, radius, legCount);
     const pct = [25, 50, 75, 95][ringIndex];
     pendingRouteSeed = {points, label: t('missing_person.ring_interior_generated_label', {pct}), closed: false, teamId, ringIndex};
     map.closePopup();
@@ -4334,11 +4333,11 @@ function openDivideRingIntoSectors(ringIndex, btnEl) {
 // members it has (a 5-person team gets ~2.5x the width of a 2-person team),
 // and for each team creates BOTH a full-disc sector (weightedWedgePolygonPoints(),
 // war-room-utils.js — same 0-to-this-ring's-radius coverage the manual tool's
-// wedges get) assigned to that team, AND a lawnmower-pattern route confined
-// to that team's wedge AND to the band between the previous ring's radius
-// and this one (annulusBoustrophedonPoints()'s new startBearingDeg/sweepDeg
-// params) — same "don't re-walk the smaller ring(s)" reasoning
-// openInteriorSweepForRing() already applies, just per-team here. Teams
+// wedges get) assigned to that team, AND a sector-search route
+// (sectorSearchLegPoints(), war-room-utils.js) confined to that team's wedge
+// AND to the band between the previous ring's radius and this one — same
+// "don't re-walk the smaller ring(s)" reasoning openInteriorSweepForRing()
+// already applies, just per-team here. Teams
 // with 0 members are skipped entirely (nothing to meaningfully assign);
 // ties in member count resolve by team creation order (missionTeamsForRoute's
 // own natural order), no extra logic needed.
@@ -4384,13 +4383,13 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
         return {team, startBearingDeg, sweepDeg};
     });
 
-    // laneCount is band-width-driven (same formula openInteriorSweepForRing
-    // uses), shared by every team's wedge in this ring. basePointCount is
-    // the same circumference-based budget ringPolygonPointCount() already
-    // gives a full-circle sweep — each team's own share below scales it down
-    // by their wedge's fraction of the full circumference, since a narrower
-    // wedge sweeps proportionally less arc.
-    const laneCount = Math.min(4, Math.max(2, Math.round((radius - innerRadius) / 200)));
+    // basePointCount is the circumference-based budget ringPolygonPointCount()
+    // gives a full-circle sweep, scaled down per team's wedge share below —
+    // used only for areaNumPoints (the wedge's own AREA boundary, a real
+    // polygon trace that benefits from that density). The ROUTE's own leg
+    // count, further down, is unrelated — see sectorSearchLegPoints()'s own
+    // comment (war-room-utils.js) for why this uses SAR sector-search
+    // doctrine (radial legs from the ring's inner to outer radius) instead.
     const basePointCount = ringPolygonPointCount(radius);
 
     map.closePopup();
@@ -4422,8 +4421,8 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
             return;
         }
 
-        const pointsPerLane = Math.max(4, Math.floor(basePointCount * sweepDeg / 360 / laneCount));
-        const routeWaypoints = annulusBoustrophedonPoints(center, innerRadius, radius, laneCount, pointsPerLane, startBearingDeg, sweepDeg)
+        const legCount = sectorSearchLegCount(sweepDeg);
+        const routeWaypoints = sectorSearchLegPoints(center, innerRadius, radius, legCount, startBearingDeg, sweepDeg)
             .map(([lat, lng]) => ({lat, lng}));
         const routeResult = await fetch('mission-route.php', {method: 'POST', body: new URLSearchParams({
             csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create',
