@@ -1904,6 +1904,11 @@ CREATE TABLE IF NOT EXISTS `mission_dispatch_points` (
     INDEX `idx_dispatch_mission` (`mission_id`, `team_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ring_index: added post-launch (migration v135) — which LPB search ring
+-- (0=25%,1=50%,2=75%,3=95%) this dispatch was generated from, NULL for
+-- hand-drawn. Backs the "reset ring assignments" bulk-clear.
+ALTER TABLE `mission_dispatch_points` ADD COLUMN `ring_index` TINYINT UNSIGNED NULL AFTER `team_id`;
+
 -- =============================================
 -- DISPATCH ETA CACHE (Live ETA for a team travelling to a dispatch point)
 -- =============================================
@@ -2034,6 +2039,10 @@ CREATE TABLE IF NOT EXISTS `mission_routes` (
     FOREIGN KEY (`cancelled_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     INDEX `idx_route_mission` (`mission_id`, `team_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ring_index: added post-launch (migration v135) — same meaning as
+-- mission_dispatch_points.ring_index above.
+ALTER TABLE `mission_routes` ADD COLUMN `ring_index` TINYINT UNSIGNED NULL AFTER `team_id`;
 
 -- =============================================
 -- MISSION ROUTE WAYPOINTS (ordered stops; dwell_minutes NULL = stay until
@@ -2183,6 +2192,12 @@ CREATE TABLE IF NOT EXISTS `mission_search_areas` (
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     INDEX `idx_search_area_mission` (`mission_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ring_index: added post-launch (migration v135) — same meaning as
+-- mission_dispatch_points.ring_index above. mission_search_sectors gets no
+-- column of its own; its area_id FK is ON DELETE CASCADE, so deleting a
+-- ring-origin area already removes its sectors.
+ALTER TABLE `mission_search_areas` ADD COLUMN `ring_index` TINYINT UNSIGNED NULL AFTER `label`;
 
 -- =============================================
 -- MISSION SEARCH SECTORS (War Room search-area coverage tracking — polygon

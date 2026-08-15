@@ -27,6 +27,7 @@ const {
     circleToPolygonPoints,
     annulusBoustrophedonPoints,
     ringDiscPolygonPoints,
+    weightedWedgePolygonPoints,
     escapeHtml,
     parseCoordsInput,
     formatDistanceMeters,
@@ -169,6 +170,52 @@ test('ringDiscPolygonPoints() traces the full disc, not (numPoints-1)/numPoints 
     const fullDiscArea = shoelaceArea(points);
     const missingSeamArea = shoelaceArea(points.slice(0, -1)); // the old, buggy shape
     assert.ok(fullDiscArea > missingSeamArea * 1.05, `expected the seam-duplicated polygon (${fullDiscArea}) to enclose meaningfully more area than the un-duplicated one (${missingSeamArea})`);
+});
+
+test('annulusBoustrophedonPoints() with no bearing args matches explicit (0, 360) exactly', () => {
+    // Regression check: startBearingDeg/sweepDeg were added as optional
+    // trailing params specifically so openInteriorSweepForRing()'s existing
+    // 5-argument calls keep sweeping the full circle unchanged.
+    const center = { lat: 35.0, lng: 24.0 };
+    const withDefaults = annulusBoustrophedonPoints(center, 500, 2000, 3, 6);
+    const withExplicitFullCircle = annulusBoustrophedonPoints(center, 500, 2000, 3, 6, 0, 360);
+    assert.deepEqual(withDefaults, withExplicitFullCircle);
+});
+
+test('annulusBoustrophedonPoints() confines every point to [startBearingDeg, startBearingDeg+sweepDeg] when given a wedge', () => {
+    const center = { lat: 35.0, lng: 24.0 };
+    const startBearingDeg = 90, sweepDeg = 90;
+    const points = annulusBoustrophedonPoints(center, 500, 2000, 3, 6, startBearingDeg, sweepDeg);
+    for (const [lat, lng] of points) {
+        const b = bearing(center, { lat, lng });
+        assert.ok(b >= startBearingDeg - 0.01 && b <= startBearingDeg + sweepDeg + 0.01, `expected bearing ${b} within [${startBearingDeg}, ${startBearingDeg + sweepDeg}]`);
+    }
+});
+
+test('weightedWedgePolygonPoints() returns numPoints+1 points: center, then the boundary arc', () => {
+    const center = { lat: 35.0, lng: 24.0 };
+    const points = weightedWedgePolygonPoints(center, 1000, 45, 90, 6);
+    assert.equal(points.length, 7);
+    assert.deepEqual(points[0], [center.lat, center.lng]);
+});
+
+// A wedge's boundary sampling is INCLUSIVE of both endpoints (unlike
+// circleToPolygonPoints()'s exclusive-of-the-wrap-around sampling, which is
+// what forced ringDiscPolygonPoints() to duplicate a seam point above) - so
+// a standalone wedge needs no such trick. Checked the same way as that
+// regression test: shoelace area, not eyeballed coordinates, since this is
+// exactly the kind of bug a screenshot could miss.
+test('weightedWedgePolygonPoints() area is proportional to sweepDeg, no seam gap', () => {
+    const center = { lat: 0, lng: 0 };
+    const radius = 1000, numPoints = 16;
+    const shoelaceArea = poly => Math.abs(poly.reduce((sum, [x1, y1], i) => {
+        const [x2, y2] = poly[(i + 1) % poly.length];
+        return sum + (x1 * y2 - x2 * y1);
+    }, 0)) / 2;
+    const fullDiscArea = shoelaceArea(weightedWedgePolygonPoints(center, radius, 0, 360, numPoints));
+    const quarterWedgeArea = shoelaceArea(weightedWedgePolygonPoints(center, radius, 0, 90, numPoints));
+    const ratio = quarterWedgeArea / fullDiscArea;
+    assert.ok(Math.abs(ratio - 0.25) < 0.02, `expected a 90° wedge to enclose ~1/4 of the full disc's area, got ratio ${ratio}`);
 });
 
 test('escapeHtml() escapes all five special characters', () => {

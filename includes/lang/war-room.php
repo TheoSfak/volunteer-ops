@@ -508,6 +508,14 @@ return [
         'missing_person.ring_divide_sectors_btn' => 'Χωρισμός σε Τομείς',
         'missing_person.ring_sectors_area_label' => 'Ζώνη {pct}% — Τομείς',
         'missing_person.ring_team_select_label' => '— Επιλέξτε ομάδα —',
+        'missing_person.ring_reset_btn' => 'Επαναφορά ζωνών αναζήτησης',
+        'missing_person.ring_reset_confirm' => 'Θα διαγραφούν {areas} περιοχές/τομείς, {dispatches} αποστολές στίγματος και θα ακυρωθούν {routes} πορείες που δημιουργήθηκαν από τα δαχτυλίδια αναζήτησης. Ό,τι έχει σχεδιαστεί χειροκίνητα δεν επηρεάζεται. Συνέχεια;',
+        'missing_person.ring_reset_cancel_reason' => 'Ακυρώθηκε από επαναφορά ζωνών αναζήτησης',
+        'missing_person.ring_auto_assign_btn' => 'Αυτόματη Ανάθεση',
+        'missing_person.ring_auto_assign_no_eligible_teams' => 'Δεν υπάρχει ομάδα με μέλη για αυτόματη ανάθεση.',
+        'missing_person.ring_auto_assign_area_label' => 'Ζώνη {pct}% — {team} (αυτόματα)',
+        'missing_person.ring_auto_assign_route_label' => 'Αυτόματη πορεία {pct}% — {team}',
+        'missing_person.ring_auto_assign_partial_failure' => 'Η αυτόματη ανάθεση σταμάτησε στην ομάδα {team} μετά από {count} επιτυχημένες αναθέσεις. Χρησιμοποιήστε την Επαναφορά για καθαρισμό και ξαναδοκιμάστε.',
 
         // missing-person-guide.php — bilingual explainer page linked from the
         // missing-person card, explains the ring/exposure/weather tools plus
@@ -1677,6 +1685,14 @@ return [
         'missing_person.ring_divide_sectors_btn' => 'Divide into Sectors',
         'missing_person.ring_sectors_area_label' => 'Zone {pct}% — Sectors',
         'missing_person.ring_team_select_label' => '— Select team —',
+        'missing_person.ring_reset_btn' => 'Reset search zones',
+        'missing_person.ring_reset_confirm' => 'This will delete {areas} areas/sectors, {dispatches} dispatches, and cancel {routes} routes generated from the search rings. Anything drawn by hand is unaffected. Continue?',
+        'missing_person.ring_reset_cancel_reason' => 'Cancelled by search zone reset',
+        'missing_person.ring_auto_assign_btn' => 'Auto-assign',
+        'missing_person.ring_auto_assign_no_eligible_teams' => 'No team with members available for auto-assign.',
+        'missing_person.ring_auto_assign_area_label' => 'Zone {pct}% — {team} (auto)',
+        'missing_person.ring_auto_assign_route_label' => 'Auto route {pct}% — {team}',
+        'missing_person.ring_auto_assign_partial_failure' => 'Auto-assign stopped at team {team} after {count} successful assignments. Use Reset to clean up and try again.',
 
         // See the 'el' block's comment above.
         'guide.page_title' => 'Missing Person Search Guide',

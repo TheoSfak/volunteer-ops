@@ -211,6 +211,17 @@ if ($action === 'create') {
     }
     $teamLabel = $team ? teamLabel($team['codename'], $team['team_number']) : null;
 
+    // 0-3, matching LPB_RING_TABLE's own [25,50,75,95] index — set only by
+    // the war-room.php ring shortcuts, null for a hand-drawn dispatch. Backs
+    // the "reset ring assignments" bulk-clear (see the clear_ring_generated
+    // action further down).
+    $ringIndexRaw = post('ring_index');
+    $ringIndex = ($ringIndexRaw !== '' && $ringIndexRaw !== null) ? (int) $ringIndexRaw : null;
+    if ($ringIndex !== null && ($ringIndex < 0 || $ringIndex > 3)) {
+        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+        exit;
+    }
+
     $type = post('type');
     $label = trim((string) post('label'));
     $label = $label !== '' ? mb_substr($label, 0, 255) : null;
@@ -248,10 +259,10 @@ if ($action === 'create') {
     }
 
     $dispatchId = dbInsert(
-        "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, label, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $teamId, $type, json_encode($geo), $label, $userId]
+        "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, label, ring_index, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $teamId, $type, json_encode($geo), $label, $ringIndex, $userId]
     );
-    logAudit('create_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'type' => $type]);
+    logAudit('create_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'type' => $type, 'ring_index' => $ringIndex]);
 
     // Recipients: a team-targeted dispatch only alerts (banner + sound) that
     // team — matching who can actually see the pin/area on their map
@@ -337,6 +348,19 @@ if ($action === 'delete') {
     dbExecute("DELETE FROM mission_dispatch_points WHERE id = ?", [$dispatchId]);
     logAudit('delete_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId]);
     echo json_encode(['ok' => true]);
+    exit;
+}
+
+// Part of the "reset ring assignments" button on the missing-person card
+// (war-room.php) — bulk wipe, same null-record_id audit shape as
+// mission-sector.php's own clear_all_areas/clear_ring_generated. Only ever
+// touches dispatches with a real ring_index, so a hand-drawn dispatch is
+// never at risk here regardless of how it was labeled.
+if ($action === 'clear_ring_generated') {
+    $count = (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_points WHERE mission_id = ? AND ring_index IS NOT NULL", [$missionId]);
+    dbExecute("DELETE FROM mission_dispatch_points WHERE mission_id = ? AND ring_index IS NOT NULL", [$missionId]);
+    logAudit('clear_ring_generated_mission_dispatch', 'mission_dispatch_points', null, null, ['mission_id' => $missionId, 'count' => $count]);
+    echo json_encode(['ok' => true, 'dispatches' => loadMissionDispatchesForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant)]);
     exit;
 }
 

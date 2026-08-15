@@ -147,7 +147,7 @@ final class MigrationsRunnerTest extends TestCase
             runSchemaMigrations();
 
             $this->assertSame(
-                134,
+                DB_SCHEMA_VERSION,
                 $this->currentSchemaVersion(),
                 'v134 must reach completion (not get stuck) even when id 7 is taken by something else'
             );
