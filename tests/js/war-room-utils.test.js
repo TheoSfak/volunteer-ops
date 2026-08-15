@@ -25,7 +25,8 @@ const {
     bearing,
     destinationPoint,
     circleToPolygonPoints,
-    annulusBoustrophedonPoints,
+    sectorSearchLegPoints,
+    sectorSearchLegCount,
     ringDiscPolygonPoints,
     weightedWedgePolygonPoints,
     escapeHtml,
@@ -111,36 +112,60 @@ test('circleToPolygonPoints() spaces points evenly around the circle', () => {
     assert.ok(Math.abs(dOpposite - radius * 2) < 1, `expected ~${radius * 2}m between opposite points, got ${dOpposite}`);
 });
 
-test('annulusBoustrophedonPoints() returns laneCount*pointsPerLane points', () => {
+test('sectorSearchLegPoints() returns legCount*2 points (one leg = near point + far point)', () => {
     const center = { lat: 35.0, lng: 24.0 };
-    const points = annulusBoustrophedonPoints(center, 500, 2000, 3, 6);
-    assert.equal(points.length, 18);
+    const points = sectorSearchLegPoints(center, 500, 2000, 6);
+    assert.equal(points.length, 12);
 });
 
-// The bug this replaced: a center-to-edge spiral always starts at radius 0
-// regardless of which ring it's sweeping, so for ring 2/3/4 it re-walked
-// ground already assigned to the smaller ring(s) inside it. Every point
-// staying >= innerRadiusMeters out is the regression test for that fix.
-test('annulusBoustrophedonPoints() never places a point closer to center than innerRadiusMeters', () => {
+// The bug this (and the concentric-arc version before it) replaced: a
+// center-to-edge spiral always starts at radius 0 regardless of which ring
+// it's sweeping, so for ring 2/3/4 it re-walked ground already assigned to
+// the smaller ring(s) inside it. Every point staying >= innerRadiusMeters
+// out is the regression test for that fix.
+test('sectorSearchLegPoints() never places a point closer to center than innerRadiusMeters', () => {
     const center = { lat: 35.0, lng: 24.0 };
     const innerRadius = 800;
-    const points = annulusBoustrophedonPoints(center, innerRadius, 3500, 4, 6);
+    const points = sectorSearchLegPoints(center, innerRadius, 3500, 6);
     for (const [lat, lng] of points) {
         const dist = haversineMeters(center, { lat, lng });
         assert.ok(dist >= innerRadius - 1, `expected >= ${innerRadius}m from center, got ${dist}`);
     }
 });
 
-test('annulusBoustrophedonPoints() outermost lane lands exactly on outerRadiusMeters', () => {
+// Unlike the old concentric arcs (only the outermost lane touched the outer
+// boundary exactly), every leg here is a straight line FROM the inner
+// radius TO the outer radius, so every single point should land on one or
+// the other, exactly — no in-between arc samples to approximate.
+test('sectorSearchLegPoints() every point lands exactly on innerRadiusMeters or outerRadiusMeters', () => {
     const center = { lat: 35.0, lng: 24.0 };
-    const outerRadius = 3500;
-    const pointsPerLane = 6;
-    const points = annulusBoustrophedonPoints(center, 800, outerRadius, 4, pointsPerLane);
-    const outerLane = points.slice(-pointsPerLane);
-    for (const [lat, lng] of outerLane) {
+    const innerRadius = 800, outerRadius = 3500;
+    const points = sectorSearchLegPoints(center, innerRadius, outerRadius, 6);
+    for (const [lat, lng] of points) {
         const dist = haversineMeters(center, { lat, lng });
-        assert.ok(Math.abs(dist - outerRadius) < 1, `expected ~${outerRadius}m from center, got ${dist}`);
+        const onInner = Math.abs(dist - innerRadius) < 1;
+        const onOuter = Math.abs(dist - outerRadius) < 1;
+        assert.ok(onInner || onOuter, `expected ${dist}m to be ~${innerRadius}m or ~${outerRadius}m from center`);
     }
+});
+
+// The bug a first attempt at this function actually shipped with: using
+// legCount/(legCount-1) spacing (inclusive of both ends) for a FULL circle
+// makes the last leg land back on the exact same bearing as the first
+// (t=1 → sweepDeg=360, same physical direction as t=0) — e.g. 4 "legs"
+// collapsing to 3 distinct bearings, a triangle instead of a square. Full-
+// circle spacing must be EXCLUSIVE (sweepDeg/legCount) so legCount distinct
+// bearings actually result.
+test('sectorSearchLegPoints() full circle produces legCount distinct bearings, not legCount-1', () => {
+    const center = { lat: 35.0, lng: 24.0 };
+    const legCount = 4;
+    const points = sectorSearchLegPoints(center, 500, 2000, legCount);
+    const legBearings = [];
+    for (let i = 0; i < legCount; i++) {
+        legBearings.push(Math.round(bearing(center, { lat: points[i * 2][0], lng: points[i * 2][1] })));
+    }
+    const distinctBearings = new Set(legBearings);
+    assert.equal(distinctBearings.size, legCount, `expected ${legCount} distinct bearings, got ${[...distinctBearings]}`);
 });
 
 test('ringDiscPolygonPoints() returns numPoints+2 points: center, boundary, then a repeat of the first boundary point', () => {
@@ -172,24 +197,46 @@ test('ringDiscPolygonPoints() traces the full disc, not (numPoints-1)/numPoints 
     assert.ok(fullDiscArea > missingSeamArea * 1.05, `expected the seam-duplicated polygon (${fullDiscArea}) to enclose meaningfully more area than the un-duplicated one (${missingSeamArea})`);
 });
 
-test('annulusBoustrophedonPoints() with no bearing args matches explicit (0, 360) exactly', () => {
-    // Regression check: startBearingDeg/sweepDeg were added as optional
-    // trailing params specifically so openInteriorSweepForRing()'s existing
-    // 5-argument calls keep sweeping the full circle unchanged.
+test('sectorSearchLegPoints() with no bearing args matches explicit (0, 360) exactly', () => {
+    // Regression check: startBearingDeg/sweepDeg default to a full circle so
+    // openInteriorSweepForRing()'s 4-argument call keeps sweeping the whole
+    // ring unchanged.
     const center = { lat: 35.0, lng: 24.0 };
-    const withDefaults = annulusBoustrophedonPoints(center, 500, 2000, 3, 6);
-    const withExplicitFullCircle = annulusBoustrophedonPoints(center, 500, 2000, 3, 6, 0, 360);
+    const withDefaults = sectorSearchLegPoints(center, 500, 2000, 6);
+    const withExplicitFullCircle = sectorSearchLegPoints(center, 500, 2000, 6, 0, 360);
     assert.deepEqual(withDefaults, withExplicitFullCircle);
 });
 
-test('annulusBoustrophedonPoints() confines every point to [startBearingDeg, startBearingDeg+sweepDeg] when given a wedge', () => {
+test('sectorSearchLegPoints() confines every point to [startBearingDeg, startBearingDeg+sweepDeg] when given a wedge', () => {
     const center = { lat: 35.0, lng: 24.0 };
     const startBearingDeg = 90, sweepDeg = 90;
-    const points = annulusBoustrophedonPoints(center, 500, 2000, 3, 6, startBearingDeg, sweepDeg);
+    const points = sectorSearchLegPoints(center, 500, 2000, 6, startBearingDeg, sweepDeg);
     for (const [lat, lng] of points) {
         const b = bearing(center, { lat, lng });
         assert.ok(b >= startBearingDeg - 0.01 && b <= startBearingDeg + sweepDeg + 0.01, `expected bearing ${b} within [${startBearingDeg}, ${startBearingDeg + sweepDeg}]`);
     }
+});
+
+// A wedge (sweepDeg < 360) uses INCLUSIVE spacing instead — unlike the full
+// circle, there's no wrap-around duplicate to avoid, and a team's route
+// should actually reach both edges of their assigned wedge.
+test('sectorSearchLegPoints() wedge spacing reaches both edge bearings exactly', () => {
+    const center = { lat: 35.0, lng: 24.0 };
+    const startBearingDeg = 90, sweepDeg = 90, legCount = 4;
+    const points = sectorSearchLegPoints(center, 500, 2000, legCount, startBearingDeg, sweepDeg);
+    const firstLegBearing = bearing(center, { lat: points[0][0], lng: points[0][1] });
+    const lastLegBearing = bearing(center, { lat: points[points.length - 2][0], lng: points[points.length - 2][1] });
+    assert.ok(Math.abs(firstLegBearing - startBearingDeg) < 0.01, `expected first leg at ${startBearingDeg}, got ${firstLegBearing}`);
+    assert.ok(Math.abs(lastLegBearing - (startBearingDeg + sweepDeg)) < 0.01, `expected last leg at ${startBearingDeg + sweepDeg}, got ${lastLegBearing}`);
+});
+
+test('sectorSearchLegCount() targets 45° steps for a full circle (8 legs), well above doctrine\'s 3-leg minimum', () => {
+    assert.equal(sectorSearchLegCount(360), 8);
+});
+
+test('sectorSearchLegCount() floors at 3 (doctrine\'s own minimum) even for a narrow wedge', () => {
+    assert.equal(sectorSearchLegCount(90), 3);
+    assert.equal(sectorSearchLegCount(10), 3);
 });
 
 test('weightedWedgePolygonPoints() returns numPoints+1 points: center, then the boundary arc', () => {
