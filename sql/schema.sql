@@ -41,6 +41,31 @@ INSERT INTO `volunteer_teams` (`name`, `color`, `is_default`, `is_active`) VALUE
 ('Επίδρασις', '#fd7e14', 1, 1);
 
 -- =============================================
+-- MISSION VISITOR TAGS (admin-extensible classification chips for
+-- walk-up, single-mission Action Room visitors — Πολίτης/Αστυνομία/
+-- Πυροσβεστική/ΕΜΑΚ/Πολιτική Προστασία/Δήμος, see users.is_mission_visitor)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_visitor_tags` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `label` VARCHAR(100) NOT NULL,
+    `color` VARCHAR(7) NOT NULL DEFAULT '#6c757d',
+    `icon` VARCHAR(50) NOT NULL DEFAULT 'bi-person-badge',
+    `sort_order` INT NOT NULL DEFAULT 0,
+    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_mission_visitor_tags_label` (`label`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `mission_visitor_tags` (`label`, `color`, `icon`, `sort_order`) VALUES
+('Πολίτης', '#6c757d', 'bi-person', 1),
+('Αστυνομία', '#2a52be', 'bi-shield-lock', 2),
+('Πυροσβεστική', '#e34948', 'bi-fire', 3),
+('ΕΜΑΚ', '#eda100', 'bi-life-preserver', 4),
+('Πολιτική Προστασία', '#1baf7a', 'bi-shield-check', 5),
+('Δήμος', '#534ab7', 'bi-bank', 6);
+
+-- =============================================
 -- USERS TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS `users` (
@@ -74,6 +99,9 @@ CREATE TABLE IF NOT EXISTS `users` (
     `guest_country` VARCHAR(100) NULL DEFAULT 'Ελλάδα' COMMENT 'Partner rescue-team country for is_external accounts',
     `volunteer_team_id` INT UNSIGNED NULL COMMENT 'Home team badge (Επίδρασις for regular members, or a partner-org team for guests) — not the same as mission_teams',
     `guest_country_code` CHAR(2) NULL COMMENT 'ISO 3166-1 alpha-2 code, drives the flag icon next to this user''s name',
+    `is_mission_visitor` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Walk-up single-mission visitor — a narrowed is_external=1 sub-type, see mission_visitor_tag_id/mission_visitor_mission_id',
+    `mission_visitor_tag_id` INT UNSIGNED NULL COMMENT 'Admin-assigned classification chip; NULL = pending classification',
+    `mission_visitor_mission_id` INT UNSIGNED NULL COMMENT 'The single mission this visitor is scoped to — never reused across missions, unlike partner-guest accounts',
     `total_points` INT DEFAULT 0,
     `monthly_points` INT DEFAULT 0,
     `email_verified_at` TIMESTAMP NULL,
@@ -86,7 +114,11 @@ CREATE TABLE IF NOT EXISTS `users` (
     `deleted_at` TIMESTAMP NULL DEFAULT NULL,
     `deleted_by` INT UNSIGNED NULL DEFAULT NULL,
     FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
-    FOREIGN KEY (`volunteer_team_id`) REFERENCES `volunteer_teams`(`id`) ON DELETE SET NULL
+    FOREIGN KEY (`volunteer_team_id`) REFERENCES `volunteer_teams`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`mission_visitor_tag_id`) REFERENCES `mission_visitor_tags`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`mission_visitor_mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    INDEX `idx_users_mission_visitor` (`mission_visitor_mission_id`, `is_mission_visitor`),
+    CHECK (`is_mission_visitor` = 0 OR `is_external` = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
@@ -195,6 +227,7 @@ CREATE TABLE IF NOT EXISTS `missions` (
     `recurrence_id` INT UNSIGNED NULL,
     `recurrence_instance_date` DATE NULL,
     `fires_overlay_enabled` TINYINT(1) NOT NULL DEFAULT 0,
+    `visitor_join_token` VARCHAR(64) NULL COMMENT 'Lazily-generated QR/link secret for self-serve Mission Visitor registration — NULL means visitor registration is off for this mission',
     FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`mission_type_id`) REFERENCES `mission_types`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
@@ -202,7 +235,8 @@ CREATE TABLE IF NOT EXISTS `missions` (
     FOREIGN KEY (`canceled_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     INDEX `idx_missions_status` (`status`),
     INDEX `idx_missions_start` (`start_datetime`),
-    INDEX `idx_missions_recurrence` (`recurrence_id`)
+    INDEX `idx_missions_recurrence` (`recurrence_id`),
+    UNIQUE KEY `uq_missions_visitor_join_token` (`visitor_join_token`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================

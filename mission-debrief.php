@@ -243,10 +243,11 @@ include __DIR__ . '/includes/header.php';
             // see/edit their own row, via mission-guest-debrief.php.
             $guestDebriefs = dbFetchAll(
                 "SELECT mgd.*, u.name, u.is_external, u.guest_org_name, u.guest_country_code,
-                        vt.name AS home_team_name, vt.color AS home_team_color
+                        COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color
                  FROM mission_guest_debriefs mgd
                  JOIN users u ON u.id = mgd.user_id
                  LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+                 LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
                  WHERE mgd.mission_id = ?
                  ORDER BY mgd.updated_at DESC",
                 [$id]
