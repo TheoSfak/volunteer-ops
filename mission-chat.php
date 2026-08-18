@@ -115,10 +115,11 @@ if (!isPost()) {
         // its next tick, rather than ever silently skipping a gap.
         $rows = dbFetchAll(
             "SELECT c.id, c.user_id, u.name, u.is_external, u.guest_org_name, u.guest_country_code,
-                    ht.name AS home_team_name, ht.color AS home_team_color, c.message, c.created_at
+                    COALESCE(ht.name, hmvt.label) AS home_team_name, COALESCE(ht.color, hmvt.color) AS home_team_color, c.message, c.created_at
              FROM mission_chat_messages c
              JOIN users u ON u.id = c.user_id
              LEFT JOIN volunteer_teams ht ON ht.id = u.volunteer_team_id
+             LEFT JOIN mission_visitor_tags hmvt ON hmvt.id = u.mission_visitor_tag_id
              WHERE c.mission_id = ? AND {$teamSql} AND c.id > ?
              ORDER BY c.id ASC LIMIT 200",
             $params
@@ -126,10 +127,11 @@ if (!isPost()) {
     } else {
         $rows = dbFetchAll(
             "SELECT c.id, c.user_id, u.name, u.is_external, u.guest_org_name, u.guest_country_code,
-                    ht.name AS home_team_name, ht.color AS home_team_color, c.message, c.created_at
+                    COALESCE(ht.name, hmvt.label) AS home_team_name, COALESCE(ht.color, hmvt.color) AS home_team_color, c.message, c.created_at
              FROM mission_chat_messages c
              JOIN users u ON u.id = c.user_id
              LEFT JOIN volunteer_teams ht ON ht.id = u.volunteer_team_id
+             LEFT JOIN mission_visitor_tags hmvt ON hmvt.id = u.mission_visitor_tag_id
              WHERE c.mission_id = ? AND {$teamSql}
              ORDER BY c.id DESC LIMIT 50",
             $params

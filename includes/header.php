@@ -1021,6 +1021,21 @@ if (isLoggedIn()) {
         
         <ul class="nav flex-column">
             <?php if (isExternalGuest()): ?>
+            <?php if (isMissionVisitor($currentUser)): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'war-room' ? 'active' : '' ?>" href="war-room.php?id=<?= (int) ($currentUser['mission_visitor_mission_id'] ?? 0) ?>">
+                    <i class="bi bi-broadcast-pin"></i> <?= t('visitor.nav_my_mission') ?>
+                </a>
+            </li>
+            <li class="nav-item">
+                <form action="logout.php" method="post">
+                    <?= csrfField() ?>
+                    <button type="submit" class="nav-link border-0 bg-transparent text-start w-100">
+                        <i class="bi bi-box-arrow-right"></i> <?= t('nav.logout') ?>
+                    </button>
+                </form>
+            </li>
+            <?php else: ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'missions' ? 'active' : '' ?>" href="missions.php">
                     <i class="bi bi-broadcast-pin"></i> <?= t('nav.my_missions') ?>
@@ -1039,6 +1054,7 @@ if (isLoggedIn()) {
                     </button>
                 </form>
             </li>
+            <?php endif; ?>
             <?php else: ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'dashboard' ? 'active' : '' ?>" href="dashboard.php">
@@ -1197,6 +1213,11 @@ if (isLoggedIn()) {
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'volunteer-teams' ? 'active' : '' ?>" href="volunteer-teams.php">
                     <i class="bi bi-flag"></i> Ομάδες Εθελοντών
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'mission-visitor-tags' ? 'active' : '' ?>" href="mission-visitor-tags.php">
+                    <i class="bi bi-person-badge"></i> Tags Επισκεπτών Αποστολής
                 </a>
             </li>
             <?php endif; ?>
@@ -1495,8 +1516,10 @@ if (isLoggedIn()) {
                         <span class="user-type-badge d-none d-md-inline"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_RESCUER) ?></span>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
+                        <?php if (!isMissionVisitor($currentUser)): ?>
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i><?= t('nav.my_profile') ?></a></li>
                         <li><a class="dropdown-item" href="mobile-app-setup.php"><i class="bi bi-android2 me-2"></i>Εφαρμογή Android</a></li>
+                        <?php endif; ?>
                         <?php if (!isExternalGuest()): ?>
                         <li><a class="dropdown-item" href="my-participations.php"><i class="bi bi-list-check me-2"></i>Οι Αιτήσεις μου</a></li>
                         <?php if (!empty($currentUser['custom_role_id'])): ?>

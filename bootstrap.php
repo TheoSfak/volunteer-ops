@@ -93,26 +93,67 @@ if (isLoggedIn() && isset($_GET['exit_preview'])) {
 // War Room AJAX endpoint now only needs adding to WAR_ROOM_ACTION_SCRIPTS
 // once to cover both behaviors — see that constant's docblock for the history.
 if (isLoggedIn() && isExternalGuest()) {
+    $__extUser = getCurrentUser();
+    $__isMissionVisitor = isMissionVisitor($__extUser);
+
+    // Mission Visitors (users.is_mission_visitor=1, a narrower sub-type of
+    // is_external — see includes/auth.php) are scoped to exactly one OPEN
+    // mission. Enforced read-time, right here, rather than hooked onto the
+    // several places missions.status changes (close_mission, publish/cancel
+    // in mission-view.php, quick-close in ops-dashboard.php) — a write-time
+    // hook is exactly the "one call site forgets it" bug class this same
+    // guest gate has already been bitten by twice (see the docblock above).
+    // Every mission-visitor request passes through here anyway, so this
+    // can't drift out of sync with a future close/cancel code path.
+    if ($__isMissionVisitor) {
+        $__vMissionId = (int) ($__extUser['mission_visitor_mission_id'] ?? 0);
+        $__vStatus = $__vMissionId ? dbFetchValue("SELECT status FROM missions WHERE id = ?", [$__vMissionId]) : null;
+        if ($__vStatus !== STATUS_OPEN) {
+            dbExecute("UPDATE users SET deleted_at = NOW(), is_active = 0, updated_at = NOW() WHERE id = ?", [$__extUser['id']]);
+            logAudit('soft_delete_user', 'users', $__extUser['id']);
+            // logout() destroys the session (session_destroy()) before this
+            // redirect happens, so a setFlash() here would be writing into a
+            // session that's already gone — it would silently never reach
+            // the next request. Pass the message via query param instead,
+            // which survives the logout cleanly.
+            logout();
+            redirect('visitor-join.php?ended=1');
+        }
+    }
+
     $__extScript = basename($_SERVER['SCRIPT_NAME'] ?? '');
-    $__extAllowed = array_merge(WAR_ROOM_ACTION_SCRIPTS, [
-        'missions.php', 'profile.php', 'logout.php',
-        'mission-certificate-print.php', 'certificate-verify.php',
-        'mission-guest-debrief.php', 'export-mission-activity.php', 'export-mission-chat.php',
-        // mobile-token-issue.php — native Android app requests its
-        // background-ping bearer token here, session-authed like everything
-        // else on this list. Guest/partner-org volunteers are exactly who
-        // field GPS reliability matters most for, so they need this too.
-        // (mobile-ping-location.php itself is NOT on this list: it's
-        // bearer-token-authed with no session at all, so isLoggedIn() is
-        // false and this whole guest gate never runs for it.)
-        'mobile-token-issue.php', 'mobile-app-setup.php',
-    ]);
+    // Mission Visitors get a strictly narrower allow-list than a partner-org
+    // guest: no profile.php (no profile page, by design), no missions.php
+    // (they only ever have the one mission — nothing else to list), and no
+    // mobile-token-issue.php/mobile-app-setup.php (that issues a long-lived
+    // native-app bearer token — more standing access than a disposable,
+    // unvetted, single-mission walk-up account should get).
+    $__extAllowed = $__isMissionVisitor
+        ? array_merge(WAR_ROOM_ACTION_SCRIPTS, ['logout.php'])
+        : array_merge(WAR_ROOM_ACTION_SCRIPTS, [
+            'missions.php', 'profile.php', 'logout.php',
+            'mission-certificate-print.php', 'certificate-verify.php',
+            'mission-guest-debrief.php', 'export-mission-activity.php', 'export-mission-chat.php',
+            // mobile-token-issue.php — native Android app requests its
+            // background-ping bearer token here, session-authed like everything
+            // else on this list. Guest/partner-org volunteers are exactly who
+            // field GPS reliability matters most for, so they need this too.
+            // (mobile-ping-location.php itself is NOT on this list: it's
+            // bearer-token-authed with no session at all, so isLoggedIn() is
+            // false and this whole guest gate never runs for it.)
+            'mobile-token-issue.php', 'mobile-app-setup.php',
+        ]);
     if (!in_array($__extScript, $__extAllowed, true)) {
+        if ($__isMissionVisitor) {
+            redirect(!empty($__extUser['mission_visitor_mission_id'])
+                ? ('war-room.php?id=' . (int) $__extUser['mission_visitor_mission_id'])
+                : 'visitor-join.php');
+        }
         $__extMissionIds = getExternalGuestMissionIds(getCurrentUserId());
         if (count($__extMissionIds) === 1) {
             redirect('war-room.php?id=' . $__extMissionIds[0]);
         }
         redirect('missions.php');
     }
-    unset($__extScript, $__extAllowed);
+    unset($__extScript, $__extAllowed, $__extUser, $__isMissionVisitor);
 }

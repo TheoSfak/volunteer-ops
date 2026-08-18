@@ -43,10 +43,11 @@ $roster = [];
 if ($team) {
     $roster = dbFetchAll(
         "SELECT mtm.user_id, u.name, u.is_external, u.guest_org_name, u.guest_country_code,
-                vt.name AS home_team_name, vt.color AS home_team_color
+                COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color
          FROM mission_team_members mtm
          JOIN users u ON u.id = mtm.user_id
          LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+         LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
          WHERE mtm.team_id = ?
          ORDER BY u.name",
         [$team['team_id']]

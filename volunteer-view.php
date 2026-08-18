@@ -15,12 +15,13 @@ if (!$id) {
 $volunteer = dbFetchOne(
     "SELECT u.*, d.name as department_name, wh.name as warehouse_name,
             vp.name as position_name, vp.color as position_color, vp.icon as position_icon,
-            vt.name AS home_team_name, vt.color AS home_team_color
+            COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color
      FROM users u
      LEFT JOIN departments d ON u.department_id = d.id
      LEFT JOIN departments wh ON u.warehouse_id = wh.id
      LEFT JOIN volunteer_positions vp ON u.position_id = vp.id
      LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+     LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
      WHERE u.id = ?",
     [$id]
 );

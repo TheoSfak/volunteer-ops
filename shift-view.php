@@ -715,9 +715,10 @@ if ($canManage) {
     }
     $availableVolunteers = dbFetchAll(
         "SELECT u.id, u.name, u.email, u.role, u.is_external, u.guest_org_name, u.guest_country_code,
-                vt.name AS home_team_name, vt.color AS home_team_color
+                COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color
          FROM users u
          LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+         LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
          WHERE u.is_active = 1
            $excludeClause
          ORDER BY u.name"

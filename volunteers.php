@@ -14,6 +14,12 @@ $user = getCurrentUser();
 $isGuestTab = get('is_external', '') === '1';
 $pageTitle = $isGuestTab ? 'Επισκέπτες' : 'Εθελοντές';
 
+// Within the guest tab, is_external mixes two very different lifespans:
+// persistent partner-org accounts and disposable single-mission walk-up
+// Mission Visitors (see visitor-join.php). Sub-filter only shown/applied on
+// that tab so the plain volunteers list is unaffected.
+$guestKind = $isGuestTab ? get('guest_kind', '') : '';
+
 // Filters
 $search = get('search', '');
 $role = get('role', '');
@@ -29,6 +35,12 @@ if (!in_array($perPage, $allowedPerPage)) $perPage = 50;
 // Build query — always show active users that haven't been soft-deleted
 $where = ['u.is_active = 1', 'u.deleted_at IS NULL', 'u.is_external = ?'];
 $params = [$isGuestTab ? 1 : 0];
+
+if ($guestKind === 'partner') {
+    $where[] = 'u.is_mission_visitor = 0';
+} elseif ($guestKind === 'visitor') {
+    $where[] = 'u.is_mission_visitor = 1';
+}
 
 if ($search) {
     $where[] = "(u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)";
@@ -78,7 +90,7 @@ $volunteers = dbFetchAll(
     "SELECT u.*, d.name as department_name, wh.name as warehouse_name,
             vp.name as position_name,
             cr.name as custom_role_name, cr.color as custom_role_color,
-            vt.name AS home_team_name, vt.color AS home_team_color,
+            COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
             COALESCE(pr_stats.shifts_count, 0) as shifts_count,
             COALESCE(pr_stats.total_hours, 0) as total_hours
      FROM users u
@@ -88,6 +100,7 @@ $volunteers = dbFetchAll(
      LEFT JOIN volunteer_positions vp ON u.position_id = vp.id
      LEFT JOIN custom_roles cr ON u.custom_role_id = cr.id
      LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+     LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
      LEFT JOIN (
          SELECT volunteer_id, 
                 COUNT(*) as shifts_count,
@@ -434,6 +447,9 @@ include __DIR__ . '/includes/header.php';
 <div class="card mb-4">
     <div class="card-body">
         <form method="get" class="row g-3">
+            <?php if ($isGuestTab): ?>
+            <input type="hidden" name="is_external" value="1">
+            <?php endif; ?>
             <div class="col-md-4">
                 <label class="form-label">Αναζήτηση</label>
                 <input type="text" class="form-control" name="search" value="<?= h($search) ?>" placeholder="Όνομα, email, τηλέφωνο...">
@@ -448,6 +464,16 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </select>
             </div>
+            <?php if ($isGuestTab): ?>
+            <div class="col-md-2">
+                <label class="form-label">Τύπος</label>
+                <select name="guest_kind" class="form-select">
+                    <option value="">Όλοι</option>
+                    <option value="partner" <?= $guestKind === 'partner' ? 'selected' : '' ?>>Συνεργάτες</option>
+                    <option value="visitor" <?= $guestKind === 'visitor' ? 'selected' : '' ?>>Επισκέπτες Αποστολής</option>
+                </select>
+            </div>
+            <?php endif; ?>
             <?php if ($user['role'] === ROLE_SYSTEM_ADMIN): ?>
             <div class="col-md-2">
                 <label class="form-label">Σώμα</label>
@@ -498,7 +524,7 @@ include __DIR__ . '/includes/header.php';
                     <i class="bi bi-search me-1"></i>Αναζήτηση
                 </button>
             </div>
-            <?php if ($search || $role || $departmentId || $warehouseId || $skillId): ?>
+            <?php if ($search || $role || $departmentId || $warehouseId || $skillId || $guestKind): ?>
             <div class="col-md-1 d-flex align-items-end">
                 <a href="volunteers.php" class="btn btn-outline-secondary w-100" title="Καθαρισμός φίλτρων">
                     <i class="bi bi-x-lg"></i>

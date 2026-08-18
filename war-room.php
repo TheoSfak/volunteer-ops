@@ -131,6 +131,75 @@ if (isPost()) {
             setFlash('success', t('wr.mission_closed_success'));
             redirect('ops-dashboard.php');
         }
+    } elseif (post('action') === 'enable_visitor_registration') {
+        if (!$canManageWarRoom) {
+            setFlash('error', t('wr.perm.manage_visitors'));
+        } elseif (empty($mission['visitor_join_token'])) {
+            dbExecute("UPDATE missions SET visitor_join_token = ?, updated_at = NOW() WHERE id = ?", [bin2hex(random_bytes(32)), $missionId]);
+            logAudit('enable_visitor_registration', 'missions', $missionId);
+            setFlash('success', t('visitor.enable_success'));
+        }
+        redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'regenerate_visitor_token') {
+        if (!$canManageWarRoom) {
+            setFlash('error', t('wr.perm.manage_visitors'));
+        } else {
+            dbExecute("UPDATE missions SET visitor_join_token = ?, updated_at = NOW() WHERE id = ?", [bin2hex(random_bytes(32)), $missionId]);
+            logAudit('regenerate_visitor_token', 'missions', $missionId);
+        }
+        redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'disable_visitor_registration') {
+        if (!$canManageWarRoom) {
+            setFlash('error', t('wr.perm.manage_visitors'));
+        } else {
+            dbExecute("UPDATE missions SET visitor_join_token = NULL, updated_at = NOW() WHERE id = ?", [$missionId]);
+            logAudit('disable_visitor_registration', 'missions', $missionId);
+            setFlash('success', t('visitor.disable_success'));
+        }
+        redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'classify_visitor') {
+        if (!$canManageWarRoom) {
+            setFlash('error', t('wr.perm.manage_visitors'));
+        } else {
+            $visitorId = (int) post('user_id');
+            $tagId = (int) post('tag_id');
+            $validVisitor = dbFetchOne("SELECT id FROM users WHERE id = ? AND is_mission_visitor = 1 AND mission_visitor_mission_id = ?", [$visitorId, $missionId]);
+            $validTag = dbFetchOne("SELECT id FROM mission_visitor_tags WHERE id = ? AND is_active = 1", [$tagId]);
+            if ($validVisitor && $validTag) {
+                dbExecute("UPDATE users SET mission_visitor_tag_id = ?, updated_at = NOW() WHERE id = ?", [$tagId, $visitorId]);
+                logAudit('classify_visitor', 'users', $visitorId, null, ['tag_id' => $tagId]);
+                setFlash('success', t('visitor.classify_success'));
+            }
+        }
+        redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'remove_visitor') {
+        if (!$canManageWarRoom) {
+            setFlash('error', t('wr.perm.manage_visitors'));
+        } else {
+            $visitorId = (int) post('user_id');
+            // Same soft-delete as volunteers.php's delete_user (deleted_at +
+            // deleted_by + is_active=0, logAudit('soft_delete_user', ...)) so
+            // a removed visitor is retained/auditable exactly like any
+            // departed regular volunteer — NOT just an is_active=0 toggle,
+            // which volunteers.php's own default list query would then hide
+            // with no way to find it again. Deliberately available to any
+            // $canManageWarRoom actor rather than system-admin-only like
+            // volunteers.php's delete_user: the WHERE clause below can only
+            // ever touch this mission's own mission-visitor rows, never a
+            // regular staff account, so widening it here keeps removal fast
+            // (no waiting on a system admin) without widening the blast
+            // radius of what a mission manager can delete.
+            $affected = dbExecute(
+                "UPDATE users SET deleted_at = NOW(), deleted_by = ?, is_active = 0, updated_at = NOW()
+                 WHERE id = ? AND is_mission_visitor = 1 AND mission_visitor_mission_id = ?",
+                [$user['id'], $visitorId, $missionId]
+            );
+            if ($affected) {
+                logAudit('soft_delete_user', 'users', $visitorId);
+                setFlash('success', t('visitor.remove_success'));
+            }
+        }
+        redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'request_location') {
         if (!$canManageWarRoom) {
             setFlash('error', t('wr.perm.request_location'));
@@ -842,7 +911,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
             "SELECT * FROM (
                 SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.battery_level, vp.created_at, u.name,
                         u.is_external, u.guest_org_name, u.guest_country_code,
-                        ht.name AS home_team_name, ht.color AS home_team_color,
+                        COALESCE(ht.name, mvt.label) AS home_team_name, COALESCE(ht.color, mvt.color) AS home_team_color,
                         mt.color AS team_color, mt.codename, mt.team_number{$field},
                         ROW_NUMBER() OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS rn,
                         LEAD(vp.lat) OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS prev_lat,
@@ -853,6 +922,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                  JOIN shifts s ON s.id = vp.shift_id
                  JOIN users u ON u.id = vp.user_id
                  LEFT JOIN volunteer_teams ht ON ht.id = u.volunteer_team_id
+                 LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
                  LEFT JOIN participation_requests pr ON pr.shift_id = vp.shift_id AND pr.volunteer_id = vp.user_id
                  LEFT JOIN mission_team_members mtm ON mtm.user_id = vp.user_id AND mtm.mission_id = s.mission_id
                  LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
@@ -1198,12 +1268,13 @@ $fieldStatusColumns = $hasFieldStatus ? ', pr.field_status, pr.field_status_upda
 $participants = dbFetchAll(
     "SELECT pr.id AS pr_id, pr.volunteer_id, pr.attended{$fieldStatusColumns},
             u.name, u.phone, u.is_external, u.guest_org_name, u.guest_country_code,
-            ht.name AS home_team_name, ht.color AS home_team_color,
+            COALESCE(ht.name, mvt.label) AS home_team_name, COALESCE(ht.color, mvt.color) AS home_team_color,
             s.id AS shift_id, s.start_time, s.end_time,
             (SELECT MAX(vp.created_at) FROM volunteer_pings vp WHERE vp.user_id = pr.volunteer_id AND vp.shift_id = pr.shift_id) AS last_ping_at
      FROM participation_requests pr
      JOIN users u ON u.id = pr.volunteer_id
      LEFT JOIN volunteer_teams ht ON ht.id = u.volunteer_team_id
+     LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
      JOIN shifts s ON s.id = pr.shift_id
      WHERE s.mission_id = ? AND pr.status = ?
      ORDER BY s.start_time, u.name",
@@ -1244,6 +1315,20 @@ $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncid
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
 $missingPerson = ($isMissingPersonMission && ($canManageWarRoom || $isApprovedParticipant)) ? loadMissingPersonForMission($missionId) : null;
+$missionVisitorTags = $canManageWarRoom ? dbFetchAll("SELECT id, label, color, icon FROM mission_visitor_tags WHERE is_active = 1 ORDER BY sort_order") : [];
+$pendingVisitors = $canManageWarRoom ? dbFetchAll(
+    "SELECT id, name, phone, created_at FROM users
+     WHERE is_mission_visitor = 1 AND mission_visitor_mission_id = ? AND is_active = 1 AND mission_visitor_tag_id IS NULL
+     ORDER BY created_at",
+    [$missionId]
+) : [];
+$activeVisitors = $canManageWarRoom ? dbFetchAll(
+    "SELECT u.id, u.name, u.phone, mvt.label AS tag_label, mvt.color AS tag_color
+     FROM users u JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
+     WHERE u.is_mission_visitor = 1 AND u.mission_visitor_mission_id = ? AND u.is_active = 1
+     ORDER BY u.name",
+    [$missionId]
+) : [];
 // See the ajax branch's own copy of this block above for why these two are
 // separately gated settings rather than one flag, and why the call is
 // try/caught (a missing weather_cache table must not fail the whole page).
@@ -2815,6 +2900,82 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
         <?php endif; ?>
+
+        <?php $visitorJoinUrl = rtrim(BASE_URL, '/') . '/visitor-join.php?token=' . urlencode($mission['visitor_join_token'] ?? ''); ?>
+        <div class="card shadow-sm mb-4" data-card-id="missionVisitorsCard">
+            <div class="card-header"><h5 class="mb-0" data-card-drag-handle><i class="bi bi-person-badge me-1"></i><?= t('visitor.card_title') ?></h5></div>
+            <div class="card-body">
+                <p class="small text-muted"><?= t('visitor.intro') ?></p>
+                <?php if (empty($mission['visitor_join_token'])): ?>
+                <form method="post">
+                    <?= csrfField() ?><input type="hidden" name="action" value="enable_visitor_registration">
+                    <button type="submit" class="btn btn-primary w-100 fw-semibold"><i class="bi bi-qr-code me-1"></i><?= t('visitor.enable_btn') ?></button>
+                </form>
+                <?php else: ?>
+                <div class="alert alert-secondary small py-2 px-2 mb-3"><?= t('visitor.enabled_note') ?></div>
+                <div class="text-center mb-3">
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&ecc=M&data=<?= urlencode($visitorJoinUrl) ?>" width="160" height="160" alt="QR" class="border rounded p-1 bg-white">
+                </div>
+                <label class="form-label small fw-semibold"><?= t('visitor.join_link_label') ?></label>
+                <div class="input-group input-group-sm mb-3">
+                    <input type="text" class="form-control" value="<?= h($visitorJoinUrl) ?>" readonly onclick="this.select()">
+                    <button type="button" class="btn btn-outline-secondary" onclick="navigator.clipboard.writeText('<?= h(addslashes($visitorJoinUrl)) ?>')"><?= t('briefing.copy_btn') ?></button>
+                </div>
+                <div class="d-flex gap-2 mb-2">
+                    <form method="post" class="flex-fill" onsubmit="return confirm('<?= h(addslashes(t('visitor.regenerate_confirm'))) ?>')">
+                        <?= csrfField() ?><input type="hidden" name="action" value="regenerate_visitor_token">
+                        <button type="submit" class="btn btn-outline-secondary btn-sm w-100"><i class="bi bi-arrow-repeat me-1"></i><?= t('visitor.regenerate_btn') ?></button>
+                    </form>
+                    <form method="post" class="flex-fill" onsubmit="return confirm('<?= h(addslashes(t('visitor.disable_confirm'))) ?>')">
+                        <?= csrfField() ?><input type="hidden" name="action" value="disable_visitor_registration">
+                        <button type="submit" class="btn btn-outline-danger btn-sm w-100"><i class="bi bi-x-lg me-1"></i><?= t('visitor.disable_btn') ?></button>
+                    </form>
+                </div>
+
+                <hr>
+                <h6 class="small fw-semibold text-uppercase text-muted"><?= t('visitor.pending_title') ?></h6>
+                <?php if (empty($pendingVisitors)): ?>
+                <p class="text-muted small mb-3"><?= t('visitor.pending_empty') ?></p>
+                <?php else: ?>
+                <?php foreach ($pendingVisitors as $pv): ?>
+                <div class="border rounded p-2 mb-2">
+                    <div class="fw-semibold small"><?= h($pv['name']) ?></div>
+                    <div class="text-muted small mb-2"><?= h($pv['phone']) ?></div>
+                    <div class="d-flex flex-wrap gap-1">
+                        <?php foreach ($missionVisitorTags as $tag): ?>
+                        <form method="post">
+                            <?= csrfField() ?><input type="hidden" name="action" value="classify_visitor">
+                            <input type="hidden" name="user_id" value="<?= $pv['id'] ?>">
+                            <input type="hidden" name="tag_id" value="<?= $tag['id'] ?>">
+                            <button type="submit" class="btn btn-sm" style="background-color:<?= h($tag['color']) ?>;color:#fff;"><i class="bi <?= h($tag['icon']) ?> me-1"></i><?= h($tag['label']) ?></button>
+                        </form>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+                <?php endif; ?>
+
+                <h6 class="small fw-semibold text-uppercase text-muted mt-3"><?= t('visitor.active_title') ?></h6>
+                <?php if (empty($activeVisitors)): ?>
+                <p class="text-muted small mb-0"><?= t('visitor.active_empty') ?></p>
+                <?php else: ?>
+                <?php foreach ($activeVisitors as $av): ?>
+                <div class="d-flex align-items-center justify-content-between border rounded p-2 mb-2">
+                    <div class="min-width-0">
+                        <div class="fw-semibold small"><?= h($av['name']) ?></div>
+                        <span class="badge" style="background-color:<?= h($av['tag_color']) ?>;"><?= h($av['tag_label']) ?></span>
+                    </div>
+                    <form method="post" onsubmit="return confirm('<?= h(addslashes(t('visitor.remove_confirm', ['name' => $av['name']]))) ?>')">
+                        <?= csrfField() ?><input type="hidden" name="action" value="remove_visitor">
+                        <input type="hidden" name="user_id" value="<?= $av['id'] ?>">
+                        <button type="submit" class="btn btn-sm btn-outline-danger" title="<?= h(t('visitor.remove_btn_title')) ?>"><i class="bi bi-person-dash"></i></button>
+                    </form>
+                </div>
+                <?php endforeach; ?>
+                <?php endif; ?>
+                <?php endif; ?>
+            </div>
+        </div>
 
         <?php
         // Closing is the only door out of the Action Room: every "Είδα"/"Λύθηκε"

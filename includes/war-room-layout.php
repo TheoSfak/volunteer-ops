@@ -30,7 +30,7 @@ function warRoomDefaultLayout(): array {
             'myLocationCard', 'mediaCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'myRouteCard',
             'myTasksCard', 'mySectorsCard', 'shiftsCard', 'sosAlertsCard', 'broadcastCard',
             'endMissionCard', 'dispatchCard', 'sectorsCard', 'restrictedAreasCard', 'routeOrderCard',
-            'teamRoutesAdminCard', 'briefingCard', 'missionMgmtCard',
+            'teamRoutesAdminCard', 'briefingCard', 'missionVisitorsCard', 'missionMgmtCard',
         ],
     ];
 }
@@ -179,6 +179,7 @@ function warRoomCardLabels(): array {
         'routeOrderCard' => t('route.card_title'),
         'teamRoutesAdminCard' => t('route.admin_panel_title'),
         'briefingCard' => t('briefing.card_title'),
+        'missionVisitorsCard' => t('visitor.card_title'),
         'missionMgmtCard' => t('admin.mission_mgmt_title'),
     ];
 }

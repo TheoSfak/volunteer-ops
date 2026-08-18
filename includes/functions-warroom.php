@@ -113,11 +113,12 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
     $ackRows = dbFetchAll(
         "SELECT a.dispatch_id, a.team_id, a.user_id, a.created_at, u.name AS user_name,
                 u.is_external, u.guest_org_name, u.guest_country_code,
-                vt.name AS home_team_name, vt.color AS home_team_color,
+                COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
                 mt.codename, mt.team_number
          FROM mission_dispatch_acks a
          JOIN users u ON u.id = a.user_id
          LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+         LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
          LEFT JOIN mission_teams mt ON mt.id = a.team_id
          WHERE a.dispatch_id IN ($placeholders)
          ORDER BY a.created_at",
@@ -746,11 +747,12 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
     $rows = dbFetchAll(
         "SELECT p.id, p.user_id, p.media_type, p.thumb_stored_name, p.lat, p.lng, p.created_at, p.poi_id, p.poi_note,
                 u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
-                vt.name AS home_team_name, vt.color AS home_team_color,
+                COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
                 mt.codename, mt.team_number
          FROM mission_photos p
          JOIN users u ON u.id = p.user_id
          LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+         LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
          LEFT JOIN mission_team_members mtm ON mtm.user_id = p.user_id AND mtm.mission_id = p.mission_id
          LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
          WHERE p.mission_id = ? AND p.order_id IS NULL
@@ -971,15 +973,17 @@ function loadMissionTeamsForMission(int $missionId): array {
     $teamRows = dbFetchAll(
         "SELECT mt.id, mt.codename, mt.team_number, mt.color, mt.briefing_token, mt.leader_id, l.name AS leader_name,
                 l.is_external AS leader_is_external, l.guest_org_name AS leader_guest_org_name, l.guest_country_code AS leader_guest_country_code,
-                lht.name AS leader_home_team_name, lht.color AS leader_home_team_color,
+                COALESCE(lht.name, lmvt.label) AS leader_home_team_name, COALESCE(lht.color, lmvt.color) AS leader_home_team_color,
                 mtm.user_id, u.name AS member_name, u.is_external AS member_is_external, u.guest_org_name AS member_guest_org_name, u.guest_country_code AS member_guest_country_code,
-                mht.name AS member_home_team_name, mht.color AS member_home_team_color
+                COALESCE(mht.name, mmvt.label) AS member_home_team_name, COALESCE(mht.color, mmvt.color) AS member_home_team_color
          FROM mission_teams mt
          LEFT JOIN users l ON l.id = mt.leader_id
          LEFT JOIN volunteer_teams lht ON lht.id = l.volunteer_team_id
+         LEFT JOIN mission_visitor_tags lmvt ON lmvt.id = l.mission_visitor_tag_id
          LEFT JOIN mission_team_members mtm ON mtm.team_id = mt.id
          LEFT JOIN users u ON u.id = mtm.user_id
          LEFT JOIN volunteer_teams mht ON mht.id = u.volunteer_team_id
+         LEFT JOIN mission_visitor_tags mmvt ON mmvt.id = u.mission_visitor_tag_id
          WHERE mt.mission_id = ?
          ORDER BY mt.created_at, u.name",
         [$missionId]
@@ -1614,11 +1618,12 @@ function loadUnresolvedShortageReportsForMission(int $missionId): array {
     $rows = dbFetchAll(
         "SELECT r.id, r.shortage_type, r.severity, r.title, r.description, r.created_at, r.acknowledged_at,
                 r.team_id, u.name AS reporter_name, u.is_external, u.guest_org_name, u.guest_country_code,
-                vt.name AS home_team_name, vt.color AS home_team_color,
+                COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
                 mt.codename, mt.team_number
          FROM mission_shortage_reports r
          JOIN users u ON u.id = r.reporter_id
          LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+         LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
          LEFT JOIN mission_teams mt ON mt.id = r.team_id
          WHERE r.mission_id = ? AND r.resolved_at IS NULL AND r.not_resolved_at IS NULL
          ORDER BY FIELD(r.severity, 'critical', 'high', 'medium', 'low'), r.created_at ASC",
@@ -1695,11 +1700,12 @@ function loadUnresolvedIncidentsForMission(int $missionId, bool $unmasked): arra
                 i.estimated_age, i.gender, i.phone, i.notes, i.team_id, i.lat, i.lng,
                 i.created_at, i.acknowledged_at,
                 u.name AS reporter_name, u.is_external, u.guest_org_name, u.guest_country_code,
-                vt.name AS home_team_name, vt.color AS home_team_color,
+                COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
                 mt.codename, mt.team_number
          FROM mission_incidents i
          JOIN users u ON u.id = i.reporter_id
          LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+         LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
          LEFT JOIN mission_teams mt ON mt.id = i.team_id
          WHERE i.mission_id = ? AND i.resolved_at IS NULL
          ORDER BY FIELD(i.severity, 'critical', 'high', 'medium', 'low'), i.created_at ASC",
@@ -1767,10 +1773,11 @@ function loadPointsOfInterestForMission(int $missionId): array {
     $photoRows = dbFetchAll(
         "SELECT ph.id, ph.poi_id, ph.media_type, ph.thumb_stored_name, ph.user_id, ph.poi_note, ph.created_at,
                 u.name AS reporter_name, u.is_external, u.guest_org_name, u.guest_country_code,
-                vt.name AS home_team_name, vt.color AS home_team_color
+                COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color
          FROM mission_photos ph
          JOIN users u ON u.id = ph.user_id
          LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+         LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
          WHERE ph.poi_id IN ($placeholders)
          ORDER BY ph.created_at ASC",
         $poiIds
@@ -1949,11 +1956,12 @@ function loadOpenSosAlertsForMission(int $missionId): array {
     $rows = dbFetchAll(
         "SELECT a.id, a.pr_id, a.lat, a.lng, a.created_at, a.acknowledged_at,
                 a.team_id, u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
-                vt.name AS home_team_name, vt.color AS home_team_color,
+                COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
                 mt.codename, mt.team_number
          FROM mission_sos_alerts a
          JOIN users u ON u.id = a.user_id
          LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+         LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
          LEFT JOIN mission_teams mt ON mt.id = a.team_id
          WHERE a.mission_id = ? AND a.resolved_at IS NULL
          ORDER BY a.created_at ASC",
@@ -2022,11 +2030,12 @@ function loadMissionRestrictedAreasForUser(int $missionId): array {
 function loadOpenRestrictedAreaBreachesForUser(int $missionId, int $userId, bool $canManageWarRoom): array {
     $sql = "SELECT b.id, b.area_label, b.lat, b.lng, b.exited_at, b.acknowledged_at, b.created_at,
                    b.user_id, b.team_id, u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
-                   vt.name AS home_team_name, vt.color AS home_team_color,
+                   COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
                    mt.codename, mt.team_number
             FROM mission_restricted_area_breaches b
             JOIN users u ON u.id = b.user_id
             LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+            LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
             LEFT JOIN mission_teams mt ON mt.id = b.team_id
             WHERE b.mission_id = ? AND b.resolved_at IS NULL";
     $params = [$missionId];
@@ -2076,11 +2085,12 @@ function loadOpenRestrictedAreaBreachesForUser(int $missionId, int $userId, bool
 function loadRestrictedAreaBreachHistoryForUser(int $missionId, int $userId, bool $canManageWarRoom): array {
     $sql = "SELECT b.id, b.area_label, b.lat, b.lng, b.exited_at, b.acknowledged_at, b.resolved_at, b.created_at,
                    b.user_id, b.team_id, u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
-                   vt.name AS home_team_name, vt.color AS home_team_color,
+                   COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
                    mt.codename, mt.team_number, ru.name AS resolved_by_name
             FROM mission_restricted_area_breaches b
             JOIN users u ON u.id = b.user_id
             LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+            LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
             LEFT JOIN mission_teams mt ON mt.id = b.team_id
             LEFT JOIN users ru ON ru.id = b.resolved_by
             WHERE b.mission_id = ?";

@@ -6180,6 +6180,80 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 136,
+            'description' => 'Mission Visitor: create mission_visitor_tags (admin-extensible classification chips, seeded with Πολίτης/Αστυνομία/Πυροσβεστική/ΕΜΑΚ/Πολιτική Προστασία/Δήμος) and add users.is_mission_visitor + mission_visitor_tag_id + mission_visitor_mission_id, plus missions.visitor_join_token — a single-mission, unvetted, QR-self-registered visitor tier layered on the existing is_external=1 guest gate (see visitor-join.php), not a parallel actor type.',
+            'up' => function () {
+                $tableExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_visitor_tags'"
+                );
+                if (!$tableExists) {
+                    dbExecute(
+                        "CREATE TABLE mission_visitor_tags (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            label VARCHAR(100) NOT NULL,
+                            color VARCHAR(7) NOT NULL DEFAULT '#6c757d',
+                            icon VARCHAR(50) NOT NULL DEFAULT 'bi-person-badge',
+                            sort_order INT NOT NULL DEFAULT 0,
+                            is_active TINYINT(1) NOT NULL DEFAULT 1,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            UNIQUE KEY uq_mission_visitor_tags_label (label)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                foreach ([
+                    ['Πολίτης', '#6c757d', 'bi-person', 1],
+                    ['Αστυνομία', '#2a52be', 'bi-shield-lock', 2],
+                    ['Πυροσβεστική', '#e34948', 'bi-fire', 3],
+                    ['ΕΜΑΚ', '#eda100', 'bi-life-preserver', 4],
+                    ['Πολιτική Προστασία', '#1baf7a', 'bi-shield-check', 5],
+                    ['Δήμος', '#534ab7', 'bi-bank', 6],
+                ] as [$label, $color, $icon, $order]) {
+                    if (!dbFetchValue("SELECT id FROM mission_visitor_tags WHERE label = ?", [$label])) {
+                        dbInsert(
+                            "INSERT INTO mission_visitor_tags (label, color, icon, sort_order, is_active) VALUES (?, ?, ?, ?, 1)",
+                            [$label, $color, $icon, $order]
+                        );
+                    }
+                }
+
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_mission_visitor'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN is_mission_visitor TINYINT(1) NOT NULL DEFAULT 0 AFTER guest_country_code");
+                }
+
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'mission_visitor_tag_id'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN mission_visitor_tag_id INT UNSIGNED NULL AFTER is_mission_visitor, ADD FOREIGN KEY (mission_visitor_tag_id) REFERENCES mission_visitor_tags(id) ON DELETE SET NULL");
+                }
+
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'mission_visitor_mission_id'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN mission_visitor_mission_id INT UNSIGNED NULL AFTER mission_visitor_tag_id, ADD FOREIGN KEY (mission_visitor_mission_id) REFERENCES missions(id) ON DELETE CASCADE, ADD INDEX idx_users_mission_visitor (mission_visitor_mission_id, is_mission_visitor)");
+                }
+
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'missions' AND COLUMN_NAME = 'visitor_join_token'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE missions ADD COLUMN visitor_join_token VARCHAR(64) NULL, ADD UNIQUE KEY uq_missions_visitor_join_token (visitor_join_token)");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
