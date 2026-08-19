@@ -6254,6 +6254,46 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 137,
+            'description' => 'Add users.mission_visitor_consent_at DATETIME NULL — the moment a walk-up Mission Visitor ticked the GDPR consent box on visitor-join.php. Nullable rather than NOT NULL because every visitor registered before this migration predates the checkbox: backfilling them with a fabricated timestamp would assert a consent that was never actually given, which is exactly the record this column exists to keep honest. Consent is mandatory for every registration from here on (enforced in visitor-join.php, not by the schema, so the resume path can still let an already-registered visitor back in).',
+            'up' => function () {
+                $col = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'mission_visitor_consent_at'"
+                );
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN mission_visitor_consent_at DATETIME NULL AFTER mission_visitor_mission_id");
+                }
+            },
+        ],
+
+        [
+            'version'     => 138,
+            'description' => 'Register the 7 Action Room command-staff notification codes that close the "the volunteer acted and nobody upstairs heard about it" gaps: route depart + per-waypoint complete, sector acknowledge, task-order complete, field status on-the-way/on-site, and a volunteer confirming they saw a restricted-area alarm. Registration is what makes them appear in Settings as togglable; sendNotification() itself already treats an unregistered code as opted-in, so the alerts work with or without this row — this exists so admins can turn the chattier ones down.',
+            'up' => function () {
+                $codes = [
+                    ['mission_route_departure',           'Εκκίνηση Ομάδας για Σημείο Πορείας', 'Μια ομάδα πάτησε «Ξεκίνησε» για σημείο της Εντολής Πορείας — ειδοποιεί το επιτελείο (μόνο push/εντός εφαρμογής, όχι email)'],
+                    ['mission_route_waypoint_completed',  'Ολοκλήρωση Σημείου Πορείας',         'Μια ομάδα ολοκλήρωσε ένα μεμονωμένο σημείο της Εντολής Πορείας — ειδοποιεί το επιτελείο (μόνο push/εντός εφαρμογής, όχι email)'],
+                    ['mission_sector_acknowledged',       'Λήψη Ανάθεσης Τομέα',                'Μια ομάδα επιβεβαίωσε λήψη («Ελήφθη») του τομέα έρευνας που της ανατέθηκε — ειδοποιεί το επιτελείο (μόνο push/εντός εφαρμογής, όχι email)'],
+                    ['mission_task_completed',            'Ολοκλήρωση Γενικής Εντολής',         'Εθελοντής δήλωσε ολοκλήρωση Γενικής Εντολής — ειδοποιεί το επιτελείο (μόνο push/εντός εφαρμογής, όχι email)'],
+                    ['mission_field_status_on_way',       'Εθελοντής σε Κίνηση',                'Εθελοντής δήλωσε «Σε Κίνηση» από το Action Room — ειδοποιεί το επιτελείο (μόνο push/εντός εφαρμογής, όχι email)'],
+                    ['mission_field_status_on_site',      'Εθελοντής στο Σημείο',               'Εθελοντής δήλωσε «Στο σημείο» από το Action Room — ειδοποιεί το επιτελείο (μόνο push/εντός εφαρμογής, όχι email)'],
+                    ['mission_restricted_area_seen',      'Είδε Προειδοποίηση Απαγορευμένης Περιοχής', 'Εθελοντής μέσα σε απαγορευμένη περιοχή έκλεισε τον συναγερμό, δηλαδή τον είδε — ειδοποιεί το επιτελείο (μόνο push/εντός εφαρμογής, όχι email)'],
+                ];
+                foreach ($codes as [$code, $name, $description]) {
+                    $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = ?", [$code]);
+                    if (!$ns) {
+                        dbInsert(
+                            "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                             VALUES (?, ?, ?, 1, NULL)",
+                            [$code, $name, $description]
+                        );
+                    }
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

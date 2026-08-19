@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `is_mission_visitor` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Walk-up single-mission visitor — a narrowed is_external=1 sub-type, see mission_visitor_tag_id/mission_visitor_mission_id',
     `mission_visitor_tag_id` INT UNSIGNED NULL COMMENT 'Admin-assigned classification chip; NULL = pending classification',
     `mission_visitor_mission_id` INT UNSIGNED NULL COMMENT 'The single mission this visitor is scoped to — never reused across missions, unlike partner-guest accounts',
+    `mission_visitor_consent_at` DATETIME NULL COMMENT 'When this visitor ticked the GDPR consent box on visitor-join.php; NULL for rows created before that checkbox existed',
     `total_points` INT DEFAULT 0,
     `monthly_points` INT DEFAULT 0,
     `email_verified_at` TIMESTAMP NULL,

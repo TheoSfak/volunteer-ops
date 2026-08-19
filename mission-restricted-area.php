@@ -50,18 +50,73 @@ if (!isPost()) {
     exit;
 }
 
-// ── POST: everything below is a mutation, all admin-only ────────────────────
+// ── POST: everything below is a mutation (admin-only except `acknowledge`) ──
 if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string) $_POST['csrf_token'])) {
     echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
     exit;
 }
 
+$action = post('action');
+
+// ── acknowledge: the ONE action on this page a non-admin may take ──────────
+// Everything else here is admin CRUD on the zones themselves, but the breach
+// alarm is dual-sided: it goes full-screen on the FIELD volunteer's own
+// device, and until now their dismissing it was purely client-side state
+// (war-room.php's raDismissedBreachIds) that never left the browser. Command
+// staff therefore had no way to tell "they saw the danger warning and are
+// reacting" from "their phone is in a pocket and nobody has seen anything" —
+// on the one alert in the app that is about someone standing inside a hazard.
+// A participant may acknowledge only their OWN breach; an admin may
+// acknowledge any of them, as before.
+if ($action === 'acknowledge') {
+    $breachId = (int) post('id');
+    $breach = dbFetchOne(
+        "SELECT id, mission_id, user_id, area_label, team_id, acknowledged_at FROM mission_restricted_area_breaches WHERE id = ?",
+        [$breachId]
+    );
+    if (!$breach || (int) $breach['mission_id'] !== $missionId) {
+        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+        exit;
+    }
+    if (!$canManageWarRoom && (int) $breach['user_id'] !== $userId) {
+        echo json_encode(['ok' => false, 'error' => t('sector.no_manage_permission')]);
+        exit;
+    }
+    if (!$breach['acknowledged_at']) {
+        dbExecute("UPDATE mission_restricted_area_breaches SET acknowledged_at = NOW(), acknowledged_by = ? WHERE id = ?", [$userId, $breachId]);
+        logAudit('acknowledge_restricted_area_breach', 'mission_restricted_area_breaches', $breachId, null, ['mission_id' => $missionId]);
+
+        // Only the field volunteer confirming their own breach is news to
+        // command staff — an admin ticking it off in the ops room is them
+        // telling themselves, and would just echo back to the rest of the
+        // desk. Inside the idempotency guard, so repeated dismissals of a
+        // still-open breach (the overlay re-arms every 15 minutes) alert once.
+        if ((int) $breach['user_id'] === $userId) {
+            $breachTeamRow = $breach['team_id'] ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$breach['team_id']]) : null;
+            $breachTeamLabel = $breachTeamRow
+                ? teamLabel($breachTeamRow['codename'], $breachTeamRow['team_number'])
+                : t('status.no_team_label');
+            notifyCommandStaffBanner(
+                $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
+                'mission_restricted_area_seen', 'restricted_area.seen_notify_title', [],
+                'restricted_area.seen_notify_message',
+                ['name' => getCurrentUser()['name'] ?? '', 'team' => $breachTeamLabel, 'area' => (string) $breach['area_label'], 'mission' => $mission['title']]
+            );
+        }
+    }
+    // History shape (not the open-only one) — the client derives the
+    // open-only subset itself to refresh the alarm state, so the breach
+    // LIST widget can show this one's new acknowledged state without a
+    // second query.
+    echo json_encode(['ok' => true, 'breaches' => loadRestrictedAreaBreachHistoryForUser($missionId, $userId, true)]);
+    exit;
+}
+
+// ── everything below is admin-only ────────────────────────────────────────
 if (!$canManageWarRoom) {
     echo json_encode(['ok' => false, 'error' => t('sector.no_manage_permission')]);
     exit;
 }
-
-$action = post('action');
 $isValidLatLng = fn($lat, $lng) => is_numeric($lat) && is_numeric($lng)
     && (float) $lat >= -90 && (float) $lat <= 90 && (float) $lng >= -180 && (float) $lng <= 180
     && !((float) $lat === 0.0 && (float) $lng === 0.0);
@@ -127,25 +182,6 @@ if ($action === 'delete') {
     logAudit('delete_mission_restricted_area', 'mission_restricted_areas', $areaId, null, ['mission_id' => $missionId]);
 
     echo json_encode(['ok' => true]);
-    exit;
-}
-
-if ($action === 'acknowledge') {
-    $breachId = (int) post('id');
-    $breach = dbFetchOne("SELECT id, mission_id, acknowledged_at FROM mission_restricted_area_breaches WHERE id = ?", [$breachId]);
-    if (!$breach || (int) $breach['mission_id'] !== $missionId) {
-        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
-        exit;
-    }
-    if (!$breach['acknowledged_at']) {
-        dbExecute("UPDATE mission_restricted_area_breaches SET acknowledged_at = NOW(), acknowledged_by = ? WHERE id = ?", [$userId, $breachId]);
-        logAudit('acknowledge_restricted_area_breach', 'mission_restricted_area_breaches', $breachId, null, ['mission_id' => $missionId]);
-    }
-    // History shape (not the open-only one) — the client derives the
-    // open-only subset itself to refresh the alarm state, so the breach
-    // LIST widget can show this one's new acknowledged state without a
-    // second query.
-    echo json_encode(['ok' => true, 'breaches' => loadRestrictedAreaBreachHistoryForUser($missionId, $userId, true)]);
     exit;
 }
 

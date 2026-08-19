@@ -58,7 +58,7 @@ function notifySectorAssigned(int $missionId, string $missionTitle, int $teamId,
  * explicitly rather than read off a $sector row that may already be stale
  * by the time this runs.
  */
-function notifySectorStatusChanged(int $missionId, string $missionTitle, ?int $responsibleUserId, array $sector, string $newStatus, int $actorId, bool $actorIsAdmin): void {
+function notifySectorStatusChanged(int $missionId, string $missionTitle, ?int $responsibleUserId, array $sector, string $newStatus, int $actorId, bool $actorIsAdmin, string $actorName = ''): void {
     if ($actorIsAdmin) {
         if (!$sector['team_id']) {
             return;
@@ -82,7 +82,11 @@ function notifySectorStatusChanged(int $missionId, string $missionTitle, ?int $r
     $langByUserId = getUserLanguages($recipientIds);
     foreach ($recipientIds as $recipientId) {
         $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
-        $message = t('sector.status_changed_notify_message', ['label' => $sector['label'], 'status' => sectorStatusLabel($newStatus, $lang)], $lang);
+        $message = t('sector.status_changed_notify_message', [
+            'label'  => $sector['label'],
+            'status' => sectorStatusLabel($newStatus, $lang),
+            'name'   => $actorName,
+        ], $lang);
         sendNotification($recipientId, t('sector.status_changed_notify_title', ['mission' => $missionTitle], $lang), $message, 'info', 'mission_sector_status', [
             'url' => $warRoomUrl,
             'tag' => 'sector-status-mission-' . $missionId,
@@ -225,7 +229,7 @@ if ($action === 'status') {
 
     notifySectorStatusChanged(
         $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null,
-        $sector, $targetStatus, $userId, $canManageWarRoom
+        $sector, $targetStatus, $userId, $canManageWarRoom, $user['name'] ?? ''
     );
 
     echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
@@ -234,7 +238,7 @@ if ($action === 'status') {
 
 if ($action === 'acknowledge') {
     $sectorId = (int) post('id');
-    $sector = dbFetchOne("SELECT id, team_id, acknowledged_at FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
+    $sector = dbFetchOne("SELECT id, team_id, acknowledged_at, label FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
     if (!$sector) {
         echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
@@ -258,6 +262,22 @@ if ($action === 'acknowledge') {
     if (!$sector['acknowledged_at']) {
         dbExecute("UPDATE mission_search_sectors SET acknowledged_at = NOW(), acknowledged_by = ? WHERE id = ?", [$userId, $sectorId]);
         logAudit('acknowledge_mission_sector', 'mission_search_sectors', $sectorId, null, ['mission_id' => $missionId]);
+
+        // Sector "Ελήφθη" is the exact counterpart of a Route Order's own
+        // acknowledge (mission-order.php), which has fired a loud banner to
+        // command staff since it shipped — this one never did, so the one
+        // signal that a team had actually seen its sector assignment reached
+        // the map as nothing but a small timestamp on a 5s poll. Inside the
+        // idempotency guard, so a double-tap or retry can't re-alert.
+        // Admin-acknowledged (a manager standing in for a team) is included
+        // deliberately: notifyCommandStaffBanner() already excludes the
+        // actor, so the rest of the command staff still learns it happened.
+        notifyCommandStaffBanner(
+            $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
+            'mission_sector_acknowledged', 'sector.acknowledged_notify_title', [],
+            'sector.acknowledged_notify_message',
+            ['name' => $user['name'] ?? '', 'label' => $sector['label'], 'mission' => $mission['title']]
+        );
     }
 
     echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
