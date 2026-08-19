@@ -47,6 +47,41 @@ function notifyMissionTeamChat(int $missionId, string $missionTitle, array $team
     }
 }
 
+/**
+ * Notify command staff about a message posted in the mission-wide "Γενικό
+ * Δωμάτιο" (team_id NULL). This room had no notification path at all: only
+ * notifyMissionTeamChat() above ever fired, and it is keyed on a team, so a
+ * message here reached nobody. That is worst exactly for the people who have
+ * no other channel — a Mission Visitor (walk-up police/citizen, no team) and
+ * any not-yet-teamed volunteer only ever see this one room, so their message
+ * to command staff was silently going nowhere.
+ *
+ * Quiet bell, not a scrolling banner: identical to the rule the private team
+ * rooms already follow (a member posting to command staff is a bell; only an
+ * admin's own message to a team gets bannerMission). A chat line is not a
+ * field report, and the mission's loud channels — orders, SOS, incident and
+ * shortage reports — all still exist for anything that warrants one.
+ */
+function notifyMissionGeneralChat(int $missionId, string $missionTitle, int $senderId, string $senderName, string $message, ?int $responsibleUserId): void {
+    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $senderId);
+    if (empty($recipientIds)) {
+        return;
+    }
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $preview = mb_strlen($message) > 120 ? mb_substr($message, 0, 117) . '…' : $message;
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        sendNotification(
+            $recipientId,
+            '💬 ' . t('chat.general_room', [], $lang),
+            $senderName . ': ' . $preview,
+            'info', 'mission_team_chat',
+            ['url' => $warRoomUrl, 'tag' => 'mission-chat-general-' . $missionId]
+        );
+    }
+}
+
 $userId = getCurrentUserId();
 $user = getCurrentUser();
 
@@ -187,6 +222,13 @@ if ($action === 'send') {
 
     if ($teamId && $team) {
         notifyMissionTeamChat($missionId, $mission['title'], $team, $userId, $user['name'], $message, $canManageWarRoom, $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null);
+    } elseif (!$canManageWarRoom) {
+        // General room. Only a non-admin sender notifies: an admin posting
+        // here is talking TO the field, and the app already has a dedicated
+        // loud, acknowledged channel for that (Καθολικό Μήνυμα / broadcast),
+        // so mass-notifying every participant off a chat line would just
+        // duplicate it noisily.
+        notifyMissionGeneralChat($missionId, $mission['title'], $userId, $user['name'], $message, $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null);
     }
 
     [$homeBg, $homeFg] = teamBadgeColors($user['home_team_color'] ?? null);

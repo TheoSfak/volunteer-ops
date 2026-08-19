@@ -531,6 +531,22 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
     $outOfSequence = ($isOutOfSequence || $alreadyFlagged) ? 1 : 0;
     [$eventTs, $reportedAtTs] = resolveEventTimestamp();
 
+    // Team label + waypoint label, resolved lazily and at most once per
+    // request: all three of depart/arrive/complete now report to command
+    // staff, but each only on the branch that actually won its race, so
+    // resolving eagerly would run two extra queries on every no-op retry.
+    $resolvedNames = null;
+    $waypointNames = function () use (&$resolvedNames, $wp) {
+        if ($resolvedNames === null) {
+            $teamRow = $wp['team_id'] ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$wp['team_id']]) : null;
+            $resolvedNames = [
+                $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : routeMixedTeamLabel((int) $wp['route_id']),
+                ($wp['label'] !== null && $wp['label'] !== '') ? $wp['label'] : t('route.waypoint_fallback_label', ['seq' => $wp['seq']]),
+            ];
+        }
+        return $resolvedNames;
+    };
+
     if ($action === 'depart') {
         // Moving on to a later stop implicitly closes out whichever earlier
         // stop(s) of this route are still open — in the field nobody clicks a
@@ -556,6 +572,23 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
             [$eventTs, $userId, $outOfSequence, $reportedAtTs, $waypointId]
         );
         logAudit('depart_route_waypoint', 'mission_route_waypoints', $waypointId, null, ['mission_id' => $missionId, 'out_of_sequence' => (bool) $outOfSequence]);
+
+        // "Ξεκίνησε" is the moment a team commits to moving toward a point —
+        // operationally the most decision-relevant event on a route, and the
+        // one command staff was never told about: only "arrive" below fired
+        // a banner, so the whole travel window was invisible from the map
+        // side. Guarded on $wp['departed_at'] being empty rather than on a
+        // rowCount: the UPDATE above uses COALESCE(departed_at, ...), so it
+        // reports 0 changed rows on a genuine first depart whose other
+        // columns happen to already match, and would swallow the alert.
+        if (!$wp['departed_at']) {
+            [$teamLbl, $label] = $waypointNames();
+            notifyCommandStaffBanner(
+                $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
+                'mission_route_departure', 'route.notify_departure_title', [],
+                'route.notify_departure_message', ['team' => $teamLbl, 'label' => $label, 'mission' => $mission['title']]
+            );
+        }
         maybeCompleteRoute((int) $wp['route_id'], $userId);
     } elseif ($action === 'arrive') {
         if (!$wp['arrived_at']) {
@@ -591,9 +624,7 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
             if ($rows > 0) {
                 logAudit('arrive_route_waypoint', 'mission_route_waypoints', $waypointId, null, ['mission_id' => $missionId, 'distance_m' => $distance]);
 
-                $teamRow = $wp['team_id'] ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$wp['team_id']]) : null;
-                $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : routeMixedTeamLabel((int) $wp['route_id']);
-                $label = $wp['label'] !== null && $wp['label'] !== '' ? $wp['label'] : t('route.waypoint_fallback_label', ['seq' => $wp['seq']]);
+                [$teamLbl, $label] = $waypointNames();
                 notifyCommandStaffBanner(
                     $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
                     'mission_route_arrival', 'route.notify_arrival_title', [],
@@ -641,6 +672,18 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
         );
         if ($rows > 0) {
             logAudit('complete_route_waypoint', 'mission_route_waypoints', $waypointId, null, ['mission_id' => $missionId]);
+
+            // Closing out a single point, as distinct from maybeCompleteRoute()
+            // below announcing the whole route finished — a 12-stop patrol
+            // used to be completely silent to command staff for its first 11
+            // stops. Inside the $rows > 0 guard, so an offline-queue replay
+            // landing on an already-completed waypoint stays silent.
+            [$teamLbl, $label] = $waypointNames();
+            notifyCommandStaffBanner(
+                $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
+                'mission_route_waypoint_completed', 'route.notify_waypoint_completed_title', [],
+                'route.notify_waypoint_completed_message', ['team' => $teamLbl, 'label' => $label, 'mission' => $mission['title']]
+            );
             maybeCompleteRoute((int) $wp['route_id'], $userId);
         }
     }

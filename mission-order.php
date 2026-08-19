@@ -158,6 +158,27 @@ if ($action === 'complete') {
             [$recipient['id']]
         );
         logAudit('complete_mission_order', 'mission_order_recipients', $recipient['id'], null, ['order_id' => $orderId]);
+
+        // "Ολοκληρώθηκε" on a task order is the report command staff is
+        // actually waiting for — merely acknowledging it ("Ελήφθη") has
+        // banner-alerted them since that feature shipped, while the far more
+        // consequential completion stayed silent. Same recipients, same
+        // loud treatment, so a task's two halves are finally symmetric.
+        $order = dbFetchOne(
+            "SELECT o.mission_id, m.title AS mission_title, m.responsible_user_id
+             FROM mission_orders o
+             JOIN missions m ON m.id = o.mission_id
+             WHERE o.id = ?",
+            [$orderId]
+        );
+        if ($order) {
+            notifyCommandStaffBanner(
+                (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
+                'mission_task_completed', 'order.task.notify_completed_title', [],
+                'order.task.notify_completed_message',
+                ['name' => getCurrentUser()['name'] ?? '', 'mission' => $order['mission_title']]
+            );
+        }
     }
 
     echo json_encode(['ok' => true]);

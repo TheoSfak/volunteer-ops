@@ -22,6 +22,10 @@
  * and bootstrap.php's is_external gate for how the resulting account is
  * confined to Action Room and to this single mission afterward).
  *
+ * Registration also requires an explicit GDPR consent tick
+ * (users.mission_visitor_consent_at, migration v137). The `resume` action
+ * never re-asks — that row's consent was recorded when it was created.
+ *
  * URL: /visitor-join.php?token=XXXX
  */
 require_once __DIR__ . '/bootstrap.php';
@@ -60,6 +64,17 @@ if ($mission && isPost()) {
         if ($phone === '') {
             $errors[] = t('visitor.join_err_phone_required', [], 'el');
         }
+        // GDPR consent is a hard gate on registration, not a formality:
+        // this is the only moment a walk-up visitor is ever asked, and the
+        // account created below is what puts their name/phone into a live
+        // operational picture and, later, into the mission's report PDFs.
+        // Checked server-side rather than trusting the `required` attribute
+        // — the same reasoning every other validation on this page follows.
+        // The `resume` action deliberately does NOT re-ask: consent was
+        // already given and stamped when that row was first created.
+        if (post('gdpr_consent') !== '1') {
+            $errors[] = t('visitor.join_err_gdpr_required', [], 'el');
+        }
 
         if (empty($errors)) {
             $name = mb_substr(trim("$firstName $lastName"), 0, 100);
@@ -76,6 +91,16 @@ if ($mission && isPost()) {
 
             if ($existingId) {
                 $visitorUser = dbFetchOne("SELECT id, name, email FROM users WHERE id = ?", [$existingId]);
+                // They just ticked the box again on a row that predates it
+                // (or a double-tap whose first request already created the
+                // row) — record the consent we actually have rather than
+                // leaving a live visitor with no timestamp at all. COALESCE
+                // keeps the ORIGINAL consent moment when there already is
+                // one; a re-tick is not a new consent event.
+                dbExecute(
+                    "UPDATE users SET mission_visitor_consent_at = COALESCE(mission_visitor_consent_at, NOW()), updated_at = NOW() WHERE id = ?",
+                    [$existingId]
+                );
                 establishMissionVisitorSession((int) $visitorUser['id'], $visitorUser['name'], $visitorUser['email']);
             } else {
                 // users.email/password are NOT NULL UNIQUE — synthesize both.
@@ -88,8 +113,8 @@ if ($mission && isPost()) {
 
                 $userId = dbInsert(
                     "INSERT INTO users
-                        (name, email, password, phone, role, is_active, is_external, is_mission_visitor, mission_visitor_mission_id, language, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, 1, 1, 1, ?, 'el', NOW(), NOW())",
+                        (name, email, password, phone, role, is_active, is_external, is_mission_visitor, mission_visitor_mission_id, mission_visitor_consent_at, language, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, 1, 1, 1, ?, NOW(), 'el', NOW(), NOW())",
                     [$name, $email, $passwordHash, $phone, ROLE_VOLUNTEER, $mission['id']]
                 );
 
@@ -113,8 +138,13 @@ if ($mission && isPost()) {
                 }
 
                 logAudit('mission_visitor_register', 'users', $userId, null, [
-                    'mission_id' => $mission['id'],
-                    'ip'         => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+                    'mission_id'   => $mission['id'],
+                    'ip'           => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+                    // The consent record lives in two places on purpose: the
+                    // users column is what the app reads, this audit row is
+                    // the tamper-evident copy with the IP and exact request
+                    // it was given in.
+                    'gdpr_consent' => true,
                 ]);
                 establishMissionVisitorSession($userId, $name, $email);
             }
@@ -173,6 +203,10 @@ $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLog
         .vj-section { padding: 22px; }
         .vj-h { font-size: 13px; font-weight: 800; color: #172554; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
         .vj-resume { background: #f6f5f1; border-top: 1px solid #eee; }
+        .vj-consent { background: #f6f5f1; border: 1px solid #e2e0da; border-radius: 12px; padding: 12px 14px; }
+        .vj-consent .form-check-input { margin-top: .2rem; }
+        .vj-consent .form-check-label { font-size: 13px; line-height: 1.45; color: #172554; }
+        .vj-consent-detail { font-size: 11.5px; line-height: 1.5; color: #6b6b6b; margin-top: 8px; }
         @media (max-width: 480px) { .vj-page { margin: 0; border-radius: 0; } body { background: #fff; } }
     </style>
 </head>
@@ -239,6 +273,21 @@ $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLog
             <div class="mb-3">
                 <label class="form-label"><?= h(t('visitor.join_phone_label', [], 'el')) ?></label>
                 <input type="tel" name="phone" class="form-control form-control-lg" required autocomplete="tel" inputmode="tel" value="<?= $activeForm === 'register' ? h(post('phone')) : '' ?>">
+            </div>
+            <!-- GDPR consent. Deliberately never pre-ticked and never
+                 remembered across a failed submit (unlike the name/phone
+                 fields just above, which are): a consent box that restores
+                 itself as already-ticked is not a consent the person gave on
+                 this submission. Server-side enforcement is what actually
+                 blocks registration — see the gdpr_consent check above. -->
+            <div class="vj-consent mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="gdpr_consent" value="1" id="vjGdprConsent" required>
+                    <label class="form-check-label" for="vjGdprConsent">
+                        <span class="fw-semibold"><?= h(t('visitor.join_gdpr_label', ['org' => $orgName], 'el')) ?></span>
+                    </label>
+                </div>
+                <p class="vj-consent-detail mb-0"><?= h(t('visitor.join_gdpr_detail', ['org' => $orgName], 'el')) ?></p>
             </div>
             <button type="submit" class="btn btn-danger btn-lg w-100 fw-bold"><?= h(t('visitor.join_submit_btn', [], 'el')) ?></button>
         </form>

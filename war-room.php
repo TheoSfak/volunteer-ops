@@ -8826,7 +8826,22 @@ document.getElementById('raMuteBtn')?.addEventListener('click', () => {
 
 let raDismissedBreachIds = new Set();
 function dismissRestrictedAreaOverlay() {
-    raDismissedBreachIds = new Set(restrictedAreaBreaches.filter(b => !b.exited_at).map(b => b.id));
+    const open = restrictedAreaBreaches.filter(b => !b.exited_at);
+    raDismissedBreachIds = new Set(open.map(b => b.id));
+    // Closing this overlay used to be purely local state, so command staff
+    // never learned the person standing in the hazard had actually seen the
+    // warning. Tell the server about MY OWN breaches (mission-restricted-
+    // area.php's acknowledge action, which stamps acknowledged_at and fires
+    // the command-staff banner). Best-effort and fire-and-forget: the alarm
+    // must dismiss instantly on a bad connection — the breach stays open
+    // server-side either way, and the overlay re-arms on the next poll, so a
+    // failed call gets another chance rather than being lost.
+    open.filter(b => b.is_mine).forEach(b => {
+        fetch('mission-restricted-area.php', {
+            method: 'POST',
+            body: new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'acknowledge', id: b.id}),
+        }).catch(() => {});
+    });
     updateRestrictedAreaAlarmState(restrictedAreaBreaches);
 }
 document.getElementById('restrictedAreaOverlayCloseBtn')?.addEventListener('click', dismissRestrictedAreaOverlay);

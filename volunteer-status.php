@@ -99,6 +99,34 @@ $auditNotes = ($reportedAtTs !== $eventTs || strtotime($eventTs) < time() - 5)
     : null;
 logAudit($auditActionByStatus[$status], 'participation_requests', $prId, $auditNotes);
 
+// "Σε Κίνηση" / "Στο σημείο" are the field volunteer's own departure and
+// arrival report — the two moments command staff most needs to hear about
+// and, until now, the only self-reported field events on this page that
+// reached them through nothing but a silent 5s poll of the participants
+// list. Now they get the same loud scrolling banner + alert sound every
+// other field report already fires (bannerMission, via
+// notifyCommandStaffBanner). needs_help is deliberately NOT routed through
+// here: it has its own full-screen siren overlay below, which is louder
+// than a banner and must not be doubled up with one.
+if ($status === 'on_way' || $status === 'on_site') {
+    $statusMissionId = (int) $pr['mission_id'];
+    $statusTeamId = getUserTeamIdForMission($statusMissionId, $userId);
+    $statusTeamRow = $statusTeamId ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$statusTeamId]) : null;
+    $statusTeamLabel = $statusTeamRow
+        ? teamLabel($statusTeamRow['codename'], $statusTeamRow['team_number'])
+        : t('status.no_team_label');
+    notifyCommandStaffBanner(
+        $statusMissionId,
+        $pr['mission_title'],
+        $pr['responsible_user_id'] ? (int) $pr['responsible_user_id'] : null,
+        $userId,
+        $status === 'on_way' ? 'mission_field_status_on_way' : 'mission_field_status_on_site',
+        $status === 'on_way' ? 'status.notify_on_way_title' : 'status.notify_on_site_title', [],
+        $status === 'on_way' ? 'status.notify_on_way_message' : 'status.notify_on_site_message',
+        ['name' => getCurrentUser()['name'] ?? '', 'team' => $statusTeamLabel, 'mission' => $pr['mission_title']]
+    );
+}
+
 // If needs_help → this IS the SOS button: open (or refresh) a War Room SOS
 // alert ticket and alert command staff. A duplicate-open-alert guard stops
 // repeated taps from spamming a fresh row + notification every time; if one
