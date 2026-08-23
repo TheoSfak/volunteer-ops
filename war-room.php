@@ -2937,7 +2937,14 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
-        <?php if (!$fieldMode): ?>
+        <!-- Deliberately not rendered in the volunteer tabbed view. This is a
+             static, server-rendered list of the mission shift times: a volunteer
+             already saw it when they signed up and can re-read it on the mission
+             page, and nobody acts on it mid-incident. It is reference material,
+             so it does not earn a slot on the "me" tab beside their live orders.
+             Command staff keep it, and can still hide it themselves through the
+             Manage Cards gear if they do not want it either. -->
+        <?php if (!$fieldMode && !$volunteerTabs): ?>
         <div class="card shadow-sm mb-4" data-card-id="shiftsCard">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-calendar-range me-1"></i><?= t('shifts.panel_title') ?></h5></div>
             <div class="list-group list-group-flush">
@@ -3991,7 +3998,7 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
         // The volunteer's own orders lead, because that is what they opened
         // the page for. Everything else is reference material.
         me:    ['myLocationCard', 'myTasksCard', 'mySectorsCard', 'myRouteCard',
-                'restrictedAreaProximityCard', 'shiftsCard'],
+                'restrictedAreaProximityCard'],
         map:   ['mapCard', 'missingPersonCard', 'weatherCard', 'sectorsListCard', 'poiListCard'],
         team:  ['nearbyTeamsCard', 'teamsCard', 'participantsCard', 'chatCard'],
         field: ['shortageFormCard', 'incidentFormCard', 'incidentsListCard',
