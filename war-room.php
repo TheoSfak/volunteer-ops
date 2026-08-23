@@ -118,6 +118,21 @@ if ($mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
 // opt-in, one tap away, but no longer decides silently for a first-time
 // mobile visitor.
 $fieldMode = isset($_COOKIE['wr_field_mode']) && $_COOKIE['wr_field_mode'] === '1';
+// Volunteer tabbed layout. Everyone who is not command staff gets the
+// compact four-tab view (see #wrTabPanes further down) instead of one long
+// scroll. Kill switch: force this to false and every volunteer falls back to
+// the classic single-column layout with no other change needed.
+$volunteerTabs = !$canManageWarRoom;
+// Field Mode is superseded by that view and is now command-staff-only: the
+// tabs already keep the map off the landing screen and put SOS in a fixed
+// bar, which is everything Field Mode was for. Forcing the flag off (rather
+// than only hiding the toggle) matters because the cookie is sticky — a
+// volunteer who switched to Field Mode before this shipped would otherwise
+// be stranded in a view with no map tab and no way back to one.
+if ($volunteerTabs) {
+    $fieldMode = false;
+}
+
 
 if (isPost()) {
     verifyCsrf();
@@ -1497,6 +1512,135 @@ include __DIR__ . '/includes/header.php';
        until the header is clicked) below the lg breakpoint, but d-lg-block
        forces it permanently visible from lg up regardless of collapse
        state — desktop never needed the tap-to-expand, only phones do. */
+    /* Mobile/tablet stacked-row fix. Below lg these rows collapse to a
+       single stacked column, so the flex default (align-items: stretch)
+       has nothing left to align against — yet it still hands each column a
+       stretched, DEFINITE height. Combined with the h-100 on mediaCard (and
+       mapCard) that produced a column box shorter than its own content, so
+       every card after the gallery escaped the row and painted on top of the
+       chat card below it — a measured 548px overlap at 375px wide, plus
+       ~1200px of dead space inside the over-stretched gallery. flex-start
+       lets each column size to its content instead. Desktop deliberately
+       keeps stretch: equal-height side-by-side columns are still wanted
+       there, and that is also what the h-100 on those cards is FOR. */
+    @media (max-width: 991.98px) {
+        .wr-stack-row { align-items: flex-start; }
+    }
+    /* ---- Volunteer tabbed layout ----------------------------------------
+       A field volunteer's Action Room was a single 7,500px column (9+ phone
+       screens) ordered for a coordinator: the map, every team's roster, the
+       participant list and a 2,500px photo gallery all sat ABOVE the three
+       cards that tell a volunteer what they personally have to do, which
+       landed at 91-95% page depth. These panes + the fixed bottom bar below
+       regroup the very same cards (no card is removed, none is duplicated)
+       into four ~1-screen tabs, with the volunteer's own orders as the
+       landing tab. Panes start hidden and are revealed by JS, so with JS off
+       the cards simply stay in their normal PHP flow and the bar never
+       appears. */
+    .wr-tab-pane { display: none; }
+    .wr-tab-pane.wr-tab-active { display: block; }
+    /* Only shown once JS has actually relocated the cards - see the
+       wr-tabs-ready class it adds. */
+    .wr-tabbar { display: none; }
+    body.wr-tabs-ready .wr-tabbar {
+        display: flex;
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        z-index: 1030;
+        background: #fff;
+        border-top: 1px solid #dee2e6;
+        box-shadow: 0 -2px 12px rgba(0,0,0,.08);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    /* Clears the fixed bar so the last card is never trapped under it. */
+    body.wr-tabs-ready { padding-bottom: 78px; }
+    .wr-tabbar-btn {
+        flex: 1 1 0;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 2px;
+        min-height: 60px;
+        padding: 6px 2px;
+        border: 0; background: transparent;
+        color: #6c757d; font-size: .6875rem; line-height: 1.1;
+        position: relative;
+    }
+    .wr-tabbar-btn i { font-size: 1.25rem; }
+    .wr-tabbar-btn.active { color: #0d6efd; font-weight: 600; }
+    .wr-tabbar-btn.active::before {
+        content: ''; position: absolute; top: 0; left: 22%; right: 22%;
+        height: 3px; border-radius: 0 0 3px 3px; background: #0d6efd;
+    }
+    .wr-tab-badge {
+        position: absolute; top: 4px; left: 52%;
+        min-width: 18px; height: 18px; padding: 0 5px;
+        border-radius: 9px; background: #dc3545; color: #fff;
+        font-size: .625rem; font-weight: 700; line-height: 18px; text-align: center;
+    }
+    /* SOS is the one control that must never be a scroll or a tab away, so it
+       owns the centre slot and is raised out of the bar. Hold-to-fire (not a
+       plain tap): this rides in a jacket pocket. */
+    .wr-tabbar-sos {
+        flex: 0 0 78px;
+        display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+        border: 0; background: transparent; padding: 0;
+        color: #dc3545; font-size: .625rem; font-weight: 700;
+    }
+    .wr-tabbar-sos .wr-sos-dot {
+        width: 54px; height: 54px; margin-top: -16px; margin-bottom: 2px;
+        border-radius: 50%; background: #dc3545; color: #fff;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.4rem;
+        box-shadow: 0 4px 14px rgba(220,53,69,.45);
+        border: 3px solid #fff;
+        transition: transform .12s ease, box-shadow .12s ease;
+    }
+    /* Fills over exactly the hold duration the JS uses, so the ring finishing
+       and the alert firing are the same instant to the eye. */
+    .wr-tabbar-sos.wr-sos-arming .wr-sos-dot {
+        transform: scale(1.12);
+        box-shadow: 0 0 0 8px rgba(220,53,69,.25), 0 4px 14px rgba(220,53,69,.5);
+    }
+    .wr-tabbar-sos.wr-sos-fired .wr-sos-dot { animation: wrSosPulse .4s ease 3; }
+    @keyframes wrSosPulse { 50% { transform: scale(1.2); box-shadow: 0 0 0 14px rgba(220,53,69,0); } }
+    .wr-sos-hint {
+        position: fixed; left: 50%; transform: translateX(-50%);
+        bottom: 86px; z-index: 1031;
+        background: #212529; color: #fff; padding: 7px 14px; border-radius: 999px;
+        font-size: .8125rem; box-shadow: 0 4px 14px rgba(0,0,0,.3);
+    }
+    /* The gallery's card-body carries a hardcoded height:520px so it lines up
+       with the 520px map card sitting next to it on a desktop. In the tabbed
+       view there is no map beside it — the map has its own tab — so all that
+       fixed height achieves is a 245px window onto ~330px-tall items: a
+       nested scroller shorter than one of its own rows, inside a page that
+       already scrolls. Letting it flow costs page height on the Πεδίο tab and
+       is worth it; nested scrolling is the thing a gloved thumb cannot do.
+       Deliberately NOT capped with a max-height: any cap small enough to
+       matter recreates the same trap, and the volunteer's own orders live on
+       a different tab now, so a long gallery costs them nothing. */
+    body.wr-tabs-ready [data-card-id="mediaCard"] .card-body { height: auto !important; }
+    /* !important because Bootstrap's own .overflow-auto utility on this
+       element is itself !important and would otherwise win. */
+    body.wr-tabs-ready #mediaList { overflow: visible !important; padding-bottom: 8px; }
+    /* The hero repeats on every tab, so its 278px was the single most
+       expensive thing on the page. Tightened, not gutted — mission title,
+       location, time window, live status badge and the way back all still
+       show; only the "Action Room · Επιχειρησιακό Κέντρο Αποστολής" eyebrow
+       goes, since a volunteer who just opened the Action Room does not need
+       to be told which screen they are on. 278px -> 190px. */
+    @media (max-width: 991.98px) {
+        body.wr-tabs-ready .war-room-hero { padding: .8rem 1rem !important; margin-bottom: .75rem !important; }
+        body.wr-tabs-ready .war-room-hero h1 { font-size: 1.05rem; margin-bottom: .15rem !important; }
+        body.wr-tabs-ready .war-room-hero .text-uppercase { display: none; }
+        body.wr-tabs-ready .war-room-hero .mb-2 { margin-bottom: .35rem !important; }
+    }
+    /* From lg up the volunteer has the room for a normal page, so the tabs
+       collapse back to one continuous column and the bar disappears. */
+    @media (min-width: 992px) {
+        .wr-tab-pane { display: block; }
+        body.wr-tabs-ready .wr-tabbar { display: none; }
+        body.wr-tabs-ready { padding-bottom: 0; }
+    }
     .wr-collapsible-header { cursor: pointer; }
     .wr-collapsible-chevron { transition: transform .2s; }
     .wr-collapsible-header:not(.collapsed) .wr-collapsible-chevron { transform: rotate(180deg); }
@@ -1810,6 +1954,7 @@ include __DIR__ . '/includes/header.php';
              toggles it from another session. -->
         <button type="button" id="firesOverlayToggle" class="btn btn-outline-light<?= $firesOverlayOn ? ' active' : '' ?>">🔥 <?= t('hero.btn_fires_overlay') ?></button>
         <?php endif; ?>
+        <?php if (!$volunteerTabs): ?>
         <form method="post">
             <?= csrfField() ?>
             <input type="hidden" name="action" value="toggle_field_mode">
@@ -1817,6 +1962,7 @@ include __DIR__ . '/includes/header.php';
                 <i class="bi bi-<?= $fieldMode ? 'grid-3x3-gap' : 'geo-alt' ?> me-1"></i><?= $fieldMode ? t('hero.btn_full_view') : t('hero.btn_field_mode') ?>
             </button>
         </form>
+        <?php endif; ?>
         <button type="button" id="warRoomFocusToggle" class="btn btn-outline-light"><i class="bi bi-arrows-fullscreen me-1"></i><?= t('hero.btn_fullscreen') ?></button>
         <button type="button" id="wakeLockToggle" class="btn btn-outline-light d-none"><i class="bi bi-sun me-1"></i><?= t('hero.btn_keep_awake') ?></button>
         <?php if ($canManageWarRoom && !$fieldMode): ?>
@@ -1884,6 +2030,49 @@ include __DIR__ . '/includes/header.php';
      obvious error. -->
 <div id="pollStaleBanner" class="alert alert-warning d-flex align-items-center gap-2 py-2 px-3 mb-3 d-none" role="status" aria-live="polite"></div>
 
+<?php if ($volunteerTabs): ?>
+<!-- Volunteer tabbed layout. Starts empty, exactly like #wrZoneMain above:
+     every card still renders in its normal PHP-conditioned spot below, and
+     JS physically moves each [data-card-id] node into one of these panes
+     (never clones), then sweeps up the emptied layout rows. JS only does
+     that under the lg breakpoint - a volunteer on a desktop keeps the
+     ordinary two-column page, which is already wide enough. Kill switch:
+     set $volunteerTabs = false where it is defined near the top of this
+     file and every volunteer falls straight back to the classic layout,
+     with no other change needed anywhere. -->
+<div id="wrTabPanes">
+    <div class="wr-tab-pane" data-tab="me" role="tabpanel" aria-labelledby="wrTabBtn-me"></div>
+    <div class="wr-tab-pane" data-tab="map" role="tabpanel" aria-labelledby="wrTabBtn-map"></div>
+    <div class="wr-tab-pane" data-tab="team" role="tabpanel" aria-labelledby="wrTabBtn-team"></div>
+    <div class="wr-tab-pane" data-tab="field" role="tabpanel" aria-labelledby="wrTabBtn-field"></div>
+</div>
+<nav id="wrTabBar" class="wr-tabbar" role="tablist" aria-label="<?= t('tabs.nav_label') ?>">
+    <button type="button" class="wr-tabbar-btn" id="wrTabBtn-me" role="tab" data-tab-target="me" aria-selected="false">
+        <i class="bi bi-person-check-fill"></i><span><?= t('tabs.me') ?></span>
+        <span class="wr-tab-badge d-none" data-count="0"></span>
+    </button>
+    <button type="button" class="wr-tabbar-btn" id="wrTabBtn-map" role="tab" data-tab-target="map" aria-selected="false">
+        <i class="bi bi-map-fill"></i><span><?= t('tabs.map') ?></span>
+        <span class="wr-tab-badge d-none" data-count="0"></span>
+    </button>
+    <!-- Not a tab: the one control that must never be a scroll or a tab
+         away. Hold-to-fire, and it simply forwards to the existing SOS
+         button inside "Το στίγμα μου" so the offline queue, the status
+         badge sync and the poll wiring all keep working untouched. -->
+    <button type="button" class="wr-tabbar-sos" id="wrTabSos" aria-label="<?= t('tabs.sos_hold_hint') ?>" title="<?= t('tabs.sos_hold_hint') ?>">
+        <span class="wr-sos-dot">🆘</span><span><?= t('tabs.sos') ?></span>
+    </button>
+    <button type="button" class="wr-tabbar-btn" id="wrTabBtn-team" role="tab" data-tab-target="team" aria-selected="false">
+        <i class="bi bi-people-fill"></i><span><?= t('tabs.team') ?></span>
+        <span class="wr-tab-badge d-none" data-count="0"></span>
+    </button>
+    <button type="button" class="wr-tabbar-btn" id="wrTabBtn-field" role="tab" data-tab-target="field" aria-selected="false">
+        <i class="bi bi-camera-fill"></i><span><?= t('tabs.field') ?></span>
+        <span class="wr-tab-badge d-none" data-count="0"></span>
+    </button>
+</nav>
+<?php endif; ?>
+
 <?php if ($canManageWarRoom && !$fieldMode): ?>
 <!-- Drag-and-drop card layout (admin desktop view only). Starts empty —
      every card below still renders in its normal PHP-conditioned spot; JS
@@ -1903,8 +2092,8 @@ include __DIR__ . '/includes/header.php';
 </div>
 <?php endif; ?>
 
-<?php if (!$fieldMode): ?>
-<div class="row g-4 mb-4 wr-legacy-row">
+<div class="row g-4 mb-4 wr-legacy-row wr-stack-row">
+    <?php if (!$fieldMode): ?>
     <div class="col-12 col-lg-8">
         <div class="card shadow-sm h-100" id="mapCard" data-card-id="mapCard">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -1996,8 +2185,16 @@ include __DIR__ . '/includes/header.php';
         </div>
         <?php endif; ?>
     </div>
+    <?php endif; ?>
 
-    <div class="col-12 col-lg-4">
+    <!-- My Ping / field status / SOS. Deliberately OUTSIDE the !$fieldMode
+         gate above: Field Mode used to drop this card entirely, which left a
+         field volunteer with no SOS button, no on-way/on-site status, and —
+         because the auto-ping geolocation watcher is gated on a .send-ping
+         element existing in the DOM (see the two guards further down) — no
+         background GPS reporting either. Field Mode gets the wider
+         single-column width since it has no map column beside it. -->
+    <div class="col-12 <?= $fieldMode ? 'col-lg-6 mx-auto' : 'col-lg-4' ?>">
         <!-- Offline queue status. Sits above every field card rather than inside
              the Route Order one (where it used to live) because the queue now
              also carries field-status/SOS taps, which are reported from the
@@ -2041,7 +2238,6 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
-<?php endif; ?>
 
 <?php if ($isApprovedParticipant): ?>
 <div class="row g-4 mb-4 wr-legacy-row">
@@ -2184,7 +2380,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 </div>
 <?php endif; ?>
 
-<div class="row g-4">
+<div class="row g-4 wr-stack-row">
     <?php if (!$fieldMode): ?>
     <div class="col-12 col-lg-8 wr-legacy-row">
         <div class="card shadow-sm mb-4" data-card-id="teamsCard">
@@ -2430,7 +2626,16 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
     <?php endif; ?>
 
     <div class="<?= $fieldMode ? 'col-12 col-lg-6 mx-auto' : 'col-12 col-lg-4' ?>">
-        <div class="card shadow-sm h-100" data-card-id="mediaCard">
+        <!-- No h-100 here on purpose. This column started out holding only
+             the gallery, so stretching it to match the taller column beside
+             it was right; the column now stacks nine cards, and stretching
+             just the FIRST one to 100% of the column blew the card up to
+             2561px (vs ~600px of real content) and pushed every card after
+             it clean out of the column box, so they painted on top of the
+             chat card below - a 550px overlap on both phone and desktop.
+             The column itself still stretches, so the equal-height look
+             next to the col-lg-8 is unchanged. -->
+        <div class="card shadow-sm" data-card-id="mediaCard">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('media.panel_title') ?></h5></div>
             <div class="card-body d-flex flex-column" style="height:520px;">
                 <?php if ($isApprovedParticipant): ?>
@@ -3764,6 +3969,178 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
         lockBtn.addEventListener('click', () => { layoutLocked = !layoutLocked; applyLockState(); });
     }
     applyLockState();
+})();
+
+// Volunteer tabbed layout (volunteer view only — #wrTabPanes only exists when
+// $volunteerTabs, so its absence already means "not this view", nothing
+// further to check). Mirrors the admin zone relocation above: real nodes are
+// moved, never cloned, so every listener, id and poll target already wired to
+// a card survives the move untouched.
+(function() {
+    const panes = document.getElementById('wrTabPanes');
+    const bar = document.getElementById('wrTabBar');
+    if (!panes || !bar) return;
+    // Desktop volunteers keep the ordinary two-column page — it has the room,
+    // and tabs would only make it narrower. Decided once at load: relocation
+    // is one-way (it deletes the emptied rows), so there is nothing sensible
+    // to re-run on a resize. A viewport that later grows past lg falls back to
+    // "all panes stacked, bar hidden" purely in CSS.
+    if (window.innerWidth >= 992) return;
+
+    const CARDS_BY_TAB = {
+        // The volunteer's own orders lead, because that is what they opened
+        // the page for. Everything else is reference material.
+        me:    ['myLocationCard', 'myTasksCard', 'mySectorsCard', 'myRouteCard',
+                'restrictedAreaProximityCard', 'shiftsCard'],
+        map:   ['mapCard', 'missingPersonCard', 'weatherCard', 'sectorsListCard', 'poiListCard'],
+        team:  ['nearbyTeamsCard', 'teamsCard', 'participantsCard', 'chatCard'],
+        field: ['shortageFormCard', 'incidentFormCard', 'incidentsListCard',
+                'broadcastPhotoCard', 'mediaCard', 'activityCard'],
+    };
+
+    const paneEl = {};
+    panes.querySelectorAll('.wr-tab-pane').forEach(p => { paneEl[p.dataset.tab] = p; });
+
+    Object.entries(CARDS_BY_TAB).forEach(([tab, ids]) => {
+        ids.forEach(id => {
+            const el = document.querySelector('[data-card-id="' + id + '"]');
+            if (el) paneEl[tab].appendChild(el);
+        });
+    });
+    // Defensive, same spirit as placeCards(): a card this map has never heard
+    // of (a future one, say) still has to end up somewhere a volunteer can
+    // reach it rather than silently vanishing with its emptied row.
+    document.querySelectorAll('[data-card-id]').forEach(el => {
+        if (!panes.contains(el)) paneEl.field.appendChild(el);
+    });
+    // Sweep the emptied layout containers, otherwise their grid gutters leave
+    // phantom gaps between panes. Only ones with no element children AND no
+    // text left, so a row still holding anything real is never touched.
+    document.querySelectorAll('.wr-legacy-row').forEach(el => el.remove());
+    document.querySelectorAll('#wrTabPanes ~ .row, .content-wrapper > .row').forEach(row => {
+        if (!row.querySelector('[data-card-id]') && !row.textContent.trim()) row.remove();
+    });
+
+    const storeKey = 'wrTab_<?= $missionId ?>';
+    const badgeOf = {};
+    bar.querySelectorAll('[data-tab-target]').forEach(b => {
+        badgeOf[b.dataset.tabTarget] = b.querySelector('.wr-tab-badge');
+    });
+
+    function clearBadge(tab) {
+        const el = badgeOf[tab];
+        if (!el) return;
+        el.dataset.count = '0';
+        el.textContent = '';
+        el.classList.add('d-none');
+        el.removeAttribute('aria-label');
+    }
+    function bumpBadge(tab, n) {
+        if (tab === activeTab) return; // already looking at it
+        const el = badgeOf[tab];
+        if (!el) return;
+        const next = (parseInt(el.dataset.count, 10) || 0) + n;
+        el.dataset.count = String(next);
+        el.textContent = next > 9 ? '9+' : String(next);
+        el.setAttribute('aria-label', next + ' ' + t('tabs.unread_chat'));
+        el.classList.remove('d-none');
+    }
+
+    let activeTab = null;
+    function setTab(tab) {
+        if (!paneEl[tab]) tab = 'me';
+        activeTab = tab;
+        Object.entries(paneEl).forEach(([k, el]) => el.classList.toggle('wr-tab-active', k === tab));
+        bar.querySelectorAll('[data-tab-target]').forEach(b => {
+            const on = b.dataset.tabTarget === tab;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        try { localStorage.setItem(storeKey, tab); } catch (e) {}
+        clearBadge(tab);
+        // A Leaflet map measured while its pane was display:none comes back
+        // with missing/misaligned tiles — the same corrective resize this file
+        // already does everywhere a hidden map becomes visible again.
+        if (tab === 'map') setTimeout(() => { if (map) map.invalidateSize(); }, 60);
+        window.scrollTo(0, 0);
+    }
+
+    bar.querySelectorAll('[data-tab-target]').forEach(b => {
+        b.addEventListener('click', () => setTab(b.dataset.tabTarget));
+    });
+
+    let initial = 'me';
+    try { initial = localStorage.getItem(storeKey) || 'me'; } catch (e) {}
+    setTab(initial);
+    document.body.classList.add('wr-tabs-ready');
+
+    // --- unread chat badge ---------------------------------------------
+    // Watches the message list instead of reaching into the chat closure
+    // further down, which owns its own render path and room switching.
+    const chatMsgs = document.getElementById('chatMessages');
+    if (chatMsgs) {
+        // loadRoom() clears and re-appends the whole history, both on first
+        // paint and on every room switch; neither is new traffic. A batch
+        // that removed anything is exactly that case, and the initial paint
+        // is covered by the settle delay.
+        let chatSettled = false;
+        setTimeout(() => { chatSettled = true; }, 4000);
+        new MutationObserver(records => {
+            if (!chatSettled) return;
+            let added = 0, removed = 0;
+            records.forEach(r => { added += r.addedNodes.length; removed += r.removedNodes.length; });
+            if (removed || !added) return;
+            bumpBadge('team', added);
+        }).observe(chatMsgs, {childList: true});
+    }
+
+    // --- hold-to-fire SOS ------------------------------------------------
+    const sosBtn = document.getElementById('wrTabSos');
+    // Forwarded to rather than reimplemented: this is the real button inside
+    // "Το στίγμα μου", so the offline queue, the optimistic badge update and
+    // the poll reconciliation all keep working with no second code path.
+    const realSos = document.querySelector('[onclick*="setFieldStatus"][onclick*="needs_help"]');
+    if (!realSos) {
+        // No approved shift on this mission => no field status to report.
+        sosBtn.remove();
+    } else {
+        const HOLD_MS = 1000;
+        let holdTimer = null, hintEl = null;
+        function clearHint() { if (hintEl) { hintEl.remove(); hintEl = null; } }
+        function showHint(text) {
+            clearHint();
+            hintEl = document.createElement('div');
+            hintEl.className = 'wr-sos-hint';
+            hintEl.setAttribute('role', 'status');
+            hintEl.textContent = text;
+            document.body.appendChild(hintEl);
+            setTimeout(clearHint, 2200);
+        }
+        function startHold(event) {
+            event.preventDefault();
+            if (holdTimer) return;
+            sosBtn.classList.add('wr-sos-arming');
+            holdTimer = setTimeout(() => {
+                holdTimer = null;
+                sosBtn.classList.remove('wr-sos-arming');
+                sosBtn.classList.add('wr-sos-fired');
+                if (navigator.vibrate) navigator.vibrate([90, 60, 90]);
+                realSos.click();
+                showHint(t('tabs.sos_sent'));
+                setTimeout(() => sosBtn.classList.remove('wr-sos-fired'), 1400);
+            }, HOLD_MS);
+        }
+        function cancelHold() {
+            if (!holdTimer) return;
+            clearTimeout(holdTimer);
+            holdTimer = null;
+            sosBtn.classList.remove('wr-sos-arming');
+            showHint(t('tabs.sos_hold_hint')); // a tap alone must never fire it
+        }
+        sosBtn.addEventListener('pointerdown', startHold);
+        ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => sosBtn.addEventListener(ev, cancelHold));
+        sosBtn.addEventListener('contextmenu', e => e.preventDefault());
+    }
 })();
 
 // Field Mode only, automatic — keeps the screen from sleeping so passive

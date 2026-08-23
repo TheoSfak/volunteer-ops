@@ -1278,6 +1278,19 @@ return [
         'visitor.enable_success' => 'Η εγγραφή επισκεπτών ενεργοποιήθηκε.',
         'visitor.disable_success' => 'Η εγγραφή επισκεπτών απενεργοποιήθηκε.',
         'wr.perm.manage_visitors' => 'Δεν έχετε δικαίωμα διαχείρισης επισκεπτών αποστολής.',
+
+        // Volunteer tabbed layout (compact mobile Action Room). The bottom
+        // bar is the volunteer's whole navigation, so these labels have to
+        // read at ~11px under a glove-sized tap target — one word each.
+        'tabs.nav_label' => 'Πλοήγηση Action Room',
+        'tabs.me' => 'Εγώ',
+        'tabs.map' => 'Χάρτης',
+        'tabs.team' => 'Ομάδα',
+        'tabs.field' => 'Πεδίο',
+        'tabs.sos' => 'SOS',
+        'tabs.sos_hold_hint' => 'Κρατήστε πατημένο για SOS',
+        'tabs.sos_sent' => 'Το SOS στάλθηκε!',
+        'tabs.unread_chat' => 'νέα μηνύματα',
     ],
     'en' => [
         'common.mission_not_found' => 'Mission not found.',
@@ -2486,5 +2499,18 @@ return [
         'visitor.enable_success' => 'Visitor registration enabled.',
         'visitor.disable_success' => 'Visitor registration disabled.',
         'wr.perm.manage_visitors' => 'You don\'t have permission to manage mission visitors.',
+
+        // Volunteer tabbed layout (compact mobile Action Room). The bottom
+        // bar is the volunteer's whole navigation, so these labels have to
+        // read at ~11px under a glove-sized tap target - one word each.
+        'tabs.nav_label' => 'Action Room navigation',
+        'tabs.me' => 'Me',
+        'tabs.map' => 'Map',
+        'tabs.team' => 'Team',
+        'tabs.field' => 'Field',
+        'tabs.sos' => 'SOS',
+        'tabs.sos_hold_hint' => 'Hold to send SOS',
+        'tabs.sos_sent' => 'SOS sent!',
+        'tabs.unread_chat' => 'new messages',
     ],
 ];
