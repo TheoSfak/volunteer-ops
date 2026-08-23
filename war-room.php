@@ -1922,6 +1922,22 @@ include __DIR__ . '/includes/header.php';
        overrides that computed 0 back to the content's natural size, which is
        what actually makes #mediaList grow past its container and scroll. */
     #mediaList .card { min-height: min-content; }
+    /* Field note / caption shown under the photo in the lightbox. This is the
+       full, unclamped text — it is what makes clamping the grid copy below
+       safe, because until this existed the little card held the only copy of
+       what the volunteer wrote. */
+    #mediaViewModalBody .media-view-caption { color: #fff; border-top: 1px solid rgba(255,255,255,.15); }
+    #mediaViewModalBody .media-view-caption-meta { color: rgba(255,255,255,.6); }
+    /* Two lines then ellipsis. A clue description ran to 105px of a 337px
+       card — the single biggest block on it — in a grid column barely 160px
+       wide. Tapping the photo now shows the whole thing, and the title
+       attribute gives it on hover for anyone on a desktop. */
+    #mediaList .media-note-clamp {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
@@ -6735,11 +6751,11 @@ function renderMedia(items) {
         <div class="card position-relative">
             ${m.is_poi ? `<span class="badge bg-danger position-absolute top-0 end-0 m-1" style="z-index:1;" title="${t('poi.popup_title')}"><i class="bi bi-search"></i></span>` : ''}
             ${m.media_type === 'video'
-                ? `<video src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="video" style="height:90px;object-fit:cover;background:#000;cursor:pointer;" preload="metadata"${m.has_thumb ? ` poster="mission-photo-view.php?id=${m.id}&thumb=1"` : ''}></video>`
-                : `<img src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="photo" style="height:90px;object-fit:cover;cursor:pointer;">`}
+                ? `<video src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="video" data-note="${escapeHtml(m.poi_note || '')}" data-meta="${escapeHtml([m.team_label, m.user_name, m.time].filter(Boolean).join(' \u00b7 '))}" style="height:90px;object-fit:cover;background:#000;cursor:pointer;" preload="metadata"${m.has_thumb ? ` poster="mission-photo-view.php?id=${m.id}&thumb=1"` : ''}></video>`
+                : `<img src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="photo" data-note="${escapeHtml(m.poi_note || '')}" data-meta="${escapeHtml([m.team_label, m.user_name, m.time].filter(Boolean).join(' \u00b7 '))}" style="height:90px;object-fit:cover;cursor:pointer;">`}
             <div class="card-body p-2">
                 ${whoBlock}
-                ${m.poi_note ? `<div class="small fst-italic mt-1">"${escapeHtml(m.poi_note)}"</div>` : ''}
+                ${m.poi_note ? `<div class="small fst-italic mt-1 media-note-clamp" title="${escapeHtml(m.poi_note)}">"${escapeHtml(m.poi_note)}"</div>` : ''}
                 <div class="d-flex justify-content-between align-items-center mt-1">
                     <span class="text-muted" style="font-size:.7rem;">${m.time}</span>
                     <div class="d-flex gap-1">
@@ -6753,7 +6769,7 @@ function renderMedia(items) {
     `;
     }).join('');
     list.querySelectorAll('.media-view-trigger').forEach(el => el.addEventListener('click', () => {
-        openMediaViewModal(el.dataset.id, el.dataset.mediaType);
+        openMediaViewModal(el.dataset.id, el.dataset.mediaType, {note: el.dataset.note, meta: el.dataset.meta});
     }));
     list.querySelectorAll('.media-locate-btn').forEach(btn => btn.addEventListener('click', () => {
         map.setView([parseFloat(btn.dataset.lat), parseFloat(btn.dataset.lng)], 16);
@@ -6782,7 +6798,7 @@ function renderBroadcastPhotos(items) {
     }
     list.innerHTML = items.map(p => `
         <div class="d-flex gap-2 mb-2 pb-2 border-bottom">
-            <img src="mission-photo-view.php?id=${p.id}" class="broadcast-photo-thumb media-view-trigger" data-id="${p.id}" data-media-type="photo" style="width:64px;height:64px;object-fit:cover;border-radius:.25rem;cursor:pointer;flex-shrink:0;">
+            <img src="mission-photo-view.php?id=${p.id}" class="broadcast-photo-thumb media-view-trigger" data-id="${p.id}" data-media-type="photo" data-note="${escapeHtml(p.caption || '')}" data-meta="${escapeHtml([p.user_name, p.time].filter(Boolean).join(' \u00b7 '))}" style="width:64px;height:64px;object-fit:cover;border-radius:.25rem;cursor:pointer;flex-shrink:0;">
             <div class="flex-grow-1" style="min-width:0;">
                 ${p.caption ? `<div class="small">${escapeHtml(p.caption)}</div>` : ''}
                 <div class="text-muted" style="font-size:.7rem;">${escapeHtml(p.user_name)} · ${p.time}</div>
@@ -6791,7 +6807,7 @@ function renderBroadcastPhotos(items) {
         </div>
     `).join('');
     list.querySelectorAll('.broadcast-photo-thumb').forEach(el => el.addEventListener('click', () => {
-        openMediaViewModal(el.dataset.id, el.dataset.mediaType);
+        openMediaViewModal(el.dataset.id, el.dataset.mediaType, {note: el.dataset.note, meta: el.dataset.meta});
     }));
     list.querySelectorAll('.broadcast-photo-delete-btn').forEach(btn => btn.addEventListener('click', () => {
         if (!confirm(t('media.delete_confirm'))) return;
@@ -6807,11 +6823,40 @@ function renderBroadcastPhotos(items) {
 // is emptied on close so a playing video actually stops (removing the
 // element from the DOM halts playback) rather than silently continuing in
 // the background.
-function openMediaViewModal(id, mediaType) {
+function openMediaViewModal(id, mediaType, context) {
     const body = document.getElementById('mediaViewModalBody');
     body.innerHTML = mediaType === 'video'
         ? `<video src="mission-photo-view.php?id=${id}" controls autoplay style="max-width:100%;max-height:80vh;"></video>`
         : `<img src="mission-photo-view.php?id=${id}" style="max-width:100%;max-height:80vh;">`;
+    // A POI note (or a broadcast caption) is text a volunteer typed standing
+    // next to the thing they photographed, and until now it lived ONLY on the
+    // small grid card — the one place nobody is looking once they have opened
+    // the photo full-size to actually study it. That also made the note
+    // impossible to shorten anywhere, since the card held the only copy.
+    // Passed in per call site via data- attributes rather than looked up by
+    // id, because this same lightbox is shared by three unrelated sources
+    // (field gallery, broadcast photos, route waypoint photos) each with its
+    // own array — an id lookup would have to know about all three.
+    // textContent, never innerHTML: this is user-entered field text.
+    const note = (context && context.note ? String(context.note) : '').trim();
+    const meta = (context && context.meta ? String(context.meta) : '').trim();
+    if (note || meta) {
+        const cap = document.createElement('div');
+        cap.className = 'media-view-caption text-start px-3 py-2';
+        if (note) {
+            const noteEl = document.createElement('div');
+            noteEl.className = 'fst-italic';
+            noteEl.textContent = note;
+            cap.appendChild(noteEl);
+        }
+        if (meta) {
+            const metaEl = document.createElement('div');
+            metaEl.className = 'small mt-1 media-view-caption-meta';
+            metaEl.textContent = meta;
+            cap.appendChild(metaEl);
+        }
+        body.appendChild(cap);
+    }
     bootstrap.Modal.getOrCreateInstance(document.getElementById('mediaViewModal')).show();
 }
 document.getElementById('mediaViewModal').addEventListener('hidden.bs.modal', () => {
