@@ -501,6 +501,36 @@ if (isAdmin()) {
             [$user['id']]
         );
     }
+
+    // Missions this user is personally responsible for whose time window has
+    // passed but that are still not COMPLETED. Volunteer-side mirror of the
+    // admin "Εκκρεμείς Αποστολές" alert — the responsible user can already
+    // close, mark attendance and file the debrief, so they need the reminder.
+    $myOverdueMissions = dbFetchAll(
+        "SELECT m.id, m.title, m.status, m.end_datetime, d.name AS department_name,
+                (SELECT COUNT(*) FROM shifts s WHERE s.mission_id = m.id) AS shift_count,
+                (SELECT COALESCE(SUM(s.max_volunteers), 0) FROM shifts s WHERE s.mission_id = m.id) AS capacity_total,
+                (SELECT COUNT(*)
+                 FROM participation_requests pr
+                 JOIN shifts s ON s.id = pr.shift_id
+                 WHERE s.mission_id = m.id AND pr.status = ?) AS approved_count,
+                (SELECT COUNT(*)
+                 FROM participation_requests pr
+                 JOIN shifts s ON s.id = pr.shift_id
+                 WHERE s.mission_id = m.id AND pr.status = ? AND pr.attended = 1) AS attended_count,
+                (SELECT COUNT(*)
+                 FROM participation_requests pr
+                 JOIN shifts s ON s.id = pr.shift_id
+                 WHERE s.mission_id = m.id AND pr.status = ? AND pr.attendance_confirmed_at IS NULL) AS unconfirmed_count
+         FROM missions m
+         LEFT JOIN departments d ON m.department_id = d.id
+         WHERE m.responsible_user_id = ?
+           AND m.status IN (?, ?)
+           AND m.end_datetime < NOW()
+           AND m.deleted_at IS NULL
+         ORDER BY m.end_datetime ASC",
+        [PARTICIPATION_APPROVED, PARTICIPATION_APPROVED, PARTICIPATION_APPROVED, $user['id'], STATUS_OPEN, STATUS_CLOSED]
+    );
 }
 
 include __DIR__ . '/includes/header.php';
@@ -1088,6 +1118,103 @@ $randomQuote = $quotes[array_rand($quotes)];
         <?php endif; ?>
     <?php endif; // else (volunteer stats) ?>
 </div>
+
+<?php if (!isAdmin() && !empty($myOverdueMissions)): ?>
+<!-- Overdue Missions I Am Responsible For -->
+<div class="alert alert-danger shadow-sm mb-4" style="border-left: 5px solid #dc3545 !important;">
+    <div class="d-flex align-items-center mb-2">
+        <i class="bi bi-exclamation-triangle-fill fs-4 text-danger me-2"></i>
+        <strong class="fs-5">Αποστολές σας που έχουν λήξει (<?= count($myOverdueMissions) ?>)</strong>
+    </div>
+    <p class="mb-3 text-danger">Είστε υπεύθυνος/η στις παρακάτω αποστολές. Ο χρόνος διεξαγωγής τους έχει παρέλθει αλλά δεν έχουν ολοκληρωθεί — ενημερώστε παρουσίες και κλείστε τις.</p>
+
+    <div class="list-group">
+        <?php foreach ($myOverdueMissions as $om): ?>
+        <?php
+            $capacity = (int)($om['capacity_total'] ?? 0);
+            $approved = (int)($om['approved_count'] ?? 0);
+            $attended = (int)($om['attended_count'] ?? 0);
+            $coveragePct = $capacity > 0 ? min(100, round(($approved / $capacity) * 100)) : 0;
+            $fullyCovered = $capacity > 0 && $approved >= $capacity;
+            $elapsed = time() - strtotime($om['end_datetime']);
+            $days = floor($elapsed / 86400);
+            $hours = floor(($elapsed % 86400) / 3600);
+            $et = '';
+            if ($days > 0) $et .= $days . ' μέρ' . ($days == 1 ? 'α' : 'ες');
+            if ($hours > 0) $et .= ($days > 0 ? ' και ' : '') . $hours . ' ώρ' . ($hours == 1 ? 'α' : 'ες');
+            if (!$et) $et = 'Μόλις τώρα';
+        ?>
+        <div class="list-group-item list-group-item-danger">
+            <div class="d-flex flex-wrap align-items-start gap-3">
+                <div class="flex-grow-1">
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <i class="bi bi-flag-fill"></i>
+                        <strong><?= h($om['title']) ?></strong>
+                        <?= statusBadge($om['status']) ?>
+                    </div>
+                    <small class="d-block mt-1">
+                        <?= h($om['department_name'] ?? '-') ?> &middot;
+                        Λήξη: <?= formatDateTime($om['end_datetime']) ?> &middot;
+                        <strong class="text-danger">πριν <?= h($et) ?></strong>
+                    </small>
+                    <div class="row g-2 mt-2">
+                        <div class="col-sm-4">
+                            <span class="badge bg-secondary"><?= (int)$om['shift_count'] ?> βάρδιες</span>
+                            <span class="badge bg-primary"><?= $approved ?> εγκεκριμένοι</span>
+                        </div>
+                        <div class="col-sm-4">
+                            <span class="badge bg-success"><?= $attended ?> παρόντες</span>
+                            <?php if ((int)$om['unconfirmed_count'] > 0): ?>
+                                <span class="badge bg-warning text-dark"><?= (int)$om['unconfirmed_count'] ?> χωρίς επιβεβαίωση</span>
+                            <?php endif; ?>
+                        </div>
+                        <div class="col-sm-4">
+                            <div class="d-flex align-items-center gap-2">
+                                <small class="text-muted text-nowrap">Κάλυψη <?= $approved ?>/<?= $capacity ?></small>
+                                <div class="progress flex-grow-1" style="height:8px;min-width:90px;">
+                                    <div class="progress-bar bg-<?= $fullyCovered ? 'success' : 'warning' ?>"
+                                         style="width:<?= $coveragePct ?>%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <small class="d-block mt-2">
+                        <i class="bi bi-arrow-right-short"></i>
+                        <?php if ($om['status'] === STATUS_OPEN): ?>
+                            Επόμενο βήμα: <strong>κλείστε τις αιτήσεις</strong> και μετά συμπληρώστε την αναφορά ολοκλήρωσης.
+                        <?php else: ?>
+                            Επόμενο βήμα: ελέγξτε τις παρουσίες και <strong>συμπληρώστε την αναφορά</strong> για να ολοκληρωθεί η αποστολή.
+                        <?php endif; ?>
+                    </small>
+                </div>
+                <div class="d-grid gap-1" style="min-width:170px;">
+                    <?php if ($om['status'] === STATUS_OPEN): ?>
+                    <form method="post" action="mission-view.php?id=<?= (int)$om['id'] ?>"
+                          onsubmit="return confirm('Κλείσιμο αιτήσεων για αυτή την αποστολή;');">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="close">
+                        <button type="submit" class="btn btn-sm btn-warning w-100">
+                            <i class="bi bi-lock me-1"></i>Κλείσιμο Αιτήσεων
+                        </button>
+                    </form>
+                    <?php else: ?>
+                    <a href="mission-debrief.php?id=<?= (int)$om['id'] ?>" class="btn btn-sm btn-primary">
+                        <i class="bi bi-journal-text me-1"></i>Αναφορά &amp; Ολοκλήρωση
+                    </a>
+                    <?php endif; ?>
+                    <a href="attendance.php?mission_id=<?= (int)$om['id'] ?>" class="btn btn-sm btn-info">
+                        <i class="bi bi-clipboard-check me-1"></i>Παρουσίες
+                    </a>
+                    <a href="mission-view.php?id=<?= (int)$om['id'] ?>" class="btn btn-sm btn-outline-danger">
+                        <i class="bi bi-eye me-1"></i>Προβολή
+                    </a>
+                </div>
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if (isAdmin()): ?>
 
