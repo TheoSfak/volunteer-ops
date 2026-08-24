@@ -2655,23 +2655,39 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('media.panel_title') ?></h5></div>
             <div class="card-body d-flex flex-column" style="height:520px;">
                 <?php if ($isApprovedParticipant): ?>
+                <!-- The two solid-blue capture buttons are d-lg-none on purpose.
+                     capture="environment" is a mobile-only attribute: it opens the
+                     camera straight away on a phone, and is silently ignored by every
+                     desktop browser, which falls back to an ordinary file picker. So on
+                     a laptop "Photo" and "Gallery" sitting side by side are two buttons
+                     that do the exact same thing - four blue buttons doing two jobs.
+                     Hidden from lg up; the Gallery button beside each one is already
+                     w-100 and simply takes the full width once its twin is gone. -->
                 <div class="d-flex gap-2 mb-2">
-                    <label class="btn btn-primary w-100 mb-0">
+                    <label class="btn btn-primary w-100 mb-0 d-lg-none">
                         <i class="bi bi-camera-fill me-1"></i><?= t('media.photo_btn') ?>
                         <input type="file" id="photoCaptureInput" accept="image/*" capture="environment" class="d-none">
                     </label>
+                    <!-- Two labels, one per breakpoint. On a phone this button sits
+                         next to its capture twin, so "Gallery" is the meaningful
+                         distinction. On a desktop the twin is hidden, leaving this as
+                         the ONLY photo button - and a second identical "Gallery" for
+                         video right under it - so there it names the media type
+                         instead. Reuses the existing keys; no new strings. -->
                     <label class="btn btn-outline-primary w-100 mb-0">
-                        <i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?>
+                        <span class="d-lg-none"><i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?></span>
+                        <span class="d-none d-lg-inline"><i class="bi bi-camera-fill me-1"></i><?= t('media.photo_btn') ?></span>
                         <input type="file" id="photoGalleryInput" accept="image/*" class="d-none">
                     </label>
                 </div>
                 <div class="d-flex gap-2 mb-2">
-                    <label class="btn btn-primary w-100 mb-0">
+                    <label class="btn btn-primary w-100 mb-0 d-lg-none">
                         <i class="bi bi-camera-reels-fill me-1"></i><?= t('media.video_btn') ?>
                         <input type="file" id="videoCaptureInput" accept="video/*" capture="environment" class="d-none">
                     </label>
                     <label class="btn btn-outline-primary w-100 mb-0">
-                        <i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?>
+                        <span class="d-lg-none"><i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?></span>
+                        <span class="d-none d-lg-inline"><i class="bi bi-camera-reels-fill me-1"></i><?= t('media.video_btn') ?></span>
                         <input type="file" id="videoGalleryInput" accept="video/*" class="d-none">
                     </label>
                 </div>
