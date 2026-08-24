@@ -4123,6 +4123,11 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
                 'broadcastPhotoCard', 'mediaCard', 'activityCard'],
     };
 
+    // Hoisted: setTab() below needs this on its very first call, which runs
+    // before the unread-badge block further down.
+    const chatMsgs = document.getElementById('chatMessages');
+    let chatRevealed = false;
+
     const paneEl = {};
     panes.querySelectorAll('.wr-tab-pane').forEach(p => { paneEl[p.dataset.tab] = p; });
 
@@ -4187,6 +4192,20 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
         // with missing/misaligned tiles — the same corrective resize this file
         // already does everywhere a hidden map becomes visible again.
         if (tab === 'map') setTimeout(() => { if (map) map.invalidateSize(); }, 60);
+        // The chat renders its history immediately on page load, but its pane
+        // starts display:none - so scrollHeight and clientHeight were both 0 and
+        // loadRoom()'s own scroll-to-bottom silently did nothing. Without this,
+        // a volunteer opening Team lands on the OLDEST message with every newer
+        // one below the fold, which is exactly backwards mid-incident. First
+        // reveal only: after that, where the reader has scrolled to is theirs.
+        if (!chatRevealed && chatMsgs && paneEl[tab] && paneEl[tab].contains(chatMsgs)) {
+            chatRevealed = true;
+            // Synchronous on purpose: the pane's visibility class is already set a
+            // few lines above, and reading scrollHeight forces the layout that makes
+            // it a real number. No rAF - that ties a correctness fix to the render
+            // loop for no benefit.
+            chatMsgs.scrollTop = chatMsgs.scrollHeight;
+        }
         window.scrollTo(0, 0);
     }
 
@@ -4202,7 +4221,6 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
     // --- unread chat badge ---------------------------------------------
     // Watches the message list instead of reaching into the chat closure
     // further down, which owns its own render path and room switching.
-    const chatMsgs = document.getElementById('chatMessages');
     if (chatMsgs) {
         // loadRoom() clears and re-appends the whole history, both on first
         // paint and on every room switch; neither is new traffic. A batch
