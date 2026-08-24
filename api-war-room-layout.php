@@ -48,7 +48,7 @@ if ($rawLayout === '' || strlen($rawLayout) > 10000) {
 
 $layout = json_decode($rawLayout, true);
 if (!is_array($layout) || !isset($layout['main']) || !isset($layout['sidebar'])
-    || count(array_diff(array_keys($layout), ['main', 'sidebar', 'hidden'])) > 0) {
+    || count(array_diff(array_keys($layout), ['main', 'sidebar', 'hidden', 'half'])) > 0) {
     echo json_encode(['ok' => false, 'error' => 'Invalid layout shape']);
     exit;
 }
@@ -101,9 +101,37 @@ if (count(array_diff($hidden, $combined)) > 0) {
     exit;
 }
 
+// 'half' — which left-zone cards render at half the column's width. Same
+// shape and same rules as 'hidden' above: an optional flat subset marker over
+// $combined, not a partition of it. Optional on purpose, which is what keeps
+// this backward compatible with a client (or a saved row) from before the
+// feature existed. An id that currently sits in the sidebar is still accepted:
+// the class is inert there (CSS scopes it to #wrZoneMain), and keeping it
+// means dragging the card back to the left column restores its chosen width.
+$half = $layout['half'] ?? [];
+if (!is_array($half) || array_values($half) !== $half) {
+    echo json_encode(['ok' => false, 'error' => 'Invalid layout shape']);
+    exit;
+}
+foreach ($half as $id) {
+    if (!is_string($id) || !in_array($id, $allIds, true)) {
+        echo json_encode(['ok' => false, 'error' => 'Unknown card id']);
+        exit;
+    }
+}
+if (count($half) !== count(array_unique($half))) {
+    echo json_encode(['ok' => false, 'error' => 'Duplicate card id']);
+    exit;
+}
+if (count(array_diff($half, $combined)) > 0) {
+    echo json_encode(['ok' => false, 'error' => 'Invalid layout shape']);
+    exit;
+}
+
 saveWarRoomLayoutForUser($userId, [
     'main' => array_values($main),
     'sidebar' => array_values($sidebar),
     'hidden' => array_values($hidden),
+    'half' => array_values($half),
 ]);
 echo json_encode(['ok' => true]);
