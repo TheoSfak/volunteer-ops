@@ -3830,6 +3830,12 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <div class="progress" style="height:20px;">
                     <div class="progress-bar progress-bar-striped progress-bar-animated" id="mediaProgressBar" role="progressbar" style="width:0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
                 </div>
+                <!-- Revealed only by shareMediaItem()'s rewrap branch. A
+                     realtime re-encode far outlives the browser's transient
+                     user activation window, and navigator.share() is gated on
+                     that, so the sheet has to be opened by a fresh click
+                     instead of fired the instant the transcode finishes. -->
+                <button type="button" class="btn btn-primary btn-sm mt-3 d-none w-100" id="mediaProgressShareBtn"><i class="bi bi-share-fill me-1"></i><span id="mediaProgressShareLabel"></span></button>
             </div>
         </div>
     </div>
@@ -6921,26 +6927,100 @@ function blobToBase64(blob) {
     });
 }
 
+// Hands back the File that should actually go to the share sheet, which is
+// not always the File sitting on the server. A clip stored as WebM - either
+// uploaded before compressVideoForUpload() started forcing MP4, or by a
+// browser that could not record MP4 at the time - is rewrapped to MP4 on
+// the way out, because that is the entire difference between Viber
+// accepting the share and silently dropping it. Everything else (photos,
+// clips already MP4) passes straight through untouched, so the common path
+// stays exactly as fast as it was. A browser that cannot record MP4 either
+// falls back to sharing the original WebM rather than failing outright:
+// no worse than before, and still fine for Telegram and the like.
+async function shareReadyMediaFile(id, mediaType) {
+    const { blob, ext } = await fetchMediaBlob(id, mediaType);
+    const original = new File([blob], `field-${id}.${ext}`, {type: blob.type});
+    if (mediaType !== 'video' || !isUnshareableVideoContainer(blob.type, original.name)) {
+        return { file: original, rewrapped: false };
+    }
+    showMediaProgressModal(t('media.rewrap_progress'));
+    try {
+        const converted = await compressVideoForUpload(original, pct => setMediaProgress(pct), {requireMp4: true});
+        if (videoExtensionForMimeType(converted.type) !== 'mp4') {
+            hideMediaProgressModal();
+            return { file: original, rewrapped: false };
+        }
+        // Left open on purpose: shareAfterRewrap() reuses this same popup as
+        // its "ready, press Share" prompt, and hiding it only to show it
+        // again a tick later races Bootstrap's own fade transition — the
+        // second show() can land mid-hide and leave nothing on screen.
+        return { file: new File([converted], `field-${id}.mp4`, {type: converted.type}), rewrapped: true };
+    } catch (e) {
+        hideMediaProgressModal();
+        throw e;
+    }
+}
+
+// Opens the share sheet from a fresh click rather than from the tail of the
+// rewrap - see #mediaProgressShareBtn's own comment for why that indirection
+// is required at all. Resolves once the sheet has been dealt with, or once
+// the operator dismissed this popup instead of using it.
+function shareAfterRewrap(file, caption) {
+    return new Promise(resolve => {
+        const modalEl = document.getElementById('mediaProgressModal');
+        const shareBtn = document.getElementById('mediaProgressShareBtn');
+        document.getElementById('mediaProgressShareLabel').textContent = t('media.share_now');
+        setMediaProgress(100, t('media.rewrap_done'));
+        shareBtn.classList.remove('d-none');
+        const cleanup = () => {
+            shareBtn.classList.add('d-none');
+            shareBtn.removeEventListener('click', onShare);
+            modalEl.removeEventListener('hidden.bs.modal', onDismiss);
+        };
+        const onShare = async () => {
+            cleanup();
+            try {
+                await navigator.share({files: [file], text: caption});
+            } catch (e) {
+                if (e.name !== 'AbortError') bgDebugLog('share_failed_after_rewrap', e.message || String(e));
+            }
+            hideMediaProgressModal();
+            resolve();
+        };
+        const onDismiss = () => { cleanup(); resolve(); };
+        shareBtn.addEventListener('click', onShare);
+        modalEl.addEventListener('hidden.bs.modal', onDismiss);
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    });
+}
+
 async function shareMediaItem(btn) {
     const { id, mediaType, url, caption } = btn.dataset;
     try {
         if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
             const { Filesystem, Share } = window.Capacitor.Plugins || {};
             if (Filesystem && Share) {
-                const { blob, ext } = await fetchMediaBlob(id, mediaType);
-                const base64Data = await blobToBase64(blob);
-                const written = await Filesystem.writeFile({ path: `field-${id}.${ext}`, data: base64Data, directory: 'CACHE' });
+                const { file } = await shareReadyMediaFile(id, mediaType);
+                const base64Data = await blobToBase64(file);
+                const written = await Filesystem.writeFile({ path: file.name, data: base64Data, directory: 'CACHE' });
                 await Share.share({ files: [written.uri], text: caption });
                 return;
             }
             bgDebugLog('share_plugin_missing', Object.keys(window.Capacitor.Plugins || {}).join(','));
         } else if (navigator.canShare) {
-            const { blob, ext } = await fetchMediaBlob(id, mediaType);
-            const file = new File([blob], `field-${id}.${ext}`, {type: blob.type});
+            const { file, rewrapped } = await shareReadyMediaFile(id, mediaType);
             if (navigator.canShare({files: [file]})) {
+                // The rewrap outlived this click's user activation, so the
+                // sheet has to be re-armed behind a button instead of being
+                // opened straight from here.
+                if (rewrapped) { await shareAfterRewrap(file, caption); return; }
                 await navigator.share({files: [file], text: caption});
                 return;
             }
+            // canShare said no even after the rewrap — the progress popup is
+            // still up (see above) and nothing is going to consume it, so
+            // close it before the link dropdown opens underneath.
+            if (rewrapped) hideMediaProgressModal();
         }
     } catch (e) {
         // Web cancel throws AbortError; the native Capacitor Share sheet
@@ -8820,7 +8900,7 @@ function compressPhotoForUpload(file) {
 // (currentTime/duration) while actively re-encoding — never called at all
 // when compression is skipped, since there's no meaningful "compressing"
 // phase to report in that case.
-function compressVideoForUpload(file, onProgress) {
+function compressVideoForUpload(file, onProgress, options) {
     return new Promise(resolve => {
         let settled = false;
         let watchdogId = null;
@@ -8859,18 +8939,38 @@ function compressVideoForUpload(file, onProgress) {
         videoEl.addEventListener('error', () => { cleanupUrl(); finishOriginal(); });
 
         videoEl.addEventListener('loadedmetadata', () => {
-            if (shouldSkipVideoCompression(file.size, videoEl.duration)) {
+            // A WebM source is re-encoded even when it is far too small to
+            // need shrinking, because that pass is about the container, not
+            // the bytes: Viber and friends drop a .webm handed to them by
+            // the OS share sheet, so a 250KB WebM that skipped compression
+            // is a clip nobody can forward out of the Action Room. Only
+            // worth forcing where this browser can actually record MP4 —
+            // videoCompressionMimeCandidates(true) returns null-worthy
+            // candidates only, so mimeType comes back null instead of
+            // quietly handing back a WebM recorder.
+            const mp4Only = !!(options && options.requireMp4)
+                || isUnshareableVideoContainer(file.type, file.name);
+            const mimeType = pickVideoCompressionMimeType(
+                videoCompressionMimeCandidates(mp4Only),
+                candidate => MediaRecorder.isTypeSupported(candidate)
+            );
+            if (!mimeType) { cleanupUrl(); finishOriginal(); return; }
+            const rewrapping = mp4Only;
+
+            // A rewrap bypasses the size floor (that's the whole point) but
+            // still respects the duration ceiling — a realtime pass over a
+            // long clip is a worse outcome than an unforwardable one, with
+            // someone standing in a field waiting on it.
+            const skip = rewrapping
+                ? videoTooLongToReencode(videoEl.duration)
+                : shouldSkipVideoCompression(file.size, videoEl.duration);
+            if (skip) {
                 cleanupUrl();
                 finishOriginal();
                 return;
             }
 
             try {
-                const mimeType = pickVideoCompressionMimeType(
-                    ['video/mp4;codecs=h264,aac', 'video/webm;codecs=vp8,opus', 'video/webm'],
-                    candidate => MediaRecorder.isTypeSupported(candidate)
-                );
-                if (!mimeType) { cleanupUrl(); finishOriginal(); return; }
 
                 // A several-second realtime capture is exposed to the phone
                 // locking, a call coming in, or the tab backgrounding — none
@@ -8927,7 +9027,12 @@ function compressVideoForUpload(file, onProgress) {
                     const blob = new Blob(chunks, {type: mimeType});
                     // Never make it worse — an edge-case input that doesn't
                     // actually shrink falls back to the original untouched.
-                    if (!blob.size || blob.size >= file.size) { finishOriginal(); return; }
+                    // A rewrap is allowed to come out heavier than its
+                    // source: an MP4 20% bigger than the WebM it replaces
+                    // is still the only one of the two that can leave the
+                    // Action Room, so "never make it worse" only applies
+                    // when size was the reason for the pass.
+                    if (!blob.size || (!rewrapping && blob.size >= file.size)) { finishOriginal(); return; }
                     const ext = videoExtensionForMimeType(mimeType);
                     finish(new File([blob], 'field-video.' + ext, {type: mimeType}));
                 });
