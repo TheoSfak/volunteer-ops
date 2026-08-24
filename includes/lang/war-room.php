@@ -377,6 +377,7 @@ return [
         'map.btn_exit_fullscreen' => 'Έξοδος πλήρους οθόνης χάρτη',
         'map.btn_satellite_view' => 'Δορυφορική προβολή',
         'map.btn_street_view' => 'Προβολή χάρτη',
+        'map.btn_topo_view' => 'Τοπογραφική προβολή (ισοϋψείς)',
 
         // Geographic export (exports/export-mission-geo.php) — GPX/KML/GeoJSON
         'geo.export_btn' => 'Εξαγωγή χάρτη',
@@ -1678,6 +1679,7 @@ return [
         'map.btn_exit_fullscreen' => 'Exit map fullscreen',
         'map.btn_satellite_view' => 'Satellite view',
         'map.btn_street_view' => 'Map view',
+        'map.btn_topo_view' => 'Topographic view (contour lines)',
 
         // Geographic export (exports/export-mission-geo.php) — GPX/KML/GeoJSON
         'geo.export_btn' => 'Export map',

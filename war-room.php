@@ -4329,43 +4329,84 @@ if (fieldMode) {
         if (document.visibilityState === 'visible') requestWarRoomWakeLock();
     });
 }
-// Street/satellite base layers, shared by the live map and all 6 composer
-// maps (dispatch/search-area/divide-into-sectors/split-sector/restricted-
-// area/route) — one definition so every map agrees on tile URLs and toggle
-// behavior instead of each composer hand-rolling its own copy. Satellite is
-// Esri World Imagery — free, no API key, no usage cap at this traffic scale
-// (Google/Bing/Mapbox satellite tiles all require a paid key, ruled out on
-// this project's standing "must be free" constraint). Both tile layers are
-// created upfront so toggling is instant add/remove, never a re-fetch; only
-// one is ever attached to a given map at a time. The preference
-// (wr_map_base_layer) is intentionally ONE shared localStorage key across
-// every map, not per-map/per-mission — whichever base a volunteer/admin
-// prefers, they want it everywhere they look or draw, not re-toggled per
-// composer. toggleBtnId is optional — the live map and every composer pass
-// their own button id; icon/title show the action a click would take
-// (globe while on street = click for satellite; map while on satellite =
-// click to go back), matching mapFullscreenToggle's own convention.
+// Street/topographic/satellite base layers, shared by the live map and all 6
+// composer maps (dispatch/search-area/divide-into-sectors/split-sector/
+// restricted-area/route) — one definition so every map agrees on tile URLs
+// and toggle behavior instead of each composer hand-rolling its own copy.
+//
+// Satellite is Esri World Imagery and topographic is OpenTopoMap — both
+// free, no API key (Google/Bing/Mapbox tiles all require a paid key, ruled
+// out on this project's standing "must be free" constraint).
+//
+// The topographic layer is the one that answers "can a team actually walk
+// this?": neither of the other two carries relief at all. Satellite shows
+// what is there but not its shape — under dense tree cover it shows nothing
+// useful, and a cliff and a plateau look identical from above — while the
+// street map has no elevation information whatsoever. Contour lines,
+// hillshading, marked footpaths and named peaks with spot heights are what
+// make a mountain sector plannable rather than guesswork, which is the whole
+// reason this third layer exists.
+//
+// OpenTopoMap is volunteer-run and only renders to zoom 17, so it gets
+// maxNativeZoom: 17 with maxZoom: 19 — past 17 Leaflet upscales the z17 tile
+// instead of leaving blank grey squares, which mid-operation would read as
+// "the map broke". The other two layers keep their own native depth. Its
+// tiles are CC-BY-SA and must carry that attribution, unlike Esri's.
+//
+// All three tile layers are created upfront so switching is instant
+// add/remove, never a re-fetch; only one is ever attached to a given map at
+// a time. The preference (wr_map_base_layer) is intentionally ONE shared
+// localStorage key across every map, not per-map/per-mission — whichever
+// base a volunteer/admin prefers, they want it everywhere they look or draw,
+// not re-picked per composer. An unrecognised stored value (including the
+// pre-3.186.0 absence of 'topo') just falls back to street.
+//
+// toggleBtnId is optional — the live map and every composer pass their own
+// button id. The button CYCLES street -> topo -> satellite -> street rather
+// than toggling a pair, and keeps the existing convention that its icon and
+// title advertise the state a click would move TO (matching
+// mapFullscreenToggle's own convention), so it stays self-explanatory now
+// that there are three stops instead of two.
+const MAP_BASE_LAYER_CYCLE = ['street', 'topo', 'satellite'];
 function addMapBaseLayers(targetMap, toggleBtnId) {
-    const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'});
-    const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {attribution: 'Tiles © Esri'});
-    (localStorage.getItem('wr_map_base_layer') === 'satellite' ? satellite : street).addTo(targetMap);
+    const layers = {
+        street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}),
+        topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenTopoMap (CC-BY-SA)',
+            maxNativeZoom: 17,
+            maxZoom: 19,
+        }),
+        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {attribution: 'Tiles © Esri'}),
+    };
+    const nextBtnState = {
+        street:    {icon: 'bi-triangle',        title: 'map.btn_topo_view'},
+        topo:      {icon: 'bi-globe-americas',  title: 'map.btn_satellite_view'},
+        satellite: {icon: 'bi-map',             title: 'map.btn_street_view'},
+    };
+
+    let currentKey = localStorage.getItem('wr_map_base_layer');
+    if (!layers[currentKey]) currentKey = 'street';
+    layers[currentKey].addTo(targetMap);
+
     const btn = toggleBtnId ? document.getElementById(toggleBtnId) : null;
     if (btn) {
         const refreshBtn = () => {
-            const active = targetMap.hasLayer(satellite);
-            btn.innerHTML = active ? '<i class="bi bi-map"></i>' : '<i class="bi bi-globe-americas"></i>';
-            btn.title = active ? t('map.btn_street_view') : t('map.btn_satellite_view');
+            // What a click moves TO, not what is showing now.
+            const nextKey = MAP_BASE_LAYER_CYCLE[(MAP_BASE_LAYER_CYCLE.indexOf(currentKey) + 1) % MAP_BASE_LAYER_CYCLE.length];
+            btn.innerHTML = '<i class="bi ' + nextBtnState[nextKey].icon + '"></i>';
+            btn.title = t(nextBtnState[nextKey].title);
         };
         refreshBtn();
         btn.addEventListener('click', () => {
-            const goingSatellite = !targetMap.hasLayer(satellite);
-            targetMap.removeLayer(goingSatellite ? street : satellite);
-            targetMap.addLayer(goingSatellite ? satellite : street);
-            try { localStorage.setItem('wr_map_base_layer', goingSatellite ? 'satellite' : 'street'); } catch (e) {}
+            const nextKey = MAP_BASE_LAYER_CYCLE[(MAP_BASE_LAYER_CYCLE.indexOf(currentKey) + 1) % MAP_BASE_LAYER_CYCLE.length];
+            targetMap.removeLayer(layers[currentKey]);
+            targetMap.addLayer(layers[nextKey]);
+            currentKey = nextKey;
+            try { localStorage.setItem('wr_map_base_layer', currentKey); } catch (e) {}
             refreshBtn();
         });
     }
-    return {street, satellite};
+    return layers;
 }
 let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null, missingPersonLayer = null, fireLayer = null, searchRingsLayer = null;
 if (!fieldMode) {
