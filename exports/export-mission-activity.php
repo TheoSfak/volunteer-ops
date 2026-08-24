@@ -38,7 +38,10 @@ if (!$canManageWarRoom && !$isApprovedParticipant) {
     redirect('dashboard.php');
 }
 
-$events = loadMissionActivityEventsForReport($missionId);
+// $canManageWarRoom, not true: this export deliberately admits an approved
+// participant as well (see the gate above), so staff-only activity notes
+// must be filtered out of their copy exactly as they are on screen.
+$events = loadMissionActivityEventsForReport($missionId, $canManageWarRoom);
 // The live feed shows newest-first; a downloaded archive reads more
 // naturally as a chronological log, oldest first.
 usort($events, fn($a, $b) => $a['ts'] <=> $b['ts']);

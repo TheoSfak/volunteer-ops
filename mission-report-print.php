@@ -77,7 +77,9 @@ $attendanceReady = in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED
 //    admin-scoped since this whole page already is, and uncapped since this
 //    is an archival document, not the bounded live UI).
 // ═══════════════════════════════════════════════════════════════════════════
-$events = loadMissionActivityEventsForReport($missionId);
+// true = include staff-only activity notes: this whole page is command-staff
+// only (gate at the top), so the archival report is the right place for them.
+$events = loadMissionActivityEventsForReport($missionId, true);
 foreach ($events as &$e) {
     $e['time'] = date('d/m/Y H:i', $e['ts']);
 }
