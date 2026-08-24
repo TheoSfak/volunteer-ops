@@ -85,9 +85,9 @@ header('Content-Disposition: attachment; filename="' . $fallbackName . '"; filen
 $out = fopen('php://output', 'w');
 fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
 
-fputcsv($out, ['Ημερομηνία/Ώρα', 'Αποστολέας', 'Μήνυμα']);
+fputcsvSafe($out, ['Ημερομηνία/Ώρα', 'Αποστολέας', 'Μήνυμα']);
 foreach ($messages as $msg) {
-    fputcsv($out, [
+    fputcsvSafe($out, [
         date('d/m/Y H:i:s', strtotime($msg['created_at'])),
         $msg['sender_name'],
         $msg['message'],

@@ -61,54 +61,54 @@ if (get('export') === 'csv') {
     $out = fopen('php://output', 'w');
     switch ($activeTab) {
         case 'overview':
-            fputcsv($out, ['Μετρική', 'Τιμή']);
+            fputcsvSafe($out, ['Μετρική', 'Τιμή']);
             $tot = safeFetchValue("SELECT COUNT(*) FROM missions m WHERE $mWhere", $mParams);
             $comp = safeFetchValue("SELECT COUNT(*) FROM missions m WHERE $mWhere AND m.status = ?", array_merge($mParams, [STATUS_COMPLETED]));
             $hrs = safeFetchValue("SELECT COALESCE(SUM(pr.actual_hours),0) FROM participation_requests pr JOIN shifts s ON pr.shift_id=s.id JOIN missions m ON s.mission_id=m.id WHERE $mWhere AND pr.attended=1", $mParams);
-            fputcsv($out, ['Σύνολο Αποστολών', $tot]);
-            fputcsv($out, ['Ολοκληρωμένες', $comp]);
-            fputcsv($out, ['Ώρες Εθελοντισμού', $hrs]);
+            fputcsvSafe($out, ['Σύνολο Αποστολών', $tot]);
+            fputcsvSafe($out, ['Ολοκληρωμένες', $comp]);
+            fputcsvSafe($out, ['Ώρες Εθελοντισμού', $hrs]);
             break;
         case 'missions':
-            fputcsv($out, ['Κατάσταση', 'Πλήθος']);
+            fputcsvSafe($out, ['Κατάσταση', 'Πλήθος']);
             $rows = dbFetchAll("SELECT m.status, COUNT(*) as cnt FROM missions m WHERE $mWhere GROUP BY m.status", $mParams);
-            foreach ($rows as $r) fputcsv($out, [$r['status'], $r['cnt']]);
+            foreach ($rows as $r) fputcsvSafe($out, [$r['status'], $r['cnt']]);
             break;
         case 'volunteers':
             if (getSetting('points_enabled', '1') === '1') {
-                fputcsv($out, ['Εθελοντής', 'Τμήμα', 'Ώρες', 'Βάρδιες', 'Πόντοι']);
+                fputcsvSafe($out, ['Εθελοντής', 'Τμήμα', 'Ώρες', 'Βάρδιες', 'Πόντοι']);
             } else {
-                fputcsv($out, ['Εθελοντής', 'Τμήμα', 'Ώρες', 'Βάρδιες']);
+                fputcsvSafe($out, ['Εθελοντής', 'Τμήμα', 'Ώρες', 'Βάρδιες']);
             }
             $rows = safeFetchAll("SELECT u.name, d.name as dept, COALESCE(SUM(pr.actual_hours),0) as hours, COUNT(DISTINCT CASE WHEN pr.attended=1 THEN pr.id END) as shifts, u.total_points FROM users u LEFT JOIN departments d ON u.department_id=d.id LEFT JOIN participation_requests pr ON pr.volunteer_id=u.id AND pr.attended=1 WHERE u.deleted_at IS NULL AND u.role IN ('VOLUNTEER','SHIFT_LEADER') " . ($departmentId ? "AND u.department_id=?" : "") . " GROUP BY u.id ORDER BY hours DESC LIMIT 100", $departmentId ? [$departmentId] : []);
             foreach ($rows as $r) {
                 if (getSetting('points_enabled', '1') === '1') {
-                    fputcsv($out, [$r['name'], $r['dept'], $r['hours'], $r['shifts'], $r['total_points']]);
+                    fputcsvSafe($out, [$r['name'], $r['dept'], $r['hours'], $r['shifts'], $r['total_points']]);
                 } else {
-                    fputcsv($out, [$r['name'], $r['dept'], $r['hours'], $r['shifts']]);
+                    fputcsvSafe($out, [$r['name'], $r['dept'], $r['hours'], $r['shifts']]);
                 }
             }
             break;
         case 'participation':
-            fputcsv($out, ['Κατάσταση', 'Πλήθος']);
+            fputcsvSafe($out, ['Κατάσταση', 'Πλήθος']);
             $rows = safeFetchAll("SELECT pr.status, COUNT(*) as cnt FROM participation_requests pr JOIN shifts s ON pr.shift_id=s.id JOIN missions m ON s.mission_id=m.id WHERE $mWhere GROUP BY pr.status", $mParams);
-            foreach ($rows as $r) fputcsv($out, [$r['status'], $r['cnt']]);
+            foreach ($rows as $r) fputcsvSafe($out, [$r['status'], $r['cnt']]);
             break;
         case 'training':
-            fputcsv($out, ['Εθελοντής', 'Βαθμολογία %', 'Χρόνος (δευτ.)', 'Επιτυχία']);
+            fputcsvSafe($out, ['Εθελοντής', 'Βαθμολογία %', 'Χρόνος (δευτ.)', 'Επιτυχία']);
             $rows = safeFetchAll("SELECT u.name, ea.score, ea.total_questions, ea.time_taken_seconds, ea.passed FROM exam_attempts ea JOIN users u ON ea.user_id=u.id WHERE ea.completed_at IS NOT NULL ORDER BY (ea.score/ea.total_questions) DESC LIMIT 100");
-            foreach ($rows as $r) fputcsv($out, [$r['name'], $r['total_questions'] > 0 ? round($r['score']/$r['total_questions']*100,1) : 0, $r['time_taken_seconds'], $r['passed'] ? 'Ναι' : 'Όχι']);
+            foreach ($rows as $r) fputcsvSafe($out, [$r['name'], $r['total_questions'] > 0 ? round($r['score']/$r['total_questions']*100,1) : 0, $r['time_taken_seconds'], $r['passed'] ? 'Ναι' : 'Όχι']);
             break;
         case 'certificates':
-            fputcsv($out, ['Εθελοντής', 'Τύπος', 'Ημ. Έκδοσης', 'Ημ. Λήξης', 'Κατάσταση']);
+            fputcsvSafe($out, ['Εθελοντής', 'Τύπος', 'Ημ. Έκδοσης', 'Ημ. Λήξης', 'Κατάσταση']);
             $rows = safeFetchAll("SELECT u.name, ct.name as type_name, vc.issue_date, vc.expiry_date FROM volunteer_certificates vc JOIN users u ON vc.volunteer_id=u.id JOIN certificate_types ct ON vc.certificate_type_id=ct.id ORDER BY vc.expiry_date ASC LIMIT 200");
             foreach ($rows as $r) {
                 $st = strtotime($r['expiry_date']) < time() ? 'Ληγμένο' : (strtotime($r['expiry_date']) < strtotime('+30 days') ? 'Λήγει σύντομα' : 'Ενεργό');
-                fputcsv($out, [$r['name'], $r['type_name'], $r['issue_date'], $r['expiry_date'], $st]);
+                fputcsvSafe($out, [$r['name'], $r['type_name'], $r['issue_date'], $r['expiry_date'], $st]);
             }
             break;
         case 'warroom':
-            fputcsv($out, ['Τύπος Αποστολής', 'Περίοδος', 'Πλήθος Αποστολών', 'Συνολική Βαθμολογία', 'Ταχύτητα Απόκρισης', 'Ολοκλήρωση Εντολών', 'Διαχείριση Ελλείψεων', 'Στελέχωση/Κάλυψη', 'Απολογισμός Debrief']);
+            fputcsvSafe($out, ['Τύπος Αποστολής', 'Περίοδος', 'Πλήθος Αποστολών', 'Συνολική Βαθμολογία', 'Ταχύτητα Απόκρισης', 'Ολοκλήρωση Εντολών', 'Διαχείριση Ελλείψεων', 'Στελέχωση/Κάλυψη', 'Απολογισμός Debrief']);
             $wrDeptId = $departmentId !== '' ? (int) $departmentId : null;
             $wrPeriods = [
                 "Τρέχουσα ($startDate έως $endDate)" => computeWarRoomTypeAggregates($startDate, $endDate, $wrDeptId),
@@ -118,7 +118,7 @@ if (get('export') === 'csv') {
                 foreach ($wrData as $wrType) {
                     if ($wrType['mission_count'] === 0) continue;
                     $pc = fn($k) => $wrType['pillars'][$k]['available'] ? number_format($wrType['pillars'][$k]['score'], 1) : '';
-                    fputcsv($out, [
+                    fputcsvSafe($out, [
                         $wrType['name'], $wrLabel, $wrType['mission_count'],
                         $wrType['overall'] !== null ? number_format($wrType['overall'], 1) : '',
                         $pc('response'), $pc('completion'), $pc('shortage'), $pc('staffing'), $pc('debrief'),
@@ -127,7 +127,7 @@ if (get('export') === 'csv') {
             }
             break;
         default:
-            fputcsv($out, ['Δεν υπάρχουν δεδομένα εξαγωγής για αυτή την καρτέλα']);
+            fputcsvSafe($out, ['Δεν υπάρχουν δεδομένα εξαγωγής για αυτή την καρτέλα']);
     }
     fclose($out);
     exit;

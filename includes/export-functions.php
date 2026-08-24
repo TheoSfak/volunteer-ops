@@ -87,7 +87,7 @@ function exportMissionsToCsv($filters = []) {
     fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
     
     // CSV headers
-    fputcsv($output, [
+    fputcsvSafe($output, [
         'ID',
         'Τίτλος',
         'Περιγραφή',
@@ -105,7 +105,7 @@ function exportMissionsToCsv($filters = []) {
     
     // Data rows
     foreach ($missions as $mission) {
-        fputcsv($output, [
+        fputcsvSafe($output, [
             $mission['id'],
             $mission['title'],
             $mission['description'],
@@ -203,7 +203,7 @@ function exportVolunteersToCsv($filters = []) {
     ];
     $vtypes = ['VOLUNTEER' => 'VOLUNTEER', 'TRAINEE_RESCUER' => 'TRAINEE_RESCUER', 'RESCUER' => 'RESCUER'];
 
-    fputcsv($out, [
+    fputcsvSafe($out, [
         'ID', 'Όνομα', 'Email', 'Τηλέφωνο', 'Ταυτότητα', 'ΑΦΜ', 'ΑΜΚΑ',
         'Δίπλωμα Οδήγησης', 'Πινακίδα Οχήματος',
         'Παντελόνι', 'Μπλούζα', 'Μπλάκετ', 'Fleece',
@@ -220,7 +220,7 @@ function exportVolunteersToCsv($filters = []) {
     $yn = fn($v) => $v ? 'Ναι' : 'Όχι';
 
     foreach ($volunteers as $v) {
-        fputcsv($out, [
+        fputcsvSafe($out, [
             $v['id'],
             $v['name'],
             $v['email'],
@@ -324,7 +324,7 @@ function exportParticipationsToCsv($filters = []) {
     $output = fopen('php://output', 'w');
     fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
     
-    fputcsv($output, [
+    fputcsvSafe($output, [
         'ID',
         'Εθελοντής',
         'Email',
@@ -340,7 +340,7 @@ function exportParticipationsToCsv($filters = []) {
     ]);
     
     foreach ($participations as $p) {
-        fputcsv($output, [
+        fputcsvSafe($output, [
             $p['id'],
             $p['volunteer_name'],
             $p['volunteer_email'],
@@ -415,7 +415,7 @@ function exportStatisticsToCsv($period = 'monthly', $deptId = null) {
     $output = fopen('php://output', 'w');
     fprintf($output, chr(0xEF).chr(0xBB).chr(0xBF));
     
-    fputcsv($output, [
+    fputcsvSafe($output, [
         'Περίοδος',
         'Αποστολές',
         'Συμμετοχές',
@@ -425,7 +425,7 @@ function exportStatisticsToCsv($period = 'monthly', $deptId = null) {
     ]);
     
     foreach ($stats as $stat) {
-        fputcsv($output, [
+        fputcsvSafe($output, [
             $stat['period_label'],
             $stat['total_missions'],
             $stat['total_participations'],

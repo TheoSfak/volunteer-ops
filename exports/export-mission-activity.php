@@ -61,9 +61,9 @@ header('Content-Disposition: attachment; filename="' . $fallbackName . '"; filen
 $out = fopen('php://output', 'w');
 fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
 
-fputcsv($out, ['Ημερομηνία/Ώρα', 'Γεγονός']);
+fputcsvSafe($out, ['Ημερομηνία/Ώρα', 'Γεγονός']);
 foreach ($events as $event) {
-    fputcsv($out, [
+    fputcsvSafe($out, [
         date('d/m/Y H:i:s', $event['ts']),
         $event['icon'] . ' ' . html_entity_decode(strip_tags($event['text']), ENT_QUOTES, 'UTF-8'),
     ]);
