@@ -4,10 +4,25 @@
  * Archival export of a mission's full Activity feed — reuses the exact same
  * loadMissionActivityEventsForReport() union query the on-screen War Room
  * card and the print/response reports already share, so this can never
- * silently disagree with what's shown live. Gate mirrors war-room.php's own
- * view access exactly (command staff OR approved participant) since the
- * feed itself is already visible to both there — this only lets someone
- * download what they can already see on screen.
+ * silently disagree with what's shown live.
+ *
+ * Gate mirrors war-room.php's own view access (command staff OR approved
+ * participant), because the feed itself is visible to both there. But the
+ * gate alone is only half of "download what you can already see": WHO may
+ * open this page and WHICH EVENTS they get are two separate questions, and
+ * for a long time this file only answered the first. It called
+ * loadMissionActivityEventsForReport(), which by design has no per-viewer
+ * team-scoping, while the live feed (mission-history.php) applies three
+ * scoping predicates — so an approved volunteer could download roughly 80
+ * events they could not see on screen on a real mission, including other
+ * teams' GPS pings and field-status changes.
+ *
+ * Both questions are answered here now. Command staff still get the full
+ * uncapped archive; anyone else gets exactly the scoped feed they see live,
+ * because the loader is handed their user id and applies the very same
+ * predicate fragments mission-history.php does (they are shared functions in
+ * includes/functions-warroom.php, not two copies). Staff-only activity notes
+ * were always filtered correctly and still are, via the second argument.
  */
 
 require_once __DIR__ . '/../bootstrap.php';
@@ -38,10 +53,16 @@ if (!$canManageWarRoom && !$isApprovedParticipant) {
     redirect('dashboard.php');
 }
 
-// $canManageWarRoom, not true: this export deliberately admits an approved
-// participant as well (see the gate above), so staff-only activity notes
-// must be filtered out of their copy exactly as they are on screen.
-$events = loadMissionActivityEventsForReport($missionId, $canManageWarRoom);
+// Both arguments are the non-staff-safe value for an approved participant,
+// and both matter (see the docblock): $canManageWarRoom keeps staff-only
+// notes out of their copy, and the viewer id makes every other source obey
+// the same team-scoping the live feed applies. Command staff pass null and
+// get the unscoped archive, which is the whole point of the export for them.
+$events = loadMissionActivityEventsForReport(
+    $missionId,
+    $canManageWarRoom,
+    $canManageWarRoom ? null : (int) $user['id']
+);
 // The live feed shows newest-first; a downloaded archive reads more
 // naturally as a chronological log, oldest first.
 usort($events, fn($a, $b) => $a['ts'] <=> $b['ts']);
