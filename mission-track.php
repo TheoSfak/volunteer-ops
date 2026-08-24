@@ -44,5 +44,7 @@ $includeAuto = get('include_auto') === '1';
 echo json_encode([
     'ok'     => true,
     'trails' => loadMissionTrailForMission($missionId, $teamId, $includeAuto),
-    'events' => loadMissionActivityEventsForReport($missionId),
+    // true = include staff-only activity notes; $canManageWarRoom is already
+    // enforced as a hard gate above, so only command staff ever reach here.
+    'events' => loadMissionActivityEventsForReport($missionId, true),
 ]);

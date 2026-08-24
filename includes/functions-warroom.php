@@ -4357,15 +4357,25 @@ function generateWarRoomComparisonNarrative(array $current, array $previous, str
 
 /**
  * War Room: activity-feed events for the archival print/stats surfaces —
- * same 7 sources as mission-history.php's live Activity feed, but
- * unconditionally admin-scoped (no viewer-filtering predicates — every
- * caller of this helper is already permission-gated to admins) and
- * uncapped (no LIMIT 150 on pings, no 200-event slice). Deliberately NOT
- * unified with mission-history.php's query, which needs real per-viewer
- * WHERE-clause scoping this helper must not have. Returns events sorted
- * newest-first with a Unix `ts` — callers format their own display string.
+ * same sources as mission-history.php's live Activity feed, but without its
+ * per-viewer team-scoping predicates and uncapped (no LIMIT 150 on pings, no
+ * 200-event slice). Deliberately NOT unified with mission-history.php's
+ * query, which needs real per-viewer WHERE-clause scoping this helper must
+ * not have. Returns events sorted newest-first with a Unix `ts` — callers
+ * format their own display string.
+ *
+ * $includeStaffOnly gates ONE source: hand-typed notes the author marked
+ * staff-only (mission_activity_notes.staff_only). It defaults to false, and
+ * that default is load-bearing rather than merely cautious — this helper's
+ * two callers are NOT equally privileged, despite what this docblock claimed
+ * before the notes feature existed. mission-report-print.php really is
+ * command-staff-only and passes true; exports/export-mission-activity.php
+ * explicitly admits an approved participant as well (it exists so someone
+ * can download the feed they can already read on screen), so it passes its
+ * own $canManageWarRoom. Any future caller that forgets the argument leaks
+ * nothing.
  */
-function loadMissionActivityEventsForReport(int $missionId): array {
+function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOnly = false): array {
     $events = [];
 
     $sentRows = dbFetchAll(
@@ -4771,6 +4781,27 @@ function loadMissionActivityEventsForReport(int $missionId): array {
     );
     foreach ($poiCheckedEventRows as $row) {
         $events[] = ['icon' => '✅', 'text' => 'Ελέγχθηκε Σημείο Ενδιαφέροντος', 'ts' => strtotime($row['checked_at'])];
+    }
+
+    // Hand-typed command-staff entries. Greek literals like every other
+    // source in this function (unlike mission-history.php, which translates
+    // per viewer) — this helper feeds the printed report and the CSV
+    // archive, both of which are Greek documents. The note body itself is
+    // free text and is never translated anywhere.
+    $noteSql = "SELECT n.note, n.staff_only, n.created_at, u.name AS author_name
+                FROM mission_activity_notes n
+                LEFT JOIN users u ON u.id = n.author_id
+                WHERE n.mission_id = ?";
+    if (!$includeStaffOnly) {
+        $noteSql .= " AND n.staff_only = 0";
+    }
+    $noteRows = dbFetchAll($noteSql, [$missionId]);
+    foreach ($noteRows as $row) {
+        $events[] = [
+            'icon' => $row['staff_only'] ? '🔒' : '📝',
+            'text' => h($row['author_name'] ?? 'Άγνωστος') . ' κατέγραψε: «' . h($row['note']) . '»',
+            'ts'   => strtotime($row['created_at']),
+        ];
     }
 
     usort($events, fn($a, $b) => $b['ts'] <=> $a['ts']);

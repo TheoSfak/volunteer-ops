@@ -52,6 +52,7 @@ return [
         'wr.perm.update_team' => 'Δεν έχετε δικαίωμα να επεξεργαστείτε ομάδες.',
         'wr.perm.delete_team' => 'Δεν έχετε δικαίωμα να διαλύσετε ομάδες.',
         'wr.perm.report_shortage' => 'Μόνο εγκεκριμένοι εθελοντές μπορούν να υποβάλουν αναφορά έλλειψης.',
+        'wr.perm.add_activity_note' => 'Δεν έχετε δικαίωμα καταγραφής στο ημερολόγιο της αποστολής.',
 
         // Team assignment notification (per-member, per-recipient language in phase 6)
         'team.notify.title' => '🔷 Ομάδα {team}',
@@ -446,6 +447,12 @@ return [
         // Activity
         'activity.panel_title' => 'Δραστηριότητα',
         'activity.export_btn' => 'Εξαγωγή Excel',
+        // Hand-typed command-staff entries in the activity log
+        'activity.note_placeholder' => 'Καταγραφή στο ημερολόγιο (π.χ. κλήση από ΕΚΑΒ, απόφαση, συνεννόηση)…',
+        'activity.note_submit_btn' => 'Καταγραφή',
+        'activity.note_staff_only_label' => 'Μόνο για το επιτελείο — να μη φαίνεται στους εθελοντές',
+        'activity.note_added_flash' => 'Η καταγραφή προστέθηκε στο ημερολόγιο.',
+        'activity.note_empty_warning' => 'Γράψτε κείμενο πριν την καταγραφή.',
 
         // My ping / field status
         'myping.panel_title' => 'Το στίγμα μου',
@@ -1072,6 +1079,8 @@ return [
         'history.incident_resolved' => 'Η αναφορά περιστατικού ({type}) έκλεισε',
         'history.poi_reported' => '{actor} ανέφερε Σημείο Ενδιαφέροντος',
         'history.poi_checked' => 'Ελέγχθηκε Σημείο Ενδιαφέροντος',
+        'history.staff_note' => '{author} κατέγραψε: «{note}»',
+        'history.unknown_author' => 'Άγνωστος',
         'history.media_sent' => '{actor} έστειλε {kind}',
         'history.route_media_sent' => '{actor} έστειλε {kind} από «{label}» ({team})',
         'history.sos_seen' => 'Ελήφθη το SOS — {actor}',
@@ -1370,6 +1379,7 @@ return [
         'wr.perm.update_team' => 'You do not have permission to edit teams.',
         'wr.perm.delete_team' => 'You do not have permission to disband teams.',
         'wr.perm.report_shortage' => 'Only approved volunteers can submit a shortage report.',
+        'wr.perm.add_activity_note' => 'You do not have permission to write in this mission log.',
 
         'team.notify.title' => '🔷 Team {team}',
         'team.notify.assigned' => 'Mission "{mission}" — you have joined team "{team}".',
@@ -1744,6 +1754,12 @@ return [
 
         'activity.panel_title' => 'Activity',
         'activity.export_btn' => 'Export Excel',
+        // Hand-typed command-staff entries in the activity log
+        'activity.note_placeholder' => 'Log entry (e.g. call from EKAB, a decision, a coordination call)…',
+        'activity.note_submit_btn' => 'Log it',
+        'activity.note_staff_only_label' => 'Command staff only — hide from volunteers',
+        'activity.note_added_flash' => 'Entry added to the log.',
+        'activity.note_empty_warning' => 'Type something before logging it.',
 
         'myping.panel_title' => 'My Location',
         'myping.no_shift' => 'You have no approved shift on this mission.',
@@ -2339,6 +2355,8 @@ return [
         'history.incident_resolved' => 'Incident report ({type}) was closed',
         'history.poi_reported' => '{actor} reported a Point of Interest',
         'history.poi_checked' => 'Point of Interest checked',
+        'history.staff_note' => '{author} logged: “{note}”',
+        'history.unknown_author' => 'Unknown',
         'history.media_sent' => '{actor} sent a {kind}',
         'history.route_media_sent' => '{actor} sent a {kind} from "{label}" ({team})',
         'history.sos_seen' => 'SOS acknowledged — {actor}',

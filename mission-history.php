@@ -627,6 +627,39 @@ foreach ($poiCheckedRows as $row) {
     ];
 }
 
+// Hand-typed command-staff entries — the only source in this whole file a
+// human writes directly; everything above is the app reacting to something.
+// A fourth visibility predicate, and the simplest: staff_only is an explicit
+// per-row choice by the author, not something inferred from team membership
+// like the three predicates in this file's docblock, so it is a flat filter
+// rather than a join. The note body is free text and stays exactly as typed
+// (never translated, same rule as order/task broadcast text) — h() here
+// because every 'text' in this feed is rendered as HTML client-side.
+$noteSql = "SELECT n.note, n.staff_only, n.created_at, u.name AS author_name
+            FROM mission_activity_notes n
+            LEFT JOIN users u ON u.id = n.author_id
+            WHERE n.mission_id = ?";
+if (!$canManageWarRoom) {
+    $noteSql .= " AND n.staff_only = 0";
+}
+$noteSql .= " ORDER BY n.created_at DESC LIMIT 200";
+$noteRows = dbFetchAll($noteSql, [$missionId]);
+foreach ($noteRows as $row) {
+    $events[] = [
+        // The padlock is for the author's benefit, not a permission marker:
+        // a volunteer never receives a staff_only row at all, so this only
+        // ever shows to staff, telling them at a glance which of their own
+        // entries the field cannot see.
+        'icon' => $row['staff_only'] ? '🔒' : '📝',
+        'text' => t('history.staff_note', [
+            'author' => h($row['author_name'] ?? t('history.unknown_author', [], $viewerLang)),
+            'note'   => h($row['note']),
+        ], $viewerLang),
+        'time' => date('d/m H:i', strtotime($row['created_at'])),
+        'ts'   => strtotime($row['created_at']),
+    ];
+}
+
 usort($events, fn($a, $b) => $b['ts'] <=> $a['ts']);
 $events = array_slice($events, 0, 200);
 

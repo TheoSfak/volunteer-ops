@@ -99,7 +99,9 @@ $orderTypeForgottenAck = array_column($orderTypeBreakdown, 'forgotten_ack_count'
 $orderTypeForgottenFulfill = array_column($orderTypeBreakdown, 'forgotten_fulfill_count');
 
 // Activity feed, for the timeline chart — hourly buckets.
-$events = loadMissionActivityEventsForReport($missionId);
+// true = include staff-only activity notes; this page is gated to
+// missions_manage or the mission's own responsible user above.
+$events = loadMissionActivityEventsForReport($missionId, true);
 $timelineBuckets = [];
 foreach ($events as $e) {
     $bucket = date('Y-m-d H:00', $e['ts']);

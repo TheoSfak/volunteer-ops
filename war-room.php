@@ -829,6 +829,40 @@ if (isPost()) {
             setFlash('success', t('incident.submitted_flash'));
         }
         redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'add_activity_note') {
+        // The one hand-written source in the Activity feed. Command staff
+        // only — a volunteer already has the shortage and incident forms for
+        // reporting upward, and this log is the command record.
+        if (!$canManageWarRoom) {
+            setFlash('error', t('wr.perm.add_activity_note'));
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $noteText = trim((string) post('note'));
+        $noteText = mb_substr($noteText, 0, 1000);
+        if ($noteText === '') {
+            setFlash('warning', t('activity.note_empty_warning'));
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $staffOnly = post('staff_only') ? 1 : 0;
+        $noteId = dbInsert(
+            "INSERT INTO mission_activity_notes (mission_id, author_id, note, staff_only, created_at)
+             VALUES (?, ?, ?, ?, NOW())",
+            [$missionId, (int) $user['id'], $noteText, $staffOnly]
+        );
+        // Audited like every other war-room write. The note body goes in
+        // deliberately: this is a command log, and "who wrote what, when"
+        // is the whole point of keeping one.
+        logAudit('add_activity_note', 'mission_activity_notes', $noteId, null, [
+            'mission_id' => $missionId, 'staff_only' => $staffOnly, 'note' => $noteText,
+        ]);
+        // No notification on purpose. A journal entry is a record, not an
+        // order — the 4 request cards and the global broadcast already exist
+        // for anything that actually needs the field to act, and pushing
+        // every log line would train people to ignore the alerts that matter.
+        setFlash('success', t('activity.note_added_flash'));
+        redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'toggle_field_mode') {
         $newFieldMode = $fieldMode ? '0' : '1';
         setcookie('wr_field_mode', $newFieldMode, [
@@ -2689,6 +2723,24 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 </div>
             </div>
             <div class="card-body collapse" id="activityCollapse">
+                <?php if ($canManageWarRoom): ?>
+                <!-- The only hand-written entry point into this feed. Kept to
+                     one line plus one checkbox on purpose: it gets used
+                     mid-incident, where anything longer than "type, Enter"
+                     simply does not get filled in. -->
+                <form method="post" class="mb-3 pb-3 border-bottom">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="add_activity_note">
+                    <div class="input-group input-group-sm">
+                        <input type="text" name="note" class="form-control" maxlength="1000" placeholder="<?= t('activity.note_placeholder') ?>" required>
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-journal-plus me-1"></i><?= t('activity.note_submit_btn') ?></button>
+                    </div>
+                    <div class="form-check mt-2">
+                        <input type="checkbox" class="form-check-input" name="staff_only" value="1" id="activityNoteStaffOnly">
+                        <label class="form-check-label small text-muted" for="activityNoteStaffOnly"><?= t('activity.note_staff_only_label') ?></label>
+                    </div>
+                </form>
+                <?php endif; ?>
                 <div id="activityList" style="max-height:420px;overflow-y:auto;"><div class="text-muted small"><?= t('common.loading') ?></div></div>
             </div>
         </div>
