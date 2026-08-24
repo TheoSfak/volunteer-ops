@@ -226,11 +226,20 @@ function missingRouteDeliverablesClientSide(wp, noteValue) {
 // report this) is treated as "skip", not "assume short enough to compress".
 function shouldSkipVideoCompression(sizeBytes, durationSeconds) {
     const SKIP_AT_OR_UNDER_BYTES = 4 * 1024 * 1024;
-    const SKIP_OVER_SECONDS = 120;
     if (sizeBytes <= SKIP_AT_OR_UNDER_BYTES) return true;
+    return videoTooLongToReencode(durationSeconds);
+}
+
+// The duration half of shouldSkipVideoCompression, split out because the
+// container rewrap below needs the same ceiling without the size floor: a
+// re-encode runs in realtime, so past a couple of minutes the operator is
+// left staring at a progress bar for longer than the problem is worth.
+// Unknown/malformed duration (NaN, 0, Infinity — some devices report this)
+// counts as too long, not as "assume it's short enough".
+function videoTooLongToReencode(durationSeconds) {
+    const MAX_SECONDS = 120;
     if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return true;
-    if (durationSeconds > SKIP_OVER_SECONDS) return true;
-    return false;
+    return durationSeconds > MAX_SECONDS;
 }
 
 // Picks the first MediaRecorder output mimeType this browser can actually
@@ -251,6 +260,48 @@ function pickVideoCompressionMimeType(candidates, isSupportedFn) {
 // original file's own extension.
 function videoExtensionForMimeType(mimeType) {
     return mimeType && mimeType.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
+}
+
+// MediaRecorder output containers, most- to least-preferred. MP4 leads for
+// a reason that has nothing to do with file size: WebM is refused outright
+// by several of the share targets field crews actually use. Viber takes
+// MP4/MOV/3GP and silently drops a .webm handed to it by the OS share
+// sheet — from the Action Room that looks exactly like a broken Share
+// button rather than a container problem, which is how it was reported.
+// Every mp4 spelling any engine accepts is listed because support is
+// genuinely inconsistent between them: some report false for the
+// codec-qualified string and true for the bare one, others the reverse,
+// and a browser that can record MP4 must never be left on WebM just
+// because the first spelling tried wasn't the one it recognises.
+const MP4_RECORDER_MIME_CANDIDATES = [
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4;codecs=h264,aac',
+    'video/mp4;codecs=avc1',
+    'video/mp4',
+];
+const WEBM_RECORDER_MIME_CANDIDATES = [
+    'video/webm;codecs=vp8,opus',
+    'video/webm',
+];
+
+// mp4Only drops the WebM fallbacks entirely, so the caller gets null rather
+// than a WebM recorder it didn't ask for — a WebM-to-WebM re-encode costs a
+// full realtime pass and leaves the file exactly as unshareable as it
+// started, which is strictly worse than not bothering.
+function videoCompressionMimeCandidates(mp4Only) {
+    return mp4Only
+        ? MP4_RECORDER_MIME_CANDIDATES.slice()
+        : MP4_RECORDER_MIME_CANDIDATES.concat(WEBM_RECORDER_MIME_CANDIDATES);
+}
+
+// True for a video whose container the share sheet can't be trusted with —
+// see MP4_RECORDER_MIME_CANDIDATES. Filename is checked alongside the MIME
+// type because a file picked off disk (rather than straight out of
+// MediaRecorder) routinely arrives with an empty or generic type while
+// still being a WebM.
+function isUnshareableVideoContainer(mimeType, fileName) {
+    return String(mimeType || '').toLowerCase().indexOf('webm') !== -1
+        || /\.webm$/i.test(String(fileName || ''));
 }
 
 // Decides whether compressPhotoForUpload() (war-room.php) should even
@@ -283,8 +334,13 @@ if (typeof module !== 'undefined' && module.exports) {
         bearingToCompassAbbr,
         missingRouteDeliverablesClientSide,
         shouldSkipVideoCompression,
+        videoTooLongToReencode,
         pickVideoCompressionMimeType,
         videoExtensionForMimeType,
+        videoCompressionMimeCandidates,
+        isUnshareableVideoContainer,
+        MP4_RECORDER_MIME_CANDIDATES,
+        WEBM_RECORDER_MIME_CANDIDATES,
         shouldSkipPhotoCompression,
     };
 }

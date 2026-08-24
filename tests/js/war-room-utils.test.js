@@ -35,8 +35,12 @@ const {
     bearingToCompassAbbr,
     missingRouteDeliverablesClientSide,
     shouldSkipVideoCompression,
+    videoTooLongToReencode,
     pickVideoCompressionMimeType,
     videoExtensionForMimeType,
+    videoCompressionMimeCandidates,
+    isUnshareableVideoContainer,
+    MP4_RECORDER_MIME_CANDIDATES,
     shouldSkipPhotoCompression,
 } = require('../../assets/js/war-room-utils.js');
 
@@ -391,6 +395,53 @@ test('videoExtensionForMimeType() maps an mp4 mimeType (with codecs) to mp4', ()
 
 test('videoExtensionForMimeType() maps a webm mimeType to webm', () => {
     assert.equal(videoExtensionForMimeType('video/webm;codecs=vp8,opus'), 'webm');
+});
+
+test('videoTooLongToReencode() allows a clip exactly at the 120s ceiling', () => {
+    assert.equal(videoTooLongToReencode(120), false);
+});
+
+test('videoTooLongToReencode() rejects past the ceiling and on unusable durations', () => {
+    assert.equal(videoTooLongToReencode(121), true);
+    assert.equal(videoTooLongToReencode(NaN), true);
+    assert.equal(videoTooLongToReencode(0), true);
+    assert.equal(videoTooLongToReencode(Infinity), true);
+});
+
+test('videoCompressionMimeCandidates() prefers every mp4 spelling before any webm', () => {
+    const all = videoCompressionMimeCandidates(false);
+    const firstWebm = all.findIndex(mt => mt.indexOf('webm') !== -1);
+    const lastMp4 = all.map(mt => mt.indexOf('mp4') !== -1).lastIndexOf(true);
+    assert.ok(lastMp4 < firstWebm);
+    assert.equal(all.length, MP4_RECORDER_MIME_CANDIDATES.length + 2);
+});
+
+test('videoCompressionMimeCandidates(true) offers no webm fallback at all', () => {
+    const mp4Only = videoCompressionMimeCandidates(true);
+    assert.deepEqual(mp4Only, MP4_RECORDER_MIME_CANDIDATES);
+    assert.equal(mp4Only.some(mt => mt.indexOf('webm') !== -1), false);
+});
+
+test('videoCompressionMimeCandidates() hands back a copy, not the shared constant', () => {
+    videoCompressionMimeCandidates(true).push('video/bogus');
+    assert.equal(MP4_RECORDER_MIME_CANDIDATES.includes('video/bogus'), false);
+});
+
+test('isUnshareableVideoContainer() flags webm by mimeType or by filename', () => {
+    assert.equal(isUnshareableVideoContainer('video/webm;codecs=vp8,opus', 'field-52.webm'), true);
+    assert.equal(isUnshareableVideoContainer('', 'field-52.webm'), true);
+    assert.equal(isUnshareableVideoContainer('application/octet-stream', 'CLIP.WEBM'), true);
+    assert.equal(isUnshareableVideoContainer('video/webm', ''), true);
+});
+
+test('isUnshareableVideoContainer() leaves mp4/mov alone', () => {
+    assert.equal(isUnshareableVideoContainer('video/mp4', 'field-52.mp4'), false);
+    assert.equal(isUnshareableVideoContainer('video/quicktime', 'clip.mov'), false);
+    assert.equal(isUnshareableVideoContainer(null, null), false);
+});
+
+test('isUnshareableVideoContainer() does not flag a non-webm name merely containing webm', () => {
+    assert.equal(isUnshareableVideoContainer('video/mp4', 'webm-export.mp4'), false);
 });
 
 test('videoExtensionForMimeType() defaults to webm for empty/missing input', () => {
