@@ -9,7 +9,9 @@
  * already used for dispatch-only, and mission-response-report.php reused).
  *
  * Visibility uses three different predicates depending on what team_id (or
- * membership) means for that source:
+ * membership) means for that source. The WHY is documented here; the SQL
+ * itself lives in includes/functions-warroom.php, because the activity CSV
+ * export needs to apply the identical rules and previously applied none:
  *  - Dispatch family: team_id is the point's deliberate TARGET — NULL means
  *    "sent to all teams", so it's visible to everyone. ($dispatchScopeSql,
  *    unchanged from the original dispatch-only version of this file.)
@@ -63,8 +65,19 @@ $isAdminParam = $canManageWarRoom ? 1 : 0;
 $viewerTeamId = getUserTeamIdForMission($missionId, $userId);
 $viewerLang = getUserLanguage($userId);
 
-// Predicate 1 — dispatch family only (sent/received/arrived).
-$dispatchScopeSql = "(d.team_id IS NULL OR ? = 1 OR d.team_id IN (SELECT team_id FROM mission_team_members WHERE user_id = ?))";
+// All three predicates now come from includes/functions-warroom.php rather
+// than being spelled out here, because this file is no longer their only
+// consumer: loadMissionActivityEventsForReport() applies the identical
+// fragments when exports/export-mission-activity.php asks it to scope for a
+// volunteer. Two hand-maintained copies of a visibility rule is how that
+// export ended up unscoped in the first place.
+$dispatchScopeSql = missionActivityDispatchScopeSql();                              // predicate 1
+$orderScopeSql    = missionActivityActorScopeSql('r.user_id', 'r.team_id');         // predicate 2
+$routeScopeSql    = missionActivityRouteScopeSql();                                 // predicate 3
+$statusScopeSql   = missionActivityActorScopeSql('pr.volunteer_id', 'mtm.team_id'); // predicate 2
+$sosScopeSql      = missionActivityActorScopeSql('a.user_id', 'a.team_id');         // predicate 2
+$pingScopeSql     = missionActivityActorScopeSql('vp.user_id', 'mtm.team_id');      // predicate 2
+$shortageScopeSql = missionActivityActorScopeSql('r.reporter_id', 'r.team_id');     // predicate 2
 
 $events = [];
 
@@ -260,7 +273,7 @@ $orderRows = dbFetchAll(
      JOIN mission_orders o ON o.id = r.order_id
      JOIN users u ON u.id = r.user_id
      LEFT JOIN mission_teams mt ON mt.id = r.team_id
-     WHERE o.mission_id = ? AND (? = 1 OR r.user_id = ? OR r.team_id = ?)
+     WHERE o.mission_id = ? AND $orderScopeSql
      ORDER BY o.created_at DESC LIMIT 200",
     [$missionId, $isAdminParam, $userId, $viewerTeamId]
 );
@@ -328,7 +341,7 @@ $routeProgressRows = dbFetchAll(
      LEFT JOIN users au ON au.id = p.arrived_by
      LEFT JOIN users cu ON cu.id = p.completed_by
      LEFT JOIN users su ON su.id = p.skipped_by
-     WHERE r.mission_id = ? AND (? = 1 OR EXISTS (SELECT 1 FROM mission_route_members rm WHERE rm.route_id = r.id AND rm.user_id = ?))
+     WHERE r.mission_id = ? AND $routeScopeSql
      ORDER BY GREATEST(
          COALESCE(p.departed_at, '1970-01-01'), COALESCE(p.arrived_at, '1970-01-01'),
          COALESCE(p.completed_at, '1970-01-01'), COALESCE(p.skipped_at, '1970-01-01')
@@ -395,7 +408,7 @@ $statusRows = dbFetchAll(
      LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = pr.volunteer_id
      WHERE al.table_name = 'participation_requests'
        AND al.action IN ('field_status_on_way', 'field_status_on_site', 'needs_help')
-       AND s.mission_id = ? AND (? = 1 OR pr.volunteer_id = ? OR mtm.team_id = ?)
+       AND s.mission_id = ? AND $statusScopeSql
      ORDER BY al.created_at DESC LIMIT 200",
     [$missionId, $isAdminParam, $userId, $viewerTeamId]
 );
@@ -420,7 +433,7 @@ $sosRows = dbFetchAll(
     "SELECT a.acknowledged_at, a.resolved_at, a.team_id, u.name AS actor_name
      FROM mission_sos_alerts a
      JOIN users u ON u.id = a.user_id
-     WHERE a.mission_id = ? AND (? = 1 OR a.user_id = ? OR a.team_id = ?)
+     WHERE a.mission_id = ? AND $sosScopeSql
      ORDER BY a.created_at DESC LIMIT 200",
     [$missionId, $isAdminParam, $userId, $viewerTeamId]
 );
@@ -450,7 +463,7 @@ $pingRows = dbFetchAll(
      JOIN shifts s ON s.id = vp.shift_id
      JOIN users u ON u.id = vp.user_id
      LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = vp.user_id
-     WHERE s.mission_id = ? AND vp.source = 'manual' AND (? = 1 OR vp.user_id = ? OR mtm.team_id = ?)
+     WHERE s.mission_id = ? AND vp.source = 'manual' AND $pingScopeSql
      ORDER BY vp.created_at DESC LIMIT 150",
     [$missionId, $isAdminParam, $userId, $viewerTeamId]
 );
@@ -471,7 +484,7 @@ $shortageRows = dbFetchAll(
     "SELECT r.shortage_type, r.title, r.created_at, r.acknowledged_at, r.resolved_at, u.name AS actor_name
      FROM mission_shortage_reports r
      JOIN users u ON u.id = r.reporter_id
-     WHERE r.mission_id = ? AND (? = 1 OR r.reporter_id = ? OR r.team_id = ?)
+     WHERE r.mission_id = ? AND $shortageScopeSql
      ORDER BY r.created_at DESC LIMIT 200",
     [$missionId, $isAdminParam, $userId, $viewerTeamId]
 );

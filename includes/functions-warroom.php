@@ -4356,35 +4356,111 @@ function generateWarRoomComparisonNarrative(array $current, array $previous, str
 }
 
 /**
+ * The three per-viewer visibility predicates the Activity feed is built on,
+ * as SQL fragments shared by both of its consumers: mission-history.php (the
+ * live feed) and loadMissionActivityEventsForReport() below (the archival
+ * one, on the path where it is asked to scope). They live here, rather than
+ * inline in mission-history.php where they were first written, for a single
+ * reason: the two surfaces must never disagree about who may see an event,
+ * and one copy of each rule is the only way to guarantee that. They were two
+ * copies once — the export shipped with none of them at all, and a volunteer
+ * could download ~80 events they could not see on screen.
+ *
+ * Each fragment takes its binds positionally, in the order named on the
+ * function. The leading `? = 1` in all three is the command-staff escape
+ * hatch: bind 1 to see everything, 0 to be scoped like a field volunteer.
+ *
+ * mission-history.php's own docblock explains WHY there are three different
+ * rules here rather than one — that reasoning is not repeated.
+ */
+
+// Predicate 1 — dispatch family (sent/received/arrived). $alias is the
+// mission_dispatch_points alias. Binds: [$isAdminParam, $viewerId].
+function missionActivityDispatchScopeSql(string $alias = 'd'): string {
+    return "($alias.team_id IS NULL OR ? = 1 OR $alias.team_id IN (SELECT team_id FROM mission_team_members WHERE user_id = ?))";
+}
+
+// Predicate 2 — sources where team_id is the ACTOR's own membership (orders,
+// field status, SOS, pings, shortage reports). Note the deliberate absence of
+// any "IS NULL" branch, unlike predicate 1: NULL here means "this person has
+// no team", which stays private to them plus command staff.
+// Binds: [$isAdminParam, $viewerId, $viewerTeamId].
+function missionActivityActorScopeSql(string $actorColumn, string $teamColumn): string {
+    return "(? = 1 OR $actorColumn = ? OR $teamColumn = ?)";
+}
+
+// Predicate 3 — Route Order waypoints: membership of THIS specific route,
+// not of the route's nominal team. $alias is the mission_routes alias.
+// Binds: [$isAdminParam, $viewerId].
+function missionActivityRouteScopeSql(string $alias = 'r'): string {
+    return "(? = 1 OR EXISTS (SELECT 1 FROM mission_route_members rm WHERE rm.route_id = $alias.id AND rm.user_id = ?))";
+}
+
+/**
  * War Room: activity-feed events for the archival print/stats surfaces —
- * same sources as mission-history.php's live Activity feed, but without its
- * per-viewer team-scoping predicates and uncapped (no LIMIT 150 on pings, no
- * 200-event slice). Deliberately NOT unified with mission-history.php's
- * query, which needs real per-viewer WHERE-clause scoping this helper must
- * not have. Returns events sorted newest-first with a Unix `ts` — callers
- * format their own display string.
+ * same sources as mission-history.php's live Activity feed, but uncapped (no
+ * LIMIT 150 on pings, no 200-event slice) and Greek-only. Returns events
+ * sorted newest-first with a Unix `ts` — callers format their own display
+ * string.
+ *
+ * TWO independent gates, because this helper's callers are NOT equally
+ * privileged and a single "is staff" flag was not enough to express that:
  *
  * $includeStaffOnly gates ONE source: hand-typed notes the author marked
- * staff-only (mission_activity_notes.staff_only). It defaults to false, and
- * that default is load-bearing rather than merely cautious — this helper's
- * two callers are NOT equally privileged, despite what this docblock claimed
- * before the notes feature existed. mission-report-print.php really is
- * command-staff-only and passes true; exports/export-mission-activity.php
- * explicitly admits an approved participant as well (it exists so someone
- * can download the feed they can already read on screen), so it passes its
- * own $canManageWarRoom. Any future caller that forgets the argument leaks
- * nothing.
+ * staff-only (mission_activity_notes.staff_only), a flat per-row filter.
+ *
+ * $scopeToViewerId gates every source where an event belongs to a particular
+ * team or person. Null (the default) means no per-viewer scoping at all —
+ * the full archive, for a caller that has already established the viewer is
+ * command staff. A user id means "show only what this volunteer can see in
+ * the live feed", applying the three shared predicates above with their
+ * escape hatch bound to 0 (a scoping caller is by construction not staff).
+ * Both default to the safe value, so a future caller that forgets either
+ * argument leaks nothing.
+ *
+ * mission-report-print.php, mission-stats.php and mission-track.php are all
+ * genuinely command-staff-only and pass (true, null). Only
+ * exports/export-mission-activity.php admits an approved participant as
+ * well, and it is the one caller that passes a viewer id.
  */
-function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOnly = false): array {
+function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOnly = false, ?int $scopeToViewerId = null): array {
     $events = [];
+
+    // Each pair below is either an empty string + no binds (the unscoped
+    // archive) or " AND <predicate>" + its binds, appended to that source's
+    // own WHERE clause. Building them once up here keeps every query below
+    // reading as the plain SQL it was before scoping existed.
+    $scoped        = $scopeToViewerId !== null;
+    $viewerTeamId  = $scoped ? getUserTeamIdForMission($missionId, $scopeToViewerId) : null;
+
+    $dispatchScope = $scoped ? ' AND ' . missionActivityDispatchScopeSql() : '';
+    $dispatchBinds = $scoped ? [0, $scopeToViewerId] : [];
+
+    $orderScope    = $scoped ? ' AND ' . missionActivityActorScopeSql('r.user_id', 'r.team_id') : '';
+    $orderBinds    = $scoped ? [0, $scopeToViewerId, $viewerTeamId] : [];
+
+    $routeScope    = $scoped ? ' AND ' . missionActivityRouteScopeSql() : '';
+    $routeBinds    = $scoped ? [0, $scopeToViewerId] : [];
+
+    $statusScope   = $scoped ? ' AND ' . missionActivityActorScopeSql('pr.volunteer_id', 'mtm.team_id') : '';
+    $statusBinds   = $scoped ? [0, $scopeToViewerId, $viewerTeamId] : [];
+
+    $sosScope      = $scoped ? ' AND ' . missionActivityActorScopeSql('a.user_id', 'a.team_id') : '';
+    $sosBinds      = $scoped ? [0, $scopeToViewerId, $viewerTeamId] : [];
+
+    $pingScope     = $scoped ? ' AND ' . missionActivityActorScopeSql('vp.user_id', 'mtm.team_id') : '';
+    $pingBinds     = $scoped ? [0, $scopeToViewerId, $viewerTeamId] : [];
+
+    $shortageScope = $scoped ? ' AND ' . missionActivityActorScopeSql('r.reporter_id', 'r.team_id') : '';
+    $shortageBinds = $scoped ? [0, $scopeToViewerId, $viewerTeamId] : [];
 
     $sentRows = dbFetchAll(
         "SELECT d.type, d.label, d.created_at, d.team_id, mt.codename, mt.team_number, u.name AS actor_name
          FROM mission_dispatch_points d
          LEFT JOIN mission_teams mt ON mt.id = d.team_id
          JOIN users u ON u.id = d.created_by
-         WHERE d.mission_id = ?",
-        [$missionId]
+         WHERE d.mission_id = ?" . $dispatchScope,
+        array_merge([$missionId], $dispatchBinds)
     );
     foreach ($sentRows as $row) {
         $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'όλες τις ομάδες';
@@ -4403,8 +4479,8 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
          JOIN mission_dispatch_points d ON d.id = rc.dispatch_id
          LEFT JOIN mission_teams mt ON mt.id = d.team_id
          JOIN users u ON u.id = rc.user_id
-         WHERE d.mission_id = ?",
-        [$missionId]
+         WHERE d.mission_id = ?" . $dispatchScope,
+        array_merge([$missionId], $dispatchBinds)
     );
     foreach ($receivedRows as $row) {
         $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'όλες τις ομάδες';
@@ -4423,8 +4499,8 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
          JOIN mission_dispatch_points d ON d.id = a.dispatch_id
          JOIN users au ON au.id = a.user_id
          LEFT JOIN mission_teams amt ON amt.id = a.team_id
-         WHERE d.mission_id = ?",
-        [$missionId]
+         WHERE d.mission_id = ?" . $dispatchScope,
+        array_merge([$missionId], $dispatchBinds)
     );
     foreach ($arrivedRows as $row) {
         $teamLabel = $row['ack_team_id'] ? teamLabel($row['ack_codename'], $row['ack_team_number']) : null;
@@ -4542,8 +4618,8 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
          JOIN mission_orders o ON o.id = r.order_id
          JOIN users u ON u.id = r.user_id
          LEFT JOIN mission_teams mt ON mt.id = r.team_id
-         WHERE o.mission_id = ?",
-        [$missionId]
+         WHERE o.mission_id = ?" . $orderScope,
+        array_merge([$missionId], $orderBinds)
     );
     foreach ($orderRows as $row) {
         $icon = $orderTypeIcons[$row['order_type']] ?? '📋';
@@ -4585,8 +4661,8 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
          LEFT JOIN users au ON au.id = p.arrived_by
          LEFT JOIN users cu ON cu.id = p.completed_by
          LEFT JOIN users su ON su.id = p.skipped_by
-         WHERE r.mission_id = ?",
-        [$missionId]
+         WHERE r.mission_id = ?" . $routeScope,
+        array_merge([$missionId], $routeBinds)
     );
     foreach ($routeProgressRows as $row) {
         $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'χωρίς ομάδα';
@@ -4624,17 +4700,23 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
 
     $fieldStatusIcons = ['field_status_on_way' => '🚗', 'field_status_on_site' => '✅', 'needs_help' => '🆘'];
     $fieldStatusText  = ['field_status_on_way' => 'σε κίνηση', 'field_status_on_site' => 'στο σημείο', 'needs_help' => 'χρειάζεται βοήθεια (SOS)'];
+    // The mission_team_members join exists only to give predicate 2 its
+    // mtm.team_id — nothing is selected from it, and it cannot multiply rows
+    // (UNIQUE KEY uniq_mission_user on mission_id+user_id), so it is left in
+    // place unconditionally rather than spliced in only on the scoped path.
+    // Same shape as mission-history.php's copy of this query.
     $statusRows = dbFetchAll(
         "SELECT al.action, al.created_at, u.name AS actor_name
          FROM audit_logs al
          JOIN participation_requests pr ON pr.id = al.record_id
          JOIN shifts s ON s.id = pr.shift_id
          JOIN users u ON u.id = pr.volunteer_id
+         LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = pr.volunteer_id
          WHERE al.table_name = 'participation_requests'
            AND al.action IN ('field_status_on_way', 'field_status_on_site', 'needs_help')
-           AND s.mission_id = ?
+           AND s.mission_id = ?" . $statusScope . "
          ORDER BY al.created_at DESC",
-        [$missionId]
+        array_merge([$missionId], $statusBinds)
     );
     foreach ($statusRows as $row) {
         $events[] = ['icon' => $fieldStatusIcons[$row['action']] ?? '📶', 'text' => h($row['actor_name']) . ' → ' . $fieldStatusText[$row['action']], 'ts' => strtotime($row['created_at'])];
@@ -4649,8 +4731,8 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
         "SELECT a.acknowledged_at, a.resolved_at, u.name AS actor_name
          FROM mission_sos_alerts a
          JOIN users u ON u.id = a.user_id
-         WHERE a.mission_id = ?",
-        [$missionId]
+         WHERE a.mission_id = ?" . $sosScope,
+        array_merge([$missionId], $sosBinds)
     );
     foreach ($sosEventRows as $row) {
         if ($row['acknowledged_at']) {
@@ -4661,14 +4743,17 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
         }
     }
 
+    // mission_team_members joined for predicate 2 only, same as $statusRows
+    // above — see the note there.
     $pingRows = dbFetchAll(
         "SELECT vp.created_at, u.name AS actor_name
          FROM volunteer_pings vp
          JOIN shifts s ON s.id = vp.shift_id
          JOIN users u ON u.id = vp.user_id
-         WHERE s.mission_id = ? AND vp.source = 'manual'
+         LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = vp.user_id
+         WHERE s.mission_id = ? AND vp.source = 'manual'" . $pingScope . "
          ORDER BY vp.created_at DESC",
-        [$missionId]
+        array_merge([$missionId], $pingBinds)
     );
     foreach ($pingRows as $row) {
         $events[] = ['icon' => '📡', 'text' => h($row['actor_name']) . ' έστειλε στίγμα GPS', 'ts' => strtotime($row['created_at'])];
@@ -4678,8 +4763,8 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
         "SELECT r.shortage_type, r.title, r.created_at, r.acknowledged_at, r.resolved_at, r.not_resolved_at, r.outcome_note, u.name AS actor_name
          FROM mission_shortage_reports r
          JOIN users u ON u.id = r.reporter_id
-         WHERE r.mission_id = ?",
-        [$missionId]
+         WHERE r.mission_id = ?" . $shortageScope,
+        array_merge([$missionId], $shortageBinds)
     );
     foreach ($shortageEventRows as $row) {
         $label = SHORTAGE_TYPE_LABELS[$row['shortage_type']] ?? $row['shortage_type'];
