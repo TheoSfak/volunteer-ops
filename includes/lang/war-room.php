@@ -1291,6 +1291,10 @@ return [
         'tabs.sos_hold_hint' => 'Κρατήστε πατημένο για SOS',
         'tabs.sos_sent' => 'Το SOS στάλθηκε!',
         'tabs.unread_chat' => 'νέα μηνύματα',
+
+        // Half/full width toggle on each left-column card, visible only while
+        // the card layout is unlocked.
+        'layout.width_toggle_title' => 'Μισό ή πλήρες πλάτος',
     ],
     'en' => [
         'common.mission_not_found' => 'Mission not found.',
@@ -2512,5 +2516,9 @@ return [
         'tabs.sos_hold_hint' => 'Hold to send SOS',
         'tabs.sos_sent' => 'SOS sent!',
         'tabs.unread_chat' => 'new messages',
+
+        // Half/full width toggle on each left-column card, visible only while
+        // the card layout is unlocked.
+        'layout.width_toggle_title' => 'Half or full width',
     ],
 ];

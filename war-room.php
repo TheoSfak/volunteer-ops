@@ -1651,6 +1651,39 @@ include __DIR__ . '/includes/header.php';
     .wr-zone > .card { margin: 0; }
     .wr-zone.wr-unlocked > .card > .card-header,
     .wr-zone.wr-unlocked > .card [data-card-drag-handle] { cursor: grab; }
+    /* Half-width cards, left zone only. The zone is normally a plain column
+       stack; switching it to a wrapping row lets two half cards share a line
+       while a full-width one still takes a line to itself. Note this restores
+       density rather than inventing it: before the drag layout existed, the
+       two report forms and the four request cards were already col-md-6 pairs,
+       and moving every card into a flex-column zone silently made all of them
+       full width. The right zone is deliberately excluded — it is a third of
+       the page, so half of it is ~200px and fits nothing. */
+    #wrZoneMain { flex-direction: row; flex-wrap: wrap; align-items: stretch; }
+    #wrZoneMain > .card { flex: 0 0 100%; min-width: 0; position: relative; }
+    #wrZoneMain > .card.wr-card-half { flex: 0 0 calc(50% - .5rem); }
+    /* Below lg the zone is already the full page width, so half of it is
+       phone-sized. Never worth it. */
+    @media (max-width: 991.98px) {
+        #wrZoneMain > .card.wr-card-half { flex: 0 0 100%; }
+    }
+    /* Hard guard, learned the expensive way in v3.182.0: a card carrying
+       Bootstrap's h-100 inside these zones resolves height:100% against the
+       WHOLE zone rather than its own flex line, which is exactly what inflated
+       the gallery card to 2561px and pushed nine cards out of their column.
+       Forcing auto also re-enables align-items:stretch, which only applies to
+       an item whose cross size is auto - so a pair of half cards still comes
+       out equal height, which is what the h-100 was reaching for anyway. */
+    #wrZoneMain > .card.h-100,
+    #wrZoneSidebar > .card.h-100 { height: auto !important; }
+    /* Sits over the card-header's top-right corner. That corner is only
+       covered while the layout is unlocked, and the header is Sortable's drag
+       handle in that state anyway, so nothing usable is being hidden. */
+    .wr-width-toggle {
+        position: absolute; top: .35rem; right: .35rem; z-index: 5;
+        display: none; padding: .05rem .35rem; line-height: 1.25; opacity: .92;
+    }
+    #wrZoneMain.wr-unlocked > .card > .wr-width-toggle { display: block; }
     .wr-sortable-ghost { opacity: .4; }
     .wr-sortable-drag { box-shadow: 0 8px 24px rgba(0,0,0,.25); }
     /* Show/hide cards (admin desktop view only). A dedicated class rather
@@ -3907,6 +3940,58 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
     }
     hiddenCards.forEach(id => setCardHidden(id, true));
 
+    // Half-width cards (left zone only). Deliberately the same shape as
+    // hiddenCards above — a flat id set, reconciled server-side exactly like
+    // 'hidden'. That is what makes this backward compatible: a layout saved
+    // before this shipped simply has no 'half' key, so every card stays full
+    // width and nobody's existing arrangement moves.
+    const halfCards = new Set(savedLayout.half || []);
+    function setCardHalf(id, half) {
+        const el = document.querySelector(`[data-card-id="${id}"]`);
+        if (!el) return;
+        el.classList.toggle('wr-card-half', half);
+        const btn = el.querySelector(':scope > .wr-width-toggle');
+        if (btn) {
+            btn.innerHTML = half
+                ? '<i class="bi bi-arrows-angle-expand"></i>'
+                : '<i class="bi bi-arrows-angle-contract"></i>';
+        }
+        // A Leaflet map whose card just changed width comes back with missing
+        // or misaligned tiles until it re-measures — the same corrective
+        // resize used everywhere else in this file. Only the map's own toggle
+        // can change the map's width: in a wrapping flex row, resizing card X
+        // never resizes card Y, it only pushes it onto another line.
+        if (id === 'mapCard') {
+            setTimeout(() => { if (map) map.invalidateSize(); }, 150);
+        }
+    }
+    // Built for every card in both zones (cheap, and it means a card dragged
+    // across from the sidebar already has one), but CSS only ever reveals it
+    // for a card sitting in the unlocked left zone.
+    document.querySelectorAll('[data-card-id]').forEach(el => {
+        if (el.querySelector(':scope > .wr-width-toggle')) return;
+        const id = el.getAttribute('data-card-id');
+        if (!id) return;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'wr-width-toggle btn btn-sm btn-light border';
+        btn.title = t('layout.width_toggle_title');
+        btn.setAttribute('aria-label', t('layout.width_toggle_title'));
+        btn.innerHTML = '<i class="bi bi-arrows-angle-contract"></i>';
+        btn.addEventListener('click', event => {
+            // The card-header is Sortable's drag handle, so this click must not
+            // reach it — otherwise resizing a card would start dragging it.
+            event.preventDefault();
+            event.stopPropagation();
+            const nowHalf = !halfCards.has(id);
+            if (nowHalf) halfCards.add(id); else halfCards.delete(id);
+            setCardHalf(id, nowHalf);
+            scheduleSaveLayout();
+        });
+        el.appendChild(btn);
+    });
+    halfCards.forEach(id => setCardHalf(id, true));
+
     function renderCardVisibilityList() {
         const list = document.getElementById('cardVisibilityList');
         if (!list) return;
@@ -3979,6 +4064,7 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
             main: Array.from(zoneMain.children).map(el => el.getAttribute('data-card-id')).filter(Boolean),
             sidebar: Array.from(zoneSidebar.children).map(el => el.getAttribute('data-card-id')).filter(Boolean),
             hidden: Array.from(hiddenCards),
+            half: Array.from(halfCards),
         };
         const data = new URLSearchParams({csrf_token: csrfToken, layout_json: JSON.stringify(layout)});
         fetch('api-war-room-layout.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {

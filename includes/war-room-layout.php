@@ -13,7 +13,7 @@ if (!defined('VOLUNTEEROPS')) {
 }
 
 /**
- * The 35 admin-desktop-view cards, in default reading order, split into the
+ * The 38 admin-desktop-view cards, in default reading order, split into the
  * two drag zones (main/left column, sidebar/right column). This list IS the
  * server-side whitelist — api-war-room-layout.php rejects any card id not
  * present here.
@@ -27,7 +27,7 @@ function warRoomDefaultLayout(): array {
             'requestVideoCard', 'requestTaskCard', 'activityCard', 'chatCard',
         ],
         'sidebar' => [
-            'myLocationCard', 'mediaCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'myRouteCard',
+            'myLocationCard', 'mediaCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'restrictedAreaProximityCard', 'myRouteCard',
             'myTasksCard', 'mySectorsCard', 'shiftsCard', 'sosAlertsCard', 'broadcastCard',
             'endMissionCard', 'dispatchCard', 'sectorsCard', 'restrictedAreasCard', 'routeOrderCard',
             'teamRoutesAdminCard', 'briefingCard', 'missionVisitorsCard', 'missionMgmtCard',
@@ -130,6 +130,15 @@ function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool 
     $savedHidden = is_array($saved['hidden'] ?? null) ? $saved['hidden'] : [];
     $result['hidden'] = array_values(array_intersect(array_unique($savedHidden), $allRenderedIds));
 
+    // 'half' mirrors 'hidden' exactly: a flat subset marker, orthogonal to
+    // zone and order, intersected against what renders today with no
+    // append-the-missing step (absent from the set = full width, which is
+    // already the wanted default). Absent entirely from a layout saved
+    // before this feature shipped, so those admins keep every card full
+    // width and nothing about their arrangement changes.
+    $savedHalf = is_array($saved['half'] ?? null) ? $saved['half'] : [];
+    $result['half'] = array_values(array_intersect(array_unique($savedHalf), $allRenderedIds));
+
     return $result;
 }
 
@@ -166,6 +175,7 @@ function warRoomCardLabels(): array {
         'myLocationCard' => t('myping.panel_title'),
         'broadcastPhotoCard' => t('broadcast_photo.card_title'),
         'nearbyTeamsCard' => t('nearby.panel_title'),
+        'restrictedAreaProximityCard' => t('restricted_area.proximity_card_title'),
         'myRouteCard' => t('route.my_panel_title'),
         'myTasksCard' => t('mytasks.panel_title'),
         'mySectorsCard' => t('sector.my_panel_title'),
