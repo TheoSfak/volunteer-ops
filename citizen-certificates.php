@@ -150,9 +150,9 @@ if (get('export') === 'csv') {
     header('Content-Disposition: attachment; filename="citizen_certificates_' . date('Y-m-d_His') . '.csv"');
     $out = fopen('php://output', 'w');
     fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // UTF-8 BOM
-    fputcsv($out, ['#', 'Επίθετο', 'Όνομα', 'Τηλέφωνο', 'Τύπος', 'Email', 'Ημ. Γέννησης', 'Ημ. Έκδοσης', 'Ημ. Λήξης', 'Σημειώσεις'], ';', '"', '\\');
+    fputcsvSafe($out, ['#', 'Επίθετο', 'Όνομα', 'Τηλέφωνο', 'Τύπος', 'Email', 'Ημ. Γέννησης', 'Ημ. Έκδοσης', 'Ημ. Λήξης', 'Σημειώσεις'], ';', '"', '\\');
     foreach ($expRows as $i => $r) {
-        fputcsv($out, [
+        fputcsvSafe($out, [
             $i + 1,
             $r['last_name'] ?? '',
             $r['first_name'] ?? '',

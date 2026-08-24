@@ -145,7 +145,7 @@ echo "\xEF\xBB\xBF";
 $output = fopen('php://output', 'w');
 
 // CSV Headers in Greek
-fputcsv($output, [
+fputcsvSafe($output, [
     'Ονοματεπώνυμο',
     'Χρονιά Σειράς',
     'Τύπος',
@@ -161,7 +161,7 @@ fputcsv($output, [
 
 // Output data rows
 foreach ($results as $row) {
-    fputcsv($output, [
+    fputcsvSafe($output, [
         $row['volunteer_name'],
         $row['cohort_year'] ?? 'Χωρίς Χρονιά',
         $row['type'],

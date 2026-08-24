@@ -471,11 +471,11 @@ if ($isExcelExport) {
     header('Content-Disposition: attachment; filename="subscriptions-' . $filterLabels[$filter] . '-' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel Greek text
-    fputcsv($out, ['Εθελοντής', 'Email', 'Ημερομηνία Πληρωμής', 'Ημερομηνία Λήξης', 'Έτη κάλυψης', 'Τύπος', 'Ποσό', 'Τρόπος Πληρωμής', 'Αριθμός Απόδειξης', 'Κατάσταση', 'Σημειώσεις'], ';');
+    fputcsvSafe($out, ['Εθελοντής', 'Email', 'Ημερομηνία Πληρωμής', 'Ημερομηνία Λήξης', 'Έτη κάλυψης', 'Τύπος', 'Ποσό', 'Τρόπος Πληρωμής', 'Αριθμός Απόδειξης', 'Κατάσταση', 'Σημειώσεις'], ';');
     foreach ($rows as $row) {
         $days = (int)floor((strtotime($row['expiry_date']) - strtotime(date('Y-m-d'))) / 86400);
         $status = $days < 0 ? 'Ληγμένη' : ($days === 0 ? 'Λήγει σήμερα' : 'Ενεργή (' . $days . ' ημέρες)');
-        fputcsv($out, [
+        fputcsvSafe($out, [
             $row['volunteer_name'], $row['email'], $row['payment_date'], $row['expiry_date'], $row['coverage_years'] ?? 1,
             $row['renewal_kind'] === 'REACTIVATION' ? 'Επανενεργοποίηση' : 'Ανανέωση',
             $row['amount'] ?? '', $row['payment_method'] ?? '', $row['receipt_number'] ?? '', $status, $row['notes'] ?? ''
@@ -504,9 +504,9 @@ if (get('export') === 'history') {
     header('Content-Disposition: attachment; filename="subscriptions-history-' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');
     fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel Greek text
-    fputcsv($out, ['Εθελοντής', 'Email', 'Ημερομηνία Πληρωμής', 'Ημερομηνία Λήξης', 'Έτη κάλυψης', 'Τύπος', 'Ποσό', 'Τρόπος Πληρωμής', 'Αριθμός Απόδειξης', 'Σημειώσεις', 'Καταχώρηση από', 'Ημερομηνία καταχώρησης'], ';');
+    fputcsvSafe($out, ['Εθελοντής', 'Email', 'Ημερομηνία Πληρωμής', 'Ημερομηνία Λήξης', 'Έτη κάλυψης', 'Τύπος', 'Ποσό', 'Τρόπος Πληρωμής', 'Αριθμός Απόδειξης', 'Σημειώσεις', 'Καταχώρηση από', 'Ημερομηνία καταχώρησης'], ';');
     foreach ($historyExportRows as $historyExportRow) {
-        fputcsv($out, [
+        fputcsvSafe($out, [
             $historyExportRow['volunteer_name'], $historyExportRow['email'], $historyExportRow['payment_date'], $historyExportRow['expiry_date'],
             $historyExportRow['coverage_years'] ?? 1,
             $historyExportRow['renewal_kind'] === 'REACTIVATION' ? 'Επανενεργοποίηση' : 'Ανανέωση',

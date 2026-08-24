@@ -596,3 +596,39 @@ function canSeeTep(?int $responsibleUserId = null): bool {
     if ($responsibleUserId && $responsibleUserId === getCurrentUserId()) return true;
     return false;
 }
+
+/**
+ * CSV formula-injection guard.
+ *
+ * Excel, LibreOffice and Google Sheets evaluate any cell whose text begins
+ * with = + - @ (or a leading tab/CR that they strip first) as a FORMULA, not
+ * as text. Almost every column this app exports is user-typed: volunteer and
+ * citizen names, chat messages, activity text, department names. The worst
+ * case is not even a registered volunteer - visitor-join.php creates an
+ * account from an UNAUTHENTICATED form with no character restriction on the
+ * name, and that name lands in the mission chat export a coordinator then
+ * opens in Excel.
+ *
+ * A leading apostrophe is the standard neutraliser: spreadsheets treat the
+ * cell as literal text and do not display the apostrophe itself.
+ *
+ * Numeric cells are returned untouched, which is what keeps this from
+ * mangling real data: "-5" is a negative number and must stay one, while
+ * "-5+cmd|'/c calc'!A0" is not numeric and does get quoted.
+ */
+function csvSafeCell($value): string {
+    $s = (string) $value;
+    if ($s === '' || is_numeric($s)) {
+        return $s;
+    }
+    return strpos("=+-@\t\r", $s[0]) !== false ? "'" . $s : $s;
+}
+
+/**
+ * Drop-in replacement for fputcsv() that runs every cell through
+ * csvSafeCell() first. Call sites keep their exact shape - only the function
+ * name changes - so this cannot reorder or drop a column by accident.
+ */
+function fputcsvSafe($handle, array $row) {
+    return fputcsv($handle, array_map('csvSafeCell', $row));
+}

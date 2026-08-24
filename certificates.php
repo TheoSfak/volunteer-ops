@@ -36,9 +36,9 @@ if (get('export') === 'csv') {
     header('Content-Disposition: attachment; filename="certificates_' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');
     fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // BOM for UTF-8
-    fputcsv($out, ['Εθελοντής', 'Email', 'Τύπος', 'Ημ. Έκδοσης', 'Ημ. Λήξης', 'Φορέας', 'Αρ. Πιστοποιητικού', 'Κατάσταση']);
+    fputcsvSafe($out, ['Εθελοντής', 'Email', 'Τύπος', 'Ημ. Έκδοσης', 'Ημ. Λήξης', 'Φορέας', 'Αρ. Πιστοποιητικού', 'Κατάσταση']);
     foreach ($csvRows as $row) {
-        fputcsv($out, [
+        fputcsvSafe($out, [
             $row['volunteer_name'], $row['email'], $row['certificate_type'],
             $row['issue_date'], $row['expiry_date'] ?? '', $row['issuing_body'] ?? '',
             $row['certificate_number'] ?? '', $row['status']
