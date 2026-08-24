@@ -2158,6 +2158,27 @@ include __DIR__ . '/includes/header.php';
                         <button type="button" class="btn btn-outline-danger" id="annoToolClearAll" title="<?= t('annotation.tool_clear_all') ?>"><i class="bi bi-trash3"></i></button>
                     </div>
                     <?php endif; ?>
+                    <?php if ($canManageWarRoom): ?>
+                    <!-- Geographic export. Command-staff only for the same
+                         reason exports/export-mission-geo.php itself is: the
+                         file bundles every volunteer's full GPS trail, which
+                         is already behind this exact gate on screen
+                         (#trailFilterBar above), and sending a mission's
+                         geography to an outside service is a command call. -->
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" title="<?= t('geo.export_btn') ?>">
+                            <i class="bi bi-download"></i><span class="d-none d-md-inline ms-1"><?= t('geo.export_btn') ?></span>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><h6 class="dropdown-header"><?= t('geo.export_menu_title') ?></h6></li>
+                            <li><a class="dropdown-item" href="exports/export-mission-geo.php?mission_id=<?= $missionId ?>&format=gpx"><i class="bi bi-smartwatch me-2"></i><?= t('geo.export_gpx') ?></a></li>
+                            <li><a class="dropdown-item" href="exports/export-mission-geo.php?mission_id=<?= $missionId ?>&format=kml"><i class="bi bi-globe-americas me-2"></i><?= t('geo.export_kml') ?></a></li>
+                            <li><a class="dropdown-item" href="exports/export-mission-geo.php?mission_id=<?= $missionId ?>&format=geojson"><i class="bi bi-braces me-2"></i><?= t('geo.export_geojson') ?></a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><div class="dropdown-item-text small text-muted" style="max-width:280px;white-space:normal;"><?= t('geo.export_hint') ?></div></li>
+                        </ul>
+                    </div>
+                    <?php endif; ?>
                     <button type="button" id="mapSatelliteToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.btn_satellite_view') ?>">
                         <i class="bi bi-globe-americas"></i>
                     </button>
