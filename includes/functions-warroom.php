@@ -811,7 +811,7 @@ function loadBroadcastPhotosForMission(int $missionId, bool $canManageWarRoom, i
         'id'         => (int) $row['id'],
         'user_name'  => $row['user_name'],
         'caption'    => $row['caption'],
-        'time'       => date('d\m H:i', strtotime($row['created_at'])),
+        'time'       => date('d/m H:i', strtotime($row['created_at'])),
         'can_delete' => $canManageWarRoom,
     ], $rows);
 }
@@ -2009,7 +2009,7 @@ function loadMissionRestrictedAreasForUser(int $missionId): array {
         'id'         => (int) $row['id'],
         'label'      => $row['label'],
         'geo'        => json_decode($row['geo'], true),
-        'created_at' => date('d\m H:i', strtotime($row['created_at'])),
+        'created_at' => date('d/m H:i', strtotime($row['created_at'])),
     ], $rows);
 }
 
@@ -2061,9 +2061,9 @@ function loadOpenRestrictedAreaBreachesForUser(int $missionId, int $userId, bool
             'team_label'         => h($row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized')),
             'lat'                => (float) $row['lat'],
             'lng'                => (float) $row['lng'],
-            'exited_at'          => $row['exited_at'] ? date('d\m H:i', strtotime($row['exited_at'])) : null,
-            'acknowledged_at'    => $row['acknowledged_at'] ? date('d\m H:i', strtotime($row['acknowledged_at'])) : null,
-            'created_at'         => date('d\m H:i', strtotime($row['created_at'])),
+            'exited_at'          => $row['exited_at'] ? date('d/m H:i', strtotime($row['exited_at'])) : null,
+            'acknowledged_at'    => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
+            'created_at'         => date('d/m H:i', strtotime($row['created_at'])),
             'is_mine'            => (int) $row['user_id'] === $userId,
         ];
     }, $rows);
@@ -2117,11 +2117,11 @@ function loadRestrictedAreaBreachHistoryForUser(int $missionId, int $userId, boo
             'team_label'         => h($row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized')),
             'lat'                => (float) $row['lat'],
             'lng'                => (float) $row['lng'],
-            'exited_at'          => $row['exited_at'] ? date('d\m H:i', strtotime($row['exited_at'])) : null,
-            'acknowledged_at'    => $row['acknowledged_at'] ? date('d\m H:i', strtotime($row['acknowledged_at'])) : null,
-            'resolved_at'        => $row['resolved_at'] ? date('d\m H:i', strtotime($row['resolved_at'])) : null,
+            'exited_at'          => $row['exited_at'] ? date('d/m H:i', strtotime($row['exited_at'])) : null,
+            'acknowledged_at'    => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
+            'resolved_at'        => $row['resolved_at'] ? date('d/m H:i', strtotime($row['resolved_at'])) : null,
             'resolved_by_name'   => $row['resolved_by_name'],
-            'created_at'         => date('d\m H:i', strtotime($row['created_at'])),
+            'created_at'         => date('d/m H:i', strtotime($row['created_at'])),
             'is_mine'            => (int) $row['user_id'] === $userId,
         ];
     }, $rows);
