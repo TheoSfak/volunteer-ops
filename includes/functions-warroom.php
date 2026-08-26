@@ -768,6 +768,7 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
             'media_type'         => $row['media_type'],
             'has_thumb'          => $row['thumb_stored_name'] !== null,
             'user_name'          => $row['user_name'],
+            'user_id'            => (int) $row['user_id'],
             'is_external'        => (bool) $row['is_external'],
             'guest_org_name'     => $row['guest_org_name'],
             'home_team_name'     => $row['home_team_name'],
@@ -939,6 +940,80 @@ function guestNameHtml(string $name, bool $isExternal, ?string $teamName, ?strin
     $team = ($teamName !== null && trim($teamName) !== '') ? $teamName : t('guest.org_unknown');
     $badge = '<span class="team-name-badge" style="background:' . h($bg) . ';color:' . h($fg) . '" title="' . h($team) . '">' . $flag . h($team) . '</span>';
     return h($name) . ' ' . $badge;
+}
+
+/**
+ * Every K9 handler in the org, keyed by user id — request-scoped static cache
+ * behind a single query.
+ *
+ * Deliberately NOT threaded through the ~11 SELECTs that already feed
+ * guestNameHtml() (participants, teams, chat, dispatch, SOS, shortage,
+ * incidents, media, breaches...). Handlers are a handful of people org-wide,
+ * so one small query per request is cheaper than three extra columns on every
+ * one of those joins — and it keeps k9BadgeHtml() callable from any render
+ * site that has a user id in scope, which all of them already do. That's what
+ * makes "show it everywhere" a one-line change per call site instead of a
+ * signature change rippling through every payload array.
+ *
+ * Wrapped in a try/catch because bootstrap.php renders names on pages that
+ * load before/independently of a successful migration run: if v140 is stuck
+ * in its failure cooldown, this degrades to "nobody is a handler" instead of
+ * fataling every page in the app that prints a person's name.
+ */
+function k9Handlers(): array {
+    static $handlers = null;
+    if ($handlers === null) {
+        $handlers = [];
+        try {
+            $rows = dbFetchAll(
+                "SELECT id, dog_name, dog_training FROM users WHERE is_dog_handler = 1 AND deleted_at IS NULL"
+            );
+            foreach ($rows as $row) {
+                $handlers[(int) $row['id']] = [
+                    'dog_name'     => $row['dog_name'],
+                    'dog_training' => $row['dog_training'],
+                ];
+            }
+        } catch (Throwable $e) {
+            $handlers = [];
+        }
+    }
+    return $handlers;
+}
+
+/**
+ * The 🐕 badge that rides next to a K9 handler's name everywhere a name is
+ * rendered — volunteer/guest lists, Action Room (participants, team rosters,
+ * map pins, chat, dispatch, SOS), shifts, briefings, the navbar. Returns ''
+ * for everyone else, so call sites can append it unconditionally.
+ *
+ * Emoji rather than a Bootstrap Icon because bi has no dog glyph, and unlike
+ * the flag emoji this codebase had to replace with self-hosted SVGs, 🐕
+ * renders correctly on Windows/Chrome (war-room already leans on ⭐/🆘/✅).
+ *
+ * $compact drops the dog's name and keeps only the glyph + tooltip, for the
+ * places where the name line is already carrying a team badge and a flag
+ * (map marker labels, chat meta lines, team-member chips).
+ *
+ * $lang pins the tooltip's language instead of following the viewer's, for
+ * the deliberately Greek-only archival pages (mission-report-print.php,
+ * mission-stats.php) whose output must stay byte-stable no matter who
+ * generates it — same reason computeMissionResponseReport() takes one.
+ */
+function k9BadgeHtml(?int $userId, bool $compact = false, ?string $lang = null): string {
+    if (!$userId) return '';
+    $handler = k9Handlers()[$userId] ?? null;
+    if ($handler === null) return '';
+
+    $dogName  = trim((string) ($handler['dog_name'] ?? ''));
+    $training = trim((string) ($handler['dog_training'] ?? ''));
+    $label    = $dogName !== '' ? $dogName : t('k9.dog_unnamed', [], $lang);
+    $tooltip  = $training !== ''
+        ? t('k9.badge_tooltip', ['dog' => $label, 'training' => $training], $lang)
+        : t('k9.badge_tooltip_no_training', ['dog' => $label], $lang);
+
+    return '<span class="k9-badge" title="' . h($tooltip) . '">🐕'
+        . ($compact ? '' : ' ' . h($label)) . '</span>';
 }
 
 /**
@@ -1617,7 +1692,7 @@ function notifyCommandStaffGuestDebriefSubmitted(int $missionId, ?int $responsib
 function loadUnresolvedShortageReportsForMission(int $missionId): array {
     $rows = dbFetchAll(
         "SELECT r.id, r.shortage_type, r.severity, r.title, r.description, r.created_at, r.acknowledged_at,
-                r.team_id, u.name AS reporter_name, u.is_external, u.guest_org_name, u.guest_country_code,
+                r.team_id, r.reporter_id, u.name AS reporter_name, u.is_external, u.guest_org_name, u.guest_country_code,
                 COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
                 mt.codename, mt.team_number
          FROM mission_shortage_reports r
@@ -1640,6 +1715,7 @@ function loadUnresolvedShortageReportsForMission(int $missionId): array {
             'title'              => $row['title'],
             'description'        => $row['description'],
             'reporter_name'      => $row['reporter_name'],
+            'user_id'            => (int) $row['reporter_id'],
             'is_external'        => (bool) $row['is_external'],
             'guest_org_name'     => $row['guest_org_name'],
             'home_team_name'     => $row['home_team_name'],
@@ -1955,7 +2031,7 @@ function loadIncidentDetailForMissionReport(int $missionId): array {
 function loadOpenSosAlertsForMission(int $missionId): array {
     $rows = dbFetchAll(
         "SELECT a.id, a.pr_id, a.lat, a.lng, a.created_at, a.acknowledged_at,
-                a.team_id, u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
+                a.team_id, a.user_id, u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
                 COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
                 mt.codename, mt.team_number
          FROM mission_sos_alerts a
@@ -1978,6 +2054,7 @@ function loadOpenSosAlertsForMission(int $missionId): array {
         return [
             'id'                 => (int) $row['id'],
             'user_name'          => $row['user_name'],
+            'user_id'            => (int) $row['user_id'],
             'is_external'        => (bool) $row['is_external'],
             'guest_org_name'     => $row['guest_org_name'],
             'home_team_name'     => $row['home_team_name'],
@@ -2052,6 +2129,7 @@ function loadOpenRestrictedAreaBreachesForUser(int $missionId, int $userId, bool
             'id'                 => (int) $row['id'],
             'area_label'         => $row['area_label'],
             'user_name'          => $row['user_name'],
+            'user_id'            => (int) $row['user_id'],
             'is_external'        => (bool) $row['is_external'],
             'guest_org_name'     => $row['guest_org_name'],
             'home_team_name'     => $row['home_team_name'],
@@ -2108,6 +2186,7 @@ function loadRestrictedAreaBreachHistoryForUser(int $missionId, int $userId, boo
             'id'                 => (int) $row['id'],
             'area_label'         => $row['area_label'],
             'user_name'          => $row['user_name'],
+            'user_id'            => (int) $row['user_id'],
             'is_external'        => (bool) $row['is_external'],
             'guest_org_name'     => $row['guest_org_name'],
             'home_team_name'     => $row['home_team_name'],

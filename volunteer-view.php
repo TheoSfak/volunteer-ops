@@ -722,7 +722,7 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
         <div class="flex-grow-1">
             <h1 class="h4 mb-1 text-white fw-bold">
-                <?= guestNameHtml($volunteer['name'], (bool)$volunteer['is_external'], $volunteer['home_team_name'], $volunteer['home_team_color'], $volunteer['guest_country_code']) ?>
+                <?= guestNameHtml($volunteer['name'], (bool)$volunteer['is_external'], $volunteer['home_team_name'], $volunteer['home_team_color'], $volunteer['guest_country_code']) ?><?= k9BadgeHtml((int) $volunteer['id']) ?>
                 <?= volunteerTypeBadge($volunteer['volunteer_type'] ?? VTYPE_RESCUER) ?>
                 <?php if (!empty($volunteer['position_name'])): ?>
                     <span class="badge bg-<?= h($volunteer['position_color'] ?? 'secondary') ?> ms-1" style="font-size:.7rem">
@@ -1005,6 +1005,25 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
                         <div class="vp-info-value"><?= h($volunteer['registry_ggpp'] ?: '-') ?></div>
                     </div>
                 </div>
+
+                <?php if (!empty($volunteer['is_dog_handler'])): ?>
+                <hr class="my-3">
+                <h6 class="text-primary mb-2" style="font-size:.85rem">🐕 Σκύλος Έρευνας</h6>
+                <div class="row g-2">
+                    <div class="col-md-4">
+                        <div class="vp-info-label">Όνομα σκύλου</div>
+                        <div class="vp-info-value"><?= h($volunteer['dog_name'] ?: '-') ?></div>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="vp-info-label">Εκπαίδευση</div>
+                        <?php // Full text here, not the badge tooltip — a long
+                              // certification list is exactly what gets truncated
+                              // in a title= attribute, and this card is where
+                              // someone comes to actually read it. ?>
+                        <div class="vp-info-value" style="white-space:pre-wrap"><?= h($volunteer['dog_training'] ?: '—') ?></div>
+                    </div>
+                </div>
+                <?php endif; ?>
 
                 <?php if ($profile): ?>
                 <hr>
@@ -1487,7 +1506,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
                         <i class="bi bi-person-fill"></i>
                     </div>
                 <?php endif; ?>
-                <h5 class="mb-1"><?= guestNameHtml($volunteer['name'], (bool)$volunteer['is_external'], $volunteer['home_team_name'], $volunteer['home_team_color'], $volunteer['guest_country_code']) ?></h5>
+                <h5 class="mb-1"><?= guestNameHtml($volunteer['name'], (bool)$volunteer['is_external'], $volunteer['home_team_name'], $volunteer['home_team_color'], $volunteer['guest_country_code']) ?><?= k9BadgeHtml((int) $volunteer['id']) ?></h5>
                 <small class="text-muted d-block mb-3"><?= h($volunteer['email']) ?></small>
 
                 <?php if (isAdmin()): ?>

@@ -27,6 +27,9 @@ $departmentId = get('department_id', '');
 $warehouseId = get('warehouse_id', '');
 $status = get('status', '');
 $skillId = (int) get('skill_id', 0);
+// K9 handlers — the question an admin asks while staffing a search mission
+// ("who can bring a dog?"), so it filters on both tabs, volunteers and guests.
+$dogHandler = get('dog_handler', '') === '1';
 $page = max(1, (int) get('page', 1));
 $allowedPerPage = [10, 20, 30, 50, 100];
 $perPage = (int) get('per_page', 50);
@@ -62,6 +65,10 @@ if ($departmentId) {
 if ($warehouseId) {
     $where[] = "u.warehouse_id = ?";
     $params[] = $warehouseId;
+}
+
+if ($dogHandler) {
+    $where[] = "u.is_dog_handler = 1";
 }
 
 // Skill filter — JOIN user_skills when a skill is selected
@@ -520,11 +527,20 @@ include __DIR__ . '/includes/header.php';
                 </select>
             </div>
             <div class="col-md-2 d-flex align-items-end">
+                <div class="form-check pb-2">
+                    <input class="form-check-input" type="checkbox" name="dog_handler" value="1" id="dogHandlerFilter"
+                           <?= $dogHandler ? 'checked' : '' ?> onchange="this.form.submit()">
+                    <label class="form-check-label text-nowrap" for="dogHandlerFilter">
+                        🐕 Χειριστές σκύλου
+                    </label>
+                </div>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
                 <button type="submit" class="btn btn-outline-primary w-100">
                     <i class="bi bi-search me-1"></i>Αναζήτηση
                 </button>
             </div>
-            <?php if ($search || $role || $departmentId || $warehouseId || $skillId || $guestKind): ?>
+            <?php if ($search || $role || $departmentId || $warehouseId || $skillId || $guestKind || $dogHandler): ?>
             <div class="col-md-1 d-flex align-items-end">
                 <a href="volunteers.php" class="btn btn-outline-secondary w-100" title="Καθαρισμός φίλτρων">
                     <i class="bi bi-x-lg"></i>
@@ -575,7 +591,7 @@ include __DIR__ . '/includes/header.php';
                     <tr class="<?= !$v['is_active'] ? 'table-secondary text-muted' : '' ?>">
                         <td data-label="Εθελοντής">
                             <a href="volunteer-view.php?id=<?= $v['id'] ?>" class="text-decoration-none fw-semibold">
-                                <?= guestNameHtml($v['name'], (bool)$v['is_external'], $v['home_team_name'], $v['home_team_color'], $v['guest_country_code']) ?>
+                                <?= guestNameHtml($v['name'], (bool)$v['is_external'], $v['home_team_name'], $v['home_team_color'], $v['guest_country_code']) ?><?= k9BadgeHtml((int) $v['id']) ?>
                             </a><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_RESCUER) ?><?= positionBadge($v['position_name'] ?? '') ?>
                             <br><small class="text-muted"><?= h($v['email']) ?><?= $v['phone'] ? ' · ' . h($v['phone']) : '' ?></small>
                         </td>

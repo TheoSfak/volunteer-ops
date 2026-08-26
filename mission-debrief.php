@@ -262,7 +262,7 @@ include __DIR__ . '/includes/header.php';
                     <?php foreach ($guestDebriefs as $gd): ?>
                         <div class="border rounded p-3 mb-3">
                             <div class="d-flex justify-content-between align-items-start mb-2">
-                                <strong><?= guestNameHtml($gd['name'], (bool) $gd['is_external'], $gd['home_team_name'], $gd['home_team_color'], $gd['guest_country_code']) ?></strong>
+                                <strong><?= guestNameHtml($gd['name'], (bool) $gd['is_external'], $gd['home_team_name'], $gd['home_team_color'], $gd['guest_country_code']) ?><?= k9BadgeHtml((int) $gd['user_id']) ?></strong>
                                 <span class="badge bg-success-subtle text-success-emphasis"><?= (int) $gd['rating'] ?> / 5</span>
                             </div>
                             <?php if (!empty($gd['what_went_well'])): ?>

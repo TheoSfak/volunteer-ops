@@ -161,6 +161,9 @@ function exportVolunteersToCsv($filters = []) {
                 u.role,
                 u.volunteer_type,
                 u.is_active,
+                u.is_dog_handler,
+                u.dog_name,
+                u.dog_training,
                 u.total_points,
                 u.department_id,
                 d.name  AS department,
@@ -215,6 +218,7 @@ function exportVolunteersToCsv($filters = []) {
         'Ομάδα Αίματος', 'Βιογραφικό', 'Ιατρικές Σημειώσεις',
         'Διαθ. Καθημερινές', 'Διαθ. Σαββ/κα', 'Διαθ. Βράδια',
         'Έχει Δίπλωμα Οδήγησης', 'Έχει Πρώτες Βοήθειες',
+        'Χειριστής Σκύλου', 'Όνομα Σκύλου', 'Εκπαίδευση Σκύλου',
     ]);
 
     $yn = fn($v) => $v ? 'Ναι' : 'Όχι';
@@ -256,6 +260,9 @@ function exportVolunteersToCsv($filters = []) {
             $yn($v['available_nights']),
             $yn($v['has_driving_license']),
             $yn($v['has_first_aid']),
+            $yn($v['is_dog_handler']),
+            $v['dog_name'],
+            $v['dog_training'],
         ]);
     }
 

@@ -1301,6 +1301,7 @@ if (get('ajax') === '1') {
         'restrictedAreaProximity' => $restrictedAreaProximity,
         'nearbyTeams' => $teamProximity['nearbyTeams'],
         'teamDistances' => $teamProximity['teamDistances'],
+        'k9Handlers' => k9Handlers(),
     ]);
     exit;
 }
@@ -2509,7 +2510,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                             <?php endif; ?>
                             <div class="small mt-2">
                                 <?php foreach ($team['members'] as $member): ?>
-                                <span class="badge bg-light text-dark border me-1 mb-1"><?= guestNameHtml($member['name'], $member['is_external'], $member['home_team_name'], $member['home_team_color'], $member['guest_country_code']) ?><?= $member['user_id'] === $team['leader_id'] ? ' ⭐' : '' ?></span>
+                                <span class="badge bg-light text-dark border me-1 mb-1"><?= guestNameHtml($member['name'], $member['is_external'], $member['home_team_name'], $member['home_team_color'], $member['guest_country_code']) ?><?= k9BadgeHtml((int) $member['user_id'], true) ?><?= $member['user_id'] === $team['leader_id'] ? ' ⭐' : '' ?></span>
                                 <?php endforeach; ?>
                             </div>
                         </div>
@@ -2559,7 +2560,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 $fatigueM = $fatigueMinutes !== null ? $fatigueMinutes % 60 : 0;
                 ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap" id="participant-row-<?= (int)$participant['volunteer_id'] ?>">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? 'presence-online' : 'presence-offline' ?>" title="<?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><?php if (!empty($participant['phone']) && ($canManageWarRoom || ($myTeamId && ($teamIdByUserId[(int)$participant['volunteer_id']] ?? null) === $myTeamId))): ?><br><a href="tel:<?= h($participant['phone']) ?>" class="text-decoration-none"><i class="bi bi-telephone me-1"></i><?= h($participant['phone']) ?></a><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping') ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= (!empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= $isFatigued ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? 'presence-online' : 'presence-offline' ?>" title="<?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?><?= k9BadgeHtml((int) $participant['volunteer_id']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><?php if (!empty($participant['phone']) && ($canManageWarRoom || ($myTeamId && ($teamIdByUserId[(int)$participant['volunteer_id']] ?? null) === $myTeamId))): ?><br><a href="tel:<?= h($participant['phone']) ?>" class="text-decoration-none"><i class="bi bi-telephone me-1"></i><?= h($participant['phone']) ?></a><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping') ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= (!empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= $isFatigued ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>" id="status-badge-<?= (int)$participant['volunteer_id'] ?>">
                         <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
@@ -3857,6 +3858,12 @@ const jsLocale = <?= json_encode($__viewerLang === 'en' ? 'en-US' : 'el-GR') ?>;
 const fieldMode = <?= $fieldMode ? 'true' : 'false' ?>;
 const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>;
 let pins = <?= json_encode($pins) ?>;
+// K9 handler registry, keyed by user id — the client-side twin of
+// k9Handlers() in includes/functions-warroom.php. Shipped once here and
+// refreshed from every poll so a handler added mid-mission shows up on the
+// board within one cycle instead of needing a reload. Object keys are
+// strings after json_encode, so every lookup below goes through String(id).
+let k9Handlers = <?= json_encode(k9Handlers(), JSON_UNESCAPED_UNICODE) ?>;
 let dispatches = <?= json_encode($dispatches) ?>;
 let annotations = <?= json_encode($annotations) ?>;
 let areas = <?= json_encode($areas) ?>;
@@ -4664,6 +4671,22 @@ function flagHtml(countryCode) {
     if (!countryCode || !/^[A-Za-z]{2}$/.test(countryCode)) return '';
     return `<img class="flag-icon" src="${FLAG_ASSET_BASE}${countryCode.toLowerCase()}.svg" alt="">`;
 }
+// Mirrors k9BadgeHtml() in includes/functions-warroom.php. Takes only a user
+// id — every poll payload that renders a name already carries one (or had one
+// added alongside this change), so no render site needed a new signature.
+// Returns '' for non-handlers, so call sites append it unconditionally.
+function k9BadgeHtml(userId, compact) {
+    if (userId === null || userId === undefined) return '';
+    const handler = k9Handlers[String(userId)];
+    if (!handler) return '';
+    const dogName = (handler.dog_name || '').trim();
+    const training = (handler.dog_training || '').trim();
+    const label = dogName !== '' ? dogName : t('k9.dog_unnamed');
+    const tooltip = training !== ''
+        ? t('k9.badge_tooltip', {dog: label, training})
+        : t('k9.badge_tooltip_no_training', {dog: label});
+    return `<span class="k9-badge" title="${escapeHtml(tooltip)}">🐕${compact ? '' : ' ' + escapeHtml(label)}</span>`;
+}
 // Mirrors teamBadgeColors()/teamLabel() in includes/functions-warroom.php —
 // needed client-side so the Teams card's roster can be live-refreshed from
 // the poll (renderTeamRosters() below) without a full page reload.
@@ -4698,7 +4721,7 @@ function teamRosterHtml(team) {
     }
     html += '<div class="small mt-2">' + team.members.map(m => {
         const [mBg, mFg] = teamBadgeColorsJs(m.home_team_color);
-        return `<span class="badge bg-light text-dark border me-1 mb-1">${guestNameHtml(m.name, m.is_external, m.home_team_name, mBg, mFg, m.guest_country_code)}${m.user_id === team.leader_id ? ' ⭐' : ''}</span>`;
+        return `<span class="badge bg-light text-dark border me-1 mb-1">${guestNameHtml(m.name, m.is_external, m.home_team_name, mBg, mFg, m.guest_country_code)}${k9BadgeHtml(m.user_id, true)}${m.user_id === team.leader_id ? ' ⭐' : ''}</span>`;
     }).join('') + '</div>';
     return html;
 }
@@ -4754,7 +4777,7 @@ function renderDispatches(items) {
     let reopenLayer = null;
     items.forEach(item => {
         const acksHtml = item.acks.length
-            ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? escapeHtml(a.team_label) + ' — ' : ''}${guestNameHtml(a.user_name, a.is_external, a.home_team_name, a.home_team_color_bg, a.home_team_color_fg, a.guest_country_code)} (${a.time})`).join('<br>') + '</div>'
+            ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? escapeHtml(a.team_label) + ' — ' : ''}${guestNameHtml(a.user_name, a.is_external, a.home_team_name, a.home_team_color_bg, a.home_team_color_fg, a.guest_country_code)}${k9BadgeHtml(a.user_id, true)} (${a.time})`).join('<br>') + '</div>'
             : '';
         const receiveHtml = item.can_receive
             ? `<br><button type="button" class="btn btn-sm btn-warning mt-1 dispatch-receive-btn" data-id="${item.id}"><i class="bi bi-flag me-1"></i>${t('banner.ack_btn')}</button>`
@@ -5638,7 +5661,7 @@ function renderRestrictedAreaBreachesList(items) {
             </div>`;
         return `
         <div class="border ${resolved ? 'border-secondary' : 'border-danger'} rounded p-2 mb-2${resolved ? ' opacity-75' : ''}">
-            <div><strong>${resolved ? '✅' : '⚠️'} ${b.team_label}</strong> — ${guestNameHtml(b.user_name, b.is_external, b.home_team_name, b.home_team_color_bg, b.home_team_color_fg, b.guest_country_code)}</div>
+            <div><strong>${resolved ? '✅' : '⚠️'} ${b.team_label}</strong> — ${guestNameHtml(b.user_name, b.is_external, b.home_team_name, b.home_team_color_bg, b.home_team_color_fg, b.guest_country_code)}${k9BadgeHtml(b.user_id, true)}</div>
             <div class="small">${escapeHtml(b.area_label)}</div>
             <div class="text-muted" style="font-size:.75rem;">${b.created_at}${b.exited_at ? t('restricted_area.exited_at_prefix', {time: b.exited_at}) : t('restricted_area.still_inside')}${b.acknowledged_at ? t('sos.ack_at_prefix', {time: b.acknowledged_at}) : ''}</div>
             ${statusOrActions}
@@ -6392,7 +6415,7 @@ function buildPinMarker(pin, interactive = true) {
     // (depends on which render*() happened to run last that poll tick). A
     // volunteer's own live position should never be the one that silently
     // disappears underneath another marker.
-    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
+    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
 }
 
 function renderPins(items) {
@@ -7055,8 +7078,8 @@ function renderMedia(items) {
         // than being the only identity shown. Teamless senders keep the old
         // single-line look, just their name, since there's no team to lead with.
         const whoBlock = m.team_label
-            ? `<div style="font-size:.85rem;font-weight:700;line-height:1.2;">${icon}${escapeHtml(m.team_label)}</div><div class="text-muted" style="font-size:.7rem;">${guestNameHtml(m.user_name, m.is_external, m.home_team_name, m.home_team_color_bg, m.home_team_color_fg, m.guest_country_code)}</div>`
-            : `<div class="fw-bold" style="font-size:.8rem;">${icon}${guestNameHtml(m.user_name, m.is_external, m.home_team_name, m.home_team_color_bg, m.home_team_color_fg, m.guest_country_code)}</div>`;
+            ? `<div style="font-size:.85rem;font-weight:700;line-height:1.2;">${icon}${escapeHtml(m.team_label)}</div><div class="text-muted" style="font-size:.7rem;">${guestNameHtml(m.user_name, m.is_external, m.home_team_name, m.home_team_color_bg, m.home_team_color_fg, m.guest_country_code)}${k9BadgeHtml(m.user_id, true)}</div>`
+            : `<div class="fw-bold" style="font-size:.8rem;">${icon}${guestNameHtml(m.user_name, m.is_external, m.home_team_name, m.home_team_color_bg, m.home_team_color_fg, m.guest_country_code)}${k9BadgeHtml(m.user_id, true)}</div>`;
         // Two-column grid (#mediaList below) leaves each card roughly half as
         // wide as before, so the footer stacks name-block over a
         // time+buttons row instead of the old side-by-side split, which
@@ -7967,7 +7990,7 @@ function renderShortageReports(items) {
         <div class="border rounded p-2 mb-2">
             <div><span class="badge bg-${sevColor[r.severity] || 'secondary'}">${r.severity_label}</span> <strong>${r.type_label}</strong> — ${escapeHtml(r.title)}</div>
             <div class="small mt-1">${escapeHtml(r.description)}</div>
-            <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.home_team_name, r.home_team_color_bg, r.home_team_color_fg, r.guest_country_code)} (${escapeHtml(r.team_label)}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
+            <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.home_team_name, r.home_team_color_bg, r.home_team_color_fg, r.guest_country_code)}${k9BadgeHtml(r.user_id, true)} (${escapeHtml(r.team_label)}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
             ${r.acknowledged_at ? `<textarea class="form-control form-control-sm mt-1 shortage-note-input" data-report-id="${r.id}" rows="1" placeholder="${t('shortage.note_placeholder')}"></textarea>` : ''}
             <div class="mt-1 d-flex gap-1">${r.acknowledged_at
                 ? `<button type="button" class="btn btn-sm btn-success flex-fill shortage-resolve-btn" data-report-id="${r.id}">${t('shortage.resolve_btn')}</button>
@@ -8033,7 +8056,7 @@ function renderMissionIncidents(items) {
             <div><span class="badge bg-${sevColor[r.severity] || 'secondary'}">${r.severity_label}</span> <strong>${r.type_label}</strong> — ${escapeHtml(who)}</div>
             ${details ? `<div class="small mt-1">${escapeHtml(details)}</div>` : ''}
             ${r.notes ? `<div class="small fst-italic mt-1">"${escapeHtml(r.notes)}"</div>` : ''}
-            <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.home_team_name, r.home_team_color_bg, r.home_team_color_fg, r.guest_country_code)} (${escapeHtml(r.team_label)}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
+            <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.home_team_name, r.home_team_color_bg, r.home_team_color_fg, r.guest_country_code)}${k9BadgeHtml(r.user_id, true)} (${escapeHtml(r.team_label)}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
             ${canManageIncidents ? `<div class="mt-1 d-flex gap-1">${r.acknowledged_at
                 ? `<select class="form-select form-select-sm incident-outcome-select" data-incident-id="${r.id}"><option value="">${t('incident.outcome_label')}…</option>${outcomeOptions}</select>
                    <input type="text" class="form-control form-control-sm incident-outcome-location-input d-none" data-incident-id="${r.id}" maxlength="255" placeholder="${t('incident.outcome_location_placeholder')}">
@@ -8686,7 +8709,7 @@ function renderSosAlerts(items) {
     // this is a display-correctness note, not a security one.
     list.innerHTML = items.map(a => `
         <div class="border border-danger rounded p-2 mb-2">
-            <div><strong>🆘 ${a.team_label}</strong> — ${guestNameHtml(a.user_name, a.is_external, a.home_team_name, a.home_team_color_bg, a.home_team_color_fg, a.guest_country_code)}</div>
+            <div><strong>🆘 ${a.team_label}</strong> — ${guestNameHtml(a.user_name, a.is_external, a.home_team_name, a.home_team_color_bg, a.home_team_color_fg, a.guest_country_code)}${k9BadgeHtml(a.user_id, true)}</div>
             <div class="text-muted" style="font-size:.75rem;">${a.created_at}${a.lat !== null ? ` · <a href="#" class="sos-locate-link" data-lat="${a.lat}" data-lng="${a.lng}">${t('sos.view_on_map')}</a>` : t('sos.no_gps')}${a.acknowledged_at ? t('sos.ack_at_prefix', {time: a.acknowledged_at}) : ''}</div>
             <div class="mt-1">${a.acknowledged_at
                 ? `<button type="button" class="btn btn-sm btn-success w-100 sos-resolve-btn" data-alert-id="${a.id}">${t('shortage.resolve_btn')}</button>`
@@ -10514,6 +10537,9 @@ function pollWarRoomData() {
         if (!data) return;
         lastPollOkAt = Date.now();
         renderPollStaleness();
+        // Refreshed BEFORE any render below — every k9BadgeHtml() call in this
+        // same tick must see the new registry, not the previous cycle's.
+        if (data.k9Handlers) k9Handlers = data.k9Handlers;
         if (!fieldMode) {
             renderPins(pins = data.pins || []);
             if (data.dispatches) renderDispatches(dispatches = data.dispatches);
@@ -10683,7 +10709,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         const meta = document.createElement('div');
         meta.className = 'small d-flex align-items-center gap-1 ' + (msg.mine ? 'text-white-50' : 'text-muted');
         const metaText = document.createElement('span');
-        metaText.innerHTML = guestNameHtml(msg.name, msg.is_external, msg.home_team_name, msg.home_team_color_bg, msg.home_team_color_fg, msg.guest_country_code) + ' · ' + escapeHtml(msg.time);
+        metaText.innerHTML = guestNameHtml(msg.name, msg.is_external, msg.home_team_name, msg.home_team_color_bg, msg.home_team_color_fg, msg.guest_country_code) + k9BadgeHtml(msg.user_id, true) + ' · ' + escapeHtml(msg.time);
         meta.appendChild(metaText);
         if (msg.can_delete) {
             const del = document.createElement('button');

@@ -1230,6 +1230,19 @@ return [
         'guest.org_tooltip' => 'Ομάδα guest: {org}',
         'guest.org_unknown' => 'Εξωτερική ομάδα',
 
+        // K9 — χειριστές σκύλων έρευνας (badge δίπλα στο όνομα παντού,
+        // πεδία στη φόρμα εθελοντή/προφίλ/εισόδου επισκέπτη)
+        'k9.badge_tooltip' => 'Χειριστής σκύλου: {dog} · Εκπαίδευση: {training}',
+        'k9.badge_tooltip_no_training' => 'Χειριστής σκύλου: {dog}',
+        'k9.dog_unnamed' => 'Σκύλος',
+        'k9.section_title' => 'Σκύλος Έρευνας',
+        'k9.is_handler_label' => 'Χειριστής σκύλου',
+        'k9.is_handler_help' => 'Τσεκάρετε αν συνοδεύει σκύλο έρευνας στις αποστολές.',
+        'k9.dog_name_label' => 'Όνομα σκύλου',
+        'k9.training_label' => 'Εκπαίδευση σκύλου',
+        'k9.training_help' => 'Τι εκπαίδευση/πιστοποιήσεις έχει ο σκύλος (π.χ. έρευνα ερειπίων, επιφανείας, ιχνηλασία).',
+        'k9.no_training' => 'Δεν έχει καταγραφεί εκπαίδευση.',
+
         // Weather card + wind-direction map control (weather_map_compass_enabled)
         'weather.card_title' => 'Πρόβλεψη Καιρού',
         'weather.forecast_for_prefix' => 'Πρόβλεψη για {time}',
@@ -2505,6 +2518,19 @@ return [
         // Guest org-name tooltip (shown on a guest's name everywhere in Action Room)
         'guest.org_tooltip' => 'Guest team: {org}',
         'guest.org_unknown' => 'External team',
+
+        // K9 — search-dog handlers (badge next to the name everywhere, plus
+        // the fields on the volunteer form / profile / visitor join page)
+        'k9.badge_tooltip' => 'Dog handler: {dog} · Training: {training}',
+        'k9.badge_tooltip_no_training' => 'Dog handler: {dog}',
+        'k9.dog_unnamed' => 'Dog',
+        'k9.section_title' => 'Search Dog',
+        'k9.is_handler_label' => 'Dog handler',
+        'k9.is_handler_help' => 'Tick if they bring a search dog on missions.',
+        'k9.dog_name_label' => 'Dog\'s name',
+        'k9.training_label' => 'Dog\'s training',
+        'k9.training_help' => 'What the dog is trained/certified for (e.g. rubble search, area search, tracking).',
+        'k9.no_training' => 'No training recorded.',
 
         // Weather card + wind-direction map control (weather_map_compass_enabled)
         'weather.card_title' => 'Weather Forecast',
