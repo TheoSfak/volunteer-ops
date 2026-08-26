@@ -185,6 +185,7 @@ foreach ($rosterRows as $row) {
         $roster[$tid] = [
             'codename' => $row['codename'], 'team_number' => $row['team_number'], 'color' => $row['color'] ?: '#898781',
             'leader_name' => $row['leader_name'],
+            'leader_id' => $row['leader_id'] !== null ? (int) $row['leader_id'] : null,
             'leader_is_external' => (bool) $row['leader_is_external'], 'leader_guest_org_name' => $row['leader_guest_org_name'],
             'leader_guest_country_code' => $row['leader_guest_country_code'],
             'leader_home_team_name' => $row['leader_home_team_name'], 'leader_home_team_color' => $row['leader_home_team_color'],
@@ -193,6 +194,7 @@ foreach ($rosterRows as $row) {
     }
     if ($row['user_id'] !== null) {
         $roster[$tid]['members'][] = [
+            'user_id' => (int) $row['user_id'],
             'name' => $row['member_name'], 'is_external' => (bool) $row['member_is_external'],
             'guest_org_name' => $row['member_guest_org_name'], 'guest_country_code' => $row['member_guest_country_code'],
             'home_team_name' => $row['member_home_team_name'], 'home_team_color' => $row['member_home_team_color'],
@@ -537,14 +539,14 @@ include __DIR__ . '/includes/header.php';
                 <div class="roster-team-header">
                     <span class="roster-swatch" style="background:<?= h($team['color']) ?>;"></span>
                     <span><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
-                    <?php if ($team['leader_name']): ?><span class="text-muted fw-normal small">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_home_team_name'], $team['leader_home_team_color'], $team['leader_guest_country_code']) ?></span><?php endif; ?>
+                    <?php if ($team['leader_name']): ?><span class="text-muted fw-normal small">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_home_team_name'], $team['leader_home_team_color'], $team['leader_guest_country_code']) ?><?= k9BadgeHtml($team['leader_id'], false, 'el') ?></span><?php endif; ?>
                 </div>
                 <?php if (empty($team['members'])): ?>
                     <div class="text-muted small">Χωρίς μέλη.</div>
                 <?php else: ?>
                     <?php foreach ($team['members'] as $m): ?>
                     <div class="roster-member-row">
-                        <span><?= guestNameHtml($m['name'], $m['is_external'], $m['home_team_name'], $m['home_team_color'], $m['guest_country_code']) ?></span>
+                        <span><?= guestNameHtml($m['name'], $m['is_external'], $m['home_team_name'], $m['home_team_color'], $m['guest_country_code']) ?><?= k9BadgeHtml((int) $m['user_id'], false, 'el') ?></span>
                         <span class="text-muted"><?= $attendanceReady ? number_format($m['hours'], 1) . ' ώρες' : 'Εκκρεμεί' ?></span>
                     </div>
                     <?php endforeach; ?>

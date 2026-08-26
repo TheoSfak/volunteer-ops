@@ -79,6 +79,13 @@ if ($mission && isPost()) {
         if (empty($errors)) {
             $name = mb_substr(trim("$firstName $lastName"), 0, 100);
 
+            // A walk-up K9 team is exactly the case this matters most for —
+            // command staff need to see the dog on the board the moment the
+            // handler signs in, not after someone edits the account later.
+            $isDogHandler = post('is_dog_handler') === '1' ? 1 : 0;
+            $dogName      = $isDogHandler ? (mb_substr(trim(post('dog_name')), 0, 100) ?: null) : null;
+            $dogTraining  = $isDogHandler ? (trim(post('dog_training')) ?: null) : null;
+
             // Re-submitting the whole form after already registering for
             // this mission (e.g. double-tap) — resume instead of creating
             // a duplicate row.
@@ -97,9 +104,14 @@ if ($mission && isPost()) {
                 // leaving a live visitor with no timestamp at all. COALESCE
                 // keeps the ORIGINAL consent moment when there already is
                 // one; a re-tick is not a new consent event.
+                // Unlike consent, the dog details ARE overwritten on a
+                // re-submit: this is the same person correcting or adding
+                // their own K9 info, and a stale dog on a live participant
+                // is worse than no dog at all.
                 dbExecute(
-                    "UPDATE users SET mission_visitor_consent_at = COALESCE(mission_visitor_consent_at, NOW()), updated_at = NOW() WHERE id = ?",
-                    [$existingId]
+                    "UPDATE users SET mission_visitor_consent_at = COALESCE(mission_visitor_consent_at, NOW()),
+                     is_dog_handler = ?, dog_name = ?, dog_training = ?, updated_at = NOW() WHERE id = ?",
+                    [$isDogHandler, $dogName, $dogTraining, $existingId]
                 );
                 establishMissionVisitorSession((int) $visitorUser['id'], $visitorUser['name'], $visitorUser['email']);
             } else {
@@ -113,9 +125,9 @@ if ($mission && isPost()) {
 
                 $userId = dbInsert(
                     "INSERT INTO users
-                        (name, email, password, phone, role, is_active, is_external, is_mission_visitor, mission_visitor_mission_id, mission_visitor_consent_at, language, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, 1, 1, 1, ?, NOW(), 'el', NOW(), NOW())",
-                    [$name, $email, $passwordHash, $phone, ROLE_VOLUNTEER, $mission['id']]
+                        (name, email, password, phone, role, is_active, is_external, is_mission_visitor, mission_visitor_mission_id, mission_visitor_consent_at, language, is_dog_handler, dog_name, dog_training, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, 1, 1, 1, ?, NOW(), 'el', ?, ?, ?, NOW(), NOW())",
+                    [$name, $email, $passwordHash, $phone, ROLE_VOLUNTEER, $mission['id'], $isDogHandler, $dogName, $dogTraining]
                 );
 
                 // Same straight-to-APPROVED insert as mission-view.php's
@@ -274,6 +286,28 @@ $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLog
                 <label class="form-label"><?= h(t('visitor.join_phone_label', [], 'el')) ?></label>
                 <input type="tel" name="phone" class="form-control form-control-lg" required autocomplete="tel" inputmode="tel" value="<?= $activeForm === 'register' ? h(post('phone')) : '' ?>">
             </div>
+            <!-- K9. Unlike the consent box below, this one IS restored on a
+                 failed submit — it's a plain fact about the person, not a
+                 permission they have to grant afresh each time. -->
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="is_dog_handler" value="1" id="vjDogHandler"
+                           <?= ($activeForm === 'register' && post('is_dog_handler') === '1') ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="vjDogHandler">
+                        <span class="fw-semibold">🐕 <?= h(t('k9.is_handler_label', [], 'el')) ?></span>
+                    </label>
+                </div>
+            </div>
+            <div id="vjDogFields">
+                <div class="mb-3">
+                    <label class="form-label"><?= h(t('k9.dog_name_label', [], 'el')) ?></label>
+                    <input type="text" name="dog_name" class="form-control form-control-lg" maxlength="100" value="<?= $activeForm === 'register' ? h(post('dog_name')) : '' ?>">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label"><?= h(t('k9.training_label', [], 'el')) ?></label>
+                    <textarea name="dog_training" class="form-control" rows="2"><?= $activeForm === 'register' ? h(post('dog_training')) : '' ?></textarea>
+                </div>
+            </div>
             <!-- GDPR consent. Deliberately never pre-ticked and never
                  remembered across a failed submit (unlike the name/phone
                  fields just above, which are): a consent box that restores
@@ -306,6 +340,24 @@ $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLog
 
 <?php endif; ?>
 </div>
+
+<script>
+(function () {
+    // Same show-on-tick toggle as volunteer-form.php/profile.php. Kept as a
+    // plain IIFE with no dependencies — this page is reached by walk-up
+    // visitors on unknown phones, often on a bad field connection.
+    var dogCheckbox = document.getElementById('vjDogHandler');
+    var dogFields = document.getElementById('vjDogFields');
+    if (!dogCheckbox || !dogFields) return;
+
+    function toggleDogFields() {
+        dogFields.style.display = dogCheckbox.checked ? '' : 'none';
+    }
+
+    dogCheckbox.addEventListener('change', toggleDogFields);
+    toggleDogFields();
+})();
+</script>
 
 </body>
 </html>

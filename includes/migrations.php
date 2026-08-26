@@ -6314,6 +6314,56 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 140,
+            'description' => 'Add users.is_dog_handler/dog_name/dog_training — K9 search-dog handlers. Columns on users rather than a volunteer_dogs table because the mission owner confirmed one dog per handler; a second dog would need the table, not a second set of columns. dog_training is free TEXT, not an ENUM of specialities: what a dog is actually certified for is written differently by every certifying body (IRO/FCI/ΓΓΠΠ) and the admin needs to paste it verbatim. The pair is only meaningful while is_dog_handler = 1 — unticking the box nulls both, same derived-mirror rule volunteer-form.php already applies to guest_org_name/guest_country_code.',
+            'up' => function () {
+                $hasFlag = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_dog_handler'"
+                );
+                if (!$hasFlag) {
+                    dbExecute(
+                        "ALTER TABLE users ADD COLUMN is_dog_handler TINYINT(1) NOT NULL DEFAULT 0
+                         COMMENT 'Handles a search dog — drives the 🐕 badge next to this user''s name app-wide'"
+                    );
+                }
+
+                $hasDogName = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'dog_name'"
+                );
+                if (!$hasDogName) {
+                    dbExecute(
+                        "ALTER TABLE users ADD COLUMN dog_name VARCHAR(100) NULL
+                         COMMENT 'Search dog''s name; NULL unless is_dog_handler = 1'"
+                    );
+                }
+
+                $hasDogTraining = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'dog_training'"
+                );
+                if (!$hasDogTraining) {
+                    dbExecute(
+                        "ALTER TABLE users ADD COLUMN dog_training TEXT NULL
+                         COMMENT 'Free-text description of the dog''s training/certifications; NULL unless is_dog_handler = 1'"
+                    );
+                }
+
+                // Indexed because volunteers.php filters on it directly
+                // ("show me every dog handler") while an admin is staffing a
+                // mission, on a table that is scanned on nearly every page.
+                $hasIndex = dbFetchOne(
+                    "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND INDEX_NAME = 'idx_users_dog_handler'"
+                );
+                if (!$hasIndex) {
+                    dbExecute("ALTER TABLE users ADD INDEX idx_users_dog_handler (is_dog_handler)");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

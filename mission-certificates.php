@@ -210,7 +210,7 @@ include __DIR__ . '/includes/header.php';
                     <label class="list-group-item d-flex gap-2 align-items-center cert-recipient-item">
                         <input class="form-check-input flex-shrink-0 cert-recipient-checkbox" type="checkbox" name="recipient_ids[]" value="<?= $u['id'] ?>">
                         <span class="flex-grow-1">
-                            <span class="cert-recipient-name fw-bold"><?= guestNameHtml($u['name'], (bool) $u['is_external'], $u['home_team_name'], $u['home_team_color'], $u['guest_country_code']) ?></span>
+                            <span class="cert-recipient-name fw-bold"><?= guestNameHtml($u['name'], (bool) $u['is_external'], $u['home_team_name'], $u['home_team_color'], $u['guest_country_code']) ?><?= k9BadgeHtml((int) $u['id']) ?></span>
                             <small class="text-muted cert-recipient-email d-block"><?= h($u['email']) ?></small>
                         </span>
                         <?php if ($u['is_participant']): ?>
@@ -272,7 +272,7 @@ include __DIR__ . '/includes/header.php';
                     <tbody>
                         <?php foreach ($issuedCertificates as $c): ?>
                         <tr>
-                            <td><?= guestNameHtml($c['recipient_name'], (bool) $c['recipient_is_external'], $c['recipient_home_team_name'], $c['recipient_home_team_color'], $c['recipient_guest_country_code']) ?></td>
+                            <td><?= guestNameHtml($c['recipient_name'], (bool) $c['recipient_is_external'], $c['recipient_home_team_name'], $c['recipient_home_team_color'], $c['recipient_guest_country_code']) ?><?= k9BadgeHtml((int) $c['recipient_user_id']) ?></td>
                             <td><?= $c['language'] === 'en' ? 'English' : 'Ελληνικά' ?></td>
                             <td><code><?= h($c['certificate_number']) ?></code></td>
                             <td><?= formatDateTime($c['issued_at']) ?></td>

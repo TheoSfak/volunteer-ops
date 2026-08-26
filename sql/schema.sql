@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS `users` (
     `profile_photo` VARCHAR(255) NULL DEFAULT NULL,
     `role` ENUM('SYSTEM_ADMIN', 'DEPARTMENT_ADMIN', 'SHIFT_LEADER', 'VOLUNTEER') DEFAULT 'VOLUNTEER',
     `volunteer_type` ENUM('TRAINEE_RESCUER','RESCUER') NOT NULL DEFAULT 'RESCUER',
+    `is_dog_handler` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Handles a search dog — drives the 🐕 badge next to this user''s name app-wide',
+    `dog_name` VARCHAR(100) NULL COMMENT 'Search dog''s name; NULL unless is_dog_handler = 1',
+    `dog_training` TEXT NULL COMMENT 'Free-text description of the dog''s training/certifications; NULL unless is_dog_handler = 1',
     `position_id` INT UNSIGNED NULL,
     `cohort_year` YEAR NULL COMMENT 'Χρονιά σειράς δοκίμων διασωστών',
     `department_id` INT UNSIGNED NULL,
@@ -119,6 +122,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     FOREIGN KEY (`mission_visitor_tag_id`) REFERENCES `mission_visitor_tags`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`mission_visitor_mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     INDEX `idx_users_mission_visitor` (`mission_visitor_mission_id`, `is_mission_visitor`),
+    INDEX `idx_users_dog_handler` (`is_dog_handler`),
     CHECK (`is_mission_visitor` = 0 OR `is_external` = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

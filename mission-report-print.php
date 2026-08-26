@@ -241,12 +241,14 @@ foreach ($rosterRows as $row) {
         $roster[$tid] = [
             'codename' => $row['codename'], 'team_number' => $row['team_number'], 'color' => $row['color'] ?: '#898781',
             'leader_name' => $row['leader_name'],
+            'leader_id' => $row['leader_id'] !== null ? (int) $row['leader_id'] : null,
             'leader_is_external' => (bool) $row['leader_is_external'], 'leader_guest_org_name' => $row['leader_guest_org_name'],
             'members' => [],
         ];
     }
     if ($row['user_id'] !== null) {
         $roster[$tid]['members'][] = [
+            'user_id' => (int) $row['user_id'],
             'name' => $row['member_name'], 'is_external' => (bool) $row['member_is_external'],
             'guest_org_name' => $row['member_guest_org_name'], 'hours' => (float) $row['member_hours'],
         ];
@@ -378,6 +380,15 @@ $printDate = date('d/m/Y H:i');
         .roster-team-card { border-radius: 10px; border: 1px solid #eee; padding: 10px 14px; page-break-inside: avoid; }
         .roster-team-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-weight: 700; font-size: 9.5pt; flex-wrap: wrap; }
         .roster-swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+        /* This page never includes header.php, so .k9-badge is redeclared
+           here. Print-tuned, not a copy: no cursor:help (nothing hovers on
+           paper), and print-color-adjust so the teal fill actually survives
+           the browser's "remove backgrounds" print default — otherwise the
+           badge prints as white-on-white and the dog silently vanishes from
+           the official mission report. */
+        .k9-badge { display: inline-block; font-size: 7pt; font-weight: 700; color: #fff; background: #0f766e;
+                    border-radius: 999px; padding: 0 5px; margin-left: 3px; white-space: nowrap;
+                    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .roster-member-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 8.3pt; border-bottom: 1px solid #f2f2f0; }
         .roster-member-row:last-child { border-bottom: none; }
 
@@ -718,14 +729,14 @@ $printDate = date('d/m/Y H:i');
             <div class="roster-team-header">
                 <span class="roster-swatch" style="background:<?= h($team['color']) ?>;"></span>
                 <span><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
-                <?php if ($team['leader_name']): ?><span style="color:#888; font-weight:400; font-size:8pt;">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_guest_org_name']) ?></span><?php endif; ?>
+                <?php if ($team['leader_name']): ?><span style="color:#888; font-weight:400; font-size:8pt;">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_guest_org_name']) ?><?= k9BadgeHtml($team['leader_id'], false, 'el') ?></span><?php endif; ?>
             </div>
             <?php if (empty($team['members'])): ?>
                 <div style="color:#888; font-size:8.3pt;">Χωρίς μέλη.</div>
             <?php else: ?>
                 <?php foreach ($team['members'] as $m): ?>
                 <div class="roster-member-row">
-                    <span><?= guestNameHtml($m['name'], $m['is_external'], $m['guest_org_name']) ?></span>
+                    <span><?= guestNameHtml($m['name'], $m['is_external'], $m['guest_org_name']) ?><?= k9BadgeHtml((int) $m['user_id'], false, 'el') ?></span>
                     <span style="color:#888;"><?= $attendanceReady ? number_format($m['hours'], 1) . ' ώρες' : 'Εκκρεμεί' ?></span>
                 </div>
                 <?php endforeach; ?>

@@ -158,11 +158,21 @@ if (isPost()) {
             }
             
             if (empty($errors)) {
+                // The K9 columns live on users, not volunteer_profiles, so
+                // they ride along on this UPDATE rather than the profile
+                // upsert below. Unticking clears the pair, same rule as
+                // volunteer-form.php's admin-side save.
+                $isDogHandler = isset($_POST['is_dog_handler']) ? 1 : 0;
                 dbExecute(
-                    "UPDATE users SET name = ?, phone = ?, updated_at = NOW() WHERE id = ?",
-                    [$name, $phone, $user['id']]
+                    "UPDATE users SET name = ?, phone = ?, is_dog_handler = ?, dog_name = ?, dog_training = ?, updated_at = NOW() WHERE id = ?",
+                    [
+                        $name, $phone, $isDogHandler,
+                        $isDogHandler ? (post('dog_name') ?: null) : null,
+                        $isDogHandler ? (post('dog_training') ?: null) : null,
+                        $user['id'],
+                    ]
                 );
-                
+
                 // Update profile
                 $profileData = [
                     'bio' => post('bio'),
@@ -509,7 +519,7 @@ include __DIR__ . '/includes/header.php';
             <div class="hero-avatar-placeholder"><i class="bi bi-person-fill"></i></div>
         <?php endif; ?>
         <div class="flex-grow-1">
-            <h1 class="h4 mb-1 text-white fw-bold"><?= guestNameHtml($user['name'], (bool)$user['is_external'], $user['home_team_name'] ?? null, $user['home_team_color'] ?? null, $user['guest_country_code']) ?></h1>
+            <h1 class="h4 mb-1 text-white fw-bold"><?= guestNameHtml($user['name'], (bool)$user['is_external'], $user['home_team_name'] ?? null, $user['home_team_color'] ?? null, $user['guest_country_code']) ?><?= k9BadgeHtml((int) $user['id']) ?></h1>
             <div style="opacity:.85">
                 <i class="bi bi-envelope me-1"></i><?= h($user['email']) ?>
                 <?php if ($user['phone']): ?>
@@ -1208,6 +1218,28 @@ $myGuestDebriefMissions = dbFetchAll(
                         </div>
                     </div>
 
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="is_dog_handler" id="isDogHandler"
+                                   <?= !empty($user['is_dog_handler']) ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="isDogHandler">🐕 <?= t('k9.is_handler_label') ?></label>
+                        </div>
+                        <small class="text-muted"><?= t('k9.is_handler_help') ?></small>
+                    </div>
+
+                    <div class="row mb-3" id="dogFieldsRow">
+                        <div class="col-md-4">
+                            <label class="form-label"><?= t('k9.dog_name_label') ?></label>
+                            <input type="text" class="form-control" name="dog_name" maxlength="100"
+                                   value="<?= h($user['dog_name'] ?? '') ?>">
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label"><?= t('k9.training_label') ?></label>
+                            <textarea class="form-control" name="dog_training" rows="2"><?= h($user['dog_training'] ?? '') ?></textarea>
+                            <small class="text-muted"><?= t('k9.training_help') ?></small>
+                        </div>
+                    </div>
+
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-check-lg me-1"></i><?= t('common.save') ?>
                     </button>
@@ -1379,5 +1411,22 @@ $myGuestDebriefMissions = dbFetchAll(
         </div>
     </div>
 </div>
+
+<script>
+(function () {
+    // Mirrors volunteer-form.php's own dog-field toggle — same show-on-tick
+    // behaviour whether the admin or the volunteer themselves is editing.
+    const dogCheckbox = document.getElementById('isDogHandler');
+    const dogFieldsRow = document.getElementById('dogFieldsRow');
+    if (!dogCheckbox || !dogFieldsRow) return;
+
+    function toggleDogFields() {
+        dogFieldsRow.style.display = dogCheckbox.checked ? '' : 'none';
+    }
+
+    dogCheckbox.addEventListener('change', toggleDogFields);
+    toggleDogFields();
+})();
+</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

@@ -80,6 +80,7 @@ if (isPost()) {
         'registry_epidrasis' => post('registry_epidrasis') ?: null,
         'registry_ggpp' => post('registry_ggpp') ?: null,
         'custom_role_id' => post('custom_role_id') ?: null,
+        'is_dog_handler' => isset($_POST['is_dog_handler']) ? 1 : 0,
     ];
 
     // Validate custom_role_id — only allowed for VOLUNTEER role
@@ -111,6 +112,18 @@ if (isPost()) {
         $data['guest_org_name'] = null;
         $data['guest_country_code'] = null;
         $data['guest_country'] = null;
+    }
+
+    // Dog name/training only mean anything while the handler box is ticked —
+    // same derived-mirror rule as the guest fields above. Unticking clears
+    // them rather than leaving an orphaned dog on the row, which would then
+    // reappear the moment someone re-ticks the box months later.
+    if ($data['is_dog_handler']) {
+        $data['dog_name'] = post('dog_name') ?: null;
+        $data['dog_training'] = post('dog_training') ?: null;
+    } else {
+        $data['dog_name'] = null;
+        $data['dog_training'] = null;
     }
 
     // Validation
@@ -167,7 +180,8 @@ if (isPost()) {
                  volunteer_type = ?, cohort_year = ?, position_id = ?,
                  id_card = ?, afm = ?, amka = ?, driving_license = ?, vehicle_plate = ?,
                  pants_size = ?, shirt_size = ?, blouse_size = ?, fleece_size = ?,
-                 registry_epidrasis = ?, registry_ggpp = ?, updated_at = NOW()
+                 registry_epidrasis = ?, registry_ggpp = ?,
+                 is_dog_handler = ?, dog_name = ?, dog_training = ?, updated_at = NOW()
                  WHERE id = ?",
                 [
                     $data['name'], $data['email'], $data['phone'],
@@ -175,7 +189,8 @@ if (isPost()) {
                     $volunteerType, $cohortYear, $data['position_id'],
                     $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
-                    $data['registry_epidrasis'], $data['registry_ggpp'], $id
+                    $data['registry_epidrasis'], $data['registry_ggpp'],
+                    $data['is_dog_handler'], $data['dog_name'], $data['dog_training'], $id
                 ]
             );
             
@@ -195,15 +210,16 @@ if (isPost()) {
                 "INSERT INTO users
                  (name, email, password, phone, role, custom_role_id, department_id, warehouse_id, is_active, is_external, language, guest_org_name, guest_country, volunteer_team_id, guest_country_code, volunteer_type, cohort_year, position_id,
                   id_card, afm, amka, driving_license, vehicle_plate, pants_size, shirt_size, blouse_size, fleece_size,
-                  registry_epidrasis, registry_ggpp, total_points, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                  registry_epidrasis, registry_ggpp, is_dog_handler, dog_name, dog_training, total_points, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                 [
                     $data['name'], $data['email'], password_hash($password, PASSWORD_DEFAULT),
                     $data['phone'], $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'], $data['language'], $data['guest_org_name'], $data['guest_country'], $data['volunteer_team_id'], $data['guest_country_code'],
                     $volunteerType, $cohortYear, $data['position_id'],
                     $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
-                    $data['registry_epidrasis'], $data['registry_ggpp']
+                    $data['registry_epidrasis'], $data['registry_ggpp'],
+                    $data['is_dog_handler'], $data['dog_name'], $data['dog_training']
                 ]
             );
             logAudit('create', 'users', $id);
@@ -285,6 +301,9 @@ $form = $volunteer ?: [
     'registry_epidrasis' => '',
     'registry_ggpp' => '',
     'custom_role_id' => null,
+    'is_dog_handler' => 0,
+    'dog_name' => '',
+    'dog_training' => '',
 ];
 
 include __DIR__ . '/includes/header.php';
@@ -489,6 +508,29 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </select>
                 <small class="text-muted">Χώρα προέλευσης της ομάδας/οργάνωσης — καθορίζει τη σημαία δίπλα στο όνομα.</small>
+            </div>
+
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="is_dog_handler" id="is_dog_handler"
+                           <?= !empty($form['is_dog_handler']) ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="is_dog_handler">
+                        🐕 Χειριστής σκύλου
+                    </label>
+                </div>
+                <small class="text-muted">Ισχύει και για εθελοντές και για guest λογαριασμούς. Όταν είναι επιλεγμένο, εμφανίζεται ένδειξη 🐕 δίπλα στο όνομά του/της παντού στην εφαρμογή — λίστες, Action Room, βάρδιες, αναφορές.</small>
+            </div>
+
+            <div class="mb-3" id="dogNameRow">
+                <label class="form-label">Όνομα σκύλου</label>
+                <input type="text" class="form-control" name="dog_name" maxlength="100" style="max-width: 320px;"
+                       value="<?= h($form['dog_name'] ?? '') ?>">
+            </div>
+
+            <div class="mb-3" id="dogTrainingRow">
+                <label class="form-label">Εκπαίδευση σκύλου</label>
+                <textarea class="form-control" name="dog_training" rows="3"><?= h($form['dog_training'] ?? '') ?></textarea>
+                <small class="text-muted">Ελεύθερο κείμενο — τι εκπαίδευση/πιστοποιήσεις έχει ο σκύλος (π.χ. έρευνα ερειπίων, επιφανείας, ιχνηλασία, φορέας &amp; έτος πιστοποίησης).</small>
             </div>
 
             <div class="mb-3">
@@ -723,6 +765,25 @@ include __DIR__ . '/includes/header.php';
 
     externalCheckbox.addEventListener('change', toggleGuestFields);
     toggleGuestFields();
+})();
+
+(function () {
+    // Same show-on-tick pattern as toggleGuestFields() above, incl. the
+    // initial call so edit mode opens with the dog fields already visible
+    // for an existing handler.
+    const dogCheckbox = document.getElementById('is_dog_handler');
+    const dogNameRow = document.getElementById('dogNameRow');
+    const dogTrainingRow = document.getElementById('dogTrainingRow');
+    if (!dogCheckbox || !dogNameRow || !dogTrainingRow) return;
+
+    function toggleDogFields() {
+        const isHandler = dogCheckbox.checked;
+        dogNameRow.style.display = isHandler ? '' : 'none';
+        dogTrainingRow.style.display = isHandler ? '' : 'none';
+    }
+
+    dogCheckbox.addEventListener('change', toggleDogFields);
+    toggleDogFields();
 })();
 </script>
 

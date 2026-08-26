@@ -125,6 +125,11 @@ if ($team) {
         .bp-member:last-child { border-bottom: none; }
         .flag-icon { width: 16px; height: 12px; object-fit: cover; border-radius: 2px; vertical-align: -1px; margin-right: 3px; }
         .team-name-badge { font-size: 10px; padding: 1px 6px; border-radius: 6px; font-weight: 700; }
+        /* Standalone page — no header.php, so .k9-badge is redeclared here,
+           sized to match this page's own .team-name-badge override above
+           rather than header.php's em-relative one. */
+        .k9-badge { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 999px;
+                    font-weight: 700; color: #fff; background: #0f766e; margin-left: 3px; white-space: nowrap; }
         @media (max-width: 480px) { .bp-page { margin: 0; border-radius: 0; } body { background: #fff; } }
     </style>
 </head>
@@ -221,7 +226,7 @@ if ($team) {
         <div class="bp-member">
             <div class="bp-avatar" style="background:<?= h($teamBg) ?>;"><?= h($initials) ?></div>
             <div style="flex:1;min-width:0;">
-                <div style="font-size:12.5px;font-weight:700;"><?= guestNameHtml($member['name'], (bool)$member['is_external'], $member['home_team_name'], $member['home_team_color'], $member['guest_country_code']) ?><?= $isLeader ? ' ⭐' : '' ?></div>
+                <div style="font-size:12.5px;font-weight:700;"><?= guestNameHtml($member['name'], (bool)$member['is_external'], $member['home_team_name'], $member['home_team_color'], $member['guest_country_code']) ?><?= k9BadgeHtml((int) $member['user_id']) ?><?= $isLeader ? ' ⭐' : '' ?></div>
                 <?php if ($isLeader): ?><div style="font-size:10.5px;color:#8a8a86;">Αρχηγός Ομάδας &middot; Team Leader</div><?php endif; ?>
             </div>
         </div>

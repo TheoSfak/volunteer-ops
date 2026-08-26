@@ -1295,7 +1295,7 @@ include __DIR__ . '/includes/header.php';
                             <label class="list-group-item d-flex gap-2 align-items-center volunteer-item">
                                 <input class="form-check-input flex-shrink-0 volunteer-checkbox" type="checkbox" name="volunteer_ids[]" value="<?= $v['id'] ?>">
                                 <span>
-                                    <span class="volunteer-name fw-bold"><?= guestNameHtml($v['name'], (bool) $v['is_external'], $v['home_team_name'], $v['home_team_color'], $v['guest_country_code']) ?></span>
+                                    <span class="volunteer-name fw-bold"><?= guestNameHtml($v['name'], (bool) $v['is_external'], $v['home_team_name'], $v['home_team_color'], $v['guest_country_code']) ?><?= k9BadgeHtml((int) $v['id']) ?></span>
                                     <small class="text-muted volunteer-email d-block"><?= h($v['email']) ?> — <?= h(ROLE_LABELS[$v['role']] ?? $v['role']) ?></small>
                                 </span>
                             </label>
