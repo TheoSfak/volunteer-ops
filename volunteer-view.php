@@ -763,6 +763,28 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<?php
+// Partner-org guests and walk-up Mission Visitors are not members of this
+// organisation, so the member-only machinery on this card says nothing about
+// them and only buries the handful of facts that do matter. Hidden for them:
+// the annual subscription and its payment history, the annual attendance and
+// training-mission quotas that decide who stays an active member, the Τ.Ε.Π.
+// hours quota, the exam/quiz history, the points/achievements incentive
+// system, and the uniform sizes plus the internal ΕΠΙΔΡΑΣΙΣ/Γ.Γ.Π.Π.
+// registries. volunteer-form.php already hides the sizes and registries when
+// an admin creates a guest — this is the viewing half of that same decision,
+// which had been missed.
+//
+// Keyed on is_external so it covers Mission Visitors too, that being a
+// narrower is_external sub-type (see includes/auth.php).
+//
+// Deliberately KEPT, because they describe a guest's real work with us:
+// skills, certificates, mission certificates (Βεβαιώσεις), participations,
+// documents, and the shifts/attendance/hours stat tiles.
+$isGuestCard = (bool) ($volunteer['is_external'] ?? false);
+?>
+
+<?php if (!$isGuestCard): ?>
 <!-- Annual Subscription -->
 <?php $subscriptionDays = $latestSubscription ? (int)floor((strtotime($latestSubscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400) : null; $subscriptionColor = $subscriptionDays === null ? 'secondary' : ($subscriptionDays < 0 ? 'danger' : ($subscriptionDays <= 7 ? 'danger' : ($subscriptionDays <= 30 ? 'warning' : ($subscriptionDays <= 90 ? 'info' : 'success')))); ?>
 <div class="card vp-card border-accent-<?= $subscriptionColor ?> mb-4" id="subscription">
@@ -893,6 +915,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
     </div>
 </div>
 <?php endif; // VTYPE_RESCUER ?>
+<?php endif; // !$isGuestCard — subscription + the three membership quotas ?>
 
 <!-- Stats Cards -->
 <div class="row g-3 mb-4">
@@ -929,7 +952,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
             </div>
         </div>
     </div>
-    <?php if (getSetting('points_enabled', '1') === '1'): ?>
+    <?php if (getSetting('points_enabled', '1') === '1' && !$isGuestCard): ?>
     <div class="col-6 col-md-3">
         <div class="card vp-stat-card">
             <div class="card-body d-flex align-items-center gap-3 py-3 px-3">
@@ -986,6 +1009,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
                     </div>
                 </div>
                 
+                <?php if (!$isGuestCard): // uniform sizes and our own registries are member-only — volunteer-form.php already hides them when creating a guest ?>
                 <hr class="my-3">
                 <div class="row g-2">
                     <div class="col-md-6">
@@ -1005,6 +1029,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
                         <div class="vp-info-value"><?= h($volunteer['registry_ggpp'] ?: '-') ?></div>
                     </div>
                 </div>
+                <?php endif; // !$isGuestCard — sizes + registries ?>
 
                 <?php if (!empty($volunteer['is_dog_handler'])): ?>
                 <hr class="my-3">
@@ -1357,6 +1382,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
             </div>
         </div>
         
+        <?php if (!$isGuestCard): // our exams/quizzes are member training, never taken by a partner-org guest ?>
         <!-- Exam & Quiz History -->
         <div class="card vp-card border-accent-secondary mb-4">
             <div class="card-header">
@@ -1424,6 +1450,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
                 <?php endif; ?>
             </div>
         </div>
+        <?php endif; // !$isGuestCard — exam/quiz history ?>
 
         <?php if (!empty($activeBookings)): ?>
         <!-- Χρεωμένα Υλικά -->
@@ -1537,7 +1564,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
         </div>
         
         <!-- Achievements -->
-        <?php if (getSetting('achievements_enabled', '1') === '1'): ?>
+        <?php if (getSetting('achievements_enabled', '1') === '1' && !$isGuestCard): ?>
         <div class="card vp-card border-accent-warning mb-4">
             <div class="card-header">
                 <h5 class="mb-0"><i class="bi bi-trophy text-warning me-2"></i>Επιτεύγματα</h5>
@@ -1635,7 +1662,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
             </div>
         </div>
 
-        <?php if (getSetting('points_enabled', '1') === '1'): ?>
+        <?php if (getSetting('points_enabled', '1') === '1' && !$isGuestCard): ?>
         <!-- Points History -->
         <div class="card">
             <div class="card-header">
