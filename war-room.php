@@ -6917,6 +6917,14 @@ function buildMediaShareButtonsHtml(m) {
     const url = MEDIA_LINK_BASE + '/mission-photo-view.php?id=' + m.id;
     const caption = (m.media_type === 'video' ? '🎥' : '📷') + ' ' + t('media.share_caption');
     const shareText = caption + ' ' + url;
+    // A video downloads through JS so it can be converted to MP4 on the way
+    // out (see downloadMediaItem) — a plain link would hand over whatever is
+    // on disk, and anything recorded before v3.188.0 is a WebM that Viber
+    // refuses. Photos keep the plain link: nothing to convert, and it streams
+    // straight to disk rather than through memory.
+    const downloadControl = m.media_type === 'video'
+        ? `<button type="button" class="btn btn-sm btn-outline-secondary p-1 media-download-btn" data-id="${m.id}" data-media-type="video" title="${t('media.download_title')}"><i class="bi bi-download" style="font-size:.7rem;"></i></button>`
+        : `<a class="btn btn-sm btn-outline-secondary p-1" href="mission-photo-view.php?id=${m.id}" download title="${t('media.download_title')}"><i class="bi bi-download" style="font-size:.7rem;"></i></a>`;
     // On a mouse-driven computer the Share control is dropped entirely, both
     // the button and its link menu. Windows will not hand the actual file to
     // Viber, and the link menu only ever sent a URL, never the photo — so the
@@ -6925,12 +6933,12 @@ function buildMediaShareButtonsHtml(m) {
     if (shareSheetIsUnusableHere()) {
         return `
         <div class="d-flex gap-1 mt-1 flex-wrap">
-            <a class="btn btn-sm btn-outline-secondary p-1" href="mission-photo-view.php?id=${m.id}" download title="${t('media.download_title')}"><i class="bi bi-download" style="font-size:.7rem;"></i></a>
+            ${downloadControl}
         </div>`;
     }
     return `
         <div class="d-flex gap-1 mt-1 flex-wrap">
-            <a class="btn btn-sm btn-outline-secondary p-1" href="mission-photo-view.php?id=${m.id}" download title="${t('media.download_title')}"><i class="bi bi-download" style="font-size:.7rem;"></i></a>
+            ${downloadControl}
             <div class="dropdown">
                 <button type="button" class="btn btn-sm btn-outline-primary p-1 media-share-btn" data-id="${m.id}" data-media-type="${m.media_type}" data-url="${escapeHtml(url)}" data-caption="${escapeHtml(caption)}" data-share-text="${escapeHtml(shareText)}" title="${t('media.share_title')}"><i class="bi bi-share-fill" style="font-size:.7rem;"></i></button>
                 <ul class="dropdown-menu dropdown-menu-end">
@@ -6993,7 +7001,14 @@ function blobToBase64(blob) {
 // stays exactly as fast as it was. A browser that cannot record MP4 either
 // falls back to sharing the original WebM rather than failing outright:
 // no worse than before, and still fine for Telegram and the like.
-async function shareReadyMediaFile(id, mediaType) {
+// Fetches a stored media item and, when it is a WebM video, re-encodes it to
+// MP4 first. Serves BOTH the share sheet and the Download button: a clip
+// recorded before v3.188.0 is still WebM on disk, and Viber silently drops a
+// WebM whether it arrives through a share sheet or as a saved file. Returns
+// the original untouched when it is already MP4, when it is a photo, or when
+// the clip is past the 120s ceiling that makes a realtime pass worse than the
+// problem — callers check `rewrapped` to tell those apart.
+async function mp4ReadyMediaFile(id, mediaType) {
     const { blob, ext } = await fetchMediaBlob(id, mediaType);
     const original = new File([blob], `field-${id}.${ext}`, {type: blob.type});
     if (mediaType !== 'video' || !isUnshareableVideoContainer(blob.type, original.name)) {
@@ -7066,13 +7081,57 @@ function shareAfterRewrap(payload) {
     });
 }
 
+// Hands a Blob/File to the browser's own save flow. The object URL is
+// revoked on a long delay rather than immediately: revoking it synchronously
+// after click() can cancel the save before the browser has finished reading
+// the blob, which shows up as a download that silently never appears.
+function saveFileToDisk(file) {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+// Download for videos. A plain <a download> would hand over whatever is on
+// disk, and for anything recorded before v3.188.0 that is a WebM — which
+// Viber refuses, so the file is useless the moment it lands. Now that the
+// share control is gone on computers (v3.191.0), this is the only way a
+// video leaves the Action Room from a PC, so it converts first.
+//
+// Photos keep the plain link: nothing to convert, and a direct link streams
+// straight to disk instead of going through memory.
+async function downloadMediaItem(btn) {
+    const { id, mediaType } = btn.dataset;
+    try {
+        const { file, rewrapped } = await mp4ReadyMediaFile(id, mediaType);
+        if (rewrapped) hideMediaProgressModal();
+        // Still not mp4 — the only way here is the 120s ceiling, so say so
+        // rather than handing over a WebM that looks fine until Viber
+        // silently drops it.
+        else if (mediaType === 'video' && isUnshareableVideoContainer(file.type, file.name)) {
+            alert(t('media.download_still_webm'));
+        }
+        saveFileToDisk(file);
+    } catch (e) {
+        hideMediaProgressModal();
+        bgDebugLog('download_failed', e.message || String(e));
+        // Never leave them with no file at all — fall back to the plain
+        // server download, WebM and all.
+        window.location.href = 'mission-photo-view.php?id=' + encodeURIComponent(id);
+    }
+}
+
 async function shareMediaItem(btn) {
     const { id, mediaType, url, caption } = btn.dataset;
     try {
         if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
             const { Filesystem, Share } = window.Capacitor.Plugins || {};
             if (Filesystem && Share) {
-                const { file } = await shareReadyMediaFile(id, mediaType);
+                const { file } = await mp4ReadyMediaFile(id, mediaType);
                 const base64Data = await blobToBase64(file);
                 const written = await Filesystem.writeFile({ path: file.name, data: base64Data, directory: 'CACHE' });
                 await Share.share({ files: [written.uri], text: caption });
@@ -7080,7 +7139,7 @@ async function shareMediaItem(btn) {
             }
             bgDebugLog('share_plugin_missing', Object.keys(window.Capacitor.Plugins || {}).join(','));
         } else if (navigator.canShare) {
-            const { file, rewrapped } = await shareReadyMediaFile(id, mediaType);
+            const { file, rewrapped } = await mp4ReadyMediaFile(id, mediaType);
             // canShare is bound here rather than passed as navigator.canShare
             // — an unbound reference throws "Illegal invocation" when called
             // detached from navigator.
@@ -7178,6 +7237,7 @@ function renderMedia(items) {
         });
     }));
     list.querySelectorAll('.media-share-btn').forEach(btn => btn.addEventListener('click', () => shareMediaItem(btn)));
+    list.querySelectorAll('.media-download-btn').forEach(btn => btn.addEventListener('click', () => downloadMediaItem(btn)));
 }
 
 // Reference photos attached to a Καθολικό Μήνυμα — coordinator-to-field
@@ -9043,7 +9103,7 @@ function compressVideoForUpload(file, onProgress, options) {
             // long clip is a worse outcome than an unforwardable one, with
             // someone standing in a field waiting on it.
             const skip = rewrapping
-                ? videoTooLongToReencode(videoEl.duration)
+                ? videoTooLongToReencode(videoEl.duration, file.size)
                 : shouldSkipVideoCompression(file.size, videoEl.duration);
             if (skip) {
                 cleanupUrl();
@@ -9058,7 +9118,15 @@ function compressVideoForUpload(file, onProgress, options) {
                 // of which the instant thumbnail-grab above ever had to
                 // worry about. Bound the worst case rather than risk a hung
                 // upload.
-                watchdogId = setTimeout(() => { cleanupUrl(); finishOriginal(); }, videoEl.duration * 3000 + 10000);
+                // Duration is NaN/Infinity for a header-less MediaRecorder
+                // WebM, and `NaN * 3000 + 10000` is NaN, which setTimeout
+                // treats as 0 — the watchdog fired instantly and aborted the
+                // very conversions this now allows through. Fall back to a
+                // flat ceiling when there is no duration to scale from.
+                const watchdogMs = Number.isFinite(videoEl.duration) && videoEl.duration > 0
+                    ? videoEl.duration * 3000 + 10000
+                    : 120000;
+                watchdogId = setTimeout(() => { cleanupUrl(); finishOriginal(); }, watchdogMs);
 
                 // Cap the long edge, aspect-preserved — never upscale, and
                 // never force a fixed landscape frame (phone video shot in
@@ -9103,7 +9171,13 @@ function compressVideoForUpload(file, onProgress, options) {
                     // completely successful. A healthy real-device capture
                     // clears this floor by a wide margin, so this only ever
                     // catches the genuinely-broken case.
-                    const MIN_FRAMES = Math.max(2, Math.floor(videoEl.duration * 2));
+                    // Guard the NaN duration case explicitly: Math.max(2, NaN)
+                    // is NaN, and `frameCount < NaN` is false, which silently
+                    // switched this whole safety check off for exactly the
+                    // header-less WebMs now allowed through above.
+                    const MIN_FRAMES = Number.isFinite(videoEl.duration) && videoEl.duration > 0
+                        ? Math.max(2, Math.floor(videoEl.duration * 2))
+                        : 2;
                     if (frameCount < MIN_FRAMES) { finishOriginal(); return; }
                     const blob = new Blob(chunks, {type: mimeType});
                     // Never make it worse — an edge-case input that doesn't
@@ -9144,6 +9218,12 @@ function compressVideoForUpload(file, onProgress, options) {
 
                 if (onProgress) {
                     videoEl.addEventListener('timeupdate', () => {
+                        // No duration to measure against (header-less WebM)
+                        // means no honest percentage — currentTime/NaN is NaN
+                        // and the bar would literally read "NaN%". Hold at 0
+                        // and let the striped animation carry the "working"
+                        // signal instead of printing nonsense.
+                        if (!Number.isFinite(videoEl.duration) || videoEl.duration <= 0) return;
                         onProgress(Math.min(100, Math.round(videoEl.currentTime / videoEl.duration * 100)));
                     });
                 }

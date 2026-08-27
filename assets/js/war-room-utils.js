@@ -227,6 +227,11 @@ function missingRouteDeliverablesClientSide(wp, noteValue) {
 function shouldSkipVideoCompression(sizeBytes, durationSeconds) {
     const SKIP_AT_OR_UNDER_BYTES = 4 * 1024 * 1024;
     if (sizeBytes <= SKIP_AT_OR_UNDER_BYTES) return true;
+    // Deliberately does NOT pass sizeBytes through. The size fallback exists
+    // for the rewrap, where the alternative is a file Viber will refuse and
+    // the pass is therefore worth running. Upload compression is only ever an
+    // optimisation, so an unknown duration stays a skip here: no reason to
+    // put a phone in the field through a realtime re-encode it may not need.
     return videoTooLongToReencode(durationSeconds);
 }
 
@@ -234,12 +239,25 @@ function shouldSkipVideoCompression(sizeBytes, durationSeconds) {
 // container rewrap below needs the same ceiling without the size floor: a
 // re-encode runs in realtime, so past a couple of minutes the operator is
 // left staring at a progress bar for longer than the problem is worth.
-// Unknown/malformed duration (NaN, 0, Infinity — some devices report this)
-// counts as too long, not as "assume it's short enough".
-function videoTooLongToReencode(durationSeconds) {
+//
+// Unknown duration used to count as "too long" outright. That looked
+// conservative and was actually self-defeating: a WebM produced by
+// MediaRecorder routinely carries NO duration in its header at all —
+// <video>.duration reads NaN or Infinity — and those are precisely the files
+// the rewrap exists to convert. The guard was refusing the exact case it was
+// written to serve, so a stuck WebM stayed WebM and Viber kept dropping it.
+//
+// Size stands in for duration when the header has none: a field clip small
+// enough to sit under the cap cannot be a two-minute video at any bitrate a
+// phone records at, so the realtime pass is still bounded. Size unknown too
+// means genuinely no information, which does fall back to skipping.
+function videoTooLongToReencode(durationSeconds, sizeBytes) {
     const MAX_SECONDS = 120;
-    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return true;
-    return durationSeconds > MAX_SECONDS;
+    const UNKNOWN_DURATION_MAX_BYTES = 25 * 1024 * 1024;
+    if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
+        return durationSeconds > MAX_SECONDS;
+    }
+    return !(Number.isFinite(sizeBytes) && sizeBytes > 0 && sizeBytes <= UNKNOWN_DURATION_MAX_BYTES);
 }
 
 // Picks the first MediaRecorder output mimeType this browser can actually

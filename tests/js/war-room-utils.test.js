@@ -403,11 +403,29 @@ test('videoTooLongToReencode() allows a clip exactly at the 120s ceiling', () =>
     assert.equal(videoTooLongToReencode(120), false);
 });
 
+// A MediaRecorder WebM routinely has no duration in its header, so
+// <video>.duration reads NaN or Infinity. Treating that as "too long" meant
+// the rewrap refused the exact files it exists to convert, and the WebM went
+// to Viber unchanged. Size stands in for duration in that case.
+test('videoTooLongToReencode() converts a header-less clip when its size is sane', () => {
+    assert.equal(videoTooLongToReencode(NaN, 1810), false);
+    assert.equal(videoTooLongToReencode(Infinity, 3 * 1024 * 1024), false);
+    assert.equal(videoTooLongToReencode(0, 25 * 1024 * 1024), false);
+});
+
+test('videoTooLongToReencode() still refuses a header-less clip that is too big to bound', () => {
+    assert.equal(videoTooLongToReencode(NaN, 25 * 1024 * 1024 + 1), true);
+    // No duration and no size is genuinely no information — stay conservative.
+    assert.equal(videoTooLongToReencode(NaN, NaN), true);
+    assert.equal(videoTooLongToReencode(NaN, 0), true);
+    assert.equal(videoTooLongToReencode(NaN, undefined), true);
+});
+
 test('videoTooLongToReencode() rejects past the ceiling and on unusable durations', () => {
     assert.equal(videoTooLongToReencode(121), true);
-    assert.equal(videoTooLongToReencode(NaN), true);
-    assert.equal(videoTooLongToReencode(0), true);
-    assert.equal(videoTooLongToReencode(Infinity), true);
+    // A real duration always wins over size — a 3-minute clip is refused no
+    // matter how small the file is.
+    assert.equal(videoTooLongToReencode(180, 1024), true);
 });
 
 test('videoCompressionMimeCandidates() prefers every mp4 spelling before any webm', () => {
