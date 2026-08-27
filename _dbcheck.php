@@ -19,15 +19,32 @@ echo "Memory usage: " . round(memory_get_usage() / 1024 / 1024, 2) . " MB\n";
 echo "Peak memory: " . round(memory_get_peak_usage() / 1024 / 1024, 2) . " MB\n";
 echo "DB: " . DB_NAME . " @ " . DB_HOST . "\n\n";
 
-// Schema version
+// Schema version. Compared against DB_SCHEMA_VERSION rather than a literal:
+// this used to hardcode 36, so once the real version passed 36 it printed
+// "up-to-date" for every database it would ever see, including one a hundred
+// migrations behind — on the one page someone opens precisely because they
+// suspect a migration did not apply.
 try {
     $ver = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'db_schema_version'");
-    echo "DB schema version: " . ($ver ?? 'NOT SET') . " (expected: 36)\n";
-    if ((int)$ver < 36) {
-        echo "⚠ MIGRATIONS PENDING — schema is behind. This causes heavy processing on every request.\n";
+    echo "DB schema version: " . ($ver ?? 'NOT SET') . " (expected: " . DB_SCHEMA_VERSION . ")\n";
+    if ($ver === null) {
+        echo "⚠ NOT SET — no migrations have ever been recorded on this database.\n";
+    } elseif ((int)$ver < DB_SCHEMA_VERSION) {
+        echo "⚠ MIGRATIONS PENDING — schema is " . (DB_SCHEMA_VERSION - (int)$ver) . " version(s) behind. This causes heavy processing on every request.\n";
+    } elseif ((int)$ver > DB_SCHEMA_VERSION) {
+        // Not academic: it means the files were rolled back (or only half
+        // uploaded) while the database kept the newer schema, so the code is
+        // older than the data it is running against.
+        echo "⚠ SCHEMA AHEAD OF CODE — the database is at " . (int)$ver . " but this deployment's files only know about " . DB_SCHEMA_VERSION . ". Check the upload completed.\n";
     } else {
-        echo "✓ Schema is up-to-date.\n";
+        echo "✓ Schema version is current.\n";
     }
+    // The version is self-reported: runSchemaMigrations() writes it after a
+    // migration's callable returns without throwing, which is not the same as
+    // the ALTER having actually taken effect. A green line above is a good
+    // sign, not proof — the failure block further down, and spot-checking the
+    // columns a recent migration was supposed to add, are the real evidence.
+    echo "  (version is self-reported — see 'Migration Failure' below before trusting it)\n";
 } catch (Exception $e) {
     echo "✗ Cannot read schema version: " . $e->getMessage() . "\n";
 }
