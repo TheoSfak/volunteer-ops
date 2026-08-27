@@ -6071,7 +6071,8 @@ map.on('click', e => {
         L.popup({closeOnClick: false})
             .setLatLng(latlng)
             .setContent(`<input type="text" maxlength="255" class="form-control form-control-sm mb-1" id="sectorBuildingLabelInput" placeholder="${t('sector.building_label_placeholder')}">
-                          <input type="number" min="1" max="50" class="form-control form-control-sm mb-1" id="sectorBuildingFloorsInput" placeholder="${t('sector.floor_count_label')}">
+                          <input type="number" min="0" max="50" value="0" class="form-control form-control-sm mb-1" id="sectorBuildingFloorsInput" placeholder="${t('sector.floor_count_label')}">
+                          <div class="small text-muted mb-1">${t('sector.floor_count_hint')}</div>
                           <button type="button" class="btn btn-sm btn-primary w-100" id="sectorBuildingSave">${t('sector.add_building_btn')}</button>`)
             .openOn(map);
         setTimeout(() => {
@@ -6080,8 +6081,12 @@ map.on('click', e => {
             input.focus();
             const save = () => {
                 const label = input.value.trim();
-                const floorCount = parseInt(document.getElementById('sectorBuildingFloorsInput').value, 10);
-                if (!label || !floorCount || floorCount < 1 || floorCount > 50) return;
+                // Blank means "no upper floors", not "invalid" — a single-storey
+                // building is the common case in a village sector, and it still
+                // gets its ground floor server-side.
+                const raw = document.getElementById('sectorBuildingFloorsInput').value.trim();
+                const floorCount = raw === '' ? 0 : parseInt(raw, 10);
+                if (!label || !Number.isInteger(floorCount) || floorCount < 0 || floorCount > 50) return;
                 const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create_building', sector_id: sectorId, label, lat: latlng.lat, lng: latlng.lng, floor_count: floorCount});
                 fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
                     map.closePopup();
@@ -6230,6 +6235,13 @@ function sectorActionLabel(currentStatus) {
         'needs_recheck': t('sector.action.resume'),
     }[currentStatus] || '';
 }
+// Floor 0 is the ground floor, which every building has and which is always
+// part of the check — it reads as "Ισόγειο", not "Όροφος 0".
+function sectorFloorLabel(floorNumber) {
+    return Number(floorNumber) === 0
+        ? t('sector.floor_ground_label')
+        : t('sector.floor_label', {n: floorNumber});
+}
 function sectorFloorChecklistHtml(building, canAct) {
     const requiredFloors = building.floors.filter(f => f.is_required);
     if (!requiredFloors.length) {
@@ -6243,7 +6255,7 @@ function sectorFloorChecklistHtml(building, canAct) {
         const meta = isChecked ? `<span class="text-muted small ms-1">(${escapeHtml(f.checked_by_name || '')}, ${f.checked_at})</span>` : '';
         const note = f.note ? `<div class="small fst-italic">"${escapeHtml(f.note)}"</div>` : '';
         return `<div class="d-flex justify-content-between align-items-center py-1">
-            <span class="small">${escapeHtml(t('sector.floor_label', {n: f.floor_number}))}${meta}</span>${btn}
+            <span class="small">${escapeHtml(sectorFloorLabel(f.floor_number))}${meta}</span>${btn}
         </div>${note}`;
     }).join('');
 }

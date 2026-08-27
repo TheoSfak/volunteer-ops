@@ -599,8 +599,11 @@ if ($action === 'create_building') {
         exit;
     }
 
+    // Floors ABOVE ground. 0 is valid and means a single-storey building —
+    // the ground floor itself is created unconditionally below, because every
+    // building has one and it is the one storey a search team must clear.
     $floorCount = (int) post('floor_count');
-    if ($floorCount < 1 || $floorCount > 50) {
+    if ($floorCount < 0 || $floorCount > 50) {
         echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
         exit;
     }
@@ -609,8 +612,10 @@ if ($action === 'create_building') {
         "INSERT INTO mission_sector_buildings (sector_id, label, lat, lng, floor_count, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
         [$sectorId, $label, (float) $lat, (float) $lng, $floorCount, $userId]
     );
-    // All floors default required=1 — admin narrows via update_building_floors.
-    for ($i = 1; $i <= $floorCount; $i++) {
+    // Floor 0 is the ground floor and is always created. All floors default
+    // required=1 — admin narrows via update_building_floors, which refuses to
+    // drop the ground floor.
+    for ($i = 0; $i <= $floorCount; $i++) {
         dbInsert("INSERT INTO mission_sector_building_floors (building_id, floor_number, is_required) VALUES (?, ?, 1)", [$buildingId, $i]);
     }
     logAudit('create_sector_building', 'mission_sector_buildings', $buildingId, null, [
@@ -636,6 +641,13 @@ if ($action === 'update_building_floors') {
 
     $requiredRaw = json_decode((string) post('required_floor_numbers'), true);
     $requiredFloorNumbers = is_array($requiredRaw) ? array_map('intval', $requiredRaw) : [];
+    // The ground floor is the floor-check's floor: an admin can narrow which
+    // upper storeys need clearing, but never produce a building whose search
+    // task is "check nothing". Forced on server-side rather than only hidden
+    // in the UI, since this endpoint takes whatever list it is handed.
+    if (!in_array(0, $requiredFloorNumbers, true)) {
+        $requiredFloorNumbers[] = 0;
+    }
 
     dbExecute("UPDATE mission_sector_building_floors SET is_required = 0 WHERE building_id = ?", [$buildingId]);
     if (!empty($requiredFloorNumbers)) {

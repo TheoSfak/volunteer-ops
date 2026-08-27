@@ -6364,6 +6364,42 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 141,
+            'description' => 'Give every sector building a ground floor. Buildings were created with floors numbered 1..floor_count and no ground floor at all, so a search team checking a building could tick every floor in the list while nobody had been told to clear the one storey every building has. floor_number 0 now means ισόγειο/ground floor, it is always created, and floor_count keeps its existing meaning of floors ABOVE ground — which is exactly what existing rows already hold, so no stored count needs rewriting. Backfills floor 0 as required for every building that lacks one; the UNIQUE (building_id, floor_number) key makes the insert idempotent, so a re-run cannot duplicate it.',
+            'up' => function () {
+                $tableExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_sector_building_floors'"
+                );
+                if (!$tableExists) {
+                    return; // sector buildings not installed yet; nothing to backfill
+                }
+
+                dbExecute(
+                    "INSERT IGNORE INTO mission_sector_building_floors (building_id, floor_number, is_required)
+                     SELECT b.id, 0, 1
+                     FROM mission_sector_buildings b
+                     LEFT JOIN mission_sector_building_floors f
+                            ON f.building_id = b.id AND f.floor_number = 0
+                     WHERE f.id IS NULL"
+                );
+
+                // Documents the column's meaning at the schema level so the
+                // next reader doesn't have to infer it from the insert loop.
+                try {
+                    dbExecute(
+                        "ALTER TABLE mission_sector_buildings
+                         MODIFY COLUMN floor_count TINYINT UNSIGNED NOT NULL
+                         COMMENT 'Floors ABOVE ground; the ground floor is always floor_number 0 and is not counted here'"
+                    );
+                } catch (Throwable $e) {
+                    // Comment-only change — never worth failing the migration
+                    // and blocking everything queued behind it.
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

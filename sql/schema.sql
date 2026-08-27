@@ -2305,7 +2305,7 @@ CREATE TABLE IF NOT EXISTS `mission_sector_buildings` (
     `label` VARCHAR(255) NOT NULL,
     `lat` DECIMAL(10,8) NOT NULL,
     `lng` DECIMAL(11,8) NOT NULL,
-    `floor_count` TINYINT UNSIGNED NOT NULL,
+    `floor_count` TINYINT UNSIGNED NOT NULL COMMENT 'Floors ABOVE ground; the ground floor is always floor_number 0 and is not counted here',
     `created_by` INT UNSIGNED NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`sector_id`) REFERENCES `mission_search_sectors`(`id`) ON DELETE CASCADE,
@@ -2315,7 +2315,10 @@ CREATE TABLE IF NOT EXISTS `mission_sector_buildings` (
 
 -- =============================================
 -- MISSION SECTOR BUILDING FLOORS (is_required flags which floors of a
--- building actually need checking — not every floor of every building does)
+-- building actually need checking — not every floor of every building does).
+-- floor_number 0 is the ground floor: always created, and mission-sector.php
+-- refuses to drop it from the required set, so a building's search task can
+-- never come out empty.
 -- =============================================
 CREATE TABLE IF NOT EXISTS `mission_sector_building_floors` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
