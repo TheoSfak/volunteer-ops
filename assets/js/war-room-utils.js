@@ -319,8 +319,37 @@ function shouldSkipPhotoCompression(sizeBytes, mimeType) {
     return false;
 }
 
+/**
+ * Picks the richest share payload the platform will actually accept, so the
+ * object handed to navigator.share() is provably the same one canShare()
+ * approved. Returns null when no file payload is shareable at all, which the
+ * caller treats as "fall back to the link dropdown".
+ *
+ * The bug this exists to prevent: war-room.php used to test
+ * canShare({files}) and then call share({files, text}). Chrome on Windows
+ * answers true to the first and rejects the second — its bridge to the OS
+ * share sheet does not take files and text together — so the guard passed
+ * and the call threw. A photo silently degraded to the text-link dropdown
+ * (Viber received a bare link, never the image) and a rewrapped video, whose
+ * branch had no fallback, did nothing at all.
+ *
+ * The caption is the half worth dropping when the two disagree: the file is
+ * the point of the share, the caption is a nicety the operator can retype.
+ *
+ * canShare is injected rather than read off navigator so this stays pure and
+ * testable, same convention as the other extracted helpers here.
+ */
+function shareablePayload(file, caption, canShare) {
+    const withCaption = { files: [file], text: caption };
+    if (canShare(withCaption)) return withCaption;
+    const filesOnly = { files: [file] };
+    if (canShare(filesOnly)) return filesOnly;
+    return null;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
+        shareablePayload,
         bearing,
         destinationPoint,
         circleToPolygonPoints,

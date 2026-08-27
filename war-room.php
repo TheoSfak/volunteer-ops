@@ -4667,6 +4667,9 @@ function guestNameHtml(name, isExternal, teamName, teamColorBg, teamColorFg, cou
 // Mirrors flagHtml() in includes/functions-warroom.php — real self-hosted SVG,
 // never emoji (Windows/Chrome renders flag emoji as literal "GR"/"GB" text).
 const FLAG_ASSET_BASE = '<?= rtrim(BASE_URL, "/") ?>/assets/flags/';
+// Absolute base for links that leave the app entirely (chat apps, email) —
+// must carry the install's subfolder, which location.origin does not.
+const MEDIA_LINK_BASE = '<?= rtrim(BASE_URL, "/") ?>';
 function flagHtml(countryCode) {
     if (!countryCode || !/^[A-Za-z]{2}$/.test(countryCode)) return '';
     return `<img class="flag-icon" src="${FLAG_ASSET_BASE}${countryCode.toLowerCase()}.svg" alt="">`;
@@ -6892,7 +6895,12 @@ if (firesOverlayToggleBtn) {
 // support — mainly desktop; every mobile browser that matters here
 // supports it.
 function buildMediaShareButtonsHtml(m) {
-    const url = location.origin + '/mission-photo-view.php?id=' + m.id;
+    // BASE_URL, not location.origin — origin drops the path an install in a
+    // subfolder lives under, producing a 404 link in every message sent from
+    // the dropdown. Both current live deployments sit at a domain root so
+    // they were unaffected, but local XAMPP (/volunteerops) and any future
+    // subfolder install are not.
+    const url = MEDIA_LINK_BASE + '/mission-photo-view.php?id=' + m.id;
     const caption = (m.media_type === 'video' ? '🎥' : '📷') + ' ' + t('media.share_caption');
     const shareText = caption + ' ' + url;
     return `
@@ -6988,7 +6996,12 @@ async function shareReadyMediaFile(id, mediaType) {
 // rewrap - see #mediaProgressShareBtn's own comment for why that indirection
 // is required at all. Resolves once the sheet has been dealt with, or once
 // the operator dismissed this popup instead of using it.
-function shareAfterRewrap(file, caption) {
+// Resolves true when the share was dealt with (sheet opened, or the operator
+// deliberately cancelled or dismissed the popup) and false when it genuinely
+// failed, so the caller can fall back to the link dropdown instead of leaving
+// the operator staring at a button that did nothing. Before, every outcome
+// resolved the same way and a failure was indistinguishable from a success.
+function shareAfterRewrap(payload) {
     return new Promise(resolve => {
         const modalEl = document.getElementById('mediaProgressModal');
         const shareBtn = document.getElementById('mediaProgressShareBtn');
@@ -7002,15 +7015,26 @@ function shareAfterRewrap(file, caption) {
         };
         const onShare = async () => {
             cleanup();
+            let ok = true;
             try {
-                await navigator.share({files: [file], text: caption});
+                await navigator.share(payload);
             } catch (e) {
-                if (e.name !== 'AbortError') bgDebugLog('share_failed_after_rewrap', e.message || String(e));
+                // A cancel is the operator's own choice, not a failure —
+                // don't pop the link dropdown on top of a sheet they just
+                // closed on purpose.
+                if (e.name !== 'AbortError') {
+                    ok = false;
+                    bgDebugLog('share_failed_after_rewrap', e.message || String(e));
+                    setMediaProgress(100, t('media.share_file_failed'));
+                }
             }
-            hideMediaProgressModal();
-            resolve();
+            if (ok) hideMediaProgressModal();
+            // Leave the popup up for a beat on failure so the reason is
+            // actually readable before the dropdown takes over the screen.
+            else setTimeout(hideMediaProgressModal, 1800);
+            resolve(ok);
         };
-        const onDismiss = () => { cleanup(); resolve(); };
+        const onDismiss = () => { cleanup(); resolve(true); };
         shareBtn.addEventListener('click', onShare);
         modalEl.addEventListener('hidden.bs.modal', onDismiss);
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -7032,18 +7056,27 @@ async function shareMediaItem(btn) {
             bgDebugLog('share_plugin_missing', Object.keys(window.Capacitor.Plugins || {}).join(','));
         } else if (navigator.canShare) {
             const { file, rewrapped } = await shareReadyMediaFile(id, mediaType);
-            if (navigator.canShare({files: [file]})) {
+            // canShare is bound here rather than passed as navigator.canShare
+            // — an unbound reference throws "Illegal invocation" when called
+            // detached from navigator.
+            const payload = shareablePayload(file, caption, d => navigator.canShare(d));
+            if (payload) {
                 // The rewrap outlived this click's user activation, so the
                 // sheet has to be re-armed behind a button instead of being
-                // opened straight from here.
-                if (rewrapped) { await shareAfterRewrap(file, caption); return; }
-                await navigator.share({files: [file], text: caption});
-                return;
+                // opened straight from here. Only a genuine failure falls
+                // through to the link dropdown below — a cancel does not.
+                if (rewrapped) {
+                    if (await shareAfterRewrap(payload)) return;
+                } else {
+                    await navigator.share(payload);
+                    return;
+                }
+            } else if (rewrapped) {
+                // Nothing shareable even after the rewrap — the progress
+                // popup is still up (see above) and nothing is going to
+                // consume it, so close it before the dropdown opens under it.
+                hideMediaProgressModal();
             }
-            // canShare said no even after the rewrap — the progress popup is
-            // still up (see above) and nothing is going to consume it, so
-            // close it before the link dropdown opens underneath.
-            if (rewrapped) hideMediaProgressModal();
         }
     } catch (e) {
         // Web cancel throws AbortError; the native Capacitor Share sheet
@@ -10297,7 +10330,10 @@ function startNativeBackgroundTracking() {
             bgDebugLog('hook_ready', 'pingButton found, token available');
 
             const shiftId = pingButton.dataset.shiftId;
-            const pingUrl = window.location.origin + '/mobile-ping-location.php?shift_id=' + encodeURIComponent(shiftId);
+            // Same subfolder trap as the media share link above: identical to
+            // location.origin on a root-domain install (both live ones), but
+            // the native service would post pings into a 404 anywhere else.
+            const pingUrl = MEDIA_LINK_BASE + '/mobile-ping-location.php?shift_id=' + encodeURIComponent(shiftId);
             const startOptions = {
                 backgroundTitle: <?= json_encode(getSetting('app_name', 'VolunteerOps')) ?>,
                 backgroundMessage: t('bgtrack.notification_text'),

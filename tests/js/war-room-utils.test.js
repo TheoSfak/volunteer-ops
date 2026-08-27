@@ -22,6 +22,7 @@ global.t = function (key) {
 };
 
 const {
+    shareablePayload,
     bearing,
     destinationPoint,
     circleToPolygonPoints,
@@ -461,6 +462,29 @@ test('shouldSkipPhotoCompression() attempts compression for a large-enough jpeg'
 test('shouldSkipPhotoCompression() attempts compression for a large-enough png/webp', () => {
     assert.equal(shouldSkipPhotoCompression(5 * 1024 * 1024, 'image/png'), false);
     assert.equal(shouldSkipPhotoCompression(5 * 1024 * 1024, 'image/webp'), false);
+});
+
+// Regression guard for the Chrome-on-Windows desktop share bug: the payload
+// handed to navigator.share() must always be one canShare() already approved.
+test('shareablePayload() drops the caption when the platform rejects files+text', () => {
+    // Exactly Chrome on Windows: files alone are fine, files+text are not.
+    const canShare = d => !!(d && d.files) && !('text' in d);
+    const file = {name: 'field-1.jpg'};
+    const payload = shareablePayload(file, 'caption', canShare);
+    assert.deepStrictEqual(Object.keys(payload).sort(), ['files']);
+    assert.strictEqual(payload.files[0], file);
+    assert.ok(canShare(payload), 'the returned payload must itself pass canShare');
+});
+
+test('shareablePayload() keeps the caption where the platform accepts both', () => {
+    const canShare = d => !!(d && d.files);
+    const payload = shareablePayload({name: 'f.mp4'}, 'caption', canShare);
+    assert.deepStrictEqual(Object.keys(payload).sort(), ['files', 'text']);
+    assert.strictEqual(payload.text, 'caption');
+});
+
+test('shareablePayload() returns null when no file payload is shareable at all', () => {
+    assert.strictEqual(shareablePayload({name: 'f.mp4'}, 'caption', () => false), null);
 });
 
 test('shouldSkipPhotoCompression() always skips gif, even when large, to protect animation', () => {
