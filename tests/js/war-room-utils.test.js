@@ -23,6 +23,7 @@ global.t = function (key) {
 
 const {
     shareablePayload,
+    isPointerOnlyComputer,
     bearing,
     destinationPoint,
     circleToPolygonPoints,
@@ -462,6 +463,47 @@ test('shouldSkipPhotoCompression() attempts compression for a large-enough jpeg'
 test('shouldSkipPhotoCompression() attempts compression for a large-enough png/webp', () => {
     assert.equal(shouldSkipPhotoCompression(5 * 1024 * 1024, 'image/png'), false);
     assert.equal(shouldSkipPhotoCompression(5 * 1024 * 1024, 'image/webp'), false);
+});
+
+// The media Share control is dropped on mouse-driven computers, where the OS
+// share sheet will not deliver the file. These guard the far more damaging
+// direction: never strip it from a phone in the field.
+const PC = {hasNativeBridge: false, uaDataMobile: false, userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120', maxTouchPoints: 0, hasFinePointer: true};
+
+test('isPointerOnlyComputer() identifies a plain Windows desktop', () => {
+    assert.strictEqual(isPointerOnlyComputer(PC), true);
+});
+
+test('isPointerOnlyComputer() identifies a touchscreen Windows laptop, which has the same broken share sheet', () => {
+    assert.strictEqual(isPointerOnlyComputer({...PC, maxTouchPoints: 10}), true);
+});
+
+test('isPointerOnlyComputer() never strips the button inside the native Android app', () => {
+    assert.strictEqual(isPointerOnlyComputer({...PC, hasNativeBridge: true}), false);
+});
+
+test('isPointerOnlyComputer() never strips the button on a phone or tablet', () => {
+    const phones = [
+        'Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome/120 Mobile',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Version/17.0 Mobile Safari',
+        'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) Version/17.0 Mobile Safari',
+    ];
+    for (const ua of phones) {
+        assert.strictEqual(isPointerOnlyComputer({...PC, userAgent: ua, maxTouchPoints: 5, hasFinePointer: false}), false, ua);
+    }
+    // The browser's own mobile flag wins even when nothing else looks mobile.
+    assert.strictEqual(isPointerOnlyComputer({...PC, uaDataMobile: true}), false);
+    // iPadOS 13+ claims to be a Macintosh; >1 touch point gives it away.
+    assert.strictEqual(isPointerOnlyComputer({...PC, userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari', maxTouchPoints: 5}), false);
+});
+
+test('isPointerOnlyComputer() fails safe and keeps the button when the pointer is unknown', () => {
+    assert.strictEqual(isPointerOnlyComputer({...PC, hasFinePointer: false}), false);
+    assert.strictEqual(isPointerOnlyComputer({...PC, hasFinePointer: undefined}), false);
+});
+
+test('isPointerOnlyComputer() still treats a real Mac desktop as a computer', () => {
+    assert.strictEqual(isPointerOnlyComputer({...PC, userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari', maxTouchPoints: 0}), true);
 });
 
 // Regression guard for the Chrome-on-Windows desktop share bug: the payload

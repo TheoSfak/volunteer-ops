@@ -6894,6 +6894,20 @@ if (firesOverlayToggleBtn) {
 // shares (same login caveat as before) on browsers with no file-share
 // support — mainly desktop; every mobile browser that matters here
 // supports it.
+// Evaluated per render rather than once at load: the Capacitor bridge is not
+// guaranteed to exist yet when this script first runs (see the bootstrap
+// comment further down), and reading it too early would misread the installed
+// Android app as a desktop browser and strip its working Share button.
+function shareSheetIsUnusableHere() {
+    return isPointerOnlyComputer({
+        hasNativeBridge: !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()),
+        uaDataMobile: navigator.userAgentData ? navigator.userAgentData.mobile : undefined,
+        userAgent: navigator.userAgent,
+        maxTouchPoints: navigator.maxTouchPoints || 0,
+        hasFinePointer: window.matchMedia ? window.matchMedia('(pointer: fine)').matches : false,
+    });
+}
+
 function buildMediaShareButtonsHtml(m) {
     // BASE_URL, not location.origin — origin drops the path an install in a
     // subfolder lives under, producing a 404 link in every message sent from
@@ -6903,6 +6917,17 @@ function buildMediaShareButtonsHtml(m) {
     const url = MEDIA_LINK_BASE + '/mission-photo-view.php?id=' + m.id;
     const caption = (m.media_type === 'video' ? '🎥' : '📷') + ' ' + t('media.share_caption');
     const shareText = caption + ' ' + url;
+    // On a mouse-driven computer the Share control is dropped entirely, both
+    // the button and its link menu. Windows will not hand the actual file to
+    // Viber, and the link menu only ever sent a URL, never the photo — so the
+    // whole control did nothing anyone wanted. Download is left as the honest
+    // desktop path: save the file, drag it into the chat.
+    if (shareSheetIsUnusableHere()) {
+        return `
+        <div class="d-flex gap-1 mt-1 flex-wrap">
+            <a class="btn btn-sm btn-outline-secondary p-1" href="mission-photo-view.php?id=${m.id}" download title="${t('media.download_title')}"><i class="bi bi-download" style="font-size:.7rem;"></i></a>
+        </div>`;
+    }
     return `
         <div class="d-flex gap-1 mt-1 flex-wrap">
             <a class="btn btn-sm btn-outline-secondary p-1" href="mission-photo-view.php?id=${m.id}" download title="${t('media.download_title')}"><i class="bi bi-download" style="font-size:.7rem;"></i></a>

@@ -347,9 +347,41 @@ function shareablePayload(file, caption, canShare) {
     return null;
 }
 
+/**
+ * True only on a pointer-driven computer: no native app bridge, not a phone
+ * or tablet, and a real mouse or trackpad. That is exactly where the OS share
+ * sheet cannot deliver a media file — Chrome on Windows accepts the file and
+ * then hands the target a link or nothing, which is why the media Share
+ * control is dropped there entirely in favour of the Download button.
+ *
+ * Written to fail SAFE: every uncertain case returns false, keeping the Share
+ * button. Losing it on a field volunteer's phone is far worse than leaving a
+ * dead button on someone's desktop, so nothing but a positive identification
+ * of a mouse-driven computer counts.
+ *
+ * Signals are injected rather than read off navigator/window so this stays
+ * pure and testable, same convention as the other helpers here.
+ */
+function isPointerOnlyComputer({ hasNativeBridge, uaDataMobile, userAgent, maxTouchPoints, hasFinePointer }) {
+    // The installed Android app shares through Capacitor's native plugin,
+    // which works fine — never touch it.
+    if (hasNativeBridge) return false;
+    // The browser's own answer, where it gives one, beats any sniffing.
+    if (uaDataMobile === true) return false;
+    if (/Android|iPhone|iPad|iPod|Mobile|Silk|Kindle/i.test(userAgent || '')) return false;
+    // iPadOS 13+ reports itself as "Macintosh"; a Mac reporting more than one
+    // touch point is really an iPad.
+    if (/Macintosh/i.test(userAgent || '') && (maxTouchPoints || 0) > 1) return false;
+    // A touchscreen Windows laptop still has a fine pointer and still has the
+    // broken desktop share sheet, so touch alone does not disqualify — but
+    // without a fine pointer this cannot be a computer.
+    return hasFinePointer === true;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         shareablePayload,
+        isPointerOnlyComputer,
         bearing,
         destinationPoint,
         circleToPolygonPoints,
