@@ -467,6 +467,9 @@ $irisRequestForPayment = get('iris_request') ? dbFetchOne("SELECT sir.*, u.name 
 
 if ($isExcelExport) {
     $filterLabels = ['all' => 'oles', 'week' => '1-evdomada', 'month' => '1-minas', 'quarter' => '3-mines', 'expired' => 'ligmenes'];
+    // Discard anything already buffered — a stray PHP notice or warning would
+    // otherwise land inside the download and corrupt every row of the file.
+    if (ob_get_level()) ob_end_clean();
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="subscriptions-' . $filterLabels[$filter] . '-' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');
@@ -500,6 +503,9 @@ if (get('export') === 'history') {
         LEFT JOIN users creator ON creator.id = vs.created_by
         {$historyWhereSql}
         ORDER BY vs.payment_date DESC, vs.id DESC");
+    // Discard anything already buffered — a stray PHP notice or warning would
+    // otherwise land inside the download and corrupt every row of the file.
+    if (ob_get_level()) ob_end_clean();
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="subscriptions-history-' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');

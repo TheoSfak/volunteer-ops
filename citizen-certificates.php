@@ -146,6 +146,9 @@ if (get('export') === 'csv') {
          WHERE $whereClause ORDER BY cc.last_name, cc.first_name",
         $params
     );
+    // Discard anything already buffered — a stray PHP notice or warning would
+    // otherwise land inside the download and corrupt every row of the file.
+    if (ob_get_level()) ob_end_clean();
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="citizen_certificates_' . date('Y-m-d_His') . '.csv"');
     $out = fopen('php://output', 'w');

@@ -32,6 +32,9 @@ if (get('export') === 'csv') {
         ORDER BY u.name, ct.name
     ");
 
+    // Discard anything already buffered — a stray PHP notice or warning would
+    // otherwise land inside the download and corrupt every row of the file.
+    if (ob_get_level()) ob_end_clean();
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="certificates_' . date('Y-m-d') . '.csv"');
     $out = fopen('php://output', 'w');

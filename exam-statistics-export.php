@@ -133,6 +133,9 @@ $query .= " ORDER BY completed_at DESC";
 $results = dbFetchAll($query, $params);
 
 // Set headers for CSV download with Greek encoding
+// Discard anything already buffered — a stray PHP notice or warning would
+// otherwise land inside the download and corrupt every row of the file.
+if (ob_get_level()) ob_end_clean();
 header('Content-Type: text/csv; charset=UTF-8');
 header('Content-Disposition: attachment; filename="exam-statistics-' . date('Y-m-d') . '.csv"');
 header('Pragma: no-cache');

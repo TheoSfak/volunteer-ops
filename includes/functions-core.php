@@ -628,7 +628,27 @@ function csvSafeCell($value): string {
  * Drop-in replacement for fputcsv() that runs every cell through
  * csvSafeCell() first. Call sites keep their exact shape - only the function
  * name changes - so this cannot reorder or drop a column by accident.
+ *
+ * $escape is passed explicitly and defaults to '' (no escaping). PHP 8.4
+ * deprecates calling fputcsv() without it, and on a live site running 8.4
+ * that deprecation is printed straight into the download — every row of
+ * every CSV export came out interleaved with "Deprecated: fputcsv(): the
+ * $escape parameter must be provided", server path included. A CSV writer
+ * emitting warnings into its own stream corrupts the file it is producing,
+ * so this is not a cosmetic notice.
+ *
+ * '' rather than the historical '\\' because RFC 4180 has no escape
+ * character and Excel does not understand one: a backslash-escaped quote is
+ * exactly how a field ending in \ breaks the quoting for everything after
+ * it. It is also the value PHP itself intends to make the default. Call
+ * sites that deliberately want the legacy behaviour can still pass '\\'.
+ *
+ * The separator/enclosure/escape parameters exist because two call sites
+ * (citizens.php, citizen-certificates.php) were already passing ';' and had
+ * been doing nothing at all: the old two-argument signature swallowed them
+ * silently, so those exports shipped comma-delimited while their code said
+ * semicolon. They now get the delimiter they always asked for.
  */
-function fputcsvSafe($handle, array $row) {
-    return fputcsv($handle, array_map('csvSafeCell', $row));
+function fputcsvSafe($handle, array $row, string $separator = ',', string $enclosure = '"', string $escape = '') {
+    return fputcsv($handle, array_map('csvSafeCell', $row), $separator, $enclosure, $escape);
 }

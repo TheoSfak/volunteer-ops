@@ -335,6 +335,9 @@ if (get('export') === 'csv') {
     $expWhereClause = implode(' AND ', $expWhere);
     $rows = dbFetchAll("SELECT * FROM citizens WHERE $expWhereClause ORDER BY last_name_gr ASC, first_name_gr ASC, id ASC", $expParams);
 
+    // Discard anything already buffered — a stray PHP notice or warning would
+    // otherwise land inside the download and corrupt every row of the file.
+    if (ob_get_level()) ob_end_clean();
     header('Content-Type: text/csv; charset=UTF-8');
     header('Content-Disposition: attachment; filename="citizens_' . date('Y-m-d_His') . '.csv"');
     $out = fopen('php://output', 'w');

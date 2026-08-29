@@ -55,6 +55,9 @@ $prevStartDate = date('Y-m-d', strtotime($prevEndDate . ' -' . ($periodDays - 1)
 if (get('export') === 'csv') {
     // Sanitize tab name to prevent header injection
     $safeTab = preg_replace('/[^a-zA-Z0-9_-]/', '', $activeTab);
+    // Discard anything already buffered — a stray PHP notice or warning would
+    // otherwise land inside the download and corrupt every row of the file.
+    if (ob_get_level()) ob_end_clean();
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="report_' . $safeTab . '_' . date('Y-m-d') . '.csv"');
     echo "\xEF\xBB\xBF"; // UTF-8 BOM
