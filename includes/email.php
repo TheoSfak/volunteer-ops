@@ -523,7 +523,26 @@ function sendNotificationEmail(string $notificationCode, string $to, array $vari
         $variables['logo_html'] = '';
     }
 
-    
+    // Inject org_contact_line — same shape as logo_html: a ready-to-drop-in
+    // <p> for a template's footer, empty string when nothing is configured,
+    // so a template can use {{org_contact_line}} unconditionally.
+    $orgPhone = trim(getSetting('org_contact_phone', ''));
+    $orgEmail = trim(getSetting('org_contact_email', ''));
+    $orgAddress = trim(getSetting('org_contact_address', ''));
+    $contactParts = [];
+    if ($orgPhone !== '') {
+        $contactParts[] = '&#9742;&#65039; ' . htmlspecialchars($orgPhone, ENT_QUOTES);
+    }
+    if ($orgEmail !== '') {
+        $contactParts[] = '&#9993;&#65039; ' . htmlspecialchars($orgEmail, ENT_QUOTES);
+    }
+    if ($orgAddress !== '') {
+        $contactParts[] = '&#128205; ' . htmlspecialchars($orgAddress, ENT_QUOTES);
+    }
+    $variables['org_contact_line'] = !empty($contactParts)
+        ? '<p style="margin:6px 0 0;">' . implode(' &nbsp;&bull;&nbsp; ', $contactParts) . '</p>'
+        : '';
+
     // Replace variables
     $subject = replaceTemplateVariables($template['subject'], $variables);
     $body = replaceTemplateVariables($template['body_html'], $variables);

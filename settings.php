@@ -24,6 +24,7 @@ $defaults = [
     'app_name' => 'VolunteerOps',
     'app_description' => 'Σύστημα Διαχείρισης Εθελοντών',
     'app_logo' => '',
+    'aithsh_bg_image' => '',
     // Used by mission-report-print.php/inventory-print.php/mission-certificate-print.php
     // for printed-document headers — previously read via getSetting() but never
     // actually in $defaults or the form below, so it silently fell back to the
@@ -525,7 +526,70 @@ if (isPost()) {
             dbExecute("UPDATE settings SET setting_value = '', updated_at = NOW() WHERE setting_key = 'app_logo'");
             $settings['app_logo'] = '';
         }
-        
+
+        // Handle aithsh.php background-image upload (same validation/storage
+        // shape as the logo upload above, own folder/filename prefix)
+        if (!empty($_FILES['aithsh_bg_image']['name'])) {
+            $file = $_FILES['aithsh_bg_image'];
+            $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+            $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+            $maxSize = 4 * 1024 * 1024; // 4MB — a hero photo is larger than an icon-sized logo
+
+            if (class_exists('finfo')) {
+                $finfo = new finfo(FILEINFO_MIME_TYPE);
+                $detectedMime = $finfo->file($file['tmp_name']);
+            } else {
+                $detectedMime = mime_content_type($file['tmp_name']);
+            }
+            $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+
+            if (!in_array($detectedMime, $allowedTypes) || !in_array($ext, $allowedExtensions)) {
+                setFlash('error', 'Μη αποδεκτός τύπος αρχείου για το φόντο. Επιτρέπονται: JPG, PNG, GIF, WebP.');
+                redirect('settings.php?tab=general');
+            }
+
+            if ($file['size'] > $maxSize) {
+                setFlash('error', 'Το αρχείο φόντου είναι πολύ μεγάλο. Μέγιστο μέγεθος: 4MB.');
+                redirect('settings.php?tab=general');
+            }
+
+            $uploadDir = __DIR__ . '/uploads/backgrounds/';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+
+            $oldBg = $settings['aithsh_bg_image'] ?? '';
+            if (!empty($oldBg) && file_exists($uploadDir . $oldBg)) {
+                unlink($uploadDir . $oldBg);
+            }
+
+            $newFilename = 'aithsh_bg_' . time() . '.' . $ext;
+
+            if (move_uploaded_file($file['tmp_name'], $uploadDir . $newFilename)) {
+                $exists = dbFetchValue("SELECT COUNT(*) FROM settings WHERE setting_key = 'aithsh_bg_image'");
+                if ($exists) {
+                    dbExecute("UPDATE settings SET setting_value = ?, updated_at = NOW() WHERE setting_key = 'aithsh_bg_image'", [$newFilename]);
+                } else {
+                    dbInsert("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES ('aithsh_bg_image', ?, NOW(), NOW())", [$newFilename]);
+                }
+                $settings['aithsh_bg_image'] = $newFilename;
+            } else {
+                setFlash('error', 'Σφάλμα κατά την αποθήκευση του αρχείου φόντου.');
+                redirect('settings.php?tab=general');
+            }
+        }
+
+        // Handle aithsh.php background-image deletion
+        if (post('delete_aithsh_bg') === '1') {
+            $uploadDir = __DIR__ . '/uploads/backgrounds/';
+            $oldBg = $settings['aithsh_bg_image'] ?? '';
+            if (!empty($oldBg) && file_exists($uploadDir . $oldBg)) {
+                unlink($uploadDir . $oldBg);
+            }
+            dbExecute("UPDATE settings SET setting_value = '', updated_at = NOW() WHERE setting_key = 'aithsh_bg_image'");
+            $settings['aithsh_bg_image'] = '';
+        }
+
         // Save general settings
         $fieldsToUpdate = [
             'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes',
@@ -1082,7 +1146,26 @@ include __DIR__ . '/includes/header.php';
                         <input type="file" class="form-control" name="app_logo" accept="image/*">
                         <small class="text-muted">Μέγιστο: 2MB. Τύποι: JPG, PNG, GIF, SVG, WebP</small>
                     </div>
-                    
+
+                    <!-- Background image for the public membership form (aithsh.php) -->
+                    <div class="mb-3">
+                        <label class="form-label">Φόντο Φόρμας Αίτησης Μέλους (aithsh.php)</label>
+                        <?php if (!empty($settings['aithsh_bg_image']) && file_exists(__DIR__ . '/uploads/backgrounds/' . $settings['aithsh_bg_image'])): ?>
+                            <div class="mb-2 p-3 bg-light rounded d-flex align-items-center">
+                                <img src="uploads/backgrounds/<?= h($settings['aithsh_bg_image']) ?>" alt="Φόντο" style="max-height: 60px; max-width: 150px; object-fit: cover;" class="me-3 rounded">
+                                <div>
+                                    <small class="text-muted d-block"><?= h($settings['aithsh_bg_image']) ?></small>
+                                    <label class="form-check-label">
+                                        <input type="checkbox" name="delete_aithsh_bg" value="1" class="form-check-input">
+                                        <span class="text-danger">Διαγραφή φόντου</span>
+                                    </label>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+                        <input type="file" class="form-control" name="aithsh_bg_image" accept="image/*">
+                        <small class="text-muted">Προαιρετική φωτογραφία πίσω από τον τίτλο της δημόσιας φόρμας αίτησης — εμφανίζεται κάτω από ένα ημιδιάφανο μπλε επίστρωμα, ώστε το κείμενο να παραμένει ευανάγνωστο. Χωρίς αυτήν, η φόρμα δείχνει το προεπιλεγμένο μπλε φόντο. Μέγιστο: 4MB.</small>
+                    </div>
+
                     <div class="mb-3">
                         <label class="form-label">Περιγραφή</label>
                         <textarea class="form-control" name="app_description" rows="2"><?= h($settings['app_description']) ?></textarea>

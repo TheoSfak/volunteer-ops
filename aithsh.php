@@ -114,6 +114,8 @@ $contactPhone = trim(getSetting('org_contact_phone', ''));
 $contactEmail = trim(getSetting('org_contact_email', ''));
 $contactAddress = trim(getSetting('org_contact_address', ''));
 $hasFooterContact = ($contactPhone !== '' || $contactEmail !== '' || $contactAddress !== '');
+$bgImage = getSetting('aithsh_bg_image', '');
+$hasBgImage = !empty($bgImage) && file_exists(__DIR__ . '/uploads/backgrounds/' . $bgImage);
 ?><!DOCTYPE html>
 <html lang="el">
 <head>
@@ -238,6 +240,20 @@ $hasFooterContact = ($contactPhone !== '' || $contactEmail !== '' || $contactAdd
             .aj-card-inner { padding: 28px 20px 24px; }
             .aj-hero { padding: 4px 12px 50px; }
         }
+        <?php if ($hasBgImage): ?>
+        /* Optional org-uploaded hero photo (Settings → Γενικές Ρυθμίσεις) — a
+           semi-transparent overlay keeps the white title/subtitle readable
+           over any photo. Scoped to .aj-hero (not body) so a tall page never
+           forces this image to stretch/crop across the whole scroll height. */
+        .aj-hero {
+            background:
+                linear-gradient(160deg, rgba(10,30,61,.86) 0%, rgba(0,85,150,.82) 55%, rgba(0,58,102,.88) 100%),
+                url('uploads/backgrounds/<?= h($bgImage) ?>');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+        <?php endif; ?>
     </style>
 </head>
 <body>

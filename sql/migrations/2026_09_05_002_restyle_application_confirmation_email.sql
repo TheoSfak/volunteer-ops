@@ -1,0 +1,10 @@
+-- Migration: Restyle member_application_confirmation to match the standard
+-- email template shape (outer/header/body/footer, logo in header via
+-- {{logo_html}}, org contact details in footer via new {{org_contact_line}}).
+-- Created: 2026-09-05
+
+UPDATE `email_templates` SET
+    `body_html` = '<div style="background:#eef2f7;padding:28px 0 40px;font-family:Helvetica Neue,Arial,sans-serif;"><div style="max-width:600px;margin:0 auto;"><div style="background:#005596;padding:30px 40px 26px;border-radius:12px 12px 0 0;text-align:center;">{{logo_html}}<p style="color:rgba(255,255,255,0.7);font-size:11px;letter-spacing:2px;text-transform:uppercase;margin:0 0 8px;">{{app_name}}</p><div style="font-size:36px;line-height:1;margin:0 0 8px;">&#9989;</div><h1 style="color:#fff;margin:0;font-size:23px;font-weight:700;line-height:1.3;">Λάβαμε την Αίτησή σας</h1></div><div style="background:#fff;padding:36px 40px 40px;border-radius:0 0 12px 12px;box-shadow:0 4px 20px rgba(0,0,0,0.07);"><h2 style="color:#1f2937;font-size:18px;font-weight:700;margin:0 0 14px;">Γεια σας {{applicant_name}},</h2><p style="color:#4b5563;line-height:1.65;font-size:15px;margin:0 0 14px;">Σας ευχαριστούμε για το ενδιαφέρον σας να γίνετε μέλος της ομάδας μας. Λάβαμε την αίτησή σας για ένταξη ως νέο μέλος και θα την εξετάσουμε το συντομότερο δυνατό.</p><div style="background:#eff6ff;border-left:4px solid #005596;padding:14px 20px;border-radius:0 8px 8px 0;margin:20px 0;"><p style="color:#005596;font-weight:600;font-size:14px;margin:0;">&#128172; Κάποιο μέλος της ομάδας μας θα επικοινωνήσει μαζί σας σύντομα.</p></div></div><div style="text-align:center;padding:18px 0 0;color:#9ca3af;font-size:12px;line-height:1.9;"><p style="margin:0;"><strong style="color:#6b7280;">{{app_name}}</strong> &bull; Σύστημα Διαχείρισης Εθελοντών</p>{{org_contact_line}}<p style="margin:8px 0 0;">Αυτό το μήνυμα στάλθηκε αυτόματα από το σύστημα.</p></div></div></div>',
+    `available_variables` = '{{app_name}}, {{applicant_name}}, {{logo_html}}, {{org_contact_line}}',
+    `updated_at` = NOW()
+WHERE `code` = 'member_application_confirmation';
