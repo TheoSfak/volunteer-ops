@@ -31,6 +31,9 @@ $defaults = [
     'org_name' => 'VolunteerOps',
     'org_president_name' => '',
     'org_secretary_name' => '',
+    'org_contact_phone' => '',
+    'org_contact_email' => '',
+    'org_contact_address' => '',
     'cert_signature_font_size' => '7',
     'war_room_banner_font_size' => '1.35',
     'war_room_auto_ping_seconds' => '180',
@@ -525,7 +528,7 @@ if (isPost()) {
         
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes',
             'admin_email', 'developer_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
@@ -1127,6 +1130,21 @@ include __DIR__ . '/includes/header.php';
                             <label class="form-label">Ονοματεπώνυμο Γεν. Γραμματέα</label>
                             <input type="text" class="form-control" name="org_secretary_name" value="<?= h($settings['org_secretary_name']) ?>">
                         </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Τηλέφωνο Επικοινωνίας</label>
+                            <input type="text" class="form-control" name="org_contact_phone" value="<?= h($settings['org_contact_phone']) ?>" placeholder="π.χ. 2810 123456">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Email Επικοινωνίας</label>
+                            <input type="email" class="form-control" name="org_contact_email" value="<?= h($settings['org_contact_email']) ?>" placeholder="info@example.gr">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Διεύθυνση / Έδρα</label>
+                            <input type="text" class="form-control" name="org_contact_address" value="<?= h($settings['org_contact_address']) ?>">
+                        </div>
+                        <small class="text-muted">Εμφανίζονται στο footer της δημόσιας φόρμας αίτησης νέου μέλους (aithsh.php). Ένα κενό πεδίο απλά δεν εμφανίζεται.</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Μέγεθος Γραμματοσειράς Ονομάτων Υπογραφής (pt)</label>
