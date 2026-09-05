@@ -14,7 +14,7 @@ if (!$id) {
 $shift = dbFetchOne(
     "SELECT s.*, m.title as mission_title, m.status as mission_status, m.department_id,
             m.description, m.location, m.end_datetime as mission_end_datetime,
-            m.mission_type_id, m.responsible_user_id
+            m.mission_type_id, m.responsible_user_id, m.is_locked as mission_is_locked
      FROM shifts s
      JOIN missions m ON s.mission_id = m.id
      WHERE s.id = ?",
@@ -79,6 +79,8 @@ if (isPost()) {
             $missionExpired = in_array($shift['mission_status'], [STATUS_OPEN, STATUS_CLOSED]) && strtotime($shift['mission_end_datetime']) < time();
             if ($missionExpired && !isAdmin()) {
                 setFlash('error', 'Η αποστολή είναι ακόμα ανοιχτή αλλά ο χρόνος διεξαγωγής έχει παρέλθει. Δεν μπορείτε να υποβάλετε αίτηση.');
+            } elseif (!empty($shift['mission_is_locked']) && !isAdmin()) {
+                setFlash('error', 'Σε αυτή την αποστολή μόνο ο διαχειριστής μπορεί να προσθέσει εθελοντές.');
             } elseif ($shift['mission_status'] !== STATUS_OPEN) {
                 setFlash('error', 'Η αποστολή δεν δέχεται αιτήσεις.');
             } elseif ($myParticipation) {
@@ -1053,6 +1055,11 @@ include __DIR__ . '/includes/header.php';
                                 <?php endif; ?>
                             </div>
                         <?php endif; ?>
+                    <?php elseif (!empty($shift['mission_is_locked']) && !isAdmin()): ?>
+                        <div class="alert alert-secondary mb-0">
+                            <i class="bi bi-lock-fill me-1"></i>
+                            Σε αυτή την αποστολή μόνο ο διαχειριστής μπορεί να προσθέσει εθελοντές.
+                        </div>
                     <?php elseif ($shift['mission_status'] === STATUS_OPEN && !$isPast && !$missionOverdue): ?>
                         <?php if ($approvedCount >= $shift['max_volunteers']): ?>
                             <div class="alert alert-warning mb-0">
@@ -1295,7 +1302,7 @@ include __DIR__ . '/includes/header.php';
                             <label class="list-group-item d-flex gap-2 align-items-center volunteer-item">
                                 <input class="form-check-input flex-shrink-0 volunteer-checkbox" type="checkbox" name="volunteer_ids[]" value="<?= $v['id'] ?>">
                                 <span>
-                                    <span class="volunteer-name fw-bold"><?= guestNameHtml($v['name'], (bool) $v['is_external'], $v['home_team_name'], $v['home_team_color'], $v['guest_country_code']) ?><?= k9BadgeHtml((int) $v['id']) ?></span>
+                                    <span class="volunteer-name fw-bold"><?= guestNameHtml($v['name'], (bool) $v['is_external'], $v['home_team_name'], $v['home_team_color'], $v['guest_country_code']) ?><?= k9BadgeHtml((int) $v['id']) ?><?= captainBadgeHtml((int) $v['id']) ?></span>
                                     <small class="text-muted volunteer-email d-block"><?= h($v['email']) ?> — <?= h(ROLE_LABELS[$v['role']] ?? $v['role']) ?></small>
                                 </span>
                             </label>

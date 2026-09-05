@@ -121,7 +121,7 @@ if ($canAccessChat) {
 $availableVolunteers = [];
 if ($canManageMissions) {
     $availableVolunteers = dbFetchAll(
-        "SELECT id, name, email, role, is_external, guest_org_name, is_dog_handler, dog_name FROM users
+        "SELECT id, name, email, role, is_external, guest_org_name, is_dog_handler, dog_name, is_team_captain FROM users
          WHERE is_active = 1
          ORDER BY name"
     );
@@ -510,6 +510,10 @@ if (isPost()) {
                 setFlash('error', 'Η αποστολή είναι ακόμα ανοιχτή αλλά ο χρόνος διεξαγωγής έχει παρέλθει. Δεν μπορείτε να υποβάλετε αίτηση.');
                 redirect('mission-view.php?id=' . $id);
             }
+            if (!empty($mission['is_locked']) && !$canManageMissions) {
+                setFlash('error', 'Σε αυτή την αποστολή μόνο ο διαχειριστής μπορεί να προσθέσει εθελοντές.');
+                redirect('mission-view.php?id=' . $id);
+            }
             if ($shiftId && !$canManageMissions) {
                 // Check if already applied
                 $existing = dbFetchValue(
@@ -652,6 +656,11 @@ include __DIR__ . '/includes/header.php';
             <?php endif; ?>
             <?php if ($mission['is_urgent']): ?>
                 <span class="badge bg-danger">Επείγον</span>
+            <?php endif; ?>
+            <?php if (!empty($mission['is_locked'])): ?>
+                <span class="badge bg-secondary" title="Μόνο ο διαχειριστής μπορεί να προσθέσει εθελοντές σε αυτή την αποστολή" data-bs-toggle="tooltip">
+                    <i class="bi bi-lock-fill"></i> Κλειδωμένη
+                </span>
             <?php endif; ?>
         </h1>
         <nav aria-label="breadcrumb">
@@ -1021,8 +1030,12 @@ include __DIR__ . '/includes/header.php';
                                                                 <i class="bi bi-arrow-left-right"></i>
                                                             </a>
                                                         <?php endif; ?>
+                                                    <?php elseif (!empty($mission['is_locked'])): ?>
+                                                        <span class="badge bg-secondary" title="Μόνο ο διαχειριστής μπορεί να προσθέσει εθελοντές σε αυτή την αποστολή" data-bs-toggle="tooltip">
+                                                            <i class="bi bi-lock-fill me-1"></i>Κλειδωμένη
+                                                        </span>
                                                     <?php elseif (!$isPast && !$isFull && $mission['status'] === STATUS_OPEN && !$isOverdue): ?>
-                                                        <button type="button" class="btn btn-sm btn-primary apply-btn" 
+                                                        <button type="button" class="btn btn-sm btn-primary apply-btn"
                                                                 data-shift-id="<?= $shift['id'] ?>"
                                                                 data-shift-date="<?= formatDateTime($shift['start_time'], 'd/m/Y H:i') ?>">
                                                             <i class="bi bi-hand-index"></i> Αίτηση
@@ -1096,8 +1109,12 @@ include __DIR__ . '/includes/header.php';
                                                         <i class="bi bi-arrow-left-right me-1"></i>Αντικατάσταση
                                                     </a>
                                                 <?php endif; ?>
+                                            <?php elseif (!empty($mission['is_locked'])): ?>
+                                                <span class="badge bg-secondary" title="Μόνο ο διαχειριστής μπορεί να προσθέσει εθελοντές σε αυτή την αποστολή">
+                                                    <i class="bi bi-lock-fill me-1"></i>Κλειδωμένη
+                                                </span>
                                             <?php elseif (!$isPast && !$isFull && $mission['status'] === STATUS_OPEN && !$isOverdue): ?>
-                                                <button type="button" class="btn btn-sm btn-primary apply-btn" 
+                                                <button type="button" class="btn btn-sm btn-primary apply-btn"
                                                         data-shift-id="<?= $shift['id'] ?>"
                                                         data-shift-date="<?= formatDateTime($shift['start_time'], 'd/m/Y H:i') ?>">
                                                     <i class="bi bi-hand-index me-1"></i>Αίτηση
@@ -1665,10 +1682,11 @@ document.querySelectorAll('.apply-btn').forEach(function(btn) {
                             <option value="">-- Επιλέξτε χρήστη --</option>
                             <?php foreach ($availableVolunteers as $vol): ?>
                                 <option value="<?= $vol['id'] ?>">
-                                    <?php // <option> can't hold markup, so the K9 flag is plain text here
-                                          // rather than k9BadgeHtml() — this is the list an admin picks
-                                          // from when staffing a search, exactly where it needs to show. ?>
-                                    <?= h($vol['name']) ?> (<?= h($vol['email']) ?>) — <?= h(ROLE_LABELS[$vol['role']] ?? $vol['role']) ?><?= !empty($vol['is_external']) ? ' — GUEST: ' . h($vol['guest_org_name'] ?: '—') : '' ?><?= !empty($vol['is_dog_handler']) ? ' — 🐕 ' . h($vol['dog_name'] ?: 'Σκύλος') : '' ?>
+                                    <?php // <option> can't hold markup, so the K9/captain flags are plain
+                                          // text here rather than k9BadgeHtml()/captainBadgeHtml() — this
+                                          // is the list an admin picks from when staffing a search, exactly
+                                          // where it needs to show. ?>
+                                    <?= h($vol['name']) ?> (<?= h($vol['email']) ?>) — <?= h(ROLE_LABELS[$vol['role']] ?? $vol['role']) ?><?= !empty($vol['is_external']) ? ' — GUEST: ' . h($vol['guest_org_name'] ?: '—') : '' ?><?= !empty($vol['is_dog_handler']) ? ' — 🐕 ' . h($vol['dog_name'] ?: 'Σκύλος') : '' ?><?= !empty($vol['is_team_captain']) ? ' — ⭐ Ομαδάρχης' : '' ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>

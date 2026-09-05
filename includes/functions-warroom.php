@@ -1017,6 +1017,69 @@ function k9BadgeHtml(?int $userId, bool $compact = false, ?string $lang = null):
 }
 
 /**
+ * Every home-team captain in the org, keyed by user id — same request-scoped
+ * static-cache-behind-one-query shape as k9Handlers(), for the same reason:
+ * captains are a handful of people, so one small query per request beats
+ * threading an is_team_captain column through every render site's own query.
+ * Includes the captain's home team name (volunteer_teams or, for a walk-up
+ * Mission Visitor, mission_visitor_tags) so captainBadgeHtml()'s tooltip can
+ * name it without any call site passing it in.
+ */
+function teamCaptains(): array {
+    static $captains = null;
+    if ($captains === null) {
+        $captains = [];
+        try {
+            $rows = dbFetchAll(
+                "SELECT u.id, COALESCE(vt.name, mvt.label) AS team_name
+                 FROM users u
+                 LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+                 LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
+                 WHERE u.is_team_captain = 1 AND u.deleted_at IS NULL"
+            );
+            foreach ($rows as $row) {
+                $captains[(int) $row['id']] = [
+                    'team_name' => $row['team_name'],
+                ];
+            }
+        } catch (Throwable $e) {
+            $captains = [];
+        }
+    }
+    return $captains;
+}
+
+/**
+ * The ⭐ badge that rides next to a home-team captain's name everywhere a
+ * name is rendered — mirrors k9BadgeHtml() exactly (same signature, same
+ * compact/lang behaviour) so it can be appended at every existing
+ * k9BadgeHtml() call site with the same arguments. Returns '' for everyone
+ * else, so call sites can append it unconditionally.
+ *
+ * Deliberately unrelated to the ⭐ already used for mission_teams.leader_id
+ * (a per-mission Action Room squad leader, picked fresh for every mission —
+ * see war-room.php's Ομάδες Αποστολής card). This one is a standing,
+ * admin-set property of the person's home team (volunteer_teams/
+ * mission_visitor_tags), set on volunteer-form.php — a person can be both,
+ * neither, or just one, and both badges may legitimately appear together.
+ * Styled as a filled bi-star-fill pill (not the bare ⭐ glyph the mission-team
+ * leader line uses) precisely so the two are never visually interchangeable.
+ */
+function captainBadgeHtml(?int $userId, bool $compact = false, ?string $lang = null): string {
+    if (!$userId) return '';
+    $captain = teamCaptains()[$userId] ?? null;
+    if ($captain === null) return '';
+
+    $team    = trim((string) ($captain['team_name'] ?? ''));
+    $tooltip = $team !== ''
+        ? t('captain.badge_tooltip', ['team' => $team], $lang)
+        : t('captain.badge_tooltip_no_team', [], $lang);
+
+    return '<span class="captain-badge" title="' . h($tooltip) . '"><i class="bi bi-star-fill"></i>'
+        . ($compact ? '' : ' ' . h(t('captain.label', [], $lang))) . '</span>';
+}
+
+/**
  * Standalone, larger home-team flag+label badge — bigger/bolder sibling of
  * guestNameHtml()'s inline badge, for a spot (e.g. war-room.php's Ομάδες
  * Αποστολής leader line) that wants more visual weight. Deliberately still

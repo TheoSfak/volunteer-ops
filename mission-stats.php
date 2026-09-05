@@ -539,14 +539,14 @@ include __DIR__ . '/includes/header.php';
                 <div class="roster-team-header">
                     <span class="roster-swatch" style="background:<?= h($team['color']) ?>;"></span>
                     <span><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
-                    <?php if ($team['leader_name']): ?><span class="text-muted fw-normal small">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_home_team_name'], $team['leader_home_team_color'], $team['leader_guest_country_code']) ?><?= k9BadgeHtml($team['leader_id'], false, 'el') ?></span><?php endif; ?>
+                    <?php if ($team['leader_name']): ?><span class="text-muted fw-normal small">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_home_team_name'], $team['leader_home_team_color'], $team['leader_guest_country_code']) ?><?= k9BadgeHtml($team['leader_id'], false, 'el') ?><?= captainBadgeHtml($team['leader_id'], false, 'el') ?></span><?php endif; ?>
                 </div>
                 <?php if (empty($team['members'])): ?>
                     <div class="text-muted small">Χωρίς μέλη.</div>
                 <?php else: ?>
                     <?php foreach ($team['members'] as $m): ?>
                     <div class="roster-member-row">
-                        <span><?= guestNameHtml($m['name'], $m['is_external'], $m['home_team_name'], $m['home_team_color'], $m['guest_country_code']) ?><?= k9BadgeHtml((int) $m['user_id'], false, 'el') ?></span>
+                        <span><?= guestNameHtml($m['name'], $m['is_external'], $m['home_team_name'], $m['home_team_color'], $m['guest_country_code']) ?><?= k9BadgeHtml((int) $m['user_id'], false, 'el') ?><?= captainBadgeHtml((int) $m['user_id'], false, 'el') ?></span>
                         <span class="text-muted"><?= $attendanceReady ? number_format($m['hours'], 1) . ' ώρες' : 'Εκκρεμεί' ?></span>
                     </div>
                     <?php endforeach; ?>

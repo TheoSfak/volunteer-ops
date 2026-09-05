@@ -226,7 +226,7 @@ if ($team) {
         <div class="bp-member">
             <div class="bp-avatar" style="background:<?= h($teamBg) ?>;"><?= h($initials) ?></div>
             <div style="flex:1;min-width:0;">
-                <div style="font-size:12.5px;font-weight:700;"><?= guestNameHtml($member['name'], (bool)$member['is_external'], $member['home_team_name'], $member['home_team_color'], $member['guest_country_code']) ?><?= k9BadgeHtml((int) $member['user_id']) ?><?= $isLeader ? ' ⭐' : '' ?></div>
+                <div style="font-size:12.5px;font-weight:700;"><?= guestNameHtml($member['name'], (bool)$member['is_external'], $member['home_team_name'], $member['home_team_color'], $member['guest_country_code']) ?><?= k9BadgeHtml((int) $member['user_id']) ?><?= captainBadgeHtml((int) $member['user_id']) ?><?= $isLeader ? ' ⭐' : '' ?></div>
                 <?php if ($isLeader): ?><div style="font-size:10.5px;color:#8a8a86;">Αρχηγός Ομάδας &middot; Team Leader</div><?php endif; ?>
             </div>
         </div>

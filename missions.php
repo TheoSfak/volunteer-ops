@@ -323,6 +323,11 @@ include __DIR__ . '/includes/header.php';
                                     <?php if ($mission['is_urgent']): ?>
                                         <span class="badge bg-danger ms-1"><?= t('missions_page.urgent_badge') ?></span>
                                     <?php endif; ?>
+                                    <?php if (!empty($mission['is_locked'])): ?>
+                                        <span class="badge bg-secondary ms-1" title="<?= t('missions_page.locked_title') ?>" data-bs-toggle="tooltip">
+                                            <i class="bi bi-lock-fill"></i>
+                                        </span>
+                                    <?php endif; ?>
                                     <?php if ($mission['recurrence_id']): ?>
                                         <span class="badge bg-info text-dark ms-1" title="<?= t('missions_page.recurring_title') ?>">
                                             <i class="bi bi-arrow-repeat me-1"></i><?= t('missions_page.recurring_badge') ?>
@@ -427,6 +432,11 @@ include __DIR__ . '/includes/header.php';
                                     </a>
                                     <?php if ($mission['is_urgent']): ?>
                                         <span class="badge bg-danger ms-1"><?= t('missions_page.urgent_badge') ?></span>
+                                    <?php endif; ?>
+                                    <?php if (!empty($mission['is_locked'])): ?>
+                                        <span class="badge bg-secondary ms-1" title="<?= t('missions_page.locked_title') ?>">
+                                            <i class="bi bi-lock-fill"></i>
+                                        </span>
                                     <?php endif; ?>
                                 </div>
                                 <div>

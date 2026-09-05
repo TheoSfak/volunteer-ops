@@ -1002,6 +1002,29 @@ if (isLoggedIn()) {
             white-space: nowrap;
             cursor: help;
         }
+
+        /* Home-team captain badge (users.is_team_captain) — same pill shape
+           and sizing as .k9-badge so the two stack cleanly on one line, but a
+           distinct gold/star treatment so it's never mistaken for the bare,
+           unstyled ⭐ used elsewhere for mission_teams.leader_id (a completely
+           different, per-mission Action Room concept — see captainBadgeHtml()
+           in includes/functions-warroom.php). */
+        .captain-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-size: .62em;
+            font-weight: 700;
+            color: #fff;
+            background: #b8860b;
+            border-radius: 999px;
+            padding: 1px 6px;
+            margin-left: 4px;
+            vertical-align: top;
+            line-height: 1.4;
+            white-space: nowrap;
+            cursor: help;
+        }
     </style>
 </head>
 <body>
@@ -1552,7 +1575,7 @@ if (isLoggedIn()) {
                         <?php else: ?>
                             <i class="bi bi-person-circle me-1 flex-shrink-0"></i>
                         <?php endif; ?>
-                        <span class="user-name-text d-none d-sm-inline"><?= $currentUser ? guestNameHtml($currentUser['name'], (bool)($currentUser['is_external'] ?? false), $currentUser['home_team_name'] ?? null, $currentUser['home_team_color'] ?? null, $currentUser['guest_country_code'] ?? null) . k9BadgeHtml((int)($currentUser['id'] ?? 0), true) : h('Χρήστης') ?></span>
+                        <span class="user-name-text d-none d-sm-inline"><?= $currentUser ? guestNameHtml($currentUser['name'], (bool)($currentUser['is_external'] ?? false), $currentUser['home_team_name'] ?? null, $currentUser['home_team_color'] ?? null, $currentUser['guest_country_code'] ?? null) . k9BadgeHtml((int)($currentUser['id'] ?? 0), true) . captainBadgeHtml((int)($currentUser['id'] ?? 0), true) : h('Χρήστης') ?></span>
                         <span class="user-type-badge d-none d-md-inline"><?= volunteerTypeBadge($currentUser['volunteer_type'] ?? VTYPE_RESCUER) ?></span>
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">

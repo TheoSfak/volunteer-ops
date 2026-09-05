@@ -130,16 +130,45 @@ function exportMissionsToCsv($filters = []) {
  * Export volunteers to CSV (all fields incl. volunteer_profiles)
  */
 function exportVolunteersToCsv($filters = []) {
-    $where = ['u.is_active = 1'];
-    $params = [];
+    // Mirrors the WHERE-building in volunteers.php so the CSV always matches
+    // whatever tab/filters are currently on screen, never the full table.
+    $where = ['u.is_active = 1', 'u.deleted_at IS NULL', 'u.is_external = ?'];
+    $params = [!empty($filters['is_external']) ? 1 : 0];
 
-    if (!empty($filters['role'])) {
-        $where[] = 'u.role = ?';
-        $params[] = $filters['role'];
+    if (($filters['guest_kind'] ?? '') === 'partner') {
+        $where[] = 'u.is_mission_visitor = 0';
+    } elseif (($filters['guest_kind'] ?? '') === 'visitor') {
+        $where[] = 'u.is_mission_visitor = 1';
+    }
+
+    if (!empty($filters['search'])) {
+        $where[] = '(u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)';
+        $term = '%' . dbEscape($filters['search']) . '%';
+        $params[] = $term;
+        $params[] = $term;
+        $params[] = $term;
+    }
+
+    if (!empty($filters['volunteer_type'])) {
+        $where[] = 'u.volunteer_type = ?';
+        $params[] = $filters['volunteer_type'];
     }
     if (!empty($filters['department_id'])) {
         $where[] = 'u.department_id = ?';
         $params[] = $filters['department_id'];
+    }
+    if (!empty($filters['warehouse_id'])) {
+        $where[] = 'u.warehouse_id = ?';
+        $params[] = $filters['warehouse_id'];
+    }
+    if (!empty($filters['dog_handler'])) {
+        $where[] = 'u.is_dog_handler = 1';
+    }
+
+    $skillJoin = '';
+    if (!empty($filters['skill_id'])) {
+        $skillJoin = 'INNER JOIN user_skills usk ON usk.user_id = u.id AND usk.skill_id = ?';
+        array_unshift($params, (int) $filters['skill_id']);
     }
 
     $sql = "SELECT
@@ -182,6 +211,7 @@ function exportVolunteersToCsv($filters = []) {
                 vp.has_driving_license,
                 vp.has_first_aid
             FROM users u
+            $skillJoin
             LEFT JOIN departments d  ON u.department_id  = d.id
             LEFT JOIN departments wh ON u.warehouse_id   = wh.id
             LEFT JOIN volunteer_profiles vp ON vp.user_id = u.id

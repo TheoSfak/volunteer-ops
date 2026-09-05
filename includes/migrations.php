@@ -6521,6 +6521,30 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 144,
+            'description' => 'Add missions.is_locked ("κλειδωμένες θέσεις") — when set, only missions_manage admins can add volunteers via manual_add_volunteer/add_volunteer; the self-serve apply action on mission-view.php and shift-view.php is blocked with a flash message instead, and the missions list/view show a lock badge.',
+            'up' => function () {
+                $col = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'missions' AND COLUMN_NAME = 'is_locked'");
+                if (!$col) {
+                    dbExecute("ALTER TABLE missions ADD COLUMN is_locked TINYINT(1) NOT NULL DEFAULT 0 AFTER is_special_mission");
+                }
+            },
+        ],
+
+        [
+            'version'     => 145,
+            'description' => 'Add users.is_team_captain — admin-only flag marking a guest/volunteer as captain of their home team (volunteer_teams/mission_visitor_tags), driving a new ⭐ captain badge next to their name everywhere via the teamCaptains()/captainBadgeHtml() registry (mirrors the K9 handler pattern). Deliberately independent of mission_teams.leader_id, the existing per-mission Action Room squad-leader star.',
+            'up' => function () {
+                $col = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_team_captain'");
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN is_team_captain TINYINT(1) NOT NULL DEFAULT 0 AFTER dog_training");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

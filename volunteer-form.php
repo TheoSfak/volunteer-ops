@@ -109,6 +109,7 @@ if (isPost()) {
         'registry_ggpp' => post('registry_ggpp') ?: null,
         'custom_role_id' => post('custom_role_id') ?: null,
         'is_dog_handler' => isset($_POST['is_dog_handler']) ? 1 : 0,
+        'is_team_captain' => isset($_POST['is_team_captain']) ? 1 : 0,
     ];
 
     // Validate custom_role_id — only allowed for VOLUNTEER role
@@ -209,7 +210,7 @@ if (isPost()) {
                  id_card = ?, afm = ?, amka = ?, driving_license = ?, vehicle_plate = ?,
                  pants_size = ?, shirt_size = ?, blouse_size = ?, fleece_size = ?,
                  registry_epidrasis = ?, registry_ggpp = ?,
-                 is_dog_handler = ?, dog_name = ?, dog_training = ?, updated_at = NOW()
+                 is_dog_handler = ?, dog_name = ?, dog_training = ?, is_team_captain = ?, updated_at = NOW()
                  WHERE id = ?",
                 [
                     $data['name'], $data['email'], $data['phone'],
@@ -218,7 +219,7 @@ if (isPost()) {
                     $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
                     $data['registry_epidrasis'], $data['registry_ggpp'],
-                    $data['is_dog_handler'], $data['dog_name'], $data['dog_training'], $id
+                    $data['is_dog_handler'], $data['dog_name'], $data['dog_training'], $data['is_team_captain'], $id
                 ]
             );
             
@@ -238,8 +239,8 @@ if (isPost()) {
                 "INSERT INTO users
                  (name, email, password, phone, role, custom_role_id, department_id, warehouse_id, is_active, is_external, language, guest_org_name, guest_country, volunteer_team_id, guest_country_code, volunteer_type, cohort_year, position_id,
                   id_card, afm, amka, driving_license, vehicle_plate, pants_size, shirt_size, blouse_size, fleece_size,
-                  registry_epidrasis, registry_ggpp, is_dog_handler, dog_name, dog_training, total_points, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                  registry_epidrasis, registry_ggpp, is_dog_handler, dog_name, dog_training, is_team_captain, total_points, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                 [
                     $data['name'], $data['email'], password_hash($password, PASSWORD_DEFAULT),
                     $data['phone'], $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'], $data['language'], $data['guest_org_name'], $data['guest_country'], $data['volunteer_team_id'], $data['guest_country_code'],
@@ -247,7 +248,7 @@ if (isPost()) {
                     $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
                     $data['registry_epidrasis'], $data['registry_ggpp'],
-                    $data['is_dog_handler'], $data['dog_name'], $data['dog_training']
+                    $data['is_dog_handler'], $data['dog_name'], $data['dog_training'], $data['is_team_captain']
                 ]
             );
             logAudit('create', 'users', $id);
@@ -340,6 +341,7 @@ $form = $volunteer ?: [
     'is_dog_handler' => 0,
     'dog_name' => '',
     'dog_training' => '',
+    'is_team_captain' => 0,
 ];
 
 include __DIR__ . '/includes/header.php';
@@ -565,6 +567,17 @@ include __DIR__ . '/includes/header.php';
                     </label>
                 </div>
                 <small class="text-muted">Ισχύει και για εθελοντές και για guest λογαριασμούς. Όταν είναι επιλεγμένο, εμφανίζεται ένδειξη 🐕 δίπλα στο όνομά του/της παντού στην εφαρμογή — λίστες, Action Room, βάρδιες, αναφορές.</small>
+            </div>
+
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="is_team_captain" id="is_team_captain"
+                           <?= !empty($form['is_team_captain']) ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="is_team_captain">
+                        ⭐ Ομαδάρχης
+                    </label>
+                </div>
+                <small class="text-muted">Αρχηγός της ομάδας του/της (π.χ. μιας guest ομάδας σαν τον Ερυθρό Σταυρό). Όταν είναι επιλεγμένο, εμφανίζεται ένδειξη ⭐ δίπλα στο όνομά του/της παντού στην εφαρμογή — λίστες, Action Room, βάρδιες, αναφορές. Άσχετο με τον αρχηγό ομάδας που ορίζετε ξεχωριστά για κάθε αποστολή μέσα στο Action Room.</small>
             </div>
 
             <div class="mb-3" id="dogNameRow">

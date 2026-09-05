@@ -729,14 +729,14 @@ $printDate = date('d/m/Y H:i');
             <div class="roster-team-header">
                 <span class="roster-swatch" style="background:<?= h($team['color']) ?>;"></span>
                 <span><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
-                <?php if ($team['leader_name']): ?><span style="color:#888; font-weight:400; font-size:8pt;">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_guest_org_name']) ?><?= k9BadgeHtml($team['leader_id'], false, 'el') ?></span><?php endif; ?>
+                <?php if ($team['leader_name']): ?><span style="color:#888; font-weight:400; font-size:8pt;">&middot; Υπεύθυνος: <?= guestNameHtml($team['leader_name'], $team['leader_is_external'], $team['leader_guest_org_name']) ?><?= k9BadgeHtml($team['leader_id'], false, 'el') ?><?= captainBadgeHtml($team['leader_id'], false, 'el') ?></span><?php endif; ?>
             </div>
             <?php if (empty($team['members'])): ?>
                 <div style="color:#888; font-size:8.3pt;">Χωρίς μέλη.</div>
             <?php else: ?>
                 <?php foreach ($team['members'] as $m): ?>
                 <div class="roster-member-row">
-                    <span><?= guestNameHtml($m['name'], $m['is_external'], $m['guest_org_name']) ?><?= k9BadgeHtml((int) $m['user_id'], false, 'el') ?></span>
+                    <span><?= guestNameHtml($m['name'], $m['is_external'], $m['guest_org_name']) ?><?= k9BadgeHtml((int) $m['user_id'], false, 'el') ?><?= captainBadgeHtml((int) $m['user_id'], false, 'el') ?></span>
                     <span style="color:#888;"><?= $attendanceReady ? number_format($m['hours'], 1) . ' ώρες' : 'Εκκρεμεί' ?></span>
                 </div>
                 <?php endforeach; ?>

@@ -22,7 +22,7 @@ $guestKind = $isGuestTab ? get('guest_kind', '') : '';
 
 // Filters
 $search = get('search', '');
-$role = get('role', '');
+$volunteerType = get('volunteer_type', '');
 $departmentId = get('department_id', '');
 $warehouseId = get('warehouse_id', '');
 $status = get('status', '');
@@ -52,9 +52,9 @@ if ($search) {
     $params[] = '%' . dbEscape($search) . '%';
 }
 
-if ($role) {
-    $where[] = "u.role = ?";
-    $params[] = $role;
+if ($volunteerType) {
+    $where[] = "u.volunteer_type = ?";
+    $params[] = $volunteerType;
 }
 
 if ($departmentId) {
@@ -369,7 +369,7 @@ include __DIR__ . '/includes/header.php';
         <a href="import-volunteers.php" class="btn btn-outline-primary">
             <i class="bi bi-upload me-1"></i>Εισαγωγή CSV
         </a>
-        <a href="exports/export-volunteers.php?role=<?= h($role) ?>&department_id=<?= h($departmentId) ?>&is_external=<?= $isGuestTab ? '1' : '0' ?>"
+        <a href="exports/export-volunteers.php?<?= h(http_build_query($_GET)) ?>"
            class="btn btn-outline-success">
             <i class="bi bi-download me-1"></i>Εξαγωγή CSV
         </a>
@@ -462,12 +462,11 @@ include __DIR__ . '/includes/header.php';
                 <input type="text" class="form-control" name="search" value="<?= h($search) ?>" placeholder="Όνομα, email, τηλέφωνο...">
             </div>
             <div class="col-md-2">
-                <label class="form-label">Ρόλος</label>
-                <select name="role" class="form-select">
+                <label class="form-label">Τύπος Εθελοντή</label>
+                <select name="volunteer_type" class="form-select">
                     <option value="">Όλοι</option>
-                    <?php foreach (ROLE_LABELS as $r => $label): ?>
-                        <?php if (in_array($r, [ROLE_DEPARTMENT_ADMIN, ROLE_SHIFT_LEADER])) continue; ?>
-                        <option value="<?= $r ?>" <?= $role === $r ? 'selected' : '' ?>><?= $label ?></option>
+                    <?php foreach (VOLUNTEER_TYPE_LABELS as $vt => $label): ?>
+                        <option value="<?= $vt ?>" <?= $volunteerType === $vt ? 'selected' : '' ?>><?= $label ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
@@ -540,7 +539,7 @@ include __DIR__ . '/includes/header.php';
                     <i class="bi bi-search me-1"></i>Αναζήτηση
                 </button>
             </div>
-            <?php if ($search || $role || $departmentId || $warehouseId || $skillId || $guestKind || $dogHandler): ?>
+            <?php if ($search || $volunteerType || $departmentId || $warehouseId || $skillId || $guestKind || $dogHandler): ?>
             <div class="col-md-1 d-flex align-items-end">
                 <a href="volunteers.php" class="btn btn-outline-secondary w-100" title="Καθαρισμός φίλτρων">
                     <i class="bi bi-x-lg"></i>
@@ -591,7 +590,7 @@ include __DIR__ . '/includes/header.php';
                     <tr class="<?= !$v['is_active'] ? 'table-secondary text-muted' : '' ?>">
                         <td data-label="Εθελοντής">
                             <a href="volunteer-view.php?id=<?= $v['id'] ?>" class="text-decoration-none fw-semibold">
-                                <?= guestNameHtml($v['name'], (bool)$v['is_external'], $v['home_team_name'], $v['home_team_color'], $v['guest_country_code']) ?><?= k9BadgeHtml((int) $v['id']) ?>
+                                <?= guestNameHtml($v['name'], (bool)$v['is_external'], $v['home_team_name'], $v['home_team_color'], $v['guest_country_code']) ?><?= k9BadgeHtml((int) $v['id']) ?><?= captainBadgeHtml((int) $v['id']) ?>
                             </a><?= volunteerTypeBadge($v['volunteer_type'] ?? VTYPE_RESCUER) ?><?= positionBadge($v['position_name'] ?? '') ?>
                             <br><small class="text-muted"><?= h($v['email']) ?><?= $v['phone'] ? ' · ' . h($v['phone']) : '' ?></small>
                         </td>
