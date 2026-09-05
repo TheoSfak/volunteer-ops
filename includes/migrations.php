@@ -6400,6 +6400,93 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 142,
+            'description' => 'Add volunteer_applications — public "Υποψήφιοι Εθελοντές" candidate new-member form (aithsh.php) — plus its admin-notify and applicant-confirmation email templates.',
+            'up' => function () {
+                // ── 1. Create volunteer_applications table ────────────────────────
+                $tableExists = dbFetchOne(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'volunteer_applications'"
+                );
+                if (!$tableExists) {
+                    dbExecute(
+                        "CREATE TABLE volunteer_applications (
+                            id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                            full_name VARCHAR(100) NOT NULL COMMENT 'Ονοματεπώνυμο',
+                            patronymic VARCHAR(100) NULL COMMENT 'Πατρώνυμο',
+                            birth_date DATE NULL COMMENT 'Ημερομηνία Γέννησης',
+                            address VARCHAR(255) NULL,
+                            postal_code VARCHAR(10) NULL COMMENT 'Τ.Κ.',
+                            city VARCHAR(100) NULL,
+                            home_phone VARCHAR(30) NULL COMMENT 'Τηλέφωνο Οικίας',
+                            mobile_phone VARCHAR(30) NOT NULL COMMENT 'Τηλέφωνο Κινητό',
+                            email VARCHAR(255) NOT NULL,
+                            occupation VARCHAR(150) NULL COMMENT 'Επαγγελματική ιδιότητα',
+                            gdpr_consent_at DATETIME NOT NULL,
+                            status ENUM('NEW','CONTACTED','CONVERTED','REJECTED') NOT NULL DEFAULT 'NEW',
+                            admin_notes TEXT NULL,
+                            contacted_at DATETIME NULL,
+                            converted_user_id INT UNSIGNED NULL,
+                            converted_at DATETIME NULL,
+                            rejected_at DATETIME NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                            FOREIGN KEY (converted_user_id) REFERENCES users(id) ON DELETE SET NULL,
+                            INDEX idx_volunteer_applications_status (status),
+                            INDEX idx_volunteer_applications_email (email)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+                    );
+                }
+
+                // ── 2. Email templates (safe: ON DUPLICATE KEY touches nothing) ────
+                $tplHtml = [
+                    'member_application_submitted' => '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#005596;color:white;padding:20px;text-align:center;"><h1>&#128100; Νέα Αίτηση Υποψηφίου Μέλους</h1></div><div style="padding:30px;background:#fff;"><h2>Γεια σας {{admin_name}},</h2><p>Υποβλήθηκε νέα αίτηση υποψηφίου νέου μέλους.</p><ul><li><strong>Ονοματεπώνυμο:</strong> {{applicant_name}}</li><li><strong>Τηλέφωνο:</strong> {{applicant_phone}}</li><li><strong>Email:</strong> {{applicant_email}}</li></ul><p style="text-align:center;"><a href="{{application_url}}" style="background:#005596;color:white;padding:12px 28px;text-decoration:none;border-radius:5px;">Δείτε την Αίτηση</a></p></div><div style="padding:12px;background:#f8f9fa;text-align:center;font-size:12px;color:#666;">{{app_name}}</div></div>',
+                    'member_application_confirmation' => '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#005596;color:white;padding:20px;text-align:center;"><h1>&#9989; Λάβαμε την Αίτησή σας</h1></div><div style="padding:30px;background:#fff;"><h2>Γεια σας {{applicant_name}},</h2><p>Σας ευχαριστούμε για το ενδιαφέρον σας να γίνετε μέλος της ομάδας μας. Λάβαμε την αίτησή σας και θα επικοινωνήσουμε μαζί σας σύντομα.</p></div><div style="padding:12px;background:#f8f9fa;text-align:center;font-size:12px;color:#666;">{{app_name}}</div></div>',
+                ];
+                $tplMeta = [
+                    'member_application_submitted' => [
+                        'name'    => 'Νέα Αίτηση Μέλους (Admin)',
+                        'subject' => 'Νέα αίτηση υποψηφίου μέλους - {{applicant_name}}',
+                        'desc'    => 'Αποστέλλεται στους διαχειριστές όταν υποβάλλεται νέα αίτηση υποψηφίου νέου μέλους (aithsh.php)',
+                        'vars'    => '{{app_name}}, {{admin_name}}, {{applicant_name}}, {{applicant_phone}}, {{applicant_email}}, {{application_url}}',
+                    ],
+                    'member_application_confirmation' => [
+                        'name'    => 'Επιβεβαίωση Αίτησης Μέλους',
+                        'subject' => 'Λάβαμε την αίτησή σας - {{app_name}}',
+                        'desc'    => 'Αποστέλλεται στον υποψήφιο μόλις υποβάλει την αίτηση νέου μέλους (aithsh.php)',
+                        'vars'    => '{{app_name}}, {{applicant_name}}',
+                    ],
+                ];
+                foreach ($tplMeta as $code => $meta) {
+                    dbExecute(
+                        "INSERT INTO email_templates
+                            (code, name, subject, body_html, description, available_variables)
+                         VALUES (?, ?, ?, ?, ?, ?)
+                         ON DUPLICATE KEY UPDATE updated_at = updated_at",
+                        [$code, $meta['name'], $meta['subject'], $tplHtml[$code], $meta['desc'], $meta['vars']]
+                    );
+                }
+
+                // ── 3. Notification settings rows ─────────────────────────────────
+                $notifCodes = [
+                    'member_application_submitted' => 'Νέα Αίτηση Μέλους (Admin)',
+                    'member_application_confirmation' => 'Επιβεβαίωση Αίτησης Μέλους',
+                ];
+                foreach ($notifCodes as $code => $name) {
+                    $tplId = dbFetchValue(
+                        "SELECT id FROM email_templates WHERE code = ?", [$code]
+                    );
+                    dbExecute(
+                        "INSERT INTO notification_settings (code, name, email_enabled, email_template_id)
+                         VALUES (?, ?, 1, ?)
+                         ON DUPLICATE KEY UPDATE updated_at = updated_at",
+                        [$code, $name, $tplId]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

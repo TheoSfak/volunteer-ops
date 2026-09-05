@@ -151,6 +151,39 @@ CREATE TABLE IF NOT EXISTS `volunteer_profiles` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- VOLUNTEER APPLICATIONS TABLE (Υποψήφιοι Εθελοντές)
+-- Public "candidate new member" form submissions (aithsh.php) — reviewed by
+-- staff and, once approved, manually converted into a real `users` row via
+-- volunteer-form.php (never created automatically, matching this app's
+-- admin-only account creation policy — see register.php).
+-- =============================================
+CREATE TABLE IF NOT EXISTS `volunteer_applications` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `full_name` VARCHAR(100) NOT NULL COMMENT 'Ονοματεπώνυμο',
+    `patronymic` VARCHAR(100) NULL COMMENT 'Πατρώνυμο',
+    `birth_date` DATE NULL COMMENT 'Ημερομηνία Γέννησης',
+    `address` VARCHAR(255) NULL,
+    `postal_code` VARCHAR(10) NULL COMMENT 'Τ.Κ.',
+    `city` VARCHAR(100) NULL,
+    `home_phone` VARCHAR(30) NULL COMMENT 'Τηλέφωνο Οικίας',
+    `mobile_phone` VARCHAR(30) NOT NULL COMMENT 'Τηλέφωνο Κινητό',
+    `email` VARCHAR(255) NOT NULL,
+    `occupation` VARCHAR(150) NULL COMMENT 'Επαγγελματική ιδιότητα',
+    `gdpr_consent_at` DATETIME NOT NULL,
+    `status` ENUM('NEW','CONTACTED','CONVERTED','REJECTED') NOT NULL DEFAULT 'NEW',
+    `admin_notes` TEXT NULL,
+    `contacted_at` DATETIME NULL,
+    `converted_user_id` INT UNSIGNED NULL,
+    `converted_at` DATETIME NULL,
+    `rejected_at` DATETIME NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`converted_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_volunteer_applications_status` (`status`),
+    INDEX `idx_volunteer_applications_email` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- SKILLS TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS `skills` (

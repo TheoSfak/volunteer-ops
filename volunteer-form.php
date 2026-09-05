@@ -26,8 +26,36 @@ if ($id) {
     $pageTitle = 'Επεξεργασία: ' . $volunteer['name'];
 }
 
+// Prefill from an approved candidate application (Υποψήφιοι Εθελοντές →
+// "Έγκριση & Δημιουργία Εθελοντή"). Deliberately kept OUT of $volunteer —
+// that variable also doubles as the create-vs-update flag further down, and
+// this is always a brand-new account; no users row exists for it yet.
+$fromApplicationId = 0;
+$sourceApplication = null;
+if (!$id) {
+    $fromApplicationId = (int) get('from_application');
+    if ($fromApplicationId) {
+        $sourceApplication = dbFetchOne(
+            "SELECT * FROM volunteer_applications WHERE id = ? AND status IN (?, ?)",
+            [$fromApplicationId, VOL_APP_NEW, VOL_APP_CONTACTED]
+        );
+        if (!$sourceApplication) {
+            $fromApplicationId = 0; // stale/already-converted link — falls through to a normal blank form
+        } else {
+            $pageTitle = 'Νέος Εθελοντής (από αίτηση: ' . $sourceApplication['full_name'] . ')';
+        }
+    }
+}
+
 // Load extended profile (volunteer_profiles table)
 $profile = $id ? dbFetchOne("SELECT * FROM volunteer_profiles WHERE user_id = ?", [$id]) : null;
+if (!$profile && $sourceApplication) {
+    $profile = [
+        'address'     => $sourceApplication['address'],
+        'city'        => $sourceApplication['city'],
+        'postal_code' => $sourceApplication['postal_code'],
+    ];
+}
 
 // Get departments (only functional corps, not warehouse/branch departments)
 $departments = dbFetchAll("SELECT id, name FROM departments WHERE (has_inventory = 0 OR has_inventory IS NULL) ORDER BY name");
@@ -224,6 +252,14 @@ if (isPost()) {
             );
             logAudit('create', 'users', $id);
             setFlash('success', 'Ο εθελοντής δημιουργήθηκε.');
+
+            if ($fromApplicationId) {
+                dbExecute(
+                    "UPDATE volunteer_applications SET status = ?, converted_user_id = ?, converted_at = NOW(), updated_at = NOW() WHERE id = ?",
+                    [VOL_APP_CONVERTED, $id, $fromApplicationId]
+                );
+                logAudit('convert_application', 'volunteer_applications', $fromApplicationId, null, ['user_id' => $id]);
+            }
         }
         
         // Upsert volunteer_profiles (bio, address, emergency contact, availability, etc.)
@@ -273,9 +309,9 @@ if (isPost()) {
 
 // Form values
 $form = $volunteer ?: [
-    'name' => '',
-    'email' => '',
-    'phone' => '',
+    'name' => $sourceApplication['full_name'] ?? '',
+    'email' => $sourceApplication['email'] ?? '',
+    'phone' => $sourceApplication['mobile_phone'] ?? '',
     'role' => ROLE_VOLUNTEER,
     'department_id' => $currentUser['department_id'],
     'warehouse_id' => $currentUser['warehouse_id'] ?? null,
@@ -315,6 +351,16 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-arrow-left me-1"></i>Πίσω
     </a>
 </div>
+
+<?php if ($sourceApplication): ?>
+<div class="alert alert-info">
+    <i class="bi bi-person-check me-1"></i>
+    Δημιουργία εθελοντή από αίτηση υποψηφίου μέλους:
+    <strong><?= h($sourceApplication['full_name']) ?></strong>
+    (<?= h($sourceApplication['email']) ?>, <?= h($sourceApplication['mobile_phone']) ?>).
+    <a href="volunteer-applications.php">Δείτε όλες τις αιτήσεις</a>
+</div>
+<?php endif; ?>
 
 <?php if (!empty($errors)): ?>
     <div class="alert alert-danger">

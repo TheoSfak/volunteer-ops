@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.193.1');
-define('DB_SCHEMA_VERSION', 141);
+define('APP_VERSION', '3.194.0');
+define('DB_SCHEMA_VERSION', 142);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
 // The download filename embeds this on purpose: the APK used to live at a
@@ -277,6 +277,26 @@ define('COMPLAINT_PRIORITY_LABELS', [
     COMPLAINT_PRIORITY_LOW => 'Χαμηλή',
     COMPLAINT_PRIORITY_MEDIUM => 'Μεσαία',
     COMPLAINT_PRIORITY_HIGH => 'Υψηλή',
+]);
+
+// Volunteer application statuses ("Υποψήφιοι Εθελοντές" — public candidate new-member form, aithsh.php)
+define('VOL_APP_NEW', 'NEW');
+define('VOL_APP_CONTACTED', 'CONTACTED');
+define('VOL_APP_CONVERTED', 'CONVERTED');
+define('VOL_APP_REJECTED', 'REJECTED');
+
+define('VOL_APP_STATUS_LABELS', [
+    VOL_APP_NEW => 'Νέα',
+    VOL_APP_CONTACTED => 'Σε Επικοινωνία',
+    VOL_APP_CONVERTED => 'Εγκρίθηκε',
+    VOL_APP_REJECTED => 'Απορρίφθηκε',
+]);
+
+define('VOL_APP_STATUS_COLORS', [
+    VOL_APP_NEW => 'primary',
+    VOL_APP_CONTACTED => 'warning',
+    VOL_APP_CONVERTED => 'success',
+    VOL_APP_REJECTED => 'danger',
 ]);
 
 // Bug report statuses ("Αποστολή Bug" — reports an app problem to the developer)

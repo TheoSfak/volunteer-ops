@@ -29,6 +29,14 @@ if (isLoggedIn()) {
     );
 }
 
+// Pending candidate applications count — sidebar badge on "Υποψήφιοι Εθελοντές"
+$pendingApplicationsCount = 0;
+if (isLoggedIn() && (isSystemAdmin() || hasPagePermission('volunteers_manage') || hasPagePermission('volunteers_view'))) {
+    $pendingApplicationsCount = (int) dbFetchValue(
+        "SELECT COUNT(*) FROM volunteer_applications WHERE status = 'NEW'"
+    );
+}
+
 // Pending "what's new" announcements — popup shown until dismissed (see announcements.php).
 // Capped digest: only the latest 3 are ever shown at once. Anything older than that is
 // auto-dismissed right here, silently, the moment a newer one exists — these are "check this
@@ -1210,6 +1218,14 @@ if (isLoggedIn()) {
             <div class="sidebar-section">Διοίκηση</div>
             
             <?php if (isSystemAdmin() || hasPagePermission('volunteers_manage') || hasPagePermission('volunteers_view')): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'volunteer-applications' ? 'active' : '' ?>" href="volunteer-applications.php">
+                    <i class="bi bi-person-plus"></i> Υποψήφιοι Εθελοντές
+                    <?php if ($pendingApplicationsCount > 0): ?>
+                        <span class="badge bg-danger ms-1"><?= $pendingApplicationsCount > 99 ? '99+' : $pendingApplicationsCount ?></span>
+                    <?php endif; ?>
+                </a>
+            </li>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'volunteers' ? 'active' : '' ?>" href="volunteers.php">
                     <i class="bi bi-people"></i> Εθελοντές
