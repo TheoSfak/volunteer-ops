@@ -44,6 +44,11 @@ if (isPost()) {
                 setFlash('success', "Στάλθηκε σε {$result['delivered']} από {$result['recipients']} συνδεδεμένους εθελοντές.{$extra}");
             }
         }
+    } elseif (post('action') === 'delete') {
+        $id = (int) post('id');
+        dbExecute("DELETE FROM mobilization_broadcasts WHERE id = ?", [$id]);
+        logAudit('mobilization_delete', 'mobilization_broadcasts', $id);
+        setFlash('success', 'Η κινητοποίηση διαγράφηκε από το ιστορικό.');
     }
 
     redirect('mobilization.php');
@@ -103,11 +108,12 @@ include __DIR__ . '/includes/header.php';
                     <th>Παραλήπτες</th>
                     <th>Από</th>
                     <th>Ημ/νία</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
             <?php if (empty($history)): ?>
-                <tr><td colspan="4" class="text-center text-muted py-4">Δεν έχει σταλεί ακόμα καμία κινητοποίηση.</td></tr>
+                <tr><td colspan="5" class="text-center text-muted py-4">Δεν έχει σταλεί ακόμα καμία κινητοποίηση.</td></tr>
             <?php else: ?>
                 <?php foreach ($history as $b): ?>
                 <tr>
@@ -119,6 +125,16 @@ include __DIR__ . '/includes/header.php';
                     </td>
                     <td data-label="Από"><?= h($b['sender_name'] ?? '—') ?></td>
                     <td data-label="Ημ/νία" class="text-muted small"><?= formatDateTime($b['created_at']) ?></td>
+                    <td data-label="Ενέργειες" class="text-end mobile-card-actions">
+                        <form method="post" class="d-inline" onsubmit="return confirm('Οριστική διαγραφή αυτής της κινητοποίησης από το ιστορικό;');">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="id" value="<?= (int) $b['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Διαγραφή">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    </td>
                 </tr>
                 <?php endforeach; ?>
             <?php endif; ?>
