@@ -2545,7 +2545,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 </div>
                 <?php endforeach; ?>
                 <?php if (empty($teams)): ?>
-                <div class="list-group-item text-muted"><?= t('teams.empty') ?></div>
+                <div class="list-group-item text-muted" id="teamsEmptyMessage"><?= t('teams.empty') ?></div>
                 <?php endif; ?>
             </div>
             <!-- Pairwise team-to-team distances — a small addendum to the
@@ -4831,19 +4831,59 @@ function teamRosterHtml(team) {
 }
 // Live-refreshes each EXISTING team's roster from the poll, so another
 // admin's edit (add/remove a member, change leader) shows up here within
-// one poll cycle instead of needing a manual reload. Deliberately doesn't
-// add a row for a brand-new team created by someone else — its Edit button
-// has no matching #editTeamModal-{id} in this tab's DOM to open, and
-// building one here would duplicate the PHP template's own eligible-member
-// pool logic. A disbanded team's row IS removed live though — that's just
-// deleting a DOM node, no modal involved.
+// one poll cycle instead of needing a manual reload. A disbanded team's row
+// is removed live too. A brand-new team (present in `items`, no row yet)
+// now gets a row appended as well — roster + Delete work immediately
+// (Delete is a plain POST, nothing to duplicate), but Edit just reloads the
+// page instead of opening a modal: #editTeamModal-{id} needs the full
+// eligible-member pool the PHP template builds server-side, which this
+// lightweight poll payload doesn't carry, and reconstructing that query
+// here would duplicate real business logic just to avoid one reload in an
+// edge case (editing a team someone else created, without having reloaded
+// since). Visibility of the team and its roster — the actual complaint —
+// no longer needs that reload at all.
 function renderTeamRosters(items) {
     const byId = new Map(items.map(team => [String(team.id), team]));
+    const seenIds = new Set();
     document.querySelectorAll('[data-card-id="teamsCard"] [data-team-id]').forEach(row => {
+        seenIds.add(row.dataset.teamId);
         const team = byId.get(row.dataset.teamId);
         if (!team) { row.remove(); return; }
         const rosterEl = row.querySelector('.wr-team-roster');
         if (rosterEl) rosterEl.innerHTML = teamRosterHtml(team);
+    });
+    const listEl = document.querySelector('[data-card-id="teamsCard"] .list-group');
+    if (!listEl) return;
+    items.forEach(team => {
+        if (seenIds.has(String(team.id))) return;
+        document.getElementById('teamsEmptyMessage')?.remove();
+        const row = document.createElement('div');
+        row.className = 'list-group-item';
+        row.dataset.teamId = String(team.id);
+        row.innerHTML = `<div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div class="wr-team-roster">${teamRosterHtml(team)}</div>
+            ${CAN_MANAGE_WAR_ROOM ? `<div class="d-flex gap-1">
+                <button type="button" class="btn btn-sm btn-outline-secondary wr-team-edit-reload-btn" title="${escapeHtml(t('common.edit'))}"><i class="bi bi-pencil"></i></button>
+                <form class="wr-team-delete-form">
+                    <button type="submit" class="btn btn-sm btn-outline-danger" title="${escapeHtml(t('teams.delete_btn_title'))}"><i class="bi bi-x-lg"></i></button>
+                </form>
+            </div>` : ''}
+        </div>`;
+        if (CAN_MANAGE_WAR_ROOM) {
+            row.querySelector('.wr-team-edit-reload-btn').addEventListener('click', () => location.reload());
+            row.querySelector('.wr-team-delete-form').addEventListener('submit', e => {
+                e.preventDefault();
+                if (!confirm(t('teams.delete_confirm', {team: teamLabel(team.codename, team.team_number)}))) return;
+                const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete_team', team_id: team.id});
+                // No shared top-level `missionId` JS variable exists in this
+                // file (only IIFE-local ones, e.g. the chat block's own) —
+                // every other top-level function embeds <?= $missionId ?>
+                // directly at its own call site instead, so this matches
+                // that same convention rather than introducing a new global.
+                fetch('war-room.php?id=<?= $missionId ?>', {method: 'POST', body: data}).then(() => location.reload());
+            });
+        }
+        listEl.appendChild(row);
     });
 }
 // Small colored pill (team's own badge color, or the dark "all teams" fallback
