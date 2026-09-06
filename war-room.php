@@ -1535,6 +1535,18 @@ include __DIR__ . '/includes/header.php';
 ?>
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
+<!-- Marker clustering: groups nearby pins/incidents/POI into one bubble
+     instead of them stacking on top of each other, and "spiderfies" (fans
+     out into individually-clickable markers) on click once zooming in
+     further wouldn't separate them any more. unpkg (matching Leaflet core
+     above) — bootstrap.php's own Content-Security-Policy only allows
+     script-src/style-src from unpkg.com and cdn.jsdelivr.net, NOT cdnjs;
+     first attempt used cdnjs and was silently blocked by CSP until caught
+     live. Hashes verified by downloading these exact unpkg URLs and hashing
+     them directly (openssl dgst -sha512), not just trusting a third party's
+     claimed value — turned out byte-identical to cdnjs's own copy anyway. -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" integrity="sha512-mQ77VzAakzdpWdgfL/lM1ksNy89uFgibRQANsNneSTMD/bj0Y/8+94XMwYhnbzx8eki2hrbPpDm0vD0CiT2lcg==" crossorigin="anonymous">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" integrity="sha512-6ZCLMiYwTeli2rVh3XAPxy3YoR5fVxGdH/pz+KMCzRY2M65Emgkw00Yqmhh8qLGeYQ3LbVZGdmOX9KUjSKr0TA==" crossorigin="anonymous">
 <style>
     /* Field-safety touch targets: the SOS/field-status buttons and the
        route depart/arrive/complete/photo/video buttons are what a volunteer
@@ -2506,13 +2518,22 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
     <div class="col-12 col-lg-8 wr-legacy-row">
         <div class="card shadow-sm mb-4" data-card-id="teamsCard">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-diagram-3 me-1"></i><?= t('teams.panel_title') ?></h5>
+                <!-- Toggle lives on the h5 itself, not the whole header (see
+                     activityCard further down for the same split) — the New
+                     Team button sits right next to it in the same header and
+                     must open its modal on click, not also fight the
+                     collapse toggle. Starts expanded (aria-expanded="true" +
+                     "show" below), unlike this file's other collapsible
+                     cards which default closed — the roster is something
+                     staff check constantly, not an occasional form/log. -->
+                <h5 class="mb-0 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#teamsCollapse" role="button" aria-expanded="true" aria-controls="teamsCollapse"><i class="bi bi-diagram-3 me-1"></i><?= t('teams.panel_title') ?> <i class="bi bi-chevron-down wr-collapsible-chevron ms-1"></i></h5>
                 <?php if ($canManageWarRoom && !empty($unassignedApproved)): ?>
                 <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createTeamModal">
                     <i class="bi bi-plus-lg me-1"></i><?= t('teams.new_btn') ?>
                 </button>
                 <?php endif; ?>
             </div>
+            <div class="collapse show" id="teamsCollapse">
             <div class="list-group list-group-flush">
                 <?php foreach ($teams as $team): ?>
                 <?php [$teamBg, $teamFg] = teamBadgeColors($team['color']); ?>
@@ -2557,6 +2578,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             <div class="card-body border-top small d-none" id="teamDistancesSection">
                 <div class="fw-semibold mb-1"><i class="bi bi-rulers me-1"></i><?= t('teams.distances_title') ?></div>
                 <div id="teamDistancesList"></div>
+            </div>
             </div>
         </div>
 
@@ -3884,6 +3906,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg==" crossorigin="anonymous"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-utils.js?v=<?= APP_VERSION ?>"></script>
 <script>
 const csrfToken = '<?= csrfToken() ?>';
@@ -4558,7 +4581,21 @@ function addMapBaseLayers(targetMap, toggleBtnId) {
     }
     return layers;
 }
-let map = null, pinLayer = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, incidentLayer = null, poiLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null, missingPersonLayer = null, fireLayer = null, searchRingsLayer = null;
+let map = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null, missingPersonLayer = null, fireLayer = null, searchRingsLayer = null;
+// Pins/incidents/POI used to each have their own plain L.featureGroup
+// (pinLayer/incidentLayer/poiLayer) — replaced by one shared cluster group
+// so nearby markers of ANY of these three kinds group into a bubble instead
+// of stacking on top of each other, and spiderfy (fan out into individually
+// clickable markers) on click once zoom alone won't separate them further.
+// A MarkerClusterGroup is itself an L.FeatureGroup subclass, so existing
+// event-delegation (e.g. the popupopen listener on the old pinLayer, below)
+// keeps working unchanged once bound to this one instead. Each render
+// function tracks its OWN current marker instances (currentPinMarkers /
+// currentIncidentMarkers / currentPoiMarkers) so it can remove exactly its
+// own stale markers from the shared group without touching the other two
+// kinds living in the same group.
+let sharedMarkerCluster = null;
+let currentPinMarkers = [], currentIncidentMarkers = [], currentPoiMarkers = [];
 if (!fieldMode) {
     map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
     addMapBaseLayers(map, 'mapSatelliteToggle');
@@ -4593,18 +4630,23 @@ if (!fieldMode) {
     map.createPane('coveragePane');
     map.getPane('coveragePane').style.zIndex = 360;
     coverageLayer = L.featureGroup();
-    // FeatureGroup, not plain LayerGroup — required for popupopen to
-    // propagate from a child marker up to the group's own listener (see the
-    // matching dispatchLayer note two lines below), needed by the new
-    // pin-charge-alert-btn wiring.
-    pinLayer = L.featureGroup().addTo(map);
+    // Shared by pins, incidents and POI (see the declaration comment above)
+    // — a MarkerClusterGroup IS an L.FeatureGroup, so popupopen still
+    // propagates from a child marker up to this group's own listener the
+    // same way it did from the old plain pinLayer, needed by the
+    // pin-charge-alert-btn wiring below. spiderfyOnMaxZoom is the library
+    // default (true) — named explicitly anyway since it's the whole point
+    // of adding this library in the first place, not an incidental option.
+    sharedMarkerCluster = L.markerClusterGroup({spiderfyOnMaxZoom: true, showCoverageOnHover: false}).addTo(map);
     // FeatureGroup (not plain LayerGroup) is required here: only FeatureGroup
     // propagates child-layer events like 'popupopen' up to the group's own
     // listeners, which is how dispatchLayer.on('popupopen', ...) below wires up
     // the Ελήφθη/Άφιξη/Διαγραφή buttons inside each dispatch's popup.
     dispatchLayer = L.featureGroup().addTo(map);
     // Not attached to the map yet — only shown while trail mode is active
-    // (enterTrailMode()/exitTrailMode() below), swapped in place of pinLayer.
+    // (enterTrailMode()/exitTrailMode() below), swapped in place of the live
+    // pin markers (removed from sharedMarkerCluster while trail mode is on,
+    // not the whole shared group — incidents/POI in it stay visible).
     trailLayer = L.layerGroup();
     // Battle-map annotations get their own pane (above the default marker/
     // overlay panes) so a draw-mode CSS rule can suspend pin/dispatch click
@@ -4623,8 +4665,9 @@ if (!fieldMode) {
     // (not used for buttons today, but keeps the two "War Room order" layers
     // consistent in case a future popup action needs it).
     routeLayer = L.featureGroup().addTo(map);
-    incidentLayer = L.featureGroup().addTo(map);
-    poiLayer = L.featureGroup().addTo(map);
+    // Incidents and POI markers go straight into sharedMarkerCluster
+    // (created above, alongside pins) instead of their own layer — no
+    // separate init needed here any more.
     missingPersonLayer = L.featureGroup().addTo(map);
     // No custom pane — L.circle defaults to the standard overlayPane (z=400),
     // which already sits exactly where these rings should stack: above
@@ -6575,12 +6618,22 @@ function buildPinMarker(pin, interactive = true) {
 }
 
 function renderPins(items) {
+    // A cluster the user has fanned open (spiderfied) to pick one of several
+    // overlapping markers must survive this tick's rebuild untouched — any
+    // removeLayer/addLayers on sharedMarkerCluster collapses it back to the
+    // bubble mid-click. Deferring one 5s poll tick is imperceptible; losing
+    // the fan-out mid-click defeats the whole point of clustering.
+    if (sharedMarkerCluster && sharedMarkerCluster._spiderfied) return;
     const sig = JSON.stringify(items);
     if (sig === pinsRenderedSig) return;
     pinsRenderedSig = sig;
 
-    pinLayer.clearLayers();
-    items.forEach(pin => buildPinMarker(pin).addTo(pinLayer));
+    // Only this function's OWN previous markers are removed — incidents/POI
+    // sharing sharedMarkerCluster are untouched, unlike the old
+    // pinLayer.clearLayers() which had its own dedicated layer to wipe.
+    currentPinMarkers.forEach(m => sharedMarkerCluster.removeLayer(m));
+    currentPinMarkers = items.map(pin => buildPinMarker(pin));
+    sharedMarkerCluster.addLayers(currentPinMarkers);
     if (!hasFitPins && items.length) {
         hasFitPins = true;
         map.invalidateSize();
@@ -6601,7 +6654,7 @@ function renderPins(items) {
 // exists in the DOM while genuinely open. Field Mode has no map at all,
 // same guard every other pin/layer listener here already uses.
 if (!fieldMode) {
-pinLayer.on('popupopen', event => {
+sharedMarkerCluster.on('popupopen', event => {
     const popupEl = event.popup.getElement();
     const chargeBtn = popupEl.querySelector('.pin-charge-alert-btn');
     if (chargeBtn) {
@@ -6905,7 +6958,7 @@ function enterTrailMode() {
     fetch('mission-track.php?' + params).then(r => r.json()).then(result => {
         if (!result.ok) { alert(result.error || t('trail.load_failed')); return; }
         if (!trailModeActive) {
-            map.removeLayer(pinLayer);
+            currentPinMarkers.forEach(m => sharedMarkerCluster.removeLayer(m));
             trailLayer.addTo(map);
             trailModeActive = true;
         }
@@ -6925,7 +6978,7 @@ function exitTrailMode() {
     trailModeActive = false;
     trailLayer.clearLayers();
     if (map.hasLayer(trailLayer)) map.removeLayer(trailLayer);
-    if (!map.hasLayer(pinLayer)) pinLayer.addTo(map);
+    sharedMarkerCluster.addLayers(currentPinMarkers);
     if (!map.hasLayer(dispatchLayer)) dispatchLayer.addTo(map);
 }
 const trailModeToggleBtn = document.getElementById('trailModeToggle');
@@ -8393,10 +8446,13 @@ function renderMissionIncidents(items) {
 // for "where"). Skips any incident reported without a GPS fix (geolocation
 // denied/unavailable) rather than guessing a location for it.
 function renderIncidentLayer(items) {
-    if (!incidentLayer) return;
-    incidentLayer.clearLayers();
+    if (!sharedMarkerCluster) return;
+    // See the matching guard in renderPins() — don't collapse an
+    // in-progress spiderfy out from under the user's click.
+    if (sharedMarkerCluster._spiderfied) return;
+    currentIncidentMarkers.forEach(m => sharedMarkerCluster.removeLayer(m));
     const sevColor = {low: '#6c757d', medium: '#0dcaf0', high: '#f59e0b', critical: '#dc3545'};
-    (items || []).filter(r => r.lat !== null && r.lng !== null).forEach(r => {
+    currentIncidentMarkers = (items || []).filter(r => r.lat !== null && r.lng !== null).map(r => {
         const icon = L.divIcon({
             className: '',
             html: `<div style="background:${sevColor[r.severity] || '#6c757d'};color:#fff;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 1px 4px #0008;"><i class="bi bi-heart-pulse-fill"></i></div>`,
@@ -8407,8 +8463,9 @@ function renderIncidentLayer(items) {
         const popupHtml = `<strong>${r.severity_label} — ${r.type_label}</strong><br>${escapeHtml(who)}` +
             (details ? `<br><span class="small">${escapeHtml(details)}</span>` : '') +
             `<br><span class="small text-muted">${escapeHtml(r.team_label)} · ${r.created_at}</span>`;
-        L.marker([r.lat, r.lng], {icon}).addTo(incidentLayer).bindPopup(popupHtml);
+        return L.marker([r.lat, r.lng], {icon}).bindPopup(popupHtml);
     });
+    sharedMarkerCluster.addLayers(currentIncidentMarkers);
 }
 
 let poiRenderedSig = null;
@@ -8467,9 +8524,12 @@ function renderPointsOfInterest(items) {
 }
 
 function renderPoiLayer(items) {
-    if (!poiLayer) return;
-    poiLayer.clearLayers();
-    (items || []).forEach(p => {
+    if (!sharedMarkerCluster) return;
+    // See the matching guard in renderPins() — don't collapse an
+    // in-progress spiderfy out from under the user's click.
+    if (sharedMarkerCluster._spiderfied) return;
+    currentPoiMarkers.forEach(m => sharedMarkerCluster.removeLayer(m));
+    currentPoiMarkers = (items || []).map(p => {
         const color = p.checked_at ? '#6c757d' : '#0d6efd';
         // A centered circle anchored on its own coordinate used to sit
         // exactly on top of (and, being bigger, fully hide) a position pin
@@ -8478,7 +8538,12 @@ function renderPoiLayer(items) {
         // standing. Anchored like a real map pin instead (tip at the true
         // coordinate, body floating above it) so the badge no longer covers
         // whatever else is at that exact point; see buildPinMarker's
-        // zIndexOffset for the other half of this fix.
+        // zIndexOffset for the other half of this fix. Clustering (see
+        // sharedMarkerCluster) now handles the general case of several
+        // markers genuinely overlapping — this anchoring trick still helps
+        // the specific case of a POI badge and the pin at its own exact
+        // coordinate both being visible at once inside a cluster's own
+        // spiderfied fan-out, not just before it existed.
         const icon = L.divIcon({
             className: '',
             html: `<div style="position:relative;width:26px;height:34px;">
@@ -8493,8 +8558,9 @@ function renderPoiLayer(items) {
             .join('');
         const popupHtml = `<strong>${t('poi.popup_title')}</strong><br>${reportedBy}${notesHtml}<br><span class="small text-muted">${p.created_at}</span>` +
             (p.checked_at ? `<br><span class="small text-success">${t('poi.checked_at_prefix', {time: p.checked_at, name: escapeHtml(p.checked_by_name || '')})}</span>` : '');
-        L.marker([p.lat, p.lng], {icon}).addTo(poiLayer).bindPopup(popupHtml);
+        return L.marker([p.lat, p.lng], {icon}).bindPopup(popupHtml);
     });
+    sharedMarkerCluster.addLayers(currentPoiMarkers);
 }
 
 // Reuses the existing #mediaViewModal lightbox — openMediaViewModal() above
