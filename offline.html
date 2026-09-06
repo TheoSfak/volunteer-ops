@@ -321,10 +321,13 @@
         if ((snapshot.tasks || []).length) {
             html += '<div class="snap-section-title">' + esc(t('tasks')) + '</div>';
             snapshot.tasks.forEach(function(task) {
-                // Shape comes from loadMyTaskOrdersForUser(): task_text/sent_at,
-                // not title/body.
+                // Shape comes from loadMyTaskOrdersForUser(): label/sent_at,
+                // not title/body. label is pre-computed server-side (raw
+                // task text for a 'task' order, else the localized
+                // "order requested" string) since this offline page has no
+                // access to war-room.php's own t() dictionary to derive it.
                 html += '<div class="snap-card"><div class="snap-note" style="margin-top:0;">'
-                     +  esc(task.task_text || '') + '</div>';
+                     +  esc(task.label || '') + '</div>';
                 if (task.sent_at) {
                     html += '<div class="snap-contact-role" style="margin-top:.3rem;">' + esc(task.sent_at) + '</div>';
                 }

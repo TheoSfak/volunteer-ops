@@ -3354,22 +3354,47 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         // resolvable through the UI again, so this warns with the real counts
         // before the generic confirm, rather than staying silent about it.
         $openItemsCount = count($incidents) + count($shortageReports) + count($sosAlerts);
+        // One line per open item, not just the count — so the admin can see
+        // exactly what they're about to lose the ability to manage (see
+        // close_open_items_warning above), not just how many. Kept as raw
+        // (unescaped) text: the confirm() dialog below is plain text (no
+        // HTML to interpret), and the alert box further down applies h()
+        // itself per line at render time — one source, correct escaping at
+        // each of its two different output contexts.
+        $openItemsLines = [];
+        foreach ($incidents as $inc) {
+            $who = $inc['is_unknown_patient'] ? t('incident.unknown_patient_label') : ($inc['patient_name'] ?: t('incident.unknown_patient_label'));
+            $openItemsLines[] = $inc['type_label'] . ' — ' . $who . ' (' . $inc['team_label'] . ')';
+        }
+        foreach ($shortageReports as $sr) {
+            $openItemsLines[] = $sr['type_label'] . ': ' . $sr['title'] . ' (' . $sr['team_label'] . ')';
+        }
+        foreach ($sosAlerts as $sos) {
+            $openItemsLines[] = 'SOS — ' . $sos['user_name'] . ' (' . $sos['team_label'] . ')';
+        }
         $closeConfirmMsg = t('admin.close_confirm');
         if ($openItemsCount > 0) {
             $closeConfirmMsg = t('admin.close_open_items_warning', [
                 'incidents' => count($incidents), 'shortages' => count($shortageReports), 'sos' => count($sosAlerts),
-            ]) . ' ' . $closeConfirmMsg;
+            ]) . "\n" . implode("\n", array_map(fn($l) => '- ' . $l, $openItemsLines)) . "\n\n" . $closeConfirmMsg;
         }
         ?>
         <div class="card border-danger shadow-sm" data-card-id="missionMgmtCard">
             <div class="card-body"><h6 data-card-drag-handle><i class="bi bi-shield-exclamation text-danger me-1"></i><?= t('admin.mission_mgmt_title') ?></h6>
                 <p class="small text-muted"><?= t('admin.close_note') ?></p>
                 <?php if ($openItemsCount > 0): ?>
-                <div class="alert alert-warning small py-2 px-2 mb-2"><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('admin.close_open_items_warning', [
-                    'incidents' => count($incidents), 'shortages' => count($shortageReports), 'sos' => count($sosAlerts),
-                ]) ?></div>
+                <div class="alert alert-warning small py-2 px-2 mb-2">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('admin.close_open_items_warning', [
+                        'incidents' => count($incidents), 'shortages' => count($shortageReports), 'sos' => count($sosAlerts),
+                    ]) ?>
+                    <ul class="mb-0 mt-1 ps-3">
+                        <?php foreach ($openItemsLines as $line): ?>
+                        <li><?= h($line) ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
                 <?php endif; ?>
-                <form method="post" onsubmit="return confirm('<?= h(addslashes($closeConfirmMsg)) ?>')">
+                <form method="post" onsubmit="return confirm(<?= h(json_encode($closeConfirmMsg)) ?>)">
                     <?= csrfField() ?><input type="hidden" name="action" value="close_mission">
                     <button class="btn btn-danger w-100"><i class="bi bi-x-octagon-fill me-1"></i><?= t('admin.close_btn') ?></button>
                 </form>
@@ -4265,6 +4290,13 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
     });
 
     function clearBadge(tab) {
+        // 'me' is excluded: its badge is a genuine outstanding-orders count
+        // (see setBadgeCount/wr-my-tasks-updated below), not an "unread
+        // since you last looked" indicator like chat's — opening the tab
+        // doesn't make a still-unfulfilled order any less outstanding, so it
+        // must only ever change via a fresh count from renderMyTasks(),
+        // never by being viewed.
+        if (tab === 'me') return;
         const el = badgeOf[tab];
         if (!el) return;
         el.dataset.count = '0';
@@ -4281,6 +4313,23 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
         el.textContent = next > 9 ? '9+' : String(next);
         el.setAttribute('aria-label', next + ' ' + t('tabs.unread_chat'));
         el.classList.remove('d-none');
+    }
+    // Unlike bumpBadge above (increments, skipped while already looking at
+    // the tab), this always SETS the badge to the given total and never
+    // skips based on activeTab — a pending order doesn't stop being pending
+    // just because the volunteer has "Εγώ" open right now.
+    function setBadgeCount(tab, n) {
+        const el = badgeOf[tab];
+        if (!el) return;
+        el.dataset.count = String(n);
+        el.textContent = n > 9 ? '9+' : String(n);
+        if (n > 0) {
+            el.setAttribute('aria-label', t('tabs.pending_orders', {count: n}));
+            el.classList.remove('d-none');
+        } else {
+            el.removeAttribute('aria-label');
+            el.classList.add('d-none');
+        }
     }
 
     let activeTab = null;
@@ -4352,6 +4401,12 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
     // reports here via a custom event instead of a direct call, since
     // bumpBadge lives in this closure and the chat code is a different one.
     document.addEventListener('wr-chat-unread', e => bumpBadge('team', e.detail.count));
+    // renderMyTasks() (outside this closure, hence the event rather than a
+    // direct call — same reasoning as wr-chat-unread above) dispatches this
+    // every time it renders, whether from the initial load, a poll tick, or
+    // right after an ack/complete click — so this always reflects the
+    // current true count, never a stale one.
+    document.addEventListener('wr-my-tasks-updated', e => setBadgeCount('me', e.detail.count));
 
     // --- hold-to-fire SOS ------------------------------------------------
     const sosBtn = document.getElementById('wrTabSos');
@@ -7383,20 +7438,39 @@ function renderMyTasks(items) {
         return;
     }
     list.innerHTML = items.map(task => {
+        const isTask = task.order_type === 'task';
         let actionHtml;
         if (task.fulfilled_at) {
             actionHtml = `<span class="badge bg-success">${t('mytasks.completed_at_prefix', {time: task.fulfilled_at})}</span>`;
-        } else if (task.acknowledged_at) {
+        } else if (isTask && task.acknowledged_at) {
             actionHtml = `<button type="button" class="btn btn-sm btn-success w-100 my-task-complete-btn" data-order-id="${task.order_id}">${t('mytasks.complete_btn')}</button>`;
+        } else if (!isTask && task.acknowledged_at) {
+            // location/photo/video have no manual "complete" step — they
+            // fulfill themselves the moment the volunteer actually does the
+            // real thing (see loadMyTaskOrdersForUser()'s docblock), so once
+            // acknowledged there's nothing left to click here but waiting.
+            actionHtml = `<span class="badge bg-warning text-dark">${t('mytasks.pending_action_badge')}</span>`;
         } else {
             actionHtml = `<button type="button" class="btn btn-sm btn-warning w-100 my-task-ack-btn" data-order-id="${task.order_id}">${t('banner.ack_btn')}</button>`;
         }
+        // task.label is already the right display text either way (raw
+        // task_text for a task, the localized "order.X.title" string
+        // otherwise) — only the free-typed task case needs escaping here,
+        // same as before this just had one branch.
+        const labelHtml = isTask ? escapeHtml(task.label) : task.label;
         return `<div class="border rounded p-2 mb-2">
-            <div class="small">${escapeHtml(task.task_text)}</div>
+            <div class="small">${labelHtml}</div>
             <div class="text-muted" style="font-size:.75rem;">${t('mytasks.sent_prefix', {time: task.sent_at})}</div>
             <div class="mt-1">${actionHtml}</div>
         </div>`;
     }).join('');
+    // Drives the "Εγώ" tab's badge (see the wr-my-tasks-updated listener in
+    // the tabs IIFE) — a genuine outstanding-count, not an "unread since you
+    // last looked" indicator like the chat badge, so it's recomputed fresh
+    // from current state every time this renders rather than incremented.
+    document.dispatchEvent(new CustomEvent('wr-my-tasks-updated', {
+        detail: {count: items.filter(task => !task.fulfilled_at).length}
+    }));
     list.querySelectorAll('.my-task-ack-btn').forEach(btn => btn.addEventListener('click', () => {
         btn.disabled = true;
         const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge', order_id: btn.dataset.orderId});

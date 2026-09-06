@@ -844,25 +844,41 @@ function loadMissionAnnotationsForMission(int $missionId): array {
 }
 
 /**
- * War Room: load $userId's own task-type orders for a mission — the "Οι Εντολές μου"
- * self-service checklist. Unlike location/photo/video (auto-fulfilled elsewhere),
- * task orders can only be marked complete by the recipient via mission-order.php
- * action=complete, so the UI needs each one's ack/fulfill state. Shared by
- * war-room.php (full render + ajax poll), like loadMissionPhotosForUser above.
+ * War Room: load $userId's own personal orders for a mission — the "Οι
+ * Εντολές μου" self-service checklist. Covers every order_type that targets
+ * one specific recipient and is meaningful to track as "still owed" (task,
+ * plus the three field-request types: location/photo/video) — NOT route
+ * (its own dedicated myRouteCard with map/step UI) or charge_phone (a
+ * system nudge, not something asked of the volunteer).
+ *
+ * 'task' is the only type ever manually completed by the recipient
+ * (mission-order.php action=complete) — location/photo/video instead
+ * auto-fulfill themselves the moment the real action happens
+ * (ping-location.php / mission-photo.php), so the renderer must branch on
+ * order_type to know whether a "Ολοκληρώθηκε" button makes sense at all.
+ * 'label' is computed here (not client-side) so every consumer — the live
+ * war-room.php renderer AND offline.html's cached-snapshot view, which has
+ * no access to war-room.php's own t() dictionary — can just display it
+ * without each needing its own order_type-to-text mapping.
+ *
+ * Shared by war-room.php (full render + ajax poll), like
+ * loadMissionPhotosForUser above.
  */
 function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
     $rows = dbFetchAll(
-        "SELECT o.id AS order_id, o.task_text, o.created_at, r.acknowledged_at, r.fulfilled_at
+        "SELECT o.id AS order_id, o.order_type, o.task_text, o.created_at, r.acknowledged_at, r.fulfilled_at
          FROM mission_order_recipients r
          JOIN mission_orders o ON o.id = r.order_id
-         WHERE o.mission_id = ? AND r.user_id = ? AND o.order_type = 'task'
+         WHERE o.mission_id = ? AND r.user_id = ? AND o.order_type IN ('task', 'location', 'photo', 'video')
          ORDER BY o.created_at DESC",
         [$missionId, $userId]
     );
 
     return array_map(fn($row) => [
         'order_id'        => (int) $row['order_id'],
+        'order_type'      => $row['order_type'],
         'task_text'       => $row['task_text'],
+        'label'           => $row['order_type'] === 'task' ? $row['task_text'] : t('order.' . $row['order_type'] . '.title'),
         'sent_at'         => date('d/m H:i', strtotime($row['created_at'])),
         'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
         'fulfilled_at'    => $row['fulfilled_at'] ? date('d/m H:i', strtotime($row['fulfilled_at'])) : null,
