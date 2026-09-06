@@ -1620,6 +1620,12 @@ include __DIR__ . '/includes/header.php';
         display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
         border: 0; background: transparent; padding: 0;
         color: #dc3545; font-size: .625rem; font-weight: 700;
+        /* This is a hold-for-1s-to-fire control, not a tap target — without
+           this, a real touchscreen is free to interpret the hold as the
+           start of a scroll/pan and cancel it mid-hold (pointercancel),
+           which reads as "I held it and nothing happened". Belt-and-braces
+           with the JS's own preventDefault()/contextmenu guard below. */
+        touch-action: none;
     }
     .wr-tabbar-sos .wr-sos-dot {
         width: 54px; height: 54px; margin-top: -16px; margin-bottom: 2px;
@@ -1640,7 +1646,14 @@ include __DIR__ . '/includes/header.php';
     @keyframes wrSosPulse { 50% { transform: scale(1.2); box-shadow: 0 0 0 14px rgba(220,53,69,0); } }
     .wr-sos-hint {
         position: fixed; left: 50%; transform: translateX(-50%);
-        bottom: 86px; z-index: 1031;
+        bottom: 86px;
+        /* Must outrank .war-room-banner (z-index 1900) — that ticker can now
+           sit bottom-anchored (Settings: war_room_ticker_position) right in
+           this same screen region on a volunteer's phone, and this hint is
+           the only feedback telling them the hold registered (or that a tap
+           alone won't fire it); silently hiding it behind an active ticker
+           row reads as the SOS button not responding at all. */
+        z-index: 1910;
         background: #212529; color: #fff; padding: 7px 14px; border-radius: 999px;
         font-size: .8125rem; box-shadow: 0 4px 14px rgba(0,0,0,.3);
     }
@@ -2028,7 +2041,9 @@ include __DIR__ . '/includes/header.php';
             <span class="badge fs-6 <?= $timeState === 'active' ? 'bg-success' : ($timeState === 'upcoming' ? 'bg-info text-dark' : 'bg-warning text-dark') ?>">
                 <?= $timeState === 'active' ? t('hero.status_active') : ($timeState === 'upcoming' ? t('hero.status_upcoming') : t('hero.status_overdue')) ?>
             </span>
+            <?php if (hasPagePermission('ops_dashboard')): ?>
             <a href="ops-dashboard.php" class="btn btn-light"><i class="bi bi-arrow-left me-1"></i><?= t('hero.btn_back_ops') ?></a>
+            <?php endif; ?>
         </div>
     </div>
     <div class="d-flex gap-1 align-items-center flex-wrap justify-content-end">
@@ -4328,6 +4343,15 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
             bumpBadge('team', added);
         }).observe(chatMsgs, {childList: true});
     }
+    // The MutationObserver above only ever sees whichever room's messages
+    // are actually rendered into #chatMessages right now — a message that
+    // arrives in the OTHER room this volunteer can see (general vs. their
+    // own team) is never fetched at all unless they happen to switch to it,
+    // so it can never trigger a DOM mutation here. The chat IIFE further
+    // down separately polls that other room (never rendering it) and
+    // reports here via a custom event instead of a direct call, since
+    // bumpBadge lives in this closure and the chat code is a different one.
+    document.addEventListener('wr-chat-unread', e => bumpBadge('team', e.detail.count));
 
     // --- hold-to-fire SOS ------------------------------------------------
     const sosBtn = document.getElementById('wrTabSos');
@@ -11007,6 +11031,32 @@ document.querySelectorAll('.team-form').forEach(form => {
                 if (nearBottom) chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
             })
             .catch(() => {});
+        pollOtherRoomsForUnread();
+    }
+
+    // Volunteer tab-bar unread badge only (see the 'wr-chat-unread' listener
+    // set up alongside bumpBadge further up) — #chatMessages only ever holds
+    // whichever room is actually open, so a message arriving in the OTHER
+    // room this volunteer can see (general vs. their own team) needs its own
+    // poll to be noticed at all; same after_id-cursor idea as pollRoom()
+    // above, just never rendered. Skipped entirely for admins/desktop
+    // volunteers: no tab bar means nowhere to show a badge, and admins can
+    // have many team rooms, so blindly polling every one of them here every
+    // 5s for no visible benefit would just be wasted chat traffic.
+    function pollOtherRoomsForUnread() {
+        if (!document.body.classList.contains('wr-tabs-ready')) return;
+        document.querySelectorAll('.chat-room-tab').forEach(tab => {
+            const otherTeamId = tab.dataset.teamId;
+            if (otherTeamId === activeTeamId || !(otherTeamId in lastIdByRoom)) return;
+            fetch(`mission-chat.php?mission_id=${missionId}&team_id=${otherTeamId}&after_id=${lastIdByRoom[otherTeamId]}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.ok || !data.messages.length) return;
+                    lastIdByRoom[otherTeamId] = data.messages[data.messages.length - 1].id;
+                    document.dispatchEvent(new CustomEvent('wr-chat-unread', {detail: {count: data.messages.length}}));
+                })
+                .catch(() => {});
+        });
     }
 
     function deleteMessage(id, el) {
@@ -11040,6 +11090,22 @@ document.querySelectorAll('.team-form').forEach(form => {
     });
 
     loadRoom('');
+    // Baseline cursor for every OTHER room this volunteer can see (never
+    // rendered here — #chatMessages only ever shows the one actually open),
+    // so pollOtherRoomsForUnread()'s first real tick counts genuinely NEW
+    // messages only, not that room's entire pre-existing history.
+    if (document.body.classList.contains('wr-tabs-ready')) {
+        document.querySelectorAll('.chat-room-tab').forEach(tab => {
+            const otherTeamId = tab.dataset.teamId;
+            if (otherTeamId === activeTeamId) return;
+            fetch(`mission-chat.php?mission_id=${missionId}&team_id=${otherTeamId}&after_id=0`)
+                .then(response => response.json())
+                .then(data => {
+                    lastIdByRoom[otherTeamId] = (data.ok && data.messages.length) ? data.messages[data.messages.length - 1].id : 0;
+                })
+                .catch(() => {});
+        });
+    }
     setInterval(() => { if (!document.hidden) pollRoom(); }, 5000);
     // Scoped here (not the outer visibilitychange listener further up) since
     // pollRoom only exists inside this closure.

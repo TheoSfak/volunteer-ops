@@ -1261,7 +1261,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="mb-3">
                         <label class="form-label">Συχνότητα Αυτόματου Στίγματος Action Room (δευτ.)</label>
                         <input type="number" class="form-control" style="max-width:160px;" name="war_room_auto_ping_seconds"
-                               value="<?= h($settings['war_room_auto_ping_seconds']) ?>" min="30" max="1800" step="10">
+                               value="<?= h($settings['war_room_auto_ping_seconds']) ?>" min="5" max="1800" step="5">
                         <small class="text-muted">Πόσο συχνά στέλνεται αυτόματα το στίγμα GPS ενός εθελοντή όσο έχει ανοιχτό το Action Room. Λειτουργεί μόνο ενώ η σελίδα παραμένει ανοιχτή στο προσκήνιο — αν κλειδώσει η οθόνη ή αλλάξει εφαρμογή, το πρόγραμμα περιήγησης σταματά το αυτόματο στίγμα (περιορισμός των κινητών, όχι της εφαρμογής).</small>
                     </div>
                     <div class="mb-3">
