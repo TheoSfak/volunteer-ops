@@ -180,6 +180,16 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
             </div>
         </div>
+        <?php if (empty($currentUser['telegram_chat_id'])): ?>
+        <div class="alert alert-light border small mt-3 mb-0">
+            <strong>Τι θα γίνει όταν πατήσετε «Σύνδεση»:</strong>
+            <ol class="mb-0 mt-1 ps-3">
+                <li>Θα ανοίξει αυτόματα το Telegram με το bot μας.</li>
+                <li>Πατήστε <strong>«START»</strong> (ή «ΕΚΚΙΝΗΣΗ») στη συνομιλία που θα εμφανιστεί — τίποτα άλλο δεν χρειάζεται να γράψετε.</li>
+                <li>Θα λάβετε αμέσως εκεί μήνυμα επιβεβαίωσης. Από εκείνη τη στιγμή, κάθε «Άμεση Κινητοποίηση» του διαχειριστή θα φτάνει κατευθείαν στο κινητό σας.</li>
+            </ol>
+        </div>
+        <?php endif; ?>
     </div>
 </div>
 <?php endif; ?>
