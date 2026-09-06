@@ -164,6 +164,19 @@ function exportVolunteersToCsv($filters = []) {
     if (!empty($filters['dog_handler'])) {
         $where[] = 'u.is_dog_handler = 1';
     }
+    // Team/org filter — same prefixed "team:2"/"tag:3" value and reasoning
+    // as volunteers.php's own $teamFilter (a guest can be classified through
+    // either table, so the value itself says which one, not the tab).
+    if (!empty($filters['team_id'])) {
+        [$teamFilterType, $teamFilterId] = array_pad(explode(':', $filters['team_id'], 2), 2, '');
+        if ($teamFilterType === 'tag') {
+            $where[] = 'u.mission_visitor_tag_id = ?';
+            $params[] = (int) $teamFilterId;
+        } elseif ($teamFilterType === 'team') {
+            $where[] = 'u.volunteer_team_id = ?';
+            $params[] = (int) $teamFilterId;
+        }
+    }
 
     $skillJoin = '';
     if (!empty($filters['skill_id'])) {
@@ -197,6 +210,7 @@ function exportVolunteersToCsv($filters = []) {
                 u.department_id,
                 d.name  AS department,
                 wh.name AS warehouse,
+                COALESCE(vt.name, mvt.label) AS home_team_name,
                 vp.address,
                 vp.city,
                 vp.postal_code,
@@ -215,6 +229,8 @@ function exportVolunteersToCsv($filters = []) {
             LEFT JOIN departments d  ON u.department_id  = d.id
             LEFT JOIN departments wh ON u.warehouse_id   = wh.id
             LEFT JOIN volunteer_profiles vp ON vp.user_id = u.id
+            LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+            LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
             WHERE " . implode(' AND ', $where) . "
             ORDER BY LOWER(TRIM(SUBSTRING_INDEX(TRIM(u.name), ' ', 1))) ASC, LOWER(TRIM(u.name)) ASC, u.id ASC";
 
@@ -242,7 +258,7 @@ function exportVolunteersToCsv($filters = []) {
         'Παντελόνι', 'Μπλούζα', 'Μπλάκετ', 'Fleece',
         'Μητρώο Επίδρασης', 'Μητρώο ΓΓΠΠ',
         'Ρόλος', 'Τύπος Εθελοντή', 'Ενεργός', 'Πόντοι',
-        'Τμήμα ID', 'Τμήμα', 'Αποθήκη/Παράρτημα',
+        'Τμήμα ID', 'Τμήμα', 'Αποθήκη/Παράρτημα', 'Ομάδα/Φορέας',
         'Διεύθυνση', 'Πόλη', 'ΤΚ',
         'Επαφή Έκτακτης Ανάγκης', 'Τηλ. Επαφής Έκτακτης',
         'Ομάδα Αίματος', 'Βιογραφικό', 'Ιατρικές Σημειώσεις',
@@ -277,6 +293,7 @@ function exportVolunteersToCsv($filters = []) {
             $v['department_id'],
             $v['department'],
             $v['warehouse'],
+            $v['home_team_name'],
             $v['address'],
             $v['city'],
             $v['postal_code'],

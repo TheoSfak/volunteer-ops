@@ -27,6 +27,8 @@ $departmentId = get('department_id', '');
 $warehouseId = get('warehouse_id', '');
 $status = get('status', '');
 $skillId = (int) get('skill_id', 0);
+$teamFilter = get('team_id', '');
+$sort = get('sort', 'name') === 'team' ? 'team' : 'name';
 // K9 handlers — the question an admin asks while staffing a search mission
 // ("who can bring a dog?"), so it filters on both tabs, volunteers and guests.
 $dogHandler = get('dog_handler', '') === '1';
@@ -69,6 +71,25 @@ if ($warehouseId) {
 
 if ($dogHandler) {
     $where[] = "u.is_dog_handler = 1";
+}
+
+// Team/org filter. Prefixed value ("team:2" / "tag:3") because a guest can
+// be classified through EITHER table — real data has both in live use (a
+// registered partner org sits in volunteer_teams same as internal teams,
+// while an ad hoc walk-up visitor gets a mission_visitor_tags row instead),
+// so the guest tab can't assume just one, unlike the plain volunteer tab
+// (confirmed: no is_external=0 user has ever had mission_visitor_tag_id
+// set). Same COALESCE(vt.name, mvt.label) this page already reads for the
+// name-badge below.
+if ($teamFilter !== '') {
+    [$teamFilterType, $teamFilterId] = array_pad(explode(':', $teamFilter, 2), 2, '');
+    if ($teamFilterType === 'tag') {
+        $where[] = "u.mission_visitor_tag_id = ?";
+        $params[] = (int) $teamFilterId;
+    } elseif ($teamFilterType === 'team') {
+        $where[] = "u.volunteer_team_id = ?";
+        $params[] = (int) $teamFilterId;
+    }
 }
 
 // Skill filter — JOIN user_skills when a skill is selected
@@ -117,7 +138,12 @@ $volunteers = dbFetchAll(
          GROUP BY volunteer_id
      ) pr_stats ON u.id = pr_stats.volunteer_id
      WHERE $whereClause
-     ORDER BY {$volunteerSurnameOrder} ASC, {$volunteerNameOrder} ASC, u.id ASC
+     ORDER BY " . ($sort === 'team'
+         // NULLS-last: an unassigned volunteer/guest sorting to the very top
+         // of a "sort by team" view is the one case actually worth special-
+         // casing here — everyone else already reads fine on plain ASC.
+         ? "(home_team_name IS NULL) ASC, LOWER(home_team_name) ASC, {$volunteerSurnameOrder} ASC, {$volunteerNameOrder} ASC, u.id ASC"
+         : "{$volunteerSurnameOrder} ASC, {$volunteerNameOrder} ASC, u.id ASC") . "
      LIMIT {$pagination['offset']}, {$pagination['per_page']}",
     array_merge([PARTICIPATION_APPROVED], $params)
 );
@@ -130,6 +156,16 @@ $warehouses = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory =
 
 // Get all skills for filter dropdown (grouped)
 $allSkillsForFilter = dbFetchAll("SELECT * FROM skills ORDER BY category, name");
+
+// Team/org filter options — see the $teamFilter WHERE clause above for why
+// both sources are offered on the guest tab but only volunteer_teams on the
+// plain one.
+$teamsForFilter = array_map(fn($t) => ['value' => 'team:' . $t['id'], 'name' => $t['name']],
+    dbFetchAll("SELECT id, name FROM volunteer_teams ORDER BY name"));
+if ($isGuestTab) {
+    $teamsForFilter = array_merge($teamsForFilter, array_map(fn($t) => ['value' => 'tag:' . $t['id'], 'name' => $t['name']],
+        dbFetchAll("SELECT id, label AS name FROM mission_visitor_tags ORDER BY label")));
+}
 
 // Handle actions
 if (isPost()) {
@@ -461,6 +497,7 @@ include __DIR__ . '/includes/header.php';
                 <label class="form-label">Αναζήτηση</label>
                 <input type="text" class="form-control" name="search" value="<?= h($search) ?>" placeholder="Όνομα, email, τηλέφωνο...">
             </div>
+            <?php if (!$isGuestTab): ?>
             <div class="col-md-2">
                 <label class="form-label">Τύπος Εθελοντή</label>
                 <select name="volunteer_type" class="form-select">
@@ -470,6 +507,7 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </select>
             </div>
+            <?php endif; ?>
             <?php if ($isGuestTab): ?>
             <div class="col-md-2">
                 <label class="form-label">Τύπος</label>
@@ -480,7 +518,18 @@ include __DIR__ . '/includes/header.php';
                 </select>
             </div>
             <?php endif; ?>
-            <?php if ($user['role'] === ROLE_SYSTEM_ADMIN): ?>
+            <div class="col-md-2">
+                <label class="form-label">Ομάδα</label>
+                <select name="team_id" class="form-select">
+                    <option value="">Όλες</option>
+                    <?php foreach ($teamsForFilter as $t): ?>
+                        <option value="<?= h($t['value']) ?>" <?= $teamFilter === $t['value'] ? 'selected' : '' ?>>
+                            <?= h($t['name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php if ($user['role'] === ROLE_SYSTEM_ADMIN && !$isGuestTab): ?>
             <div class="col-md-2">
                 <label class="form-label">Σώμα</label>
                 <select name="department_id" class="form-select">
@@ -523,6 +572,13 @@ include __DIR__ . '/includes/header.php';
                         </option>
                     <?php endforeach; ?>
                     <?php if ($currentCat !== '') echo '</optgroup>'; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Ταξινόμηση</label>
+                <select name="sort" class="form-select" onchange="this.form.submit()">
+                    <option value="name" <?= $sort === 'name' ? 'selected' : '' ?>>Όνομα</option>
+                    <option value="team" <?= $sort === 'team' ? 'selected' : '' ?>>Ομάδα</option>
                 </select>
             </div>
             <div class="col-md-2 d-flex align-items-end">

@@ -16,6 +16,7 @@ $filters = [
     'dog_handler' => get('dog_handler') === '1',
     'is_external' => $isGuestTab ? 1 : 0,
     'guest_kind' => $isGuestTab ? get('guest_kind', '') : '',
+    'team_id' => get('team_id', ''),
 ];
 
 // Department admins can only export their own department
