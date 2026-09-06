@@ -685,11 +685,11 @@ if (isPost()) {
                         dbInsert("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$k, $v]);
                     }
                 }
-                $webhookOk = registerTelegramWebhook();
+                $webhook = registerTelegramWebhook($telegramTokenInput);
                 logAudit('update_settings', 'settings', null, 'Telegram bot token');
-                $telegramFlash = $webhookOk
+                $telegramFlash = $webhook['ok']
                     ? ['success', 'Το Telegram bot συνδέθηκε (@' . $botUsername . ') και ενεργοποιήθηκε ο webhook.']
-                    : ['warning', 'Το bot token αποθηκεύτηκε (@' . $botUsername . ') αλλά η καταχώρηση webhook απέτυχε — το site πρέπει να είναι προσβάσιμο μέσω HTTPS από το διαδίκτυο.'];
+                    : ['warning', 'Το bot token αποθηκεύτηκε (@' . $botUsername . ') αλλά η καταχώρηση webhook απέτυχε' . ($webhook['description'] !== '' ? ': ' . $webhook['description'] : '') . '. Δοκιμάστε «Επανεγγραφή Webhook» παρακάτω.'];
             }
         } elseif ($telegramTokenInput === '' && post('telegram_bot_token_clear') === '1') {
             dbExecute("UPDATE settings SET setting_value = '', updated_at = NOW() WHERE setting_key IN ('telegram_bot_token', 'telegram_bot_username')");
@@ -704,7 +704,23 @@ if (isPost()) {
             setFlash('success', 'Οι γενικές ρυθμίσεις αποθηκεύτηκαν.');
         }
         redirect('settings.php?tab=general');
-        
+
+    } elseif ($action === 'telegram_reregister_webhook') {
+        // Own action, deliberately not folded into save_general above: that
+        // handler's fieldsToUpdate loop treats any field missing from the
+        // POST body as "clear it", so a minimal one-button form posting only
+        // this action would wipe every other general setting to empty.
+        if (isTelegramConfigured()) {
+            $webhook = registerTelegramWebhook();
+            logAudit('update_settings', 'settings', null, 'Telegram webhook re-register');
+            if ($webhook['ok']) {
+                setFlash('success', 'Ο webhook ενεργοποιήθηκε: ' . $webhook['url']);
+            } else {
+                setFlash('error', 'Απέτυχε η καταχώρηση webhook' . ($webhook['description'] !== '' ? ': ' . $webhook['description'] : '.'));
+            }
+        }
+        redirect('settings.php?tab=general');
+
     } elseif ($action === 'save_smtp') {
         // Save SMTP settings
         $smtpFields = ['smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_encryption', 'smtp_from_email', 'smtp_from_name'];
@@ -1673,6 +1689,13 @@ include __DIR__ . '/includes/header.php';
                         <input type="checkbox" name="telegram_bot_token_clear" value="1" class="form-check-input" id="telegramClear">
                         <label class="form-check-label" for="telegramClear"><span class="text-danger">Κατάργηση σύνδεσης bot</span></label>
                     </div>
+                    <div class="mt-2">
+                        <!-- Submits telegramReregisterForm, a standalone form placed after
+                             this whole tab closes — nesting a form here would be invalid,
+                             since this card already sits inside the "Αποθήκευση Ρυθμίσεων" form. -->
+                        <button type="submit" form="telegramReregisterForm" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-repeat"></i> Επανεγγραφή Webhook</button>
+                        <span class="form-text">Πατήστε το αν η σύνδεση εθελοντών δεν λειτουργεί παρόλο που το bot είναι συνδεδεμένο.</span>
+                    </div>
                     <?php else: ?>
                     <div class="alert alert-secondary py-1 px-2 mb-0 small">
                         <i class="bi bi-info-circle me-1"></i>Χωρίς bot, το κουμπί «Άμεση Κινητοποίηση» και η σύνδεση Telegram των εθελοντών δεν είναι διαθέσιμα.
@@ -1707,7 +1730,7 @@ include __DIR__ . '/includes/header.php';
             </div>
     </div>
     </div>
-    
+
     <div class="card">
         <div class="card-body">
             <button type="submit" class="btn btn-primary">
@@ -1715,6 +1738,10 @@ include __DIR__ . '/includes/header.php';
             </button>
         </div>
     </div>
+</form>
+<form id="telegramReregisterForm" method="post" class="d-none">
+    <?= csrfField() ?>
+    <input type="hidden" name="action" value="telegram_reregister_webhook">
 </form>
 <?php endif; ?>
 

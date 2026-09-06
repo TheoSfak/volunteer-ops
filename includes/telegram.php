@@ -148,8 +148,16 @@ function sendTelegramBroadcast(string $text): array {
  * The secret_token round-trips back on every webhook POST as the
  * X-Telegram-Bot-Api-Secret-Token header - that's the only auth the webhook
  * has, since it's a public endpoint Telegram's servers call directly.
+ *
+ * Returns Telegram's own 'description' on failure (e.g. "HTTPS url must be
+ * provided" or a certificate/DNS complaint) rather than a bare bool - this
+ * is the only way to see WHY a registration was rejected, since a rejected
+ * setWebhook leaves no trace in getWebhookInfo (its 'url' just stays empty)
+ * and this server's own outbound HTTPS to api.telegram.org already works
+ * fine for every other call (getMe), so the failure is specific to Telegram
+ * reaching back to OUR url, not this server reaching Telegram.
  */
-function registerTelegramWebhook(?string $tokenOverride = null): bool {
+function registerTelegramWebhook(?string $tokenOverride = null): array {
     $secret = trim(getSetting('telegram_webhook_secret', ''));
     if ($secret === '') {
         $secret = bin2hex(random_bytes(32));
@@ -167,5 +175,9 @@ function registerTelegramWebhook(?string $tokenOverride = null): bool {
         'allowed_updates' => ['message'],
     ], $tokenOverride);
 
-    return $result !== null && !empty($result['ok']);
+    return [
+        'ok' => $result !== null && !empty($result['ok']),
+        'description' => $result['description'] ?? ($result === null ? 'Δεν ελήφθη απάντηση από το Telegram (πρόβλημα δικτύου).' : ''),
+        'url' => $url,
+    ];
 }
