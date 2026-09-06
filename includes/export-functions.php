@@ -232,7 +232,13 @@ function exportVolunteersToCsv($filters = []) {
             LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
             LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
             WHERE " . implode(' AND ', $where) . "
-            ORDER BY LOWER(TRIM(SUBSTRING_INDEX(TRIM(u.name), ' ', 1))) ASC, LOWER(TRIM(u.name)) ASC, u.id ASC";
+            ORDER BY " . (($filters['sort'] ?? '') === 'team'
+                // Mirrors volunteers.php's own $sort==='team' branch exactly
+                // (including the NULLS-last tiebreak) — the CSV must sort the
+                // same way the screen it's supposed to match just did, not
+                // silently fall back to the default name order.
+                ? "(home_team_name IS NULL) ASC, LOWER(home_team_name) ASC, LOWER(TRIM(SUBSTRING_INDEX(TRIM(u.name), ' ', 1))) ASC, LOWER(TRIM(u.name)) ASC, u.id ASC"
+                : "LOWER(TRIM(SUBSTRING_INDEX(TRIM(u.name), ' ', 1))) ASC, LOWER(TRIM(u.name)) ASC, u.id ASC") . "";
 
     $volunteers = dbFetchAll($sql, $params);
 
@@ -253,12 +259,12 @@ function exportVolunteersToCsv($filters = []) {
     $vtypes = ['VOLUNTEER' => 'VOLUNTEER', 'TRAINEE_RESCUER' => 'TRAINEE_RESCUER', 'RESCUER' => 'RESCUER'];
 
     fputcsvSafe($out, [
-        'ID', 'Όνομα', 'Email', 'Τηλέφωνο', 'Ταυτότητα', 'ΑΦΜ', 'ΑΜΚΑ',
+        'ID', 'Όνομα', 'Ομάδα/Φορέας', 'Email', 'Τηλέφωνο', 'Ταυτότητα', 'ΑΦΜ', 'ΑΜΚΑ',
         'Δίπλωμα Οδήγησης', 'Πινακίδα Οχήματος',
         'Παντελόνι', 'Μπλούζα', 'Μπλάκετ', 'Fleece',
         'Μητρώο Επίδρασης', 'Μητρώο ΓΓΠΠ',
         'Ρόλος', 'Τύπος Εθελοντή', 'Ενεργός', 'Πόντοι',
-        'Τμήμα ID', 'Τμήμα', 'Αποθήκη/Παράρτημα', 'Ομάδα/Φορέας',
+        'Τμήμα ID', 'Τμήμα', 'Αποθήκη/Παράρτημα',
         'Διεύθυνση', 'Πόλη', 'ΤΚ',
         'Επαφή Έκτακτης Ανάγκης', 'Τηλ. Επαφής Έκτακτης',
         'Ομάδα Αίματος', 'Βιογραφικό', 'Ιατρικές Σημειώσεις',
@@ -273,6 +279,7 @@ function exportVolunteersToCsv($filters = []) {
         fputcsvSafe($out, [
             $v['id'],
             $v['name'],
+            $v['home_team_name'],
             $v['email'],
             $v['phone'],
             $v['id_card'],
@@ -293,7 +300,6 @@ function exportVolunteersToCsv($filters = []) {
             $v['department_id'],
             $v['department'],
             $v['warehouse'],
-            $v['home_team_name'],
             $v['address'],
             $v['city'],
             $v['postal_code'],

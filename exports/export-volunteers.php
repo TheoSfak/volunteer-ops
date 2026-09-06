@@ -17,6 +17,7 @@ $filters = [
     'is_external' => $isGuestTab ? 1 : 0,
     'guest_kind' => $isGuestTab ? get('guest_kind', '') : '',
     'team_id' => get('team_id', ''),
+    'sort' => get('sort', 'name') === 'team' ? 'team' : 'name',
 ];
 
 // Department admins can only export their own department
