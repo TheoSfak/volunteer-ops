@@ -37,6 +37,7 @@ $defaults = [
     'org_contact_address' => '',
     'cert_signature_font_size' => '7',
     'war_room_banner_font_size' => '1.35',
+    'war_room_ticker_position' => 'top',
     'war_room_auto_ping_seconds' => '180',
     'war_room_low_battery_pct' => '60',
     'war_room_max_shift_minutes' => '480',
@@ -592,7 +593,7 @@ if (isPost()) {
 
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes',
             'admin_email', 'developer_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
@@ -632,6 +633,14 @@ if (isPost()) {
             // clamping server-side too.
             if ($field === 'war_room_max_shift_minutes') {
                 $value = (string) max(30, min(2880, (int) $value ?: 480));
+            }
+
+            // Closed <select> in the form only offers these two — a crafted
+            // request could still post anything, and this drives a live CSS
+            // attribute selector in war-room.php that must never see a
+            // third value.
+            if ($field === 'war_room_ticker_position' && !in_array($value, ['top', 'bottom'], true)) {
+                $value = 'top';
             }
 
             // Don't overwrite API key if form was submitted empty (acts like a "keep existing" field)
@@ -1240,6 +1249,14 @@ include __DIR__ . '/includes/header.php';
                         <input type="number" class="form-control" style="max-width:160px;" name="war_room_banner_font_size"
                                value="<?= h($settings['war_room_banner_font_size']) ?>" min="0.8" max="3" step="0.05">
                         <small class="text-muted">Μέγεθος του κυλιόμενου κειμένου συναγερμού (banner) στο Action Room, σε desktop οθόνες.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Θέση Κυλιόμενης Μπάρας Action Room</label>
+                        <select class="form-select" style="max-width:220px;" name="war_room_ticker_position">
+                            <option value="top" <?= $settings['war_room_ticker_position'] === 'top' ? 'selected' : '' ?>>Πάνω στη σελίδα</option>
+                            <option value="bottom" <?= $settings['war_room_ticker_position'] === 'bottom' ? 'selected' : '' ?>>Κάτω στη σελίδα</option>
+                        </select>
+                        <small class="text-muted">Η μπάρα (SOS/απαγορευμένη ζώνη ενεργά, ανακοινώσεις &amp; εντολές) μένει πάντα ορατή στην οθόνη, ό,τι tab ή σημείο της σελίδας κι αν βρίσκεται ο χρήστης — αυτό επιλέγει αν κάθεται πάνω ή κάτω.</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Συχνότητα Αυτόματου Στίγματος Action Room (δευτ.)</label>

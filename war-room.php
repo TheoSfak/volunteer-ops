@@ -1826,7 +1826,24 @@ include __DIR__ . '/includes/header.php';
     .wr-weather-ctl-reading .v { font-weight: 700; font-size: .9rem; }
     .wr-weather-ctl-reading .u { font-size: .65rem; color: #6c757d; }
     .wr-weather-ctl-sev { margin-top: .3rem; text-align: center; font-size: .62rem; font-weight: 600; padding: .12rem .35rem; border-radius: 4px; }
-    .war-room-banner { display: none; flex-direction: column; background: #000; border-bottom: 2px solid #dc2626; position: relative; z-index: 1900; max-height: 40vh; overflow-y: auto; }
+    /* Fixed instead of in-flow so it stays on screen regardless of scroll
+       position or (for volunteers) which of the wrTabBar tabs is active —
+       previously this only ever showed if you happened to be scrolled to
+       the very top of the page. left/right pinned to the content area (not
+       full viewport width) so it never sits over the sidebar's own nav
+       links, matching header.php's own --sidebar-width/991.98px breakpoint
+       for when that sidebar goes off-canvas. data-ticker-pos (from Settings'
+       war_room_ticker_position) picks top vs bottom; #mapCard.map-fullscreen
+       -active #warRoomBanner below still wins over both via its higher
+       ID-based specificity, unchanged. */
+    .war-room-banner { display: none; flex-direction: column; background: #000; position: fixed; left: var(--sidebar-width, 260px); right: 0; z-index: 1900; max-height: 40vh; overflow-y: auto; }
+    @media (max-width: 991.98px) { .war-room-banner { left: 0; } }
+    .war-room-banner[data-ticker-pos="top"] { top: 0; border-bottom: 2px solid #dc2626; }
+    .war-room-banner[data-ticker-pos="bottom"] { bottom: 0; border-top: 2px solid #dc2626; }
+    /* Clears the volunteer mobile tab bar (.wr-tabbar, fixed bottom, ~78px
+       incl. safe-area — same figure body.wr-tabs-ready already hardcodes
+       below) so a bottom-positioned ticker never sits underneath it. */
+    body.wr-tabs-ready .war-room-banner[data-ticker-pos="bottom"] { bottom: 78px; }
     .war-room-banner-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
     .war-room-banner-row + .war-room-banner-row { border-top: 1px solid rgba(255,59,48,.35); }
     .war-room-banner-track { flex: 1; overflow: hidden; white-space: nowrap; position: relative; height: 1.6em; }
@@ -1840,7 +1857,7 @@ include __DIR__ . '/includes/header.php';
            the span alone would grow the text without growing its container,
            clipping it. Font-size set here is inherited by the span anyway.
            Value comes from Settings (war_room_banner_font_size), not hardcoded. */
-        .war-room-banner-track, .sos-map-marquee-track { font-size: <?= (float) getSetting('war_room_banner_font_size', '1.35') ?>rem; }
+        .war-room-banner-track { font-size: <?= (float) getSetting('war_room_banner_font_size', '1.35') ?>rem; }
     }
     @keyframes warRoomPulseRed { 0%, 100% { box-shadow: 0 0 0 0 rgba(220,53,69,0); } 50% { box-shadow: 0 0 0 10px rgba(220,53,69,0.4); } }
     #sosOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
@@ -1951,18 +1968,6 @@ include __DIR__ . '/includes/header.php';
     }
     .rtb-marquee-track { width: 100%; white-space: nowrap; overflow: hidden; position: relative; height: 1.3em; font-size: clamp(1.8rem, 9vw, 3.5rem); }
     .rtb-marquee-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #4ade80; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; text-shadow: 0 0 24px rgba(74,222,128,.85); animation: warRoomBannerScroll 14s linear infinite; }
-    .sos-map-marquee { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.75); padding: 6px 10px; overflow: hidden; z-index: 500; }
-    .sos-map-marquee-track { white-space: nowrap; position: relative; height: 1.4em; }
-    .sos-map-marquee-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #ff3b30; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; animation: warRoomBannerScroll 14s linear infinite; }
-    /* On narrow/mobile screens the scrolling text sweeps right through the
-       Leaflet OSM attribution corner (bottom-right) since the marquee spans
-       the full width flush against the map's bottom edge — lift it clear
-       instead of overlapping. Desktop has enough width that this wasn't
-       reported as an issue there, so scoped to mobile rather than changed
-       globally. */
-    @media (max-width: 991.98px) {
-        .sos-map-marquee { bottom: 22px; }
-    }
     /* Focus mode: reclaim the app's own left sidebar for more War Room room. */
     body.war-room-focus .sidebar,
     body.war-room-focus .sidebar-overlay,
@@ -2061,7 +2066,7 @@ include __DIR__ . '/includes/header.php';
 
 <?= showFlash() ?>
 
-<div id="warRoomBanner" class="war-room-banner"></div>
+<div id="warRoomBanner" class="war-room-banner" data-ticker-pos="<?= getSetting('war_room_ticker_position', 'top') === 'bottom' ? 'bottom' : 'top' ?>"></div>
 
 <?php if ($canManageWarRoom): ?>
 <div id="sosOverlay">
@@ -2269,11 +2274,6 @@ include __DIR__ . '/includes/header.php';
             <?php endif; ?>
             <div class="card-body p-0" style="position:relative;">
                 <div id="warRoomMap"></div>
-                <?php if ($canManageWarRoom): ?>
-                <div id="sosMapMarquee" class="sos-map-marquee d-none">
-                    <div class="sos-map-marquee-track"><span id="sosMapMarqueeText"></span></div>
-                </div>
-                <?php endif; ?>
             </div>
         </div>
         <?php if ($canManageWarRoom): ?>
@@ -9706,22 +9706,16 @@ function updateSosAlarmState(items) {
     }
     const closeBtn = document.getElementById('sosOverlayCloseBtn');
     if (closeBtn) closeBtn.classList.toggle('d-none', !(anyUnacked && !dismissStillValid));
-    // Shared by the map-bottom marquee and the full-screen overlay's own
-    // centered one (the latter only ever visible while sos-active) — one
+    // Shared by the always-visible ticker row and the full-screen overlay's
+    // own centered one (the latter only ever visible while sos-active) — one
     // "who's in danger" string computed once, not duplicated per surface.
     const marqueeText = items.length
         ? items.map(a => t('sos.marquee_text', {team: a.team_label.toUpperCase(), name: a.user_name})).join('     •••     ')
         : '';
-    const marquee = document.getElementById('sosMapMarquee');
-    if (marquee) {
-        if (items.length) {
-            document.getElementById('sosMapMarqueeText').textContent = marqueeText;
-            marquee.classList.remove('d-none');
-        } else {
-            marquee.classList.add('d-none');
-            document.getElementById('sosMapMarqueeText').textContent = '';
-        }
-    }
+    // Command-only, same as the rest of this function's data — items is
+    // always [] for a volunteer (see $sosAlerts in the ajax poll), so this
+    // naturally never shows a row for them without needing its own gate.
+    upsertPersistentBannerRow('sos-status', marqueeText, '🚨');
     const overlayMarqueeText = document.getElementById('sosOverlayMarqueeText');
     if (overlayMarqueeText) overlayMarqueeText.textContent = marqueeText;
 }
@@ -9871,6 +9865,13 @@ function updateRestrictedAreaAlarmState(items) {
         : '';
     const overlayMarqueeText = document.getElementById('restrictedAreaOverlayMarqueeText');
     if (overlayMarqueeText) overlayMarqueeText.textContent = marqueeText;
+    // Previously this text only ever existed inside #restrictedAreaOverlay
+    // itself, i.e. only while ra-active — once calmed (breach still open but
+    // not in the full takeover), there was no scrolling text anywhere at
+    // all, on the map or off it. The ticker row now covers that gap for
+    // both roles, matching items' own (canManageWarRoom || isApprovedParticipant)
+    // visibility from loadOpenRestrictedAreaBreachesForUser().
+    upsertPersistentBannerRow('ra-status', marqueeText, '⚠️');
 }
 
 // End of Mission / Return to Base — reuses the SOS siren sound engine (via
@@ -9892,6 +9893,68 @@ function triggerReturnToBaseAlarm(text) {
         overlay.classList.remove('rtb-active');
         reconcileSharedSiren();
     }, 12000);
+}
+
+// The ticker is now position:fixed (see .war-room-banner CSS) so it no
+// longer pushes the rest of the page down the way an in-flow element does —
+// compensate by padding .content-wrapper on whichever side it sits, so it
+// never sits on top of the hero (top) or the last card (bottom). Scoped to
+// .content-wrapper rather than body: keeps this fully local to War Room,
+// with no risk of fighting footer.php's own body.style.paddingTop (offline
+// bar) or the war-room-focus/wr-tabs-ready body classes over who owns body
+// padding. Skipped while map-fullscreen has physically relocated the same
+// node into #mapCard (see the map-fullscreen IIFE below) — it isn't
+// floating over the hero in that state, so there's nothing to compensate.
+const wrContentWrapperEl = document.querySelector('.content-wrapper');
+const wrTickerPos = document.getElementById('warRoomBanner')?.dataset.tickerPos || 'top';
+const wrBaseContentPad = wrContentWrapperEl ? {
+    top: parseFloat(getComputedStyle(wrContentWrapperEl).paddingTop) || 0,
+    bottom: parseFloat(getComputedStyle(wrContentWrapperEl).paddingBottom) || 0
+} : {top: 0, bottom: 0};
+function syncTickerSpacing() {
+    if (!wrContentWrapperEl) return;
+    const bannerEl = document.getElementById('warRoomBanner');
+    const mapCardEl = document.getElementById('mapCard');
+    const relocated = !!(mapCardEl && mapCardEl.classList.contains('map-fullscreen-active'));
+    const h = (!relocated && bannerEl && bannerEl.style.display === 'flex') ? bannerEl.offsetHeight : 0;
+    if (wrTickerPos === 'bottom') {
+        wrContentWrapperEl.style.paddingBottom = h ? (wrBaseContentPad.bottom + h) + 'px' : '';
+    } else {
+        wrContentWrapperEl.style.paddingTop = h ? (wrBaseContentPad.top + h) + 'px' : '';
+    }
+}
+window.addEventListener('resize', syncTickerSpacing);
+
+// Persistent status rows (SOS/Restricted-Area) — unlike showWarRoomBanner's
+// one-shot order/dispatch notices below, these track a live condition: no
+// 60s expiry and no close button, since the entire point is that staff
+// can't lose track of a still-open alert. Text just follows whatever
+// updateSosAlarmState()/updateRestrictedAreaAlarmState() computed this poll
+// tick. Reuses activeBannerRows as the single source of truth for the
+// container's own show/hide, so this can never leave #warRoomBanner
+// visibly empty-but-shown, or leave a real order row hidden along with it.
+function upsertPersistentBannerRow(id, text, icon) {
+    const existing = activeBannerRows.get(id);
+    if (!text) {
+        if (existing) hideWarRoomBannerRow(id);
+        return;
+    }
+    if (existing) {
+        existing.el.querySelector('.war-room-banner-track span').textContent = text;
+        return;
+    }
+    const row = document.createElement('div');
+    row.className = 'war-room-banner-row';
+    row.innerHTML = `
+        <span style="flex-shrink:0;">${icon}</span>
+        <div class="war-room-banner-track"><span></span></div>
+    `;
+    row.querySelector('.war-room-banner-track span').textContent = text;
+    const container = document.getElementById('warRoomBanner');
+    container.prepend(row);
+    container.style.display = 'flex';
+    activeBannerRows.set(id, {el: row, timer: null});
+    syncTickerSpacing();
 }
 
 function showWarRoomBanner(id, text, orderId, alarmStyle) {
@@ -9929,6 +9992,7 @@ function showWarRoomBanner(id, text, orderId, alarmStyle) {
 
     const timer = setTimeout(() => hideWarRoomBannerRow(id), 60000);
     activeBannerRows.set(id, {el: row, timer});
+    syncTickerSpacing();
 }
 function hideWarRoomBannerRow(id) {
     const entry = activeBannerRows.get(id);
@@ -9939,6 +10003,7 @@ function hideWarRoomBannerRow(id) {
     if (activeBannerRows.size === 0) {
         document.getElementById('warRoomBanner').style.display = 'none';
     }
+    syncTickerSpacing();
 }
 
 // Focus mode: hide the app's own left sidebar and expand War Room to the
@@ -10035,13 +10100,17 @@ function hideWarRoomBannerRow(id) {
     const mapFsBtn = document.getElementById('mapFullscreenToggle');
     const mapCardEl = document.getElementById('mapCard');
     if (!mapFsBtn || !mapCardEl) return;
-    // The alert banner (orders/dispatch/global messages) lives at the top of
-    // the whole page normally. While the map is fullscreen that's off-screen
-    // from what's actually visible, so we physically relocate the same node
-    // (not a clone — its close/ack button listeners and running scroll
-    // animation keep working untouched) into the map card, bottom-anchored
-    // like the existing SOS marquee. bannerHome remembers exactly where it
-    // came from so exiting puts it back in precisely the right spot.
+    // The ticker (orders/dispatch/SOS/RA/global messages) is position:fixed
+    // and stays on screen through ordinary scrolling now, but the native
+    // Fullscreen API grant below is requested on #mapCard specifically —
+    // while that's engaged, the browser only paints #mapCard's OWN subtree,
+    // so any fixed-position element outside it (this ticker included)
+    // simply doesn't render at all until fullscreen exits. Physically
+    // relocating the same node (not a clone — its close/ack button
+    // listeners and running scroll animation keep working untouched) into
+    // the map card, bottom-anchored, is still the only way to keep it
+    // visible in that state. bannerHome remembers exactly where it came
+    // from so exiting puts it back in precisely the right spot.
     const bannerEl = document.getElementById('warRoomBanner');
     const mapBodyEl = mapCardEl.querySelector('.card-body');
     const bannerHome = bannerEl ? {parent: bannerEl.parentNode, next: bannerEl.nextSibling} : null;
@@ -10055,6 +10124,11 @@ function hideWarRoomBannerRow(id) {
             } else {
                 bannerHome.parent.insertBefore(bannerEl, bannerHome.next);
             }
+            // #mapCard.map-fullscreen-active #warRoomBanner (CSS) takes over
+            // positioning entirely while active — nothing to compensate for
+            // on .content-wrapper either way, but re-sync right away rather
+            // than waiting for the next banner mutation to notice.
+            if (typeof syncTickerSpacing === 'function') syncTickerSpacing();
         }
         setTimeout(() => { if (map) map.invalidateSize(); }, 150);
     }
