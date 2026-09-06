@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS `users` (
     `email` VARCHAR(255) NOT NULL UNIQUE,
     `password` VARCHAR(255) NOT NULL,
     `phone` VARCHAR(20) NULL,
+    `telegram_chat_id` BIGINT NULL COMMENT 'Telegram chat id once linked via the /start deep link handshake; NULL = not connected',
+    `telegram_username` VARCHAR(100) NULL COMMENT 'Telegram @handle at link time, display-only',
+    `telegram_linked_at` TIMESTAMP NULL COMMENT 'When this user connected Telegram; NULL unless telegram_chat_id is set',
     `id_card` VARCHAR(20) NULL,
     `afm` VARCHAR(20) NULL,
     `amka` VARCHAR(11) NULL,
@@ -124,6 +127,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     FOREIGN KEY (`mission_visitor_mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     INDEX `idx_users_mission_visitor` (`mission_visitor_mission_id`, `is_mission_visitor`),
     INDEX `idx_users_dog_handler` (`is_dog_handler`),
+    UNIQUE INDEX `idx_users_telegram_chat` (`telegram_chat_id`),
     CHECK (`is_mission_visitor` = 0 OR `is_external` = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -1902,6 +1906,38 @@ CREATE TABLE IF NOT EXISTS `push_subscriptions` (
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     INDEX `idx_push_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- TELEGRAM LINK TOKENS TABLE
+-- One-shot handshake for connecting a user's account to a Telegram chat: the
+-- user opens https://t.me/<bot>?start=<token>, Telegram sends /start <token>
+-- to our webhook, which resolves the token back to user_id here. At most one
+-- pending token per user (regenerating deletes any previous one).
+-- =============================================
+CREATE TABLE IF NOT EXISTS `telegram_link_tokens` (
+    `token` VARCHAR(64) NOT NULL PRIMARY KEY,
+    `user_id` INT UNSIGNED NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    INDEX `idx_telegram_token_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- MOBILIZATION BROADCASTS TABLE
+-- Audit history for the "Άμεση Κινητοποίηση" admin broadcast — one row per
+-- send, with delivery counts against all users linked to Telegram at the time.
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mobilization_broadcasts` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `message` TEXT NOT NULL,
+    `sent_by` INT UNSIGNED NULL,
+    `recipients_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    `delivered_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    `failed_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`sent_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_mobilization_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==================================================

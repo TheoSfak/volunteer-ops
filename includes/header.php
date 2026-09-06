@@ -1458,6 +1458,11 @@ if (isLoggedIn()) {
                     <i class="bi bi-megaphone"></i> Ανακοινώσεις
                 </a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'mobilization' ? 'active' : '' ?> text-danger" href="mobilization.php">
+                    <i class="bi bi-broadcast"></i> Άμεση Κινητοποίηση
+                </a>
+            </li>
 
             <div class="sidebar-section">Σύστημα</div>
             

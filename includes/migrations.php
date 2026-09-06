@@ -6545,6 +6545,56 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 146,
+            'description' => 'Add Telegram linking (users.telegram_chat_id/username/linked_at + telegram_link_tokens) and mobilization_broadcasts, for the admin "Άμεση Κινητοποίηση" broadcast button.',
+            'up' => function () {
+                $col = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'telegram_chat_id'");
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN telegram_chat_id BIGINT NULL AFTER phone");
+                }
+
+                $col = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'telegram_username'");
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN telegram_username VARCHAR(100) NULL AFTER telegram_chat_id");
+                }
+
+                $col = dbFetchOne("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'telegram_linked_at'");
+                if (!$col) {
+                    dbExecute("ALTER TABLE users ADD COLUMN telegram_linked_at TIMESTAMP NULL AFTER telegram_username");
+                }
+
+                $idx = dbFetchOne("SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND INDEX_NAME = 'idx_users_telegram_chat'");
+                if (!$idx) {
+                    dbExecute("ALTER TABLE users ADD UNIQUE INDEX idx_users_telegram_chat (telegram_chat_id)");
+                }
+
+                dbExecute("CREATE TABLE IF NOT EXISTS telegram_link_tokens (
+                    token VARCHAR(64) NOT NULL PRIMARY KEY,
+                    user_id INT UNSIGNED NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    INDEX idx_telegram_token_user (user_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                dbExecute("CREATE TABLE IF NOT EXISTS mobilization_broadcasts (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    message TEXT NOT NULL,
+                    sent_by INT UNSIGNED NULL,
+                    recipients_count INT UNSIGNED NOT NULL DEFAULT 0,
+                    delivered_count INT UNSIGNED NOT NULL DEFAULT 0,
+                    failed_count INT UNSIGNED NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (sent_by) REFERENCES users(id) ON DELETE SET NULL,
+                    INDEX idx_mobilization_created (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

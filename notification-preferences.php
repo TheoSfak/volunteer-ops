@@ -10,10 +10,27 @@ $pageTitle = 'Ρυθμίσεις Ειδοποιήσεων';
 $currentPage = 'notification-preferences';
 
 $userId = getCurrentUserId();
+$currentUser = getCurrentUser();
 
 // ── Handle POST ────────────────────────────────────────────────────────────
 if (isPost()) {
     verifyCsrf();
+    $action = post('action', 'save_prefs');
+
+    if ($action === 'telegram_connect') {
+        if (!isTelegramConfigured()) {
+            setFlash('error', 'Η σύνδεση Telegram δεν έχει ρυθμιστεί ακόμα από τον διαχειριστή.');
+            redirect('notification-preferences.php');
+        }
+        redirect(getTelegramDeepLink(generateTelegramLinkToken($userId)));
+    }
+
+    if ($action === 'telegram_disconnect') {
+        dbExecute("UPDATE users SET telegram_chat_id = NULL, telegram_username = NULL, telegram_linked_at = NULL WHERE id = ?", [$userId]);
+        logAudit('telegram_disconnect', 'users', $userId);
+        setFlash('success', 'Η σύνδεση με το Telegram καταργήθηκε.');
+        redirect('notification-preferences.php');
+    }
 
     // Fetch all configurable notification codes
     $allSettings = dbFetchAll("SELECT code FROM notification_settings ORDER BY id");
@@ -137,6 +154,36 @@ include __DIR__ . '/includes/header.php';
 })();
 </script>
 
+<?php if (isTelegramConfigured()): ?>
+<!-- ══ Telegram Link Card ══ -->
+<div class="card shadow-sm mb-4 border-primary border-opacity-25">
+    <div class="card-body">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+            <div>
+                <h5 class="mb-1"><i class="bi bi-telegram text-primary"></i> Σύνδεση Telegram</h5>
+                <p class="text-muted mb-0 small">Λάβετε στο κινητό σας μηνύματα άμεσης κινητοποίησης από τον διαχειριστή, ακόμα κι όταν η εφαρμογή είναι κλειστή.</p>
+            </div>
+            <div class="text-end">
+                <?php if (!empty($currentUser['telegram_chat_id'])): ?>
+                    <div class="mb-2"><span class="badge bg-success"><i class="bi bi-check-circle"></i> Συνδεδεμένο<?= !empty($currentUser['telegram_username']) ? ' ως @' . h($currentUser['telegram_username']) : '' ?></span></div>
+                    <form method="post" onsubmit="return confirm('Κατάργηση σύνδεσης με το Telegram; Δεν θα λαμβάνετε πλέον μηνύματα κινητοποίησης εκεί.');">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="telegram_disconnect">
+                        <button type="submit" class="btn btn-outline-danger btn-sm"><i class="bi bi-x-lg"></i> Αποσύνδεση</button>
+                    </form>
+                <?php else: ?>
+                    <form method="post">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="telegram_connect">
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-telegram"></i> Σύνδεση</button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <div class="card shadow-sm">
     <div class="card-body">
         <p class="text-muted mb-4">
@@ -147,6 +194,7 @@ include __DIR__ . '/includes/header.php';
 
         <form method="post">
             <?= csrfField() ?>
+            <input type="hidden" name="action" value="save_prefs">
 
             <div class="table-responsive notification-table-wrap">
                 <table class="table table-hover align-middle notification-table table-mobile-opt-out">

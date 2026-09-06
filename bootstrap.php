@@ -19,6 +19,7 @@ require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/includes/permissions.php';
 require_once __DIR__ . '/includes/email.php';
 require_once __DIR__ . '/includes/webpush.php';
+require_once __DIR__ . '/includes/telegram.php';
 require_once __DIR__ . '/includes/newsletter-functions.php';
 require_once __DIR__ . '/includes/training-functions.php';
 require_once __DIR__ . '/includes/achievements-functions.php';

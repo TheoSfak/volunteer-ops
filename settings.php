@@ -661,12 +661,48 @@ if (isPost()) {
             
             $settings[$field] = $value;
         }
-        
+
         // Clear settings cache after update
         clearSettingsCache();
-        
+
+        // ── Telegram bot token: validated against Telegram itself (getMe)
+        // before saving, unlike the plain-text API keys above — a typo here
+        // would otherwise silently break every future mobilization broadcast
+        // instead of just one feature. Never part of the generic loop above.
+        $telegramFlash = null;
+        $telegramTokenInput = trim(post('telegram_bot_token', ''));
+        if ($telegramTokenInput !== '' && $telegramTokenInput !== ($settings['telegram_bot_token'] ?? '')) {
+            $me = tgApiCall('getMe', [], $telegramTokenInput);
+            if ($me === null || empty($me['ok'])) {
+                $telegramFlash = ['error', 'Το Telegram Bot Token δεν είναι έγκυρο — ελέγξτε ότι το αντιγράψατε σωστά από το BotFather.'];
+            } else {
+                $botUsername = $me['result']['username'] ?? '';
+                foreach (['telegram_bot_token' => $telegramTokenInput, 'telegram_bot_username' => $botUsername] as $k => $v) {
+                    $exists = dbFetchValue("SELECT COUNT(*) FROM settings WHERE setting_key = ?", [$k]);
+                    if ($exists) {
+                        dbExecute("UPDATE settings SET setting_value = ?, updated_at = NOW() WHERE setting_key = ?", [$v, $k]);
+                    } else {
+                        dbInsert("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$k, $v]);
+                    }
+                }
+                $webhookOk = registerTelegramWebhook();
+                logAudit('update_settings', 'settings', null, 'Telegram bot token');
+                $telegramFlash = $webhookOk
+                    ? ['success', 'Το Telegram bot συνδέθηκε (@' . $botUsername . ') και ενεργοποιήθηκε ο webhook.']
+                    : ['warning', 'Το bot token αποθηκεύτηκε (@' . $botUsername . ') αλλά η καταχώρηση webhook απέτυχε — το site πρέπει να είναι προσβάσιμο μέσω HTTPS από το διαδίκτυο.'];
+            }
+        } elseif ($telegramTokenInput === '' && post('telegram_bot_token_clear') === '1') {
+            dbExecute("UPDATE settings SET setting_value = '', updated_at = NOW() WHERE setting_key IN ('telegram_bot_token', 'telegram_bot_username')");
+            logAudit('update_settings', 'settings', null, 'Telegram bot token κατάργηση');
+            $telegramFlash = ['success', 'Η σύνδεση με το Telegram bot καταργήθηκε.'];
+        }
+
         logAudit('update_settings', 'settings', null, 'Γενικές ρυθμίσεις');
-        setFlash('success', 'Οι γενικές ρυθμίσεις αποθηκεύτηκαν.');
+        if ($telegramFlash !== null) {
+            setFlash($telegramFlash[0], $telegramFlash[1]);
+        } else {
+            setFlash('success', 'Οι γενικές ρυθμίσεις αποθηκεύτηκαν.');
+        }
         redirect('settings.php?tab=general');
         
     } elseif ($action === 'save_smtp') {
@@ -1580,6 +1616,72 @@ include __DIR__ . '/includes/header.php';
                         <div class="form-text">
                             Μόνο σε αποστολές τύπου «Αγνοούμενο άτομο». Σχεδιάζει ομόκεντρους κύκλους γύρω από το σημείο τελευταίας θέασης, με ακτίνα ανάλογη της κατηγορίας ατόμου (παιδί, πεζοπόρος, άτομο με άνοια κ.λπ.). <strong>Ενδεικτικό εργαλείο σχεδιασμού, όχι επιχειρησιακή βεβαιότητα</strong> — οι αποστάσεις είναι κατά προσέγγιση τιμές από γενική βιβλιογραφία SAR, όχι επικυρωμένα δεδομένα. Συνιστάται έλεγχος από άτομο με εκπαίδευση SAR πριν τη χρήση σε πραγματική επιχείρηση.
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Telegram Bot Settings -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-telegram me-1"></i>Ρυθμίσεις Telegram (Άμεση Κινητοποίηση)</h5>
+                </div>
+                <div class="card-body">
+                    <?php if (!isTelegramConfigured()): ?>
+                    <div class="alert alert-info">
+                        <strong><i class="bi bi-info-circle me-1"></i>Πώς να συνδέσετε ένα δωρεάν bot — βήμα βήμα:</strong>
+                        <ol class="mt-2 mb-3 ps-3">
+                            <li class="mb-2">
+                                Πατήστε το κουμπί για να ανοίξει το Telegram με τον επίσημο «κατασκευαστή bot»:
+                                <div class="mt-1">
+                                    <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-primary">
+                                        <i class="bi bi-telegram me-1"></i>Άνοιγμα @BotFather στο Telegram
+                                    </a>
+                                </div>
+                            </li>
+                            <li class="mb-2">Στη συνομιλία που θα ανοίξει, πατήστε <strong>START</strong> (ή γράψτε <code>/start</code>).</li>
+                            <li class="mb-2">Γράψτε την εντολή <code>/newbot</code> και πατήστε αποστολή.</li>
+                            <li class="mb-2">Θα σας ρωτήσει για ένα <strong>όνομα</strong> — γράψτε ό,τι θέλετε, π.χ. «<?= h(getSetting('app_name', APP_NAME)) ?> Ειδοποιήσεις». Αυτό θα το βλέπουν οι εθελοντές.</li>
+                            <li class="mb-2">Μετά θα ζητήσει ένα <strong>username</strong> που πρέπει να τελειώνει σε <code>bot</code>, π.χ. <code>epidrasis_alerts_bot</code>. Αν σας πει ότι είναι πιασμένο, δοκιμάστε άλλο.</li>
+                            <li class="mb-2">
+                                Θα λάβετε μήνυμα «Done!» με έναν κωδικό (token) σαν κι αυτόν:
+                                <div class="mt-1"><code>123456789:AAExampleTokenTextGoesHere1234</code></div>
+                                Πατήστε πάνω του στο Telegram για να αντιγραφεί <strong>ολόκληρος</strong> αυτόματα.
+                            </li>
+                            <li>Επικολλήστε τον εδώ στο πεδίο <strong>«Telegram Bot Token»</strong> από κάτω, πατήστε <strong>«Αποθήκευση Ρυθμίσεων»</strong> στο τέλος της σελίδας, και θα τον ελέγξουμε αυτόματα.</li>
+                        </ol>
+                        <div class="small text-muted mb-0">Περίπου 2 λεπτά, χωρίς κάρτα ή εγγραφή κάπου — μόνο το ίδιο σας το Telegram.</div>
+                    </div>
+                    <?php endif; ?>
+                    <div class="mb-3">
+                        <label class="form-label" for="telegramBotToken">Telegram Bot Token</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="telegramBotToken"
+                                   name="telegram_bot_token"
+                                   autocomplete="new-password"
+                                   value="<?= h($settings['telegram_bot_token'] ?? '') ?>"
+                                   placeholder="π.χ. 123456789:AAExampleTokenTextGoesHere1234">
+                            <button type="button" class="btn btn-outline-secondary" onclick="toggleKeyVisibility('telegramBotToken')" tabindex="-1">
+                                <i class="bi bi-eye" id="eye-telegramBotToken"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <?php if (isTelegramConfigured()): ?>
+                    <div class="alert alert-success py-1 px-2 mb-0 small">
+                        <i class="bi bi-check-circle me-1"></i>Συνδεδεμένο bot: @<?= h($settings['telegram_bot_username'] ?? '') ?>
+                    </div>
+                    <div class="form-check mt-2">
+                        <input type="checkbox" name="telegram_bot_token_clear" value="1" class="form-check-input" id="telegramClear">
+                        <label class="form-check-label" for="telegramClear"><span class="text-danger">Κατάργηση σύνδεσης bot</span></label>
+                    </div>
+                    <?php else: ?>
+                    <div class="alert alert-secondary py-1 px-2 mb-0 small">
+                        <i class="bi bi-info-circle me-1"></i>Χωρίς bot, το κουμπί «Άμεση Κινητοποίηση» και η σύνδεση Telegram των εθελοντών δεν είναι διαθέσιμα.
+                    </div>
+                    <?php endif; ?>
+                    <div class="form-text mt-2">
+                        Μόλις αποθηκευτεί έγκυρο token, κάθε εθελοντής μπορεί να συνδέσει το δικό του Telegram από τις
+                        <a href="notification-preferences.php">Ρυθμίσεις Ειδοποιήσεων</a> του, και αποκτάτε το κουμπί
+                        <a href="mobilization.php">Άμεση Κινητοποίηση</a> για μαζικό μήνυμα σε όλους τους συνδεδεμένους — εντελώς δωρεάν, χωρίς όριο μηνυμάτων.
                     </div>
                 </div>
             </div>
