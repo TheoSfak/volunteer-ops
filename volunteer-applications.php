@@ -59,6 +59,10 @@ if (isPost()) {
             logAudit('update_status', 'volunteer_applications', $id, ['status' => $application['status']], ['status' => $finalStatus]);
             setFlash('success', 'Η αίτηση ενημερώθηκε.');
         }
+    } elseif ($action === 'delete' && $application) {
+        dbExecute("DELETE FROM volunteer_applications WHERE id = ?", [$id]);
+        logAudit('delete', 'volunteer_applications', $id, ['full_name' => $application['full_name']]);
+        setFlash('success', 'Η αίτηση διαγράφηκε.');
     }
 
     redirect('volunteer-applications.php' . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : ''));
@@ -217,6 +221,16 @@ include __DIR__ . '/includes/header.php';
                         <a href="volunteer-form.php?from_application=<?= $app['id'] ?>" class="btn btn-sm btn-success">
                             <i class="bi bi-person-check"></i> Έγκριση &amp; Δημιουργία Εθελοντή
                         </a>
+                        <?php endif; ?>
+                        <?php if ($canManage): ?>
+                        <form method="post" class="d-inline" onsubmit="return confirm('Οριστική διαγραφή αυτής της αίτησης;');">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="application_id" value="<?= $app['id'] ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Διαγραφή">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
                         <?php endif; ?>
                     </td>
                 </tr>
