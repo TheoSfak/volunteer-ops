@@ -20,6 +20,10 @@ function subscriptionIrisTaxId(): string {
     return trim(getSetting('subscription_iris_tax_id', '996695642'));
 }
 
+function subscriptionIrisPhone(): string {
+    return trim(getSetting('subscription_iris_phone', ''));
+}
+
 function subscriptionIrisIsEligible(?array $subscription): bool {
     if (!$subscription || empty($subscription['expiry_date'])) return false;
     $daysUntilExpiry = (int)floor((strtotime($subscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400);
