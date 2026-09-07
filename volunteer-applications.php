@@ -82,6 +82,43 @@ if ($search !== '') {
 }
 $whereClause = implode(' AND ', $where);
 
+// CSV Export — reuses the exact $whereClause/$params the list below queries
+// with (just without the LIMIT/OFFSET), so the export can never drift from
+// whatever status tab/search is currently applied on screen.
+if (get('export') === 'csv') {
+    $exportRows = dbFetchAll("SELECT * FROM volunteer_applications WHERE $whereClause ORDER BY created_at DESC", $params);
+
+    if (ob_get_level()) ob_end_clean();
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="volunteer_applications_' . date('Y-m-d_His') . '.csv"');
+    $out = fopen('php://output', 'w');
+    fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF)); // UTF-8 BOM for Excel
+    fputcsvSafe($out, ['#', 'Ονοματεπώνυμο', 'Πατρώνυμο', 'Ημ. Γέννησης', 'Διεύθυνση', 'Τ.Κ.', 'Πόλη', 'Τηλ. Οικίας', 'Κινητό', 'Email', 'Επάγγελμα', 'Κατάσταση', 'Ημερομηνία Αίτησης', 'Ημ/νία Επικοινωνίας', 'Ημ/νία Απόρριψης', 'Ημ/νία Έγκρισης', 'Σημειώσεις Προσωπικού'], ';', '"', '\\');
+    foreach ($exportRows as $i => $r) {
+        fputcsvSafe($out, [
+            $i + 1,
+            $r['full_name'],
+            $r['patronymic'] ?? '',
+            $r['birth_date'] ? formatDate($r['birth_date']) : '',
+            $r['address'] ?? '',
+            $r['postal_code'] ?? '',
+            $r['city'] ?? '',
+            $r['home_phone'] ?? '',
+            $r['mobile_phone'],
+            $r['email'],
+            $r['occupation'] ?? '',
+            VOL_APP_STATUS_LABELS[$r['status']] ?? $r['status'],
+            formatDateTime($r['created_at']),
+            $r['contacted_at'] ? formatDateTime($r['contacted_at']) : '',
+            $r['rejected_at'] ? formatDateTime($r['rejected_at']) : '',
+            $r['converted_at'] ? formatDateTime($r['converted_at']) : '',
+            $r['admin_notes'] ?? '',
+        ], ';', '"', '\\');
+    }
+    fclose($out);
+    exit;
+}
+
 $total = dbFetchValue("SELECT COUNT(*) FROM volunteer_applications WHERE $whereClause", $params);
 $pagination = paginate($total, $page, $perPage);
 
@@ -102,6 +139,9 @@ include __DIR__ . '/includes/header.php';
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h1 class="h3 mb-0"><i class="bi bi-person-plus me-2"></i><?= h($pageTitle) ?></h1>
+    <a href="volunteer-applications.php?export=csv&status=<?= urlencode($statusFilter) ?>&search=<?= urlencode($search) ?>" class="btn btn-success">
+        <i class="bi bi-filetype-csv"></i> Εξαγωγή CSV
+    </a>
 </div>
 
 <?= showFlash() ?>
@@ -165,7 +205,7 @@ include __DIR__ . '/includes/header.php';
                 <?php foreach ($applications as $app): ?>
                 <tr>
                     <td><?= h($app['full_name']) ?></td>
-                    <td><?= h($app['mobile_phone']) ?></td>
+                    <td><a href="tel:<?= h($app['mobile_phone']) ?>" class="text-decoration-none"><?= h($app['mobile_phone']) ?></a></td>
                     <td><?= h($app['email']) ?></td>
                     <td><?= formatDateTime($app['created_at']) ?></td>
                     <td><span class="badge bg-<?= VOL_APP_STATUS_COLORS[$app['status']] ?>"><?= h(VOL_APP_STATUS_LABELS[$app['status']]) ?></span></td>
