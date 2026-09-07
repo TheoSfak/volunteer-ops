@@ -93,27 +93,34 @@ function sendTelegramMessage($chatId, string $text): bool {
 }
 
 /**
- * Sends to every user with a linked chat_id. A 403 (Forbidden: bot was
- * blocked by the user) or the chat no longer existing means that link is
- * dead, so it's cleared here the same way push_subscriptions rows get
- * cleaned up on an expired endpoint - otherwise every future broadcast keeps
- * re-failing against the same stale chat_id forever.
+ * Sends to every regular volunteer with a linked chat_id. Deliberately
+ * excludes is_external accounts (partner/guest rescue teams and the
+ * single-mission visitors under them) - this is an org-wide call to action,
+ * not scoped to any one mission, which is not something a guest account
+ * should ever receive. A 403 (Forbidden: bot was blocked by the user) or
+ * the chat no longer existing means that link is dead, so it's cleared here
+ * the same way push_subscriptions rows get cleaned up on an expired
+ * endpoint - otherwise every future broadcast keeps re-failing against the
+ * same stale chat_id forever.
  */
 function sendTelegramBroadcast(string $text): array {
     $recipients = dbFetchAll(
         "SELECT id, telegram_chat_id FROM users
-          WHERE telegram_chat_id IS NOT NULL AND is_active = 1 AND deleted_at IS NULL"
+          WHERE telegram_chat_id IS NOT NULL AND is_active = 1 AND deleted_at IS NULL AND is_external = 0"
     );
 
     $delivered = 0;
     $failed = 0;
+    $details = [];
     foreach ($recipients as $recipient) {
         $result = tgApiCall('sendMessage', ['chat_id' => $recipient['telegram_chat_id'], 'text' => $text]);
 
         if ($result !== null && !empty($result['ok'])) {
             $delivered++;
+            $details[] = ['user_id' => (int) $recipient['id'], 'status' => 'delivered'];
         } else {
             $failed++;
+            $details[] = ['user_id' => (int) $recipient['id'], 'status' => 'failed'];
             $errorCode = $result['error_code'] ?? null;
             if ($errorCode === 403 || $errorCode === 400) {
                 dbExecute(
@@ -133,6 +140,7 @@ function sendTelegramBroadcast(string $text): array {
         'recipients' => count($recipients),
         'delivered'  => $delivered,
         'failed'     => $failed,
+        'details'    => $details,
     ];
 }
 

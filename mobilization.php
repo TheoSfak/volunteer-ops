@@ -35,6 +35,12 @@ if (isPost()) {
                 "INSERT INTO mobilization_broadcasts (message, sent_by, recipients_count, delivered_count, failed_count, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
                 [$message, getCurrentUserId(), $result['recipients'], $result['delivered'], $result['failed']]
             );
+            foreach ($result['details'] as $detail) {
+                dbExecute(
+                    "INSERT INTO mobilization_broadcast_recipients (broadcast_id, user_id, status, created_at) VALUES (?, ?, ?, NOW())",
+                    [$newId, $detail['user_id'], $detail['status']]
+                );
+            }
             logAudit('mobilization_send', 'mobilization_broadcasts', $newId, null, ['recipients' => $result['recipients'], 'delivered' => $result['delivered']]);
 
             if ($result['recipients'] === 0) {
@@ -55,8 +61,10 @@ if (isPost()) {
 }
 
 $telegramReady = isTelegramConfigured();
-$linkedCount = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE telegram_chat_id IS NOT NULL AND is_active = 1 AND deleted_at IS NULL");
-$totalActiveUsers = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE is_active = 1 AND deleted_at IS NULL");
+// is_external = 0 excludes guest/partner-org accounts and the single-mission
+// visitors under them - this broadcast is for regular volunteers only.
+$linkedCount = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE telegram_chat_id IS NOT NULL AND is_active = 1 AND deleted_at IS NULL AND is_external = 0");
+$totalActiveUsers = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE is_active = 1 AND deleted_at IS NULL AND is_external = 0");
 
 $history = dbFetchAll(
     "SELECT b.*, u.name AS sender_name
@@ -65,6 +73,25 @@ $history = dbFetchAll(
    ORDER BY b.created_at DESC, b.id DESC
       LIMIT 50"
 );
+
+// Recipient names for the "Ποιοι;" modal on each history row - one query for
+// every broadcast on the page rather than one per row.
+$recipientsByBroadcast = [];
+if (!empty($history)) {
+    $historyIds = array_column($history, 'id');
+    $placeholders = implode(',', array_fill(0, count($historyIds), '?'));
+    $recipientRows = dbFetchAll(
+        "SELECT r.broadcast_id, r.status, u.name
+           FROM mobilization_broadcast_recipients r
+           JOIN users u ON u.id = r.user_id
+          WHERE r.broadcast_id IN ($placeholders)
+       ORDER BY u.name ASC",
+        $historyIds
+    );
+    foreach ($recipientRows as $row) {
+        $recipientsByBroadcast[$row['broadcast_id']][] = $row;
+    }
+}
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -122,6 +149,9 @@ include __DIR__ . '/includes/header.php';
                         <span class="badge bg-success"><?= (int) $b['delivered_count'] ?> εστάλησαν</span>
                         <?php if ($b['failed_count'] > 0): ?><span class="badge bg-danger"><?= (int) $b['failed_count'] ?> απέτυχαν</span><?php endif; ?>
                         <span class="text-muted small">/ <?= (int) $b['recipients_count'] ?> συνδεδεμένοι</span>
+                        <?php if (!empty($recipientsByBroadcast[$b['id']])): ?>
+                        <br><button type="button" class="btn btn-link btn-sm p-0" data-bs-toggle="modal" data-bs-target="#recipientsModal<?= (int) $b['id'] ?>">Ποιοι;</button>
+                        <?php endif; ?>
                     </td>
                     <td data-label="Από"><?= h($b['sender_name'] ?? '—') ?></td>
                     <td data-label="Ημ/νία" class="text-muted small"><?= formatDateTime($b['created_at']) ?></td>
@@ -142,6 +172,36 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
+
+<?php foreach ($history as $b): ?>
+<?php if (!empty($recipientsByBroadcast[$b['id']])): ?>
+<!-- Recipients Modal for broadcast #<?= (int) $b['id'] ?> -->
+<div class="modal fade" id="recipientsModal<?= (int) $b['id'] ?>" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Παραλήπτες</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <ul class="list-unstyled mb-0" style="max-height: 320px; overflow-y: auto;">
+                    <?php foreach ($recipientsByBroadcast[$b['id']] as $r): ?>
+                    <li class="d-flex justify-content-between align-items-center border-bottom py-1">
+                        <span><?= h($r['name']) ?></span>
+                        <?php if ($r['status'] === 'delivered'): ?>
+                        <span class="badge bg-success">Παραδόθηκε</span>
+                        <?php else: ?>
+                        <span class="badge bg-danger">Απέτυχε</span>
+                        <?php endif; ?>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+<?php endforeach; ?>
 
 <?php if ($telegramReady): ?>
 <!-- Mobilize Modal -->

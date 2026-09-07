@@ -1940,6 +1940,21 @@ CREATE TABLE IF NOT EXISTS `mobilization_broadcasts` (
     INDEX `idx_mobilization_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- MOBILIZATION BROADCAST RECIPIENTS TABLE
+-- Per-volunteer delivery detail behind "who saw this" on mobilization.php.
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mobilization_broadcast_recipients` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `broadcast_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `status` ENUM('delivered','failed') NOT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`broadcast_id`) REFERENCES `mobilization_broadcasts`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    INDEX `idx_mob_recipients_broadcast` (`broadcast_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ==================================================
 -- WEATHER CACHE TABLE
 -- ==================================================
