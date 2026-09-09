@@ -6826,7 +6826,18 @@ function renderTrailUpTo(trails, cutoffTs) {
                 marker = L.circleMarker([point.lat, point.lng], {radius: isFirst ? 7 : 5, color:'#fff', weight: isFirst ? 3 : 2, fillColor: color, fillOpacity: 1}).addTo(trailLayer);
             }
             const sourceLabel = point.source === 'auto' ? t('trail.auto_suffix') : '';
-            marker.bindTooltip(`<strong>${escapeHtml(trail.name)}</strong><br>${point.time}${sourceLabel}`);
+            // Speed isn't reported by the device/stored on the ping — it's the
+            // average speed of the leg arriving at this point (distance from
+            // the previous point / elapsed time), same limitation any GPS
+            // trail without a native speed field has. No previous point (trail
+            // start) or a zero/negative time delta (duplicate-timestamp pings)
+            // both fall back to '—' rather than dividing by zero.
+            const prevPoint = points[i - 1];
+            const speedKmh = (prevPoint && point.ts > prevPoint.ts)
+                ? L.latLng(prevPoint.lat, prevPoint.lng).distanceTo(L.latLng(point.lat, point.lng)) / (point.ts - prevPoint.ts) * 3.6
+                : null;
+            const speedLabel = speedKmh === null ? '—' : speedKmh.toFixed(1) + ' km/h';
+            marker.bindPopup(`<strong>${escapeHtml(trail.name)}</strong><br>${point.time}${sourceLabel}<br>${t('trail.speed_label')}: ${speedLabel}`);
             bounds.push([point.lat, point.lng]);
         });
     });
