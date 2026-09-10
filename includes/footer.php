@@ -252,10 +252,14 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     }
 
     // ── PWA Install Prompt ──
+    // Walk-up mission guests are one-off Action Room visitors, not app users —
+    // never offer them the install banner/tip (see isMissionVisitor() in auth.php).
+    var voHideInstallPrompt = <?= isMissionVisitor() ? 'true' : 'false' ?>;
     var deferredPrompt = null;
     window.addEventListener('beforeinstallprompt', function(e) {
         e.preventDefault();
         deferredPrompt = e;
+        if (voHideInstallPrompt) return;
         // Don't show if user already dismissed
         if (localStorage.getItem('vo-pwa-dismissed')) return;
         showInstallBanner();
@@ -293,7 +297,7 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     // iOS doesn't support beforeinstallprompt — show manual instructions instead
     var isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
     var isStandalone = window.navigator.standalone === true;
-    if (isIos && !isStandalone && !localStorage.getItem('vo-ios-tip-dismissed')) {
+    if (!voHideInstallPrompt && isIos && !isStandalone && !localStorage.getItem('vo-ios-tip-dismissed')) {
         setTimeout(showIosTip, 2000); // slight delay so page loads first
     }
 
