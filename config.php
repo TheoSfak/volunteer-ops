@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.214.3');
+define('APP_VERSION', '3.215.0');
 define('DB_SCHEMA_VERSION', 148);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
@@ -212,7 +212,7 @@ define('MISSION_TYPES', [
 ]);
 
 define('VOLUNTEER_TYPE_LABELS', [
-    VTYPE_TRAINEE => 'Δόκιμος Διασώστης',
+    VTYPE_TRAINEE => 'Εκπαιδευόμενος Εθελοντής',
     VTYPE_RESCUER => 'Εθελοντής Διασώστης',
 ]);
 

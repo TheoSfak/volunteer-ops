@@ -1244,7 +1244,7 @@ function mc(id, type, data, options = {}) {
 // By Type
 (function(){
     const raw = <?= json_encode($chartData['byType'] ?? []) ?>;
-    const typeLabels = {'VOLUNTEER':'Εθελοντής','TRAINEE_RESCUER':'Δόκιμος Διασώστης','RESCUER':'Διασώστης'};
+    const typeLabels = {'VOLUNTEER':'Εθελοντής','TRAINEE_RESCUER':'Εκπαιδευόμενος Εθελοντής','RESCUER':'Διασώστης'};
     mc('chartVolByType', 'doughnut', {
         labels: raw.map(r=>typeLabels[r.type]||r.type), datasets:[{data:raw.map(r=>r.cnt), backgroundColor:COLORS}]
     });

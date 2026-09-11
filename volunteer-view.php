@@ -877,7 +877,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
         <?php if ($tepHours < $tepGoal): ?>
             <small class="text-muted mt-1 d-block">Απομένουν <strong><?= number_format($tepGoal - $tepHours, 1) ?></strong> ώρες από τις <?= $tepGoal ?> απαιτούμενες σε αποστολές Τ.Ε.Π.</small>
         <?php else: ?>
-            <small class="text-success mt-1 d-block"><i class="bi bi-check-lg"></i> Ο δόκιμος έχει ολοκληρώσει τον στόχο των <?= $tepGoal ?> ωρών Τ.Ε.Π.!</small>
+            <small class="text-success mt-1 d-block"><i class="bi bi-check-lg"></i> Ο εκπαιδευόμενος έχει ολοκληρώσει τον στόχο των <?= $tepGoal ?> ωρών Τ.Ε.Π.!</small>
         <?php endif; ?>
     </div>
 </div>

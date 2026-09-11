@@ -958,7 +958,7 @@ $randomQuote = $quotes[array_rand($quotes)];
                     <?php elseif ($alreadyTaken): ?>
                         <span class="badge bg-secondary fs-6">Ολοκληρώθηκε</span>
                     <?php elseif (!isTraineeRescuer()): ?>
-                        <span class="badge bg-info fs-6">Μόνο για Δόκιμους</span>
+                        <span class="badge bg-info fs-6">Μόνο για Εκπαιδευόμενους</span>
                     <?php else: ?>
                         <a href="exam-take.php?id=<?= $liveExam['id'] ?>" class="btn btn-danger btn-lg">
                             <i class="bi bi-play-fill"></i> Ξεκινήστε Τώρα!

@@ -92,7 +92,7 @@ $missionNotifyPositions = dbFetchAll(
     <div id="vtypesGroup" class="ps-3 d-none">
         <div class="form-check form-check-sm">
             <input class="form-check-input" type="checkbox" name="notify_vtypes[]" value="TRAINEE_RESCUER" id="vtypeTrainee">
-            <label class="form-check-label" for="vtypeTrainee">Δόκιμοι Διασώστες</label>
+            <label class="form-check-label" for="vtypeTrainee">Εκπαιδευόμενοι Εθελοντές</label>
         </div>
         <div class="form-check form-check-sm">
             <input class="form-check-input" type="checkbox" name="notify_vtypes[]" value="RESCUER" id="vtypeRescuer">

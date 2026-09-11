@@ -478,7 +478,7 @@ include __DIR__ . '/includes/header.php';
                            value="<?= h($form['cohort_year'] ?? '') ?>" 
                            placeholder="π.χ. 2026" min="2020" max="2099"
                            title="Χρονιά σειράς δοκίμων (προαιρετικό)">
-                    <small class="text-muted">Για δόκιμους διασώστες - χρησιμοποιείται για στατιστικά ανά χρονιά</small>
+                    <small class="text-muted">Για εκπαιδευόμενους εθελοντές - χρησιμοποιείται για στατιστικά ανά χρονιά</small>
                 </div>
                 <div class="col-md-6 mb-3">
                     <label class="form-label"><i class="bi bi-shield me-1"></i>Σώμα</label>

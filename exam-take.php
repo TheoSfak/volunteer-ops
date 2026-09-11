@@ -8,7 +8,7 @@ $userId = $user['id'];
 
 // Exams are only for trainee rescuers
 if (!isAdmin() && !isTraineeRescuer($user)) {
-    setFlash('error', 'Τα διαγωνίσματα είναι διαθέσιμα μόνο για Δόκιμους Διασώστες.');
+    setFlash('error', 'Τα διαγωνίσματα είναι διαθέσιμα μόνο για Εκπαιδευόμενους Εθελοντές.');
     redirect('training.php');
 }
 
