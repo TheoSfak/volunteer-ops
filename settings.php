@@ -846,7 +846,10 @@ if (isPost()) {
         $quality = post('livekit_quality', '540');
         if (!in_array($quality, ['auto', '360', '540', '720'], true)) { $quality = 'auto'; }
 
-        $values = ['livekit_url' => $url, 'livekit_api_key' => $key, 'livekit_quality' => $quality];
+        $codec = post('livekit_codec', 'vp8');
+        if (!in_array($codec, ['vp8', 'vp9', 'h264'], true)) { $codec = 'vp8'; }
+
+        $values = ['livekit_url' => $url, 'livekit_api_key' => $key, 'livekit_quality' => $quality, 'livekit_codec' => $codec];
         if ($sec !== '' || empty($settings['livekit_api_secret'] ?? '')) {
             $values['livekit_api_secret'] = $sec;
         }
@@ -2292,6 +2295,23 @@ $lkSiteKey    = trim((string) getSetting('livekit_site_key', ''));
                         </div>
                     </div>
 
+                    <div class="mb-3">
+                        <label class="form-label" for="livekit_codec">Κωδικοποίηση βίντεο</label>
+                        <?php $lkC = (string) ($settings['livekit_codec'] ?? 'vp8'); ?>
+                        <select class="form-select" id="livekit_codec" name="livekit_codec">
+                            <option value="vp8" <?= $lkC === 'vp8' ? 'selected' : '' ?>>VP8 — συμβατό παντού (προεπιλογή)</option>
+                            <option value="h264" <?= $lkC === 'h264' ? 'selected' : '' ?>>H.264 — λιγότερη ζέστη στο κινητό</option>
+                            <option value="vp9" <?= $lkC === 'vp9' ? 'selected' : '' ?>>VP9 — καλύτερη εικόνα, πιο βαρύ στο κινητό</option>
+                        </select>
+                        <div class="form-text">
+                            Ποιο αποδίδει καλύτερα εξαρτάται από τις <strong>δικές σας συσκευές</strong>, γι' αυτό
+                            είναι επιλογή και όχι σταθερά. Το H.264 κωδικοποιείται από το υλικό σχεδόν κάθε κινητού,
+                            άρα ζεσταίνεται λιγότερο — και η ζέστη είναι ανεξάρτητη αιτία κολλήματος μετά από λίγα
+                            λεπτά. Το VP9 δίνει καλύτερη εικόνα στον ίδιο ρυθμό αλλά συχνά κωδικοποιείται σε
+                            λογισμικό. Δοκιμάστε τα στο ίδιο σημείο πεδίου πριν αποφασίσετε.
+                        </div>
+                    </div>
+
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-save me-1"></i>Αποθήκευση
                     </button>
@@ -2326,6 +2346,10 @@ $lkSiteKey    = trim((string) getSetting('livekit_site_key', ''));
                     <tr>
                         <td>Ποιότητα</td>
                         <td><?php $lkP = livekitQualityProfile(); ?><strong><?= $lkP['auto'] ? 'Αυτόματο' : ((int) $lkP['height'] . 'p') ?></strong> <span class="text-muted">/ έως <?= (int) round($lkP['maxBitrate'] / 1000) ?> kb</span></td>
+                    </tr>
+                    <tr>
+                        <td>Κωδικοποίηση</td>
+                        <td><strong><?= h(strtoupper($lkP['codec'])) ?></strong></td>
                     </tr>
                     <tr>
                         <td>Κλειδί εγκατάστασης</td>

@@ -13624,7 +13624,23 @@ setInterval(function () {
                     // Drop resolution before framerate: for someone walking and
                     // showing terrain, smooth motion tells command more about
                     // where they are than extra detail in a frozen frame.
-                    degradationPreference: 'maintain-framerate'
+                    degradationPreference: 'maintain-framerate',
+                    // Simulcast OFF — this is the single biggest saving here.
+                    // It exists to serve viewers with unequal connections, by
+                    // encoding and uploading three copies at roughly 1.4x the
+                    // bandwidth and 3x the encoder work. Our audience is
+                    // deliberately homogeneous: a handful of command staff on
+                    // a fixed screen. So all of that was being spent on layers
+                    // nobody watches, out of the one resource the phone in a
+                    // gorge has least of. Turning it off pays twice — the whole
+                    // budget goes to one stream, and the phone runs cooler, so
+                    // it thermally throttles later.
+                    //
+                    // What we give up is per-viewer adaptation. The continuous
+                    // bitrate adaptation is unaffected: that is congestion
+                    // control on the single stream, not a simulcast feature.
+                    simulcast: false,
+                    videoCodec: LIVE_PROFILE.codec
                 },
                 dynacast: true
             });
@@ -13836,6 +13852,15 @@ setInterval(function () {
 
     function attachRemote(participant, track) {
         if (track.kind !== 'video') { track.attach(); return; }
+        // The receiver buffers to smooth out network jitter. Command staff sit
+        // on the GOOD side of this link — a fixed screen on fixed broadband —
+        // so that buffer is almost pure added delay for them, and delay is the
+        // half of "quality" that matters when you are directing someone by
+        // radio against what you can see. Ask for the minimum; the browser
+        // treats it as a hint and will still buffer if it genuinely must.
+        if (typeof track.setPlayoutDelay === 'function') {
+            try { track.setPlayoutDelay(0); } catch (e) { /* hint only, never fatal */ }
+        }
         const uid = (participant.identity || '').replace(/^v/, '');
         const vid = document.querySelector('video[data-live-video="' + uid + '"]');
         if (vid) track.attach(vid);

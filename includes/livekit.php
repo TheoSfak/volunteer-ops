@@ -173,6 +173,12 @@ function livekitQualityProfile(?string $key = null): array {
     $base = $profiles[$auto ? '540' : $key] ?? $profiles['540'];
     $base['auto'] = $auto;
     $base['floor'] = $profiles['360'];
+
+    // Codec travels with the profile purely so the publisher receives one
+    // object; it is an independent choice, not a property of the resolution.
+    $codec = (string) getSetting('livekit_codec', 'vp8');
+    $base['codec'] = in_array($codec, ['vp8', 'vp9', 'h264'], true) ? $codec : 'vp8';
+
     return $base;
 }
 
