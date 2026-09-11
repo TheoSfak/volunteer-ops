@@ -13,7 +13,7 @@
 // can never satisfy an integrity check; each one 404'd-looking until its own
 // background stale-while-revalidate refetch (same code, further down) quietly
 // replaced it with a proper cors-mode response on the following load.
-const CACHE_VERSION = 'vo-v3.153.8';
+const CACHE_VERSION = 'vo-v3.212.0';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime';
 

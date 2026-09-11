@@ -220,6 +220,8 @@
                 queued_one: 'Εκκρεμεί 1 ενέργεια πεδίου — θα σταλεί μόλις επανέλθει το δίκτυο.',
                 queued: 'Εκκρεμούν {n} ενέργειες πεδίου — θα σταλούν μόλις επανέλθει το δίκτυο.',
                 queuedSos: '🆘 Το SOS σας ΔΕΝ έχει φύγει ακόμα. Τηλεφωνήστε αν μπορείτε.',
+                retrying: 'Επανάληψη σε {n}δ...',
+                retryingNow: 'Επανασύνδεση...',
                 minutesAgo: 'πριν {n} λεπτά', hoursAgo: 'πριν {n} ώρες', justNow: 'μόλις τώρα'
             },
             en: {
@@ -239,6 +241,8 @@
                 queued_one: '1 field action pending — will send once the network returns.',
                 queued: '{n} field actions pending — will send once the network returns.',
                 queuedSos: '🆘 Your SOS has NOT been sent yet. Call if you can.',
+                retrying: 'Retrying in {n}s...',
+                retryingNow: 'Reconnecting...',
                 minutesAgo: '{n} minutes ago', hoursAgo: '{n} hours ago', justNow: 'just now'
             }
         };
@@ -251,6 +255,61 @@
 
         var snapshot = null;
         try { snapshot = JSON.parse(localStorage.getItem('wr_field_snapshot') || 'null'); } catch (e) {}
+
+        // Come back on our own, without the volunteer having to think about it.
+        //
+        // The 'online' listener at the top of this function only fires on a real
+        // offline->online transition. This page is also reached when the device
+        // never lost connectivity at all and a single navigation request failed
+        // — a WebView still warming up right after an app update, a DNS or TLS
+        // hiccup, or the server briefly refusing connections while it is busy
+        // being updated. navigator.onLine was true throughout, so that event
+        // never fires and the volunteer is parked here until they think to
+        // refresh by hand. Reported from the field exactly that way: the app sat
+        // on this page and only came back "after many refreshes".
+        //
+        // Deliberately placed ABOVE the snapshot early-return below: a volunteer
+        // who has no saved mission snapshot is precisely the one with nothing
+        // else on this page to look at, and needs the recovery most.
+        //
+        // Reloading IS the probe. A fetch() cannot answer the question: the
+        // service worker intercepts it, and its .php branch answers a failed
+        // request with this very page at status 200, while static files are
+        // served cache-first — so a probe would report success while still
+        // offline. A navigation goes down the same path the volunteer's own
+        // retry would, and is the only honest test of whether we are back.
+        var RETRY_KEY = 'vo_offline_retry';
+        var retry = { n: 0, at: 0 };
+        try { retry = JSON.parse(sessionStorage.getItem(RETRY_KEY)) || retry; } catch (e) {}
+        // A gap this long means the previous run of attempts belonged to an
+        // earlier outage that resolved; start the backoff over rather than
+        // opening this one at a minute.
+        if (!retry.at || (Date.now() - retry.at) > 300000) { retry = { n: 0, at: 0 }; }
+
+        // 3s, 6s, 12s, 24s, 48s, then once a minute for as long as it takes.
+        // Backing off matters: the likeliest cause of a run of failures is a
+        // server that is already busy, and hammering it is the opposite of help.
+        var retryDelay = Math.min(3000 * Math.pow(2, retry.n), 60000);
+        try { sessionStorage.setItem(RETRY_KEY, JSON.stringify({ n: retry.n + 1, at: Date.now() })); } catch (e) {}
+
+        var retryAt = Date.now() + retryDelay;
+        setTimeout(function () { location.reload(); }, retryDelay);
+
+        // Count it down in the status line, so the wait reads as the app working
+        // rather than the app stuck. STRINGS is available here; t() is not — it
+        // is defined below the early-return, and this has to work without a
+        // snapshot.
+        var retryStrings = STRINGS[(snapshot && snapshot.lang) || 'el'] || STRINGS.el;
+        var waitEl = document.getElementById('offWaiting');
+        (function countdown() {
+            if (!waitEl) return;
+            var left = Math.max(0, Math.round((retryAt - Date.now()) / 1000));
+            waitEl.textContent = left > 0
+                ? retryStrings.retrying.split('{n}').join(left)
+                : retryStrings.retryingNow;
+            if (left > 0) setTimeout(countdown, 1000);
+        })();
+
         if (!snapshot || !snapshot.mission) return;
 
         var T = STRINGS[snapshot.lang] || STRINGS.el;
@@ -352,7 +411,8 @@
         document.body.classList.add('has-snapshot');
         document.getElementById('offTitle').textContent = t('title');
         document.getElementById('offBody').textContent = t('body');
-        document.getElementById('offWaiting').textContent = t('waiting');
+        // #offWaiting belongs to the retry countdown above, which owns it from
+        // load; setting t('waiting') here would overwrite it for one second.
     })();
     </script>
 </body>
