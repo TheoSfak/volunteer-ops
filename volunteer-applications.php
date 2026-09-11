@@ -52,9 +52,62 @@ if (isPost()) {
             } elseif ($finalStatus === VOL_APP_REJECTED && $application['status'] !== VOL_APP_REJECTED) {
                 $tsUpdate = ', rejected_at = NOW()';
             }
+            // The candidate's own details are editable from this same modal, so
+            // a save that carries a status also carries any correction made to
+            // the card. Staff take these applications down over the phone, and a
+            // mistyped mobile or email is the difference between reaching
+            // someone and losing them.
+            //
+            // Validated with exactly the rules aithsh.php enforces on the public
+            // form: name, mobile and a well-formed email required, birth date
+            // either empty or a real Y-m-d. Whatever the public form would have
+            // refused must not become reachable by editing afterwards.
+            $details = [
+                'full_name'    => trim((string) post('full_name')),
+                'patronymic'   => trim((string) post('patronymic')) ?: null,
+                'birth_date'   => trim((string) post('birth_date')) ?: null,
+                'address'      => trim((string) post('address')) ?: null,
+                'postal_code'  => trim((string) post('postal_code')) ?: null,
+                'city'         => trim((string) post('city')) ?: null,
+                'home_phone'   => trim((string) post('home_phone')) ?: null,
+                'mobile_phone' => trim((string) post('mobile_phone')),
+                'email'        => trim((string) post('email')),
+                'occupation'   => trim((string) post('occupation')) ?: null,
+            ];
+
+            $detailErrors = [];
+            if ($details['full_name'] === '')    { $detailErrors[] = 'Το ονοματεπώνυμο είναι υποχρεωτικό.'; }
+            if ($details['mobile_phone'] === '') { $detailErrors[] = 'Το κινητό τηλέφωνο είναι υποχρεωτικό.'; }
+            if ($details['email'] === '') {
+                $detailErrors[] = 'Το email είναι υποχρεωτικό.';
+            } elseif (!filter_var($details['email'], FILTER_VALIDATE_EMAIL)) {
+                $detailErrors[] = 'Το email δεν είναι έγκυρο.';
+            }
+            if ($details['birth_date'] !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $details['birth_date'])) {
+                $detailErrors[] = 'Μη έγκυρη ημερομηνία γέννησης.';
+            }
+
+            // Refuse the whole save rather than store a half-corrected card: the
+            // status buttons and the details share one form, so a partial write
+            // would leave the row saying something nobody chose.
+            if ($detailErrors) {
+                setFlash('error', implode(' ', $detailErrors));
+                redirect('volunteer-applications.php' . ($_SERVER['QUERY_STRING'] ? '?' . $_SERVER['QUERY_STRING'] : ''));
+            }
+
             dbExecute(
-                "UPDATE volunteer_applications SET status = ?, admin_notes = ?{$tsUpdate}, updated_at = NOW() WHERE id = ?",
-                [$finalStatus, $notes, $id]
+                "UPDATE volunteer_applications
+                    SET status = ?, admin_notes = ?,
+                        full_name = ?, patronymic = ?, birth_date = ?, address = ?, postal_code = ?,
+                        city = ?, home_phone = ?, mobile_phone = ?, email = ?, occupation = ?{$tsUpdate},
+                        updated_at = NOW()
+                  WHERE id = ?",
+                [
+                    $finalStatus, $notes,
+                    $details['full_name'], $details['patronymic'], $details['birth_date'], $details['address'], $details['postal_code'],
+                    $details['city'], $details['home_phone'], $details['mobile_phone'], $details['email'], $details['occupation'],
+                    $id,
+                ]
             );
             logAudit('update_status', 'volunteer_applications', $id, ['status' => $application['status']], ['status' => $finalStatus]);
             setFlash('success', 'Η αίτηση ενημερώθηκε.');
@@ -252,6 +305,36 @@ include __DIR__ . '/includes/header.php';
                                 </div>
                                 <div class="modal-body">
                                     <div class="row g-3 mb-3">
+                                        <?php if ($canManage): ?>
+                                        <?php
+                                        // Editable in place rather than behind a
+                                        // separate edit screen: staff correct these
+                                        // while on the phone with the candidate, and
+                                        // a second page to open is a second reason
+                                        // not to bother. Saved by any of the footer
+                                        // buttons — see the handler at the top, which
+                                        // validates them exactly as aithsh.php does.
+                                        $appFields = [
+                                            ['full_name',    'Ονοματεπώνυμο', 'col-md-6', 'text',  true],
+                                            ['patronymic',   'Πατρώνυμο',     'col-md-6', 'text',  false],
+                                            ['birth_date',   'Ημ. Γέννησης',  'col-md-6', 'date',  false],
+                                            ['address',      'Διεύθυνση',     'col-md-6', 'text',  false],
+                                            ['postal_code',  'Τ.Κ.',          'col-md-3', 'text',  false],
+                                            ['city',         'Πόλη',          'col-md-3', 'text',  false],
+                                            ['home_phone',   'Τηλ. Οικίας',   'col-md-6', 'tel',   false],
+                                            ['mobile_phone', 'Τηλ. Κινητό',   'col-md-6', 'tel',   true],
+                                            ['email',        'Email',         'col-md-6', 'email', true],
+                                            ['occupation',   'Επάγγελμα',     'col-md-6', 'text',  false],
+                                        ];
+                                        foreach ($appFields as [$fname, $flabel, $fcol, $ftype, $freq]):
+                                        ?>
+                                        <div class="<?= $fcol ?>">
+                                            <label class="form-label fw-semibold mb-1"><?= h($flabel) ?><?= $freq ? ' *' : '' ?></label>
+                                            <input type="<?= $ftype ?>" name="<?= $fname ?>" class="form-control form-control-sm"
+                                                   value="<?= h($app[$fname] ?? '') ?>"<?= $freq ? ' required' : '' ?>>
+                                        </div>
+                                        <?php endforeach; ?>
+                                        <?php else: ?>
                                         <div class="col-md-6"><strong>Πατρώνυμο:</strong> <?= h($app['patronymic'] ?: '—') ?></div>
                                         <div class="col-md-6"><strong>Ημ. Γέννησης:</strong> <?= $app['birth_date'] ? formatDate($app['birth_date']) : '—' ?></div>
                                         <div class="col-md-6"><strong>Διεύθυνση:</strong> <?= h($app['address'] ?: '—') ?></div>
@@ -261,6 +344,7 @@ include __DIR__ . '/includes/header.php';
                                         <div class="col-md-6"><strong>Τηλ. Κινητό:</strong> <?= h($app['mobile_phone']) ?></div>
                                         <div class="col-md-6"><strong>Email:</strong> <?= h($app['email']) ?></div>
                                         <div class="col-md-6"><strong>Επάγγελμα:</strong> <?= h($app['occupation'] ?: '—') ?></div>
+                                        <?php endif; ?>
                                         <?php if ($app['status'] === VOL_APP_CONVERTED && $app['converted_user_id']): ?>
                                         <div class="col-12">
                                             <strong>Δημιουργήθηκε εθελοντής:</strong>
@@ -274,8 +358,12 @@ include __DIR__ . '/includes/header.php';
                                         <textarea name="admin_notes" class="form-control" rows="3" <?= $canManage ? '' : 'readonly' ?>><?= h($app['admin_notes'] ?? '') ?></textarea>
                                     </div>
                                 </div>
-                                <?php if ($canManage): ?>
                                 <div class="modal-footer">
+                                    <a href="volunteer-application-print.php?id=<?= (int) $app['id'] ?>" target="_blank" rel="noopener"
+                                       class="btn btn-outline-secondary me-auto">
+                                        <i class="bi bi-printer"></i> Εκτύπωση / Εξαγωγή
+                                    </a>
+                                    <?php if ($canManage): ?>
                                     <?php if ($app['status'] !== VOL_APP_CONVERTED): ?>
                                     <?php if ($app['status'] !== VOL_APP_CONTACTED): ?>
                                     <button type="submit" name="new_status" value="<?= VOL_APP_CONTACTED ?>" class="btn btn-warning">Σε Επικοινωνία</button>
@@ -293,8 +381,8 @@ include __DIR__ . '/includes/header.php';
                                     </a>
                                     <?php endif; ?>
                                     <button type="submit" name="new_status" value="<?= h($app['status']) ?>" class="btn btn-outline-primary">Αποθήκευση Σημειώσεων</button>
-                                </div>
                                 <?php endif; ?>
+                                </div>
                             </form>
                         </div>
                     </div>
