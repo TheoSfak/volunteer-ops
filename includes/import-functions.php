@@ -170,8 +170,18 @@ function importVolunteersFromCsv(array $rows, bool $dryRun = false): array {
         $drivingLicense   = _col($row, 'Δίπλωμα Οδήγησης');
         $vehiclePlate     = _col($row, 'Πινακίδα Οχήματος');
         $pantsSize        = _col($row, 'Παντελόνι');
-        $shirtSize        = _col($row, 'Μπλούζα');
-        $blouseSize       = _col($row, 'Μπλάκετ');
+        // The export used to head shirt_size "Μπλούζα" and blouse_size "Μπλάκετ",
+        // neither of which is what volunteer-form.php calls them — it labels them
+        // Χιτώνιο and Μπλούζα. The export now says the same; this reads the
+        // corrected names first and still accepts the old ones, so spreadsheets
+        // exported before that change keep importing into the right columns.
+        // Decided per FILE, not per field: in the old layout "Μπλούζα" is the
+        // shirt, in the new one it is the blouse, so falling back field by field
+        // would read an old file's shirt into both columns. The presence of a
+        // "Χιτώνιο" column is what tells the two layouts apart.
+        $hasNewSizeHeaders = array_key_exists('Χιτώνιο', $row);
+        $shirtSize        = $hasNewSizeHeaders ? _col($row, 'Χιτώνιο') : _col($row, 'Μπλούζα');
+        $blouseSize       = $hasNewSizeHeaders ? _col($row, 'Μπλούζα') : _col($row, 'Μπλάκετ');
         $fleeceSize       = _col($row, 'Fleece');
         $regEpidrasis     = _col($row, 'Μητρώο Επίδρασης');
         $regGgpp          = _col($row, 'Μητρώο ΓΓΠΠ');
