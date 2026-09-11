@@ -1040,28 +1040,67 @@ foreach (dbFetchAll(
 $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds, $continuousFieldMinutesByVolunteerId) {
     try {
         $field = $hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status';
-        // Was: 1 query for the latest ping per volunteer, PLUS one extra
-        // query per volunteer inside the loop below to find their previous
-        // ping (needed only for the moving/heading calc) — a real N+1 that
-        // scaled with active-volunteer count on every single poll tick.
-        // LEAD() pulls that previous ping's lat/lng/accuracy/time into the
-        // SAME row in one query. Windowed/ordered by vp.id (not created_at)
-        // to match exactly what the old MAX(id) subquery picked as
-        // "latest" — id is the real tiebreak of record here, not the
-        // timestamp, so this selects and pairs the identical rows the old
-        // two-query version did.
+        // The latest ping per volunteer+shift, plus the one immediately before
+        // it (needed only for the moving/heading calc further down).
+        //
+        // This used to be a single ROW_NUMBER()/LEAD() window pass over every
+        // ping row belonging to the mission. Correct, but it re-read the
+        // mission's entire GPS history on every 5s poll from every open tab,
+        // so its cost grew with the mission's age rather than with the number
+        // of volunteers actually on the map. Measured locally: 4ms at 180
+        // pings, 55ms at 5.000, 269ms at 25.000, 2.381ms at 100.000 — at which
+        // point it was 82% of the whole poll, the poll no longer fitted inside
+        // its own 5s interval, and tabs piled up overlapping requests until the
+        // database refused new connections (max_user_connections).
+        //
+        // The ids are now resolved first, from volunteer_pings alone:
+        //   - MAX(id) GROUP BY user_id, shift_id over the mission's shift ids
+        //     is answered by a loose index scan ("Using index for group-by") on
+        //     the existing idx_pings_user_shift, whose InnoDB leaf entries carry
+        //     the PK. It visits one index entry per group instead of one per
+        //     ping, so a 12-hour mission costs the same as a 10-minute one.
+        //     The shift ids MUST be an explicit IN list — resolving them with a
+        //     subquery, or joining shifts in here, loses the loose scan and puts
+        //     the full scan straight back (verified with EXPLAIN both ways).
+        //   - the previous ping is then one backward index seek per group.
+        // Everything else joins against those ~one-row-per-volunteer results.
+        // Identical output to the old query, verified row-by-row and
+        // column-by-column on a 100.000-ping mission: 2.381ms -> 3ms.
+        //
+        // Deriving prev_* from volunteer_pings before the joins also fixes a
+        // quiet bug: the old query windowed over the JOINED rows, so a
+        // volunteer duplicated by the LEFT JOINs below (two team memberships,
+        // say) had LEAD() land on a duplicate of their own latest ping rather
+        // than on the previous one — zero distance, hence never "moving".
+        $shiftIds = array_column(
+            dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$missionId]),
+            'id'
+        );
+        if (empty($shiftIds)) {
+            return [];
+        }
+        $shiftPlaceholders = implode(',', array_fill(0, count($shiftIds), '?'));
         $rawPins = dbFetchAll(
             "SELECT * FROM (
                 SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.battery_level, vp.created_at, u.name,
                         u.is_external, u.guest_org_name, u.guest_country_code,
                         COALESCE(ht.name, mvt.label) AS home_team_name, COALESCE(ht.color, mvt.color) AS home_team_color,
                         mt.color AS team_color, mt.codename, mt.team_number{$field},
-                        ROW_NUMBER() OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS rn,
-                        LEAD(vp.lat) OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS prev_lat,
-                        LEAD(vp.lng) OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS prev_lng,
-                        LEAD(vp.accuracy_meters) OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS prev_accuracy_meters,
-                        LEAD(vp.created_at) OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS prev_created_at
-                 FROM volunteer_pings vp
+                        pvp.lat AS prev_lat, pvp.lng AS prev_lng,
+                        pvp.accuracy_meters AS prev_accuracy_meters, pvp.created_at AS prev_created_at,
+                        ROW_NUMBER() OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS rn
+                 FROM (
+                     SELECT l.max_id,
+                            (SELECT p.id FROM volunteer_pings p
+                              WHERE p.user_id = l.user_id AND p.shift_id = l.shift_id AND p.id < l.max_id
+                              ORDER BY p.id DESC LIMIT 1) AS prev_id
+                     FROM (SELECT user_id, shift_id, MAX(id) AS max_id
+                             FROM volunteer_pings
+                            WHERE shift_id IN ({$shiftPlaceholders})
+                            GROUP BY user_id, shift_id) l
+                 ) sel
+                 JOIN volunteer_pings vp ON vp.id = sel.max_id
+                 LEFT JOIN volunteer_pings pvp ON pvp.id = sel.prev_id
                  JOIN shifts s ON s.id = vp.shift_id
                  JOIN users u ON u.id = vp.user_id
                  LEFT JOIN volunteer_teams ht ON ht.id = u.volunteer_team_id
@@ -1069,11 +1108,10 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                  LEFT JOIN participation_requests pr ON pr.shift_id = vp.shift_id AND pr.volunteer_id = vp.user_id
                  LEFT JOIN mission_team_members mtm ON mtm.user_id = vp.user_id AND mtm.mission_id = s.mission_id
                  LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
-                 WHERE s.mission_id = ?
              ) ranked
              WHERE rn = 1
              ORDER BY created_at DESC",
-            [$missionId]
+            $shiftIds
         );
 
         $pins = [];
@@ -10668,7 +10706,11 @@ function hideWarRoomBannerRow(id) {
     });
 })();
 
+// Overlap guard — see pollWarRoomData()'s own flag below for why.
+let activityInFlight = false;
 function loadActivity() {
+    if (activityInFlight) return;
+    activityInFlight = true;
     fetch('mission-history.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(data => {
         const list = document.getElementById('activityList');
         if (!data.ok || !data.events.length) {
@@ -10682,7 +10724,7 @@ function loadActivity() {
             </div>
         `).join('');
         document.getElementById('activityRefresh').textContent = new Date().toLocaleTimeString(jsLocale, {hour: '2-digit', minute: '2-digit'});
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => { activityInFlight = false; });
 }
 if (!fieldMode) {
     loadActivity();
@@ -11300,7 +11342,22 @@ setInterval(renderPollStaleness, 5000);
 // moment this tab becomes visible again — rather than leaving the user
 // looking at a map/route/SOS list that's been silently frozen for however
 // long the tab was hidden until the next scheduled tick happens to land.
+// Overlap guard, shared by the three timer-driven polls on this page.
+// setInterval fires on a fixed schedule whether or not the previous request
+// has come back, so as soon as a poll starts taking longer than its own
+// interval — precisely what happens when the server is already loaded — every
+// open tab stacks requests on top of each other, and each one holds a database
+// connection for the whole time it is waiting. That is a feedback loop: the
+// extra requests are what make the server slower still. Measured locally on a
+// 50.000-ping mission with 20 tabs open: 147 concurrent connections and a 73s
+// poll without this flag, 52 and 17s with it. Skipping a tick while one is
+// still in flight makes the cadence self-regulating — it stays at the nominal
+// interval while the server keeps up, and backs off on its own when it does
+// not, rather than piling more load onto a server that is already behind.
+let pollInFlight = false;
 function pollWarRoomData() {
+    if (pollInFlight) return;
+    pollInFlight = true;
     fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId).then(response => {
         if (!checkSessionAlive(response)) return null;
         return response.json();
@@ -11421,7 +11478,7 @@ function pollWarRoomData() {
         // something actually changed, so a quiet mission doesn't rewrite
         // localStorage every 5 seconds.
         saveFieldSnapshot();
-    }).catch(() => { renderPollStaleness(); });
+    }).catch(() => { renderPollStaleness(); }).finally(() => { pollInFlight = false; });
 }
 setInterval(() => { if (!document.hidden) pollWarRoomData(); }, 5000);
 
@@ -11521,7 +11578,11 @@ document.querySelectorAll('.team-form').forEach(form => {
             .catch(() => { chatMessagesEl.textContent = t('chat.load_error'); });
     }
 
+    // Overlap guard — see pollWarRoomData()'s own flag for why.
+    let roomPollInFlight = false;
     function pollRoom() {
+        if (roomPollInFlight) return;
+        roomPollInFlight = true;
         const teamId = activeTeamId;
         const afterId = lastIdByRoom[teamId] || 0;
         fetch(`mission-chat.php?mission_id=${missionId}&team_id=${teamId}&after_id=${afterId}`)
@@ -11533,7 +11594,8 @@ document.querySelectorAll('.team-form').forEach(form => {
                 lastIdByRoom[teamId] = data.messages[data.messages.length - 1].id;
                 if (nearBottom) chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
             })
-            .catch(() => {});
+            .catch(() => {})
+            .finally(() => { roomPollInFlight = false; });
         pollOtherRoomsForUnread();
     }
 
