@@ -178,8 +178,12 @@ if (isPost()) {
             
         case 'resend_email':
             if ($canManageMissions && $mission['status'] === STATUS_OPEN) {
+                // is_external = 0 keeps this reminder to our own people. It
+                // also drops the single-mission QR visitors layered on top of
+                // that flag, whose synthesized @mission-visitor.invalid address
+                // (visitor-join.php) can only ever hard-fail an SMTP send.
                 $allUsers = dbFetchAll(
-                    "SELECT id, name, email FROM users WHERE is_active = 1 AND deleted_at IS NULL"
+                    "SELECT id, name, email FROM users WHERE is_active = 1 AND deleted_at IS NULL AND is_external = 0"
                 );
                 $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id;
                 $appName = getSetting('app_name', 'VolunteerOps');
@@ -233,7 +237,17 @@ if (isPost()) {
                 // Notify volunteers based on targeting selection
                 if (isset($_POST['notify_volunteers'])) {
                     $notifyTarget = post('notify_target', 'all');
-                    $whereFilter  = "is_active = 1 AND deleted_at IS NULL";
+                    // is_external = 0 excludes guest/partner-org accounts and
+                    // the single-mission QR visitors layered on that same flag:
+                    // a new mission of ours is not a call-out they belong in,
+                    // and a visitor's synthesized @mission-visitor.invalid
+                    // address hard-fails every send, inflating the failure
+                    // count and stalling publish on one SMTP timeout each.
+                    // Same gate mobilization.php and telegram.php already use.
+                    // Applies to every target below, including the by-role
+                    // "Volunteer" option, which would otherwise still catch
+                    // them all since guests and visitors are ROLE_VOLUNTEER.
+                    $whereFilter  = "is_active = 1 AND deleted_at IS NULL AND is_external = 0";
                     $filterParams = [];
 
                     if ($notifyTarget === 'roles' && !empty($_POST['notify_roles'])) {

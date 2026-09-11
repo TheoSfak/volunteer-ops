@@ -62,11 +62,15 @@ foreach ($incompleteShifts as $shift) {
         continue; // Already sent alert in last 24 hours
     }
     
-    // Get all active volunteers (not just those in this mission)
+    // Get all active volunteers (not just those in this mission).
+    // is_external = 0 keeps guest/partner-org accounts and single-mission QR
+    // visitors out of an automated recruitment blast for our own missions,
+    // the same gate the manual publish/reminder sends in mission-view.php use.
     $allVolunteers = dbFetchAll(
         "SELECT * FROM users 
          WHERE role = ? 
-         AND is_active = 1",
+         AND is_active = 1
+         AND is_external = 0",
         [ROLE_VOLUNTEER]
     );
     
