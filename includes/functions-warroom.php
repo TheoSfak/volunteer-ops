@@ -2688,6 +2688,84 @@ function pointToSegmentDistanceMeters(float $lat, float $lng, float $latA, float
 }
 
 /**
+ * Spatial index over the pings and walked segments a coverage sweep has to
+ * test cells against, bucketed at sweep-radius resolution.
+ *
+ * Both coverage functions below grid-sample an area and ask, per cell, "did
+ * anyone walk within $sweepRadiusMeters of here". They used to answer that by
+ * scanning every ping and then every segment, breaking on the first hit — so a
+ * COVERED cell was cheap but an UNCOVERED one paid for the full list twice,
+ * and on a large, thinly-walked area almost every cell is uncovered. Measured
+ * on the demo mission's 7km sector with only 180 pings: the grid itself and
+ * pointInPolygon() together cost 0,13s, the covered-check 25s.
+ *
+ * Shared by both rather than copied into each, so the two can never drift into
+ * disagreeing about what "covered" means — the same reasoning the activity-feed
+ * scope fragments further up this file are shared for.
+ */
+function coverageSpatialIndex(array $points, array $segments, float $bucketLat, float $bucketLng): array {
+    $key = fn($la, $ln) => ((int) floor($la / $bucketLat)) . ':' . ((int) floor($ln / $bucketLng));
+
+    $pointBuckets = [];
+    foreach ($points as $p) {
+        $pointBuckets[$key($p['lat'], $p['lng'])][] = $p;
+    }
+
+    // A segment is registered in every bucket it passes through, not just the
+    // two holding its endpoints — a walked leg crossing a cell must be visible
+    // to that cell even when both of its ends are far away. Sampled at half a
+    // bucket so none in between is stepped over.
+    $segmentBuckets = [];
+    foreach ($segments as $s) {
+        $spanLat = $s['lat2'] - $s['lat1'];
+        $spanLng = $s['lng2'] - $s['lng1'];
+        $samples = (int) max(1, ceil(2 * max(abs($spanLat) / $bucketLat, abs($spanLng) / $bucketLng)));
+        $seenKeys = [];
+        for ($k = 0; $k <= $samples; $k++) {
+            $bucket = $key($s['lat1'] + $spanLat * $k / $samples, $s['lng1'] + $spanLng * $k / $samples);
+            if (!isset($seenKeys[$bucket])) {
+                $seenKeys[$bucket] = true;
+                $segmentBuckets[$bucket][] = $s;
+            }
+        }
+    }
+
+    return ['points' => $pointBuckets, 'segments' => $segmentBuckets];
+}
+
+/**
+ * Was this cell walked? Answers from coverageSpatialIndex() above, looking only
+ * at the buckets that could possibly hold something in range.
+ *
+ * The neighbourhood is +/-2 buckets, not +/-1: one bucket covers the sweep
+ * radius itself, the second absorbs the half-bucket sampling error in that
+ * function's segment rasterisation. Anything genuinely within reach of this
+ * cell is therefore guaranteed to sit in one of the buckets examined here.
+ */
+function coverageCellIsCovered(float $cellLat, float $cellLng, array $index, float $bucketLat, float $bucketLng, float $sweepRadiusMeters): bool {
+    $ci = (int) floor($cellLat / $bucketLat);
+    $cj = (int) floor($cellLng / $bucketLng);
+
+    for ($di = -2; $di <= 2; $di++) {
+        for ($dj = -2; $dj <= 2; $dj++) {
+            $bucket = ($ci + $di) . ':' . ($cj + $dj);
+            foreach ($index['points'][$bucket] ?? [] as $p) {
+                if (gpsDistanceMeters($cellLat, $cellLng, $p['lat'], $p['lng']) <= $sweepRadiusMeters) {
+                    return true;
+                }
+            }
+            foreach ($index['segments'][$bucket] ?? [] as $s) {
+                if (pointToSegmentDistanceMeters($cellLat, $cellLng, $s['lat1'], $s['lng1'], $s['lat2'], $s['lng2']) <= $sweepRadiusMeters) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
  * Verified Coverage — ground-truth swept-area estimate for search sectors,
  * entirely independent of the self-reported status a team leader taps.
  * Grid-samples each sector polygon at $gridStepMeters resolution: a cell
@@ -2724,7 +2802,16 @@ function pointToSegmentDistanceMeters(float $lat, float $lng, float $latA, float
  * the default is wrong.
  */
 function computeMissionSectorCoverage(int $missionId): array {
-    $gridStepMeters = 10;
+    // $gridStepMeters is derived per sector below, not fixed. It used to be a
+    // flat 10m on the stated assumption that "hand-drawn sectors are naturally
+    // small" — which does not hold. The demo mission's own search sector is
+    // 7km x 7km, which at 10m resolution is 491.118 grid cells, each of them
+    // running pointInPolygon() and, when not covered, a linear scan of every
+    // ping and every walked segment. That endpoint did not merely get slow: it
+    // ran into PHP's max_execution_time and returned a 500, on 181 pings — so
+    // this was never a ping-volume problem, and no amount of query tuning
+    // would have touched it. When it did finish, it was 112 seconds and a
+    // 16MB response of gap cells.
     $sweepRadiusMeters = 25;
     $trustedAccuracyMeters = 100; // same "trustworthy" cutoff checkRestrictedAreaBreach() already uses
     $maxWalkGapSeconds = 1800; // 30 min — see doc comment above
@@ -2807,12 +2894,27 @@ function computeMissionSectorCoverage(int $missionId): array {
             $inBbox($s['lat1'], $s['lng1']) || $inBbox($s['lat2'], $s['lng2'])
         ));
 
+        // Bound the cell count instead of the sector size: at most 150 steps
+        // along each axis, so any sector costs at most ~22.500 cells however
+        // large an admin drew it. Small sectors keep the full 10m resolution;
+        // only ones too big to grid finely get a coarser cell. This mirrors
+        // exactly what computeMissionRingCoverage() below already does
+        // ($maxRadius / 150) — rings were hardened against this and sectors
+        // were left on the "naturally small" assumption.
+        $sectorHeightMeters = ($maxLat - $minLat) / $latDegPerMeter;
+        $sectorWidthMeters  = ($maxLng - $minLng) / $lngDegPerMeter;
+        $gridStepMeters = max(10, (int) round(max($sectorHeightMeters, $sectorWidthMeters) / 150));
+
         $stepLat = $gridStepMeters * $latDegPerMeter;
         $stepLng = $gridStepMeters * $lngDegPerMeter;
 
         $totalCells = 0;
         $coveredCells = 0;
         $gapCells = [];
+
+        $bucketLat = $sweepRadiusMeters * $latDegPerMeter;
+        $bucketLng = $sweepRadiusMeters * $lngDegPerMeter;
+        $coverageIndex = coverageSpatialIndex($nearbyPoints, $nearbySegments, $bucketLat, $bucketLng);
 
         // Always grid-sample, even with zero nearby pings — a completely
         // unwalked sector must still resolve to a real 0%, not be skipped.
@@ -2825,21 +2927,7 @@ function computeMissionSectorCoverage(int $missionId): array {
                 }
                 $totalCells++;
 
-                $covered = false;
-                foreach ($nearbyPoints as $p) {
-                    if (gpsDistanceMeters($cellLat, $cellLng, $p['lat'], $p['lng']) <= $sweepRadiusMeters) {
-                        $covered = true;
-                        break;
-                    }
-                }
-                if (!$covered) {
-                    foreach ($nearbySegments as $s) {
-                        if (pointToSegmentDistanceMeters($cellLat, $cellLng, $s['lat1'], $s['lng1'], $s['lat2'], $s['lng2']) <= $sweepRadiusMeters) {
-                            $covered = true;
-                            break;
-                        }
-                    }
-                }
+                $covered = coverageCellIsCovered($cellLat, $cellLng, $coverageIndex, $bucketLat, $bucketLng, $sweepRadiusMeters);
                 if ($covered) {
                     $coveredCells++;
                 } else {
@@ -2969,6 +3057,14 @@ function computeMissionRingCoverage(int $missionId): array {
     $stepLat = $gridStepMeters * $latDegPerMeter;
     $stepLng = $gridStepMeters * $lngDegPerMeter;
 
+    // Same spatial index the sector sweep uses — this loop had the identical
+    // full-list-scan-per-uncovered-cell cost, and with four concentric rings
+    // gridded in one pass it was the slower of the two: 20,5s of the coverage
+    // endpoint's response on the demo mission, against 0,38s for the sectors.
+    $bucketLat = $sweepRadiusMeters * $latDegPerMeter;
+    $bucketLng = $sweepRadiusMeters * $lngDegPerMeter;
+    $coverageIndex = coverageSpatialIndex($nearbyPoints, $nearbySegments, $bucketLat, $bucketLng);
+
     $totalByRing = [0, 0, 0, 0];
     $coveredByRing = [0, 0, 0, 0];
 
@@ -2986,21 +3082,7 @@ function computeMissionRingCoverage(int $missionId): array {
                 continue;
             }
 
-            $covered = false;
-            foreach ($nearbyPoints as $p) {
-                if (gpsDistanceMeters($cellLat, $cellLng, $p['lat'], $p['lng']) <= $sweepRadiusMeters) {
-                    $covered = true;
-                    break;
-                }
-            }
-            if (!$covered) {
-                foreach ($nearbySegments as $s) {
-                    if (pointToSegmentDistanceMeters($cellLat, $cellLng, $s['lat1'], $s['lng1'], $s['lat2'], $s['lng2']) <= $sweepRadiusMeters) {
-                        $covered = true;
-                        break;
-                    }
-                }
-            }
+            $covered = coverageCellIsCovered($cellLat, $cellLng, $coverageIndex, $bucketLat, $bucketLng, $sweepRadiusMeters);
 
             // Bucket this one cell's already-computed status into every
             // ring whose radius contains it — rings are concentric, so a
