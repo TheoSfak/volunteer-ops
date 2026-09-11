@@ -253,6 +253,13 @@ if (isPost()) {
             if (($canManageMissions || $isResponsible) && $mission['status'] === STATUS_OPEN) {
                 dbExecute("UPDATE missions SET status = ?, updated_at = NOW() WHERE id = ?", [STATUS_CLOSED, $id]);
                 logAudit('close', 'missions', $id);
+                // A mission that is over must not leave a camera running on
+                // someone. Runs before the debrief notice purely so a failure
+                // here cannot swallow that notification.
+                $endedLive = endAllLiveStreamsForMission($id, (int) $user['id']);
+                if ($endedLive > 0) {
+                    logAudit('end_live_on_mission_close', 'missions', $id, null, ['ended' => $endedLive]);
+                }
                 notifyGuestsMissionDebriefEligible($id);
                 setFlash('success', 'Η αποστολή έκλεισε.');
                 redirect('mission-view.php?id=' . $id);

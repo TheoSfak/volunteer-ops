@@ -1003,6 +1003,36 @@ if (isLoggedIn()) {
             cursor: help;
         }
 
+        /* Live-video badge on a map pin (liveBadgeHtml() in war-room.php).
+           Same pill geometry as .k9-badge so badges stack cleanly on one
+           line, but red and gently pulsing: unlike the others this one is
+           transient state, not an attribute of the person, and it needs to
+           read as "happening right now" at a glance on a crowded map. */
+        .live-pin-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-size: .62em;
+            font-weight: 700;
+            color: #fff;
+            background: #dc2626;
+            border-radius: 999px;
+            padding: 1px 6px;
+            margin-left: 4px;
+            vertical-align: top;
+            line-height: 1.4;
+            white-space: nowrap;
+            animation: livePinPulse 1.6s ease-in-out infinite;
+        }
+        @keyframes livePinPulse {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: .55; }
+        }
+        /* Respect a reader who has asked the system to stop animating things. */
+        @media (prefers-reduced-motion: reduce) {
+            .live-pin-badge { animation: none; }
+        }
+
         /* Home-team captain badge (users.is_team_captain) — same pill shape
            and sizing as .k9-badge so the two stack cleanly on one line, but a
            distinct gold/star treatment so it's never mistaken for the bare,

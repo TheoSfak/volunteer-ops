@@ -18,6 +18,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/includes/permissions.php';
 require_once __DIR__ . '/includes/email.php';
+require_once __DIR__ . '/includes/livekit.php';
 require_once __DIR__ . '/includes/webpush.php';
 require_once __DIR__ . '/includes/telegram.php';
 require_once __DIR__ . '/includes/newsletter-functions.php';
@@ -49,8 +50,28 @@ initSession();
 header('X-Frame-Options: SAMEORIGIN');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: strict-origin-when-cross-origin');
-header('Permissions-Policy: camera=(self), microphone=(), geolocation=(self)');
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://*.push.services.mozilla.com https://fcm.googleapis.com https://updates.push.services.mozilla.com; worker-src 'self'");
+// microphone=(self), not the empty allowlist it used to be: Action Room live
+// video publishes audio (with a mute button the volunteer controls), and an
+// empty allowlist blocks getUserMedia's audio track outright — before any
+// permission prompt, with an error that does not mention this header at all.
+header('Permissions-Policy: camera=(self), microphone=(self), geolocation=(self)');
+
+// LiveKit needs two origins added to connect-src: https for the pre-flight
+// validate call and TURN, wss for the signalling socket. Derived from the
+// configured URL rather than a hardcoded *.livekit.cloud wildcard, so moving
+// to a self-hosted server later is a settings change and not a code change —
+// and so an install with no live video widens nothing at all.
+$livekitCsp = '';
+$livekitHost = trim((string) getSetting('livekit_url', ''));
+if ($livekitHost !== '') {
+    $livekitHost = explode('/', preg_replace('#^wss?://#i', '', $livekitHost))[0];
+    // Host-only, and only if it looks like one — never interpolate raw
+    // settings text straight into a security header.
+    if (preg_match('/^[A-Za-z0-9.-]+(:[0-9]+)?$/', $livekitHost)) {
+        $livekitCsp = ' https://' . $livekitHost . ' wss://' . $livekitHost;
+    }
+}
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; img-src 'self' data: https:; media-src 'self' blob:; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; connect-src 'self' blob: https://cdn.jsdelivr.net https://unpkg.com https://*.push.services.mozilla.com https://fcm.googleapis.com https://updates.push.services.mozilla.com" . $livekitCsp . "; worker-src 'self' blob:");
 if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 }

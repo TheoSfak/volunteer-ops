@@ -23,11 +23,11 @@ function warRoomDefaultLayout(): array {
         'main' => [
             'mapCard', 'weatherCard', 'missingPersonCard', 'trailEventsCard', 'shortageFormCard', 'incidentFormCard',
             'shortageListCard', 'incidentsListCard', 'poiListCard', 'sectorsListCard', 'teamsCard',
-            'participantsCard', 'requestLocationCard', 'requestPhotoCard',
-            'requestVideoCard', 'requestTaskCard', 'activityCard', 'chatCard',
+            'participantsCard', 'liveStreamsCard', 'requestLocationCard', 'requestPhotoCard',
+            'requestVideoCard', 'requestLiveCard', 'requestTaskCard', 'activityCard', 'chatCard',
         ],
         'sidebar' => [
-            'myLocationCard', 'mediaCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'restrictedAreaProximityCard', 'myRouteCard',
+            'myLocationCard', 'myLiveCard', 'mediaCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'restrictedAreaProximityCard', 'myRouteCard',
             'myTasksCard', 'mySectorsCard', 'shiftsCard', 'sosAlertsCard', 'broadcastCard',
             'endMissionCard', 'dispatchCard', 'sectorsCard', 'restrictedAreasCard', 'routeOrderCard',
             'teamRoutesAdminCard', 'briefingCard', 'missionVisitorsCard', 'missionMgmtCard',
@@ -45,7 +45,7 @@ function warRoomAllCardIds(): array {
  * PHP conditionals already in war-room.php (report forms need an approved
  * participant, the two team-routing cards need at least one team to exist).
  */
-function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false, bool $weatherEnabled = false): array {
+function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false, bool $weatherEnabled = false, bool $liveEnabled = false): array {
     $default = warRoomDefaultLayout();
     $excluded = [];
     if (!$isApprovedParticipant) {
@@ -64,6 +64,14 @@ function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, boo
     }
     if (!$weatherEnabled) {
         $excluded[] = 'weatherCard';
+    }
+    // No LiveKit credentials configured -> the whole feature is absent rather
+    // than present-but-broken, the same treatment weatherCard gets without an
+    // API key. Also stops a saved layout from pinning a card that cannot work.
+    if (!$liveEnabled) {
+        $excluded[] = 'requestLiveCard';
+        $excluded[] = 'liveStreamsCard';
+        $excluded[] = 'myLiveCard';
     }
     return [
         'main'    => array_values(array_diff($default['main'], $excluded)),
@@ -85,8 +93,8 @@ function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, boo
  *    no "append missing ids" step — an id absent from 'hidden' is visible
  *    by default, which is already what we want.
  */
-function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false, bool $weatherEnabled = false): array {
-    $rendered = warRoomRenderedCardIds($isApprovedParticipant, $hasTeams, $isSpecialMission, $isMissingPersonMission, $weatherEnabled);
+function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false, bool $weatherEnabled = false, bool $liveEnabled = false): array {
+    $rendered = warRoomRenderedCardIds($isApprovedParticipant, $hasTeams, $isSpecialMission, $isMissingPersonMission, $weatherEnabled, $liveEnabled);
     $allRenderedIds = array_merge($rendered['main'], $rendered['sidebar']);
 
     $saved = [];

@@ -828,6 +828,37 @@ if (isPost()) {
         setFlash('success', 'Οι ρυθμίσεις ετήσιας συνδρομής και IRIS αποθηκεύτηκαν.');
         redirect('settings.php?tab=subscriptions');
         
+    } elseif ($action === 'save_livekit') {
+        // Same "blank means keep" contract the weather/FIRMS keys use, and for
+        // the same reason: the secret is rendered masked, so an admin editing
+        // only the URL would otherwise wipe it without noticing.
+        $url = trim(post('livekit_url', ''));
+        $key = trim(post('livekit_api_key', ''));
+        $sec = trim(post('livekit_api_secret', ''));
+
+        if ($url !== '' && !preg_match('#^wss?://#i', $url)) {
+            setFlash('error', 'Το URL του LiveKit πρέπει να ξεκινά με wss:// (π.χ. wss://example.livekit.cloud).');
+            redirect('settings.php?tab=livekit');
+        }
+
+        $values = ['livekit_url' => $url, 'livekit_api_key' => $key];
+        if ($sec !== '' || empty($settings['livekit_api_secret'] ?? '')) {
+            $values['livekit_api_secret'] = $sec;
+        }
+        foreach ($values as $k => $v) {
+            dbExecute("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW()) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()", [$k, $v]);
+        }
+        clearSettingsCache();
+        logAudit('save_livekit_settings', 'settings', null);
+        setFlash('success', 'Οι ρυθμίσεις ζωντανής μετάδοσης αποθηκεύτηκαν.');
+        redirect('settings.php?tab=livekit');
+
+    } elseif ($action === 'test_livekit') {
+        clearSettingsCache();
+        $res = livekitTestConnection();
+        setFlash($res['ok'] ? 'success' : 'error', $res['message']);
+        redirect('settings.php?tab=livekit');
+
     } elseif ($action === 'save_notifications') {
         // Save notification settings
         foreach ($_POST['notifications'] ?? [] as $code => $enabled) {
@@ -1143,6 +1174,11 @@ include __DIR__ . '/includes/header.php';
         </a>
         <a class="nav-link <?= $activeTab === 'subscriptions' ? 'active' : '' ?>" href="settings.php?tab=subscriptions">
             <i class="bi bi-cash-coin me-1"></i> Συνδρομές
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link <?= $activeTab === 'livekit' ? 'active' : '' ?>" href="settings.php?tab=livekit">
+            <i class="bi bi-broadcast me-1"></i>Ζωντανή Μετάδοση
         </a>
     </li>
     <li class="nav-item">
@@ -2176,6 +2212,120 @@ $invStats = [
 </div>
 <?php endif; ?>
 
+<!-- Live Streaming (LiveKit) Tab -->
+<?php if ($activeTab === 'livekit'): ?>
+<?php
+$lkConfigured = livekitConfigured();
+$lkSiteKey    = trim((string) getSetting('livekit_site_key', ''));
+?>
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-broadcast me-1"></i>Ζωντανή Μετάδοση (LiveKit)</h5>
+                <?php if ($lkConfigured): ?>
+                    <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Ρυθμισμένο</span>
+                <?php else: ?>
+                    <span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>Ανενεργό</span>
+                <?php endif; ?>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small">
+                    Επιτρέπει στο Επιχειρησιακό να ζητήσει ζωντανή εικόνα από εθελοντή στο πεδίο.
+                    Χωρίς αυτές τις ρυθμίσεις η λειτουργία δεν εμφανίζεται πουθενά — δεν χαλάει τίποτα,
+                    απλώς δεν υπάρχει.
+                </p>
+
+                <form method="post">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="save_livekit">
+
+                    <div class="mb-3">
+                        <label class="form-label" for="livekit_url">URL διακομιστή</label>
+                        <input type="text" class="form-control" id="livekit_url" name="livekit_url"
+                               placeholder="wss://example.livekit.cloud" spellcheck="false"
+                               value="<?= h($settings['livekit_url'] ?? '') ?>">
+                        <div class="form-text">Από το LiveKit Cloud, στο project σας. Ξεκινά με <code>wss://</code></div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="livekit_api_key">API Key</label>
+                        <input type="text" class="form-control" id="livekit_api_key" name="livekit_api_key"
+                               autocomplete="off" spellcheck="false"
+                               value="<?= h($settings['livekit_api_key'] ?? '') ?>">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="livekit_api_secret">API Secret</label>
+                        <input type="password" class="form-control" id="livekit_api_secret" name="livekit_api_secret"
+                               autocomplete="new-password" spellcheck="false" value="">
+                        <?php if (!empty($settings['livekit_api_secret'] ?? '')): ?>
+                            <div class="form-text text-success">
+                                <i class="bi bi-check-circle me-1"></i>Έχει αποθηκευτεί. Αφήστε το κενό για να μείνει ως έχει.
+                            </div>
+                        <?php else: ?>
+                            <div class="form-text">Το secret που αντιστοιχεί στο παραπάνω key.</div>
+                        <?php endif; ?>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save me-1"></i>Αποθήκευση
+                    </button>
+                </form>
+
+                <?php if ($lkConfigured): ?>
+                <hr>
+                <form method="post" class="mb-0">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="test_livekit">
+                    <button type="submit" class="btn btn-outline-secondary">
+                        <i class="bi bi-plug me-1"></i>Δοκιμή σύνδεσης
+                    </button>
+                    <span class="form-text ms-2">Επαληθεύει URL, key και secret μαζί.</span>
+                </form>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-info-circle me-1"></i>Πληροφορίες</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm mb-3">
+                    <tr>
+                        <td>Όριο ανά μετάδοση</td>
+                        <td><strong><?= (int) round(MISSION_LIVE_MAX_SECONDS / 60) ?>′</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Κλειδί εγκατάστασης</td>
+                        <td><code><?= h($lkSiteKey !== '' ? $lkSiteKey : '—') ?></code></td>
+                    </tr>
+                </table>
+                <p class="small text-muted mb-0">
+                    Το κλειδί εγκατάστασης μπαίνει μπροστά από κάθε όνομα δωματίου. Υπάρχει επειδή οι
+                    κωδικοί αποστολών είναι ανά βάση: δύο διαφορετικές εγκαταστάσεις έχουν και οι δύο
+                    αποστολή με τον ίδιο αριθμό, και χωρίς αυτό το κλειδί θα κατέληγαν στο ίδιο δωμάτιο.
+                    Παράγεται αυτόματα και <strong>δεν πρέπει να αλλάξει</strong> όσο τρέχει αποστολή.
+                </p>
+            </div>
+        </div>
+
+        <div class="card mb-4 border-warning">
+            <div class="card-header bg-warning bg-opacity-25">
+                <h6 class="mb-0"><i class="bi bi-shield-exclamation me-1"></i>Ιδιωτικότητα</h6>
+            </div>
+            <div class="card-body small text-muted">
+                Οι ροές <strong>δεν καταγράφονται</strong>. Τις βλέπει μόνο το Επιχειρησιακό, ο εθελοντής
+                αποδέχεται πάντα ρητά, και μπορεί να σταματήσει τη μετάδοση ή να κόψει το μικρόφωνο
+                οποιαδήποτε στιγμή.
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 <?php if ($activeTab === 'cron'): ?>
 <?php
 $cronJobs = [

@@ -796,6 +796,108 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
  * everyone); can_delete is simply $canManageWarRoom since only command
  * staff can ever create one of these in the first place.
  */
+/**
+ * Live streams for a mission that are not finished yet — both 'requested'
+ * (asked, not yet accepted) and 'live' (publishing). Command staff need to see
+ * the pending ones too, otherwise a request that is never accepted looks
+ * identical to a request that was never sent.
+ *
+ * seconds_left is computed in SQL against started_at so the server, not the
+ * browser clock, decides when MISSION_LIVE_MAX_SECONDS has run out.
+ */
+function loadActiveLiveStreamsForMission(int $missionId): array {
+    return dbFetchAll(
+        "SELECT ls.id, ls.user_id, ls.status, ls.started_at,
+                u.name, u.is_external, u.guest_country_code,
+                vt.name AS home_team_name, vt.color AS home_team_color,
+                GREATEST(0, ? - TIMESTAMPDIFF(SECOND, ls.started_at, NOW())) AS seconds_left
+         FROM mission_live_streams ls
+         JOIN users u ON u.id = ls.user_id
+         LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+         WHERE ls.mission_id = ? AND ls.status <> 'ended'
+         ORDER BY ls.id ASC",
+        [MISSION_LIVE_MAX_SECONDS, $missionId]
+    );
+}
+
+/**
+ * The caller's own live stream row for this mission, if one is open. Drives
+ * the volunteer-facing card: a pending request they can accept, or a session
+ * already running (after a page reload, say).
+ */
+function loadMyLiveStreamForUser(int $missionId, int $userId): ?array {
+    $row = dbFetchOne(
+        "SELECT id, status, started_at,
+                GREATEST(0, ? - TIMESTAMPDIFF(SECOND, started_at, NOW())) AS seconds_left
+         FROM mission_live_streams
+         WHERE mission_id = ? AND user_id = ? AND status <> 'ended'
+         ORDER BY id DESC LIMIT 1",
+        [MISSION_LIVE_MAX_SECONDS, $missionId, $userId]
+    );
+    return $row ?: null;
+}
+
+/**
+ * Close live streams that have outrun their limits. Called from the Action
+ * Room's own request cycle rather than from cron: this must hold even on an
+ * install where nobody ever set cron up, and the only moment it actually
+ * matters is while someone is looking at the board.
+ *
+ * The cap is enforced HERE, not by the browser countdown — that one is
+ * decoration. A frozen tab, a tampered clock or a closed laptop must not be
+ * able to extend a live camera pointed at a person.
+ */
+function expireStaleLiveStreams(int $missionId): void {
+    $expired = dbFetchAll(
+        "SELECT id, user_id FROM mission_live_streams
+         WHERE mission_id = ? AND status = 'live' AND started_at IS NOT NULL
+           AND TIMESTAMPDIFF(SECOND, started_at, NOW()) >= ?",
+        [$missionId, MISSION_LIVE_MAX_SECONDS]
+    );
+    foreach ($expired as $row) {
+        livekitRemoveParticipant($missionId, livekitIdentity((int) $row['user_id'], 'publisher'));
+        dbExecute(
+            "UPDATE mission_live_streams SET status = 'ended', ended_at = NOW(), end_reason = 'timeout'
+             WHERE id = ? AND status <> 'ended'",
+            [$row['id']]
+        );
+    }
+
+    // Asked but never answered. Nothing to disconnect — no session was ever
+    // created — so this is a plain database close.
+    dbExecute(
+        "UPDATE mission_live_streams SET status = 'ended', ended_at = NOW(), end_reason = 'timeout'
+         WHERE mission_id = ? AND status = 'requested'
+           AND created_at < DATE_SUB(NOW(), INTERVAL ? SECOND)",
+        [$missionId, MISSION_LIVE_REQUEST_EXPIRY_SECONDS]
+    );
+}
+
+/**
+ * End every open stream for a mission — used when the mission itself closes.
+ * A mission that is over must not leave a camera running.
+ */
+function endAllLiveStreamsForMission(int $missionId, ?int $byUserId = null): int {
+    $open = dbFetchAll(
+        "SELECT id, user_id, status FROM mission_live_streams WHERE mission_id = ? AND status <> 'ended'",
+        [$missionId]
+    );
+    foreach ($open as $row) {
+        if ($row['status'] === 'live') {
+            livekitRemoveParticipant($missionId, livekitIdentity((int) $row['user_id'], 'publisher'));
+        }
+    }
+    if ($open) {
+        dbExecute(
+            "UPDATE mission_live_streams SET status = 'ended', ended_at = NOW(),
+                    end_reason = 'mission_closed', ended_by = ?
+             WHERE mission_id = ? AND status <> 'ended'",
+            [$byUserId, $missionId]
+        );
+    }
+    return count($open);
+}
+
 function loadBroadcastPhotosForMission(int $missionId, bool $canManageWarRoom, int $limit = 15): array {
     $rows = dbFetchAll(
         "SELECT p.id, p.created_at, u.name AS user_name, o.task_text AS caption
@@ -1660,6 +1762,7 @@ function createMissionOrderAndNotify(
         'return_to_base' => 'end_mission_broadcast.admin_fyi',
         'route'          => 'order.route.admin_fyi',
         'charge_phone'   => 'order.charge_phone.admin_fyi',
+        'live'           => 'order.live.admin_fyi',
     ];
     $fyiKey = $adminFyiKeys[$orderType] ?? null;
     $adminBystanderIds = $fyiKey ? array_values(array_diff(getSystemAdminIds($createdBy), $recipientIds)) : [];

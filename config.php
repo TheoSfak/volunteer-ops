@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.200.1');
-define('DB_SCHEMA_VERSION', 147);
+define('APP_VERSION', '3.201.0');
+define('DB_SCHEMA_VERSION', 148);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
 // The download filename embeds this on purpose: the APK used to live at a
@@ -110,6 +110,21 @@ define('MISSION_SCORE_FORGOTTEN_MINUTES', 240);
 // state and mission-battery-alert.php's own server-side re-check — never
 // duplicate this number, the whole point is one place to change it.
 define('CHARGE_ALERT_THRESHOLD_PCT', 40);
+
+// Action Room live video: hard cap on a single stream, in seconds. A live
+// request is a short, consented look — not an open camera pointed at a
+// volunteer indefinitely — and the cap is what protects their battery, their
+// data plan, and the person who simply forgets they are broadcasting. Read by
+// BOTH the countdown in war-room.php's publisher bar and mission-live.php's
+// own server-side expiry check; the client copy is cosmetic, the server one is
+// authoritative. Same single-source rule as CHARGE_ALERT_THRESHOLD_PCT above.
+define('MISSION_LIVE_MAX_SECONDS', 600);
+
+// How long a live REQUEST stays open before it stops being shown as pending.
+// Separate from the cap above and deliberately shorter: an unanswered ask is
+// stale information fast, and a "waiting for acceptance" row that never
+// clears teaches command staff to ignore the card.
+define('MISSION_LIVE_REQUEST_EXPIRY_SECONDS', 300);
 
 // Participation statuses
 define('PARTICIPATION_PENDING', 'PENDING');

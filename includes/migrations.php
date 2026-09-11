@@ -6612,6 +6612,66 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 148,
+            'description' => 'Action Room live video (LiveKit): order_type "live", mission_live_streams lifecycle table, a per-install livekit_site_key, and the mission_live_request notification code. The site key exists because mission ids are per-database — yphresies.gr and epidrasi.iloveweb.gr both have a mission 42 — so an unprefixed room name would put two different organisations into the SAME LiveKit room if they ever share a project. Generated once here rather than left as a setting an admin must remember to fill in.',
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_orders MODIFY COLUMN order_type ENUM('location','photo','video','task','message','return_to_base','route','charge_phone','live') NOT NULL");
+
+                // One row per stream ATTEMPT, not per order: the order is the
+                // request, this is the thing that has a start, an end, and a
+                // reason for ending. Deliberately no unique key on
+                // (mission_id, user_id) — a volunteer can be asked to go live
+                // several times in one mission, and every one of those is
+                // history worth keeping. "Only one active at a time" is
+                // enforced in mission-live.php, the same way
+                // mission-battery-alert.php dedups its pending orders.
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_live_streams (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    user_id INT UNSIGNED NOT NULL,
+                    order_id INT UNSIGNED NULL,
+                    status ENUM('requested','live','ended') NOT NULL DEFAULT 'requested',
+                    started_at TIMESTAMP NULL,
+                    ended_at TIMESTAMP NULL,
+                    end_reason ENUM('command','volunteer','timeout','disconnect','mission_closed') NULL,
+                    ended_by INT UNSIGNED NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (order_id) REFERENCES mission_orders(id) ON DELETE SET NULL,
+                    FOREIGN KEY (ended_by) REFERENCES users(id) ON DELETE SET NULL,
+                    INDEX idx_live_mission_status (mission_id, status)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                // Stable per-install prefix for LiveKit room names. Created
+                // once and never rotated: changing it mid-mission would split
+                // a live publisher and its viewers into two different rooms.
+                $existing = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'livekit_site_key'");
+                if (empty($existing)) {
+                    dbExecute(
+                        "INSERT INTO settings (setting_key, setting_value, updated_at)
+                         VALUES ('livekit_site_key', ?, NOW())
+                         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
+                        [bin2hex(random_bytes(5))]
+                    );
+                }
+
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_live_request'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_live_request',
+                            'Ζήτηση Ζωντανής Μετάδοσης War Room',
+                            'Ο υπεύθυνος σας ζητά να ξεκινήσετε ζωντανή μετάδοση από το πεδίο (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

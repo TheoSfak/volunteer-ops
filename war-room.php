@@ -272,6 +272,48 @@ if (isPost()) {
             setFlash('success', t('order.video.sent_flash', ['count' => count($requestedIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'request_live') {
+        if (!$canManageWarRoom) {
+            setFlash('error', t('wr.perm.request_live'));
+            redirect('war-room.php?id=' . $missionId);
+        }
+        // Second gate on top of the card simply not rendering: the card is
+        // hidden client-side by the layout, which a crafted POST ignores.
+        if (!livekitConfigured()) {
+            setFlash('error', t('live.not_configured'));
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        $requestedIds = resolveRequestedActiveRecipients($missionId);
+
+        if (empty($requestedIds)) {
+            setFlash('warning', t('common.select_active_volunteer'));
+        } else {
+            $orderId = createMissionOrderAndNotify(
+                $missionId, $mission['title'], 'live', $user['id'], $requestedIds,
+                'order.live.title', [], null, 'order.live.message', ['mission' => $mission['title']]
+            );
+            // One 'requested' row per recipient, created up front rather than
+            // on accept, so the card can show "asked, not answered yet" — an
+            // unanswered request and a request that was never sent must not
+            // look the same to command staff. Any still-open row for the same
+            // volunteer is closed first: only one live session per person.
+            foreach ($requestedIds as $rid) {
+                dbExecute(
+                    "UPDATE mission_live_streams SET status = 'ended', ended_at = NOW(), end_reason = 'command', ended_by = ?
+                     WHERE mission_id = ? AND user_id = ? AND status <> 'ended'",
+                    [$user['id'], $missionId, $rid]
+                );
+                dbInsert(
+                    "INSERT INTO mission_live_streams (mission_id, user_id, order_id, status, created_at)
+                     VALUES (?, ?, ?, 'requested', NOW())",
+                    [$missionId, $rid, $orderId]
+                );
+            }
+            logAudit('request_mission_live', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
+            setFlash('success', t('order.live.sent_flash', ['count' => count($requestedIds)]));
+        }
+        redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'request_task') {
         if (!$canManageWarRoom) {
             setFlash('error', t('wr.perm.request_task'));
@@ -1195,6 +1237,11 @@ if (get('ajax') === '1') {
     $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $broadcastPhotos = loadBroadcastPhotosForMission($missionId, $canManageWarRoom);
     $myTasks = loadMyTaskOrdersForUser($missionId, (int)$user['id']);
+    // Server-side enforcement of MISSION_LIVE_MAX_SECONDS, before anything is
+    // read back: the browser countdown is decoration, this is the real cap.
+    if (livekitConfigured()) { expireStaleLiveStreams($missionId); }
+    $myLive = loadMyLiveStreamForUser($missionId, (int)$user['id']);
+    $liveStreams = ($canManageWarRoom && livekitConfigured()) ? loadActiveLiveStreamsForMission($missionId) : [];
     $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
     $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
@@ -1278,6 +1325,8 @@ if (get('ajax') === '1') {
         'media' => $photos,
         'broadcastPhotos' => $broadcastPhotos,
         'myTasks' => $myTasks,
+        'myLive' => $myLive,
+        'liveStreams' => $liveStreams,
         'routes' => $routes,
         'shortageReports' => $shortageReports,
         'incidents' => $incidents,
@@ -1360,6 +1409,8 @@ $dispatches = loadMissionDispatchesForUser($missionId, (int)$user['id'], $canMan
 $photos = loadMissionPhotosForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $broadcastPhotos = loadBroadcastPhotosForMission($missionId, $canManageWarRoom);
 $myTasks = loadMyTaskOrdersForUser($missionId, (int)$user['id']);
+if (livekitConfigured()) { expireStaleLiveStreams($missionId); }
+$myLive = loadMyLiveStreamForUser($missionId, (int)$user['id']);
 $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
 $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
@@ -1387,6 +1438,10 @@ $weatherCompassOn = getSetting('weather_map_compass_enabled', '0') === '1';
 $exposureUrgencyOn = $isMissingPersonMission && getSetting('exposure_urgency_enabled', '0') === '1';
 // See the ajax branch's own copy of this block above.
 $searchRingsOn = $isMissingPersonMission && getSetting('search_rings_enabled', '0') === '1';
+// Live video: the whole feature hinges on credentials existing. No keys ->
+// no cards rendered (war-room-layout.php) and request_live refused.
+$liveEnabled = livekitConfigured();
+$liveStreams = ($canManageWarRoom && $liveEnabled) ? loadActiveLiveStreamsForMission($missionId) : [];
 try {
     $weather = ($weatherCompassOn || $exposureUrgencyOn) ? getWeatherForMission($mission) : null;
 } catch (Throwable $e) {
@@ -1526,7 +1581,7 @@ foreach ($participants as $participant) {
 
 require_once __DIR__ . '/includes/war-room-layout.php';
 $warRoomLayout = ($canManageWarRoom && !$fieldMode)
-    ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams), !empty($mission['is_special_mission']), $isMissingPersonMission, $weatherCompassOn)
+    ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams), !empty($mission['is_special_mission']), $isMissingPersonMission, $weatherCompassOn, $liveEnabled)
     : null;
 
 $pageTitle = 'Action Room — ' . $mission['title'];
@@ -2715,6 +2770,75 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 </div>
             </div>
 
+            <?php if ($liveEnabled): ?>
+            <div class="col-12 col-md-6">
+                <div class="card shadow-sm h-100 border-danger" data-card-id="requestLiveCard">
+                    <div class="card-header bg-danger bg-opacity-10 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#requestLiveCollapse" role="button" aria-expanded="false" aria-controls="requestLiveCollapse">
+                        <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-broadcast me-1"></i><?= t('request.live.card_title') ?></span><i class="bi bi-chevron-down wr-collapsible-chevron"></i></h5>
+                    </div>
+                    <div class="card-body collapse" id="requestLiveCollapse">
+                        <?php if (empty($activeParticipants)): ?>
+                            <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
+                        <?php else: ?>
+                            <p class="small text-muted"><?= t('request.live.note', ['min' => (int) round(MISSION_LIVE_MAX_SECONDS / 60)]) ?></p>
+                            <form method="post">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="request_live">
+                                <button type="submit" name="request_scope" value="all" class="btn btn-danger w-100 fw-semibold mb-3">
+                                    <i class="bi bi-broadcast me-1"></i><?= t('common.request_all_active', ['count' => count($activeParticipants)]) ?>
+                                </button>
+                                <div class="small fw-semibold mb-2"><?= t('common.or_select_volunteers') ?></div>
+                                <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
+                                    <?php foreach ($activeParticipants as $participant): ?>
+                                    <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
+                                        <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
+                                    </label>
+                                    <?php endforeach; ?>
+                                </div>
+                                <button type="submit" name="request_scope" value="selected" class="btn btn-outline-danger w-100 fw-semibold">
+                                    <i class="bi bi-person-check me-1"></i><?= t('common.request_selected') ?>
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 col-md-6">
+                <div class="card shadow-sm h-100 border-danger" data-card-id="liveStreamsCard">
+                    <div class="card-header bg-danger bg-opacity-25">
+                        <h5 class="mb-0 d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-camera-video-fill me-1"></i><?= t('live.card_title') ?></span>
+                            <span id="liveStreamCount" class="badge bg-danger<?= empty($liveStreams) ? ' d-none' : '' ?>"><?= count($liveStreams) ?></span>
+                        </h5>
+                    </div>
+                    <div class="card-body" id="liveStreamsBody">
+                        <?php if (empty($liveStreams)): ?>
+                            <p class="text-muted mb-0" id="liveStreamsEmpty"><?= t('live.empty') ?></p>
+                        <?php else: ?>
+                            <?php foreach ($liveStreams as $ls): ?>
+                            <div class="border rounded mb-2 p-2 live-stream-item" data-stream-id="<?= (int)$ls['id'] ?>" data-user-id="<?= (int)$ls['user_id'] ?>" data-status="<?= h($ls['status']) ?>">
+                                <div class="d-flex justify-content-between align-items-center gap-2">
+                                    <strong><?= guestNameHtml($ls['name'], (bool)$ls['is_external'], $ls['home_team_name'], $ls['home_team_color'], $ls['guest_country_code']) ?><?= k9BadgeHtml((int) $ls['user_id']) ?></strong>
+                                    <button type="button" class="btn btn-sm btn-outline-danger live-stop-btn" data-stream-id="<?= (int)$ls['id'] ?>">
+                                        <i class="bi bi-stop-circle me-1"></i><?= t('live.stop') ?>
+                                    </button>
+                                </div>
+                                <?php if ($ls['status'] === 'requested'): ?>
+                                    <div class="small text-muted mt-1 live-status-text"><i class="bi bi-hourglass-split me-1"></i><?= t('live.waiting') ?></div>
+                                <?php else: ?>
+                                    <video class="w-100 mt-2 rounded bg-dark" style="aspect-ratio:16/9;" autoplay playsinline data-live-video="<?= (int)$ls['user_id'] ?>"></video>
+                                    <div class="small text-muted mt-1">
+                                        <span class="live-remaining live-status-text" data-seconds-left="<?= (int)$ls['seconds_left'] ?>"><?= t('live.remaining', ['time' => gmdate('i:s', (int)$ls['seconds_left'])]) ?></span>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
             <div class="col-12 col-md-6">
                 <div class="card shadow-sm h-100 border-warning" data-card-id="requestTaskCard">
                     <div class="card-header bg-warning bg-opacity-25 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#requestTaskCollapse" role="button" aria-expanded="false" aria-controls="requestTaskCollapse">
@@ -3096,6 +3220,45 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
+        <?php if ($liveEnabled && $isApprovedParticipant): ?>
+        <!-- Volunteer-facing live card. A persistent card rather than hanging
+             off the push banner: a banner is transient and easy to miss, and
+             this is the surface someone needs to find again after locking
+             their phone, reloading, or arriving late to the request. -->
+        <div class="card shadow-sm mb-4 border-danger" data-card-id="myLiveCard">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0 d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-broadcast me-1"></i><?= t('mylive.panel_title') ?></span>
+                    <span id="myLiveOnAir" class="badge bg-light text-danger fw-bold d-none"><?= t('mylive.on_air') ?></span>
+                </h5>
+            </div>
+            <div class="card-body">
+                <div id="myLiveIdle" class="text-muted<?= $myLive ? ' d-none' : '' ?>"><?= t('mylive.idle') ?></div>
+
+                <div id="myLiveRequested" class="<?= ($myLive && $myLive['status'] === 'requested') ? '' : 'd-none' ?>">
+                    <p class="mb-2"><i class="bi bi-exclamation-circle text-danger me-1"></i><?= t('mylive.requested') ?></p>
+                    <button type="button" id="myLiveStartBtn" class="btn btn-danger w-100 fw-semibold">
+                        <i class="bi bi-camera-video-fill me-1"></i><?= t('mylive.start') ?>
+                    </button>
+                    <div class="form-text"><?= t('mylive.keep_screen_on') ?></div>
+                </div>
+
+                <div id="myLiveActive" class="<?= ($myLive && $myLive['status'] === 'live') ? '' : 'd-none' ?>">
+                    <video id="myLivePreview" class="w-100 rounded bg-dark mb-2" style="aspect-ratio:16/9;" autoplay playsinline muted></video>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="badge bg-danger"><i class="bi bi-record-circle me-1"></i><span id="myLiveTimer">--:--</span></span>
+                        <span id="myLiveMutedNote" class="small text-warning d-none"><?= t('mylive.muted_note') ?></span>
+                    </div>
+                    <div class="d-grid gap-2">
+                        <button type="button" id="myLiveMuteBtn" class="btn btn-outline-secondary"><i class="bi bi-mic-mute me-1"></i><?= t('mylive.mute') ?></button>
+                        <button type="button" id="myLiveStopBtn" class="btn btn-danger"><i class="bi bi-stop-circle me-1"></i><?= t('mylive.stop') ?></button>
+                    </div>
+                </div>
+
+                <div id="myLiveError" class="alert alert-warning mt-2 mb-0 py-2 small d-none"></div>
+            </div>
+        </div>
+        <?php endif; ?>
         <div class="card shadow-sm mb-4 border-primary" data-card-id="myTasksCard">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-clipboard-check me-1"></i><?= t('mytasks.panel_title') ?></h5></div>
             <div class="card-body">
@@ -4834,6 +4997,17 @@ function captainBadgeHtml(userId, compact) {
         : t('captain.badge_tooltip_no_team');
     return `<span class="captain-badge" title="${escapeHtml(tooltip)}"><i class="bi bi-star-fill"></i>${compact ? '' : ' ' + escapeHtml(t('captain.label'))}</span>`;
 }
+// Who is publishing live video right now, keyed by user id. Same
+// registry-refreshed-from-the-poll shape as k9Handlers/teamCaptains above,
+// and the reason is the same: the map popup is built in pure JS, so it needs
+// its own copy of what the server knows rather than a server-rendered badge.
+let liveStreamingUserIds = {};
+function liveBadgeHtml(userId) {
+    if (userId === null || userId === undefined) return '';
+    if (!liveStreamingUserIds[String(userId)]) return '';
+    return `<span class="live-pin-badge" title="${escapeHtml(t('live.card_title'))}">🔴 LIVE</span>`;
+}
+
 // Mirrors teamBadgeColors()/teamLabel() in includes/functions-warroom.php —
 // needed client-side so the Teams card's roster can be live-refreshed from
 // the poll (renderTeamRosters() below) without a full page reload.
@@ -6614,7 +6788,7 @@ function buildPinMarker(pin, interactive = true) {
     // (depends on which render*() happened to run last that poll tick). A
     // volunteer's own live position should never be the one that silently
     // disappears underneath another marker.
-    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
+    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
 }
 
 function renderPins(items) {
@@ -11026,6 +11200,7 @@ function pollWarRoomData() {
         }
         if (data.broadcastPhotos) renderBroadcastPhotos(broadcastPhotos = data.broadcastPhotos);
         if (data.myTasks) renderMyTasks(myTasks = data.myTasks);
+        if (data.liveStreams && typeof renderLiveStreams === 'function') renderLiveStreams(data.liveStreams);
         if (data.routes) {
             routes = data.routes;
             renderMyRoutes(routes);
@@ -13281,6 +13456,310 @@ document.querySelectorAll('.wr-briefing-copy-btn').forEach(btn => {
         });
     });
 });
+
+// ══ LIVE STREAMS ════════════════════════════════════════════════════════════
+// Delegated rather than bound per button: the streams list is re-rendered by
+// the 5s poll, and per-element listeners would be lost on every tick.
+document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.live-stop-btn');
+    if (!btn) return;
+    if (!confirm(t('live.stop_confirm'))) return;
+    btn.disabled = true;
+    const data = new URLSearchParams({
+        csrf_token: csrfToken,
+        mission_id: <?= $missionId ?>,
+        action: 'stop',
+        stream_id: btn.dataset.streamId
+    });
+    fetch('mission-live.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+        if (result.ok) {
+            // The server is the authority on whether the feed is gone, so on
+            // success we reflect "ended" immediately instead of waiting for
+            // the next poll — a stop button that appears to do nothing for
+            // five seconds gets pressed again, and again.
+            if (result.warning) alert(result.warning);
+            const item = btn.closest('.live-stream-item');
+            if (item) {
+                item.dataset.status = 'ended';
+                item.classList.add('opacity-50');
+                const vid = item.querySelector('video');
+                if (vid) { try { vid.srcObject = null; } catch (err) {} vid.remove(); }
+                // Covers both states: a live stream's countdown and a pending
+                // request's "waiting for acceptance" line share this class, so
+                // a cancelled invitation stops claiming it is still waiting.
+                const label = item.querySelector('.live-status-text');
+                if (label) {
+                    label.textContent = t('live.ended');
+                    label.removeAttribute('data-seconds-left');
+                }
+                btn.remove();
+            }
+        } else {
+            btn.disabled = false;
+            alert(result.error || t('common.failed'));
+        }
+    }).catch(() => { btn.disabled = false; });
+});
+
+// Countdown toward MISSION_LIVE_MAX_SECONDS. Purely informational — the
+// server independently enforces the cap, so a tampered or frozen clock here
+// cannot extend anyone's stream.
+setInterval(function () {
+    document.querySelectorAll('.live-remaining[data-seconds-left]').forEach(el => {
+        let left = parseInt(el.dataset.secondsLeft, 10);
+        if (isNaN(left)) return;
+        if (left <= 0) { el.textContent = t('live.ended'); return; }
+        left -= 1;
+        el.dataset.secondsLeft = left;
+        const m = String(Math.floor(left / 60)).padStart(2, '0');
+        const s = String(left % 60).padStart(2, '0');
+        el.textContent = t('live.remaining', {time: m + ':' + s});
+    });
+}, 1000);
 </script>
+
+<?php if ($liveEnabled): ?>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
+<script>
+// ══ LIVE VIDEO ══════════════════════════════════════════════════════════════
+// Two independent halves that never both run in one browser: a volunteer
+// publishes (myLiveCard), command subscribes (liveStreamsCard). The token each
+// side receives decides which — canPublish and canSubscribe are mutually
+// exclusive and enforced by LiveKit, so neither half can drift into the
+// other's role even if this file is tampered with.
+(function () {
+    const el = id => document.getElementById(id);
+    const MISSION_ID = <?= $missionId ?>;
+    const MAX_SECONDS = <?= MISSION_LIVE_MAX_SECONDS ?>;
+
+    function post(action, extra) {
+        const data = new URLSearchParams(Object.assign(
+            {csrf_token: csrfToken, mission_id: MISSION_ID, action: action}, extra || {}
+        ));
+        return fetch('mission-live.php', {method: 'POST', body: data}).then(r => r.json());
+    }
+
+    // ── Publisher (volunteer) ───────────────────────────────────────────────
+    let pubRoom = null, pubTimer = null, pubLeft = 0, pubStreamId = null;
+
+    function pubErr(msg) {
+        const e = el('myLiveError');
+        if (e) { e.textContent = msg; e.classList.remove('d-none'); }
+    }
+    function pubClearErr() { const e = el('myLiveError'); if (e) e.classList.add('d-none'); }
+
+    function pubShow(state) {
+        const map = {idle: 'myLiveIdle', requested: 'myLiveRequested', live: 'myLiveActive'};
+        Object.keys(map).forEach(k => {
+            const n = el(map[k]);
+            if (n) n.classList.toggle('d-none', k !== state);
+        });
+        const air = el('myLiveOnAir');
+        if (air) air.classList.toggle('d-none', state !== 'live');
+    }
+
+    function pubTick() {
+        if (pubLeft <= 0) { stopPublishing(true); return; }
+        pubLeft -= 1;
+        const t2 = el('myLiveTimer');
+        if (t2) t2.textContent = String(Math.floor(pubLeft / 60)).padStart(2, '0') + ':' + String(pubLeft % 60).padStart(2, '0');
+    }
+
+    async function startPublishing() {
+        const btn = el('myLiveStartBtn');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>' + t('mylive.starting'); }
+        pubClearErr();
+        try {
+            const r = await post('accept');
+            if (!r.ok) { pubErr(r.error || t('mylive.connect_error')); return; }
+            pubStreamId = r.streamId;
+            pubLeft = r.secondsLeft || MAX_SECONDS;
+
+            const LK = window.LivekitClient;
+            pubRoom = new LK.Room({
+                // Back camera, stated explicitly: left to the browser's own
+                // default a phone opens the FRONT camera, which is the wrong
+                // lens for someone showing command what they are looking at.
+                videoCaptureDefaults: {resolution: {width: 960, height: 540, frameRate: 24}, facingMode: 'environment'},
+                dynacast: true
+            });
+            pubRoom.on(LK.RoomEvent.Disconnected, () => stopPublishing(false));
+            await pubRoom.connect(r.url, r.token);
+            await pubRoom.localParticipant.enableCameraAndMicrophone();
+            const cam = pubRoom.localParticipant.getTrackPublication(LK.Track.Source.Camera);
+            if (cam && cam.track) cam.track.attach(el('myLivePreview'));
+
+            pubShow('live');
+            pubTick();
+            pubTimer = setInterval(pubTick, 1000);
+        } catch (e) {
+            const denied = e && (e.name === 'NotAllowedError' || e.name === 'NotFoundError' || /permission|denied/i.test(e.message || ''));
+            const msg = denied ? t('mylive.camera_error') : (t('mylive.connect_error') + ' ' + (e && e.message ? e.message : ''));
+            // Release the row server-side. We accepted the request and then
+            // failed to actually go on air, so leaving it 'live' would show
+            // command a feed that never existed and a countdown for nothing.
+            await stopPublishing(true);
+            // After stopPublishing, not before: its generic "ended" note would
+            // otherwise overwrite the specific reason, and "the stream ended"
+            // is useless to someone who just denied a camera prompt.
+            pubErr(msg);
+        } finally {
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-camera-video-fill me-1"></i>' + t('mylive.start'); }
+        }
+    }
+
+    async function stopPublishing(tellServer) {
+        clearInterval(pubTimer); pubTimer = null;
+        if (pubRoom) { try { await pubRoom.disconnect(); } catch (e) {} pubRoom = null; }
+        if (tellServer && pubStreamId) { try { await post('stop', {stream_id: pubStreamId}); } catch (e) {} }
+        pubStreamId = null;
+        pubShow('idle');
+        pubErr(t('mylive.ended_note'));
+    }
+
+    if (el('myLiveStartBtn')) el('myLiveStartBtn').addEventListener('click', startPublishing);
+    if (el('myLiveStopBtn')) el('myLiveStopBtn').addEventListener('click', () => stopPublishing(true));
+    if (el('myLiveMuteBtn')) el('myLiveMuteBtn').addEventListener('click', async () => {
+        if (!pubRoom) return;
+        const on = pubRoom.localParticipant.isMicrophoneEnabled;
+        await pubRoom.localParticipant.setMicrophoneEnabled(!on);
+        el('myLiveMuteBtn').innerHTML = on
+            ? '<i class="bi bi-mic me-1"></i>' + t('mylive.unmute')
+            : '<i class="bi bi-mic-mute me-1"></i>' + t('mylive.mute');
+        el('myLiveMutedNote').classList.toggle('d-none', !on);
+    });
+
+    // A page reloaded mid-stream comes back rendering the card in its "live"
+    // state with no connection behind it. Rather than lie, fall back to the
+    // request state so the volunteer can simply start again — accept() hands
+    // back a token for the same row instead of refusing.
+    <?php if ($myLive && $myLive['status'] === 'live'): ?>
+    pubShow('requested');
+    <?php endif; ?>
+
+    // ── Viewer (command staff) ──────────────────────────────────────────────
+    let viewRoom = null, viewConnecting = false;
+
+    // Re-render the command-side list from the poll so a stream that has just
+    // been accepted appears without a reload. Deliberately surgical rather
+    // than innerHTML-ing the whole card: blowing away the container would
+    // detach every <video> element and drop the media attached to it, so an
+    // already-running tile would go black every five seconds.
+    window.renderLiveStreams = function (rows) {
+        // Refresh the map-pin registry first and unconditionally: it must
+        // stay correct even when the card itself is hidden by the layout.
+        const nextIds = {};
+        rows.forEach(r => { if (r.status === 'live') nextIds[String(r.user_id)] = true; });
+        liveStreamingUserIds = nextIds;
+
+        const body = document.getElementById('liveStreamsBody');
+        if (!body) return;
+        const badge = document.getElementById('liveStreamCount');
+        if (badge) {
+            badge.textContent = rows.length;
+            badge.classList.toggle('d-none', rows.length === 0);
+        }
+        const empty = document.getElementById('liveStreamsEmpty');
+        if (empty) empty.classList.toggle('d-none', rows.length > 0);
+
+        const seen = {};
+        rows.forEach(r => {
+            seen[r.id] = true;
+            let item = body.querySelector('.live-stream-item[data-stream-id="' + r.id + '"]');
+            if (!item) {
+                // A brand new row: build the shell, then let the normal
+                // TrackSubscribed path fill the <video> in.
+                item = document.createElement('div');
+                item.className = 'border rounded mb-2 p-2 live-stream-item';
+                item.dataset.streamId = r.id;
+                item.dataset.userId = r.user_id;
+                item.innerHTML =
+                    '<div class="d-flex justify-content-between align-items-center gap-2">' +
+                    '<strong></strong>' +
+                    '<button type="button" class="btn btn-sm btn-outline-danger live-stop-btn" data-stream-id="' + r.id + '">' +
+                    '<i class="bi bi-stop-circle me-1"></i>' + t('live.stop') + '</button></div>' +
+                    '<div class="mt-2"></div>';
+                item.querySelector('strong').textContent = r.name;
+                body.appendChild(item);
+            }
+            const slot = item.lastElementChild;
+            if (item.dataset.status !== r.status) {
+                item.dataset.status = r.status;
+                if (r.status === 'live') {
+                    slot.innerHTML =
+                        '<video class="w-100 rounded bg-dark" style="aspect-ratio:16/9;" autoplay playsinline data-live-video="' + r.user_id + '"></video>' +
+                        '<div class="small text-muted mt-1"><span class="live-remaining live-status-text" data-seconds-left="' + r.seconds_left + '"></span></div>';
+                    // A tile that just appeared needs the track attaching now;
+                    // TrackSubscribed already fired if we were connected.
+                    reattachAll();
+                } else {
+                    slot.innerHTML = '<div class="small text-muted live-status-text"><i class="bi bi-hourglass-split me-1"></i>' + t('live.waiting') + '</div>';
+                }
+            }
+        });
+
+        // Anything the server no longer reports is finished.
+        body.querySelectorAll('.live-stream-item').forEach(item => {
+            if (!seen[item.dataset.streamId] && item.dataset.status !== 'ended') {
+                item.dataset.status = 'ended';
+                item.classList.add('opacity-50');
+                const v = item.querySelector('video');
+                if (v) { try { v.srcObject = null; } catch (e) {} v.remove(); }
+                const lbl = item.querySelector('.live-status-text');
+                if (lbl) { lbl.textContent = t('live.ended'); lbl.removeAttribute('data-seconds-left'); }
+                const b = item.querySelector('.live-stop-btn');
+                if (b) b.remove();
+            }
+        });
+    };
+
+    function reattachAll() {
+        if (!viewRoom) return;
+        viewRoom.remoteParticipants.forEach(p => p.trackPublications.forEach(tp => {
+            if (tp.track) attachRemote(p, tp.track);
+        }));
+    }
+
+    function attachRemote(participant, track) {
+        if (track.kind !== 'video') { track.attach(); return; }
+        const uid = (participant.identity || '').replace(/^v/, '');
+        const vid = document.querySelector('video[data-live-video="' + uid + '"]');
+        if (vid) track.attach(vid);
+    }
+
+    async function ensureViewer() {
+        if (viewRoom || viewConnecting) return;
+        if (!document.querySelector('.live-stream-item[data-status="live"]')) return;
+        viewConnecting = true;
+        try {
+            const r = await post('viewer_token');
+            if (!r.ok) return;
+            const LK = window.LivekitClient;
+            viewRoom = new LK.Room({adaptiveStream: true});
+            viewRoom.on(LK.RoomEvent.TrackSubscribed, (track, pub, participant) => attachRemote(participant, track));
+            viewRoom.on(LK.RoomEvent.Disconnected, () => { viewRoom = null; });
+            await viewRoom.connect(r.url, r.token);
+            // Anyone already publishing before we joined.
+            viewRoom.remoteParticipants.forEach(p => p.trackPublications.forEach(tp => {
+                if (tp.track) attachRemote(p, tp.track);
+            }));
+        } catch (e) {
+            viewRoom = null;
+        } finally {
+            viewConnecting = false;
+        }
+    }
+
+    // Connect only while something is actually live, and drop the connection
+    // when nothing is: an idle subscriber still burns LiveKit minutes.
+    setInterval(function () {
+        const anyLive = !!document.querySelector('.live-stream-item[data-status="live"]');
+        if (anyLive) { ensureViewer(); }
+        else if (viewRoom) { try { viewRoom.disconnect(); } catch (e) {} viewRoom = null; }
+    }, 4000);
+    ensureViewer();
+})();
+</script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
