@@ -321,14 +321,18 @@ function extractUpdate($zipFile, $tempDir) {
     return $contentDir;
 }
 
-function applyUpdate($sourceDir) {
+// $targetDir defaults to the live installation. It is a parameter only so the
+// copy can be pointed at a scratch directory instead of the running app when
+// this logic needs to be exercised in isolation — nothing in the app passes it.
+function applyUpdate($sourceDir, ?string $targetDir = null) {
+    $targetDir = $targetDir ?? __DIR__;
+
     updateLog('Εφαρμογή ενημέρωσης...');
     updateLog("Source dir: {$sourceDir}");
-    updateLog("Target dir: " . __DIR__);
-    
-    $targetDir = __DIR__;
+    updateLog("Target dir: {$targetDir}");
     $updated = 0;
     $skipped = 0;
+    $unchanged = 0;
     $failed = 0;
     $failedFiles = [];
     
@@ -386,6 +390,38 @@ function applyUpdate($sourceDir) {
                 @mkdir($dir, 0755, true);
             }
             
+            // Don't rewrite a file that is already byte-identical.
+            //
+            // This loop used to copy (and chmod) all ~716 files of the release
+            // unconditionally, every single update, no matter how few had
+            // actually changed. A release that touches two files still moved
+            // the whole tree — including the two Android APKs in
+            // assets/downloads (9 MB between them) and every documentation
+            // screenshot, none of which change from one release to the next.
+            //
+            // That matters for more than speed. While this loop runs, the live
+            // installation is a half-replaced mixture of the old and new
+            // release, and every request arriving in that window is served
+            // from it. Copying only what genuinely differs shrinks that window
+            // from "every file in the app" to "the handful this release
+            // changed", which for a typical release is a fraction of a second.
+            //
+            // Size first because it settles almost every file for the cost of
+            // a stat; the hash only runs for same-size candidates, and reads a
+            // file this update was about to read in full anyway.
+            // The source hash is checked against false explicitly: md5_file()
+            // returns false on an unreadable file, and comparing the two calls
+            // directly would make two failures compare equal and silently skip
+            // a file that genuinely needed copying — an update that reports
+            // success while not having applied.
+            if (is_file($targetPath) && filesize($targetPath) === $item->getSize()) {
+                $sourceHash = @md5_file($item->getPathname());
+                if ($sourceHash !== false && @md5_file($targetPath) === $sourceHash) {
+                    $unchanged++;
+                    continue;
+                }
+            }
+
             // Copy with error checking
             if (@copy($item->getPathname(), $targetPath)) {
                 $updated++;
@@ -400,7 +436,7 @@ function applyUpdate($sourceDir) {
         }
     }
     
-    updateLog("Ενημερώθηκαν {$updated} αρχεία, παραλήφθηκαν {$skipped}, ΑΠΟΤΥΧΙΑ {$failed}");
+    updateLog("Ενημερώθηκαν {$updated} αρχεία, αμετάβλητα {$unchanged}, παραλήφθηκαν {$skipped}, ΑΠΟΤΥΧΙΑ {$failed}");
     
     if ($failed > 0) {
         updateLog("Αρχεία που απέτυχαν: " . implode(', ', array_slice($failedFiles, 0, 20)), 'error');
@@ -412,7 +448,7 @@ function applyUpdate($sourceDir) {
         updateLog('OPcache cleared μετά την αντιγραφή αρχείων');
     }
     
-    return ['updated' => $updated, 'skipped' => $skipped, 'failed' => $failed, 'failed_files' => $failedFiles];
+    return ['updated' => $updated, 'unchanged' => $unchanged, 'skipped' => $skipped, 'failed' => $failed, 'failed_files' => $failedFiles];
 }
 
 function runMigrations() {
@@ -841,7 +877,7 @@ if (isPost()) {
                 if (!empty($updateResult['failed']) && $updateResult['failed'] > 0) {
                     updateLog("ΠΡΟΕΙΔΟΠΟΙΗΣΗ: {$updateResult['failed']} αρχεία δεν αντιγράφηκαν!", 'warning');
                 }
-                updateLog("Αρχεία που ενημερώθηκαν: {$updateResult['updated']}");
+                updateLog("Αρχεία που ενημερώθηκαν: {$updateResult['updated']} (αμετάβλητα, δεν ξαναγράφηκαν: {$updateResult['unchanged']})");
                 
                 // Step 5: Run SQL file migrations
                 $migrations = runMigrations();
