@@ -154,12 +154,10 @@ function createBackup() {
     
     try {
         $dbBackupFile = "{$backupPath}/database.sql";
-        $dbDump = exportDatabase();
-        
-        if ($dbDump) {
-            file_put_contents($dbBackupFile, $dbDump);
+
+        if (exportDatabase($dbBackupFile)) {
             $results['db_backed_up'] = true;
-            updateLog('Backup βάσης δεδομένων επιτυχές (' . round(strlen($dbDump) / 1024, 2) . ' KB)');
+            updateLog('Backup βάσης δεδομένων επιτυχές (' . round((filesize($dbBackupFile) ?: 0) / 1024, 2) . ' KB)');
         } else {
             $results['errors'][] = 'Αποτυχία backup βάσης δεδομένων';
         }
@@ -203,49 +201,95 @@ function copyDirectory($source, $dest) {
     closedir($dir);
 }
 
-function exportDatabase() {
-    $tables = dbFetchAll("SHOW TABLES");
-    $dump  = "-- VolunteerOps Database Backup\n";
-    $dump .= "-- Generated: " . date('Y-m-d H:i:s') . "\n";
-    $dump .= "-- Version: " . APP_VERSION . "\n\n";
-    $dump .= "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;\n";
-    $dump .= "SET FOREIGN_KEY_CHECKS = 0;\n\n";
+/**
+ * Write a full SQL dump straight to $targetFile. Returns false if it could not
+ * be written.
+ *
+ * This used to build the entire database into one PHP string and return it, so
+ * peak memory was the size of the whole dump — twice over, since the caller
+ * then handed that string to file_put_contents(). volunteer_pings alone is
+ * ~90 bytes per row in dump text, and it grows with every GPS ping of every
+ * mission and is never pruned: 1 million pings is 86MB of string, 3 million is
+ * 258MB, against a memory_limit that is typically 256M or 512M on shared
+ * hosting. Past that the request dies on a fatal allocation error — not an
+ * exception, so the try/catch around the call site never sees it and the
+ * backup just silently is not there.
+ *
+ * Two ceilings were in play and both are gone: the dump is written row by row
+ * to an open handle, and each table is streamed with an unbuffered query
+ * instead of dbFetchAll() pulling it wholly into an array first. Memory is now
+ * flat in the size of one row, whatever the table holds.
+ *
+ * backup-ajax.php already dumps in this streaming style, but paginates with
+ * LIMIT/OFFSET because a browser drives it one chunk per request. That would
+ * be the wrong tool here: this runs as one synchronous pass, and OFFSET makes
+ * it quadratic — MySQL walks every skipped row, so a million-row table would
+ * scan on the order of a billion. An unbuffered cursor has no offset at all.
+ */
+function exportDatabase(string $targetFile): bool {
+    $fh = @fopen($targetFile, 'w');
+    if (!$fh) {
+        return false;
+    }
 
     $pdo = db();
+    fwrite($fh, "-- VolunteerOps Database Backup\n");
+    fwrite($fh, "-- Generated: " . date('Y-m-d H:i:s') . "\n");
+    fwrite($fh, "-- Version: " . APP_VERSION . "\n\n");
+    fwrite($fh, "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;\n");
+    fwrite($fh, "SET FOREIGN_KEY_CHECKS = 0;\n\n");
 
-    foreach ($tables as $tableRow) {
-        $tableName = array_values($tableRow)[0];
+    // Read before any unbuffered cursor is open below — nothing else may run on
+    // this connection while one is.
+    $tables = [];
+    foreach (dbFetchAll("SHOW TABLES") as $tableRow) {
+        $tables[] = array_values($tableRow)[0];
+    }
 
-        // Get CREATE TABLE statement
-        $createResult = dbFetchOne("SHOW CREATE TABLE `{$tableName}`");
-        $createStmt   = $createResult['Create Table'] ?? '';
+    try {
+        foreach ($tables as $tableName) {
+            $createResult = dbFetchOne("SHOW CREATE TABLE `{$tableName}`");
+            $createStmt   = $createResult['Create Table'] ?? '';
 
-        $dump .= "-- Table: {$tableName}\n";
-        $dump .= "DROP TABLE IF EXISTS `{$tableName}`;\n";
-        $dump .= $createStmt . ";\n\n";
+            fwrite($fh, "-- Table: {$tableName}\n");
+            fwrite($fh, "DROP TABLE IF EXISTS `{$tableName}`;\n");
+            fwrite($fh, $createStmt . ";\n\n");
 
-        // Get data
-        $rows = dbFetchAll("SELECT * FROM `{$tableName}`");
+            // Unbuffered: rows arrive from the server one at a time instead of
+            // the whole result set landing in PHP memory first. Restored in the
+            // finally below, because this is the app's single shared connection
+            // and leaving it unbuffered would break every later query.
+            $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+            $stmt = $pdo->query("SELECT * FROM `{$tableName}`");
 
-        if (!empty($rows)) {
-            $columns    = array_keys($rows[0]);
-            $columnList = '`' . implode('`, `', $columns) . '`';
-
-            foreach ($rows as $row) {
+            $columnList = null;
+            $wroteAny = false;
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                if ($columnList === null) {
+                    $columnList = '`' . implode('`, `', array_keys($row)) . '`';
+                }
                 $values = array_map(function ($val) use ($pdo) {
                     if ($val === null) return 'NULL';
                     return $pdo->quote((string)$val);
                 }, array_values($row));
-
-                $dump .= "INSERT INTO `{$tableName}` ({$columnList}) VALUES (" . implode(', ', $values) . ");\n";
+                fwrite($fh, "INSERT INTO `{$tableName}` ({$columnList}) VALUES (" . implode(', ', $values) . ");\n");
+                $wroteAny = true;
             }
-            $dump .= "\n";
+            $stmt->closeCursor();
+            $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
+
+            if ($wroteAny) {
+                fwrite($fh, "\n");
+            }
         }
+    } finally {
+        // Whatever happened above, this connection must not be left unbuffered.
+        $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
+        fwrite($fh, "SET FOREIGN_KEY_CHECKS = 1;\n");
+        fclose($fh);
     }
 
-    $dump .= "SET FOREIGN_KEY_CHECKS = 1;\n";
-
-    return $dump;
+    return true;
 }
 
 function downloadUpdate($zipUrl, $version) {
