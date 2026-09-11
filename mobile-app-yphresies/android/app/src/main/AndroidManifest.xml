@@ -33,6 +33,25 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Action Room live video. Capacitor's BridgeWebChromeClient already
+         translates the WebView's VIDEO_CAPTURE / AUDIO_CAPTURE requests into
+         runtime permission requests for exactly these three — but Android
+         refuses instantly for any permission NOT declared here, so getUserMedia
+         failed inside the APK while the same page worked in the mobile browser.
+         The browser has its own permissions; the APK has only what this file
+         grants it. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- required="false" so the app still installs on a device with no camera.
+         Declaring CAMERA above would otherwise make Google Play treat a camera
+         as a hardware requirement and hide the app from such devices. Live
+         video is one feature among many; it must not gate installation. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
     <!-- @capgo/background-geolocation's own module manifest already declares
          everything the background GPS ping feature needs (location,
          FOREGROUND_SERVICE + FOREGROUND_SERVICE_LOCATION, POST_NOTIFICATIONS,

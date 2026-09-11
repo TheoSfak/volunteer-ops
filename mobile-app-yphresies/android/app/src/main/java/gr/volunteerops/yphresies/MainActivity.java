@@ -1,7 +1,15 @@
 package gr.volunteerops.yphresies;
 
+import android.app.DownloadManager;
+import android.content.Context;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.webkit.CookieManager;
+import android.webkit.URLUtil;
 import android.webkit.WebView;
+import android.widget.Toast;
 
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.WebViewListener;
@@ -55,6 +63,65 @@ public class MainActivity extends BridgeActivity {
                     }
                 }
             );
+
+        installDownloadHandler();
+    }
+
+    /**
+     * An Android WebView does nothing at all with a download — no error, no
+     * prompt, no file. Every link that serves a file rather than a page was
+     * therefore silently dead inside the app while working perfectly in the
+     * mobile browser: the APK self-update link, CSV exports, report PDFs,
+     * certificate prints. Only the browser has a download manager; a WebView
+     * has to be handed one.
+     *
+     * Cookies are copied onto the request because most of these downloads sit
+     * behind the login session — without them DownloadManager would fetch the
+     * login page and cheerfully save that as the .csv.
+     */
+    private void installDownloadHandler() {
+        final WebView webView = getBridge().getWebView();
+        if (webView == null) {
+            return;
+        }
+        webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+            try {
+                DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+                String name = URLUtil.guessFileName(url, contentDisposition, mimeType);
+
+                String cookies = CookieManager.getInstance().getCookie(url);
+                if (cookies != null) {
+                    request.addRequestHeader("Cookie", cookies);
+                }
+                if (userAgent != null) {
+                    request.addRequestHeader("User-Agent", userAgent);
+                }
+                request.setMimeType(mimeType);
+                request.setTitle(name);
+                request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+
+                // Public Downloads needs no permission from Android 10 on, and
+                // is where a user actually looks for a file — but on 7..9 it
+                // would require WRITE_EXTERNAL_STORAGE, a runtime prompt this
+                // activity has no business raising. Older devices get the
+                // app-private external dir instead: less discoverable, but it
+                // downloads, and the completion notification still opens it.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
+                } else {
+                    request.setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, name);
+                }
+
+                DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+                if (dm == null) {
+                    return;
+                }
+                dm.enqueue(request);
+                Toast.makeText(this, "Λήψη: " + name, Toast.LENGTH_LONG).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Η λήψη απέτυχε.", Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     /**
