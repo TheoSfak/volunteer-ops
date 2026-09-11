@@ -2485,6 +2485,78 @@ unset($_SESSION['cron_results'], $_SESSION['cron_elapsed']);
                 </div>
             </div>
         </div>
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-hdd-network me-2"></i>Ρύθμιση αυτόματης εκτέλεσης (Hostinger)</h5>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">
+                    Χρειάζεται <strong>μία μόνο</strong> προγραμματισμένη εργασία. Το <code>cron_daily.php</code>
+                    τρέχει με τη σειρά και τις <?= count($cronJobs) ?> εργασίες που βλέπετε παραπάνω.
+                </p>
+
+                <ol class="small mb-3">
+                    <li class="mb-1">Συνδεθείτε στο hPanel και επιλέξτε τον λογαριασμό φιλοξενίας.</li>
+                    <li class="mb-1">Πηγαίνετε <strong>Advanced</strong> &rarr; <strong>Cron Jobs</strong>.</li>
+                    <li class="mb-1">Στο <em>Create New Cron Job</em> επιλέξτε <strong>Custom</strong> και συχνότητα
+                        <strong>μία φορά την ημέρα</strong> — προτείνεται νωρίς το πρωί, π.χ. 07:00.</li>
+                    <li class="mb-1">Στο πεδίο εντολής επικολλήστε ακριβώς αυτό:</li>
+                </ol>
+
+                <?php
+                // On the live (Linux) host __DIR__ IS the path to paste, so show
+                // it verbatim. On a Windows dev box it would render a nonsense
+                // command like "/usr/bin/php C:\xampp\..." — there, show the
+                // shape of a Hostinger path instead and say it is an example.
+                $cronIsWindows = (DIRECTORY_SEPARATOR === '\\');
+                $cronPath = $cronIsWindows
+                    ? '/home/uXXXXXXXXX/domains/example.gr/public_html'
+                    : __DIR__;
+                ?>
+                <div class="d-flex align-items-start gap-2 mb-2">
+                    <code id="cronCmd" class="flex-grow-1 d-block bg-dark text-light p-2 rounded" style="font-size:12px;word-break:break-all;">/usr/bin/php <?= h($cronPath) ?>/cron_daily.php</code>
+                    <button type="button" class="btn btn-sm btn-outline-secondary flex-shrink-0" id="cronCopyBtn">
+                        <i class="bi bi-clipboard"></i>
+                    </button>
+                </div>
+                <?php if ($cronIsWindows): ?>
+                <p class="small text-muted">
+                    Αυτή είναι εγκατάσταση Windows, οπότε η διαδρομή παραπάνω είναι <strong>παράδειγμα</strong>.
+                    Ανοίγοντας την ίδια σελίδα στο live site, θα δείτε εκεί την πραγματική του διαδρομή
+                    έτοιμη για επικόλληση.
+                </p>
+                <?php else: ?>
+                <p class="small text-muted">
+                    Η διαδρομή παραπάνω είναι η πραγματική διαδρομή <strong>αυτής</strong> της εγκατάστασης —
+                    δεν χρειάζεται να αλλάξετε τίποτα.
+                </p>
+                <?php endif; ?>
+
+                <div class="alert alert-warning py-2 small mb-3">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    <strong>Μην χρησιμοποιήσετε <code>wget</code> ή <code>curl</code> με διεύθυνση ιστοσελίδας.</strong>
+                    Τα scripts δέχονται κλήση μόνο από γραμμή εντολών και θα απαντήσουν
+                    «This script can only be run from command line». Είναι σκόπιμο: αλλιώς οποιοσδήποτε
+                    γνώριζε τη διεύθυνση θα μπορούσε να πυροδοτεί μαζικές αποστολές email.
+                </div>
+
+                <p class="small text-muted mb-0">
+                    Σε πακέτα κοινόχρηστης φιλοξενίας υπάρχει ελάχιστο διάστημα μεταξύ εκτελέσεων — δεν αφορά
+                    εδώ, αφού η εργασία τρέχει μία φορά την ημέρα. Αν χρειαστεί να ελέγξετε ότι δουλεύει
+                    χωρίς να περιμένετε, χρησιμοποιήστε το <strong>Εκτέλεση Όλων</strong> παραπάνω.
+                </p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="bi bi-pc-display me-2"></i>Τοπική εγκατάσταση (XAMPP)</h6>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted mb-2">Σε Windows, μέσω Task Scheduler:</p>
+                <code class="d-block bg-dark text-light p-2 rounded" style="font-size:12px;word-break:break-all;">C:\xampp\php\php.exe <?= h(__DIR__) ?>\cron_daily.php</code>
+            </div>
+        </div>
     </div>
 
     <div class="col-lg-4">
@@ -2495,11 +2567,8 @@ unset($_SESSION['cron_results'], $_SESSION['cron_elapsed']);
             <div class="card-body">
                 <h6>Αυτόματη εκτέλεση</h6>
                 <p class="small text-muted">
-                    Για καθημερινή αυτόματη εκτέλεση, ρυθμίστε στο Windows Task Scheduler:
+                    Δείτε τις αναλυτικές οδηγίες εγκατάστασης πιο κάτω σε αυτή τη σελίδα.
                 </p>
-                <div class="bg-dark text-light p-2 rounded mb-3" style="font-size: 12px;">
-                    <code class="text-light">php C:\xampp\htdocs\volunteerops\cron_daily.php</code>
-                </div>
 
                 <h6>Σχετικές ρυθμίσεις</h6>
                 <ul class="list-unstyled small">
@@ -2531,6 +2600,26 @@ unset($_SESSION['cron_results'], $_SESSION['cron_elapsed']);
     </div>
 </div>
 <?php endif; ?>
+
+<script>
+(function () {
+    var btn = document.getElementById('cronCopyBtn');
+    var cmd = document.getElementById('cronCmd');
+    if (!btn || !cmd) return;
+    btn.addEventListener('click', function () {
+        navigator.clipboard.writeText(cmd.textContent.trim()).then(function () {
+            btn.innerHTML = '<i class="bi bi-check-lg"></i>';
+            btn.classList.add('btn-success');
+            btn.classList.remove('btn-outline-secondary');
+            setTimeout(function () {
+                btn.innerHTML = '<i class="bi bi-clipboard"></i>';
+                btn.classList.remove('btn-success');
+                btn.classList.add('btn-outline-secondary');
+            }, 1500);
+        });
+    });
+})();
+</script>
 
 <!-- Citizens Settings Tab -->
 <?php if ($activeTab === 'citizens'): ?>
