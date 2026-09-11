@@ -85,13 +85,6 @@ if ($mission && isPost()) {
             $isDogHandler = post('is_dog_handler') === '1' ? 1 : 0;
             $dogName      = $isDogHandler ? (mb_substr(trim(post('dog_name')), 0, 100) ?: null) : null;
             $dogTraining  = $isDogHandler ? (trim(post('dog_training')) ?: null) : null;
-            // Blouse size. Optional on purpose: someone turning up to help must
-            // never be blocked from joining over a clothing size, so this is the
-            // one field here with no required attribute and no validation beyond
-            // the column's own 10-character width. users.blouse_size already
-            // exists and is what volunteer-form.php writes for staff — this is
-            // simply the guest-facing way into it.
-            $blouseSize   = mb_substr(trim((string) post('blouse_size')), 0, 10) ?: null;
 
             // Re-submitting the whole form after already registering for
             // this mission (e.g. double-tap) — resume instead of creating
@@ -117,9 +110,8 @@ if ($mission && isPost()) {
                 // is worse than no dog at all.
                 dbExecute(
                     "UPDATE users SET mission_visitor_consent_at = COALESCE(mission_visitor_consent_at, NOW()),
-                     is_dog_handler = ?, dog_name = ?, dog_training = ?,
-                     blouse_size = COALESCE(?, blouse_size), updated_at = NOW() WHERE id = ?",
-                    [$isDogHandler, $dogName, $dogTraining, $blouseSize, $existingId]
+                     is_dog_handler = ?, dog_name = ?, dog_training = ?, updated_at = NOW() WHERE id = ?",
+                    [$isDogHandler, $dogName, $dogTraining, $existingId]
                 );
                 establishMissionVisitorSession((int) $visitorUser['id'], $visitorUser['name'], $visitorUser['email']);
             } else {
@@ -133,9 +125,9 @@ if ($mission && isPost()) {
 
                 $userId = dbInsert(
                     "INSERT INTO users
-                        (name, email, password, phone, role, is_active, is_external, is_mission_visitor, mission_visitor_mission_id, mission_visitor_consent_at, language, is_dog_handler, dog_name, dog_training, blouse_size, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?, 1, 1, 1, ?, NOW(), 'el', ?, ?, ?, ?, NOW(), NOW())",
-                    [$name, $email, $passwordHash, $phone, ROLE_VOLUNTEER, $mission['id'], $isDogHandler, $dogName, $dogTraining, $blouseSize]
+                        (name, email, password, phone, role, is_active, is_external, is_mission_visitor, mission_visitor_mission_id, mission_visitor_consent_at, language, is_dog_handler, dog_name, dog_training, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, 1, 1, 1, ?, NOW(), 'el', ?, ?, ?, NOW(), NOW())",
+                    [$name, $email, $passwordHash, $phone, ROLE_VOLUNTEER, $mission['id'], $isDogHandler, $dogName, $dogTraining]
                 );
 
                 // Same straight-to-APPROVED insert as mission-view.php's
@@ -293,12 +285,6 @@ $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLog
             <div class="mb-3">
                 <label class="form-label"><?= h(t('visitor.join_phone_label', [], 'el')) ?></label>
                 <input type="tel" name="phone" class="form-control form-control-lg" required autocomplete="tel" inputmode="tel" value="<?= $activeForm === 'register' ? h(post('phone')) : '' ?>">
-            </div>
-            <div class="mb-3">
-                <label class="form-label"><?= h(t('visitor.join_blouse_size_label', [], 'el')) ?></label>
-                <input type="text" name="blouse_size" class="form-control form-control-lg" maxlength="10"
-                       value="<?= ($activeForm === 'register') ? h(post('blouse_size')) : '' ?>">
-                <small class="text-muted"><?= h(t('visitor.join_blouse_size_hint', [], 'el')) ?></small>
             </div>
             <!-- K9. Unlike the consent box below, this one IS restored on a
                  failed submit — it's a plain fact about the person, not a

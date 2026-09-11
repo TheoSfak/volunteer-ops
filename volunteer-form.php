@@ -558,6 +558,13 @@ include __DIR__ . '/includes/header.php';
                 <small class="text-muted">Χώρα προέλευσης της ομάδας/οργάνωσης — καθορίζει τη σημαία δίπλα στο όνομα.</small>
             </div>
 
+            <div class="mb-3" id="guestBlouseSizeRow">
+                <label class="form-label">Μέγεθος Μπλούζας</label>
+                <input type="text" class="form-control" id="guestBlouseSize" name="blouse_size" style="max-width: 320px;"
+                       value="<?= h($form['blouse_size'] ?? '') ?>" placeholder="π.χ. M, L, XL" maxlength="10">
+                <small class="text-muted">Το μόνο μέγεθος στολής που κρατάμε για εξωτερική ομάδα — τα υπόλοιπα αφορούν δικούς μας εθελοντές.</small>
+            </div>
+
             <div class="mb-3">
                 <div class="form-check">
                     <input class="form-check-input" type="checkbox" name="is_dog_handler" id="is_dog_handler"
@@ -648,7 +655,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 <div class="col-md-3 mb-3">
                     <label class="form-label">Μπλούζα</label>
-                    <input type="text" class="form-control" name="blouse_size" value="<?= h($form['blouse_size'] ?? '') ?>" placeholder="π.χ. M, L, XL">
+                    <input type="text" class="form-control" id="staffBlouseSize" name="blouse_size" value="<?= h($form['blouse_size'] ?? '') ?>" placeholder="π.χ. M, L, XL">
                 </div>
                 <div class="col-md-3 mb-3">
                     <label class="form-label">Fleece</label>
@@ -809,6 +816,9 @@ include __DIR__ . '/includes/header.php';
     const orgNameRow = document.getElementById('guestOrgNameRow');
     const countryRow = document.getElementById('guestCountryRow');
     const hiddenFieldsWrap = document.getElementById('guestHiddenFieldsWrap');
+    const guestBlouseRow = document.getElementById('guestBlouseSizeRow');
+    const guestBlouse = document.getElementById('guestBlouseSize');
+    const staffBlouse = document.getElementById('staffBlouseSize');
     if (!externalCheckbox || !orgNameRow || !hiddenFieldsWrap) return;
 
     // Uniform sizes / ΑΦΜ-ΑΜΚΑ-ID / Epidrasis-ΓΓΠΠ registries are meaningless
@@ -820,6 +830,15 @@ include __DIR__ . '/includes/header.php';
         orgNameRow.style.display = isGuest ? '' : 'none';
         if (countryRow) countryRow.style.display = isGuest ? '' : 'none';
         hiddenFieldsWrap.style.display = isGuest ? 'none' : '';
+
+        // A guest keeps exactly one uniform size, and it lives in the guest
+        // block rather than in Μεγέθη Στολής, which is hidden for them.
+        // Both inputs are named blouse_size, so the inactive one is disabled
+        // rather than merely hidden — a hidden input still posts, and two of
+        // them would leave PHP taking whichever came last in the body.
+        if (guestBlouseRow) { guestBlouseRow.style.display = isGuest ? '' : 'none'; }
+        if (guestBlouse) { guestBlouse.disabled = !isGuest; }
+        if (staffBlouse) { staffBlouse.disabled = isGuest; }
     }
 
     externalCheckbox.addEventListener('change', toggleGuestFields);
