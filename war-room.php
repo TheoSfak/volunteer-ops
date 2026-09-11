@@ -11204,6 +11204,10 @@ function pollWarRoomData() {
         if (data.broadcastPhotos) renderBroadcastPhotos(broadcastPhotos = data.broadcastPhotos);
         if (data.myTasks) renderMyTasks(myTasks = data.myTasks);
         if (data.liveStreams && typeof renderLiveStreams === 'function') renderLiveStreams(data.liveStreams);
+        // Note: myLive is legitimately null when nothing is pending, so this
+        // must NOT be guarded on truthiness the way the lists above are —
+        // "no request for me" is itself state the card needs to apply.
+        if (typeof renderMyLive === 'function') renderMyLive(data.myLive || null);
         if (data.routes) {
             routes = data.routes;
             renderMyRoutes(routes);
@@ -13566,7 +13570,7 @@ setInterval(function () {
 
     // ── Publisher (volunteer) ───────────────────────────────────────────────
     let pubRoom = null, pubTimer = null, pubLeft = 0, pubStreamId = null;
-    let pubSteppedDown = false, pubQualityWatch = null;
+    let pubSteppedDown = false, pubQualityWatch = null, pubStoppedAt = 0;
     const LIVE_PROFILE = <?= json_encode(livekitQualityProfile()) ?>;
 
     function pubErr(msg) {
@@ -13685,6 +13689,7 @@ setInterval(function () {
     async function stopPublishing(tellServer) {
         clearInterval(pubTimer); pubTimer = null;
         pubSteppedDown = false; pubQualityWatch = null;
+        pubStoppedAt = Date.now();
         if (pubRoom) { try { await pubRoom.disconnect(); } catch (e) {} pubRoom = null; }
         if (tellServer && pubStreamId) { try { await post('stop', {stream_id: pubStreamId}); } catch (e) {} }
         pubStreamId = null;
@@ -13711,6 +13716,37 @@ setInterval(function () {
     <?php if ($myLive && $myLive['status'] === 'live'): ?>
     pubShow('requested');
     <?php endif; ?>
+
+    // Apply the server's view of MY stream on every poll tick.
+    //
+    // This was missing: the card rendered once on page load and then never
+    // moved, so after one stream ended a volunteer kept seeing "the stream
+    // ended" with no start button, and a NEW request aimed at them was
+    // invisible until they manually reloaded the page. The request arrives by
+    // push notification — being unable to act on it without knowing to reload
+    // is exactly the wrong failure for something asked for mid-operation.
+    window.renderMyLive = function (my) {
+        if (!el('myLiveIdle')) return;   // card not rendered for this user
+
+        // Never fight a session that is actually running in this tab: our own
+        // state is ahead of anything the server can tell us.
+        if (pubRoom) return;
+
+        // A poll already in flight when we pressed stop would report the old
+        // 'live' row and flash the start button back up, which reads as the
+        // app asking again immediately. Ignore the server briefly after a
+        // deliberate local stop.
+        if (pubStoppedAt && Date.now() - pubStoppedAt < 8000) return;
+
+        if (!my) { pubClearErr(); pubShow('idle'); return; }
+
+        // 'live' server-side with no local session means the page reloaded or
+        // the publish died. The honest state is "you can start" — accept()
+        // hands back a token for the same row rather than refusing.
+        pubClearErr();
+        pubShow('requested');
+        pubStoppedAt = 0;
+    };
 
     // ── Viewer (command staff) ──────────────────────────────────────────────
     let viewRoom = null, viewConnecting = false;
