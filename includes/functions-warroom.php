@@ -967,11 +967,17 @@ function loadMissionAnnotationsForMission(int $missionId): array {
  * loadMissionPhotosForUser above.
  */
 function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
+    // The order types NOT listed below are excluded on purpose, not by
+    // oversight: 'message' and 'return_to_base' are broadcasts with nothing to
+    // do, 'route' has its own myRouteCard, and 'charge_phone' is answered by
+    // plugging the phone in. Anything NEW that asks the volunteer to act
+    // belongs in this list — 'live' was added late and missed it, so a
+    // request arrived by push with no trace in the volunteer's orders card.
     $rows = dbFetchAll(
         "SELECT o.id AS order_id, o.order_type, o.task_text, o.created_at, r.acknowledged_at, r.fulfilled_at
          FROM mission_order_recipients r
          JOIN mission_orders o ON o.id = r.order_id
-         WHERE o.mission_id = ? AND r.user_id = ? AND o.order_type IN ('task', 'location', 'photo', 'video')
+         WHERE o.mission_id = ? AND r.user_id = ? AND o.order_type IN ('task', 'location', 'photo', 'video', 'live')
          ORDER BY o.created_at DESC",
         [$missionId, $userId]
     );

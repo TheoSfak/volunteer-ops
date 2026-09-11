@@ -92,8 +92,14 @@ if ($action === 'accept') {
         // Accepting IS the acknowledgement — making them press "Ελήφθη" too
         // would be a second tap for no new information.
         if (!empty($stream['order_id'])) {
+            // Acknowledged AND fulfilled in one go: going on air is the whole
+            // of what was asked. Leaving fulfilled_at null would park the row
+            // in "Οι Εντολές μου" as permanently outstanding, and would also
+            // count against the mission's response-time scoring.
             dbExecute(
-                "UPDATE mission_order_recipients SET acknowledged_at = COALESCE(acknowledged_at, NOW())
+                "UPDATE mission_order_recipients
+                 SET acknowledged_at = COALESCE(acknowledged_at, NOW()),
+                     fulfilled_at    = COALESCE(fulfilled_at, NOW())
                  WHERE order_id = ? AND user_id = ?",
                 [$stream['order_id'], $userId]
             );
