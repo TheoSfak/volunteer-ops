@@ -1772,7 +1772,19 @@ function createMissionOrderAndNotify(
     ];
     $fyiKey = $adminFyiKeys[$orderType] ?? null;
     $adminBystanderIds = $fyiKey ? array_values(array_diff(getSystemAdminIds($createdBy), $recipientIds)) : [];
-    if ($adminBystanderIds) {
+    // An empty $recipientIds is a real case, not a defensive hypothetical: the
+    // Action Room's global broadcast sends to the mission's approved volunteers
+    // minus the sender, so it comes out empty on a mission with no approved
+    // volunteers yet, or where the sender is the only one. That crashed the
+    // whole request — the name lookup below built "id IN ()", which is a SQL
+    // syntax error — and it crashed precisely BECAUSE the list was empty, since
+    // array_diff() then returns every admin and lands us in here.
+    //
+    // Skipping is also the right answer on its own terms: this FYI exists to
+    // tell the other admins who was just messaged, and there is no one to name.
+    // The order itself is still created and still audited; only this courtesy
+    // notification is dropped.
+    if ($adminBystanderIds && $recipientIds) {
         $actorName = (string) dbFetchValue("SELECT name FROM users WHERE id = ?", [$createdBy]);
         $recipientNamePlaceholders = implode(',', array_fill(0, count($recipientIds), '?'));
         $recipientNames = array_column(
