@@ -469,19 +469,25 @@ $pingShiftIds = array_column(
     'id'
 ) ?: [0];
 $pingShiftPlaceholders = implode(',', array_fill(0, count($pingShiftIds), '?'));
+// vp.id breaks ties on created_at in the ORDER BY below. Without it the order
+// is not deterministic: manual pings from two volunteers land in the same
+// second often enough, and which came first then depended on the query plan,
+// so the feed could reorder itself between refreshes — and with the LIMIT, a
+// tie straddling the cut could make an event appear and disappear. id is
+// already what the rest of this app treats as the tiebreak of record for pings.
+//
+// Deliberately a PHP comment and not a "--" line inside the query string: that
+// string is double-quoted, so PHP interpolates anything that looks like a
+// variable inside it. This very note used to sit in there naming a variable
+// from another file, which made every call emit "Undefined variable" — printed
+// straight into the response ahead of the JSON, so the client could not parse
+// it and the Activity tab showed only a load failure.
 $pingRows = dbFetchAll(
     "SELECT vp.created_at, u.name AS actor_name, mtm.team_id AS actor_team_id
      FROM volunteer_pings vp
      JOIN users u ON u.id = vp.user_id
      LEFT JOIN mission_team_members mtm ON mtm.mission_id = ? AND mtm.user_id = vp.user_id
      WHERE vp.shift_id IN ({$pingShiftPlaceholders}) AND vp.source = 'manual' AND $pingScopeSql
-     -- vp.id breaks ties on created_at. Without it this ORDER BY is not
-     -- deterministic: manual pings from two volunteers land in the same second
-     -- often enough, and which of the two came first then depended on the query
-     -- plan, so the feed could reorder itself between refreshes — and with the
-     -- LIMIT below, a tie straddling the cut could make an event appear and
-     -- disappear. id is already what the rest of this app treats as the
-     -- tiebreak of record for pings (see $loadPins in war-room.php).
      ORDER BY vp.created_at DESC, vp.id DESC LIMIT 150",
     array_merge([$missionId], $pingShiftIds, [$isAdminParam, $userId, $viewerTeamId])
 );
