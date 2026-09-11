@@ -56,6 +56,11 @@ if ($action === 'acknowledge') {
         // Photo/video/location request acknowledges stay exactly as silent
         // as they've always been; this was asked for these three order
         // types specifically, not a blanket behavior change.
+        //
+        // 'live' joins the loud group rather than the silent one: unlike a
+        // photo request, command is waiting to WATCH something, and needs to
+        // know to look at the screen. A silent acknowledgement would leave
+        // them staring at a card with no idea the volunteer had answered.
         if ($recipient['order_type'] === 'route') {
             $route = dbFetchOne(
                 "SELECT r.id AS route_id, r.mission_id, r.team_id, m.title AS mission_title, m.responsible_user_id, mt.codename, mt.team_number
@@ -75,7 +80,7 @@ if ($action === 'acknowledge') {
                     'route.notify_acknowledged_message', ['team' => $teamLbl, 'mission' => $route['mission_title']]
                 );
             }
-        } elseif (in_array($recipient['order_type'], ['task', 'message'], true)) {
+        } elseif (in_array($recipient['order_type'], ['task', 'message', 'live'], true)) {
             $order = dbFetchOne(
                 "SELECT o.mission_id, m.title AS mission_title, m.responsible_user_id
                  FROM mission_orders o
@@ -90,6 +95,12 @@ if ($action === 'acknowledge') {
                         (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
                         'mission_task_acknowledged', 'order.task.notify_acknowledged_title', [],
                         'order.task.notify_acknowledged_message', ['name' => $recipientName, 'mission' => $order['mission_title']]
+                    );
+                } elseif ($recipient['order_type'] === 'live') {
+                    notifyCommandStaffBanner(
+                        (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
+                        'mission_live_acknowledged', 'order.live.notify_acknowledged_title', [],
+                        'order.live.notify_acknowledged_message', ['name' => $recipientName, 'mission' => $order['mission_title']]
                     );
                 } else {
                     notifyCommandStaffBanner(

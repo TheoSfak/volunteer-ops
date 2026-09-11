@@ -105,6 +105,18 @@ if ($action === 'accept') {
             );
         }
         logAudit('accept_mission_live', 'mission_live_streams', (int) $stream['id'], null, ['mission_id' => $missionId]);
+
+        // Going on air matters more to command than the acknowledgement does:
+        // it is the moment there is actually something to look at. Fired only
+        // on the requested -> live transition, so a reconnect after a dropped
+        // signal does not re-announce the same stream over and over.
+        notifyCommandStaffBanner(
+            $missionId, $mission['title'],
+            $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
+            'mission_live_started', 'live.notify_started_title', [],
+            'live.notify_started_message',
+            ['name' => (string) (getCurrentUser()['name'] ?? ''), 'mission' => $mission['title']]
+        );
     }
 
     $me = getCurrentUser();
