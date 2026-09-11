@@ -436,6 +436,32 @@ function getSetting($key, $default = null) {
 }
 
 /**
+ * Which Android app belongs to the site serving this request.
+ *
+ * Matched on host rather than on a setting an admin has to remember to set:
+ * offering the wrong organisation's app is a silent failure that only shows up
+ * as a confused volunteer, so it must not depend on anyone doing anything.
+ * The host is normalised (port stripped, leading www. dropped) because the
+ * same deployment answers on more than one form of its own name.
+ *
+ * @return array{slug:string, version:string, label:string, file:string, exists:bool}
+ */
+function androidAppForThisSite(): array {
+    $host = strtolower($_SERVER['HTTP_HOST'] ?? '');
+    $host = preg_replace('/:\d+$/', '', $host);
+    $host = preg_replace('/^www\./', '', $host);
+
+    $apps = ANDROID_APPS;
+    $app = $apps[$host] ?? $apps[ANDROID_APP_DEFAULT];
+
+    $app['file'] = $app['slug'] . '-' . $app['version'] . '.apk';
+    // Checked rather than assumed: a deployment that has not had the APK
+    // uploaded yet should say so, not hand out a link that 404s.
+    $app['exists'] = is_file(__DIR__ . '/../assets/downloads/' . $app['file']);
+    return $app;
+}
+
+/**
  * Clear settings cache (forces reload on next getSetting() call)
  */
 function clearSettingsCache() {

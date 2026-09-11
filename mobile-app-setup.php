@@ -96,16 +96,26 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 
+    <?php $androidApp = androidAppForThisSite(); ?>
     <div class="text-center mb-4">
-        <a href="assets/downloads/epidrasis-<?= h(ANDROID_APK_VERSION) ?>.apk" class="btn btn-success btn-lg">
+        <?php if ($androidApp['exists']): ?>
+        <a href="assets/downloads/<?= h($androidApp['file']) ?>" class="btn btn-success btn-lg">
             <i class="bi bi-download me-1"></i>Λήψη Εφαρμογής Android
         </a>
+        <?php else: ?>
+        <button type="button" class="btn btn-secondary btn-lg" disabled>
+            <i class="bi bi-download me-1"></i>Λήψη Εφαρμογής Android
+        </button>
+        <div class="text-danger small mt-2">
+            Το αρχείο <code><?= h($androidApp['file']) ?></code> δεν βρέθηκε στον διακομιστή.
+        </div>
+        <?php endif; ?>
         <?php // Shown so you can tell at a glance whether the download actually
               // gave you something newer than what is already on the phone —
               // previously the only way to find out was to install it and go
               // hunting in Android's app settings. ?>
         <div class="text-muted small mt-2">
-            Έκδοση <?= h(ANDROID_APK_VERSION) ?> &middot; Δείτε την εγκατεστημένη έκδοση στις Ρυθμίσεις &rarr; Εφαρμογές
+            <?= h($androidApp['label']) ?> &middot; Έκδοση <?= h($androidApp['version']) ?> &middot; Δείτε την εγκατεστημένη έκδοση στις Ρυθμίσεις &rarr; Εφαρμογές
         </div>
     </div>
 
