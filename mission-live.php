@@ -163,6 +163,31 @@ if ($action === 'viewer_token') {
     exit;
 }
 
+if ($action === 'release') {
+    // The volunteer accepted, then never got on air — camera permission
+    // refused, no camera, capture failed. Ending the stream here (what we used
+    // to do) also destroyed the REQUEST, so a retry answered "no active
+    // request for you" and the only way back was for command to ask again.
+    //
+    // The honest state is the one before they pressed start: the request still
+    // stands, they are simply not live. Roll the row back to 'requested' so
+    // both the retry and command's card tell the truth.
+    $stream = dbFetchOne(
+        "SELECT id FROM mission_live_streams
+         WHERE mission_id = ? AND user_id = ? AND status = 'live'
+         ORDER BY id DESC LIMIT 1",
+        [$missionId, $userId]
+    );
+    if ($stream) {
+        dbExecute(
+            "UPDATE mission_live_streams SET status = 'requested', started_at = NULL WHERE id = ?",
+            [$stream['id']]
+        );
+    }
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
 if ($action === 'stop') {
     $streamId = (int) post('stream_id');
     $stream = dbFetchOne(

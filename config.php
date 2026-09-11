@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.205.1');
+define('APP_VERSION', '3.206.0');
 define('DB_SCHEMA_VERSION', 148);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
@@ -29,18 +29,21 @@ define('DB_SCHEMA_VERSION', 148);
 // the epidrasis filename, so yphresies.gr offered its users the wrong app
 // entirely. Keyed by the host that serves the page; androidAppForThisSite()
 // in functions-core.php does the lookup.
+// Host keys verified against the live sites and against each app's own
+// capacitor.config.json server.url — epidrasis.iloveweb.gr carries the 's';
+// the 's'-less spelling does not resolve at all.
 define('ANDROID_APPS', [
-    'yphresies.gr'          => ['slug' => 'yphresies', 'version' => '1.0.9', 'label' => 'yphresies'],
-    'epidrasi.iloveweb.gr'  => ['slug' => 'epidrasis', 'version' => '1.1.8', 'label' => 'ΕΠΙΔΡΑΣΙΣ'],
+    'yphresies.gr'          => ['slug' => 'yphresies', 'version' => '1.0.10', 'label' => 'Εθελοντές Σε Δράση'],
+    'epidrasis.iloveweb.gr' => ['slug' => 'epidrasis', 'version' => '1.1.9', 'label' => 'ΕΠΙΔΡΑΣΙΣ'],
 ]);
 // Used when the host is not in the map above (a dev box, a renamed domain, a
 // new deployment). Keeping a default means an unrecognised host still gets a
 // working page rather than a blank one.
-define('ANDROID_APP_DEFAULT', 'epidrasi.iloveweb.gr');
+define('ANDROID_APP_DEFAULT', 'epidrasis.iloveweb.gr');
 
 // Kept so nothing that still reads it breaks; the page now asks
 // androidAppForThisSite() instead.
-define('ANDROID_APK_VERSION', '1.1.8');
+define('ANDROID_APK_VERSION', '1.1.9');
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {

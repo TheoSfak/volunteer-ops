@@ -1,12 +1,16 @@
 package gr.volunteerops.epidrasis;
 
+import android.annotation.SuppressLint;
 import android.app.DownloadManager;
 import android.content.Context;
+import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.Settings;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.URLUtil;
 import android.webkit.WebView;
 import android.widget.Toast;
@@ -65,6 +69,48 @@ public class MainActivity extends BridgeActivity {
             );
 
         installDownloadHandler();
+        installNativeBridge();
+    }
+
+    /**
+     * Exposes window.VopsNative to the page.
+     *
+     * Exists for one thing the web side genuinely cannot do: Android stops
+     * showing the permission dialog after a refusal, and no page can re-trigger
+     * it. The only route back is this app's own permission screen in system
+     * settings, and only native code can open that. Without it a volunteer who
+     * tapped "deny" once is stuck with an error they cannot clear, on a device
+     * they are holding in the field.
+     *
+     * addJavascriptInterface exposes this to every page the WebView loads,
+     * which is safe here only because the WebView is pinned to our own origin
+     * by capacitor.config.json's server.url. Keep the surface to exactly this
+     * one parameterless method — anything that takes input from the page would
+     * deserve a much harder look.
+     */
+    @SuppressLint("JavascriptInterface")
+    private void installNativeBridge() {
+        final WebView webView = getBridge().getWebView();
+        if (webView == null) {
+            return;
+        }
+        webView.addJavascriptInterface(new NativeBridge(), "VopsNative");
+    }
+
+    public class NativeBridge {
+        @JavascriptInterface
+        public void openAppSettings() {
+            runOnUiThread(() -> {
+                try {
+                    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    intent.setData(Uri.fromParts("package", getPackageName(), null));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "Δεν άνοιξαν οι ρυθμίσεις.", Toast.LENGTH_LONG).show();
+                }
+            });
+        }
     }
 
     /**

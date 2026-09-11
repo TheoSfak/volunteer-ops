@@ -3258,7 +3258,17 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     </div>
                 </div>
 
-                <div id="myLiveError" class="alert alert-warning mt-2 mb-0 py-2 small d-none"></div>
+                <div id="myLiveError" class="alert alert-warning mt-2 mb-0 py-2 small d-none">
+                    <div id="myLiveErrorText"></div>
+                    <div id="myLiveErrorActions" class="mt-2 d-none d-flex gap-2 flex-wrap">
+                        <button type="button" id="myLiveRetryBtn" class="btn btn-sm btn-warning">
+                            <i class="bi bi-arrow-clockwise me-1"></i><?= t('mylive.retry') ?>
+                        </button>
+                        <button type="button" id="myLivePermBtn" class="btn btn-sm btn-outline-secondary d-none">
+                            <i class="bi bi-gear me-1"></i><?= t('mylive.open_permissions') ?>
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
         <?php endif; ?>
@@ -13573,11 +13583,38 @@ setInterval(function () {
     let pubSteppedDown = false, pubQualityWatch = null, pubStoppedAt = 0;
     const LIVE_PROFILE = <?= json_encode(livekitQualityProfile()) ?>;
 
-    function pubErr(msg) {
-        const e = el('myLiveError');
-        if (e) { e.textContent = msg; e.classList.remove('d-none'); }
+    // Android never re-asks once a permission has been refused twice — the
+    // request returns "denied" instantly with no dialog at all. So a failed
+    // capture offers a plain retry first (a FIRST refusal is still re-askable),
+    // and only after a second failure offers the one thing that actually works
+    // from there: a jump straight to this app's permission screen.
+    let pubCamFailures = 0;
+
+    function pubErr(msg, withActions) {
+        const box = el('myLiveError');
+        const txt = el('myLiveErrorText');
+        if (!box) return;
+        if (txt) { txt.textContent = msg; } else { box.textContent = msg; }
+        box.classList.remove('d-none');
+
+        const actions = el('myLiveErrorActions');
+        if (!actions) return;
+        actions.classList.toggle('d-none', !withActions);
+        const permBtn = el('myLivePermBtn');
+        // window.VopsNative exists only inside the Android app — testing for the
+        // capability itself rather than sniffing the user agent, and it keeps
+        // the button hidden in a browser where it could do nothing anyway.
+        const canOpenSettings = !!(window.VopsNative && window.VopsNative.openAppSettings);
+        if (permBtn) {
+            permBtn.classList.toggle('d-none', !(withActions && canOpenSettings && pubCamFailures >= 2));
+        }
     }
-    function pubClearErr() { const e = el('myLiveError'); if (e) e.classList.add('d-none'); }
+    function pubClearErr() {
+        const e = el('myLiveError');
+        if (e) e.classList.add('d-none');
+        const a = el('myLiveErrorActions');
+        if (a) a.classList.add('d-none');
+    }
 
     function pubShow(state) {
         const map = {idle: 'myLiveIdle', requested: 'myLiveRequested', live: 'myLiveActive'};
@@ -13650,6 +13687,7 @@ setInterval(function () {
             const cam = pubRoom.localParticipant.getTrackPublication(LK.Track.Source.Camera);
             if (cam && cam.track) cam.track.attach(el('myLivePreview'));
 
+            pubCamFailures = 0;
             pubShow('live');
             pubTick();
             pubTimer = setInterval(pubTick, 1000);
@@ -13688,15 +13726,24 @@ setInterval(function () {
             }
         } catch (e) {
             const denied = e && (e.name === 'NotAllowedError' || e.name === 'NotFoundError' || /permission|denied/i.test(e.message || ''));
-            const msg = denied ? t('mylive.camera_error') : (t('mylive.connect_error') + ' ' + (e && e.message ? e.message : ''));
+            if (denied) { pubCamFailures += 1; }
+            let msg = denied ? t('mylive.camera_error') : (t('mylive.connect_error') + ' ' + (e && e.message ? e.message : ''));
+            if (denied && pubCamFailures >= 2) { msg = t('mylive.permissions_hint'); }
             // Release the row server-side. We accepted the request and then
             // failed to actually go on air, so leaving it 'live' would show
             // command a feed that never existed and a countdown for nothing.
-            await stopPublishing(true);
+            // Tear down locally, then hand the request back rather than ending
+            // it — see the 'release' action. stopPublishing(false) so it does
+            // not also POST a stop and close the row we are about to reopen.
+            await stopPublishing(false);
+            try { await post('release'); } catch (err) { /* the row expires on its own anyway */ }
+            // Back to the request state, so the retry button has something to
+            // act on and the card does not claim the stream simply ended.
+            pubShow('requested');
             // After stopPublishing, not before: its generic "ended" note would
             // otherwise overwrite the specific reason, and "the stream ended"
             // is useless to someone who just denied a camera prompt.
-            pubErr(msg);
+            pubErr(msg, denied);
         } finally {
             if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-camera-video-fill me-1"></i>' + t('mylive.start'); }
         }
@@ -13714,6 +13761,14 @@ setInterval(function () {
     }
 
     if (el('myLiveStartBtn')) el('myLiveStartBtn').addEventListener('click', startPublishing);
+    if (el('myLiveRetryBtn')) el('myLiveRetryBtn').addEventListener('click', () => {
+        pubClearErr();
+        pubShow('requested');
+        startPublishing();
+    });
+    if (el('myLivePermBtn')) el('myLivePermBtn').addEventListener('click', () => {
+        try { window.VopsNative.openAppSettings(); } catch (e) { /* button is only shown when it exists */ }
+    });
     if (el('myLiveStopBtn')) el('myLiveStopBtn').addEventListener('click', () => stopPublishing(true));
     if (el('myLiveMuteBtn')) el('myLiveMuteBtn').addEventListener('click', async () => {
         if (!pubRoom) return;
