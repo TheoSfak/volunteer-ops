@@ -64,14 +64,33 @@ header('Permissions-Policy: camera=(self), microphone=(self), geolocation=(self)
 $livekitCsp = '';
 $livekitHost = trim((string) getSetting('livekit_url', ''));
 if ($livekitHost !== '') {
-    $livekitHost = explode('/', preg_replace('#^wss?://#i', '', $livekitHost))[0];
+    // https:// as well as wss://: the LiveKit dashboard shows a wss:// URL, but
+    // an admin pasting the https:// form used to leave this whole clause empty
+    // — the host failed the check below as "https:" — and CSP then blocked
+    // LiveKit outright. A typo in a settings field should not be a silent,
+    // unexplainable connection failure.
+    $livekitHost = explode('/', preg_replace('#^(wss?|https?)://#i', '', $livekitHost))[0];
     // Host-only, and only if it looks like one — never interpolate raw
     // settings text straight into a security header.
     if (preg_match('/^[A-Za-z0-9.-]+(:[0-9]+)?$/', $livekitHost)) {
         $livekitCsp = ' https://' . $livekitHost . ' wss://' . $livekitHost;
+        // LiveKit Cloud does not keep you on the host you dialled: the client
+        // fetches a region list and can fail over to a DIFFERENT hostname
+        // (<project>.<region>.production.livekit.cloud). Under the exact-host
+        // rule above, that failover is blocked by CSP — which looks like a
+        // network problem on a flaky uplink, exactly when the failover is
+        // needed most. Widened only for the known provider domain, so a
+        // self-hosted host keeps the strict exact-host treatment.
+        if (preg_match('/(^|\.)livekit\.cloud$/i', explode(':', $livekitHost)[0])) {
+            $livekitCsp .= ' https://*.livekit.cloud wss://*.livekit.cloud';
+        }
     }
 }
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; img-src 'self' data: https:; media-src 'self' blob:; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; connect-src 'self' blob: https://cdn.jsdelivr.net https://unpkg.com https://*.push.services.mozilla.com https://fcm.googleapis.com https://updates.push.services.mozilla.com" . $livekitCsp . "; worker-src 'self' blob:");
+// media-src carries `mediastream:` because WebKit — unlike Chrome — checks a
+// <video>'s srcObject against this directive. Without it an iPhone renders a
+// permanently black box for a live stream that is otherwise working perfectly,
+// and the only trace is a securitypolicyviolation event nobody is watching.
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com; img-src 'self' data: https:; media-src 'self' blob: mediastream:; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; connect-src 'self' blob: https://cdn.jsdelivr.net https://unpkg.com https://*.push.services.mozilla.com https://fcm.googleapis.com https://updates.push.services.mozilla.com" . $livekitCsp . "; worker-src 'self' blob:");
 if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 }

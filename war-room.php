@@ -13835,7 +13835,12 @@ setInterval(function () {
 </script>
 
 <?php if ($liveEnabled): ?>
-<script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
+<!-- Pinned, not floating on @2. This is the one feature here whose failure
+     mode is "the incident is happening and command cannot see it", and a
+     silent CDN minor bump re-rolls the dice on every device in the field
+     with nobody testing anything. 2.22.3 is the build the iPhone fix below
+     was read against and field-tested with. -->
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.22.3/dist/livekit-client.umd.min.js"></script>
 <script>
 // ══ LIVE VIDEO ══════════════════════════════════════════════════════════════
 // Two independent halves that never both run in one browser: a volunteer
@@ -13848,6 +13853,93 @@ setInterval(function () {
     const MISSION_ID = <?= $missionId ?>;
     const MAX_SECONDS = <?= MISSION_LIVE_MAX_SECONDS ?>;
 
+    // ── Field diagnostics: append ?livedebug=1 ──────────────────────────────
+    // A phone in a gorge cannot be plugged into a desktop inspector, and every
+    // failure this feature has had in the field was of the silent kind: a
+    // play() that rejected into an empty catch, a CSP rule nobody was reading,
+    // an encoder running perfectly while sending nothing. This panel puts all
+    // three on the screen, so a screenshot from the field IS the diagnosis.
+    const LIVE_DEBUG = /(^|[?&])livedebug=1(&|$)/.test(location.search);
+    let dbgBox = null;
+    function dbg(msg) {
+        if (!LIVE_DEBUG) return;
+        if (!dbgBox) {
+            const host = document.querySelector('[data-card-id="myLiveCard"] .card-body')
+                      || document.getElementById('liveStreamsBody')
+                      || document.body;
+            dbgBox = document.createElement('pre');
+            dbgBox.className = 'bg-dark text-info p-2 rounded mt-2 mb-0';
+            dbgBox.style.cssText = 'max-height:38vh;overflow:auto;white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.35;';
+            host.appendChild(dbgBox);
+        }
+        const ts = new Date().toTimeString().slice(0, 8);
+        dbgBox.textContent += ts + ' ' + msg + '\n';
+        dbgBox.scrollTop = dbgBox.scrollHeight;
+    }
+    if (LIVE_DEBUG) {
+        // The single most useful line this panel can print. A CSP refusal is
+        // invisible everywhere else: no exception, no failed request, just
+        // media that never arrives.
+        document.addEventListener('securitypolicyviolation', e => {
+            dbg('CSP BLOCKED ' + e.violatedDirective + ' <- ' + (e.blockedURI || '(inline)'));
+        });
+        dbg('debug on · ' + navigator.userAgent);
+        dbg('secure=' + window.isSecureContext +
+            ' sdk=' + (window.LivekitClient ? 'loaded 2.22.3' : 'MISSING — CDN blocked?') +
+            ' gUM=' + !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+    }
+
+    // ── Playback, the WebKit way ────────────────────────────────────────────
+    // Chrome starts a <video> the moment a MediaStream is attached and keeps it
+    // running whether or not the element is on screen. WebKit does neither:
+    //   · it refuses to begin playback on an element that is not rendered —
+    //     display:none, zero-sized, or inside a collapsed card — and
+    //   · livekit-client deliberately does NOT set autoplay on Safari. It
+    //     calls play() exactly once, inside a setTimeout(0), and swallows the
+    //     rejection (verified in 2.22.3's attachToElement).
+    // Attach an instant before revealing the card and those two facts meet:
+    // the one play() attempt lands at the one moment it cannot succeed,
+    // nothing ever retries, and an iPhone shows a black box for a stream that
+    // is in fact flowing. Chrome and the Android app never saw it, which is
+    // why this survived a field test. So every attach goes through here:
+    // reveal first, attach second, then keep asking until it is really running.
+    function liveAttach(track, video) {
+        if (!track || !video) return;
+        try { track.attach(video); } catch (e) { dbg('attach failed: ' + e); return; }
+        video.playsInline = true;
+        liveForcePlay(video);
+    }
+
+    function liveForcePlay(video, attempt) {
+        if (!video || !video.isConnected) return;
+        attempt = attempt || 0;
+        let p;
+        try { p = video.play(); } catch (e) { p = null; }
+        if (p && p.catch) {
+            p.then(() => { if (attempt) dbg('play ok after ' + attempt + ' retries'); })
+             .catch(err => {
+                // Not rendered yet, or rendered and still refused. Either way
+                // the answer is to let layout settle and ask again — roughly
+                // ten seconds of trying in total, which comfortably outlasts a
+                // card being expanded or a phone coming back from a lock.
+                if (attempt < 15) {
+                    setTimeout(() => liveForcePlay(video, attempt + 1), 250 + attempt * 100);
+                } else {
+                    dbg('play gave up: ' + (err && err.name ? err.name : err));
+                }
+            });
+        }
+    }
+
+    // Returning from a locked screen or another app leaves WebKit's media
+    // elements paused, and nothing re-plays them on its own.
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) return;
+        document.querySelectorAll('#myLivePreview, video[data-live-video]').forEach(v => {
+            if (v.srcObject && v.paused) { dbg('re-play after unhide'); liveForcePlay(v); }
+        });
+    });
+
     function post(action, extra) {
         const data = new URLSearchParams(Object.assign(
             {csrf_token: csrfToken, mission_id: MISSION_ID, action: action}, extra || {}
@@ -13857,7 +13949,7 @@ setInterval(function () {
 
     // ── Publisher (volunteer) ───────────────────────────────────────────────
     let pubRoom = null, pubTimer = null, pubLeft = 0, pubStreamId = null;
-    let pubSteppedDown = false, pubQualityWatch = null, pubStoppedAt = 0;
+    let pubSteppedDown = false, pubQualityWatch = null, pubStoppedAt = 0, pubDiagTimer = null;
     const LIVE_PROFILE = <?= json_encode(livekitQualityProfile()) ?>;
 
     // Android never re-asks once a permission has been refused twice — the
@@ -13910,6 +14002,91 @@ setInterval(function () {
         if (t2) t2.textContent = String(Math.floor(pubLeft / 60)).padStart(2, '0') + ':' + String(pubLeft % 60).padStart(2, '0');
     }
 
+    // The three questions a black screen raises, answered every 3 seconds:
+    // is the camera producing frames, is the encoder sending them, and is the
+    // <video> element actually playing what it was given? Each has a different
+    // culprit — the device, the uplink, and WebKit respectively — and without
+    // this they are indistinguishable from one another.
+    async function pubDiagTick() {
+        if (!pubRoom) return;
+        const LK = window.LivekitClient;
+        const pub = pubRoom.localParticipant.getTrackPublication(LK.Track.Source.Camera);
+        const v = el('myLivePreview');
+        if (v) {
+            dbg('video ' + v.videoWidth + 'x' + v.videoHeight + ' ready=' + v.readyState +
+                ' paused=' + v.paused + ' shown=' + (v.offsetWidth > 0));
+        }
+        if (!pub || !pub.track) { dbg('no camera track'); return; }
+        const mst = pub.track.mediaStreamTrack;
+        if (mst) {
+            const s = mst.getSettings ? mst.getSettings() : {};
+            // muted=true here is the device withholding frames — another app
+            // took the camera, or iOS interrupted the capture. It is NOT the
+            // microphone mute button, which lives on the audio track.
+            dbg('cam ' + (s.width || '?') + 'x' + (s.height || '?') + '@' + Math.round(s.frameRate || 0) +
+                ' state=' + mst.readyState + ' muted=' + mst.muted + ' enabled=' + mst.enabled);
+        }
+        try {
+            const sender = pub.track.sender;
+            if (!sender) { dbg('no RTP sender'); return; }
+            const stats = await sender.getStats();
+            stats.forEach(rep => {
+                if (rep.type === 'outbound-rtp' && rep.kind === 'video') {
+                    dbg('sent frames=' + (rep.framesSent || 0) + ' enc=' + (rep.framesEncoded || 0) +
+                        ' kB=' + Math.round((rep.bytesSent || 0) / 1024) +
+                        (rep.qualityLimitationReason ? ' limit=' + rep.qualityLimitationReason : '') +
+                        (rep.active === false ? ' ACTIVE=false' : ''));
+                }
+                if (rep.type === 'candidate-pair' && rep.nominated) {
+                    dbg('ice ' + rep.state + ' rtt=' + (rep.currentRoundTripTime || '?'));
+                }
+            });
+        } catch (e) { dbg('stats error: ' + e); }
+    }
+
+    // ── "On air" is not the same as "sending" ───────────────────────────────
+    // Everything the volunteer can see says the stream is up: the badge, the
+    // countdown, the preview. None of it proves a single frame left the phone.
+    // Today's iPhone failure was exactly that shape — the card looked right
+    // and command had nothing — so check the one number that settles it, and
+    // say so on the volunteer's own screen rather than leaving command to
+    // discover it. The repair attempted here is deliberately narrow: dynacast
+    // pauses the encoder while nobody is subscribed, and a pause that fails to
+    // lift leaves encodings[0].active stuck false. Re-arming it is a no-op in
+    // every other case.
+    async function pubWatchdog(attempt) {
+        if (!pubRoom) return;
+        const LK = window.LivekitClient;
+        const pub = pubRoom.localParticipant.getTrackPublication(LK.Track.Source.Camera);
+        const sender = pub && pub.track && pub.track.sender;
+        if (!sender) return;
+        let framesSent = 0;
+        try {
+            const stats = await sender.getStats();
+            stats.forEach(rep => {
+                if (rep.type === 'outbound-rtp' && rep.kind === 'video') framesSent += (rep.framesSent || 0);
+            });
+        } catch (e) { return; }   // no stats is not evidence of failure
+        if (framesSent > 0) { dbg('watchdog ok, framesSent=' + framesSent); return; }
+
+        dbg('watchdog: 0 frames sent after ' + (attempt === 1 ? '8s' : '16s'));
+        if (attempt === 1) {
+            try {
+                const params = sender.getParameters();
+                if (params.encodings && params.encodings.length && params.encodings[0].active === false) {
+                    params.encodings[0].active = true;
+                    await sender.setParameters(params);
+                    dbg('watchdog: re-armed a paused encoder');
+                }
+            } catch (e) { dbg('watchdog repair failed: ' + e); }
+            setTimeout(() => pubWatchdog(2), 8000);
+            return;
+        }
+        // Second look, still nothing. Tell the volunteer, because from here
+        // only they can act — move, switch network, or restart the stream.
+        pubErr(t('mylive.not_sending'));
+    }
+
     async function startPublishing() {
         const btn = el('myLiveStartBtn');
         if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>' + t('mylive.starting'); }
@@ -13921,6 +14098,20 @@ setInterval(function () {
             pubLeft = r.secondsLeft || MAX_SECONDS;
 
             const LK = window.LivekitClient;
+
+            // Codec, decided per device rather than per install. VP8 is the
+            // field-validated default and it is software-encoded everywhere —
+            // which cost nothing on the Android hardware it was validated on.
+            // An iPhone has no such thing as a free software encode: H.264 is
+            // the only codec its hardware encoder touches, and anything else
+            // competes for CPU with the capture itself on a phone that is
+            // already warm. Android and the APK keep the configured setting
+            // untouched; only WebKit is steered, and only here.
+            const isWebKit = /iPad|iPhone|iPod/.test(navigator.userAgent)
+                          || /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
+            const codec = isWebKit ? 'h264' : LIVE_PROFILE.codec;
+            dbg('codec=' + codec + (isWebKit ? ' (WebKit override)' : ''));
+
             pubRoom = new LK.Room({
                 // Back camera, stated explicitly: left to the browser's own
                 // default a phone opens the FRONT camera, which is the wrong
@@ -13954,20 +14145,30 @@ setInterval(function () {
                     // bitrate adaptation is unaffected: that is congestion
                     // control on the single stream, not a simulcast feature.
                     simulcast: false,
-                    videoCodec: LIVE_PROFILE.codec
+                    videoCodec: codec
                 },
                 dynacast: true
             });
             pubRoom.on(LK.RoomEvent.Disconnected, () => stopPublishing(false));
+            dbg('connecting to ' + (r.url || '?'));
+            pubRoom.on(LK.RoomEvent.ConnectionStateChanged, s => dbg('room state: ' + s));
             await pubRoom.connect(r.url, r.token);
+            dbg('connected, enabling camera+mic');
             await pubRoom.localParticipant.enableCameraAndMicrophone();
-            const cam = pubRoom.localParticipant.getTrackPublication(LK.Track.Source.Camera);
-            if (cam && cam.track) cam.track.attach(el('myLivePreview'));
 
             pubCamFailures = 0;
+            // Reveal BEFORE attaching, never after: WebKit will not start a
+            // <video> that is still display:none, and the rejection is thrown
+            // away inside the SDK. See liveAttach.
             pubShow('live');
+            const cam = pubRoom.localParticipant.getTrackPublication(LK.Track.Source.Camera);
+            if (cam && cam.track) liveAttach(cam.track, el('myLivePreview'));
+            else dbg('NO camera publication after enableCameraAndMicrophone');
+
             pubTick();
             pubTimer = setInterval(pubTick, 1000);
+            setTimeout(() => pubWatchdog(1), 8000);
+            if (LIVE_DEBUG) { pubDiagTick(); pubDiagTimer = setInterval(pubDiagTick, 3000); }
 
             // Auto mode: step the ceiling down ONCE if the link stays bad.
             // Only once, and never back up — oscillating between resolutions
@@ -13993,7 +14194,8 @@ setInterval(function () {
                                     resolution: {width: LIVE_PROFILE.floor.width, height: LIVE_PROFILE.floor.height, frameRate: LIVE_PROFILE.floor.fps},
                                     facingMode: 'environment'
                                 });
-                                cam.track.attach(el('myLivePreview'));
+                                liveAttach(cam.track, el('myLivePreview'));
+                                dbg('stepped down to ' + LIVE_PROFILE.floor.height + 'p');
                             }
                         } catch (err) { /* stay at the current quality rather than dropping the stream */ }
                     } else {
@@ -14028,6 +14230,7 @@ setInterval(function () {
 
     async function stopPublishing(tellServer) {
         clearInterval(pubTimer); pubTimer = null;
+        clearInterval(pubDiagTimer); pubDiagTimer = null;
         pubSteppedDown = false; pubQualityWatch = null;
         pubStoppedAt = Date.now();
         if (pubRoom) { try { await pubRoom.disconnect(); } catch (e) {} pubRoom = null; }
@@ -14195,7 +14398,11 @@ setInterval(function () {
         }
         const uid = (participant.identity || '').replace(/^v/, '');
         const vid = document.querySelector('video[data-live-video="' + uid + '"]');
-        if (vid) track.attach(vid);
+        // Command staff are not immune to the WebKit rule either — an iPad on
+        // the desk, or simply a Live Streams card someone had collapsed when
+        // the track arrived, and the tile stays black for the whole stream.
+        if (vid) { liveAttach(track, vid); dbg('attached remote video for ' + uid); }
+        else dbg('no tile yet for participant ' + uid);
     }
 
     async function ensureViewer() {
@@ -14204,17 +14411,24 @@ setInterval(function () {
         viewConnecting = true;
         try {
             const r = await post('viewer_token');
-            if (!r.ok) return;
+            if (!r.ok) { dbg('viewer_token refused: ' + (r.error || '?')); return; }
             const LK = window.LivekitClient;
             viewRoom = new LK.Room({adaptiveStream: true});
-            viewRoom.on(LK.RoomEvent.TrackSubscribed, (track, pub, participant) => attachRemote(participant, track));
-            viewRoom.on(LK.RoomEvent.Disconnected, () => { viewRoom = null; });
+            viewRoom.on(LK.RoomEvent.TrackSubscribed, (track, pub, participant) => {
+                dbg('subscribed ' + track.kind + ' from ' + participant.identity);
+                attachRemote(participant, track);
+            });
+            viewRoom.on(LK.RoomEvent.ParticipantConnected, p => dbg('participant joined: ' + p.identity));
+            viewRoom.on(LK.RoomEvent.Disconnected, () => { dbg('viewer disconnected'); viewRoom = null; });
+            dbg('viewer connecting to ' + (r.url || '?'));
             await viewRoom.connect(r.url, r.token);
+            dbg('viewer connected, remotes=' + viewRoom.remoteParticipants.size);
             // Anyone already publishing before we joined.
             viewRoom.remoteParticipants.forEach(p => p.trackPublications.forEach(tp => {
                 if (tp.track) attachRemote(p, tp.track);
             }));
         } catch (e) {
+            dbg('viewer connect failed: ' + (e && e.message ? e.message : e));
             viewRoom = null;
         } finally {
             viewConnecting = false;
@@ -14227,7 +14441,32 @@ setInterval(function () {
         const anyLive = !!document.querySelector('.live-stream-item[data-status="live"]');
         if (anyLive) { ensureViewer(); }
         else if (viewRoom) { try { viewRoom.disconnect(); } catch (e) {} viewRoom = null; }
+        if (LIVE_DEBUG && viewRoom) viewDiagTick();
     }, 4000);
+
+    // The command-side counterpart of pubDiagTick: are frames arriving, and is
+    // the tile playing them? Two different problems that look identical.
+    async function viewDiagTick() {
+        document.querySelectorAll('video[data-live-video]').forEach(v => {
+            dbg('tile ' + v.dataset.liveVideo + ' ' + v.videoWidth + 'x' + v.videoHeight +
+                ' ready=' + v.readyState + ' paused=' + v.paused + ' src=' + !!v.srcObject);
+        });
+        if (!viewRoom) return;
+        for (const p of viewRoom.remoteParticipants.values()) {
+            for (const tp of p.trackPublications.values()) {
+                if (!tp.track || tp.kind !== 'video') continue;
+                try {
+                    const stats = await tp.track.receiver.getStats();
+                    stats.forEach(rep => {
+                        if (rep.type === 'inbound-rtp' && rep.kind === 'video') {
+                            dbg('recv frames=' + (rep.framesReceived || 0) + ' dec=' + (rep.framesDecoded || 0) +
+                                ' kB=' + Math.round((rep.bytesReceived || 0) / 1024));
+                        }
+                    });
+                } catch (e) { /* stats are a nicety, never a reason to break the view */ }
+            }
+        }
+    }
     ensureViewer();
 })();
 </script>
