@@ -10,7 +10,10 @@ requireRole([ROLE_SYSTEM_ADMIN]);
 $pageTitle = 'Ρυθμίσεις';
 
 // Get active tab
-$activeTab = get('tab', 'general');
+// Empty (not 'general') so a bare settings.php lands on the section grid
+// rather than dropping straight into one form. Every existing
+// ?tab=... link and redirect keeps working untouched.
+$activeTab = get('tab', '');
 
 // Get current settings
 $settings = [];
@@ -1150,72 +1153,78 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 
 <!-- Tabs -->
-<ul class="nav nav-tabs mb-4" role="tablist">
-    <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'general' ? 'active' : '' ?>" href="settings.php?tab=general">
-            <i class="bi bi-sliders me-1"></i>Γενικά
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'smtp' ? 'active' : '' ?>" href="settings.php?tab=smtp">
-            <i class="bi bi-envelope me-1"></i>SMTP Email
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'templates' ? 'active' : '' ?>" href="settings.php?tab=templates">
-            <i class="bi bi-file-earmark-code me-1"></i>Email Templates
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'notifications' ? 'active' : '' ?>" href="settings.php?tab=notifications">
-            <i class="bi bi-bell me-1"></i>Ειδοποιήσεις
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'inventory' ? 'active' : '' ?>" href="settings.php?tab=inventory">
-            <i class="bi bi-box-seam me-1"></i>Απόθεμα
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'citizens' ? 'active' : '' ?>" href="settings.php?tab=citizens">
-            <i class="bi bi-person-vcard me-1"></i>Πολίτες
-        </a>
-        <a class="nav-link <?= $activeTab === 'subscriptions' ? 'active' : '' ?>" href="settings.php?tab=subscriptions">
-            <i class="bi bi-cash-coin me-1"></i> Συνδρομές
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'livekit' ? 'active' : '' ?>" href="settings.php?tab=livekit">
-            <i class="bi bi-broadcast me-1"></i>Ζωντανή Μετάδοση
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'cron' ? 'active' : '' ?>" href="settings.php?tab=cron">
-            <i class="bi bi-clock-history me-1"></i>Cron Jobs
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'health' ? 'active' : '' ?>" href="settings.php?tab=health">
-            <i class="bi bi-heart-pulse me-1"></i>Υγεία Εφαρμογής
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'prerequisites' ? 'active' : '' ?>" href="settings.php?tab=prerequisites">
-            <i class="bi bi-list-check me-1"></i>Προαπαιτούμενα
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link" href="update.php">
-            <i class="bi bi-cloud-download me-1"></i>Ενημερώσεις
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link <?= $activeTab === 'reset' ? 'active' : '' ?> text-danger fw-semibold" href="settings.php?tab=reset">
-            <i class="bi bi-trash3 me-1"></i>Επαναφορά
-        </a>
-    </li>
-</ul>
+<?php
+// The 13 settings sections, grouped. One source for both the landing grid and
+// the sidebar, so the two can never disagree about what exists. 'danger' marks
+// the destructive one so it can be visually separated in both places.
+$settingsNav = [
+    'Βασικά' => [
+        ['tab' => 'general',       'icon' => 'bi-sliders',            'label' => 'Γενικά',            'hint' => 'Όνομα, λογότυπο, ζώνη ώρας'],
+        ['tab' => 'notifications', 'icon' => 'bi-bell',               'label' => 'Ειδοποιήσεις',      'hint' => 'Τι στέλνεται και πού'],
+    ],
+    'Επικοινωνία' => [
+        ['tab' => 'smtp',      'icon' => 'bi-envelope',           'label' => 'SMTP Email',     'hint' => 'Διακομιστής αποστολής'],
+        ['tab' => 'templates', 'icon' => 'bi-file-earmark-code',  'label' => 'Πρότυπα Email',  'hint' => 'Κείμενα μηνυμάτων'],
+    ],
+    'Λειτουργίες' => [
+        ['tab' => 'inventory',     'icon' => 'bi-box-seam',     'label' => 'Απόθεμα',           'hint' => 'Κατηγορίες και χώροι'],
+        ['tab' => 'citizens',      'icon' => 'bi-person-vcard', 'label' => 'Πολίτες',           'hint' => 'Μητρώο και σεμινάρια'],
+        ['tab' => 'subscriptions', 'icon' => 'bi-cash-coin',    'label' => 'Συνδρομές',         'hint' => 'Ετήσια συνδρομή, IRIS'],
+        ['tab' => 'livekit',       'icon' => 'bi-broadcast',    'label' => 'Ζωντανή Μετάδοση',  'hint' => 'LiveKit και ποιότητα'],
+    ],
+    'Σύστημα' => [
+        ['tab' => 'cron',          'icon' => 'bi-clock-history',   'label' => 'Cron Jobs',         'hint' => 'Προγραμματισμένες εργασίες'],
+        ['tab' => 'health',        'icon' => 'bi-heart-pulse',     'label' => 'Υγεία Εφαρμογής',   'hint' => 'Έλεγχοι και καθαρισμός'],
+        ['tab' => 'prerequisites', 'icon' => 'bi-list-check',      'label' => 'Προαπαιτούμενα',    'hint' => 'Τι χρειάζεται ο server'],
+        ['url' => 'update.php',    'icon' => 'bi-cloud-download',  'label' => 'Ενημερώσεις',       'hint' => 'Νέα έκδοση εφαρμογής'],
+    ],
+    'Επικίνδυνα' => [
+        ['tab' => 'reset', 'icon' => 'bi-trash3', 'label' => 'Επαναφορά', 'hint' => 'Διαγραφή δεδομένων', 'danger' => true],
+    ],
+];
+$settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
+?>
 
+<?php if ($activeTab === ''): ?>
+<p class="text-muted mb-4">Διαλέξτε ενότητα.</p>
+<?php foreach ($settingsNav as $groupLabel => $groupItems): ?>
+    <h6 class="text-uppercase text-muted fw-semibold mb-2" style="font-size:.72rem;letter-spacing:.06em;"><?= h($groupLabel) ?></h6>
+    <div class="row g-3 mb-4">
+        <?php foreach ($groupItems as $item): ?>
+        <div class="col-12 col-sm-6 col-lg-4 col-xxl-3">
+            <a href="<?= h($settingsHref($item)) ?>" class="text-decoration-none d-block h-100">
+                <div class="card h-100 settings-tile <?= !empty($item['danger']) ? 'border-danger' : '' ?>">
+                    <div class="card-body py-3">
+                        <i class="bi <?= h($item['icon']) ?> fs-4 <?= !empty($item['danger']) ? 'text-danger' : 'text-primary' ?>"></i>
+                        <div class="fw-semibold mt-2 <?= !empty($item['danger']) ? 'text-danger' : '' ?>"><?= h($item['label']) ?></div>
+                        <div class="small text-muted"><?= h($item['hint']) ?></div>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <?php endforeach; ?>
+    </div>
+<?php endforeach; ?>
+<?php else: ?>
+
+<div class="row g-4">
+    <div class="col-lg-3">
+        <div class="list-group list-group-flush settings-side sticky-lg-top" style="top:1rem;">
+            <a href="settings.php" class="list-group-item list-group-item-action text-muted px-2 py-2">
+                <i class="bi bi-grid me-2"></i>Όλες οι ρυθμίσεις
+            </a>
+            <?php foreach ($settingsNav as $groupLabel => $groupItems): ?>
+                <div class="text-uppercase text-muted fw-semibold px-2 pt-3 pb-1" style="font-size:.68rem;letter-spacing:.06em;"><?= h($groupLabel) ?></div>
+                <?php foreach ($groupItems as $item): ?>
+                <a href="<?= h($settingsHref($item)) ?>"
+                   class="list-group-item list-group-item-action px-2 py-2 <?= (isset($item['tab']) && $activeTab === $item['tab']) ? 'active' : '' ?> <?= !empty($item['danger']) ? 'text-danger' : '' ?>">
+                    <i class="bi <?= h($item['icon']) ?> me-2"></i><?= h($item['label']) ?>
+                </a>
+                <?php endforeach; ?>
+            <?php endforeach; ?>
+        </div>
+    </div>
+    <div class="col-lg-9">
 <!-- General Settings Tab -->
 <?php if ($activeTab === 'general'): ?>
 <form method="post" enctype="multipart/form-data">
@@ -3349,4 +3358,7 @@ document.getElementById('btnTestFirmsKey') && document.getElementById('btnTestFi
 </script>
 <?php endif; ?>
 
+    </div>
+</div>
+<?php endif; ?>
 <?php include __DIR__ . '/includes/footer.php'; ?>

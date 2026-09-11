@@ -1003,6 +1003,39 @@ if (isLoggedIn()) {
             cursor: help;
         }
 
+        /* Settings landing tiles. The lift on hover is the only affordance
+           telling you a whole card is clickable — without it the grid reads as
+           a list of captions rather than a set of doors. */
+        .settings-tile {
+            transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+            cursor: pointer;
+        }
+        .settings-tile:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 .35rem .9rem rgba(0, 0, 0, .09);
+            border-color: var(--bs-primary, #0d6efd);
+        }
+        .settings-tile.border-danger:hover { border-color: var(--bs-danger, #dc3545); }
+
+        /* Settings sidebar. list-group-flush gives full-width dividers between
+           every row, which turns the group headings into just more lines —
+           borders off, and let the spacing do the grouping instead. */
+        .settings-side .list-group-item {
+            border: 0;
+            border-radius: .375rem;
+            background: transparent;
+            font-size: .93rem;
+        }
+        .settings-side .list-group-item:hover { background: rgba(0, 0, 0, .04); }
+        .settings-side .list-group-item.active {
+            background: var(--bs-primary, #0d6efd);
+            color: #fff;
+            font-weight: 600;
+        }
+        /* .active wins over the danger text colour on the reset row, which is
+           correct — a selected row is selected first, destructive second. */
+        .settings-side .list-group-item.active.text-danger { color: #fff !important; }
+
         /* Live tile: the fullscreen toggle floats over the picture rather
            than taking a row of its own, because the Action Room sidebar is
            narrow and every vertical pixel there is competing with the map. */
