@@ -127,11 +127,6 @@ if ($canManageMissions) {
     );
 }
 
-// Positions for publish targeting panel
-$publishPositions = dbFetchAll(
-    "SELECT id, name FROM volunteer_positions WHERE is_active = 1 ORDER BY name"
-);
-
 // Get debrief if it exists (even if status is not completed yet, e.g. reopened)
 $debrief = dbFetchOne(
     "SELECT md.*, COALESCE(u.name, 'Άγνωστος') as submitter_name 
@@ -234,109 +229,17 @@ if (isPost()) {
                     logAudit('auto_create_shift', 'shifts', $id, 'Αυτόματη δημιουργία βαρδίας κατά τη δημοσίευση');
                 }
 
-                // Notify volunteers based on targeting selection
+                // Notify volunteers based on the targeting selection. Both
+                // the audience rules and the send itself live in one place
+                // now (sendMissionOpenedNotifications, includes/email.php):
+                // mission-form.php's "save straight as Ανοιχτή" path calls
+                // the very same function with the very same field names.
                 if (isset($_POST['notify_volunteers'])) {
-                    $notifyTarget = post('notify_target', 'all');
-                    // is_external = 0 excludes guest/partner-org accounts and
-                    // the single-mission QR visitors layered on that same flag:
-                    // a new mission of ours is not a call-out they belong in,
-                    // and a visitor's synthesized @mission-visitor.invalid
-                    // address hard-fails every send, inflating the failure
-                    // count and stalling publish on one SMTP timeout each.
-                    // Same gate mobilization.php and telegram.php already use.
-                    // Applies to every target below, including the by-role
-                    // "Volunteer" option, which would otherwise still catch
-                    // them all since guests and visitors are ROLE_VOLUNTEER.
-                    $whereFilter  = "is_active = 1 AND deleted_at IS NULL AND is_external = 0";
-                    $filterParams = [];
-
-                    if ($notifyTarget === 'roles' && !empty($_POST['notify_roles'])) {
-                        $allowedRoles = [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_SHIFT_LEADER, ROLE_VOLUNTEER];
-                        $roles = array_values(array_filter((array)$_POST['notify_roles'], fn($r) => in_array($r, $allowedRoles)));
-                        if (!empty($roles)) {
-                            $placeholders  = implode(',', array_fill(0, count($roles), '?'));
-                            $whereFilter  .= " AND role IN ($placeholders)";
-                            $filterParams  = $roles;
-                        }
-                    } elseif ($notifyTarget === 'vtypes' && !empty($_POST['notify_vtypes'])) {
-                        $allowedVtypes = [VTYPE_TRAINEE, VTYPE_RESCUER];
-                        $vtypes = array_values(array_filter((array)$_POST['notify_vtypes'], fn($v) => in_array($v, $allowedVtypes)));
-                        if (!empty($vtypes)) {
-                            $placeholders  = implode(',', array_fill(0, count($vtypes), '?'));
-                            $whereFilter  .= " AND volunteer_type IN ($placeholders)";
-                            $filterParams  = $vtypes;
-                        }
-                    } elseif ($notifyTarget === 'positions' && !empty($_POST['notify_positions'])) {
-                        $positions = array_values(array_filter(array_map('intval', (array)$_POST['notify_positions']), fn($p) => $p > 0));
-                        if (!empty($positions)) {
-                            $placeholders  = implode(',', array_fill(0, count($positions), '?'));
-                            $whereFilter  .= " AND position_id IN ($placeholders)";
-                            $filterParams  = $positions;
-                        }
-                    }
-
-                    $volunteers = dbFetchAll(
-                        "SELECT id, name, email FROM users WHERE $whereFilter",
-                        $filterParams
-                    );
-                    $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id;
-                    $appName = getSetting('app_name', 'VolunteerOps');
-
-                    // Human-readable label for flash message
-                    $targetLabel = 'όλους τους χρήστες';
-                    if ($notifyTarget === 'roles' && !empty($roles ?? [])) {
-                        $roleLabels = array_map(fn($r) => ROLE_LABELS[$r] ?? $r, $roles);
-                        $targetLabel = implode(', ', $roleLabels);
-                    } elseif ($notifyTarget === 'vtypes' && !empty($vtypes ?? [])) {
-                        $vtypeLabels = array_map(fn($v) => VOLUNTEER_TYPE_LABELS[$v] ?? $v, $vtypes);
-                        $targetLabel = implode(', ', $vtypeLabels);
-                    } elseif ($notifyTarget === 'positions' && !empty($positions ?? [])) {
-                        $posPh = implode(',', array_fill(0, count($positions), '?'));
-                        $posRows = dbFetchAll(
-                            "SELECT name FROM volunteer_positions WHERE id IN ($posPh)",
-                            $positions
-                        );
-                        $targetLabel = implode(', ', array_column($posRows, 'name'));
-                    }
-                    
-                    $userIds = array_column($volunteers, 'id');
-                    if (!empty($userIds)) {
-                        sendBulkNotifications(
-                            $userIds,
-                            'Νέα Αποστολή: ' . $mission['title'],
-                            'Μια νέα αποστολή δημοσιεύτηκε και αναζητά εθελοντές. Δείτε τις διαθέσιμες βάρδιες.',
-                            'info',
-                            '',
-                            ['url' => 'mission-view.php?id=' . $id]
-                        );
-                    }
-                    
-                    $sent = 0; $failed = 0; $lastError = '';
-                    foreach ($volunteers as $v) {
-                        if (!empty($v['email'])) {
-                            $result = sendNotificationEmail('new_mission', $v['email'], [
-                                'user_name'           => $v['name'],
-                                'mission_title'       => $mission['title'],
-                                'mission_description' => $mission['description'] ?? '',
-                                'location'            => $mission['location'] ?? 'Θα ανακοινωθεί',
-                                'start_date'          => formatDate($mission['start_datetime']),
-                                'end_date'            => formatDate($mission['end_datetime']),
-                                'mission_url'         => $missionUrl,
-                                'app_name'            => $appName,
-                            ]);
-                            if ($result['success']) {
-                                $sent++;
-                            } else {
-                                $failed++;
-                                $lastError = $result['message'];
-                            }
-                        }
-                    }
-                    if ($failed > 0) {
-                        logAudit('email_send_error', 'missions', $id, 'Sent:' . $sent . ' Failed:' . $failed . ' Error:' . $lastError);
-                        setFlash('warning', 'Η αποστολή δημοσιεύτηκε. Emails: ' . $sent . ' εστάλησαν σε (' . $targetLabel . '), ' . $failed . ' απέτυχαν (δείτε Audit Log).');
+                    $notify = sendMissionOpenedNotifications($id, $mission, $_POST);
+                    if ($notify['failed'] > 0) {
+                        setFlash('warning', 'Η αποστολή δημοσιεύτηκε. Emails: ' . $notify['sent'] . ' εστάλησαν σε (' . $notify['label'] . '), ' . $notify['failed'] . ' απέτυχαν (δείτε Audit Log).');
                     } else {
-                        setFlash('success', 'Η αποστολή δημοσιεύτηκε και στάλθηκε email σε ' . $sent . ' χρήστες (' . $targetLabel . ').');
+                        setFlash('success', 'Η αποστολή δημοσιεύτηκε και στάλθηκε email σε ' . $notify['sent'] . ' χρήστες (' . $notify['label'] . ').');
                     }
                 } else {
                     setFlash('success', 'Η αποστολή δημοσιεύτηκε.');
@@ -1175,120 +1078,12 @@ include __DIR__ . '/includes/header.php';
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="publish">
 
-                            <!-- Notify toggle -->
-                            <div class="form-check mb-2">
-                                <input class="form-check-input" type="checkbox" name="notify_volunteers"
-                                       id="notifyVolunteers" value="1" checked
-                                       onchange="toggleNotifyPanel(this.checked)">
-                                <label class="form-check-label small fw-semibold" for="notifyVolunteers">
-                                    <i class="bi bi-envelope me-1"></i>Αποστολή ειδοποίησης Email
-                                </label>
-                            </div>
-
-                            <!-- Targeting panel (visible when checked) -->
-                            <div id="notifyPanel" class="border rounded p-2 mb-3 bg-light small">
-                                <div class="mb-2 text-muted fw-semibold">Παραλήπτες:</div>
-
-                                <!-- All -->
-                                <div class="form-check mb-1">
-                                    <input class="form-check-input" type="radio" name="notify_target"
-                                           id="targetAll" value="all" checked
-                                           onchange="toggleTargetGroups()">
-                                    <label class="form-check-label" for="targetAll">
-                                        <i class="bi bi-people me-1 text-primary"></i>Όλοι οι ενεργοί χρήστες
-                                    </label>
-                                </div>
-
-                                <!-- By Role -->
-                                <div class="form-check mb-1">
-                                    <input class="form-check-input" type="radio" name="notify_target"
-                                           id="targetRoles" value="roles"
-                                           onchange="toggleTargetGroups()">
-                                    <label class="form-check-label" for="targetRoles">
-                                        <i class="bi bi-shield-check me-1 text-success"></i>Ανά Ρόλο
-                                    </label>
-                                </div>
-                                <div id="rolesGroup" class="ps-3 mb-2 d-none">
-                                    <div class="form-check form-check-sm">
-                                        <input class="form-check-input" type="checkbox" name="notify_roles[]" value="SHIFT_LEADER" id="roleShiftLeader">
-                                        <label class="form-check-label" for="roleShiftLeader">Αρχηγοί Βάρδιας</label>
-                                    </div>
-                                    <div class="form-check form-check-sm">
-                                        <input class="form-check-input" type="checkbox" name="notify_roles[]" value="VOLUNTEER" id="roleVolunteer">
-                                        <label class="form-check-label" for="roleVolunteer">Εθελοντές</label>
-                                    </div>
-                                    <div class="form-check form-check-sm">
-                                        <input class="form-check-input" type="checkbox" name="notify_roles[]" value="DEPARTMENT_ADMIN" id="roleDeptAdmin">
-                                        <label class="form-check-label" for="roleDeptAdmin">Διαχ. Τμήματος</label>
-                                    </div>
-                                    <div class="form-check form-check-sm">
-                                        <input class="form-check-input" type="checkbox" name="notify_roles[]" value="SYSTEM_ADMIN" id="roleSysAdmin">
-                                        <label class="form-check-label" for="roleSysAdmin">Διαχ. Συστήματος</label>
-                                    </div>
-                                </div>
-
-                                <!-- By Volunteer Type -->
-                                <div class="form-check mb-1">
-                                    <input class="form-check-input" type="radio" name="notify_target"
-                                           id="targetVtypes" value="vtypes"
-                                           onchange="toggleTargetGroups()">
-                                    <label class="form-check-label" for="targetVtypes">
-                                        <i class="bi bi-person-badge me-1 text-warning"></i>Ανά Τύπο Εθελοντή
-                                    </label>
-                                </div>
-                                <div id="vtypesGroup" class="ps-3 d-none">
-                                    <div class="form-check form-check-sm">
-                                        <input class="form-check-input" type="checkbox" name="notify_vtypes[]" value="TRAINEE_RESCUER" id="vtypeTrainee">
-                                        <label class="form-check-label" for="vtypeTrainee">Δόκιμοι Διασώστες</label>
-                                    </div>
-                                    <div class="form-check form-check-sm">
-                                        <input class="form-check-input" type="checkbox" name="notify_vtypes[]" value="RESCUER" id="vtypeRescuer">
-                                        <label class="form-check-label" for="vtypeRescuer">Εθελοντές Διασώστες</label>
-                                    </div>
-                                </div>
-
-                                <?php if (!empty($publishPositions)): ?>
-                                <!-- By Position -->
-                                <div class="form-check mb-1">
-                                    <input class="form-check-input" type="radio" name="notify_target"
-                                           id="targetPositions" value="positions"
-                                           onchange="toggleTargetGroups()">
-                                    <label class="form-check-label" for="targetPositions">
-                                        <i class="bi bi-briefcase me-1 text-danger"></i>Ανά Θέση
-                                    </label>
-                                </div>
-                                <div id="positionsGroup" class="ps-3 d-none">
-                                    <?php foreach ($publishPositions as $pos): ?>
-                                    <div class="form-check form-check-sm">
-                                        <input class="form-check-input" type="checkbox"
-                                               name="notify_positions[]" value="<?= (int)$pos['id'] ?>"
-                                               id="pos<?= (int)$pos['id'] ?>">
-                                        <label class="form-check-label" for="pos<?= (int)$pos['id'] ?>">
-                                            <?= h($pos['name']) ?>
-                                        </label>
-                                    </div>
-                                    <?php endforeach; ?>
-                                </div>
-                                <?php endif; ?>
-
-                            </div>
+                            <?php include __DIR__ . '/includes/mission-notify-fields.php'; ?>
 
                             <button type="submit" class="btn btn-success w-100">
                                 <i class="bi bi-send me-1"></i>Δημοσίευση
                             </button>
                         </form>
-                        <script>
-                        function toggleNotifyPanel(checked) {
-                            document.getElementById('notifyPanel').style.display = checked ? '' : 'none';
-                        }
-                        function toggleTargetGroups() {
-                            var target = document.querySelector('input[name="notify_target"]:checked').value;
-                            document.getElementById('rolesGroup').classList.toggle('d-none', target !== 'roles');
-                            document.getElementById('vtypesGroup').classList.toggle('d-none', target !== 'vtypes');
-                            var pg = document.getElementById('positionsGroup');
-                            if (pg) pg.classList.toggle('d-none', target !== 'positions');
-                        }
-                        </script>
                     <?php endif; ?>
                     
                     <?php if ($mission['status'] === STATUS_OPEN): ?>

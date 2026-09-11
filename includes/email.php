@@ -684,3 +684,128 @@ function sendBulkNotifications(array $userIds, string $title, string $message, s
         }
     }
 }
+
+/**
+ * Send the "Νέα Αποστολή" blast for a mission that has just gone live, to the
+ * audience picked in includes/mission-notify-fields.php.
+ *
+ * There are two ways a mission goes live — mission-view.php's Δημοσίευση
+ * action on a DRAFT, and mission-form.php saving one straight as Ανοιχτή —
+ * and this is the single implementation both call. The caller owns only the
+ * decision to notify and the wording of its own flash message; the audience
+ * rules, the in-app notification and the email loop live here.
+ *
+ * The caller passes $post rather than this reading $_POST directly so the
+ * field-name contract stays visible at both call sites.
+ *
+ * @param  array $post     the submitted form data (notify_target, notify_roles[], ...)
+ * @return array{sent:int, failed:int, lastError:string, label:string, recipients:int}
+ */
+function sendMissionOpenedNotifications(int $missionId, array $mission, array $post): array {
+    $notifyTarget = $post['notify_target'] ?? 'all';
+    // is_external = 0 excludes guest/partner-org accounts and the
+    // single-mission QR visitors layered on that same flag: a new mission of
+    // ours is not a call-out they belong in, and a visitor's synthesized
+    // @mission-visitor.invalid address hard-fails every send, inflating the
+    // failure count and stalling the request on one SMTP timeout each. Same
+    // gate mobilization.php and telegram.php already use. It applies to every
+    // target below, including the by-role "Εθελοντές" option, which would
+    // otherwise still catch them all since both tiers are ROLE_VOLUNTEER.
+    $whereFilter  = "is_active = 1 AND deleted_at IS NULL AND is_external = 0";
+    $filterParams = [];
+    $roles = $vtypes = $positions = [];
+
+    if ($notifyTarget === 'roles' && !empty($post['notify_roles'])) {
+        $allowedRoles = [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_SHIFT_LEADER, ROLE_VOLUNTEER];
+        $roles = array_values(array_filter((array)$post['notify_roles'], fn($r) => in_array($r, $allowedRoles)));
+        if (!empty($roles)) {
+            $placeholders  = implode(',', array_fill(0, count($roles), '?'));
+            $whereFilter  .= " AND role IN ($placeholders)";
+            $filterParams  = $roles;
+        }
+    } elseif ($notifyTarget === 'vtypes' && !empty($post['notify_vtypes'])) {
+        $allowedVtypes = [VTYPE_TRAINEE, VTYPE_RESCUER];
+        $vtypes = array_values(array_filter((array)$post['notify_vtypes'], fn($v) => in_array($v, $allowedVtypes)));
+        if (!empty($vtypes)) {
+            $placeholders  = implode(',', array_fill(0, count($vtypes), '?'));
+            $whereFilter  .= " AND volunteer_type IN ($placeholders)";
+            $filterParams  = $vtypes;
+        }
+    } elseif ($notifyTarget === 'positions' && !empty($post['notify_positions'])) {
+        $positions = array_values(array_filter(array_map('intval', (array)$post['notify_positions']), fn($p) => $p > 0));
+        if (!empty($positions)) {
+            $placeholders  = implode(',', array_fill(0, count($positions), '?'));
+            $whereFilter  .= " AND position_id IN ($placeholders)";
+            $filterParams  = $positions;
+        }
+    }
+
+    $volunteers = dbFetchAll(
+        "SELECT id, name, email FROM users WHERE $whereFilter",
+        $filterParams
+    );
+    $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $missionId;
+    $appName = getSetting('app_name', 'VolunteerOps');
+
+    // Human-readable audience, for the caller's flash message
+    $targetLabel = 'όλους τους χρήστες';
+    if ($notifyTarget === 'roles' && !empty($roles)) {
+        $roleLabels = array_map(fn($r) => ROLE_LABELS[$r] ?? $r, $roles);
+        $targetLabel = implode(', ', $roleLabels);
+    } elseif ($notifyTarget === 'vtypes' && !empty($vtypes)) {
+        $vtypeLabels = array_map(fn($v) => VOLUNTEER_TYPE_LABELS[$v] ?? $v, $vtypes);
+        $targetLabel = implode(', ', $vtypeLabels);
+    } elseif ($notifyTarget === 'positions' && !empty($positions)) {
+        $posPh = implode(',', array_fill(0, count($positions), '?'));
+        $posRows = dbFetchAll(
+            "SELECT name FROM volunteer_positions WHERE id IN ($posPh)",
+            $positions
+        );
+        $targetLabel = implode(', ', array_column($posRows, 'name'));
+    }
+
+    $userIds = array_column($volunteers, 'id');
+    if (!empty($userIds)) {
+        sendBulkNotifications(
+            $userIds,
+            'Νέα Αποστολή: ' . $mission['title'],
+            'Μια νέα αποστολή δημοσιεύτηκε και αναζητά εθελοντές. Δείτε τις διαθέσιμες βάρδιες.',
+            'info',
+            '',
+            ['url' => 'mission-view.php?id=' . $missionId]
+        );
+    }
+
+    $sent = 0; $failed = 0; $lastError = '';
+    foreach ($volunteers as $v) {
+        if (!empty($v['email'])) {
+            $result = sendNotificationEmail('new_mission', $v['email'], [
+                'user_name'           => $v['name'],
+                'mission_title'       => $mission['title'],
+                'mission_description' => $mission['description'] ?? '',
+                'location'            => $mission['location'] ?? 'Θα ανακοινωθεί',
+                'start_date'          => formatDate($mission['start_datetime']),
+                'end_date'            => formatDate($mission['end_datetime']),
+                'mission_url'         => $missionUrl,
+                'app_name'            => $appName,
+            ]);
+            if ($result['success']) {
+                $sent++;
+            } else {
+                $failed++;
+                $lastError = $result['message'];
+            }
+        }
+    }
+    if ($failed > 0) {
+        logAudit('email_send_error', 'missions', $missionId, 'Sent:' . $sent . ' Failed:' . $failed . ' Error:' . $lastError);
+    }
+
+    return [
+        'sent'       => $sent,
+        'failed'     => $failed,
+        'lastError'  => $lastError,
+        'label'      => $targetLabel,
+        'recipients' => count($volunteers),
+    ];
+}

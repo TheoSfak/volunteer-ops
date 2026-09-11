@@ -162,6 +162,18 @@ if (isPost()) {
                     logAudit('auto_create_shift', 'shifts', $id, 'Αυτόματη δημιουργία βαρδίας κατά την ενημέρωση αποστολής');
                     $message .= ' Δημιουργήθηκε αυτόματα μία βάρδια.';
                 }
+                // A Πρόχειρο saved as Ανοιχτή from this form goes live exactly as
+                // if Δημοσίευση had been pressed on mission-view.php, so it gets
+                // that same notification. An already-open mission being edited
+                // does not — re-blasting everyone over a typo fix is the wrong
+                // call, which is also why the picker is not rendered in that case.
+                if ($mission['status'] === STATUS_DRAFT && $data['status'] === STATUS_OPEN
+                    && isset($_POST['notify_volunteers'])) {
+                    $notify = sendMissionOpenedNotifications($id, $data, $_POST);
+                    $message .= $notify['failed'] > 0
+                        ? ' Emails: ' . $notify['sent'] . ' εστάλησαν σε (' . $notify['label'] . '), ' . $notify['failed'] . ' απέτυχαν (δείτε Audit Log).'
+                        : ' Στάλθηκε email σε ' . $notify['sent'] . ' χρήστες (' . $notify['label'] . ').';
+                }
                 setFlash('success', $message);
                 if ($shiftsNeedManualUpdate) {
                     setFlash('warning', 'Η αποστολή έχει ' . $shiftCountBeforeUpdate . ' βάρδιες, οπότε οι ημερομηνίες/ώρες τους ΔΕΝ ενημερώθηκαν αυτόματα. Ελέγξτε και ενημερώστε τις χειροκίνητα από τη σελίδα της αποστολής.');
@@ -309,7 +321,25 @@ if (isPost()) {
                     }
 
                     logAudit('create', 'missions', $newId, null, $data);
-                    setFlash('success', 'Η αποστολή δημιουργήθηκε επιτυχώς.');
+                    // A mission created straight as Ανοιχτή is live from this
+                    // moment and never passes through mission-view.php's
+                    // Δημοσίευση button, so it fires that button's notification
+                    // here instead, off the same recipient picker. Gated on the
+                    // resulting status, not the checkbox alone: the picker is only
+                    // hidden by JS when Πρόχειρο is selected, so it still posts.
+                    // The recurring branch above deliberately never reaches this.
+                    $createMessage = 'Η αποστολή δημιουργήθηκε επιτυχώς.';
+                    $createFlash   = 'success';
+                    if ($data['status'] === STATUS_OPEN && isset($_POST['notify_volunteers'])) {
+                        $notify = sendMissionOpenedNotifications($newId, $data, $_POST);
+                        if ($notify['failed'] > 0) {
+                            $createFlash    = 'warning';
+                            $createMessage .= ' Emails: ' . $notify['sent'] . ' εστάλησαν σε (' . $notify['label'] . '), ' . $notify['failed'] . ' απέτυχαν (δείτε Audit Log).';
+                        } else {
+                            $createMessage .= ' Στάλθηκε email σε ' . $notify['sent'] . ' χρήστες (' . $notify['label'] . ').';
+                        }
+                    }
+                    setFlash($createFlash, $createMessage);
                     redirect('mission-view.php?id=' . $newId);
                 }
             }
@@ -517,7 +547,7 @@ include __DIR__ . '/includes/header.php';
                 <div class="card-body">
                     <div class="mb-3">
                         <label for="status" class="form-label">Κατάσταση</label>
-                        <select class="form-select" id="status" name="status">
+                        <select class="form-select" id="status" name="status" onchange="toggleMissionNotify()">
                             <?php 
                             $allowedStatuses = [STATUS_DRAFT, STATUS_OPEN];
                             if ($isEdit && in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED, STATUS_CANCELED])) {
@@ -530,6 +560,31 @@ include __DIR__ . '/includes/header.php';
                             <?php endforeach; ?>
                         </select>
                     </div>
+
+                    <?php if (!$isEdit || $mission['status'] === STATUS_DRAFT): ?>
+                    <!-- Recipient picker for a mission that goes live straight from
+                         this form. Shown only while Ανοιχτή is selected: a Πρόχειρο
+                         notifies nobody yet (mission-view.php's Δημοσίευση button
+                         does that later, with this same partial), and a recurring
+                         series would mean one blast per generated mission. Hidden
+                         entirely on an already-open mission so an ordinary edit can
+                         never re-notify everyone. -->
+                    <div id="missionNotifyWrap" style="display:none;">
+                        <?php include __DIR__ . '/includes/mission-notify-fields.php'; ?>
+                    </div>
+                    <script>
+                    function toggleMissionNotify() {
+                        var wrap = document.getElementById('missionNotifyWrap');
+                        if (!wrap) return;
+                        var statusEl = document.getElementById('status');
+                        var recurEl  = document.getElementById('is_recurring');
+                        var live = statusEl && statusEl.value === '<?= STATUS_OPEN ?>';
+                        wrap.style.display = (live && !(recurEl && recurEl.checked)) ? '' : 'none';
+                    }
+                    toggleMissionNotify();
+                    document.addEventListener('DOMContentLoaded', toggleMissionNotify);
+                    </script>
+                    <?php endif; ?>
                     
                     <div class="form-check mb-3">
                         <input class="form-check-input" type="checkbox" id="is_urgent" name="is_urgent" 
@@ -1092,6 +1147,7 @@ function toggleRecurring(on) {
     document.getElementById('recurringBody').style.display = on ? '' : 'none';
     if (on && window._recurCalInstance) window._recurCalInstance.render();
     if (on) updateRecurPreview();
+    if (typeof toggleMissionNotify === 'function') toggleMissionNotify();
 }
 
 function switchRecurType(type) {
