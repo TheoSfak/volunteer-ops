@@ -44,6 +44,12 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
+    <!-- Lets the app offer its own downloaded update to the package installer.
+         Without it a downloaded APK just sits there and the user has to go
+         hunting through a file manager. The system still asks the user to
+         allow installs from this source the first time. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- required="false" so the app still installs on a device with no camera.
          Declaring CAMERA above would otherwise make Google Play treat a camera
          as a hardware requirement and hide the app from such devices. Live

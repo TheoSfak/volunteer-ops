@@ -2,8 +2,10 @@ package gr.volunteerops.epidrasis;
 
 import android.annotation.SuppressLint;
 import android.app.DownloadManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -14,6 +16,10 @@ import android.webkit.JavascriptInterface;
 import android.webkit.URLUtil;
 import android.webkit.WebView;
 import android.widget.Toast;
+
+import androidx.core.content.FileProvider;
+
+import java.io.File;
 
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.WebViewListener;
@@ -70,6 +76,75 @@ public class MainActivity extends BridgeActivity {
 
         installDownloadHandler();
         installNativeBridge();
+        installApkCompletionReceiver();
+    }
+
+    private BroadcastReceiver apkReceiver = null;
+    private long pendingApkDownloadId = -1L;
+    private String pendingApkName = null;
+
+    /**
+     * Opens the install prompt the moment a downloaded update finishes.
+     *
+     * DownloadManager only posts a notification; tapping it is an extra step
+     * that assumes the user notices it, and otherwise the .apk simply sits in
+     * a folder they have to go find. Since the only APK this app ever
+     * downloads is its own next version, going straight to the installer is
+     * both safe and what anyone pressing "download update" actually meant.
+     *
+     * Only fires for the download WE started (matched on its id), so a file
+     * downloaded from anywhere else can never trigger an install.
+     */
+    private void installApkCompletionReceiver() {
+        apkReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L);
+                if (id == -1L || id != pendingApkDownloadId || pendingApkName == null) {
+                    return;
+                }
+                pendingApkDownloadId = -1L;
+                try {
+                    File dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+                    File apk = new File(dir, pendingApkName);
+                    if (!apk.exists()) {
+                        return;
+                    }
+                    Uri uri = FileProvider.getUriForFile(
+                        MainActivity.this, getPackageName() + ".fileprovider", apk
+                    );
+                    Intent install = new Intent(Intent.ACTION_VIEW);
+                    install.setDataAndType(uri, "application/vnd.android.package-archive");
+                    install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(install);
+                } catch (Exception e) {
+                    // The download itself succeeded; the notification is still
+                    // there to tap. Say so rather than failing silently.
+                    Toast.makeText(
+                        MainActivity.this,
+                        "Η λήψη ολοκληρώθηκε. Ανοίξτε την ειδοποίηση για εγκατάσταση.",
+                        Toast.LENGTH_LONG
+                    ).show();
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+        // Android 14 requires the export flag to be explicit, and this is a
+        // system broadcast, so it must be the exported one.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(apkReceiver, filter, Context.RECEIVER_EXPORTED);
+        } else {
+            registerReceiver(apkReceiver, filter);
+        }
+    }
+
+    @Override
+    public void onDestroy() {
+        if (apkReceiver != null) {
+            try { unregisterReceiver(apkReceiver); } catch (Exception ignored) {}
+            apkReceiver = null;
+        }
+        super.onDestroy();
     }
 
     /**
@@ -152,17 +227,27 @@ public class MainActivity extends BridgeActivity {
                 // activity has no business raising. Older devices get the
                 // app-private external dir instead: less discoverable, but it
                 // downloads, and the completion notification still opens it.
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
-                } else {
+                boolean isApk = name.toLowerCase().endsWith(".apk");
+                if (isApk || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                    // An APK has to be handed to the package installer through
+                    // a FileProvider uri, and only the app-private dir is
+                    // reliably shareable that way on every API level. Nobody
+                    // needs to find this file by hand — the install prompt
+                    // opens as soon as the download finishes.
                     request.setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, name);
+                } else {
+                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
                 }
 
                 DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
                 if (dm == null) {
                     return;
                 }
-                dm.enqueue(request);
+                long id = dm.enqueue(request);
+                if (isApk) {
+                    pendingApkDownloadId = id;
+                    pendingApkName = name;
+                }
                 Toast.makeText(this, "Λήψη: " + name, Toast.LENGTH_LONG).show();
             } catch (Exception e) {
                 Toast.makeText(this, "Η λήψη απέτυχε.", Toast.LENGTH_LONG).show();

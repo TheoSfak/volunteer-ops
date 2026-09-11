@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-path name="my_images" path="." />
+    <!-- Where downloaded APKs land. The app-private external dir is readable
+         on every API level with no storage permission, unlike public Downloads
+         under scoped storage - and the file does not need to be findable by
+         hand because the install prompt opens by itself. -->
+    <external-files-path name="app_downloads" path="Download/" />
     <cache-path name="my_cache_images" path="." />
 </paths>
