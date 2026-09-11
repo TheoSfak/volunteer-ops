@@ -1003,6 +1003,34 @@ if (isLoggedIn()) {
             cursor: help;
         }
 
+        /* Live tile: the fullscreen toggle floats over the picture rather
+           than taking a row of its own, because the Action Room sidebar is
+           narrow and every vertical pixel there is competing with the map. */
+        .live-video-wrap > .live-fs-btn {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            opacity: .75;
+            padding: 2px 8px;
+            line-height: 1.2;
+        }
+        .live-video-wrap > .live-fs-btn:hover { opacity: 1; }
+        .live-video-wrap:fullscreen {
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        /* Let the picture use the whole screen: the 16/9 box that suits a
+           sidebar card would otherwise letterbox it twice over. */
+        .live-video-wrap:fullscreen > video {
+            width: 100%;
+            height: 100%;
+            aspect-ratio: auto;
+            object-fit: contain;
+            border-radius: 0;
+        }
+
         /* Live-video badge on a map pin (liveBadgeHtml() in war-room.php).
            Same pill geometry as .k9-badge so badges stack cleanly on one
            line, but red and gently pulsing: unlike the others this one is

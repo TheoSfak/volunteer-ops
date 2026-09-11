@@ -146,6 +146,36 @@ function livekitToken(
     );
 }
 
+/**
+ * The three publish profiles offered in settings.php.
+ *
+ * maxBitrate is the load-bearing number, more than the resolution: an encoder
+ * left to decide for itself will happily aim above what a mobile uplink can
+ * actually sustain, and the result is the stutter you see rather than a
+ * gracefully softer picture. Values are per top simulcast layer; LiveKit sends
+ * two smaller layers alongside, so real total usage runs roughly 1.4x these.
+ *
+ * @return array{width:int, height:int, fps:int, maxBitrate:int, label:string}
+ */
+function livekitQualityProfile(?string $key = null): array {
+    static $profiles = [
+        '360' => ['width' => 640,  'height' => 360, 'fps' => 20, 'maxBitrate' => 500000],
+        '540' => ['width' => 960,  'height' => 540, 'fps' => 24, 'maxBitrate' => 1200000],
+        '720' => ['width' => 1280, 'height' => 720, 'fps' => 24, 'maxBitrate' => 2200000],
+    ];
+    $key = $key ?? (string) getSetting('livekit_quality', 'auto');
+    // 'auto' starts from the middle profile and lets the client step the
+    // ceiling down once if the link turns out not to sustain it. It is NOT a
+    // different encoder setting — the continuous, second-by-second adaptation
+    // happens either way; this only decides how high the encoder is allowed
+    // to aim in the first place.
+    $auto = ($key === 'auto');
+    $base = $profiles[$auto ? '540' : $key] ?? $profiles['540'];
+    $base['auto'] = $auto;
+    $base['floor'] = $profiles['360'];
+    return $base;
+}
+
 /** wss://x.livekit.cloud -> https://x.livekit.cloud (the REST API host). */
 function livekitApiBase(string $wsUrl): string {
     return rtrim(preg_replace('#^wss?://#i', 'https://', trim($wsUrl)), '/');

@@ -841,7 +841,12 @@ if (isPost()) {
             redirect('settings.php?tab=livekit');
         }
 
-        $values = ['livekit_url' => $url, 'livekit_api_key' => $key];
+        // Closed list: this value drives an encoder config, and an unexpected
+        // string there would silently fall back rather than fail loudly.
+        $quality = post('livekit_quality', '540');
+        if (!in_array($quality, ['auto', '360', '540', '720'], true)) { $quality = 'auto'; }
+
+        $values = ['livekit_url' => $url, 'livekit_api_key' => $key, 'livekit_quality' => $quality];
         if ($sec !== '' || empty($settings['livekit_api_secret'] ?? '')) {
             $values['livekit_api_secret'] = $sec;
         }
@@ -2268,6 +2273,25 @@ $lkSiteKey    = trim((string) getSetting('livekit_site_key', ''));
                         <?php endif; ?>
                     </div>
 
+                    <div class="mb-3">
+                        <label class="form-label" for="livekit_quality">Ποιότητα μετάδοσης</label>
+                        <?php $lkQ = (string) ($settings['livekit_quality'] ?? 'auto'); ?>
+                        <select class="form-select" id="livekit_quality" name="livekit_quality">
+                            <option value="auto" <?= $lkQ === 'auto' ? 'selected' : '' ?>>Αυτόματο — προσαρμόζεται στη γραμμή (προεπιλογή)</option>
+                            <option value="360" <?= $lkQ === '360' ? 'selected' : '' ?>>360p — ανθεκτικό σε κακό σήμα</option>
+                            <option value="540" <?= $lkQ === '540' ? 'selected' : '' ?>>540p — ισορροπία</option>
+                            <option value="720" <?= $lkQ === '720' ? 'selected' : '' ?>>720p — καθαρή εικόνα, θέλει καλή γραμμή</option>
+                        </select>
+                        <div class="form-text">
+                            Ο ρυθμός προσαρμόζεται συνεχώς στη γραμμή <strong>σε κάθε επιλογή</strong> —
+                            αυτό που ορίζετε εδώ είναι πόσο ψηλά επιτρέπεται να στοχεύσει.
+                            Στο <strong>Αυτόματο</strong> ξεκινά στα 540p και κατεβαίνει μία φορά στα 360p
+                            αν η σύνδεση παραμείνει κακή. Σε αδύναμο σήμα διατηρείται η ομαλή κίνηση
+                            αντί της λεπτομέρειας — για κάποιον που περπατά δείχνοντας έδαφος, η κίνηση
+                            βοηθά τον προσανατολισμό περισσότερο.
+                        </div>
+                    </div>
+
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-save me-1"></i>Αποθήκευση
                     </button>
@@ -2298,6 +2322,10 @@ $lkSiteKey    = trim((string) getSetting('livekit_site_key', ''));
                     <tr>
                         <td>Όριο ανά μετάδοση</td>
                         <td><strong><?= (int) round(MISSION_LIVE_MAX_SECONDS / 60) ?>′</strong></td>
+                    </tr>
+                    <tr>
+                        <td>Ποιότητα</td>
+                        <td><?php $lkP = livekitQualityProfile(); ?><strong><?= $lkP['auto'] ? 'Αυτόματο' : ((int) $lkP['height'] . 'p') ?></strong> <span class="text-muted">/ έως <?= (int) round($lkP['maxBitrate'] / 1000) ?> kb</span></td>
                     </tr>
                     <tr>
                         <td>Κλειδί εγκατάστασης</td>

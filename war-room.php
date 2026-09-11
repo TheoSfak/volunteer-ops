@@ -2827,7 +2827,10 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                                 <?php if ($ls['status'] === 'requested'): ?>
                                     <div class="small text-muted mt-1 live-status-text"><i class="bi bi-hourglass-split me-1"></i><?= t('live.waiting') ?></div>
                                 <?php else: ?>
-                                    <video class="w-100 mt-2 rounded bg-dark" style="aspect-ratio:16/9;" autoplay playsinline data-live-video="<?= (int)$ls['user_id'] ?>"></video>
+                                    <div class="live-video-wrap position-relative mt-2">
+                                        <video class="w-100 rounded bg-dark" style="aspect-ratio:16/9;" autoplay playsinline data-live-video="<?= (int)$ls['user_id'] ?>"></video>
+                                        <button type="button" class="btn btn-sm btn-dark live-fs-btn" title="<?= t('live.fullscreen') ?>"><i class="bi bi-arrows-fullscreen"></i></button>
+                                    </div>
                                     <div class="small text-muted mt-1">
                                         <span class="live-remaining live-status-text" data-seconds-left="<?= (int)$ls['seconds_left'] ?>"><?= t('live.remaining', ['time' => gmdate('i:s', (int)$ls['seconds_left'])]) ?></span>
                                     </div>
@@ -13501,6 +13504,28 @@ document.addEventListener('click', function (e) {
     }).catch(() => { btn.disabled = false; });
 });
 
+// Full screen on a live tile. Delegated for the same reason the stop button
+// is: the poll rebuilds these tiles. The WRAPPER goes fullscreen rather than
+// the <video>, so the tile keeps its own controls on top of the picture —
+// except on iOS, where only a video element can go fullscreen at all, hence
+// the webkitEnterFullscreen fallback.
+document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.live-fs-btn');
+    if (!btn) return;
+    const wrap = btn.closest('.live-video-wrap');
+    if (!wrap) return;
+    if (document.fullscreenElement) { document.exitFullscreen(); return; }
+    if (wrap.requestFullscreen) {
+        wrap.requestFullscreen().catch(() => {
+            const v = wrap.querySelector('video');
+            if (v && v.webkitEnterFullscreen) v.webkitEnterFullscreen();
+        });
+    } else {
+        const v = wrap.querySelector('video');
+        if (v && v.webkitEnterFullscreen) v.webkitEnterFullscreen();
+    }
+});
+
 // Countdown toward MISSION_LIVE_MAX_SECONDS. Purely informational — the
 // server independently enforces the cap, so a tampered or frozen clock here
 // cannot extend anyone's stream.
@@ -13541,6 +13566,8 @@ setInterval(function () {
 
     // ── Publisher (volunteer) ───────────────────────────────────────────────
     let pubRoom = null, pubTimer = null, pubLeft = 0, pubStreamId = null;
+    let pubSteppedDown = false, pubQualityWatch = null;
+    const LIVE_PROFILE = <?= json_encode(livekitQualityProfile()) ?>;
 
     function pubErr(msg) {
         const e = el('myLiveError');
@@ -13580,7 +13607,21 @@ setInterval(function () {
                 // Back camera, stated explicitly: left to the browser's own
                 // default a phone opens the FRONT camera, which is the wrong
                 // lens for someone showing command what they are looking at.
-                videoCaptureDefaults: {resolution: {width: 960, height: 540, frameRate: 24}, facingMode: 'environment'},
+                videoCaptureDefaults: {
+                    resolution: {width: LIVE_PROFILE.width, height: LIVE_PROFILE.height, frameRate: LIVE_PROFILE.fps},
+                    facingMode: 'environment'
+                },
+                publishDefaults: {
+                    // A ceiling, not a target. WebRTC already adapts the rate
+                    // second by second; what it will NOT do on its own is stop
+                    // aiming too high for a mobile uplink, and that overshoot
+                    // is what produces stutter rather than a softer picture.
+                    videoEncoding: {maxBitrate: LIVE_PROFILE.maxBitrate, maxFramerate: LIVE_PROFILE.fps},
+                    // Drop resolution before framerate: for someone walking and
+                    // showing terrain, smooth motion tells command more about
+                    // where they are than extra detail in a frozen frame.
+                    degradationPreference: 'maintain-framerate'
+                },
                 dynacast: true
             });
             pubRoom.on(LK.RoomEvent.Disconnected, () => stopPublishing(false));
@@ -13592,6 +13633,39 @@ setInterval(function () {
             pubShow('live');
             pubTick();
             pubTimer = setInterval(pubTick, 1000);
+
+            // Auto mode: step the ceiling down ONCE if the link stays bad.
+            // Only once, and never back up — oscillating between resolutions
+            // looks worse to a viewer than simply settling at the lower one,
+            // and a link that struggled at 540p is unlikely to hold it later.
+            // Lowering the capture resolution also cuts encoder load, which
+            // matters on a phone that has been warm in a pocket for ten
+            // minutes; that heat throttling is itself a cause of stutter.
+            if (LIVE_PROFILE.auto) {
+                let poorSince = null;
+                pubQualityWatch = pubRoom.on(LK.RoomEvent.ConnectionQualityChanged, async (q, p) => {
+                    if (!p || !p.isLocal || pubSteppedDown) return;
+                    if (q === 'poor' || q === 'lost') {
+                        if (poorSince === null) poorSince = Date.now();
+                        // 15s of sustained trouble, not one bad sample: a
+                        // momentary dip walking past a rock face is normal.
+                        if (Date.now() - poorSince < 15000) return;
+                        pubSteppedDown = true;
+                        try {
+                            const cam = pubRoom.localParticipant.getTrackPublication(LK.Track.Source.Camera);
+                            if (cam && cam.track) {
+                                await cam.track.restartTrack({
+                                    resolution: {width: LIVE_PROFILE.floor.width, height: LIVE_PROFILE.floor.height, frameRate: LIVE_PROFILE.floor.fps},
+                                    facingMode: 'environment'
+                                });
+                                cam.track.attach(el('myLivePreview'));
+                            }
+                        } catch (err) { /* stay at the current quality rather than dropping the stream */ }
+                    } else {
+                        poorSince = null;
+                    }
+                });
+            }
         } catch (e) {
             const denied = e && (e.name === 'NotAllowedError' || e.name === 'NotFoundError' || /permission|denied/i.test(e.message || ''));
             const msg = denied ? t('mylive.camera_error') : (t('mylive.connect_error') + ' ' + (e && e.message ? e.message : ''));
@@ -13610,6 +13684,7 @@ setInterval(function () {
 
     async function stopPublishing(tellServer) {
         clearInterval(pubTimer); pubTimer = null;
+        pubSteppedDown = false; pubQualityWatch = null;
         if (pubRoom) { try { await pubRoom.disconnect(); } catch (e) {} pubRoom = null; }
         if (tellServer && pubStreamId) { try { await post('stop', {stream_id: pubStreamId}); } catch (e) {} }
         pubStreamId = null;
@@ -13687,7 +13762,10 @@ setInterval(function () {
                 item.dataset.status = r.status;
                 if (r.status === 'live') {
                     slot.innerHTML =
+                        '<div class="live-video-wrap position-relative">' +
                         '<video class="w-100 rounded bg-dark" style="aspect-ratio:16/9;" autoplay playsinline data-live-video="' + r.user_id + '"></video>' +
+                        '<button type="button" class="btn btn-sm btn-dark live-fs-btn" title="' + escapeHtml(t('live.fullscreen')) + '"><i class="bi bi-arrows-fullscreen"></i></button>' +
+                        '</div>' +
                         '<div class="small text-muted mt-1"><span class="live-remaining live-status-text" data-seconds-left="' + r.seconds_left + '"></span></div>';
                     // A tile that just appeared needs the track attaching now;
                     // TrackSubscribed already fired if we were connected.
