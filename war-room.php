@@ -10762,12 +10762,22 @@ function hideWarRoomBannerRow(id) {
     });
 })();
 
+// How long any of this page's guarded polls may stay in flight before it is
+// abandoned. Not a nicety: the overlap guards below clear their flag in a
+// .finally(), and a fetch that never settles never reaches one — so a single
+// stalled request would latch its poll off permanently and only a page reload
+// would bring it back. Aborting also releases the connection the stalled
+// request was holding, which on this app is the scarce resource.
+const POLL_ABORT_MS = 30000;
+
 // Overlap guard — see pollWarRoomData()'s own flag below for why.
 let activityInFlight = false;
 function loadActivity() {
     if (activityInFlight) return;
     activityInFlight = true;
-    fetch('mission-history.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(data => {
+    const activityAbort = new AbortController();
+    const activityKiller = setTimeout(() => activityAbort.abort(), POLL_ABORT_MS);
+    fetch('mission-history.php?mission_id=<?= $missionId ?>', {signal: activityAbort.signal}).then(r => r.json()).then(data => {
         const list = document.getElementById('activityList');
         if (!data.ok || !data.events.length) {
             list.innerHTML = '<div class="text-muted small">' + t('activity.empty') + '</div>';
@@ -10780,7 +10790,14 @@ function loadActivity() {
             </div>
         `).join('');
         document.getElementById('activityRefresh').textContent = new Date().toLocaleTimeString(jsLocale, {hour: '2-digit', minute: '2-digit'});
-    }).catch(() => {}).finally(() => { activityInFlight = false; });
+    }).catch(() => {
+        // Say so, instead of leaving the panel on "Loading…" for ever. This
+        // used to swallow the error silently, so a feed that had stopped
+        // arriving was indistinguishable from one still on its way — which is
+        // exactly how a broken Activity tab went unnoticed.
+        const list = document.getElementById('activityList');
+        if (list) list.innerHTML = '<div class="text-muted small">' + t('activity.load_failed') + '</div>';
+    }).finally(() => { clearTimeout(activityKiller); activityInFlight = false; });
 }
 if (!fieldMode) {
     loadActivity();
@@ -11420,7 +11437,9 @@ let lastPayloadHash = '';
 function pollWarRoomData() {
     if (pollInFlight) return;
     pollInFlight = true;
-    fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId + '&payload_hash=' + encodeURIComponent(lastPayloadHash)).then(response => {
+    const pollAbort = new AbortController();
+    const pollKiller = setTimeout(() => pollAbort.abort(), POLL_ABORT_MS);
+    fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId + '&payload_hash=' + encodeURIComponent(lastPayloadHash), {signal: pollAbort.signal}).then(response => {
         if (!checkSessionAlive(response)) return null;
         return response.json();
     }).then(data => {
@@ -11552,7 +11571,7 @@ function pollWarRoomData() {
         // the next poll is answered in full rather than telling a half-drawn
         // tab that nothing changed.
         lastPayloadHash = data.payloadHash || '';
-    }).catch(() => { renderPollStaleness(); }).finally(() => { pollInFlight = false; });
+    }).catch(() => { renderPollStaleness(); }).finally(() => { clearTimeout(pollKiller); pollInFlight = false; });
 }
 setInterval(() => { if (!document.hidden) pollWarRoomData(); }, 5000);
 
@@ -11659,7 +11678,9 @@ document.querySelectorAll('.team-form').forEach(form => {
         roomPollInFlight = true;
         const teamId = activeTeamId;
         const afterId = lastIdByRoom[teamId] || 0;
-        fetch(`mission-chat.php?mission_id=${missionId}&team_id=${teamId}&after_id=${afterId}`)
+        const roomAbort = new AbortController();
+        const roomKiller = setTimeout(() => roomAbort.abort(), POLL_ABORT_MS);
+        fetch(`mission-chat.php?mission_id=${missionId}&team_id=${teamId}&after_id=${afterId}`, {signal: roomAbort.signal})
             .then(response => response.json())
             .then(data => {
                 if (!data.ok || teamId !== activeTeamId || !data.messages.length) return;
@@ -11669,7 +11690,7 @@ document.querySelectorAll('.team-form').forEach(form => {
                 if (nearBottom) chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
             })
             .catch(() => {})
-            .finally(() => { roomPollInFlight = false; });
+            .finally(() => { clearTimeout(roomKiller); roomPollInFlight = false; });
         pollOtherRoomsForUnread();
     }
 
