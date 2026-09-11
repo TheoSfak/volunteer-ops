@@ -1029,6 +1029,18 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
                         <div class="vp-info-value"><?= h($volunteer['registry_ggpp'] ?: '-') ?></div>
                     </div>
                 </div>
+                <?php else: // A guest keeps exactly one uniform size — volunteer-form.php shows
+                             // only that one behind the guest checkbox, so show only that one here
+                             // too rather than a block of dashes for sizes nobody records. ?>
+                <hr class="my-3">
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <h6 class="text-primary mb-2" style="font-size:.85rem"><i class="bi bi-person-badge me-1"></i>Μεγέθη Στολής</h6>
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            <span class="badge bg-light text-dark border"><i class="bi bi-slash-circle me-1"></i>Μπλούζα: <?= h($volunteer['blouse_size'] ?: '-') ?></span>
+                        </div>
+                    </div>
+                </div>
                 <?php endif; // !$isGuestCard — sizes + registries ?>
 
                 <?php if (!empty($volunteer['is_dog_handler'])): ?>
