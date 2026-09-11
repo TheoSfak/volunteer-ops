@@ -118,11 +118,31 @@ if ($mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
 // opt-in, one tap away, but no longer decides silently for a first-time
 // mobile visitor.
 $fieldMode = isset($_COOKIE['wr_field_mode']) && $_COOKIE['wr_field_mode'] === '1';
-// Volunteer tabbed layout. Everyone who is not command staff gets the
-// compact four-tab view (see #wrTabPanes further down) instead of one long
-// scroll. Kill switch: force this to false and every volunteer falls back to
-// the classic single-column layout with no other change needed.
-$volunteerTabs = !$canManageWarRoom;
+// Which LAYOUT this person gets — deliberately NOT the same question as
+// $canManageWarRoom, which is what they are ALLOWED to do. This was a plain
+// !$canManageWarRoom and that conflated the two: giving a volunteer a role
+// carrying "Διαχείριση Αποστολών" (missions_manage), or simply naming them a
+// mission's Υπεύθυνος, silently moved them off the four-tab phone view and
+// onto the 14-screen command console — SOS six screens down, their own orders
+// at screen eight, no fixed bottom bar. Holding a permission says nothing
+// about whether you are at a desk or standing in a field with a phone, so the
+// DEFAULT now follows the account type: only a real admin account lands on
+// the console, and everyone else (plain volunteer, shift leader, a volunteer
+// holding missions_manage, guest, mission visitor) keeps the tabs.
+// isPreviewMode() is excluded for the same reason isAdmin()/isSystemAdmin()
+// exclude it — previewing a role has to render as that role's holder sees it.
+$isAdminAccount = !isPreviewMode()
+    && in_array($user['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN], true);
+// ...and a default is only a default. The hero toggle (command staff only —
+// see toggle_view_mode below) overrides it in either direction and is
+// remembered from then on, so the same squad lead gets tabs on their phone
+// and the full console on their laptop. Kill switch: force this to false and
+// everyone falls back to the classic single-column layout with no other
+// change needed.
+$viewModeCookie = $_COOKIE['wr_view_mode'] ?? '';
+$volunteerTabs = ($viewModeCookie === 'tabs' || $viewModeCookie === 'full')
+    ? ($viewModeCookie === 'tabs')
+    : !$isAdminAccount;
 // Field Mode is superseded by that view and is now command-staff-only: the
 // tabs already keep the map off the landing screen and put SOS in a fixed
 // bar, which is everything Field Mode was for. Forcing the flag off (rather
@@ -132,6 +152,14 @@ $volunteerTabs = !$canManageWarRoom;
 if ($volunteerTabs) {
     $fieldMode = false;
 }
+// Command staff who are in the tabbed view get a fifth tab of their own.
+// Authorization is untouched by the split above, so they still render every
+// command card (broadcast, dispatch, sectors, restricted areas, SOS alerts,
+// close mission, ...) — roughly 19 cards the four-tab map has never heard of,
+// which would otherwise all pile into "Πεδίο" through the tab JS's
+// unknown-card fallback. Never rendered for anyone without command powers, so
+// a plain volunteer's four-tab view is byte-identical to what it was.
+$commandTab = $volunteerTabs && $canManageWarRoom;
 
 
 if (isPost()) {
@@ -913,6 +941,30 @@ if (isPost()) {
             'httponly' => true, 'samesite' => 'Lax',
         ]);
         redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'toggle_view_mode') {
+        // Explicit layout choice, remembered exactly like wr_field_mode above.
+        // Gated on command powers unlike its neighbour — this one can land you
+        // on the console view, and the button that gets you back out only
+        // renders for command staff, so an ungated POST could strand a plain
+        // volunteer on the 14-screen page with no way back: the very thing
+        // this whole split exists to stop.
+        if (!$canManageWarRoom) {
+            redirect('war-room.php?id=' . $missionId);
+        }
+        $newViewMode = $volunteerTabs ? 'full' : 'tabs';
+        $cookieOpts = [
+            'expires' => time() + 31536000, 'path' => '/',
+            'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
+            'httponly' => true, 'samesite' => 'Lax',
+        ];
+        setcookie('wr_view_mode', $newViewMode, $cookieOpts);
+        // Field Mode is forced off inside the tabs anyway, but the cookie is
+        // sticky: without this, switching to tabs and back later would drop
+        // them into Field Mode, which reads as one toggle doing two things.
+        if ($newViewMode === 'tabs') {
+            setcookie('wr_field_mode', '0', $cookieOpts);
+        }
+        redirect('war-room.php?id=' . $missionId);
     }
 }
 
@@ -1580,7 +1632,10 @@ foreach ($participants as $participant) {
 }
 
 require_once __DIR__ . '/includes/war-room-layout.php';
-$warRoomLayout = ($canManageWarRoom && !$fieldMode)
+// Mirrors the #wrZoneMain/#wrZoneSidebar gate exactly — a saved drag layout is
+// only meaningful to the zone view, and $volunteerTabs now excludes it even
+// for command staff (they get the tabs instead, see the flags near the top).
+$warRoomLayout = ($canManageWarRoom && !$fieldMode && !$volunteerTabs)
     ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams), !empty($mission['is_special_mission']), $isMissingPersonMission, $weatherCompassOn, $liveEnabled)
     : null;
 
@@ -2114,7 +2169,12 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
     <div class="d-flex gap-1 align-items-center flex-wrap justify-content-end">
-        <?php if ($canManageWarRoom && !$fieldMode): ?>
+        <?php /* Command tools live on the console view only. In the tabbed view
+                 the hero repeats on every tab and was deliberately cut to
+                 ~190px for exactly that reason, and these four all act on the
+                 map, which is a tab away — a squad lead who needs them taps
+                 the view toggle below and gets the whole console. */ ?>
+        <?php if ($canManageWarRoom && !$fieldMode && !$volunteerTabs): ?>
         <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
         <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i><?= t('hero.btn_team_trail') ?></button>
         <button type="button" id="coverageModeToggle" class="btn btn-outline-light"><i class="bi bi-broadcast me-1"></i><?= t('hero.btn_verified_coverage') ?></button>
@@ -2135,9 +2195,29 @@ include __DIR__ . '/includes/header.php';
             </button>
         </form>
         <?php endif; ?>
+        <?php if ($canManageWarRoom): ?>
+        <!-- Layout override. The default now follows the account type (see the
+             flags near the top of this file), which is right for the common
+             case but cannot know where this particular person is standing:
+             a squad lead is on a phone in the field and on a laptop back at
+             base, on the same account, on the same day. This is the one
+             control that lets them say so, and it is remembered. Deliberately
+             the only command control kept in the tabbed hero — it is the way
+             back to every other one. -->
+        <form method="post">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="toggle_view_mode">
+            <button type="submit" class="btn btn-outline-light">
+                <i class="bi bi-<?= $volunteerTabs ? 'columns-gap' : 'phone' ?> me-1"></i><?= $volunteerTabs ? t('hero.btn_command_view') : t('hero.btn_volunteer_view') ?>
+            </button>
+        </form>
+        <?php endif; ?>
         <button type="button" id="warRoomFocusToggle" class="btn btn-outline-light"><i class="bi bi-arrows-fullscreen me-1"></i><?= t('hero.btn_fullscreen') ?></button>
         <button type="button" id="wakeLockToggle" class="btn btn-outline-light d-none"><i class="bi bi-sun me-1"></i><?= t('hero.btn_keep_awake') ?></button>
-        <?php if ($canManageWarRoom && !$fieldMode): ?>
+        <?php /* Both of these drive the drag/zone layout only — the IIFE that
+                 wires them returns early when #wrZoneMain is absent, so in the
+                 tabbed view they would render as two dead buttons. */ ?>
+        <?php if ($canManageWarRoom && !$fieldMode && !$volunteerTabs): ?>
         <button type="button" id="wrLayoutLockToggle" class="btn btn-outline-light"></button>
         <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#cardVisibilityModal" title="<?= t('hero.btn_manage_cards') ?>" aria-label="<?= t('hero.btn_manage_cards') ?>">
             <i class="bi bi-gear-fill"></i>
@@ -2217,6 +2297,9 @@ include __DIR__ . '/includes/header.php';
     <div class="wr-tab-pane" data-tab="map" role="tabpanel" aria-labelledby="wrTabBtn-map"></div>
     <div class="wr-tab-pane" data-tab="team" role="tabpanel" aria-labelledby="wrTabBtn-team"></div>
     <div class="wr-tab-pane" data-tab="field" role="tabpanel" aria-labelledby="wrTabBtn-field"></div>
+    <?php if ($commandTab): ?>
+    <div class="wr-tab-pane" data-tab="admin" role="tabpanel" aria-labelledby="wrTabBtn-admin"></div>
+    <?php endif; ?>
 </div>
 <nav id="wrTabBar" class="wr-tabbar" role="tablist" aria-label="<?= t('tabs.nav_label') ?>">
     <button type="button" class="wr-tabbar-btn" id="wrTabBtn-me" role="tab" data-tab-target="me" aria-selected="false">
@@ -2242,10 +2325,20 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-camera-fill"></i><span><?= t('tabs.field') ?></span>
         <span class="wr-tab-badge d-none" data-count="0"></span>
     </button>
+    <?php if ($commandTab): ?>
+    <!-- Command staff only, and last on purpose: a squad lead's own orders
+         still lead, exactly like every other volunteer's. Every card the
+         four-tab map above has never heard of lands here instead of in
+         "Πεδίο" — see the fallback in the tab JS. -->
+    <button type="button" class="wr-tabbar-btn" id="wrTabBtn-admin" role="tab" data-tab-target="admin" aria-selected="false">
+        <i class="bi bi-sliders"></i><span><?= t('tabs.admin') ?></span>
+        <span class="wr-tab-badge d-none" data-count="0"></span>
+    </button>
+    <?php endif; ?>
 </nav>
 <?php endif; ?>
 
-<?php if ($canManageWarRoom && !$fieldMode): ?>
+<?php if ($canManageWarRoom && !$fieldMode && !$volunteerTabs): ?>
 <!-- Drag-and-drop card layout (admin desktop view only). Starts empty —
      every card below still renders in its normal PHP-conditioned spot; JS
      physically relocates each [data-card-id] node into these two zones
@@ -2390,8 +2483,11 @@ include __DIR__ . '/includes/header.php';
              Rendered here except for the admin-desktop drag/zone view, which
              already rendered these same two ids once, above, next to
              #wrZoneSidebar — never both, since duplicate ids would break
-             every getElementById() lookup that targets them. -->
-        <?php if (!($canManageWarRoom && !$fieldMode)): ?>
+             every getElementById() lookup that targets them. Must stay the
+             exact negation of that block's own gate, $volunteerTabs included:
+             command staff in the tabbed view never render the zones, so they
+             need these two here. -->
+        <?php if (!($canManageWarRoom && !$fieldMode && !$volunteerTabs)): ?>
         <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
         <div id="offlineQueueFailures"></div>
         <?php endif; ?>
@@ -3297,7 +3393,12 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
              so it does not earn a slot on the "me" tab beside their live orders.
              Command staff keep it, and can still hide it themselves through the
              Manage Cards gear if they do not want it either. -->
-        <?php if (!$fieldMode && !$volunteerTabs): ?>
+        <?php /* Was !$fieldMode && !$volunteerTabs, which meant exactly
+                 "command staff keep it" back when those two were the same
+                 question. Spelled out against $canManageWarRoom now that they
+                 are not, so a squad lead in the tabbed view still gets it
+                 (on their Διοίκηση tab) rather than losing it silently. */ ?>
+        <?php if (!$fieldMode && $canManageWarRoom): ?>
         <div class="card shadow-sm mb-4" data-card-id="shiftsCard">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-calendar-range me-1"></i><?= t('shifts.panel_title') ?></h5></div>
             <div class="list-group list-group-flush">
@@ -4468,12 +4569,31 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
             if (el) paneEl[tab].appendChild(el);
         });
     });
-    // Defensive, same spirit as placeCards(): a card this map has never heard
-    // of (a future one, say) still has to end up somewhere a volunteer can
-    // reach it rather than silently vanishing with its emptied row.
+    // Same spirit as placeCards(): a card this map has never heard of still
+    // has to end up somewhere reachable rather than silently vanishing with
+    // its emptied row. Two populations land here, hence the two targets. For
+    // command staff it is the bulk of their console — every broadcast,
+    // dispatch, sector, restricted-area and mission-management card — and
+    // those go to the "admin" pane, which exists only for them ($commandTab).
+    // For a plain volunteer, whose panes have no 'admin', it stays what it has
+    // always been: the occasional future card, dropped into "Πεδίο".
+    const overflowPane = paneEl.admin || paneEl.field;
     document.querySelectorAll('[data-card-id]').forEach(el => {
-        if (!panes.contains(el)) paneEl.field.appendChild(el);
+        if (!panes.contains(el)) overflowPane.appendChild(el);
     });
+    // The offline queue banner/failure list are the only two things in the
+    // legacy layout that are NOT [data-card-id] cards — they are bare divs
+    // sitting beside myLocationCard — so the relocation above walked straight
+    // past them and the row sweep below then deleted them along with their
+    // emptied container. That has been silently true for every volunteer
+    // since the tabs shipped: the queue kept working, but the one piece of UI
+    // that says "your SOS/field-status taps are held and not sent yet" was
+    // never in the DOM to show it. They go on the "me" pane, above the card
+    // whose buttons feed the queue in the first place.
+    // prepend() moves the existing nodes (it does not clone), same as every
+    // other relocation in this file, so their ids and any wiring survive.
+    paneEl.me.prepend(...['offlineQueueBanner', 'offlineQueueFailures']
+        .map(id => document.getElementById(id)).filter(Boolean));
     // Sweep the emptied layout containers, otherwise their grid gutters leave
     // phantom gaps between panes. Only ones with no element children AND no
     // text left, so a row still holding anything real is never touched.

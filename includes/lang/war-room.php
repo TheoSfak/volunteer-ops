@@ -409,6 +409,10 @@ return [
         'hero.btn_verified_coverage' => 'Επαληθευμένη Κάλυψη',
         'hero.btn_full_view' => 'Πλήρης Προβολή',
         'hero.btn_field_mode' => 'Λειτουργία Πεδίου',
+        // Layout override for command staff — labelled by the view it takes
+        // you TO, like btn_full_view/btn_field_mode above it.
+        'hero.btn_command_view' => 'Όψη Διοίκησης',
+        'hero.btn_volunteer_view' => 'Όψη Εθελοντή',
         'hero.btn_fullscreen' => 'Πλήρης Οθόνη',
         'hero.btn_keep_awake' => 'Οθόνη Ενεργή',
         'hero.btn_awake_active' => 'Οθόνη Ενεργή ✓',
@@ -1404,6 +1408,9 @@ return [
         'tabs.map' => 'Χάρτης',
         'tabs.team' => 'Ομάδα',
         'tabs.field' => 'Πεδίο',
+        // Fifth tab, command staff only. Short on purpose — it shares a
+        // ~59px slot with four siblings on a 375px phone.
+        'tabs.admin' => 'Διοίκηση',
         'tabs.sos' => 'SOS',
         'tabs.sos_hold_hint' => 'Κρατήστε πατημένο για SOS',
         'tabs.sos_sent' => 'Το SOS στάλθηκε!',
@@ -1795,6 +1802,8 @@ return [
         'hero.btn_verified_coverage' => 'Verified Coverage',
         'hero.btn_full_view' => 'Full View',
         'hero.btn_field_mode' => 'Field Mode',
+        'hero.btn_command_view' => 'Command View',
+        'hero.btn_volunteer_view' => 'Volunteer View',
         'hero.btn_fullscreen' => 'Fullscreen',
         'hero.btn_keep_awake' => 'Keep Awake',
         'hero.btn_awake_active' => 'Keep Awake ✓',
@@ -2746,6 +2755,7 @@ return [
         'tabs.map' => 'Map',
         'tabs.team' => 'Team',
         'tabs.field' => 'Field',
+        'tabs.admin' => 'Command',
         'tabs.sos' => 'SOS',
         'tabs.sos_hold_hint' => 'Hold to send SOS',
         'tabs.sos_sent' => 'SOS sent!',
