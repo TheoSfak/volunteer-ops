@@ -197,14 +197,8 @@ $shiftIds = !empty($activeMissions)
     : [];
 
 // Detect if new columns / tables exist on this DB server
-$hasFieldStatus = !empty($shiftIds) && (bool) dbFetchValue(
-    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'participation_requests' AND COLUMN_NAME = 'field_status'"
-);
-$hasPingsTable = (bool) dbFetchValue(
-    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'volunteer_pings'"
-);
+$hasFieldStatus = !empty($shiftIds) && dbColumnExists('participation_requests', 'field_status');
+$hasPingsTable = dbTableExists('volunteer_pings');
 
 $approvedVolunteers = [];
 if (!empty($shiftIds)) {

@@ -968,10 +968,7 @@ if (isPost()) {
     }
 }
 
-$hasFieldStatus = (bool)dbFetchValue(
-    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
-     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'participation_requests' AND COLUMN_NAME = 'field_status'"
-);
+$hasFieldStatus = dbColumnExists('participation_requests', 'field_status');
 
 // A participant's GPS ping (manual or auto) is flagged stale past 3x the
 // configured auto-ping cadence (warRoomPingStaleThresholdSeconds() —
@@ -1003,16 +1000,50 @@ $participantLiveByVolunteerId = [];
 // as $pingIsStaleByVolunteerId above) and merged into $participantLiveByVolunteerId
 // below so it rides the existing ajax-poll + full-render plumbing rather than
 // needing its own JSON key.
+// Every ping query on this page scopes by the mission's shift ids as an
+// explicit IN list rather than by joining shifts. That is not a style
+// preference: MySQL only answers "latest ping per volunteer" and "most
+// recent pings, in order" from an index when the shift ids arrive as
+// constants. Reaching them through a join or a subquery instead loses the
+// index and puts a full scan of the mission's entire ping history back into
+// the 5s poll — which is exactly the regression this page was crashing on
+// (see $loadPins below). Resolved once here and shared by all of them.
+$missionShiftIds = array_column(
+    dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$missionId]),
+    'id'
+);
+// A live mission always has at least one shift, but an empty IN () is a SQL
+// syntax error, so fall back to the impossible id 0 — every query below then
+// legitimately matches nothing instead of blowing up.
+$missionShiftBinds = $missionShiftIds ?: [0];
+$missionShiftPlaceholders = implode(',', array_fill(0, count($missionShiftBinds), '?'));
+
 $continuousFieldMinutesByVolunteerId = computeContinuousFieldMinutesByVolunteerId($missionId);
 $warRoomMaxShiftMinutes = (int) getSetting('war_room_max_shift_minutes', '480');
 $warRoomCriticalShiftMinutes = (int) round($warRoomMaxShiftMinutes * 1.5);
+// last_ping_at was a correlated MAX(vp.created_at) per participant. created_at
+// is not in any index that also covers user_id+shift_id, so each participant
+// meant reading every one of their own ping rows off the table: 147ms on a
+// 40-volunteer mission with 100.000 pings, on every poll. The derived table
+// below gets the same answer from the loose index scan on
+// idx_pings_user_shift, then one primary-key lookup reads that row's
+// created_at. Latest-by-id rather than latest-by-timestamp, matching what
+// $loadPins already treats as the tiebreak of record on this page — pings are
+// only ever written by recordVolunteerPing(), which stamps NOW() as it
+// inserts, so the two orderings agree.
 foreach (dbFetchAll(
     "SELECT pr.volunteer_id" . ($hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status') . ",
-            (SELECT MAX(vp.created_at) FROM volunteer_pings vp WHERE vp.user_id = pr.volunteer_id AND vp.shift_id = pr.shift_id) AS last_ping_at
+            lp.created_at AS last_ping_at
      FROM participation_requests pr
      JOIN shifts s ON s.id = pr.shift_id
+     LEFT JOIN (SELECT user_id, shift_id, MAX(id) AS max_id
+                  FROM volunteer_pings
+                 WHERE shift_id IN ({$missionShiftPlaceholders})
+                 GROUP BY user_id, shift_id) l
+            ON l.user_id = pr.volunteer_id AND l.shift_id = pr.shift_id
+     LEFT JOIN volunteer_pings lp ON lp.id = l.max_id
      WHERE s.mission_id = ? AND pr.status = ?",
-    [$missionId, PARTICIPATION_APPROVED]
+    array_merge($missionShiftBinds, [$missionId, PARTICIPATION_APPROVED])
 ) as $pingRow) {
     $volunteerId = (int)$pingRow['volunteer_id'];
     // Only set a staleness entry when a ping actually exists. A missing
@@ -1037,7 +1068,7 @@ foreach (dbFetchAll(
 // has no such cutoff) still showed them. The map now shows every last-known
 // position always, marking it 'is_stale' (reusing the same $pingStaleThresholdSeconds
 // as the sidebar list) once it's past due, rather than hiding it outright.
-$loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds, $continuousFieldMinutesByVolunteerId) {
+$loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds, $continuousFieldMinutesByVolunteerId, $missionShiftBinds, $missionShiftPlaceholders) {
     try {
         $field = $hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status';
         // The latest ping per volunteer+shift, plus the one immediately before
@@ -1072,14 +1103,6 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
         // volunteer duplicated by the LEFT JOINs below (two team memberships,
         // say) had LEAD() land on a duplicate of their own latest ping rather
         // than on the previous one — zero distance, hence never "moving".
-        $shiftIds = array_column(
-            dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$missionId]),
-            'id'
-        );
-        if (empty($shiftIds)) {
-            return [];
-        }
-        $shiftPlaceholders = implode(',', array_fill(0, count($shiftIds), '?'));
         $rawPins = dbFetchAll(
             "SELECT * FROM (
                 SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.battery_level, vp.created_at, u.name,
@@ -1096,7 +1119,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                               ORDER BY p.id DESC LIMIT 1) AS prev_id
                      FROM (SELECT user_id, shift_id, MAX(id) AS max_id
                              FROM volunteer_pings
-                            WHERE shift_id IN ({$shiftPlaceholders})
+                            WHERE shift_id IN ({$missionShiftPlaceholders})
                             GROUP BY user_id, shift_id) l
                  ) sel
                  JOIN volunteer_pings vp ON vp.id = sel.max_id
@@ -1110,8 +1133,14 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                  LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
              ) ranked
              WHERE rn = 1
-             ORDER BY created_at DESC",
-            $shiftIds
+             -- user_id/shift_id break ties on created_at. rn = 1 leaves exactly
+             -- one row per (user_id, shift_id), so the pair is unique here and
+             -- the order is fully determined. Without it two volunteers whose
+             -- latest ping landed in the same second could swap places between
+             -- one 5s poll and the next, making their rows jump around the
+             -- participants list for no reason the viewer can see.
+             ORDER BY created_at DESC, user_id, shift_id",
+            $missionShiftBinds
         );
 
         $pins = [];

@@ -457,15 +457,33 @@ foreach ($sosRows as $row) {
 }
 
 // ── GPS pings ("στίγματα") ─────────────────────────────────────────────────────
+// Scoped by an explicit shift-id IN list rather than by joining shifts. The
+// LIMIT 150 was already here, but reaching the mission through the join meant
+// MySQL could not use idx_pings_shift_time (shift_id, created_at) to read the
+// rows in order — it collected every manual ping of the mission into a
+// temporary table and sorted it to find the newest 150. With the shift ids as
+// constants the index supplies the order directly: no temporary, no filesort,
+// 56ms -> 3ms on a mission with 50.000 pings, every 15s per open tab.
+$pingShiftIds = array_column(
+    dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$missionId]),
+    'id'
+) ?: [0];
+$pingShiftPlaceholders = implode(',', array_fill(0, count($pingShiftIds), '?'));
 $pingRows = dbFetchAll(
     "SELECT vp.created_at, u.name AS actor_name, mtm.team_id AS actor_team_id
      FROM volunteer_pings vp
-     JOIN shifts s ON s.id = vp.shift_id
      JOIN users u ON u.id = vp.user_id
-     LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = vp.user_id
-     WHERE s.mission_id = ? AND vp.source = 'manual' AND $pingScopeSql
-     ORDER BY vp.created_at DESC LIMIT 150",
-    [$missionId, $isAdminParam, $userId, $viewerTeamId]
+     LEFT JOIN mission_team_members mtm ON mtm.mission_id = ? AND mtm.user_id = vp.user_id
+     WHERE vp.shift_id IN ({$pingShiftPlaceholders}) AND vp.source = 'manual' AND $pingScopeSql
+     -- vp.id breaks ties on created_at. Without it this ORDER BY is not
+     -- deterministic: manual pings from two volunteers land in the same second
+     -- often enough, and which of the two came first then depended on the query
+     -- plan, so the feed could reorder itself between refreshes — and with the
+     -- LIMIT below, a tie straddling the cut could make an event appear and
+     -- disappear. id is already what the rest of this app treats as the
+     -- tiebreak of record for pings (see $loadPins in war-room.php).
+     ORDER BY vp.created_at DESC, vp.id DESC LIMIT 150",
+    array_merge([$missionId], $pingShiftIds, [$isAdminParam, $userId, $viewerTeamId])
 );
 foreach ($pingRows as $row) {
     $events[] = [

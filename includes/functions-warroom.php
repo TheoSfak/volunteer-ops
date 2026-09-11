@@ -3045,17 +3045,45 @@ function loadTeamPositionsForMission(int $missionId, array $continuousFieldMinut
         [$missionId]
     );
 
+    // Every team's most recent ping in one query, not one query per team.
+    // The per-team version read and sorted every ping belonging to that
+    // team's members to pick a single row, so it cost O(pings) and ran once
+    // per team on every 5s Action Room poll: 34ms x 6 teams = 204ms on a
+    // mission with 100.000 pings.
+    //
+    // The derived table is the same loose-index-scan shape $loadPins uses in
+    // war-room.php (one index entry per volunteer, not one per ping), and the
+    // mission's shift ids are again passed as an explicit IN list because a
+    // join or subquery there loses that index. The global newest ping of a
+    // team is necessarily the latest ping of whoever made it, so ranking each
+    // member's latest ping picks the identical row the old ORDER BY ... LIMIT 1
+    // did — newest first, first row per team wins.
+    $shiftIds = array_column(
+        dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$missionId]),
+        'id'
+    ) ?: [0];
+    $shiftPlaceholders = implode(',', array_fill(0, count($shiftIds), '?'));
+    $pingByTeamId = [];
+    foreach (dbFetchAll(
+        "SELECT mtm.team_id, vp.user_id, vp.lat, vp.lng, vp.created_at, vp.battery_level
+         FROM (SELECT user_id, shift_id, MAX(id) AS max_id
+                 FROM volunteer_pings
+                WHERE shift_id IN ({$shiftPlaceholders})
+                GROUP BY user_id, shift_id) l
+         JOIN volunteer_pings vp ON vp.id = l.max_id
+         JOIN mission_team_members mtm ON mtm.user_id = vp.user_id AND mtm.mission_id = ?
+         ORDER BY vp.created_at DESC",
+        array_merge($shiftIds, [$missionId])
+    ) as $pingRow) {
+        $rowTeamId = (int) $pingRow['team_id'];
+        if (!isset($pingByTeamId[$rowTeamId])) {
+            $pingByTeamId[$rowTeamId] = $pingRow;
+        }
+    }
+
     $positions = [];
     foreach ($teams as $team) {
-        $ping = dbFetchOne(
-            "SELECT vp.user_id, vp.lat, vp.lng, vp.created_at, vp.battery_level
-             FROM volunteer_pings vp
-             JOIN mission_team_members mtm ON mtm.user_id = vp.user_id
-             JOIN shifts s ON s.id = vp.shift_id AND s.mission_id = mtm.mission_id
-             WHERE mtm.team_id = ?
-             ORDER BY vp.created_at DESC LIMIT 1",
-            [$team['id']]
-        );
+        $ping = $pingByTeamId[(int) $team['id']] ?? null;
         if (!$ping) {
             continue;
         }

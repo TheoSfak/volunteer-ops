@@ -11,6 +11,64 @@ if (!defined('VOLUNTEEROPS')) {
 }
 
 /**
+ * Does this database actually have $table.$column / $table?
+ *
+ * Deliberately a "SELECT <column> FROM <table> LIMIT 0" probe rather than the
+ * INFORMATION_SCHEMA.COLUMNS lookup these replaced. Same answer, but asking
+ * the table itself costs 0,3ms where asking the data dictionary costs 17ms
+ * locally — and information_schema is slower still on shared hosting, where a
+ * single MySQL instance carries every customer's tables. That mattered
+ * because the callers run on polled screens: war-room.php's $hasFieldStatus
+ * check fires on every 5s Action Room poll, ops-dashboard.php's pair on every
+ * 15s refresh. At small data sizes the war-room one measured as the single
+ * most expensive query in the entire poll.
+ *
+ * Memoised per request — the schema cannot change underneath a running
+ * request, and more than one caller asks about the same column.
+ *
+ * $table/$column are interpolated, not bound, because placeholders cannot
+ * stand in for identifiers. Every caller passes a literal; the identifier
+ * guard is here so that stays true if one ever does not.
+ */
+function dbColumnExists(string $table, string $column): bool {
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (isset($cache[$key])) {
+        return $cache[$key];
+    }
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $table) || !preg_match('/^[A-Za-z0-9_]+$/', $column)) {
+        return $cache[$key] = false;
+    }
+    try {
+        db()->query("SELECT `{$column}` FROM `{$table}` LIMIT 0");
+        return $cache[$key] = true;
+    } catch (PDOException $e) {
+        // Unknown column, or the table itself is missing — either way the
+        // caller's question ("can I select this?") is answered with no.
+        return $cache[$key] = false;
+    }
+}
+
+/**
+ * Table-level twin of dbColumnExists() above — same reasoning, same tradeoffs.
+ */
+function dbTableExists(string $table): bool {
+    static $cache = [];
+    if (isset($cache[$table])) {
+        return $cache[$table];
+    }
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $table)) {
+        return $cache[$table] = false;
+    }
+    try {
+        db()->query("SELECT 1 FROM `{$table}` LIMIT 0");
+        return $cache[$table] = true;
+    } catch (PDOException $e) {
+        return $cache[$table] = false;
+    }
+}
+
+/**
  * Redirect to a page.
  * Relative paths are resolved against BASE_URL so the Location header
  * is always an absolute URI (required by RFC 7231).
