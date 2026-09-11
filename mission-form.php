@@ -1140,6 +1140,18 @@ $(document).ready(function() {
 .recur-cal-month-header      { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:.85rem; font-weight:600; }
 </style>
 
+<?php
+// Every function in this block belongs to the recurring-missions card, which
+// the markup above renders only on a create page — so the whole block is
+// gated the same way rather than null-guarding each element it touches. It
+// used to run unconditionally, and the two bare addEventListener calls below
+// threw on every edit page, killing the rest of the block silently from there
+// down (updateRecurPreview, hidePreview and class RecurCalendar never got
+// defined). Nothing on an edit page called them, so the only visible symptom
+// was a console error — but anything appended here would have been dead code
+// on edit pages with no warning.
+if (!$isEdit):
+?>
 <script>
 // ══ RECURRING MISSIONS JS ════════════════════════════════════════════════════
 
@@ -1354,6 +1366,7 @@ class RecurCalendar {
     }
 }
 </script>
+<?php endif; ?>
 <script>
 (() => {
     const typeSelect = document.getElementById('mission_type_id');
