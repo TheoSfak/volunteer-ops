@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.218.0');
+define('APP_VERSION', '3.219.0');
 define('DB_SCHEMA_VERSION', 148);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
@@ -33,8 +33,8 @@ define('DB_SCHEMA_VERSION', 148);
 // capacitor.config.json server.url — epidrasis.iloveweb.gr carries the 's';
 // the 's'-less spelling does not resolve at all.
 define('ANDROID_APPS', [
-    'yphresies.gr'          => ['slug' => 'yphresies', 'version' => '1.0.11', 'label' => 'Εθελοντές Σε Δράση'],
-    'epidrasis.iloveweb.gr' => ['slug' => 'epidrasis', 'version' => '1.1.10', 'label' => 'ΕΠΙΔΡΑΣΙΣ'],
+    'yphresies.gr'          => ['slug' => 'yphresies', 'version' => '1.0.12', 'label' => 'Εθελοντές Σε Δράση'],
+    'epidrasis.iloveweb.gr' => ['slug' => 'epidrasis', 'version' => '1.1.11', 'label' => 'ΕΠΙΔΡΑΣΙΣ'],
 ]);
 // Used when the host is not in the map above (a dev box, a renamed domain, a
 // new deployment). Keeping a default means an unrecognised host still gets a
@@ -43,7 +43,7 @@ define('ANDROID_APP_DEFAULT', 'epidrasis.iloveweb.gr');
 
 // Kept so nothing that still reads it breaks; the page now asks
 // androidAppForThisSite() instead.
-define('ANDROID_APK_VERSION', '1.1.10');
+define('ANDROID_APK_VERSION', '1.1.11');
 
 // Load local config if exists (created by installer)
 if (file_exists(__DIR__ . '/config.local.php')) {

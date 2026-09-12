@@ -2458,6 +2458,15 @@ include __DIR__ . '/includes/header.php';
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-map me-1"></i><?= t('map.title') ?></h5>
                 <div class="d-flex align-items-center gap-2">
+                    <!-- Auto-centring state. Deliberately a visible, always-
+                         present control rather than an invisible behaviour:
+                         the map moving on its own needs an on-screen reason,
+                         and someone who has panned away needs an obvious way
+                         back. See setFollowPins()/centreMapOnPins(). -->
+                    <button type="button" class="btn btn-sm btn-outline-secondary active" id="mapFollowBtn"
+                            aria-pressed="true" title="<?= t('map.follow_title') ?>">
+                        <i class="bi bi-crosshair"></i>
+                    </button>
                     <small class="text-muted"><?= t('common.updated_label') ?> <span id="mapRefresh"><?= date('H:i:s') ?></span></small>
                     <?php if ($canManageWarRoom): ?>
                     <div class="btn-group btn-group-sm" role="group" id="annotationToolbar">
@@ -6893,7 +6902,118 @@ function renderMySectors(items) {
     list.querySelectorAll('.sector-floor-btn').forEach(btn => btn.addEventListener('click', () => sectorFloorToggle(btn.dataset.id, btn.dataset.action, btn)));
 }
 
-let hasFitPins = false;
+// ── Auto-centre on the live positions ───────────────────────────────────────
+// The map used to fit the pins exactly once — the first render that had any —
+// and then never move again. A team walking out of frame simply left the
+// screen, and anyone who had panned away to look at something stayed lost
+// there. It now re-centres whenever the positions actually change.
+//
+// It does yield the moment someone pans or zooms by hand, and that is not a
+// weakening of "always centred": the same map is also how a coordinator
+// inspects one corner of a search area, and a view that snaps back every five
+// seconds cannot be used for that at all. The button in the map header shows
+// which mode it is in and puts it back.
+let followPins = true;
+// Coordinates last fitted. An unchanged set must not re-animate the map on
+// every poll — the movement itself reads as "something happened".
+let pinFollowSig = null;
+// fitBounds/setView fire the same movestart a user's own drag does, so
+// without this the map would take its own automatic centring as a manual
+// interaction and switch itself off on the very first one.
+let lastAutoMoveAt = 0;
+
+if (map) {
+    // movestart rather than dragstart+zoomstart, because it also catches a
+    // programmatic jump — clicking a volunteer's name to fly to their pin,
+    // opening a route, framing a sector. Every one of those is someone
+    // choosing where to look, and none of them should be undone five seconds
+    // later by the auto-centring. Only this feature's own moves are excluded,
+    // by the timestamp above.
+    map.on('movestart', () => {
+        if (Date.now() - lastAutoMoveAt > 800) setFollowPins(false);
+    });
+    // Re-frame whenever the map's own frame changes, not only when the
+    // positions do — full-screen in and out, a window resize, or a layout
+    // that only reveals the map card later. A fit computed against one size
+    // is simply wrong at another, and without this nothing would correct it
+    // until a volunteer happened to move.
+    map.on('resize', () => centreMapOnPins(pins, true));
+    // Attached directly, no DOMContentLoaded wrapper: L.map('warRoomMap')
+    // above already succeeded, so the map card — button included — is parsed.
+    const followBtn = document.getElementById('mapFollowBtn');
+    if (followBtn) followBtn.addEventListener('click', () => setFollowPins(!followPins));
+}
+
+function setFollowPins(on) {
+    followPins = on;
+    const btn = document.getElementById('mapFollowBtn');
+    if (btn) {
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.title = t(on ? 'map.follow_title' : 'map.follow_off_title');
+    }
+    // Turning it back on re-centres immediately rather than waiting for the
+    // next position change — otherwise pressing the button on a settled
+    // mission appears to do nothing at all.
+    if (on) { pinFollowSig = null; centreMapOnPins(pins); }
+}
+
+// invalidateSize() below can itself report a size change and re-enter this
+// through the 'resize' hook, so the whole thing is guarded rather than trusting
+// that two invalidateSize() calls in a row always settle.
+let centringNow = false;
+function centreMapOnPins(items, force) {
+    if (centringNow) return;
+    if (!followPins || !map || trailModeActive) return;
+    if (!items || !items.length) return;
+    // A fanned-out cluster or an open popup is someone deliberately reading
+    // something. Moving the map out from under that is the one thing this
+    // feature must never do.
+    if (sharedMarkerCluster && sharedMarkerCluster._spiderfied) return;
+    if (document.querySelector('.leaflet-popup')) return;
+    // The positions themselves, and nothing else. The one-shot fit this
+    // replaced also threw the mission's own location into the bounds, which
+    // was defensible for a single opening frame but not for a view that
+    // tracks: the mission point never moves, so on this demo mission it sat
+    // 2,6 km from where anyone actually was and pushed the whole team into a
+    // corner of the map at a zoom too wide to read. With no pins at all the
+    // early return above leaves the map on its mission-centred opening view,
+    // which is exactly where that location is still the right answer.
+    const coords = items.map(pin => [pin.lat, pin.lng]);
+    const sig = JSON.stringify(coords);
+    if (!force && sig === pinFollowSig) return;
+    centringNow = true;
+    try {
+        pinFollowSig = sig;
+        lastAutoMoveAt = Date.now();
+        map.invalidateSize();
+        // animate:false on both, unlike the user-initiated jumps elsewhere in
+        // this file which keep their glide. Two reasons, and the second is the
+        // load-bearing one: a re-frame that happens on its own every time
+        // someone moves reads as visual noise when it slides, and Leaflet's
+        // animated move depends on a CSS transition completing — which it
+        // never does while the tab is throttled or off-screen, leaving the map
+        // stuck wherever the animation was abandoned. An Action Room spends
+        // most of its life in exactly that state, on a phone in someone's
+        // pocket. (Seen first-hand here: with the browser pane hidden, every
+        // animated setView on this map silently did nothing at all, while the
+        // same call with animate:false landed immediately.)
+        if (coords.length > 1) {
+            // Capped so a team standing together doesn't slam the map to
+            // street level — the point is seeing everyone at once, not
+            // maximum zoom.
+            map.fitBounds(L.latLngBounds(coords), {padding: [40, 40], maxZoom: 17, animate: false});
+        } else {
+            // Single position: keep whatever zoom is already set if it's
+            // closer, so following one volunteer doesn't repeatedly pull the
+            // view back out.
+            map.setView(coords[0], Math.max(map.getZoom(), 15), {animate: false});
+        }
+    } finally {
+        centringNow = false;
+    }
+}
+
 function pinStatusLabel(status) {
     return {needs_help: t('status.badge_needs_help'), on_site: t('status.badge_on_site'), on_way: t('status.badge_on_way')}[status] || '';
 }
@@ -7035,17 +7155,7 @@ function renderPins(items) {
     currentPinMarkers.forEach(m => sharedMarkerCluster.removeLayer(m));
     currentPinMarkers = items.map(pin => buildPinMarker(pin));
     sharedMarkerCluster.addLayers(currentPinMarkers);
-    if (!hasFitPins && items.length) {
-        hasFitPins = true;
-        map.invalidateSize();
-        const coords = items.map(pin => [pin.lat, pin.lng]);
-        if (missionLocation.lat) coords.push([missionLocation.lat, missionLocation.lng]);
-        if (coords.length > 1) {
-            map.fitBounds(L.latLngBounds(coords), {padding: [40, 40]});
-        } else {
-            map.setView(coords[0], 15);
-        }
-    }
+    centreMapOnPins(items);
 }
 
 // Wires the pin-charge-alert-btn built into buildPinMarker() next to the
@@ -7186,8 +7296,9 @@ function renderTeamDistances(items) {
 
 // "Πορεία Ομάδων" — historical GPS trail view, toggled in place of the live
 // pinLayer on the same map (not a second map instance). Own fitBounds call,
-// deliberately not sharing hasFitPins above (that flag is one-shot for the
-// initial live view and reusing it here would break one view or the other).
+// deliberately separate from the live view's auto-centring above — which
+// checks this flag and stands down entirely while a trail is on screen, since
+// the whole point of the trail view is a fixed frame you can read.
 let trailModeActive = false;
 // Everything currently loaded (unfiltered) — kept so the scrubber can
 // re-render at any chosen instant without re-fetching, and so switching

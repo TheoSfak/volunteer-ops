@@ -430,6 +430,8 @@ return [
 
         // Map / trail
         'map.title' => 'Ζωντανός χάρτης αποστολής',
+        'map.follow_title' => 'Ο χάρτης κεντράρει αυτόματα στα στίγματα — πατήστε για παύση',
+        'map.follow_off_title' => 'Αυτόματο κεντράρισμα σε παύση — πατήστε για επαναφορά',
         'map.btn_fullscreen' => 'Πλήρης οθόνη χάρτη',
         'map.btn_exit_fullscreen' => 'Έξοδος πλήρους οθόνης χάρτη',
         'map.btn_satellite_view' => 'Δορυφορική προβολή',
@@ -1824,6 +1826,8 @@ return [
         'banner.ack_btn' => 'Acknowledge',
 
         'map.title' => 'Live mission map',
+        'map.follow_title' => 'The map centres on the positions automatically — click to pause',
+        'map.follow_off_title' => 'Auto-centring paused — click to resume',
         'map.btn_fullscreen' => 'Fullscreen map',
         'map.btn_exit_fullscreen' => 'Exit map fullscreen',
         'map.btn_satellite_view' => 'Satellite view',
