@@ -13975,46 +13975,83 @@ setInterval(function () {
         if (t2) t2.textContent = String(Math.floor(pubLeft / 60)).padStart(2, '0') + ':' + String(pubLeft % 60).padStart(2, '0');
     }
 
-    // The three questions a black screen raises, answered every 3 seconds:
-    // is the camera producing frames, is the encoder sending them, and is the
-    // <video> element actually playing what it was given? Each has a different
-    // culprit — the device, the uplink, and WebKit respectively — and without
-    // this they are indistinguishable from one another.
+    // The questions a dead stream raises, answered every 3 seconds: is the
+    // room actually joined, did BOTH tracks publish, is the camera producing
+    // frames, is anything leaving the phone, and is the <video> playing what it
+    // was given? Each has a different culprit — the signalling, the device, the
+    // uplink and WebKit — and without this they are indistinguishable.
+    //
+    // Audio is reported alongside video on purpose. It is the cheapest split
+    // there is: audio is Opus and shares nothing with the video encoder or its
+    // codec, so audio leaving the phone while video does not isolates the fault
+    // to the video path, and NEITHER leaving isolates it to the transport —
+    // which no amount of codec or dynacast work would ever have fixed. The
+    // iPhone report of 2026-09-13 was exactly that second shape, and this panel
+    // could not see it: it sampled only 'video' RTP.
+    //
+    // Nothing here may early-return on a missing camera track either. That was
+    // the previous version's real flaw — a phone whose camera never published
+    // printed "no camera track" and then reported NOTHING else, discarding the
+    // room state, the microphone and the ICE state in the one case where they
+    // matter most.
     async function pubDiagTick() {
         if (!pubRoom) return;
         const LK = window.LivekitClient;
-        const pub = pubRoom.localParticipant.getTrackPublication(LK.Track.Source.Camera);
-        const v = el('myLivePreview');
-        if (v) {
-            dbg('video ' + v.videoWidth + 'x' + v.videoHeight + ' ready=' + v.readyState +
-                ' paused=' + v.paused + ' shown=' + (v.offsetWidth > 0));
-        }
-        if (!pub || !pub.track) { dbg('no camera track'); return; }
-        const mst = pub.track.mediaStreamTrack;
-        if (mst) {
-            const s = mst.getSettings ? mst.getSettings() : {};
-            // muted=true here is the device withholding frames — another app
-            // took the camera, or iOS interrupted the capture. It is NOT the
-            // microphone mute button, which lives on the audio track.
-            dbg('cam ' + (s.width || '?') + 'x' + (s.height || '?') + '@' + Math.round(s.frameRate || 0) +
-                ' state=' + mst.readyState + ' muted=' + mst.muted + ' enabled=' + mst.enabled);
-        }
         try {
-            const sender = pub.track.sender;
-            if (!sender) { dbg('no RTP sender'); return; }
-            const stats = await sender.getStats();
-            stats.forEach(rep => {
-                if (rep.type === 'outbound-rtp' && rep.kind === 'video') {
-                    dbg('sent frames=' + (rep.framesSent || 0) + ' enc=' + (rep.framesEncoded || 0) +
-                        ' kB=' + Math.round((rep.bytesSent || 0) / 1024) +
-                        (rep.qualityLimitationReason ? ' limit=' + rep.qualityLimitationReason : '') +
-                        (rep.active === false ? ' ACTIVE=false' : ''));
+            const lp = pubRoom.localParticipant;
+            dbg('room=' + (pubRoom.state || '?') +
+                ' pubs=' + ((lp && lp.trackPublications) ? lp.trackPublications.size : '?'));
+
+            const v = el('myLivePreview');
+            if (v) {
+                dbg('video ' + v.videoWidth + 'x' + v.videoHeight + ' ready=' + v.readyState +
+                    ' paused=' + v.paused + ' shown=' + (v.offsetWidth > 0));
+            }
+            if (!lp) return;
+
+            for (const [label, source] of [['cam', LK.Track.Source.Camera],
+                                           ['mic', LK.Track.Source.Microphone]]) {
+                const pub = lp.getTrackPublication(source);
+                if (!pub || !pub.track) { dbg(label + ': NOT PUBLISHED'); continue; }
+                const mst = pub.track.mediaStreamTrack;
+                if (mst) {
+                    const st = mst.getSettings ? mst.getSettings() : {};
+                    // muted=true here is the DEVICE withholding data — another
+                    // app took the camera or mic, or iOS interrupted capture.
+                    // It is not the volunteer's mute button, which toggles
+                    // `enabled` on the audio track instead.
+                    const shape = (source === LK.Track.Source.Camera)
+                        ? (st.width || '?') + 'x' + (st.height || '?') + '@' + Math.round(st.frameRate || 0)
+                        : 'audio';
+                    dbg(label + ' ' + shape + ' state=' + mst.readyState +
+                        ' muted=' + mst.muted + ' enabled=' + mst.enabled);
                 }
-                if (rep.type === 'candidate-pair' && rep.nominated) {
-                    dbg('ice ' + rep.state + ' rtt=' + (rep.currentRoundTripTime || '?'));
-                }
-            });
-        } catch (e) { dbg('stats error: ' + e); }
+                const sender = pub.track.sender;
+                if (!sender) { dbg(label + ': no RTP sender'); continue; }
+                const stats = await sender.getStats();
+                stats.forEach(rep => {
+                    if (rep.type === 'outbound-rtp') {
+                        dbg(label + ' sent pkts=' + (rep.packetsSent || 0) +
+                            (rep.kind === 'video'
+                                ? ' frames=' + (rep.framesSent || 0) + ' enc=' + (rep.framesEncoded || 0)
+                                : '') +
+                            ' kB=' + Math.round((rep.bytesSent || 0) / 1024) +
+                            (rep.qualityLimitationReason ? ' limit=' + rep.qualityLimitationReason : '') +
+                            (rep.active === false ? ' ACTIVE=false' : ''));
+                    }
+                    // Printed from whichever sender reports it first; both share
+                    // one peer connection, so one nominated pair is the answer
+                    // for the whole publisher.
+                    if (rep.type === 'candidate-pair' && rep.nominated) {
+                        dbg('ice ' + rep.state + ' rtt=' + (rep.currentRoundTripTime || '?'));
+                    }
+                });
+            }
+        } catch (e) {
+            // A diagnostic that throws takes the panel down with it, in the one
+            // situation where the panel is the only thing anyone can see.
+            dbg('diag error: ' + (e && e.message ? e.message : e));
+        }
     }
 
     // ── "On air" is not the same as "sending" ───────────────────────────────
