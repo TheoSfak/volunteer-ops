@@ -7085,27 +7085,37 @@ function buildPinMarker(pin, interactive = true) {
     // non-jitter fixes are available), a small arrow rotated to the
     // compass heading of travel.
     const opacity = pin.is_stale ? 'opacity:.45;' : '';
-    // A monochrome Bootstrap glyph, not the 🏃 emoji this used to carry. The
-    // emoji was set at font-size 8px inside a circle whose inner diameter is
-    // 11px, which is not a legible size for a multi-colour pictogram — so the
-    // badge read as a plain blue blob, and since it was 14px against the pin's
-    // own 16px and offset by only 4px, the pair looked like two position dots
-    // rather than one dot with a marker on it. Reported as exactly that.
-    // A glyph takes `color`, so it can be drawn in solid white against the
-    // blue: high contrast, crisp at 9,5px, unmistakably a walking figure. Sat
-    // further out of the corner too, so it hangs off the dot instead of
-    // forming a figure-8 with it.
-    const movingBadge = pin.is_moving
-        ? '<span style="position:absolute;top:-5px;right:-7px;width:15px;height:15px;background:#0ea5e9;border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px #0006;"><i class="bi bi-person-walking" style="color:#fff;font-size:9.5px;line-height:1;"></i></span>'
-        : '';
+    // A moving volunteer is marked by the heading arrow below and nothing
+    // else. There used to be a second small circle badge on the corner of the
+    // dot as well — first a 🏃 emoji, then a white glyph — but at map scale
+    // any filled circle beside a filled circle reads as two position dots, no
+    // matter what is drawn inside it. One volunteer must be one circle on the
+    // map; the direction is the arrow's job.
+    //
+    // Nothing is lost by dropping it: $loadPins computes heading_deg inside
+    // its own `if ($isMoving)` branch, so a moving pin always has a bearing
+    // and therefore always gets the arrow. The popup still says so in words.
     // heading_deg is a compass bearing (0°=North, clockwise) — exactly
     // what CSS rotate() already expects, so no conversion is needed. The
     // arrow itself points up (North) at rotate(0), same convention every
     // map/compass UI uses.
+    //
+    // The rotation is applied to a zero-size box pinned to the dot's centre,
+    // with the arrow offset outwards inside it, so the arrow ORBITS the dot
+    // and comes to rest on the side the volunteer is heading towards — above
+    // for north, right for east. It used to be parked below the dot and merely
+    // spun on the spot, which points correctly but puts the arrow south of
+    // someone walking north, and at a glance reads as an ornament rather than
+    // a bearing.
+    //
+    // The inner span is a fixed 12px box with the glyph centred in it, rather
+    // than letting the ▲ size itself: its advance width varies between fonts,
+    // and any difference would offset the arrow from the axis it turns on and
+    // make the orbit visibly lopsided.
     const headingArrow = (pin.is_moving && pin.heading_deg !== null && pin.heading_deg !== undefined)
-        ? `<span style="position:absolute;bottom:-9px;left:50%;transform:translateX(-50%) rotate(${pin.heading_deg}deg);color:${color};text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff;font-size:15px;line-height:1;">▲</span>`
+        ? `<span style="position:absolute;left:50%;top:50%;width:0;height:0;transform:rotate(${pin.heading_deg}deg);"><span style="position:absolute;left:-6px;top:-21px;width:12px;text-align:center;color:${color};text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff;font-size:11px;line-height:1;">▲</span></span>`
         : '';
-    const icon = L.divIcon({className:'', html:`<span style="position:relative;display:block;width:16px;height:16px;background:${color};${ring}${opacity}border-radius:50%;box-shadow:0 1px 4px #0008">${movingBadge}${headingArrow}</span>`, iconSize:[16,16], iconAnchor:[8,8]});
+    const icon = L.divIcon({className:'', html:`<span style="position:relative;display:block;width:16px;height:16px;background:${color};${ring}${opacity}border-radius:50%;box-shadow:0 1px 4px #0008">${headingArrow}</span>`, iconSize:[16,16], iconAnchor:[8,8]});
     const statusLine = pinStatusLabel(pin.status);
     const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
         : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
