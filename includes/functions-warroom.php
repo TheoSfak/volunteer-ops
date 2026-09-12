@@ -787,6 +787,156 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
 }
 
 /**
+ * Action Room: the small JPEG behind every photo drawn as a tile — the media
+ * gallery, the POI and route strips, the broadcast card, and mission-stats'
+ * own gallery and map popups.
+ *
+ * Those tiles are between 50 and 120 pixels, and every one of them used to
+ * download the full stored image: 1920px on its long edge, because that is
+ * what compressPhotoForUpload() produces. A 30-item gallery was ~12MB of
+ * photograph to draw 30 stamps, re-decoded by the browser on every render.
+ *
+ * Generated on first request rather than at upload time, deliberately:
+ *   - it backfills every photo already on disk, with no migration to run, and
+ *   - the work lands on a coordinator's browser rather than on the volunteer's
+ *     phone mid-upload, on whatever signal the field has.
+ * The cost is paid once per photo, by whoever views it first.
+ *
+ * Returns the absolute path of a usable thumbnail, or null. Null is not an
+ * error — it means "serve the original instead", and every failure path
+ * returns it: no GD, an unreadable or corrupt file, an image large enough to
+ * be a decompression bomb, a full disk. A thumbnail is an optimisation, and it
+ * must never be able to make a photo unviewable.
+ */
+function ensureMissionPhotoThumbnail(array $photo): ?string {
+    $dir = __DIR__ . '/../uploads/mission-photos/';
+    $staleName = (string) ($photo['thumb_stored_name'] ?? '');
+
+    if ($staleName !== '') {
+        $existing = $dir . basename($staleName);
+        if (is_file($existing) && is_readable($existing)) {
+            return $existing;
+        }
+    }
+
+    // A video's thumbnail is the poster frame its uploader captured
+    // client-side (see mission-photo.php's 'upload' action). There is no frame
+    // to extract server-side without ffmpeg, so a video that arrived without
+    // one simply has no thumbnail, exactly as before.
+    if (($photo['media_type'] ?? '') !== 'photo' || !function_exists('imagecreatefromstring')) {
+        return null;
+    }
+
+    $sourcePath = $dir . basename((string) ($photo['stored_name'] ?? ''));
+    if (!is_file($sourcePath) || !is_readable($sourcePath)) {
+        return null;
+    }
+
+    // Dimensions read before decoding, not after: imagecreatefromstring()
+    // allocates 4 bytes per pixel, so a 50MP image is 200MB of memory and
+    // would take the whole request down with it. Nothing that large is a field
+    // photo — the client caps its uploads at 1920px on the long edge.
+    $info = @getimagesize($sourcePath);
+    if ($info === false || $info[0] < 1 || $info[1] < 1 || ($info[0] * $info[1]) > 50000000) {
+        return null;
+    }
+
+    $source = @imagecreatefromstring((string) file_get_contents($sourcePath));
+    if (!$source instanceof GdImage) {
+        return null;
+    }
+
+    $scale = min(1, MISSION_PHOTO_THUMB_LONG_EDGE / max($info[0], $info[1]));
+    $width = max(1, (int) round($info[0] * $scale));
+    $height = max(1, (int) round($info[1] * $scale));
+
+    $thumb = imagecreatetruecolor($width, $height);
+    // Flattened onto white first: the output is JPEG, which has no alpha
+    // channel, so a transparent PNG source would otherwise come out black.
+    imagefilledrectangle($thumb, 0, 0, $width, $height, imagecolorallocate($thumb, 255, 255, 255));
+    imagecopyresampled($thumb, $source, 0, 0, 0, 0, $width, $height, $info[0], $info[1]);
+    imagedestroy($source);
+
+    // A browser honours a JPEG's EXIF orientation tag when it renders it
+    // (image-orientation: from-image has been the CSS default for years); GD
+    // does not. Without this, a photo from a phone that records orientation
+    // instead of rotating pixels shows upright everywhere in the app and
+    // sideways in its own thumbnail. Applied to the thumbnail rather than the
+    // source because it is 16x smaller; rotation only swaps the two sides, so
+    // the result still fits inside the same long-edge box.
+    $orientation = 1;
+    if ($info[2] === IMAGETYPE_JPEG && function_exists('exif_read_data')) {
+        $exif = @exif_read_data($sourcePath);
+        if (!empty($exif['Orientation'])) {
+            $orientation = (int) $exif['Orientation'];
+        }
+    }
+    if (in_array($orientation, [2, 5, 7], true)) {
+        imageflip($thumb, IMG_FLIP_HORIZONTAL);
+    } elseif ($orientation === 4) {
+        imageflip($thumb, IMG_FLIP_VERTICAL);
+    }
+    // imagerotate() turns counter-clockwise, the EXIF table is clockwise.
+    $angle = [3 => 180, 5 => 90, 6 => -90, 7 => -90, 8 => 90][$orientation] ?? 0;
+    if ($angle !== 0) {
+        $rotated = imagerotate($thumb, $angle, 0);
+        if ($rotated instanceof GdImage) {
+            imagedestroy($thumb);
+            $thumb = $rotated;
+        }
+    }
+
+    $thumbName = 'mphoto_' . (int) ($photo['mission_id'] ?? 0) . '_' . time()
+        . '_' . bin2hex(random_bytes(4)) . '_thumb.jpg';
+    $tempPath = $dir . $thumbName . '.tmp';
+    $written = @imagejpeg($thumb, $tempPath, MISSION_PHOTO_THUMB_QUALITY);
+    imagedestroy($thumb);
+    if (!$written) {
+        @unlink($tempPath);
+        return null;
+    }
+    // Renamed into place rather than written there, so a second request for
+    // the same photo can never read a half-written JPEG. The name is unique,
+    // so the rename never overwrites anything.
+    if (!@rename($tempPath, $dir . $thumbName)) {
+        @unlink($tempPath);
+        return null;
+    }
+
+    // The row already named a thumbnail, it was just missing from disk (a
+    // restore that skipped uploads/, a manual cleanup). Replace it outright —
+    // the compare-and-set below would refuse, and the photo would then
+    // regenerate a thumbnail it could never record, on every single view.
+    if ($staleName !== '') {
+        dbExecute(
+            "UPDATE mission_photos SET thumb_stored_name = ? WHERE id = ?",
+            [$thumbName, (int) $photo['id']]
+        );
+        return $dir . $thumbName;
+    }
+
+    // Compare-and-set, because two coordinators opening the Action Room in the
+    // same second both generate one. The loser deletes its own file and uses
+    // the winner's, so the row and the disk never disagree and no orphan is
+    // left behind.
+    $claimed = dbExecute(
+        "UPDATE mission_photos SET thumb_stored_name = ? WHERE id = ? AND thumb_stored_name IS NULL",
+        [$thumbName, (int) $photo['id']]
+    );
+    if ($claimed === 0) {
+        @unlink($dir . $thumbName);
+        $winner = (string) dbFetchValue(
+            "SELECT thumb_stored_name FROM mission_photos WHERE id = ?",
+            [(int) $photo['id']]
+        );
+        $winnerPath = $winner !== '' ? $dir . basename($winner) : '';
+        return ($winnerPath !== '' && is_file($winnerPath)) ? $winnerPath : null;
+    }
+
+    return $dir . $thumbName;
+}
+
+/**
  * War Room: load reference photos attached to a Καθολικό Μήνυμα (global
  * broadcast message) — the coordinator-to-field direction, opposite of
  * loadMissionPhotosForUser()'s field-to-coordinator gallery, and always

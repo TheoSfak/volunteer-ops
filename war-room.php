@@ -7935,7 +7935,7 @@ function renderMedia(items) {
             ${m.is_poi ? `<span class="badge bg-danger position-absolute top-0 end-0 m-1" style="z-index:1;" title="${t('poi.popup_title')}"><i class="bi bi-search"></i></span>` : ''}
             ${m.media_type === 'video'
                 ? `<video src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="video" data-note="${escapeHtml(m.poi_note || '')}" data-meta="${escapeHtml([m.team_label, m.user_name, m.time].filter(Boolean).join(' \u00b7 '))}" style="height:90px;object-fit:cover;background:#000;cursor:pointer;" preload="metadata"${m.has_thumb ? ` poster="mission-photo-view.php?id=${m.id}&thumb=1"` : ''}></video>`
-                : `<img src="mission-photo-view.php?id=${m.id}" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="photo" data-note="${escapeHtml(m.poi_note || '')}" data-meta="${escapeHtml([m.team_label, m.user_name, m.time].filter(Boolean).join(' \u00b7 '))}" style="height:90px;object-fit:cover;cursor:pointer;">`}
+                : `<img src="mission-photo-view.php?id=${m.id}&thumb=1" class="card-img-top media-view-trigger" data-id="${m.id}" data-media-type="photo" data-note="${escapeHtml(m.poi_note || '')}" data-meta="${escapeHtml([m.team_label, m.user_name, m.time].filter(Boolean).join(' \u00b7 '))}" style="height:90px;object-fit:cover;cursor:pointer;">`}
             <div class="card-body p-2">
                 ${whoBlock}
                 ${m.poi_note ? `<div class="small fst-italic mt-1 media-note-clamp" title="${escapeHtml(m.poi_note)}">"${escapeHtml(m.poi_note)}"</div>` : ''}
@@ -7982,7 +7982,7 @@ function renderBroadcastPhotos(items) {
     }
     list.innerHTML = items.map(p => `
         <div class="d-flex gap-2 mb-2 pb-2 border-bottom">
-            <img src="mission-photo-view.php?id=${p.id}" class="broadcast-photo-thumb media-view-trigger" data-id="${p.id}" data-media-type="photo" data-note="${escapeHtml(p.caption || '')}" data-meta="${escapeHtml([p.user_name, p.time].filter(Boolean).join(' \u00b7 '))}" style="width:64px;height:64px;object-fit:cover;border-radius:.25rem;cursor:pointer;flex-shrink:0;">
+            <img src="mission-photo-view.php?id=${p.id}&thumb=1" class="broadcast-photo-thumb media-view-trigger" data-id="${p.id}" data-media-type="photo" data-note="${escapeHtml(p.caption || '')}" data-meta="${escapeHtml([p.user_name, p.time].filter(Boolean).join(' \u00b7 '))}" style="width:64px;height:64px;object-fit:cover;border-radius:.25rem;cursor:pointer;flex-shrink:0;">
             <div class="flex-grow-1" style="min-width:0;">
                 ${p.caption ? `<div class="small">${escapeHtml(p.caption)}</div>` : ''}
                 <div class="text-muted" style="font-size:.7rem;">${escapeHtml(p.user_name)} · ${p.time}</div>
@@ -8647,7 +8647,7 @@ function renderRouteWaypointClosed(wp) {
     }
     const mediaHtml = (wp.photo || wp.video)
         ? `<div class="d-flex gap-2 mt-1">
-            ${wp.photo ? `<img src="mission-photo-view.php?id=${wp.photo.id}" style="max-height:70px;border-radius:4px;">` : ''}
+            ${wp.photo ? `<img src="mission-photo-view.php?id=${wp.photo.id}&thumb=1" style="max-height:70px;border-radius:4px;">` : ''}
             ${wp.video ? `<video src="mission-photo-view.php?id=${wp.video.id}" style="max-height:70px;border-radius:4px;" muted${wp.video.has_thumb ? ` poster="mission-photo-view.php?id=${wp.video.id}&thumb=1"` : ''}></video>` : ''}
           </div>`
         : '';
@@ -9012,7 +9012,7 @@ function renderPointsOfInterest(items) {
             : t('poi.reported_by_one', {name: escapeHtml(p.reporter_names[0] || '—')});
         const thumbs = p.photos.map(photo => photo.media_type === 'video'
             ? `<video src="mission-photo-view.php?id=${photo.id}" class="media-view-trigger" data-id="${photo.id}" data-media-type="video" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;background:#000;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}" preload="metadata"${photo.has_thumb ? ` poster="mission-photo-view.php?id=${photo.id}&thumb=1"` : ''}></video>`
-            : `<img src="mission-photo-view.php?id=${photo.id}" class="media-view-trigger" data-id="${photo.id}" data-media-type="photo" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}">`
+            : `<img src="mission-photo-view.php?id=${photo.id}&thumb=1" class="media-view-trigger" data-id="${photo.id}" data-media-type="photo" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}">`
         ).join('');
         // One line per note, attributed — a merged POI can have a note from
         // each reporter (e.g. one says "found a shoe", another adds "there's
@@ -13268,7 +13268,7 @@ function renderRouteAdminWaypointsList(route) {
         const isOpen = route.status === 'active' && !wp.completed_at && !wp.skipped_at;
         const mediaHtml = (wp.photo || wp.video)
             ? `<div class="d-flex gap-2 mt-1">
-                ${wp.photo ? `<img src="mission-photo-view.php?id=${wp.photo.id}" class="route-media-view" data-id="${wp.photo.id}" data-media-type="photo" style="max-height:50px;border-radius:4px;cursor:pointer;">` : ''}
+                ${wp.photo ? `<img src="mission-photo-view.php?id=${wp.photo.id}&thumb=1" class="route-media-view" data-id="${wp.photo.id}" data-media-type="photo" style="max-height:50px;border-radius:4px;cursor:pointer;">` : ''}
                 ${wp.video ? `<video src="mission-photo-view.php?id=${wp.video.id}" class="route-media-view" data-id="${wp.video.id}" data-media-type="video" style="max-height:50px;border-radius:4px;cursor:pointer;" muted${wp.video.has_thumb ? ` poster="mission-photo-view.php?id=${wp.video.id}&thumb=1"` : ''}></video>` : ''}
               </div>`
             : '';

@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.220.0');
+define('APP_VERSION', '3.221.0');
 define('DB_SCHEMA_VERSION', 148);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
@@ -94,6 +94,21 @@ define('UPLOAD_MAX_SIZE', 10 * 1024 * 1024); // 10MB
 define('VIDEO_MAX_SIZE', 25 * 1024 * 1024); // 25MB
 define('UPLOAD_PATH', __DIR__ . '/uploads/');
 define('ALLOWED_EXTENSIONS', ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png']);
+
+// Action Room field-photo thumbnails (ensureMissionPhotoThumbnail()).
+//
+// Sized against the widest place one is drawn, which is not the obvious one:
+// the gallery tile is only 90px tall, but it is a two-column grid inside a
+// card that grows with the viewport, so on a desktop each tile measured 454
+// CSS pixels wide — and a phone is not far behind, ~170 CSS pixels at a device
+// ratio of 3. Both want roughly 500-900 real pixels; 720 covers a phone
+// outright and leaves a desktop very slightly soft on a 2x display, which is
+// invisible on a 90px strip that is cropped by object-fit anyway. Clicking a
+// tile still opens the full image.
+//
+// Costs ~45KB against the ~400KB of the stored 1920px original.
+define('MISSION_PHOTO_THUMB_LONG_EDGE', 720);
+define('MISSION_PHOTO_THUMB_QUALITY', 82);
 
 // Training module upload settings
 define('TRAINING_UPLOAD_PATH', __DIR__ . '/uploads/training/materials/');

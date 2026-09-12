@@ -153,28 +153,33 @@ $emitCacheHeaders = function (string $path, bool $isThumb) use ($photoId) {
     }
 };
 
-// Client-generated poster frame for a video (see mission-photo.php's
-// 'upload' action) — same permission gates as the real media above, just a
+// The small JPEG behind a tile — a video's client-captured poster frame, or a
+// photo's thumbnail, which ensureMissionPhotoThumbnail() generates on the
+// first request for it. Same permission gates as the real media above, just a
 // different, much smaller file. No Range support needed, it's a single JPEG.
 if (get('thumb') === '1') {
-    if (empty($photo['thumb_stored_name'])) {
+    $thumbPath = ensureMissionPhotoThumbnail($photo);
+    if ($thumbPath !== null) {
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        header('Content-Type: image/jpeg');
+        header('X-Content-Type-Options: nosniff');
+        $emitCacheHeaders($thumbPath, true);
+        header('Content-Length: ' . filesize($thumbPath));
+        readfile($thumbPath);
+        exit;
+    }
+    // A video whose uploader never sent a poster frame keeps the old 404: the
+    // caller is a <video poster>, and answering it with the video itself would
+    // download the very thing the poster exists to avoid.
+    if ($photo['media_type'] !== 'photo') {
         http_response_code(404);
         exit(t('media.file_not_found_on_disk'));
     }
-    $thumbPath = __DIR__ . '/uploads/mission-photos/' . basename($photo['thumb_stored_name']);
-    if (!is_file($thumbPath) || !is_readable($thumbPath)) {
-        http_response_code(404);
-        exit(t('media.file_not_found_on_disk'));
-    }
-    while (ob_get_level() > 0) {
-        ob_end_clean();
-    }
-    header('Content-Type: image/jpeg');
-    header('X-Content-Type-Options: nosniff');
-    $emitCacheHeaders($thumbPath, true);
-    header('Content-Length: ' . filesize($thumbPath));
-    readfile($thumbPath);
-    exit;
+    // A photo falls through to the full image below instead, so a host without
+    // GD, or an image GD cannot read, costs bandwidth rather than leaving a
+    // broken tile in the gallery.
 }
 
 $filePath = __DIR__ . '/uploads/mission-photos/' . basename($photo['stored_name']);

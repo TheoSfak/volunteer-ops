@@ -734,7 +734,7 @@ include __DIR__ . '/includes/header.php';
         <?php if (!empty($photos)): ?>
         <div class="mstats-gallery mb-3">
             <?php foreach ($photos as $p): ?>
-            <img class="gallery-thumb" src="mission-photo-view.php?id=<?= $p['id'] ?>" data-full="mission-photo-view.php?id=<?= $p['id'] ?>" alt="" title="<?= h($p['user_name']) ?> · <?= h($p['time']) ?>">
+            <img class="gallery-thumb" src="mission-photo-view.php?id=<?= $p['id'] ?>&amp;thumb=1" data-full="mission-photo-view.php?id=<?= $p['id'] ?>" alt="" title="<?= h($p['user_name']) ?> · <?= h($p['time']) ?>">
             <?php endforeach; ?>
         </div>
         <?php endif; ?>
@@ -925,7 +925,7 @@ if (mapEl) {
     const photoPoints = <?= json_encode($photoPoints) ?>;
     photoPoints.forEach(p => {
         const icon = L.divIcon({ className: '', html: '<i class="bi bi-camera-fill" style="font-size:18px;color:#1baf7a;"></i>', iconSize: [18, 18], iconAnchor: [9, 9] });
-        L.marker([parseFloat(p.lat), parseFloat(p.lng)], { icon }).addTo(map).bindPopup(`<img src="mission-photo-view.php?id=${p.id}" style="width:120px;border-radius:4px;">`);
+        L.marker([parseFloat(p.lat), parseFloat(p.lng)], { icon }).addTo(map).bindPopup(`<img src="mission-photo-view.php?id=${p.id}&thumb=1" style="width:120px;border-radius:4px;">`);
         bounds.push([parseFloat(p.lat), parseFloat(p.lng)]);
     });
 
