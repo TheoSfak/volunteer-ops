@@ -138,6 +138,29 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    /**
+     * Writes the WebView's cookies to disk every time this app goes to the
+     * background.
+     *
+     * WebView keeps cookies in memory and persists them on its own schedule.
+     * Android is free to kill a backgrounded process at any moment, and when
+     * it does, anything not yet written is simply gone — including the session
+     * cookie. For this app that is not a corner case: a volunteer on a mission
+     * leaves the Action Room running, locks the phone and puts it in a pocket
+     * for an hour, which is precisely when the OS reclaims the process. They
+     * reopen the app and are back at the login screen, having done nothing
+     * wrong and with no explanation — one of the "random logouts" being
+     * reported from the field.
+     *
+     * flush() is synchronous and cheap, and onPause is the last callback
+     * guaranteed to run before the process can be killed.
+     */
+    @Override
+    public void onPause() {
+        try { CookieManager.getInstance().flush(); } catch (Exception ignored) {}
+        super.onPause();
+    }
+
     @Override
     public void onDestroy() {
         if (apkReceiver != null) {

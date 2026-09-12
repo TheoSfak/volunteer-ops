@@ -145,7 +145,19 @@ if (function_exists('isLoggedIn') && isLoggedIn()):
     // against whichever tab (this one, or another one open elsewhere) saw
     // activity most recently. Cheap enough to not matter even at the
     // smallest allowed timeout (5 minutes).
+    // Client-side half of includes/auth.php's war_room_at rule: a session that
+    // has been used for an operation within the last 24h is never auto-logged-
+    // out, from any page. Without this the server would keep the session alive
+    // and this timer would still navigate the tab to logout.php on its own
+    // clock — destroying it anyway, and taking every other tab's Action Room
+    // with it. Read once at render, which is the safe direction both ways: a
+    // tab opened while protected stays protected for its whole life, and a tab
+    // opened before the Action Room was is still covered by the shared
+    // localStorage heartbeat the Action Room broadcasts every 20 seconds.
+    var warRoomProtected = <?= (isset($_SESSION['war_room_at']) && (time() - $_SESSION['war_room_at']) < 86400) ? 'true' : 'false' ?>;
+
     setInterval(function() {
+        if (warRoomProtected) { hideBanner(); return; }
         var idleMs = sharedIdleMs();
         if (idleMs >= timeoutMs) {
             window.location.href = 'logout.php?reason=inactivity';

@@ -100,12 +100,24 @@ function initSession() {
         // below: PHP's own session garbage collector can delete a session
         // file server-side once it's gone untouched longer than
         // session.gc_maxlifetime (a php.ini default, often far shorter than
-        // this app's own configurable timeout) — raise it generously for
-        // these pages specifically, set before session_start() so it actually
-        // takes effect for this session.
-        if ($isWarRoomExempt) {
-            ini_set('session.gc_maxlifetime', 86400); // 24 hours
-        }
+        // this app's own configurable timeout) — raise it generously, set
+        // before session_start() so it actually takes effect for this session.
+        //
+        // Raised on EVERY request, not just the War Room ones it was first
+        // added for. PHP's GC is probabilistic and runs inside whichever
+        // request happens to trigger it, sweeping with THAT request's
+        // gc_maxlifetime — so a dashboard.php hit landing on the 1-in-1000
+        // roll swept with php.ini's value (1440s = 24 minutes, both locally
+        // and on the live hosts) and deleted the session file of an Action
+        // Room tab that had merely been backgrounded on a locked phone for
+        // half an hour. Exactly the force-logout this ini_set exists to
+        // prevent, arriving from a completely unrelated page, which is why
+        // limiting it to the War Room scripts could never actually hold.
+        // Nothing is weakened by the longer file life: idle is still enforced
+        // below against $_SESSION['last_activity'], so a surviving file grants
+        // no access it did not already have — it only stops the file being
+        // deleted out from under a session the app still considers valid.
+        ini_set('session.gc_maxlifetime', 86400); // 24 hours
 
         // Read the configured inactivity window BEFORE starting the session,
         // so the cookie's own lifetime just below can be driven by it too —
@@ -148,7 +160,89 @@ function initSession() {
         session_name(SESSION_NAME);
         session_start();
 
-        if (!$isWarRoomExempt && isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeoutSeconds) {
+        // Stamped by every War Room script, read by every other one below.
+        if ($isWarRoomExempt) {
+            $_SESSION['war_room_at'] = time();
+        }
+
+        // A session that has been used for an operation within the last day is
+        // treated as operational everywhere, not only on the War Room scripts
+        // themselves. Both rules below key off this rather than off
+        // $isWarRoomExempt, because the exemption is per-SCRIPT and the
+        // session is shared by every tab — which is precisely how it kept
+        // failing. Caught by a direct test of the fix above: with the cookie
+        // now re-issued on every request, a single dashboard.php load in a
+        // second tab rewrote the Action Room's 24h cookie back down to the
+        // configured 2h, so opening the app's home page in another tab
+        // silently re-armed the very logout this is meant to stop.
+        $warRoomProtected = isset($_SESSION['war_room_at'])
+            && (time() - $_SESSION['war_room_at']) < 86400;
+        if ($warRoomProtected) {
+            $cookieLifetime = 86400;
+        }
+
+        // Slide the cookie's expiry forward on every request.
+        //
+        // session_set_cookie_params() above only ever reaches the browser on
+        // the request that CREATES the session id: PHP emits Set-Cookie there
+        // and never again for an id that arrived in the request (verified
+        // directly — three consecutive requests to the same script, only the
+        // first carried the header). Every session in this app is minted by
+        // session_regenerate_id(true) inside loginUser()/
+        // establishMissionVisitorSession(), i.e. on login.php or
+        // visitor-join.php — neither of which is War-Room-exempt. So the
+        // cookie was always stamped with the configured inactivity window
+        // (120 minutes by default) counted from the moment of login, and the
+        // 86400 branch above was dead code that had never once applied to a
+        // real session.
+        //
+        // The effect in the field: exactly two hours after logging in, no
+        // matter how continuously the app was being used, the BROWSER itself
+        // discarded the cookie and the next request arrived anonymous. In the
+        // Action Room that surfaces as the red "session expired — GPS ping
+        // stopped sending" banner mid-operation; everywhere else it is a
+        // sudden bounce to the login page. That is the "random logouts"
+        // volunteers have been reporting.
+        //
+        // Re-issuing it here makes the window sliding instead of fixed, and
+        // makes the War Room's 24h exemption real for the first time. Safe to
+        // do unconditionally: the idle rule itself is still enforced below
+        // against $_SESSION['last_activity'], server-side, where a browser
+        // cannot argue with it. logout() sets its own deletion cookie later
+        // in the same response and a browser applies Set-Cookie headers in
+        // order, so the last one for this name — the deletion — still wins.
+        if (isset($_COOKIE[SESSION_NAME]) && !headers_sent()) {
+            setcookie(SESSION_NAME, session_id(), [
+                'expires'  => time() + $cookieLifetime,
+                'path'     => '/',
+                'secure'   => $isSecure,
+                'httponly' => true,
+                'samesite' => 'Lax',
+            ]);
+        }
+
+        // $warRoomProtected (computed above, right after session_start) also
+        // governs the idle timeout: a session used for an operation is not
+        // idle-timed-out, no matter which page the next request comes from.
+        //
+        // The exemption on the line below is per-SCRIPT, and that was never
+        // enough, because logout() destroys the one session every tab shares.
+        // The failure documented in includes/inactivity-timeout.php is real
+        // and was reported from live testing: Action Room open on a phone, a
+        // second tab (or the app's own dashboard) idle in the background, the
+        // phone locked in a pocket so every timer on the page is frozen by
+        // Android's battery throttling — then the screen comes back on, the
+        // idle tab's request lands first, finds last_activity stale and kills
+        // the session out from under the Action Room, which was exempt and
+        // still open. The volunteer is logged out mid-mission by a page they
+        // were not even looking at.
+        //
+        // 86400 deliberately matches the cookie lifetime and gc_maxlifetime
+        // the War Room already gets above, so all three say the same thing:
+        // once someone is in an operation, this app keeps them signed in for
+        // the day. Ordinary sessions that never touched the Action Room are
+        // unaffected and still expire on the configured schedule.
+        if (!$isWarRoomExempt && !$warRoomProtected && isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeoutSeconds) {
             logout();
             session_start();
             setFlash('warning', 'Η συνεδρία σας έληξε. Παρακαλώ συνδεθείτε ξανά.');

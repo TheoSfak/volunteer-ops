@@ -11387,14 +11387,34 @@ function setFieldStatus(btn, prId, status) {
 let lastPollOkAt = Date.now();
 const POLL_STALE_MS = 20000;
 
+// Told people what was wrong and left them with nothing to do about it — the
+// one thing everybody tried anyway was to reload, so the banner now carries
+// the button. Built ONCE and thereafter only updated, never re-innerHTML'd:
+// this function runs every 5 seconds, and rebuilding the markup would throw
+// the button away mid-press, resetting its "refreshing…" state and dropping
+// keyboard focus on a control someone in the field is actively using.
+let pollStaleBuilt = false;
 function renderPollStaleness() {
     const el = document.getElementById('pollStaleBanner');
     if (!el) return;
     const ageMs = Date.now() - lastPollOkAt;
     if (ageMs < POLL_STALE_MS) {
         el.classList.add('d-none');
-        el.innerHTML = '';
         return;
+    }
+    if (!pollStaleBuilt) {
+        pollStaleBuilt = true;
+        el.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i>'
+            + '<div class="flex-grow-1"><strong id="pollStaleTitle"></strong>'
+            + `<div class="small">${escapeHtml(t('poll.stale_help'))}</div></div>`
+            + '<button type="button" id="pollStaleRetry" class="btn btn-sm btn-light border flex-shrink-0">'
+            + '<i class="bi bi-arrow-clockwise me-1"></i><span id="pollStaleRetryLabel"></span></button>'
+            + '<button type="button" id="pollStaleReload" class="btn btn-sm btn-light border flex-shrink-0 d-none"></button>';
+        document.getElementById('pollStaleRetryLabel').textContent = t('poll.stale_retry');
+        document.getElementById('pollStaleRetry').onclick = retryPollNow;
+        const reloadBtn = document.getElementById('pollStaleReload');
+        reloadBtn.textContent = t('poll.stale_reload');
+        reloadBtn.onclick = () => location.reload();
     }
     const mins = Math.floor(ageMs / 60000);
     const age = mins >= 1 ? t('poll.stale_minutes', {n: mins}) : t('poll.stale_seconds', {n: Math.round(ageMs / 1000)});
@@ -11402,8 +11422,43 @@ function renderPollStaleness() {
     // changed materially — a 25-second gap is a hiccup, three minutes is not.
     const severe = ageMs > 180000;
     el.className = 'alert d-flex align-items-center gap-2 py-2 px-3 mb-3 ' + (severe ? 'alert-danger' : 'alert-warning');
-    el.innerHTML = `<i class="bi bi-exclamation-triangle-fill"></i><div><strong>${escapeHtml(t('poll.stale_title', {age}))}</strong>`
-        + `<div class="small">${escapeHtml(t('poll.stale_help'))}</div></div>`;
+    document.getElementById('pollStaleTitle').textContent = t('poll.stale_title', {age});
+    // Only offered once retrying in place has plainly not been enough. A
+    // reload is never destructive here — the offline queue lives in
+    // localStorage — but it does cost the map's current pan/zoom, which is
+    // not a trade worth making for a 25-second hiccup.
+    document.getElementById('pollStaleReload').classList.toggle('d-none', !severe);
+}
+
+// The banner's button. Retries in place rather than reloading: it is faster,
+// it keeps the map exactly where the viewer put it, and a transient drop —
+// a tunnel, a handover, a lost bar of signal — is what the banner is usually
+// reporting. If the session itself is gone, the retry's own response trips
+// checkSessionAlive() and the red session banner takes over with its own
+// reload button, so the two cases stay cleanly separated.
+function retryPollNow() {
+    const btn = document.getElementById('pollStaleRetry');
+    const label = document.getElementById('pollStaleRetryLabel');
+    if (btn) btn.disabled = true;
+    if (label) label.textContent = t('poll.stale_retrying');
+    // Free the overlap guard first. A request hung behind a dead connection
+    // is the usual reason this banner is up, and while it is still in flight
+    // pollWarRoomData() returns immediately — so without this abort the press
+    // would visibly do nothing until POLL_ABORT_MS eventually fires.
+    if (pollAbortCurrent) { try { pollAbortCurrent.abort(); } catch (e) {} }
+    pollAbortCurrent = null;
+    pollInFlight = false;
+    pollWarRoomData();
+    // Staff-only panel, so it genuinely may not exist on this page.
+    if (typeof loadActivity === 'function' && document.getElementById('activityList')) loadActivity();
+    // Restored on a timer rather than off the poll's own promise: the retry
+    // deliberately does not await anything, and the button has to become
+    // pressable again whether the attempt succeeded (banner already gone) or
+    // failed (banner still up, and they will want another go).
+    setTimeout(() => {
+        if (btn) btn.disabled = false;
+        if (label) label.textContent = t('poll.stale_retry');
+    }, 2500);
 }
 // Its own timer, not just the poll's: when the poll is failing its .then()
 // never runs, so without this the "4 minutes ago" would freeze at whatever it
@@ -11434,10 +11489,17 @@ let pollInFlight = false;
 // measurements behind it. Empty until the first successful render, which is
 // exactly right: a tab that has rendered nothing must be sent everything.
 let lastPayloadHash = '';
+// The controller of the poll currently in flight, so the manual "Ανανέωση"
+// button on the staleness banner can cut a hung request loose instead of
+// being swallowed by the overlap guard above — a poll that is already stuck
+// is precisely the situation in which that button gets pressed, and without
+// this the press would do nothing at all for up to POLL_ABORT_MS.
+let pollAbortCurrent = null;
 function pollWarRoomData() {
     if (pollInFlight) return;
     pollInFlight = true;
     const pollAbort = new AbortController();
+    pollAbortCurrent = pollAbort;
     const pollKiller = setTimeout(() => pollAbort.abort(), POLL_ABORT_MS);
     fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId + '&payload_hash=' + encodeURIComponent(lastPayloadHash), {signal: pollAbort.signal}).then(response => {
         if (!checkSessionAlive(response)) return null;
@@ -11571,7 +11633,16 @@ function pollWarRoomData() {
         // the next poll is answered in full rather than telling a half-drawn
         // tab that nothing changed.
         lastPayloadHash = data.payloadHash || '';
-    }).catch(() => { renderPollStaleness(); }).finally(() => { clearTimeout(pollKiller); pollInFlight = false; });
+    }).catch(() => { renderPollStaleness(); }).finally(() => {
+        clearTimeout(pollKiller);
+        // Guarded on identity, not unconditional: retryPollNow() aborts this
+        // request and starts a fresh one synchronously, so by the time this
+        // settles the flag may already belong to the newer poll. Clearing it
+        // blindly would reopen the overlap guard while that one is still in
+        // flight — reintroducing exactly the request-stacking this guard was
+        // added to stop.
+        if (pollAbortCurrent === pollAbort) { pollInFlight = false; pollAbortCurrent = null; }
+    });
 }
 setInterval(() => { if (!document.hidden) pollWarRoomData(); }, 5000);
 
