@@ -6672,6 +6672,34 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 149,
+            'description' => 'Remove the NASA FIRMS wildfire-hotspot overlay entirely (added in v131). The layer was withdrawn because it could not do the job it existed for: measured against the public NASA VIIRS feeds, 3.054 detections landed inside this app Greece bounding box over seven days and ZERO of them were in Crete, with 81% north of the 40th parallel and exactly one south of the 37th. That distribution is post-harvest agricultural burning in Thrace and Macedonia, not wildfires - so for a Cretan operation the layer was permanently empty, and everywhere else it was mostly noise. Drops the per-mission flag, the cache table and the stored MAP_KEY. Every step is guarded, so it is safe to re-run and safe on a fresh install, where v131 will have just created these objects from scratch.',
+            'up' => function () {
+                // Cache only - nothing here is worth keeping, and it holds a
+                // foreign key to missions, so it goes before anything else.
+                dbExecute("DROP TABLE IF EXISTS fire_hotspot_cache");
+
+                // Same INFORMATION_SCHEMA pre-check idiom v131 itself had to
+                // adopt: "DROP COLUMN IF EXISTS" is MariaDB-only and a hard
+                // syntax error on real MySQL 8, which would stop the runner
+                // and block every later migration behind it.
+                $columnExists = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'missions' AND COLUMN_NAME = 'fires_overlay_enabled'"
+                );
+                if ($columnExists) {
+                    dbExecute("ALTER TABLE missions DROP COLUMN fires_overlay_enabled");
+                }
+
+                // The NASA Earthdata MAP_KEY. Nothing reads it any more, and
+                // leaving a credential in the database for a feature that no
+                // longer exists is worse than losing it - a new one is free to
+                // generate if this is ever brought back.
+                dbExecute("DELETE FROM settings WHERE setting_key = 'nasa_firms_api_key'");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

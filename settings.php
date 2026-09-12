@@ -606,7 +606,7 @@ if (isPost()) {
             'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled',
             'qr_checkin_enabled',
             'openweathermap_api_key', 'weather_map_compass_enabled', 'exposure_urgency_enabled',
-            'nasa_firms_api_key', 'search_rings_enabled',
+            'search_rings_enabled',
         ];
 
         foreach ($fieldsToUpdate as $field) {
@@ -617,7 +617,7 @@ if (isPost()) {
             }
 
             // Trim the API key to avoid whitespace issues from copy-paste
-            if ($field === 'openweathermap_api_key' || $field === 'nasa_firms_api_key') {
+            if ($field === 'openweathermap_api_key') {
                 $value = trim($value);
             }
 
@@ -649,9 +649,6 @@ if (isPost()) {
 
             // Don't overwrite API key if form was submitted empty (acts like a "keep existing" field)
             if ($field === 'openweathermap_api_key' && empty($value) && !empty($settings['openweathermap_api_key'] ?? '')) {
-                continue;
-            }
-            if ($field === 'nasa_firms_api_key' && empty($value) && !empty($settings['nasa_firms_api_key'] ?? '')) {
                 continue;
             }
             
@@ -832,7 +829,7 @@ if (isPost()) {
         redirect('settings.php?tab=subscriptions');
         
     } elseif ($action === 'save_livekit') {
-        // Same "blank means keep" contract the weather/FIRMS keys use, and for
+        // Same "blank means keep" contract the weather key uses, and for
         // the same reason: the secret is rendered masked, so an admin editing
         // only the URL would otherwise wipe it without noticing.
         $url = trim(post('livekit_url', ''));
@@ -1624,50 +1621,6 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             <strong>Ένδειξη Επείγοντος λόγω Έκθεσης</strong>
                         </label>
                         <div class="form-text">Μόνο σε αποστολές τύπου «Αγνοούμενο άτομο». Ενδεικτικός υπολογισμός από ηλικία, θερμοκρασία και άνεμο — <strong>όχι κλινική πρόγνωση</strong>. Προτείνεται έλεγχος πριν την ενεργοποίηση σε πραγματική επιχείρηση.</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- NASA FIRMS Wildfire Settings -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-fire me-1"></i>Ρυθμίσεις Δορυφορικών Πυρκαγιών</h5>
-                </div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label" for="firmsApiKey">NASA FIRMS MAP_KEY</label>
-                        <div class="input-group">
-                            <input type="password" class="form-control" id="firmsApiKey"
-                                   name="nasa_firms_api_key"
-                                   autocomplete="new-password"
-                                   value="<?= h($settings['nasa_firms_api_key'] ?? '') ?>"
-                                   placeholder="Εισάγετε το MAP_KEY σας">
-                            <button type="button" class="btn btn-outline-secondary" onclick="toggleKeyVisibility('firmsApiKey')" tabindex="-1">
-                                <i class="bi bi-eye" id="eye-firmsApiKey"></i>
-                            </button>
-                        </div>
-                        <div class="form-text">
-                            Απαιτείται λογαριασμός NASA Earthdata Login πριν τη δημιουργία του MAP_KEY.
-                            <a href="https://firms.modaps.eosdis.nasa.gov/api/map_key/" target="_blank" rel="noopener noreferrer">Δωρεάν εγγραφή στο NASA FIRMS</a>
-                        </div>
-                    </div>
-                    <?php if (!empty($settings['nasa_firms_api_key'] ?? '')): ?>
-                    <div class="d-flex align-items-center gap-2 flex-wrap">
-                        <div class="alert alert-success py-1 px-2 mb-0 small flex-grow-1">
-                            <i class="bi bi-check-circle me-1"></i>MAP_KEY έχει οριστεί
-                        </div>
-                        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnTestFirmsKey">
-                            <i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης
-                        </button>
-                    </div>
-                    <div id="firmsTestResult" class="mt-2" style="display:none;"></div>
-                    <?php else: ?>
-                    <div class="alert alert-secondary py-1 px-2 mb-0 small">
-                        <i class="bi bi-info-circle me-1"></i>Χωρίς MAP_KEY το επίπεδο πυρκαγιών δεν είναι διαθέσιμο στο Action Room
-                    </div>
-                    <?php endif; ?>
-                    <div class="form-text mt-2">
-                        Δεν υπάρχει διακόπτης ενεργοποίησης εδώ — η εμφάνιση/απόκρυψη του επιπέδου πυρκαγιών γίνεται ζωντανά από διαχειριστές μέσα από το ίδιο το Action Room κάθε αποστολής, ανά αποστολή. Ενδεικτικά δορυφορικά δεδομένα (NASA FIRMS) — <strong>όχι επιβεβαιωμένη πυρκαγιά</strong>.
                     </div>
                 </div>
             </div>
@@ -3362,8 +3315,8 @@ function confirmReset() {
 <?php endif; ?>
 
 <script>
-// Shared by both API-key fields (OpenWeatherMap, NASA FIRMS) — same
-// show/hide idiom as reset-password.php's togglePass(), reused under a
+// Used by the OpenWeatherMap API-key field — same show/hide idiom as
+// reset-password.php's togglePass(), reused under a
 // distinct name since this file's inputs use id-based lookup directly
 // rather than that file's id+'-confirm' pairing.
 function toggleKeyVisibility(id) {
@@ -3415,40 +3368,6 @@ document.getElementById('btnTestWeatherKey') && document.getElementById('btnTest
 </script>
 <?php endif; ?>
 
-<?php if (!empty($settings['nasa_firms_api_key'] ?? '')): ?>
-<script>
-document.getElementById('btnTestFirmsKey') && document.getElementById('btnTestFirmsKey').addEventListener('click', function() {
-    var btn = this;
-    var result = document.getElementById('firmsTestResult');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Έλεγχος...';
-    result.style.display = 'none';
-
-    fetch('api-firms-test.php', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest'},
-        body: 'csrf_token=' + encodeURIComponent('<?= csrfToken() ?>')
-    })
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            result.style.display = '';
-            if (data.ok) {
-                result.innerHTML = '<div class="alert alert-success py-1 px-2 small mb-0"><i class="bi bi-check-circle me-1"></i>' + data.message + '</div>';
-            } else {
-                result.innerHTML = '<div class="alert alert-danger py-1 px-2 small mb-0"><i class="bi bi-exclamation-triangle me-1"></i>' + data.message + '</div>';
-            }
-        })
-        .catch(function() {
-            result.style.display = '';
-            result.innerHTML = '<div class="alert alert-danger py-1 px-2 small mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Αποτυχία επικοινωνίας</div>';
-        })
-        .finally(function() {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης';
-        });
-});
-</script>
-<?php endif; ?>
 
     </div>
 </div>

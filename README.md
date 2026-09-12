@@ -62,8 +62,6 @@ It is what separates VolunteerOps from every roster-and-shifts tool.
   in the style of Lost Person Behavior / ISRID search-planning tools
 
 **Situational awareness overlays**
-- **NASA FIRMS wildfire hotspots** — near-real-time VIIRS satellite fire detections
-  across Greece, with confidence, brightness and fire radiative power
 - Weather conditions and exposure-urgency indication for the mission area
 
 > Planning aids, not authorities. The LPB rings and exposure indicators are clearly

@@ -6,7 +6,6 @@
 
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/weather.php';
-require_once __DIR__ . '/includes/wildfire.php';
 require_once __DIR__ . '/includes/lpb-rings.php';
 requireLogin();
 
@@ -1399,19 +1398,6 @@ if (get('ajax') === '1') {
         $weather['forecast_dt_label'] = date('d/m H:i', $weather['forecast_dt']);
     }
     $exposureUrgency = ($exposureUrgencyOn && $missingPerson && $weather) ? computeExposureUrgency($missingPerson, $weather) : null;
-    // Per-mission flag (not a global Settings toggle like the weather compass
-    // above) — flipped live by admins from inside the Action Room itself via
-    // mission-fires.php, so every viewer picks up the change on their next
-    // poll tick. Same defensive try/catch reasoning as getWeatherForMission()
-    // just above: a NASA FIRMS/DB hiccup here must degrade to "no fire data",
-    // never take down the rest of this poll.
-    $firesOverlayOn = !empty($mission['fires_overlay_enabled']);
-    try {
-        $fireHotspots = $firesOverlayOn ? getFireHotspotsForMission($mission) : null;
-    } catch (Throwable $e) {
-        error_log('getFireHotspotsForMission() failed (ajax poll, mission ' . $missionId . '): ' . $e->getMessage());
-        $fireHotspots = null;
-    }
     $onlinePresence = loadOnlinePresenceUserIds($missionId);
     $annotations = loadMissionAnnotationsForMission($missionId);
     $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
@@ -1453,8 +1439,6 @@ if (get('ajax') === '1') {
         'missingPerson' => $missingPerson,
         'weather' => $weather,
         'exposureUrgency' => $exposureUrgency,
-        'firesOverlayOn' => $firesOverlayOn,
-        'fireHotspots' => $fireHotspots,
         'onlinePresence' => $onlinePresence,
         'pingStaleness' => $pingIsStaleByVolunteerId,
         'participantLive' => $participantLiveByVolunteerId,
@@ -1598,15 +1582,6 @@ if ($weather && ($weather['status'] ?? '') === 'ok') {
     $weather['forecast_dt_label'] = date('d/m H:i', $weather['forecast_dt']);
 }
 $exposureUrgency = ($exposureUrgencyOn && $missingPerson && $weather) ? computeExposureUrgency($missingPerson, $weather) : null;
-// See the ajax branch's own copy of this block above — per-mission flag,
-// not a global setting, flipped live from within the Action Room itself.
-$firesOverlayOn = !empty($mission['fires_overlay_enabled']);
-try {
-    $fireHotspots = $firesOverlayOn ? getFireHotspotsForMission($mission) : null;
-} catch (Throwable $e) {
-    error_log('getFireHotspotsForMission() failed (full page load, mission ' . $missionId . '): ' . $e->getMessage());
-    $fireHotspots = null;
-}
 $annotations = loadMissionAnnotationsForMission($missionId);
 $areas = loadMissionSearchAreasForUser($missionId, $canManageWarRoom);
 $sectors = loadMissionSectorsForUser($missionId, (int)$user['id'], $canManageWarRoom, $isApprovedParticipant);
@@ -2272,13 +2247,6 @@ include __DIR__ . '/includes/header.php';
         <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
         <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i><?= t('hero.btn_team_trail') ?></button>
         <button type="button" id="coverageModeToggle" class="btn btn-outline-light"><i class="bi bi-broadcast me-1"></i><?= t('hero.btn_verified_coverage') ?></button>
-        <!-- Unlike its neighbors above (Team Trail/Verified Coverage, both
-             local-only per-browser view toggles), this one is a per-mission
-             DB flag — its active/inactive class is re-applied from server
-             state on every poll tick (updateFiresToggleBtn()), not just
-             flipped locally on click, so it stays correct if a second admin
-             toggles it from another session. -->
-        <button type="button" id="firesOverlayToggle" class="btn btn-outline-light<?= $firesOverlayOn ? ' active' : '' ?>">🔥 <?= t('hero.btn_fires_overlay') ?></button>
         <?php endif; ?>
         <?php if (!$volunteerTabs): ?>
         <form method="post">
@@ -4409,11 +4377,6 @@ const searchRingsEnabled = <?= json_encode($searchRingsOn) ?>;
 const LPB_RING_TABLE = <?= json_encode(LPB_RING_TABLE) ?>;
 let weather = <?= json_encode($weather) ?>;
 let exposureUrgency = <?= json_encode($exposureUrgency) ?>;
-// Unlike weatherCompassEnabled (a page-load-only global setting),
-// firesOverlayOn is per-mission and can change live from another admin's
-// click, so it's a `let` re-assigned every poll tick — not a `const`.
-let firesOverlayOn = <?= json_encode($firesOverlayOn) ?>;
-let fireHotspots = <?= json_encode($fireHotspots) ?>;
 let restrictedAreas = <?= json_encode($restrictedAreas) ?>;
 let restrictedAreaBreaches = <?= json_encode($restrictedAreaBreaches) ?>;
 let restrictedAreaBreachHistory = <?= json_encode($restrictedAreaBreachHistory) ?>;
@@ -4980,7 +4943,7 @@ function addMapBaseLayers(targetMap, toggleBtnId) {
     }
     return layers;
 }
-let map = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null, missingPersonLayer = null, fireLayer = null, searchRingsLayer = null;
+let map = null, dispatchLayer = null, trailLayer = null, annotationLayer = null, annotationDrawLayer = null, routeLayer = null, areaLayer = null, sectorLayer = null, sectorBuildingLayer = null, restrictedAreaLayer = null, coverageLayer = null, missingPersonLayer = null, searchRingsLayer = null;
 // Pins/incidents/POI used to each have their own plain L.featureGroup
 // (pinLayer/incidentLayer/poiLayer) — replaced by one shared cluster group
 // so nearby markers of ANY of these three kinds group into a bubble instead
@@ -5074,7 +5037,6 @@ if (!fieldMode) {
     // restrictedAreaPane. Same as dispatchLayer/routeLayer/trailLayer, none
     // of which use a custom pane either.
     searchRingsLayer = L.featureGroup().addTo(map);
-    fireLayer = L.featureGroup().addTo(map);
     // Restricted (hazard/danger) areas render ABOVE literally everything else
     // on the map, including annotationPane (610, itself already above every
     // default Leaflet pane) — the user's own explicit ask. 700 leaves headroom
@@ -7597,42 +7559,6 @@ if (coverageModeToggleBtn) {
     });
 }
 
-// Reflects server-driven firesOverlayOn on the toolbar button — called both
-// right after this admin's own click and every poll tick (in case a second
-// admin flipped it from another session), never assumed from local state
-// alone.
-function updateFiresToggleBtn() {
-    const btn = document.getElementById('firesOverlayToggle');
-    if (!btn) return;
-    btn.classList.toggle('active', !!firesOverlayOn);
-}
-const firesOverlayToggleBtn = document.getElementById('firesOverlayToggle');
-if (firesOverlayToggleBtn) {
-    firesOverlayToggleBtn.addEventListener('click', () => {
-        const nextEnabled = !firesOverlayOn;
-        firesOverlayToggleBtn.disabled = true;
-        const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, enabled: nextEnabled ? '1' : '0'});
-        fetch('mission-fires.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
-            if (result.ok) {
-                firesOverlayOn = result.enabled;
-                updateFiresToggleBtn();
-                // Turning off clears immediately for instant feedback; turning
-                // on waits for the next poll tick to actually populate
-                // fireHotspots (this endpoint is write-only, see mission-fires.php).
-                if (!firesOverlayOn) { fireHotspots = null; if (!fieldMode) renderFireLayer(null); }
-            } else {
-                alert(result.error || t('fires.no_api_key'));
-            }
-        }).catch(() => {
-            // A raw PHP error/non-JSON response (the class of bug this app
-            // hit twice already this same day) must still tell the admin
-            // SOMETHING, not fail invisibly like it did before this line
-            // existed.
-            alert(t('fires.toggle_failed'));
-        }).finally(() => { firesOverlayToggleBtn.disabled = false; });
-    });
-}
-
 // One Share button, not five. Prefers the OS's own native share sheet
 // (navigator.share with an actual file attached) — that sends the real
 // photo/video bytes, not a link, so the recipient doesn't need an account
@@ -9471,89 +9397,6 @@ function renderWeatherControl(w) {
         </div>`;
 }
 
-// NASA FIRMS satellite hotspot markers — cleared/rebuilt every poll tick,
-// same idiom as renderPoiLayer above. Driven entirely by server state
-// (firesOverlayOn/fireHotspots come from the ajax=1 poll, per-mission, not
-// a local toggle), so this has no on/off logic of its own: an empty/null
-// hotspots value from the server already means "layer should be empty".
-function renderFireLayer(fireData) {
-    if (!fireLayer) return;
-    fireLayer.clearLayers();
-    // fireData is the full ['status' => ..., 'hotspots' => [...]] shape from
-    // getFireHotspotsForMission() — same wrapper convention as `weather`, not
-    // a bare array — so a non-'ok' status (no_key/api_error, or firesOverlayOn
-    // itself false → fireHotspots null) just clears the layer, same as
-    // renderWeatherControl's own status check.
-    if (!fireData || fireData.status !== 'ok') return;
-    const confidenceColor = {high: '#d62828', nominal: '#f77f00', low: '#ffb703'};
-    (fireData.hotspots || []).forEach(h => {
-        const color = confidenceColor[h.confidence] || confidenceColor.nominal;
-        // Same teardrop divIcon shape as renderPoiLayer, a flame emoji
-        // instead of a Bootstrap icon glyph (user's explicit ask — matches
-        // the rest of this app's existing emoji-as-marker-glyph convention,
-        // e.g. the 📷/🎥 media icons) — colored ring still encodes confidence.
-        const icon = L.divIcon({
-            className: '',
-            html: `<div style="position:relative;width:26px;height:34px;">
-                <div style="width:26px;height:26px;background:${color};border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;border:2px solid #fff;box-shadow:0 1px 4px #0008;">🔥</div>
-                <div style="position:absolute;left:50%;top:24px;transform:translateX(-50%);width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:10px solid ${color};"></div>
-            </div>`,
-            iconSize: [26, 34], iconAnchor: [13, 34],
-        });
-        // Confidence shown as NASA's own raw term (Low/Nominal/High), not a
-        // Greek translation — matches the exact wording the user pointed to
-        // on NASA's own FIRMS map, deliberately not localized.
-        const confidenceRaw = (h.confidence || 'nominal');
-        const confidenceLabel = confidenceRaw.charAt(0).toUpperCase() + confidenceRaw.slice(1);
-        const frpHtml = (h.frp !== null && h.frp !== undefined) ? `<br>${t('fires.popup_frp_label')}: ${h.frp} MW` : '';
-        // FIRMS reports brightness in Kelvin; converted to °C for display —
-        // European audience, Kelvin isn't the intuitive unit here.
-        const brightnessHtml = (h.brightness !== null && h.brightness !== undefined) ? `<br>${t('fires.popup_brightness_label')}: ${(h.brightness - 273.15).toFixed(1)}°C` : '';
-        // acq_date 'YYYY-MM-DD' + acq_time 'HHMM' (UTC) -> 'DD/MM/YYYY HH:MM',
-        // matching the exact format the user pointed to on NASA's own site.
-        const dateParts = (h.acq_date || '').split('-');
-        const dateLabel = dateParts.length === 3 ? `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}` : (h.acq_date || '');
-        const timeRaw = (h.acq_time || '').padStart(4, '0');
-        const timeLabel = timeRaw.length === 4 ? `${timeRaw.slice(0, 2)}:${timeRaw.slice(2)}` : timeRaw;
-        // Location line is filled in lazily on popupopen (see fireLayer.on
-        // below) — a reverse-geocode call per marker up front would mean
-        // dozens of sequential Nominatim requests on every 15-min cache
-        // refresh, well past their free-tier fair-use policy.
-        const popupHtml = `<div class="fire-location-line small fw-semibold mb-1" data-lat="${h.lat}" data-lng="${h.lng}">${t('fires.location_loading')}</div>` +
-            `${t('fires.popup_coords_label')}: ${h.lat.toFixed(4)}, ${h.lng.toFixed(4)}<br>` +
-            `${t('fires.popup_detected_label')}: ${dateLabel} ${timeLabel} UTC<br>` +
-            `${t('fires.popup_confidence_label')}: ${escapeHtml(confidenceLabel)}<br>` +
-            `${t('fires.popup_source_label')}: NASA ${escapeHtml(h.instrument || 'VIIRS')}` +
-            brightnessHtml + frpHtml +
-            `<br><span class="small fst-italic text-muted">${t('fires.caveat')}</span>`;
-        L.marker([h.lat, h.lng], {icon}).addTo(fireLayer).bindPopup(popupHtml);
-    });
-}
-// Lazy reverse-geocode: fills in the "Fire Xkm <direction> from <place>"
-// line only when a marker's popup is actually opened, same delegated-
-// listener-on-the-group idiom as dispatchLayer.on('popupopen', ...) above.
-fireLayer?.on('popupopen', event => {
-    const popupEl = event.popup.getElement();
-    const line = popupEl.querySelector('.fire-location-line');
-    if (!line) return;
-    const lat = line.dataset.lat, lng = line.dataset.lng;
-    fetch(`api-fire-location.php?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`)
-        .then(r => r.json())
-        .then(result => {
-            if (result.ok) {
-                const distanceLabel = Number(result.distance_km).toLocaleString(jsLocale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
-                line.textContent = t('fires.location_line', {
-                    distance: distanceLabel,
-                    direction: t('fires.direction_' + result.direction),
-                    place: result.place,
-                });
-            } else {
-                line.textContent = t('fires.location_unavailable');
-            }
-        })
-        .catch(() => { line.textContent = t('fires.location_unavailable'); });
-});
-
 function renderMissingPersonCard(item) {
     const el = document.getElementById('missingPersonDisplay');
     if (!el) return;
@@ -10222,7 +10065,7 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 })();
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); renderSearchRingsLayer(missingPerson); renderWeatherControl(weather); renderFireLayer(fireHotspots); }
+    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); renderSearchRingsLayer(missingPerson); renderWeatherControl(weather); }
     renderMyTasks(myTasks);
     renderMySectors(sectors);
     renderMyRoutes(routes);
@@ -11710,12 +11553,6 @@ function pollWarRoomData() {
             exposureUrgency = data.exposureUrgency;
             renderWeatherCard(weather, exposureUrgency);
             if (!fieldMode) renderWeatherControl(weather);
-        }
-        if (data.firesOverlayOn !== undefined) {
-            firesOverlayOn = data.firesOverlayOn;
-            fireHotspots = data.fireHotspots;
-            updateFiresToggleBtn();
-            if (!fieldMode) renderFireLayer(fireHotspots);
         }
         if (data.areas) areas = data.areas;
         if (!fieldMode && data.teams) renderTeamRosters(data.teams);

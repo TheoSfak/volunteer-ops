@@ -1334,35 +1334,6 @@ return [
         'exposure.hm_format' => '{h}ω {m}λ',
         'exposure.note' => 'Ενδεικτικός υπολογισμός από θερμοκρασία, άνεμο και ηλικία — όχι κλινική πρόγνωση.',
 
-        // NASA FIRMS wildfire hotspot overlay — per-mission toggle
-        // (missions.fires_overlay_enabled), flipped live by admins from the
-        // Action Room toolbar, synced to every viewer via the ajax=1 poll.
-        'hero.btn_fires_overlay' => 'Πυρκαγιές',
-        'fires.no_api_key' => 'Δεν έχει οριστεί NASA FIRMS MAP_KEY στις Ρυθμίσεις',
-        'fires.toggle_failed' => 'Αποτυχία αλλαγής — δοκιμάστε ξανά σε λίγο',
-        'fires.popup_title' => 'Δορυφορική Ένδειξη Πυρκαγιάς',
-        'fires.popup_brightness_label' => 'Θερμοκρασία',
-        'fires.popup_frp_label' => 'Ισχύς Ακτινοβολίας',
-        'fires.popup_detected_label' => 'Στιγμή λήψης',
-        'fires.popup_coords_label' => 'Γεωγρ. πλάτος, μήκος',
-        'fires.popup_confidence_label' => 'Βεβαιότητα',
-        'fires.popup_source_label' => 'Πηγή',
-        'fires.confidence_low' => 'χαμηλή βεβαιότητα',
-        'fires.confidence_nominal' => 'μέτρια βεβαιότητα',
-        'fires.confidence_high' => 'υψηλή βεβαιότητα',
-        'fires.location_line' => 'Φωτιά {distance}χλμ {direction} από {place}',
-        'fires.location_loading' => 'Αναζήτηση τοποθεσίας...',
-        'fires.location_unavailable' => 'Η τοποθεσία δεν βρέθηκε',
-        'fires.direction_n' => 'Βόρεια',
-        'fires.direction_ne' => 'Βορειοανατολικά',
-        'fires.direction_e' => 'Ανατολικά',
-        'fires.direction_se' => 'Νοτιοανατολικά',
-        'fires.direction_s' => 'Νότια',
-        'fires.direction_sw' => 'Νοτιοδυτικά',
-        'fires.direction_w' => 'Δυτικά',
-        'fires.direction_nw' => 'Βορειοδυτικά',
-        'fires.caveat' => 'Ενδεικτικά δορυφορικά δεδομένα (NASA FIRMS) — όχι επιβεβαιωμένη πυρκαγιά.',
-
         // Mission Visitor — walk-up, single-mission Action Room access for
         // police/citizens/etc. via a QR/link (visitor-join.php), classified
         // by an admin after self-registering (war-room.php's visitor card).
@@ -2691,33 +2662,6 @@ return [
         'exposure.overdue_suffix' => 'overdue',
         'exposure.hm_format' => '{h}h {m}m',
         'exposure.note' => 'Indicative estimate from temperature, wind and age — not a clinical prognosis.',
-
-        // NASA FIRMS wildfire hotspot overlay
-        'hero.btn_fires_overlay' => 'Fires',
-        'fires.no_api_key' => 'No NASA FIRMS MAP_KEY configured in Settings',
-        'fires.toggle_failed' => 'Failed to change — try again shortly',
-        'fires.popup_coords_label' => 'Lat, Lng',
-        'fires.popup_confidence_label' => 'Confidence',
-        'fires.popup_source_label' => 'Source',
-        'fires.location_line' => 'Fire {distance}km {direction} of {place}',
-        'fires.location_loading' => 'Looking up location...',
-        'fires.location_unavailable' => 'Location unavailable',
-        'fires.direction_n' => 'North',
-        'fires.direction_ne' => 'Northeast',
-        'fires.direction_e' => 'East',
-        'fires.direction_se' => 'Southeast',
-        'fires.direction_s' => 'South',
-        'fires.direction_sw' => 'Southwest',
-        'fires.direction_w' => 'West',
-        'fires.direction_nw' => 'Northwest',
-        'fires.popup_title' => 'Satellite Fire Detection',
-        'fires.popup_brightness_label' => 'Brightness',
-        'fires.popup_frp_label' => 'Fire Radiative Power',
-        'fires.popup_detected_label' => 'Detected',
-        'fires.confidence_low' => 'low confidence',
-        'fires.confidence_nominal' => 'nominal confidence',
-        'fires.confidence_high' => 'high confidence',
-        'fires.caveat' => 'Indicative satellite data (NASA FIRMS) — not a confirmed fire.',
 
         // Mission Visitor
         'visitor.nav_my_mission' => 'My Mission',

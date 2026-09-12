@@ -9,8 +9,8 @@
  * property this project has always had.
  *
  * Credentials live in `settings` (livekit_url / livekit_api_key /
- * livekit_api_secret), managed from settings.php alongside the weather and
- * FIRMS keys. Everything here degrades to "not configured" rather than
+ * livekit_api_secret), managed from settings.php alongside the weather
+ * key. Everything here degrades to "not configured" rather than
  * throwing, so the Action Room cards can simply not render — see
  * livekitConfigured().
  */
