@@ -109,14 +109,6 @@ if ($mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
     redirect('mission-view.php?id=' . $missionId);
 }
 
-// A volunteer's own explicit choice (the toggle button below, which sets
-// this cookie) always wins and is remembered from then on. With no cookie
-// yet, the default is the normal full view on every device, mobile
-// included — a deliberate reversal of this file's earlier User-Agent-sniffed
-// default (mission owner's explicit call): Field Mode stays available as an
-// opt-in, one tap away, but no longer decides silently for a first-time
-// mobile visitor.
-$fieldMode = isset($_COOKIE['wr_field_mode']) && $_COOKIE['wr_field_mode'] === '1';
 // Which LAYOUT this person gets — deliberately NOT the same question as
 // $canManageWarRoom, which is what they are ALLOWED to do. This was a plain
 // !$canManageWarRoom and that conflated the two: giving a volunteer a role
@@ -142,15 +134,6 @@ $viewModeCookie = $_COOKIE['wr_view_mode'] ?? '';
 $volunteerTabs = ($viewModeCookie === 'tabs' || $viewModeCookie === 'full')
     ? ($viewModeCookie === 'tabs')
     : !$isAdminAccount;
-// Field Mode is superseded by that view and is now command-staff-only: the
-// tabs already keep the map off the landing screen and put SOS in a fixed
-// bar, which is everything Field Mode was for. Forcing the flag off (rather
-// than only hiding the toggle) matters because the cookie is sticky — a
-// volunteer who switched to Field Mode before this shipped would otherwise
-// be stranded in a view with no map tab and no way back to one.
-if ($volunteerTabs) {
-    $fieldMode = false;
-}
 // Command staff who are in the tabbed view get a fifth tab of their own.
 // Authorization is untouched by the split above, so they still render every
 // command card (broadcast, dispatch, sectors, restricted areas, SOS alerts,
@@ -932,16 +915,8 @@ if (isPost()) {
         // every log line would train people to ignore the alerts that matter.
         setFlash('success', t('activity.note_added_flash'));
         redirect('war-room.php?id=' . $missionId);
-    } elseif (post('action') === 'toggle_field_mode') {
-        $newFieldMode = $fieldMode ? '0' : '1';
-        setcookie('wr_field_mode', $newFieldMode, [
-            'expires' => time() + 31536000, 'path' => '/',
-            'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
-            'httponly' => true, 'samesite' => 'Lax',
-        ]);
-        redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'toggle_view_mode') {
-        // Explicit layout choice, remembered exactly like wr_field_mode above.
+        // Explicit layout choice, remembered in a cookie of its own.
         // Gated on command powers unlike its neighbour — this one can land you
         // on the console view, and the button that gets you back out only
         // renders for command staff, so an ungated POST could strand a plain
@@ -957,12 +932,6 @@ if (isPost()) {
             'httponly' => true, 'samesite' => 'Lax',
         ];
         setcookie('wr_view_mode', $newViewMode, $cookieOpts);
-        // Field Mode is forced off inside the tabs anyway, but the cookie is
-        // sticky: without this, switching to tabs and back later would drop
-        // them into Field Mode, which reads as one toggle doing two things.
-        if ($newViewMode === 'tabs') {
-            setcookie('wr_field_mode', '0', $cookieOpts);
-        }
         redirect('war-room.php?id=' . $missionId);
     }
 }
@@ -1253,7 +1222,7 @@ $loadTeamProximity = function () use ($missionId, $user, $continuousFieldMinutes
     return ['nearbyTeams' => $nearbyTeams, 'teamDistances' => computeTeamDistanceMatrix($teamPositions)];
 };
 
-// Field Mode has no map at all (see the !$fieldMode wrap further down), so
+// Some viewers have no map (see the map card further down), so
 // this is the only place a field volunteer gets any restricted-area
 // awareness — a plain distance list instead of seeing the red zone on a
 // map, same reasoning as $loadTeamProximity/nearbyTeamsCard just above.
@@ -1704,7 +1673,7 @@ require_once __DIR__ . '/includes/war-room-layout.php';
 // Mirrors the #wrZoneMain/#wrZoneSidebar gate exactly — a saved drag layout is
 // only meaningful to the zone view, and $volunteerTabs now excludes it even
 // for command staff (they get the tabs instead, see the flags near the top).
-$warRoomLayout = ($canManageWarRoom && !$fieldMode && !$volunteerTabs)
+$warRoomLayout = ($canManageWarRoom && !$volunteerTabs)
     ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams), !empty($mission['is_special_mission']), $isMissingPersonMission, $weatherCompassOn, $liveEnabled)
     : null;
 
@@ -1968,7 +1937,7 @@ include __DIR__ . '/includes/header.php';
     .war-room-hero { background: linear-gradient(135deg, #172554, #b91c1c); color: #fff; border-radius: 14px; }
     .war-room-hero h1 { color: #fff; font-weight: 700; }
     /* The action row can hold up to ~10 buttons for an admin (report, trail,
-       coverage, field mode, fullscreen, keep-awake, layout lock, manage
+       coverage, fullscreen, keep-awake, layout lock, manage
        cards, back) — shrinking them (vs. Bootstrap's default btn size) fits
        noticeably more per row before flex-wrap kicks in, without hiding any
        of them behind a menu. Scoped to this hero only, not a global .btn
@@ -2243,19 +2212,10 @@ include __DIR__ . '/includes/header.php';
                  ~190px for exactly that reason, and these four all act on the
                  map, which is a tab away — a squad lead who needs them taps
                  the view toggle below and gets the whole console. */ ?>
-        <?php if ($canManageWarRoom && !$fieldMode && !$volunteerTabs): ?>
+        <?php if ($canManageWarRoom && !$volunteerTabs): ?>
         <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
         <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i><?= t('hero.btn_team_trail') ?></button>
         <button type="button" id="coverageModeToggle" class="btn btn-outline-light"><i class="bi bi-broadcast me-1"></i><?= t('hero.btn_verified_coverage') ?></button>
-        <?php endif; ?>
-        <?php if (!$volunteerTabs): ?>
-        <form method="post">
-            <?= csrfField() ?>
-            <input type="hidden" name="action" value="toggle_field_mode">
-            <button type="submit" class="btn btn-outline-light">
-                <i class="bi bi-<?= $fieldMode ? 'grid-3x3-gap' : 'geo-alt' ?> me-1"></i><?= $fieldMode ? t('hero.btn_full_view') : t('hero.btn_field_mode') ?>
-            </button>
-        </form>
         <?php endif; ?>
         <?php if ($canManageWarRoom): ?>
         <!-- Layout override. The default now follows the account type (see the
@@ -2279,7 +2239,7 @@ include __DIR__ . '/includes/header.php';
         <?php /* Both of these drive the drag/zone layout only — the IIFE that
                  wires them returns early when #wrZoneMain is absent, so in the
                  tabbed view they would render as two dead buttons. */ ?>
-        <?php if ($canManageWarRoom && !$fieldMode && !$volunteerTabs): ?>
+        <?php if ($canManageWarRoom && !$volunteerTabs): ?>
         <button type="button" id="wrLayoutLockToggle" class="btn btn-outline-light"></button>
         <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#cardVisibilityModal" title="<?= t('hero.btn_manage_cards') ?>" aria-label="<?= t('hero.btn_manage_cards') ?>">
             <i class="bi bi-gear-fill"></i>
@@ -2400,12 +2360,12 @@ include __DIR__ . '/includes/header.php';
 </nav>
 <?php endif; ?>
 
-<?php if ($canManageWarRoom && !$fieldMode && !$volunteerTabs): ?>
+<?php if ($canManageWarRoom && !$volunteerTabs): ?>
 <!-- Drag-and-drop card layout (admin desktop view only). Starts empty —
      every card below still renders in its normal PHP-conditioned spot; JS
      physically relocates each [data-card-id] node into these two zones
      (never clones), then removes the now-empty .wr-legacy-row containers
-     left behind. Any other view ($fieldMode, or a non-admin participant)
+     left behind. Any other view (a non-admin participant)
      never renders this block, so nothing below is ever touched for them. -->
 <div class="row g-4 mb-4">
     <div class="col-12 col-lg-8">
@@ -2420,7 +2380,6 @@ include __DIR__ . '/includes/header.php';
 <?php endif; ?>
 
 <div class="row g-4 mb-4 wr-legacy-row wr-stack-row">
-    <?php if (!$fieldMode): ?>
     <div class="col-12 col-lg-8">
         <div class="card shadow-sm h-100" id="mapCard" data-card-id="mapCard">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -2537,16 +2496,14 @@ include __DIR__ . '/includes/header.php';
         </div>
         <?php endif; ?>
     </div>
-    <?php endif; ?>
 
-    <!-- My Ping / field status / SOS. Deliberately OUTSIDE the !$fieldMode
-         gate above: Field Mode used to drop this card entirely, which left a
+    <!-- My Ping / field status / SOS. Deliberately OUTSIDE the admin-only
+         gate above: the old Field Mode used to drop this card entirely, which left a
          field volunteer with no SOS button, no on-way/on-site status, and —
          because the auto-ping geolocation watcher is gated on a .send-ping
          element existing in the DOM (see the two guards further down) — no
-         background GPS reporting either. Field Mode gets the wider
-         single-column width since it has no map column beside it. -->
-    <div class="col-12 <?= $fieldMode ? 'col-lg-6 mx-auto' : 'col-lg-4' ?>">
+         background GPS reporting either. -->
+    <div class="col-12 col-lg-4">
         <!-- Offline queue status. Sits above every field card rather than inside
              the Route Order one (where it used to live) because the queue now
              also carries field-status/SOS taps, which are reported from the
@@ -2558,7 +2515,7 @@ include __DIR__ . '/includes/header.php';
              exact negation of that block's own gate, $volunteerTabs included:
              command staff in the tabbed view never render the zones, so they
              need these two here. -->
-        <?php if (!($canManageWarRoom && !$fieldMode && !$volunteerTabs)): ?>
+        <?php if (!($canManageWarRoom && !$volunteerTabs)): ?>
         <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
         <div id="offlineQueueFailures"></div>
         <?php endif; ?>
@@ -2673,7 +2630,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 <?php endif; ?>
 
-<?php if (($canManageWarRoom || $isApprovedParticipant) && !$fieldMode): ?>
+<?php if ($canManageWarRoom || $isApprovedParticipant): ?>
 <?php
 // Shortage is admin-only, so whenever it's actually present there are
 // guaranteed to be 3 cards in this row (it + incidents + POI, both of the
@@ -2736,7 +2693,6 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 <?php endif; ?>
 
 <div class="row g-4 wr-stack-row">
-    <?php if (!$fieldMode): ?>
     <div class="col-12 col-lg-8 wr-legacy-row">
         <div class="card shadow-sm mb-4" data-card-id="teamsCard">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -3078,9 +3034,8 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
     </div>
-    <?php endif; ?>
 
-    <div class="<?= $fieldMode ? 'col-12 col-lg-6 mx-auto' : 'col-12 col-lg-4' ?>">
+    <div class="col-12 col-lg-4">
         <!-- No h-100 here on purpose. This column started out holding only
              the gallery, so stretching it to match the taller column beside
              it was right; the column now stacks nine cards, and stretching
@@ -3171,7 +3126,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
              "Αναζήτηση Αγνοουμένου" mission type — distinct from the
              free-text briefingCard. Unconditional visibility (like My
              Location/broadcastPhotoCard right below it): shows in both
-             Field Mode and full view to every approved participant, not just
+             the tabbed and full views to every approved participant, not just
              admins, since every field volunteer needs to know who they're
              looking for. Only $canManageWarRoom gets the edit trigger/modal. -->
         <?php if ($isMissingPersonMission): ?>
@@ -3274,14 +3229,10 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label small fw-semibold"><?= t('missing_person.last_seen_location_label') ?></label>
-                                    <?php if (!$fieldMode): ?>
                                     <div>
                                         <button type="button" class="btn btn-outline-primary btn-sm" id="missingPersonPickOnMapBtn"><i class="bi bi-crosshair"></i> <?= t('missing_person.pick_on_map_btn') ?></button>
                                     </div>
                                     <div class="small text-muted mt-1" id="missingPersonLocationPreview"></div>
-                                    <?php else: ?>
-                                    <div class="small text-muted"><?= t('missing_person.location_needs_full_view') ?></div>
-                                    <?php endif; ?>
                                     <input type="hidden" name="last_seen_lat" id="missingPersonLat" value="<?= h((string)($missingPerson['last_seen_lat'] ?? '')) ?>">
                                     <input type="hidden" name="last_seen_lng" id="missingPersonLng" value="<?= h((string)($missingPerson['last_seen_lng'] ?? '')) ?>">
                                 </div>
@@ -3316,7 +3267,6 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
              map card first. Field-mode-gated like every other map-drawing
              feature (the trigger button above already is too; this also
              skips shipping an unusable map container in that mode's DOM). -->
-        <?php if (!$fieldMode): ?>
         <div class="modal fade" id="missingPersonPickMapModal" tabindex="-1">
             <div class="modal-dialog modal-fullscreen">
                 <div class="modal-content">
@@ -3340,13 +3290,12 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         </div>
         <?php endif; ?>
         <?php endif; ?>
-        <?php endif; ?>
 
         <!-- Broadcast reference photo (e.g. a missing person's photo relayed
              to the coordination center) — read-only here, sent via the
              Καθολικό Μήνυμα composer further down (command staff only).
              Unconditional card (like My Location/Nearby/Route/Tasks): shows
-             in both Field Mode and full view, since field volunteers out
+             in both the tabbed and full views, since field volunteers out
              searching are exactly who most need to see it. Deliberately its
              own card, never merged into "Φωτογραφίες Πεδίου" (mediaCard) —
              that gallery is field-to-coordinator, this is the opposite
@@ -3358,11 +3307,11 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
-        <!-- Field Mode has no map at all (see the !$fieldMode wrap further up),
+        <!-- This card carries no map of its own,
              so this is the only place a field volunteer sees where other teams
              are — a plain distance+direction list instead of pins on a map.
              Unconditional card (like My Ping/Route/Tasks below it): shows in
-             both Field Mode and full view, content degrades gracefully via
+             both the tabbed and full views, content degrades gracefully via
              renderNearbyTeams() when there's no data yet. -->
         <div class="card shadow-sm mb-4 border-primary" data-card-id="nearbyTeamsCard">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-compass me-1"></i><?= t('nearby.panel_title') ?></h5></div>
@@ -3371,11 +3320,11 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
-        <!-- Field Mode's only restricted-area awareness (see the !$fieldMode
+        <!-- Map-free restricted-area awareness (see the map card
              map wrap further up) — a plain distance list mirroring
              nearbyTeamsCard just above, instead of seeing the red zone
              directly on a map that doesn't exist here. Unconditional, same
-             as nearbyTeamsCard: shows in both Field Mode and full view. -->
+             as nearbyTeamsCard: shows in both the tabbed and full views. -->
         <div class="card shadow-sm mb-4 border-danger" data-card-id="restrictedAreaProximityCard">
             <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('restricted_area.proximity_card_title') ?></h5></div>
             <div class="card-body">
@@ -3464,12 +3413,12 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
              so it does not earn a slot on the "me" tab beside their live orders.
              Command staff keep it, and can still hide it themselves through the
              Manage Cards gear if they do not want it either. -->
-        <?php /* Was !$fieldMode && !$volunteerTabs, which meant exactly
+        <?php /* Was gated on Field Mode and !$volunteerTabs, which meant exactly
                  "command staff keep it" back when those two were the same
                  question. Spelled out against $canManageWarRoom now that they
                  are not, so a squad lead in the tabbed view still gets it
                  (on their Διοίκηση tab) rather than losing it silently. */ ?>
-        <?php if (!$fieldMode && $canManageWarRoom): ?>
+        <?php if ($canManageWarRoom): ?>
         <div class="card shadow-sm mb-4" data-card-id="shiftsCard">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-calendar-range me-1"></i><?= t('shifts.panel_title') ?></h5></div>
             <div class="list-group list-group-flush">
@@ -3480,7 +3429,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         </div>
         <?php endif; ?>
 
-        <?php if ($canManageWarRoom && !$fieldMode): ?>
+        <?php if ($canManageWarRoom): ?>
         <div class="card shadow-sm mb-4 border-danger" data-card-id="sosAlertsCard">
             <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="bi bi-sos me-1"></i><?= t('sos.panel_title') ?></h5></div>
             <div class="card-body">
@@ -3489,7 +3438,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         </div>
         <?php endif; ?>
 
-        <?php if ($canManageWarRoom && !$fieldMode): ?>
+        <?php if ($canManageWarRoom): ?>
         <div class="card shadow-sm mb-4 border-danger" data-card-id="broadcastCard">
             <div class="card-header bg-danger bg-opacity-10"><h5 class="mb-0"><i class="bi bi-megaphone-fill me-1 text-danger"></i><?= t('global_message.card_title') ?></h5></div>
             <div class="card-body">
@@ -4267,7 +4216,6 @@ function t(key, vars = {}) {
     return text;
 }
 const jsLocale = <?= json_encode($__viewerLang === 'en' ? 'en-US' : 'el-GR') ?>;
-const fieldMode = <?= $fieldMode ? 'true' : 'false' ?>;
 const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>;
 let pins = <?= json_encode($pins) ?>;
 // K9 handler registry, keyed by user id — the client-side twin of
@@ -4285,7 +4233,7 @@ let dispatches = <?= json_encode($dispatches) ?>;
 let annotations = <?= json_encode($annotations) ?>;
 let areas = <?= json_encode($areas) ?>;
 // Set by openDivideSectorsForArea() (declared further down, inside the
-// !fieldMode block, where the area popup's "Divide into Sectors" button
+// map block, where the area popup's "Divide into Sectors" button
 // lives) and read by the divideSectorsModal IIFE (declared later in the
 // file, as its own separate top-level scope). MUST live at this true
 // top-level script scope, not inside any block — a `let` declared inside a
@@ -4293,15 +4241,15 @@ let areas = <?= json_encode($areas) ?>;
 // `function` declaration, which at least gets its name hoisted in sloppy
 // mode; see the field-mode hoisting note elsewhere in this file for that
 // related but distinct pitfall). Declaring this class of state inside the
-// !fieldMode block has already thrown "is not defined" once this session —
+// map block has already thrown "is not defined" once this session —
 // caught via a live shown.bs.modal test, not visible from php -l.
 let pendingDivideAreaId = null;
 // Same cross-scope requirement as pendingDivideAreaId just above — set by
-// openSplitSectorModal() (inside the !fieldMode block) and read by the
+// openSplitSectorModal() (inside the map block) and read by the
 // splitSectorModal IIFE (a separate top-level scope further down the file).
 let pendingSplitSectorId = null;
 // Same cross-scope requirement again — set by openDispatchForRing()/
-// openRouteForRing() (near openDivideSectorsForArea(), inside the !fieldMode
+// openRouteForRing() (near openDivideSectorsForArea(), inside the map
 // block) and consumed once, one-shot, inside dispatchMapModal's/
 // routeComposerModal's own shown.bs.modal handlers (separate top-level IIFE
 // scopes further down the file). Shape: null, or {points: [[lat,lng],...],
@@ -4382,7 +4330,7 @@ let restrictedAreaBreaches = <?= json_encode($restrictedAreaBreaches) ?>;
 let restrictedAreaBreachHistory = <?= json_encode($restrictedAreaBreachHistory) ?>;
 
 // Drag-and-drop card layout (admin desktop view only — #wrZoneMain/#wrZoneSidebar
-// only exist in the DOM when canManageWarRoom && !fieldMode, so their absence
+// only exist in the DOM when canManageWarRoom, so their absence
 // here already means "not this view", nothing further to check). Runs before
 // the map initializes below, so a saved layout that puts the map card in a
 // different zone is already in its final position before Leaflet ever
@@ -4842,28 +4790,6 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
     }
 })();
 
-// Field Mode only, automatic — keeps the screen from sleeping so passive
-// location capture keeps working while a volunteer's phone is out. The
-// browser force-releases this lock the instant the tab is hidden and does
-// NOT re-acquire it automatically, so it must be explicitly re-requested on
-// every return to visible or it silently stays dead after the first
-// backgrounding. Never blocks anything else on success/failure (unsupported
-// browser, low battery mode, non-secure context all just no-op quietly),
-// matching this file's existing defensive style for the Fullscreen API.
-let wakeLockSentinel = null;
-function requestWarRoomWakeLock() {
-    if (!fieldMode || !('wakeLock' in navigator)) return;
-    navigator.wakeLock.request('screen').then(sentinel => {
-        wakeLockSentinel = sentinel;
-        sentinel.addEventListener('release', () => { wakeLockSentinel = null; });
-    }).catch(() => { wakeLockSentinel = null; });
-}
-if (fieldMode) {
-    requestWarRoomWakeLock();
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') requestWarRoomWakeLock();
-    });
-}
 // Street/topographic/satellite base layers, shared by the live map and all 6
 // composer maps (dispatch/search-area/divide-into-sectors/split-sector/
 // restricted-area/route) — one definition so every map agrees on tile URLs
@@ -4958,112 +4884,110 @@ let map = null, dispatchLayer = null, trailLayer = null, annotationLayer = null,
 // kinds living in the same group.
 let sharedMarkerCluster = null;
 let currentPinMarkers = [], currentIncidentMarkers = [], currentPoiMarkers = [];
-if (!fieldMode) {
-    map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
-    addMapBaseLayers(map, 'mapSatelliteToggle');
-    // Search-area boundaries get their own pane BELOW search-sector polygons
-    // (tilePane 200 < areaPane 340 < sectorPane 350 < overlayPane 400 <
-    // markerPane 600) — an area is the large outer container a sector lives
-    // inside, so it must render underneath the sector's own fill, never on
-    // top of it.
-    map.createPane('areaPane');
-    map.getPane('areaPane').style.zIndex = 340;
-    areaLayer = L.featureGroup().addTo(map);
-    // Search-sector polygons get their own pane BELOW the default marker/
-    // overlay panes (tilePane 200 < sectorPane 350 < overlayPane 400 <
-    // markerPane 600) — sectors are large background coverage fills and
-    // must never sit visually on top of dispatch polygons or live pins the
-    // way annotationPane (610, above everything) deliberately does for
-    // hand-drawn sketches. Buildings are separate point markers and stay in
-    // the default marker pane (sectorBuildingLayer, created below) rather
-    // than this pane, since a small precise point would visually bury
-    // under the sector's own fill if placed at this same low z-index.
-    map.createPane('sectorPane');
-    map.getPane('sectorPane').style.zIndex = 350;
-    sectorLayer = L.featureGroup().addTo(map);
-    sectorBuildingLayer = L.featureGroup().addTo(map);
-    // Verified Coverage gap-cell overlay gets its own pane ABOVE sectorPane
-    // (so translucent gap tint paints over the sector's own status-color
-    // fill) but BELOW the default overlayPane/markerPane (tilePane 200 <
-    // areaPane 340 < sectorPane 350 < coveragePane 360 < overlayPane 400 <
-    // markerPane 600) — live pins must stay visible on top of it. Not
-    // attached to the map here — same never-attached-until-toggled pattern
-    // as trailLayer just below, only shown while coverage mode is active.
-    map.createPane('coveragePane');
-    map.getPane('coveragePane').style.zIndex = 360;
-    coverageLayer = L.featureGroup();
-    // Shared by pins, incidents and POI (see the declaration comment above)
-    // — a MarkerClusterGroup IS an L.FeatureGroup, so popupopen still
-    // propagates from a child marker up to this group's own listener the
-    // same way it did from the old plain pinLayer, needed by the
-    // pin-charge-alert-btn wiring below. spiderfyOnMaxZoom is the library
-    // default (true) — named explicitly anyway since it's the whole point
-    // of adding this library in the first place, not an incidental option.
-    sharedMarkerCluster = L.markerClusterGroup({spiderfyOnMaxZoom: true, showCoverageOnHover: false}).addTo(map);
-    // FeatureGroup (not plain LayerGroup) is required here: only FeatureGroup
-    // propagates child-layer events like 'popupopen' up to the group's own
-    // listeners, which is how dispatchLayer.on('popupopen', ...) below wires up
-    // the Ελήφθη/Άφιξη/Διαγραφή buttons inside each dispatch's popup.
-    dispatchLayer = L.featureGroup().addTo(map);
-    // Not attached to the map yet — only shown while trail mode is active
-    // (enterTrailMode()/exitTrailMode() below), swapped in place of the live
-    // pin markers (removed from sharedMarkerCluster while trail mode is on,
-    // not the whole shared group — incidents/POI in it stay visible).
-    trailLayer = L.layerGroup();
-    // Battle-map annotations get their own pane (above the default marker/
-    // overlay panes) so a draw-mode CSS rule can suspend pin/dispatch click
-    // interactivity without touching this one — the eraser must keep working
-    // while everything else is suspended. annotationLayer holds only the
-    // persisted shapes (rebuilt from scratch by renderAnnotations() every
-    // poll, like dispatchLayer); annotationDrawLayer holds only the
-    // in-progress gesture preview (an active freehand stroke, a pending arrow
-    // start point) so a poll tick landing mid-gesture can never wipe out what's
-    // currently being drawn.
-    map.createPane('annotationPane');
-    map.getPane('annotationPane').style.zIndex = 610;
-    annotationLayer = L.featureGroup().addTo(map);
-    annotationDrawLayer = L.layerGroup().addTo(map);
-    // FeatureGroup so popup events propagate the same way dispatchLayer's do
-    // (not used for buttons today, but keeps the two "War Room order" layers
-    // consistent in case a future popup action needs it).
-    routeLayer = L.featureGroup().addTo(map);
-    // Incidents and POI markers go straight into sharedMarkerCluster
-    // (created above, alongside pins) instead of their own layer — no
-    // separate init needed here any more.
-    missingPersonLayer = L.featureGroup().addTo(map);
-    // No custom pane — L.circle defaults to the standard overlayPane (z=400),
-    // which already sits exactly where these rings should stack: above
-    // coveragePane/sectorPane/areaPane, below markerPane/annotationPane/
-    // restrictedAreaPane. Same as dispatchLayer/routeLayer/trailLayer, none
-    // of which use a custom pane either.
-    searchRingsLayer = L.featureGroup().addTo(map);
-    // Restricted (hazard/danger) areas render ABOVE literally everything else
-    // on the map, including annotationPane (610, itself already above every
-    // default Leaflet pane) — the user's own explicit ask. 700 leaves headroom
-    // above annotationPane without needing to renumber anything else.
-    map.createPane('restrictedAreaPane');
-    map.getPane('restrictedAreaPane').style.zIndex = 700;
-    restrictedAreaLayer = L.featureGroup().addTo(map);
-    // Diagonal-hatch fill pattern, injected once as a standalone SVG appended
-    // to document.body — deliberately NOT reaching into Leaflet's internals
-    // (map.getPanes()/map._renderer._container). A custom pane with no
-    // explicitly-created renderer gets its own separate, lazily-created SVG
-    // root distinct from the default overlayPane's (areaPane/sectorPane
-    // already do this invisibly), so a <defs> placed inside one pane's tree
-    // wouldn't be reachable from a polygon drawn in a different pane anyway.
-    // fill="url(#id)" resolves document-wide regardless of which SVG subtree
-    // hosts the referencing element, so a standalone def sidesteps the whole
-    // question and survives restrictedAreaLayer.clearLayers() on every
-    // re-render (never part of the cleared layer group to begin with).
-    if (!document.getElementById('restrictedHatchDefs')) {
-        const hatchSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        hatchSvg.setAttribute('id', 'restrictedHatchDefs');
-        hatchSvg.style.cssText = 'position:absolute;width:0;height:0';
-        hatchSvg.innerHTML = '<defs><pattern id="restrictedHatch" patternUnits="userSpaceOnUse" width="10" height="10" patternTransform="rotate(45)">'
-            + '<line x1="0" y1="0" x2="0" y2="10" stroke="#dc3545" stroke-width="4" stroke-dasharray="4,3"/>'
-            + '</pattern></defs>';
-        document.body.appendChild(hatchSvg);
-    }
+map = L.map('warRoomMap').setView(missionLocation.lat ? [missionLocation.lat, missionLocation.lng] : [37.97, 23.73], missionLocation.lat ? 13 : 7);
+addMapBaseLayers(map, 'mapSatelliteToggle');
+// Search-area boundaries get their own pane BELOW search-sector polygons
+// (tilePane 200 < areaPane 340 < sectorPane 350 < overlayPane 400 <
+// markerPane 600) — an area is the large outer container a sector lives
+// inside, so it must render underneath the sector's own fill, never on
+// top of it.
+map.createPane('areaPane');
+map.getPane('areaPane').style.zIndex = 340;
+areaLayer = L.featureGroup().addTo(map);
+// Search-sector polygons get their own pane BELOW the default marker/
+// overlay panes (tilePane 200 < sectorPane 350 < overlayPane 400 <
+// markerPane 600) — sectors are large background coverage fills and
+// must never sit visually on top of dispatch polygons or live pins the
+// way annotationPane (610, above everything) deliberately does for
+// hand-drawn sketches. Buildings are separate point markers and stay in
+// the default marker pane (sectorBuildingLayer, created below) rather
+// than this pane, since a small precise point would visually bury
+// under the sector's own fill if placed at this same low z-index.
+map.createPane('sectorPane');
+map.getPane('sectorPane').style.zIndex = 350;
+sectorLayer = L.featureGroup().addTo(map);
+sectorBuildingLayer = L.featureGroup().addTo(map);
+// Verified Coverage gap-cell overlay gets its own pane ABOVE sectorPane
+// (so translucent gap tint paints over the sector's own status-color
+// fill) but BELOW the default overlayPane/markerPane (tilePane 200 <
+// areaPane 340 < sectorPane 350 < coveragePane 360 < overlayPane 400 <
+// markerPane 600) — live pins must stay visible on top of it. Not
+// attached to the map here — same never-attached-until-toggled pattern
+// as trailLayer just below, only shown while coverage mode is active.
+map.createPane('coveragePane');
+map.getPane('coveragePane').style.zIndex = 360;
+coverageLayer = L.featureGroup();
+// Shared by pins, incidents and POI (see the declaration comment above)
+// — a MarkerClusterGroup IS an L.FeatureGroup, so popupopen still
+// propagates from a child marker up to this group's own listener the
+// same way it did from the old plain pinLayer, needed by the
+// pin-charge-alert-btn wiring below. spiderfyOnMaxZoom is the library
+// default (true) — named explicitly anyway since it's the whole point
+// of adding this library in the first place, not an incidental option.
+sharedMarkerCluster = L.markerClusterGroup({spiderfyOnMaxZoom: true, showCoverageOnHover: false}).addTo(map);
+// FeatureGroup (not plain LayerGroup) is required here: only FeatureGroup
+// propagates child-layer events like 'popupopen' up to the group's own
+// listeners, which is how dispatchLayer.on('popupopen', ...) below wires up
+// the Ελήφθη/Άφιξη/Διαγραφή buttons inside each dispatch's popup.
+dispatchLayer = L.featureGroup().addTo(map);
+// Not attached to the map yet — only shown while trail mode is active
+// (enterTrailMode()/exitTrailMode() below), swapped in place of the live
+// pin markers (removed from sharedMarkerCluster while trail mode is on,
+// not the whole shared group — incidents/POI in it stay visible).
+trailLayer = L.layerGroup();
+// Battle-map annotations get their own pane (above the default marker/
+// overlay panes) so a draw-mode CSS rule can suspend pin/dispatch click
+// interactivity without touching this one — the eraser must keep working
+// while everything else is suspended. annotationLayer holds only the
+// persisted shapes (rebuilt from scratch by renderAnnotations() every
+// poll, like dispatchLayer); annotationDrawLayer holds only the
+// in-progress gesture preview (an active freehand stroke, a pending arrow
+// start point) so a poll tick landing mid-gesture can never wipe out what's
+// currently being drawn.
+map.createPane('annotationPane');
+map.getPane('annotationPane').style.zIndex = 610;
+annotationLayer = L.featureGroup().addTo(map);
+annotationDrawLayer = L.layerGroup().addTo(map);
+// FeatureGroup so popup events propagate the same way dispatchLayer's do
+// (not used for buttons today, but keeps the two "War Room order" layers
+// consistent in case a future popup action needs it).
+routeLayer = L.featureGroup().addTo(map);
+// Incidents and POI markers go straight into sharedMarkerCluster
+// (created above, alongside pins) instead of their own layer — no
+// separate init needed here any more.
+missingPersonLayer = L.featureGroup().addTo(map);
+// No custom pane — L.circle defaults to the standard overlayPane (z=400),
+// which already sits exactly where these rings should stack: above
+// coveragePane/sectorPane/areaPane, below markerPane/annotationPane/
+// restrictedAreaPane. Same as dispatchLayer/routeLayer/trailLayer, none
+// of which use a custom pane either.
+searchRingsLayer = L.featureGroup().addTo(map);
+// Restricted (hazard/danger) areas render ABOVE literally everything else
+// on the map, including annotationPane (610, itself already above every
+// default Leaflet pane) — the user's own explicit ask. 700 leaves headroom
+// above annotationPane without needing to renumber anything else.
+map.createPane('restrictedAreaPane');
+map.getPane('restrictedAreaPane').style.zIndex = 700;
+restrictedAreaLayer = L.featureGroup().addTo(map);
+// Diagonal-hatch fill pattern, injected once as a standalone SVG appended
+// to document.body — deliberately NOT reaching into Leaflet's internals
+// (map.getPanes()/map._renderer._container). A custom pane with no
+// explicitly-created renderer gets its own separate, lazily-created SVG
+// root distinct from the default overlayPane's (areaPane/sectorPane
+// already do this invisibly), so a <defs> placed inside one pane's tree
+// wouldn't be reachable from a polygon drawn in a different pane anyway.
+// fill="url(#id)" resolves document-wide regardless of which SVG subtree
+// hosts the referencing element, so a standalone def sidesteps the whole
+// question and survives restrictedAreaLayer.clearLayers() on every
+// re-render (never part of the cleared layer group to begin with).
+if (!document.getElementById('restrictedHatchDefs')) {
+    const hatchSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    hatchSvg.setAttribute('id', 'restrictedHatchDefs');
+    hatchSvg.style.cssText = 'position:absolute;width:0;height:0';
+    hatchSvg.innerHTML = '<defs><pattern id="restrictedHatch" patternUnits="userSpaceOnUse" width="10" height="10" patternTransform="rotate(45)">'
+        + '<line x1="0" y1="0" x2="0" y2="10" stroke="#dc3545" stroke-width="4" stroke-dasharray="4,3"/>'
+        + '</pattern></defs>';
+    document.body.appendChild(hatchSvg);
 }
 const ANNOTATION_COLOR = '#1f2937';
 // Battle-map annotation tool state — a plain toggle over the same live map
@@ -5428,7 +5352,13 @@ function renderAnnotations(items) {
         }
     });
 }
-if (!fieldMode) {
+// Bare block, not a stray brace: this was the body of `if (!fieldMode) {`.
+// Field Mode is gone, so the condition is, but the braces stay because they
+// are a real scope boundary — 46 top-level let/const/function declarations
+// live in here and several functions elsewhere in this file are deliberately
+// declared OUTSIDE it so they stay reachable (see the notes below). Removing
+// the braces would hoist all 46 into script scope for no benefit.
+{
 dispatchLayer.on('popupopen', event => {
     const popupEl = event.popup.getElement();
     const delBtn = popupEl.querySelector('.dispatch-delete-btn');
@@ -5471,13 +5401,13 @@ dispatchLayer.on('popupopen', event => {
 // stats.php already uses for its own status-driven charts.
 // NOTE: sectorRefreshAfter/sectorSelfAdvance/sectorFloorToggle/
 // sectorActionLabel/sectorFloorChecklistHtml/renderMySectors are NOT here —
-// they live below, outside this `if (!fieldMode)` block. A `function` DEFINED
+// they live below, outside this scoped block. A `function` DEFINED
 // inside a block is only actually ASSIGNED if that block runs (legacy
-// sloppy-mode "Annex B" hoisting rules) — in field mode this block never
-// runs at all, so anything renderMySectors' own field-mode card needs at
-// call time must be declared where field mode still reaches it. Confirmed
+// sloppy-mode "Annex B" hoisting rules), and this block used to be skipped
+// entirely for map-less viewers, so anything renderMySectors' own card
+// needs at call time must be declared outside it. Confirmed
 // live: this exact mistake first shipped as "renderMySectors is not a
-// function" the moment field mode was tested for real, not caught by
+// function" the moment a map-less viewer was tested for real, not caught by
 // php -l (a JS runtime issue, not a PHP one) or by any of the full-view
 // testing done first.
 const SECTOR_STATUS_HEX = <?= json_encode(array_map(fn($c) => MISSION_TYPE_COLOR_HEX[$c] ?? '#6c757d', SECTOR_STATUS_COLORS)) ?>;
@@ -5567,7 +5497,7 @@ function sectorDeleteBuilding(id) {
 // top-level script scope, not inside this block, for the same reason
 // pendingSectorAreaId used to have to (see the note further down where the
 // file-wide `let areas/sectors` globals are declared): a `let` inside this
-// `if (!fieldMode) {}` block is invisible to a sibling scope outside it.
+// scoped block is invisible to a sibling scope outside it.
 function openDivideSectorsForArea(areaId) {
     pendingDivideAreaId = areaId;
     const modalEl = document.getElementById('divideSectorsModal');
@@ -5733,7 +5663,7 @@ function openDivideRingIntoSectors(ringIndex, btnEl) {
 // audited, notification-sending create actions, so there's nothing to roll
 // back that the server doesn't already know about.
 // var, not `async function ...` — this whole region turns out to sit
-// inside the `if (!fieldMode) { ... }` block opened way above (its real
+// inside the bare scoped block opened way above (its real
 // closing brace is 1300+ lines down, near updateMissingPersonLocationPreview
 // — the block is far bigger than several nearby comments assume). Plain
 // `function` declarations there still end up global via legacy sloppy-mode
@@ -5826,7 +5756,7 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
         sectorRefreshAfter(sectorResult.sectors, sectorResult.areas);
         routes = routeResult.routes;
         renderMyRoutes(routes);
-        if (!fieldMode) { renderRoutesAdmin(routes); renderRouteLayer(routes); }
+        renderRoutesAdmin(routes); renderRouteLayer(routes);
     }
 
     if (btnEl) btnEl.disabled = false;
@@ -5901,7 +5831,7 @@ document.getElementById('ringResetBtn')?.addEventListener('click', () => {
         if (routeResult.ok && routeResult.routes) {
             routes = routeResult.routes;
             renderMyRoutes(routes);
-            if (!fieldMode) { renderRoutesAdmin(routes); renderRouteLayer(routes); }
+            renderRoutesAdmin(routes); renderRouteLayer(routes);
         }
         const failed = [sectorResult, dispatchResult, routeResult].find(r => !r.ok);
         if (failed) alert(failed.error || t('common.send_failed'));
@@ -5991,7 +5921,7 @@ areaLayer?.on('popupopen', event => {
 // Restricted (hazard/danger) areas — solid red border + red diagonal-hatch
 // fill (restrictedHatch pattern, defined once at map init above), rendered
 // in restrictedAreaPane (z-index 700) so they sit above every other layer on
-// the map, admin-drawn/managed only (field mode has no map to show these on;
+// the map, admin-drawn/managed only (a map-less viewer never sees these;
 // the volunteer-facing side of this feature is purely the full-screen alarm,
 // wired separately below).
 function renderRestrictedAreaLayer(items) {
@@ -6499,7 +6429,7 @@ function renderSectorsList(items) {
 
     list.querySelectorAll('.sector-list-row').forEach(row => row.addEventListener('click', e => {
         if (e.target.closest('button, select, input')) return;
-        if (fieldMode || !map) return;
+        if (!map) return;
         const item = sectors.find(s => String(s.id) === row.dataset.id);
         if (item && item.geo && item.geo.length) {
             map.fitBounds(L.latLngBounds(item.geo), {padding: [40, 40], maxZoom: 17});
@@ -6515,7 +6445,7 @@ function renderSectorsList(items) {
 
     list.querySelectorAll('.area-list-header').forEach(header => header.addEventListener('click', e => {
         if (e.target.closest('button')) return;
-        if (fieldMode || !map) return;
+        if (!map) return;
         const area = areas.find(a => String(a.id) === header.dataset.id);
         if (area && area.geo && area.geo.length) {
             map.fitBounds(L.latLngBounds(area.geo), {padding: [40, 40], maxZoom: 16});
@@ -6732,16 +6662,16 @@ document.getElementById('missingPersonPickOnMapBtn')?.addEventListener('click', 
 updateMissingPersonLocationPreview();
 }
 
-// Search-sector functions that MUST work in field mode (no map involved,
-// deliberately declared outside the `if (!fieldMode)` block above — see the
+// Search-sector functions that MUST work without a map (no map involved,
+// deliberately declared outside the scoped block above — see the
 // note next to SECTOR_STATUS_HEX for why a block-scoped `function` here
-// would silently never be assigned in field mode). renderSectorLayer/
+// would silently never be assigned when the block is skipped). renderSectorLayer/
 // renderSectorsList/sectorAdminSetStatus/sectorDelete/sectorDeleteBuilding
 // stay inside that block on purpose — they're genuinely map/full-view-only.
 function sectorRefreshAfter(newSectors, newAreas) {
     if (newSectors) sectors = newSectors;
     if (newAreas) areas = newAreas;
-    if (!fieldMode) { renderSectorLayer(sectors); renderSectorsList(sectors); renderAreaLayer(areas); }
+    renderSectorLayer(sectors); renderSectorsList(sectors); renderAreaLayer(areas);
     renderMySectors(sectors);
 }
 // Separate from sectorSelfAdvance below — acknowledging a fresh assignment
@@ -7144,9 +7074,7 @@ function renderPins(items) {
 // Navigate button (admin-only, always rendered regardless of the battery
 // badge). Mirrors dispatchLayer.on('popupopen', ...) below exactly — same
 // delegated-listener-on-the-group approach, since a marker's popup only
-// exists in the DOM while genuinely open. Field Mode has no map at all,
-// same guard every other pin/layer listener here already uses.
-if (!fieldMode) {
+// exists in the DOM while genuinely open.
 sharedMarkerCluster.on('popupopen', event => {
     const popupEl = event.popup.getElement();
     const chargeBtn = popupEl.querySelector('.pin-charge-alert-btn');
@@ -7170,18 +7098,17 @@ sharedMarkerCluster.on('popupopen', event => {
         });
     }
 });
-}
 
-// Nearby Teams (field-card column, both modes — the only place a Field Mode
-// volunteer sees any position data at all, since that mode has no map) and
-// Team Distances (small addendum inside the Teams panel, full view only).
+// Nearby Teams (field-card column — the only place a volunteer with no map
+// sees any position data at all) and Team Distances (small addendum inside
+// the Teams panel, full view only).
 // No existing meters->km or bearing->compass-letter formatter anywhere in
 // this file to reuse (route.distance_from_point only ever shows raw
 // unrounded meters) — both written fresh here.
 // The 100m threshold below is a rough "getting close, pay attention" cue,
 // not the actual safety boundary — the real trigger is entering the zone
 // at all (distance 0), which fires the existing full-screen alarm
-// regardless of Field Mode. This card is purely proactive/informational.
+// regardless. This card is purely proactive/informational.
 const RESTRICTED_AREA_PROXIMITY_WARN_METERS = 100;
 let restrictedAreaProximityRenderedSig = null;
 function renderRestrictedAreaProximity(items) {
@@ -8058,8 +7985,8 @@ function renderMyTasks(items) {
 }
 
 // ── Route Orders ("Εντολή Πορείας") ─────────────────────────────────────────
-// One team-scoped multi-waypoint patrol. Field mode has no map/media panel at
-// all (see the `!fieldMode`-gated block above), so this card is fully
+// One team-scoped multi-waypoint patrol. A map-less viewer has no map/media panel at
+// all (see the map block above), so this card is fully
 // self-contained: its own directions links, its own photo/video capture
 // (hits mission-photo.php directly with route_waypoint_id), its own GPS
 // capture for "arrive". Every mutating call POSTs to mission-route.php and
@@ -8076,7 +8003,7 @@ function postRouteAction(action, id, extra) {
         if (result && result.ok && result.routes) {
             routes = result.routes;
             renderMyRoutes(routes);
-            if (!fieldMode) { renderRoutesAdmin(routes); renderRouteLayer(routes); }
+            renderRoutesAdmin(routes); renderRouteLayer(routes);
         }
         return result;
     }).catch(() => ({ok: false, error: t('common.network_error'), networkError: true}));
@@ -8378,7 +8305,7 @@ function routeAcknowledge(routeId, orderId, btn) {
             const route = routes.find(r => String(r.id) === String(routeId));
             if (route) route.my_acknowledged_at = true;
             renderMyRoutes(routes);
-            if (!fieldMode) renderRouteLayer(routes);
+            renderRouteLayer(routes);
         } else { btn.disabled = false; alert(result.error || t('common.failed')); }
     }).catch(() => { btn.disabled = false; });
 }
@@ -8454,7 +8381,7 @@ function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
     // wireMediaInput's own upload flow, composed the same way (compression
     // + geolocation concurrent, one CPU-bound, one a GPS wait) — this is
     // the *other* independent upload path (a Route Order waypoint's own
-    // self-contained capture button, used because field mode has no map/
+    // self-contained capture button, used because that view has no map/
     // media panel), and without this it would keep the exact same
     // slow-upload problem for a required deliverable photo/video.
     const compressPromise = isVideo
@@ -8492,7 +8419,7 @@ function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
                         }
                     }
                     renderMyRoutes(routes);
-                    if (!fieldMode) renderRouteLayer(routes);
+                    renderRouteLayer(routes);
                 } else {
                     if (statusEl) { statusEl.textContent = result.error || t('common.send_failed'); statusEl.className = 'small text-danger'; }
                 }
@@ -9460,7 +9387,7 @@ function renderSosAlerts(items) {
     `).join('');
     list.querySelectorAll('.sos-locate-link').forEach(link => link.addEventListener('click', (e) => {
         e.preventDefault();
-        if (!fieldMode && map) { map.setView([parseFloat(link.dataset.lat), parseFloat(link.dataset.lng)], 16); }
+        if (map) { map.setView([parseFloat(link.dataset.lat), parseFloat(link.dataset.lng)], 16); }
     }));
     list.querySelectorAll('.sos-ack-btn').forEach(btn => btn.addEventListener('click', () => {
         btn.disabled = true;
@@ -9470,7 +9397,7 @@ function renderSosAlerts(items) {
                 const item = sosAlerts.find(x => String(x.id) === btn.dataset.alertId);
                 if (item) item.acknowledged_at = item.acknowledged_at || t('common.now');
                 renderSosAlerts(sosAlerts);
-                if (!fieldMode) updateSosAlarmState(sosAlerts);
+                updateSosAlarmState(sosAlerts);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
     }));
@@ -9481,7 +9408,7 @@ function renderSosAlerts(items) {
             if (result.ok) {
                 sosAlerts = sosAlerts.filter(x => String(x.id) !== btn.dataset.alertId);
                 renderSosAlerts(sosAlerts);
-                if (!fieldMode) updateSosAlarmState(sosAlerts);
+                updateSosAlarmState(sosAlerts);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
     }));
@@ -10065,7 +9992,7 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 })();
 
 setTimeout(() => {
-    if (!fieldMode) { renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); renderSearchRingsLayer(missingPerson); renderWeatherControl(weather); }
+    renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); renderSearchRingsLayer(missingPerson); renderWeatherControl(weather);
     renderMyTasks(myTasks);
     renderMySectors(sectors);
     renderMyRoutes(routes);
@@ -10078,7 +10005,7 @@ setTimeout(() => {
     renderBroadcastPhotos(broadcastPhotos);
     renderMissingPersonCard(missingPerson);
     renderWeatherCard(weather, exposureUrgency);
-    if (!fieldMode) updateSosAlarmState(sosAlerts);
+    updateSosAlarmState(sosAlerts);
     // Ungated (unlike updateSosAlarmState just above) — same reasoning as the
     // poll-path wiring in pollWarRoomData(): this alarm's primary audience is
     // the field volunteer's own device, not just command staff.
@@ -10773,10 +10700,8 @@ function loadActivity() {
         if (list) list.innerHTML = '<div class="text-muted small">' + t('activity.load_failed') + '</div>';
     }).finally(() => { clearTimeout(activityKiller); activityInFlight = false; });
 }
-if (!fieldMode) {
-    loadActivity();
-    setInterval(() => { if (!document.hidden) loadActivity(); }, 15000);
-}
+loadActivity();
+setInterval(() => { if (!document.hidden) loadActivity(); }, 15000);
 
 const reportModalEl = document.getElementById('reportModal');
 if (reportModalEl) {
@@ -10983,7 +10908,7 @@ function sendAutoPing(position) {
 
 // enableHighAccuracy is deliberately false here (unlike the manual button
 // above) — a live ops-map pin doesn't need meter-level precision, and pairing
-// continuous high-accuracy GPS with Field Mode's always-on screen (below)
+// continuous high-accuracy GPS with the keep-awake screen (below)
 // over a multi-hour mission is a real battery cost not worth paying twice.
 // Delayed a few seconds so the location-permission prompt doesn't fire the
 // instant the page renders, before anyone's read anything on it.
@@ -11486,30 +11411,28 @@ function pollWarRoomData() {
             // Nothing to redraw, but the refresh clock still has to move —
             // a frozen timestamp is how this page tells the viewer it has
             // lost contact, and that would be a lie here.
-            if (!fieldMode) document.getElementById('mapRefresh').textContent = data.time || '';
+            document.getElementById('mapRefresh').textContent = data.time || '';
             return;
         }
         // Refreshed BEFORE any render below — every k9BadgeHtml()/captainBadgeHtml()
         // call in this same tick must see the new registry, not the previous cycle's.
         if (data.k9Handlers) k9Handlers = data.k9Handlers;
         if (data.teamCaptains) teamCaptains = data.teamCaptains;
-        if (!fieldMode) {
-            renderPins(pins = data.pins || []);
-            if (data.dispatches) renderDispatches(dispatches = data.dispatches);
-            if (data.annotations) renderAnnotations(annotations = data.annotations);
-            // Keeps the route composer's reference layers live while it's
-            // open, not just at the moment it was opened — both are no-ops
-            // until the composer has been opened at least once this session
-            // (the layers stay null until then).
-            renderRouteComposerPins(pins);
-            renderRouteComposerAnnotations(annotations);
-            renderRouteComposerAreas();
-            if (data.media) {
-                const sig = JSON.stringify(data.media);
-                if (sig !== mediaSignature) {
-                    mediaSignature = sig;
-                    renderMedia(media = data.media);
-                }
+        renderPins(pins = data.pins || []);
+        if (data.dispatches) renderDispatches(dispatches = data.dispatches);
+        if (data.annotations) renderAnnotations(annotations = data.annotations);
+        // Keeps the route composer's reference layers live while it's
+        // open, not just at the moment it was opened — both are no-ops
+        // until the composer has been opened at least once this session
+        // (the layers stay null until then).
+        renderRouteComposerPins(pins);
+        renderRouteComposerAnnotations(annotations);
+        renderRouteComposerAreas();
+        if (data.media) {
+            const sig = JSON.stringify(data.media);
+            if (sig !== mediaSignature) {
+                mediaSignature = sig;
+                renderMedia(media = data.media);
             }
         }
         if (data.broadcastPhotos) renderBroadcastPhotos(broadcastPhotos = data.broadcastPhotos);
@@ -11522,22 +11445,22 @@ function pollWarRoomData() {
         if (data.routes) {
             routes = data.routes;
             renderMyRoutes(routes);
-            if (!fieldMode) { renderRoutesAdmin(routes); renderRouteLayer(routes); }
+            renderRoutesAdmin(routes); renderRouteLayer(routes);
         }
         if (data.shortageReports) renderShortageReports(shortageReports = data.shortageReports);
         if (data.incidents) {
             missionIncidents = data.incidents;
             renderMissionIncidents(missionIncidents);
-            if (!fieldMode) renderIncidentLayer(missionIncidents);
+            renderIncidentLayer(missionIncidents);
         }
         if (data.sosAlerts) {
             renderSosAlerts(sosAlerts = data.sosAlerts);
-            if (!fieldMode) updateSosAlarmState(sosAlerts);
+            updateSosAlarmState(sosAlerts);
         }
         if (data.pointsOfInterest) {
             pointsOfInterest = data.pointsOfInterest;
             renderPointsOfInterest(pointsOfInterest);
-            if (!fieldMode) renderPoiLayer(pointsOfInterest);
+            renderPoiLayer(pointsOfInterest);
         }
         // !== undefined, not a truthy check like the blocks above/below —
         // null is this field's normal "no profile filled in yet" value, not
@@ -11546,45 +11469,45 @@ function pollWarRoomData() {
         if (data.missingPerson !== undefined) {
             missingPerson = data.missingPerson;
             renderMissingPersonCard(missingPerson);
-            if (!fieldMode) { renderMissingPersonMarker(missingPerson); renderSearchRingsLayer(missingPerson); }
+            renderMissingPersonMarker(missingPerson); renderSearchRingsLayer(missingPerson);
         }
         if (data.weather !== undefined) {
             weather = data.weather;
             exposureUrgency = data.exposureUrgency;
             renderWeatherCard(weather, exposureUrgency);
-            if (!fieldMode) renderWeatherControl(weather);
+            renderWeatherControl(weather);
         }
         if (data.areas) areas = data.areas;
-        if (!fieldMode && data.teams) renderTeamRosters(data.teams);
+        if (data.teams) renderTeamRosters(data.teams);
         if (data.sectors) {
             sectors = data.sectors;
             renderMySectors(sectors);
-            if (!fieldMode) { renderSectorLayer(sectors); renderSectorsList(sectors); renderAreaLayer(areas); }
+            renderSectorLayer(sectors); renderSectorsList(sectors); renderAreaLayer(areas);
         }
         if (data.restrictedAreas) {
             restrictedAreas = data.restrictedAreas;
-            if (!fieldMode) { renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); }
+            renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas);
         }
         if (data.restrictedAreaBreaches) {
             restrictedAreaBreaches = data.restrictedAreaBreaches;
-            // Deliberately NOT !fieldMode-gated, unlike updateSosAlarmState just
+            // Deliberately NOT map-gated, unlike updateSosAlarmState just
             // above — SOS is command-only by design, but this alarm's primary
             // audience is the field volunteer's own device. Mirrors how
             // triggerReturnToBaseAlarm (via the banners loop below) already
-            // reaches fieldMode unconditionally.
+            // reaches every viewer unconditionally.
             updateRestrictedAreaAlarmState(restrictedAreaBreaches);
         }
         if (data.restrictedAreaBreachHistory) {
             restrictedAreaBreachHistory = data.restrictedAreaBreachHistory;
-            if (!fieldMode) renderRestrictedAreaBreachesList(restrictedAreaBreachHistory);
+            renderRestrictedAreaBreachesList(restrictedAreaBreachHistory);
         }
         if (data.onlinePresence) renderPresence(data.onlinePresence, data.pingStaleness);
         if (data.pingStaleness) renderPingStaleness(data.pingStaleness);
         if (data.participantLive) renderParticipantLiveData(data.participantLive);
         if (data.nearbyTeams) renderNearbyTeams(nearbyTeams = data.nearbyTeams);
         if (data.restrictedAreaProximity) renderRestrictedAreaProximity(restrictedAreaProximity = data.restrictedAreaProximity);
-        if (!fieldMode && data.teamDistances) renderTeamDistances(teamDistances = data.teamDistances);
-        if (!fieldMode) document.getElementById('mapRefresh').textContent = data.time || '';
+        if (data.teamDistances) renderTeamDistances(teamDistances = data.teamDistances);
+        document.getElementById('mapRefresh').textContent = data.time || '';
         if (data.banners && data.banners.length) {
             data.banners.forEach(b => {
                 if (b.id > bannerAfterId) bannerAfterId = b.id;
@@ -11628,7 +11551,7 @@ document.addEventListener('visibilitychange', () => {
     pollWarRoomData();
     // Chat's own pollRoom() lives inside its IIFE further down (not in scope
     // here) and handles its own visibilitychange listener there instead.
-    if (!fieldMode && typeof loadActivity === 'function') loadActivity();
+    if (typeof loadActivity === 'function') loadActivity();
 });
 
 document.querySelectorAll('.team-form').forEach(form => {
@@ -11835,7 +11758,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     let isClosed = false;
     let lastAddressLabel = '';
     // Set from pendingDispatchSeed.ringIndex when opened via a ring shortcut
-    // (openDispatchForRing(), !fieldMode block), null for the normal "New
+    // (openDispatchForRing(), map block), null for the normal "New
     // Dispatch" sidebar-card flow — sent as-is either way so a hand-drawn
     // dispatch correctly gets no ring_index. Reset in hidden.bs.modal, same
     // one-shot lifetime as the seed it came from.
@@ -11936,7 +11859,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         }
         renderDispatchContext();
         // Pre-fill from a ring's "send team here" button (openDispatchForRing()
-        // in the !fieldMode block) — one-shot, same consume-then-null pattern
+        // in the map block) — one-shot, same consume-then-null pattern
         // pendingDivideAreaId uses. addDrawPoint() alone leaves isClosed false
         // and Send disabled (it only tracks point count, never shape-closedness
         // on its own) so both must be set explicitly here, same as the
@@ -13067,7 +12990,6 @@ function renderRouteLayer(allRoutes) {
 // admin/command-staff popups render no buttons for these selectors to match
 // (see renderRouteLayer above), so this handler simply finds nothing and
 // does nothing on their popups.
-if (!fieldMode) {
 routeLayer.on('popupopen', event => {
     const popupEl = event.popup.getElement();
     const ackBtn = popupEl.querySelector('.route-ack-btn');
@@ -13085,7 +13007,6 @@ routeLayer.on('popupopen', event => {
         triggerWaypointUpload(btn.dataset.id, btn.dataset.mediaType, statusEl);
     }));
 });
-}
 
 // ── Route Order admin sidebar list (every team's routes, cancel/skip) ───────
 // Which routes are expanded in the admin panel — module-level so the 5s poll's
@@ -13319,7 +13240,7 @@ let routeMap = null, routeMarkers = [], routeLine = null;
 let routeComposerPinLayer = null, routeComposerAnnotationLayer = null, routeComposerAreasLayer = null;
 let routeComposerPinsRenderedSig = null;
 // Set from pendingRouteSeed.ringIndex when opened via a ring shortcut
-// (openRouteForRing()/openInteriorSweepForRing(), !fieldMode block), null
+// (openRouteForRing()/openInteriorSweepForRing(), map block), null
 // for the normal "New Route" sidebar-card flow — sent as-is either way so a
 // hand-drawn route correctly gets no ring_index. Reset in hidden.bs.modal,
 // same one-shot lifetime as the seed it came from.
@@ -13671,7 +13592,7 @@ function renderWaypointPanel() {
         renderRouteComposerAnnotations(annotations);
         renderRouteComposerAreas();
         // Pre-fill from a ring's "sweep perimeter"/"sweep interior" buttons
-        // (openRouteForRing()/openInteriorSweepForRing(), in the !fieldMode
+        // (openRouteForRing()/openInteriorSweepForRing(), in the map
         // block) — same one-shot consume-then-null pattern as the dispatch
         // composer's own pendingDispatchSeed handling above.
         // addRouteWaypoint() alone never sets routeClosed (that only happens

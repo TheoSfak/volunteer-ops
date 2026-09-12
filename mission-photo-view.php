@@ -101,9 +101,8 @@ if (!$canManageWarRoom && !$isApprovedParticipant) {
  *   - `private` keeps it out of every shared/proxy cache.
  *   - `Vary: Cookie` keys the entry to the session that was authorised for it,
  *     so a different login on the same browser profile revalidates rather than
- *     being served from cache. Costs one re-fetch per login, and one if the
- *     viewer toggles Field Mode (wr_field_mode is a cookie too) — which hides
- *     the media card anyway.
+ *     being served from cache. Costs one re-fetch per login, and one if any
+ *     other cookie this app sets changes (wr_view_mode, say).
  *   - The ETag covers the thumb/full split, since both are served off one id.
  *
  * Range requests are deliberately exempt from the 304: a browser scrubbing a

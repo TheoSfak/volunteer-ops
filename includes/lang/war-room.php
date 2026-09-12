@@ -82,7 +82,7 @@ return [
         'teams.new_btn' => 'Νέα Ομάδα',
         'teams.distances_title' => 'Αποστάσεις Ομάδων',
 
-        // Nearby Teams (field-card column, both Field Mode and full view) +
+        // Nearby Teams (field-card column, every view) +
         // the compass/unit labels it shares with Team Distances above.
         'nearby.panel_title' => 'Κοντινές Ομάδες',
         'nearby.empty' => 'Καμία άλλη ομάδα δεν έχει διαθέσιμη θέση ακόμη.',
@@ -336,8 +336,8 @@ return [
         'restricted_area.notify_message_admin' => 'Η ομάδα {team} ({name}) μπήκε στην απαγορευμένη περιοχή «{area}».',
         'restricted_area.seen_notify_title' => '👁️ Είδε την προειδοποίηση κινδύνου',
         'restricted_area.seen_notify_message' => 'Ο/Η {name} ({team}) είδε τον συναγερμό για την απαγορευμένη περιοχή «{area}» στην αποστολή «{mission}».',
-        // Field Mode proximity card — no map there, so this is a plain
-        // distance list instead of seeing the zone drawn on the map
+        // Proximity card for viewers with no map — a plain distance list
+        // instead of seeing the zone drawn on the map
         'restricted_area.proximity_card_title' => 'Απόσταση από Απαγορευμένες Περιοχές',
         'restricted_area.proximity_empty' => 'Δεν βρίσκεστε κοντά σε καμία απαγορευμένη περιοχή.',
         'restricted_area.proximity_inside' => 'ΕΝΤΟΣ',
@@ -411,10 +411,8 @@ return [
         'hero.btn_response_report' => 'Αναφορά Χρόνων',
         'hero.btn_team_trail' => 'Πορεία Ομάδων',
         'hero.btn_verified_coverage' => 'Επαληθευμένη Κάλυψη',
-        'hero.btn_full_view' => 'Πλήρης Προβολή',
-        'hero.btn_field_mode' => 'Λειτουργία Πεδίου',
         // Layout override for command staff — labelled by the view it takes
-        // you TO, like btn_full_view/btn_field_mode above it.
+        // you TO.
         'hero.btn_command_view' => 'Όψη Διοίκησης',
         'hero.btn_volunteer_view' => 'Όψη Εθελοντή',
         'hero.btn_fullscreen' => 'Πλήρης Οθόνη',
@@ -573,7 +571,6 @@ return [
         'missing_person.last_seen_location_label' => 'Θέση στον Χάρτη',
         'missing_person.pick_on_map_btn' => 'Επιλογή στον χάρτη',
         'missing_person.use_map_center_btn' => 'Κέντρο χάρτη',
-        'missing_person.location_needs_full_view' => 'Για ορισμό θέσης στον χάρτη, απενεργοποιήστε προσωρινά τη Λειτουργία Πεδίου.',
         'missing_person.perm.save' => 'Δεν έχετε δικαίωμα να αλλάξετε το προφίλ αγνοούμενου.',
         'missing_person.not_missing_person_mission' => 'Η αποστολή δεν είναι τύπου «Αναζήτηση Αγνοουμένου».',
         'missing_person.name_required' => 'Το ονοματεπώνυμο είναι υποχρεωτικό.',
@@ -1708,8 +1705,8 @@ return [
         'restricted_area.notify_message_admin' => 'Team {team} ({name}) entered the restricted area "{area}".',
         'restricted_area.seen_notify_title' => '👁️ Hazard warning seen',
         'restricted_area.seen_notify_message' => '{name} ({team}) saw the alarm for restricted area "{area}" on mission "{mission}".',
-        // Field Mode proximity card — no map there, so this is a plain
-        // distance list instead of seeing the zone drawn on the map
+        // Proximity card for viewers with no map — a plain distance list
+        // instead of seeing the zone drawn on the map
         'restricted_area.proximity_card_title' => 'Distance to Restricted Areas',
         'restricted_area.proximity_empty' => 'You are not near any restricted area.',
         'restricted_area.proximity_inside' => 'INSIDE',
@@ -1782,8 +1779,6 @@ return [
         'hero.btn_response_report' => 'Response Report',
         'hero.btn_team_trail' => 'Team Trails',
         'hero.btn_verified_coverage' => 'Verified Coverage',
-        'hero.btn_full_view' => 'Full View',
-        'hero.btn_field_mode' => 'Field Mode',
         'hero.btn_command_view' => 'Command View',
         'hero.btn_volunteer_view' => 'Volunteer View',
         'hero.btn_fullscreen' => 'Fullscreen',
@@ -1931,7 +1926,6 @@ return [
         'missing_person.last_seen_location_label' => 'Map Position',
         'missing_person.pick_on_map_btn' => 'Pick on map',
         'missing_person.use_map_center_btn' => 'Map center',
-        'missing_person.location_needs_full_view' => 'To set a map position, temporarily turn off Field Mode.',
         'missing_person.perm.save' => 'You do not have permission to change the missing-person profile.',
         'missing_person.not_missing_person_mission' => 'This mission is not of the "Missing Person Search" type.',
         'missing_person.name_required' => 'Full name is required.',
