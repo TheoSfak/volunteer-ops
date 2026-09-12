@@ -13,6 +13,28 @@ requireLogin();
 $userId = getCurrentUserId();
 $photoId = (int) get('id');
 
+// Releases the PHP session file lock immediately — nothing below this point
+// writes to $_SESSION (reads still work after the close, and the two writes
+// this request makes, last_activity and war_room_at, both happen inside
+// bootstrap.php's session start, above).
+//
+// Without it, PHP's default session handler holds an exclusive lock on this
+// session's file for the whole request, so the browser's parallel image
+// requests do not actually run in parallel: they queue behind each other, one
+// at a time, for the full duration of each. Proven with a probe that slept
+// 0,7s inside the lock, four requests fired together: 0,77s / 1,46s / 2,15s /
+// 2,84s — a perfect 0,7s staircase. An Action Room gallery is up to 30 items
+// (loadMissionPhotosForUser()'s LIMIT) and every one of them is one of these
+// requests.
+//
+// On its own this is worth little: measured over 24 requests it moved the wall
+// clock from 534ms to 510ms, because the lock is only held for bootstrap plus
+// the login check, and the real cost was always the re-download that the
+// caching below now removes. It matters for what is left — a viewer whose
+// cache has expired, or a first load — where the remaining requests can now
+// overlap instead of forming that staircase.
+session_write_close();
+
 $photo = dbFetchOne("SELECT * FROM mission_photos WHERE id = ?", [$photoId]);
 if (!$photo) {
     http_response_code(404);
@@ -60,6 +82,77 @@ if (!$canManageWarRoom && !$isApprovedParticipant) {
     exit(t('common.no_access'));
 }
 
+/**
+ * Cache validators for access-gated but immutable media. Called only after
+ * every permission gate above has passed, so nothing here can confirm the
+ * existence of an item to someone who may not see it.
+ *
+ * This endpoint used to send `Cache-Control: private, no-store, max-age=0`,
+ * which meant a browser kept nothing at all: every Action Room load
+ * re-downloaded the entire gallery from scratch, each item a full PHP request
+ * (bootstrap + login check + 3 queries + finfo, measured at 51ms against 6ms
+ * for the same bytes served statically by Apache). Issuing an order is a plain
+ * form POST that redirects back — a full page reload — so the whole
+ * re-download ran again on every single command the coordinator sent.
+ *
+ * The bytes behind an id never change: stored_name is written once at upload
+ * and mission-photo.php has no edit path, only delete, and ids are never
+ * reused. So the browser can simply keep them.
+ *   - `private` keeps it out of every shared/proxy cache.
+ *   - `Vary: Cookie` keys the entry to the session that was authorised for it,
+ *     so a different login on the same browser profile revalidates rather than
+ *     being served from cache. Costs one re-fetch per login, and one if the
+ *     viewer toggles Field Mode (wr_field_mode is a cookie too) — which hides
+ *     the media card anyway.
+ *   - The ETag covers the thumb/full split, since both are served off one id.
+ *
+ * Range requests are deliberately exempt from the 304: a browser scrubbing a
+ * video sends If-Range, not If-None-Match, and answering a ranged request with
+ * 304 would break seeking — the exact thing the Range support below exists for.
+ */
+$emitCacheHeaders = function (string $path, bool $isThumb) use ($photoId) {
+    $mtime = filemtime($path);
+    $etag = '"' . $photoId . ($isThumb ? 't' : 'f') . '-' . filesize($path) . '-' . $mtime . '"';
+
+    // session_start() (inside bootstrap.php) applies PHP's default
+    // session.cache_limiter, which stamps every response with
+    //     Expires: Thu, 19 Nov 1981 08:52:00 GMT
+    //     Pragma: no-cache
+    // Overwriting Cache-Control below does NOT remove those two, and a
+    // response that says max-age=86400 while also carrying a 1981 Expires and
+    // Pragma: no-cache is self-contradictory — Chrome resolves it
+    // conservatively and revalidates. Measured with them still present: all 31
+    // gallery items sent a conditional request and got 304s on a plain
+    // navigation, instead of being read straight out of the cache.
+    //
+    // Dropped here, per response, rather than by changing the cache limiter at
+    // session_start() — that would change the caching posture of every page in
+    // the app, and no other page has established that its output is safe to
+    // keep. This one has: see the docblock above.
+    header_remove('Expires');
+    header_remove('Pragma');
+
+    header('Cache-Control: private, max-age=86400');
+    header('Vary: Cookie');
+    header('ETag: ' . $etag);
+    header('Last-Modified: ' . gmdate('D, d M Y H:i:s', $mtime) . ' GMT');
+
+    if (isset($_SERVER['HTTP_RANGE'])) {
+        return;
+    }
+    foreach (explode(',', (string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? '')) as $candidate) {
+        // Strips a weak-validator prefix if the client sent one; the tag
+        // itself starts with a quote, so this never eats into it.
+        if (ltrim(trim($candidate), 'W/') === $etag) {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            http_response_code(304);
+            exit;
+        }
+    }
+};
+
 // Client-generated poster frame for a video (see mission-photo.php's
 // 'upload' action) — same permission gates as the real media above, just a
 // different, much smaller file. No Range support needed, it's a single JPEG.
@@ -78,7 +171,7 @@ if (get('thumb') === '1') {
     }
     header('Content-Type: image/jpeg');
     header('X-Content-Type-Options: nosniff');
-    header('Cache-Control: private, no-store, max-age=0');
+    $emitCacheHeaders($thumbPath, true);
     header('Content-Length: ' . filesize($thumbPath));
     readfile($thumbPath);
     exit;
@@ -112,7 +205,7 @@ $downloadName = preg_replace('/[^A-Za-z0-9._-]/', '_', basename((string)($photo[
 header('Content-Type: ' . $mime);
 header('X-Content-Type-Options: nosniff');
 header('Content-Disposition: inline; filename="' . $downloadName . '"');
-header('Cache-Control: private, no-store, max-age=0');
+$emitCacheHeaders($filePath, false);
 header('Accept-Ranges: bytes');
 
 // Videos need Range support for seeking/scrubbing — mobile Safari refuses
