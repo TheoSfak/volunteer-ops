@@ -13887,6 +13887,19 @@ setInterval(function () {
         dbg('secure=' + window.isSecureContext +
             ' sdk=' + (window.LivekitClient ? 'loaded 2.22.3' : 'MISSING — CDN blocked?') +
             ' gUM=' + !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+        // A home-screen icon on iOS is not the same environment as Safari:
+        // camera capture inside a standalone web app has its own long history
+        // of handing back black frames. Worth ruling in or out before blaming
+        // anything in this file.
+        dbg('standalone=' + ((window.navigator.standalone === true) ||
+                (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)) +
+            ' nativeApp=' + !!window.VopsNative);
+        // Settles the codec question without going live at all: a codec this
+        // device cannot SEND never appears in this list.
+        try {
+            const caps = RTCRtpSender.getCapabilities('video');
+            dbg('can send: ' + [...new Set(caps.codecs.map(c => c.mimeType.split('/')[1]))].join(', '));
+        } catch (e) { dbg('codec capabilities unavailable'); }
     }
 
     // ── Playback, the WebKit way ────────────────────────────────────────────
@@ -14147,7 +14160,19 @@ setInterval(function () {
                     simulcast: false,
                     videoCodec: codec
                 },
-                dynacast: true
+                // Dynacast pauses the encoder while nobody is subscribed, and
+                // there IS always such a window here: the volunteer starts
+                // publishing, and command's viewer only joins on its next poll
+                // five to nine seconds later. So every single stream begins
+                // paused and depends on the resume arriving correctly. That
+                // round trip has been proven on Android and proven nowhere on
+                // WebKit, and its failure mode is precisely what was reported —
+                // a phone that says it is on air while command sees nothing.
+                // The saving it buys is a few seconds of upload on a stream
+                // command explicitly asked for and is already watching, which
+                // is not worth one more thing that has to work. Off on WebKit,
+                // untouched everywhere else.
+                dynacast: !isWebKit
             });
             pubRoom.on(LK.RoomEvent.Disconnected, () => stopPublishing(false));
             dbg('connecting to ' + (r.url || '?'));
