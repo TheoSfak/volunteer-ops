@@ -7085,8 +7085,18 @@ function buildPinMarker(pin, interactive = true) {
     // non-jitter fixes are available), a small arrow rotated to the
     // compass heading of travel.
     const opacity = pin.is_stale ? 'opacity:.45;' : '';
+    // A monochrome Bootstrap glyph, not the 🏃 emoji this used to carry. The
+    // emoji was set at font-size 8px inside a circle whose inner diameter is
+    // 11px, which is not a legible size for a multi-colour pictogram — so the
+    // badge read as a plain blue blob, and since it was 14px against the pin's
+    // own 16px and offset by only 4px, the pair looked like two position dots
+    // rather than one dot with a marker on it. Reported as exactly that.
+    // A glyph takes `color`, so it can be drawn in solid white against the
+    // blue: high contrast, crisp at 9,5px, unmistakably a walking figure. Sat
+    // further out of the corner too, so it hangs off the dot instead of
+    // forming a figure-8 with it.
     const movingBadge = pin.is_moving
-        ? '<span style="position:absolute;top:-4px;right:-4px;width:14px;height:14px;background:#0ea5e9;border:2px solid #fff;border-radius:50%;font-size:8px;line-height:11px;text-align:center;">🏃</span>'
+        ? '<span style="position:absolute;top:-5px;right:-7px;width:15px;height:15px;background:#0ea5e9;border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px #0006;"><i class="bi bi-person-walking" style="color:#fff;font-size:9.5px;line-height:1;"></i></span>'
         : '';
     // heading_deg is a compass bearing (0°=North, clockwise) — exactly
     // what CSS rotate() already expects, so no conversion is needed. The
