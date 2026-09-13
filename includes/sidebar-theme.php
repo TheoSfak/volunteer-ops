@@ -98,6 +98,19 @@ function sidebarPalette(): array
 }
 
 /**
+ * Whether sections are colour-coded at all.
+ *
+ * Switched off, the menu goes back to the single navy it was before v3.224.0 -
+ * no tinted zones, no coloured edges, headings in the old muted white. Folding
+ * is a separate setting and is unaffected, so turning colour off does not also
+ * hand back a 67-row menu.
+ */
+function sidebarColorsEnabled(): bool
+{
+    return getSetting('sidebar_colors_enabled', '1') !== '0';
+}
+
+/**
  * How the menu opens: 'current' shows only the section holding the page you
  * are on, 'expanded' shows everything, 'collapsed' folds everything. Whatever
  * a person has since toggled themselves wins over this in their own browser.

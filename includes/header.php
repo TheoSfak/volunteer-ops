@@ -303,6 +303,43 @@ if (isLoggedIn()) {
            active link is out of sight, so the heading has to carry the marker
            instead - otherwise the one thing you always want to know, which
            part of the app you are in, is the one thing the menu stops saying. */
+        /* Colour switched off: back to the single navy the menu wore before
+           the sections were ever tinted. Written against an ancestor class
+           rather than as a second palette so there is exactly one set of
+           rules, and so settings.php can put the same class on its preview
+           and show the real thing instead of an impression of it. Folding is
+           a separate setting and deliberately survives this. */
+        .sidebar-mono .sidebar-sec {
+            margin: 0;
+            background: transparent;
+            border-left: 0;
+            border-radius: 0;
+        }
+        .sidebar-mono .sidebar-sec-h {
+            background: transparent;
+            color: rgba(255,255,255,0.5);
+            padding: 1rem 1.5rem 0.5rem;
+            letter-spacing: 1.5px;
+        }
+        .sidebar-mono .sidebar-sec-h:hover { background: rgba(255,255,255,0.08); }
+        .sidebar-mono .sidebar-sec .nav-link {
+            padding: 0.85rem 1.5rem;
+            font-size: 0.9rem;
+        }
+        .sidebar-mono .sidebar-sec .nav-link:hover {
+            background: rgba(255,255,255,0.1);
+            transform: translateX(5px);
+        }
+        .sidebar-mono .sidebar-sec .nav-link.active {
+            background: linear-gradient(90deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.05) 100%);
+            border-left: 4px solid #fbbf24;
+            box-shadow: inset 0 0 20px rgba(255,255,255,0.1);
+        }
+        /* Let the per-item text-* classes and the default white come back
+           through, instead of every icon wearing its section's colour. */
+        .sidebar-mono .sidebar-sec .nav-link i,
+        .sidebar-mono .sidebar-sec .nav-link.active i { color: inherit; }
+
         .sidebar-sec.is-here > .sidebar-sec-h .sec-t::before {
             content: '';
             display: inline-block;
@@ -1271,7 +1308,7 @@ if (isLoggedIn()) {
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
     
     <!-- Sidebar -->
-    <nav class="sidebar" id="sidebar">
+    <nav class="sidebar<?= sidebarColorsEnabled() ? '' : ' sidebar-mono' ?>" id="sidebar">
         <a href="dashboard.php" class="sidebar-brand">
             <i class="bi bi-heart-pulse"></i>
             <div style="flex: 1;">

@@ -732,6 +732,9 @@ if (isPost()) {
         if (!in_array($state, ['current', 'expanded', 'collapsed'], true)) {
             $state = 'current';
         }
+        // An unchecked switch posts nothing at all, so absence is the "off"
+        // signal here rather than a missing field to be ignored.
+        $colorsOn = isset($_POST['sidebar_colors_enabled']) ? '1' : '0';
 
         if (post('reset_palette') === '1') {
             // Only the colours reset; the open/closed choice sits on its own
@@ -754,7 +757,12 @@ if (isPost()) {
             $flashMessage = 'Οι ρυθμίσεις του μενού αποθηκεύτηκαν.';
         }
 
-        foreach (['sidebar_palette' => json_encode($palette), 'sidebar_default_state' => $state] as $key => $value) {
+        $toStore = [
+            'sidebar_palette'        => json_encode($palette),
+            'sidebar_default_state'  => $state,
+            'sidebar_colors_enabled' => $colorsOn,
+        ];
+        foreach ($toStore as $key => $value) {
             $exists = dbFetchValue("SELECT COUNT(*) FROM settings WHERE setting_key = ?", [$key]);
             if ($exists) {
                 dbExecute("UPDATE settings SET setting_value = ?, updated_at = NOW() WHERE setting_key = ?", [$value, $key]);
@@ -1806,6 +1814,7 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
 <?php
 $menuPalette = sidebarPalette();
 $menuState = sidebarDefaultState();
+$menuColorsOn = sidebarColorsEnabled();
 $menuStateOptions = [
     'current'   => ['Μόνο η τρέχουσα ενότητα', 'Ανοίγει η ενότητα της σελίδας που βλέπετε· οι υπόλοιπες μένουν διπλωμένες.'],
     'expanded'  => ['Όλες ανοιχτές', 'Ολόκληρο το μενού ανοιχτό, όπως ήταν πριν μπει το δίπλωμα.'],
@@ -1854,6 +1863,19 @@ $menuStateOptions = [
                 περάσει το 4,5:1 και ούτε βήμα παραπάνω, ώστε να μη χάνεται η απόχρωση.
                 Αποφύγετε μπλε και γαλάζιο — χάνονται πάνω στο φόντο του μενού.
             </p>
+            <div class="form-check form-switch mb-3 pb-3 border-bottom">
+                <input class="form-check-input" type="checkbox" role="switch" value="1"
+                       id="sidebarColorsEnabled" name="sidebar_colors_enabled"
+                       <?= $menuColorsOn ? 'checked' : '' ?>>
+                <label class="form-check-label" for="sidebarColorsEnabled">
+                    <span class="fw-semibold">Χρωματισμός ενοτήτων</span>
+                    <span class="d-block small text-muted">
+                        Κλειστός, το μενού επιστρέφει στην αρχική του εμφάνιση: όλα στο ίδιο
+                        μπλε, χωρίς χρωματιστές ζώνες. Το δίπλωμα των ενοτήτων δεν επηρεάζεται
+                        και τα χρώματα παρακάτω μένουν αποθηκευμένα για όταν το ξανανοίξετε.
+                    </span>
+                </label>
+            </div>
             <div class="row g-4">
                 <div class="col-lg-7">
                     <?php foreach (sidebarSections() as $secKey => $secLabel): ?>
@@ -1977,8 +1999,26 @@ $menuStateOptions = [
         });
     }
 
+    /* The preview borrows .sidebar-mono from header.php rather than restating
+       what "colour off" looks like, so the two cannot drift apart. */
+    var toggle = document.getElementById('sidebarColorsEnabled');
+
+    function applyMode() {
+        var on = !toggle || toggle.checked;
+        preview.classList.toggle('sidebar-mono', !on);
+        /* Dimmed but deliberately still live and still submitting: disabling
+           them would post nothing, and the handler reads a missing colour as
+           "fall back to the shipped one" - so saving with the switch off would
+           quietly wipe a palette the admin spent time on. */
+        inputs.forEach(function (input) {
+            input.parentNode.style.opacity = on ? '' : '0.5';
+        });
+    }
+
     inputs.forEach(function (input) { input.addEventListener('input', render); });
+    if (toggle) { toggle.addEventListener('change', applyMode); }
     render();
+    applyMode();
 })();
 </script>
 <?php endif; ?>
