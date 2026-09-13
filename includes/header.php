@@ -220,6 +220,108 @@ if (isLoggedIn()) {
             font-weight: 600;
         }
         
+        /* --- Colour-coded, collapsible sidebar sections -------------------
+           The menu markup below stays flat (one <ul>, heading <div>s between
+           the <li>s) and the inline script after </nav> regroups it into one
+           .sidebar-sec block per section. If that script never runs the menu
+           just stays flat, which is why .sidebar-section above still styles a
+           bare heading. Colours live here, keyed on data-sec, so the PHP only
+           carries a section's name and not its palette. */
+        .sidebar-sec {
+            /* Two tones per section. --sc is the saturated hue and only ever
+               fills (every use of it is an rgba tint); --sl is a lightened
+               version for anything that has to be READ against the navy - the
+               edge, the heading, the icons. The saturated tones measured about
+               2.3:1 on this background, under the 4.5:1 a 0.7rem heading needs;
+               the light ones clear 4.5:1. Training and its admin section
+               deliberately share --sl, so they read as parent and child - keep
+               any new section's pair in that same relationship. */
+            --sc: 148,163,184;
+            --sl: 203,213,225;
+            list-style: none;
+            margin: 0.4rem 0.5rem;
+            background: rgba(var(--sc), 0.13);
+            border-left: 3px solid rgb(var(--sl));
+            border-radius: 0 10px 10px 0;
+            overflow: hidden;
+        }
+        .sidebar-sec[data-sec="general"]        { --sc: 226,232,240; --sl: 226,232,240; }
+        .sidebar-sec[data-sec="missions"]       { --sc: 74,222,128;  --sl: 187,247,208; }
+        .sidebar-sec[data-sec="manage"]         { --sc: 45,212,191;  --sl: 153,246,228; }
+        .sidebar-sec[data-sec="training"]       { --sc: 251,146,60;  --sl: 254,215,170; }
+        .sidebar-sec[data-sec="training-admin"] { --sc: 217,119,6;   --sl: 254,215,170; }
+        .sidebar-sec[data-sec="admin"]          { --sc: 192,132,252; --sl: 233,213,255; }
+        .sidebar-sec[data-sec="inventory"]      { --sc: 253,224,71;  --sl: 254,240,138; }
+        .sidebar-sec[data-sec="gamification"]   { --sc: 244,114,182; --sl: 251,207,232; }
+        .sidebar-sec[data-sec="citizens"]       { --sc: 163,230,53;  --sl: 217,249,157; }
+        .sidebar-sec[data-sec="comms"]          { --sc: 251,113,133; --sl: 254,205,211; }
+        .sidebar-sec[data-sec="system"]         { --sc: 148,163,184; --sl: 226,232,240; }
+        .sidebar-sec--plain { background: rgba(255,255,255,0.07); }
+
+        .sidebar-sec-h {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            width: 100%;
+            padding: 0.6rem 0.9rem;
+            border: 0;
+            background: rgba(var(--sc), 0.16);
+            color: rgb(var(--sl));
+            font-family: inherit;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 1.2px;
+            text-transform: uppercase;
+            text-align: start;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        .sidebar-sec-h:hover { background: rgba(var(--sc), 0.28); }
+        .sidebar-sec-h .sec-t {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .sidebar-sec-h .sec-count {
+            font-size: 0.68rem;
+            font-weight: 500;
+            letter-spacing: 0;
+            color: rgba(255,255,255,0.62);
+            font-variant-numeric: tabular-nums;
+        }
+        .sidebar-sec-h .sec-chev {
+            font-size: 0.85rem;
+            color: rgba(255,255,255,0.65);
+            transition: transform 0.2s ease;
+        }
+        .sidebar-sec.collapsed .sec-chev { transform: rotate(-90deg); }
+        .sidebar-sec.collapsed .sidebar-sec-items { display: none; }
+        .sidebar-sec-items { padding-bottom: 0.2rem; }
+
+        /* Inside a zone the link drops the hover slide: the block clips at
+           overflow:hidden, so translateX would shave the text against its
+           edge. The tint does the same job without moving anything. */
+        .sidebar-sec .nav-link {
+            padding: 0.55rem 0.9rem;
+            font-size: 0.875rem;
+        }
+        .sidebar-sec .nav-link:hover {
+            transform: none;
+            background: rgba(var(--sc), 0.22);
+        }
+        .sidebar-sec .nav-link.active {
+            border-left: 0;
+            background: rgba(var(--sc), 0.32);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14);
+            font-weight: 600;
+        }
+        /* Bootstrap's .text-success / .text-warning / .text-danger carry
+           !important, so the mission-status flags and the two red entries keep
+           their own colour and only the rest inherit the section's. */
+        .sidebar-sec .nav-link i { color: rgba(var(--sl), 0.92); }
+        .sidebar-sec .nav-link.active i { color: #fff; }
         .main-content {
             margin-left: var(--sidebar-width);
             min-height: 100vh;
@@ -1223,7 +1325,7 @@ if (isLoggedIn()) {
             </li>
             <?php endif; ?>
             
-            <div class="sidebar-section">Αποστολές</div>
+            <div class="sidebar-section" data-sec="missions">Αποστολές</div>
             
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'shift-calendar' ? 'active' : '' ?>" href="shift-calendar.php">
@@ -1255,7 +1357,7 @@ if (isLoggedIn()) {
             </li>
             <?php endif; ?>
             
-            <div class="sidebar-section">Διαχείριση</div>
+            <div class="sidebar-section" data-sec="manage">Διαχείριση</div>
             
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'tasks' ? 'active' : '' ?>" href="tasks.php">
@@ -1268,7 +1370,7 @@ if (isLoggedIn()) {
                 </a>
             </li>
             
-            <div class="sidebar-section">Εκπαίδευση</div>
+            <div class="sidebar-section" data-sec="training">Εκπαίδευση</div>
             
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'training' ? 'active' : '' ?>" href="training.php">
@@ -1294,7 +1396,7 @@ if (isLoggedIn()) {
             <?php endif; ?>
             
             <?php if (isSystemAdmin() || hasPagePermission('training_admin')): ?>
-            <div class="sidebar-section">Διαχείριση Εκπαίδευσης</div>
+            <div class="sidebar-section" data-sec="training-admin">Διαχείριση Εκπαίδευσης</div>
             
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'training-admin' ? 'active' : '' ?>" href="training-admin.php">
@@ -1329,7 +1431,7 @@ if (isLoggedIn()) {
             <?php endif; ?>
             
             <?php if (isSystemAdmin() || hasPagePermission('volunteers_manage') || hasPagePermission('volunteers_view') || hasPagePermission('inactive_volunteers') || hasPagePermission('positions_manage') || hasPagePermission('skills_manage') || hasPagePermission('certificates_manage') || hasPagePermission('reports') || hasPagePermission('complaints_view') || hasPagePermission('complaints_manage')): ?>
-            <div class="sidebar-section">Διοίκηση</div>
+            <div class="sidebar-section" data-sec="admin">Διοίκηση</div>
             
             <?php if (isSystemAdmin() || hasPagePermission('volunteers_manage') || hasPagePermission('volunteers_view')): ?>
             <li class="nav-item">
@@ -1441,7 +1543,7 @@ if (isLoggedIn()) {
             <?php endif; // Διοίκηση section ?>
             
             <?php if (!isTraineeRescuer()): ?>
-            <div class="sidebar-section">Απόθεμα</div>
+            <div class="sidebar-section" data-sec="inventory">Απόθεμα</div>
             
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'inventory' ? 'active' : '' ?>" href="inventory.php">
@@ -1492,7 +1594,7 @@ if (isLoggedIn()) {
             <!-- Παραρτήματα: accessible via Διοίκηση → Παραρτήματα -->
             <?php endif; // !isTraineeRescuer ?>
             
-            <div class="sidebar-section">Gamification</div>
+            <div class="sidebar-section" data-sec="gamification">Gamification</div>
             
             <?php if (getSetting('points_enabled', '1') === '1'): ?>
             <li class="nav-item">
@@ -1510,7 +1612,7 @@ if (isLoggedIn()) {
             <?php endif; ?>
             
             <?php if (isSystemAdmin() || hasPagePermission('citizens_view') || hasPagePermission('citizens_manage')): ?>
-            <div class="sidebar-section">Πολίτες</div>
+            <div class="sidebar-section" data-sec="citizens">Πολίτες</div>
             
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'citizens' ? 'active' : '' ?>" href="citizens.php">
@@ -1532,7 +1634,7 @@ if (isLoggedIn()) {
             <?php endif; ?>
 
             <?php if (isSystemAdmin()): ?>
-            <div class="sidebar-section">Επικοινωνία</div>
+            <div class="sidebar-section" data-sec="comms">Επικοινωνία</div>
             
             <li class="nav-item">
                 <a class="nav-link <?= in_array($currentPage, ['newsletters', 'newsletter-form', 'newsletter-view', 'newsletter-log', 'newsletter-templates', 'newsletter-template-form', 'newsletter-presets', 'newsletter-preset-form']) ? 'active' : '' ?>" href="newsletters.php">
@@ -1555,7 +1657,7 @@ if (isLoggedIn()) {
                 </a>
             </li>
 
-            <div class="sidebar-section">Σύστημα</div>
+            <div class="sidebar-section" data-sec="system">Σύστημα</div>
             
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'roles' ? 'active' : '' ?>" href="roles.php">
@@ -1589,6 +1691,94 @@ if (isLoggedIn()) {
         </ul>
     </nav>
     
+    <script>
+    /* Colour-coded, collapsible sidebar sections.
+       The markup above is left flat on purpose: every entry sits behind its
+       own permission check, so wrapping each section in PHP would mean
+       threading a <div> through roughly thirty nested conditionals. Doing it
+       here instead also gets the per-section counts and "which section am I
+       in?" for free, and a section whose entries are all permission-hidden
+       drops out with its heading rather than leaving an orphan. Inline and
+       immediately after the markup, so the menu is never painted flat first;
+       if it fails the menu degrades to exactly what it was before. */
+    (function () {
+        var sidebar = document.getElementById('sidebar');
+        var list = sidebar && sidebar.querySelector('ul.nav');
+        if (!list || !list.querySelector('.sidebar-section')) return;
+
+        var groups = [];
+        var current = { head: null, items: [] };
+        Array.prototype.forEach.call(list.children, function (el) {
+            if (el.classList.contains('sidebar-section')) {
+                groups.push(current);
+                current = { head: el, items: [] };
+            } else {
+                current.items.push(el);
+            }
+        });
+        groups.push(current);
+
+        list.innerHTML = '';
+        groups.forEach(function (group, n) {
+            if (!group.items.length) return;
+            var block = document.createElement('li');
+            block.className = 'sidebar-sec' + (group.head ? '' : ' sidebar-sec--plain');
+            block.setAttribute('data-sec',
+                group.head ? (group.head.getAttribute('data-sec') || '') : 'general');
+
+            var items = document.createElement('ul');
+            items.className = 'nav flex-column sidebar-sec-items';
+            items.id = 'sidebarSec' + n;
+            group.items.forEach(function (item) { items.appendChild(item); });
+
+            if (group.head) {
+                var head = document.createElement('button');
+                head.type = 'button';
+                head.className = 'sidebar-sec-h';
+                head.setAttribute('aria-controls', items.id);
+                head.innerHTML = '<span class="sec-t"></span>'
+                               + '<span class="sec-count"></span>'
+                               + '<i class="bi bi-chevron-down sec-chev"></i>';
+                head.querySelector('.sec-t').textContent = group.head.textContent.trim();
+                head.querySelector('.sec-count').textContent = group.items.length;
+                block.appendChild(head);
+            }
+            block.appendChild(items);
+            list.appendChild(block);
+        });
+
+        /* Which sections stay open is a reading preference, so it lives in the
+           browser rather than on the account. A first visit opens only the
+           section holding the current page; after that the saved choice wins,
+           except that the current page's section is always opened so you can
+           never land on a page whose own link is folded away. */
+        var KEY = 'vo_sidebar_sections';
+        var saved = {};
+        var seen = false;
+        try {
+            var raw = localStorage.getItem(KEY);
+            seen = raw !== null;
+            saved = JSON.parse(raw || '{}') || {};
+        } catch (e) {}
+
+        Array.prototype.forEach.call(sidebar.querySelectorAll('.sidebar-sec'), function (block) {
+            var head = block.querySelector('.sidebar-sec-h');
+            if (!head) return;
+            var key = block.getAttribute('data-sec');
+            var open = !!block.querySelector('.nav-link.active') || (seen && saved[key] === 1);
+
+            block.classList.toggle('collapsed', !open);
+            head.setAttribute('aria-expanded', open ? 'true' : 'false');
+
+            head.addEventListener('click', function () {
+                var nowOpen = !block.classList.toggle('collapsed');
+                head.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
+                saved[key] = nowOpen ? 1 : 0;
+                try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+            });
+        });
+    })();
+    </script>
     <!-- Main Content -->
     <div class="main-content">
         <!-- Top Navbar -->
