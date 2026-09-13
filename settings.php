@@ -4,6 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/sidebar-theme.php';
 requireLogin();
 requireRole([ROLE_SYSTEM_ADMIN]);
 
@@ -722,6 +723,52 @@ if (isPost()) {
         }
         redirect('settings.php?tab=general');
 
+    } elseif ($action === 'save_menu') {
+        // Left menu appearance. The palette is stored as one JSON blob rather
+        // than eleven rows: it is read on every single page render through
+        // getSetting(), and eleven separate keys would be eleven entries to
+        // keep in step every time a section is added or renamed.
+        $state = post('sidebar_default_state', 'current');
+        if (!in_array($state, ['current', 'expanded', 'collapsed'], true)) {
+            $state = 'current';
+        }
+
+        if (post('reset_palette') === '1') {
+            // Only the colours reset; the open/closed choice sits on its own
+            // card and is submitted by the same form, so honouring it here
+            // keeps "reset the colours" from also undoing an unsaved change
+            // the admin just made above it.
+            $palette = sidebarDefaultPalette();
+            $flashMessage = 'Τα χρώματα επανήλθαν στις προεπιλογές.';
+        } else {
+            $submitted = $_POST['sidebar_color'] ?? [];
+            $palette = [];
+            foreach (sidebarDefaultPalette() as $secKey => $fallback) {
+                $value = is_array($submitted) ? ($submitted[$secKey] ?? null) : null;
+                // A rejected value falls back to the shipped colour rather than
+                // to whatever was stored: a section is never left without one.
+                $palette[$secKey] = (is_string($value) && sidebarIsHex($value))
+                    ? strtolower($value)
+                    : $fallback;
+            }
+            $flashMessage = 'Οι ρυθμίσεις του μενού αποθηκεύτηκαν.';
+        }
+
+        foreach (['sidebar_palette' => json_encode($palette), 'sidebar_default_state' => $state] as $key => $value) {
+            $exists = dbFetchValue("SELECT COUNT(*) FROM settings WHERE setting_key = ?", [$key]);
+            if ($exists) {
+                dbExecute("UPDATE settings SET setting_value = ?, updated_at = NOW() WHERE setting_key = ?", [$value, $key]);
+            } else {
+                dbInsert("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$key, $value]);
+            }
+            $settings[$key] = $value;
+        }
+
+        clearSettingsCache();
+        logAudit('update_settings', 'settings', null, 'Εμφάνιση πλαϊνού μενού');
+        setFlash('success', $flashMessage);
+        redirect('settings.php?tab=menu');
+
     } elseif ($action === 'save_smtp') {
         // Save SMTP settings
         $smtpFields = ['smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_encryption', 'smtp_from_email', 'smtp_from_name'];
@@ -1158,6 +1205,7 @@ $settingsNav = [
     'Βασικά' => [
         ['tab' => 'general',       'icon' => 'bi-sliders',            'label' => 'Γενικά',            'hint' => 'Όνομα, λογότυπο, ζώνη ώρας'],
         ['tab' => 'notifications', 'icon' => 'bi-bell',               'label' => 'Ειδοποιήσεις',      'hint' => 'Τι στέλνεται και πού'],
+        ['tab' => 'menu',          'icon' => 'bi-palette',            'label' => 'Πλαϊνό Μενού',      'hint' => 'Χρώματα και άνοιγμα ενοτήτων'],
     ],
     'Επικοινωνία' => [
         ['tab' => 'smtp',      'icon' => 'bi-envelope',           'label' => 'SMTP Email',     'hint' => 'Διακομιστής αποστολής'],
@@ -1751,6 +1799,188 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
     <?= csrfField() ?>
     <input type="hidden" name="action" value="telegram_reregister_webhook">
 </form>
+<?php endif; ?>
+
+<!-- Left Menu Tab -->
+<?php if ($activeTab === 'menu'): ?>
+<?php
+$menuPalette = sidebarPalette();
+$menuState = sidebarDefaultState();
+$menuStateOptions = [
+    'current'   => ['Μόνο η τρέχουσα ενότητα', 'Ανοίγει η ενότητα της σελίδας που βλέπετε· οι υπόλοιπες μένουν διπλωμένες.'],
+    'expanded'  => ['Όλες ανοιχτές', 'Ολόκληρο το μενού ανοιχτό, όπως ήταν πριν μπει το δίπλωμα.'],
+    'collapsed' => ['Όλες διπλωμένες', 'Το πιο σύντομο μενού. Μια κουκκίδα στην επικεφαλίδα δείχνει σε ποια ενότητα βρίσκεστε.'],
+];
+?>
+<form method="post">
+    <?= csrfField() ?>
+    <input type="hidden" name="action" value="save_menu">
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-list-nested me-1"></i>Άνοιγμα ενοτήτων</h5>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small">
+                Πώς εμφανίζεται το πλαϊνό μενού μόλις φορτώσει μια σελίδα. Ό,τι ανοιγοκλείνει
+                μετά ο κάθε χρήστης αποθηκεύεται στον browser του και υπερισχύει — μέχρι να
+                αλλάξετε αυτή τη ρύθμιση, οπότε η νέα επιλογή εφαρμόζεται ξανά σε όλους.
+            </p>
+            <?php foreach ($menuStateOptions as $stateValue => $stateMeta): ?>
+            <div class="form-check mb-2">
+                <input class="form-check-input" type="radio" name="sidebar_default_state"
+                       id="menuState<?= h($stateValue) ?>" value="<?= h($stateValue) ?>"
+                       <?= $menuState === $stateValue ? 'checked' : '' ?>>
+                <label class="form-check-label" for="menuState<?= h($stateValue) ?>">
+                    <span class="fw-semibold"><?= h($stateMeta[0]) ?></span>
+                    <span class="d-block small text-muted"><?= h($stateMeta[1]) ?></span>
+                </label>
+            </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-palette me-1"></i>Χρώματα ενοτήτων</h5>
+            <button type="submit" name="reset_palette" value="1" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>Επαναφορά προεπιλογών
+            </button>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small">
+                Διαλέγετε ένα χρώμα ανά ενότητα. Ο δεύτερος, πιο ανοιχτός τόνος που διαβάζεται
+                πάνω στο μπλε του μενού υπολογίζεται μόνος του: φωτίζεται όσο χρειάζεται για να
+                περάσει το 4,5:1 και ούτε βήμα παραπάνω, ώστε να μη χάνεται η απόχρωση.
+                Αποφύγετε μπλε και γαλάζιο — χάνονται πάνω στο φόντο του μενού.
+            </p>
+            <div class="row g-4">
+                <div class="col-lg-7">
+                    <?php foreach (sidebarSections() as $secKey => $secLabel): ?>
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <input type="color" class="form-control form-control-color flex-shrink-0"
+                               name="sidebar_color[<?= h($secKey) ?>]"
+                               value="<?= h($menuPalette[$secKey]) ?>"
+                               data-menu-color="<?= h($secKey) ?>"
+                               title="<?= h($secLabel) ?>" style="width:2.6rem;">
+                        <span class="flex-grow-1"><?= h($secLabel) ?></span>
+                        <code class="small text-muted" data-menu-hex="<?= h($secKey) ?>"><?= h($menuPalette[$secKey]) ?></code>
+                        <span class="badge bg-light text-dark border" data-menu-ratio="<?= h($secKey) ?>">—</span>
+                    </div>
+                    <?php endforeach; ?>
+                    <button type="submit" class="btn btn-primary mt-3">
+                        <i class="bi bi-check-lg me-1"></i>Αποθήκευση
+                    </button>
+                </div>
+                <div class="col-lg-5">
+                    <div class="small text-muted mb-2">Προεπισκόπηση</div>
+                    <ul class="nav flex-column sticky-lg-top" id="menuPreview"
+                        style="top:1rem;background:linear-gradient(180deg,#1e3c72 0%,#2a5298 50%,#1e3c72 100%);border-radius:8px;padding:0.4rem 0;"></ul>
+                    <div class="small text-muted mt-2">
+                        Ο αριθμός δίπλα σε κάθε χρώμα είναι η μετρούμενη αντίθεση της
+                        επικεφαλίδας. Δεν πέφτει ποτέ κάτω από 4,5:1, όσο σκούρο χρώμα κι αν
+                        διαλέξετε.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+<script>
+(function () {
+    /* The numbers come from sidebarToneConfig() rather than being retyped, so
+       the preview and the real menu can never disagree about the layers or the
+       target. Only the walk below exists twice — it mirrors
+       sidebarReadableTone() in includes/sidebar-theme.php; change one, change
+       the other. */
+    var CFG = <?= json_encode(sidebarToneConfig()) ?>;
+    var SECTIONS = <?= json_encode(sidebarSections()) ?>;
+
+    function hexToRgb(hex) {
+        hex = hex.replace('#', '');
+        return [
+            parseInt(hex.slice(0, 2), 16),
+            parseInt(hex.slice(2, 4), 16),
+            parseInt(hex.slice(4, 6), 16)
+        ];
+    }
+    function blend(rgb, alpha, over) {
+        return [0, 1, 2].map(function (i) {
+            return Math.round(rgb[i] * alpha + over[i] * (1 - alpha));
+        });
+    }
+    function luminance(rgb) {
+        var lin = rgb.map(function (v) {
+            v /= 255;
+            return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+    }
+    function contrast(a, b) {
+        var la = luminance(a), lb = luminance(b);
+        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    }
+    function headingBand(rgb) {
+        var ground = hexToRgb(CFG.ground);
+        return blend([0, 0, 0], CFG.darken,
+               blend(rgb, CFG.strip, blend(rgb, CFG.body, ground)));
+    }
+    function readableTone(rgb) {
+        var band = headingBand(rgb);
+        for (var step = 0; step <= CFG.steps; step++) {
+            var t = step / CFG.steps;
+            var candidate = [0, 1, 2].map(function (i) {
+                return Math.round(rgb[i] + (255 - rgb[i]) * t);
+            });
+            if (contrast(candidate, band) >= CFG.target) { return candidate; }
+        }
+        return [255, 255, 255];
+    }
+
+    var preview = document.getElementById('menuPreview');
+    var inputs = Array.prototype.slice.call(document.querySelectorAll('[data-menu-color]'));
+    if (!preview || !inputs.length) { return; }
+
+    function render() {
+        preview.innerHTML = '';
+        inputs.forEach(function (input, index) {
+            var key = input.getAttribute('data-menu-color');
+            var rgb = hexToRgb(input.value);
+            var tone = readableTone(rgb);
+
+            document.querySelector('[data-menu-hex="' + key + '"]').textContent = input.value;
+            document.querySelector('[data-menu-ratio="' + key + '"]').textContent =
+                contrast(tone, headingBand(rgb)).toFixed(2).replace('.', ',') + ':1';
+
+            var block = document.createElement('li');
+            block.className = 'sidebar-sec' + (index === 0 ? ' sidebar-sec--plain' : ' collapsed');
+            block.style.setProperty('--sc', rgb.join(','));
+            block.style.setProperty('--sl', tone.join(','));
+
+            if (index === 0) {
+                var link = document.createElement('a');
+                link.className = 'nav-link';
+                link.innerHTML = '<i class="bi bi-speedometer2"></i>';
+                link.appendChild(document.createTextNode(' Πίνακας Ελέγχου'));
+                block.appendChild(link);
+            } else {
+                var head = document.createElement('button');
+                head.type = 'button';
+                head.className = 'sidebar-sec-h';
+                head.innerHTML = '<span class="sec-t"></span>'
+                               + '<i class="bi bi-chevron-down sec-chev"></i>';
+                head.querySelector('.sec-t').textContent = SECTIONS[key];
+                block.appendChild(head);
+            }
+            preview.appendChild(block);
+        });
+    }
+
+    inputs.forEach(function (input) { input.addEventListener('input', render); });
+    render();
+})();
+</script>
 <?php endif; ?>
 
 <!-- SMTP Settings Tab -->

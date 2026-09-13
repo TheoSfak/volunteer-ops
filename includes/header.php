@@ -7,6 +7,8 @@ if (!defined('VOLUNTEEROPS')) {
     die('Direct access not permitted');
 }
 
+require_once __DIR__ . '/sidebar-theme.php';
+
 $currentUser = getCurrentUser();
 $currentPage = basename($_SERVER['PHP_SELF'], '.php');
 
@@ -228,14 +230,15 @@ if (isLoggedIn()) {
            bare heading. Colours live here, keyed on data-sec, so the PHP only
            carries a section's name and not its palette. */
         .sidebar-sec {
-            /* Two tones per section. --sc is the saturated hue and only ever
-               fills (every use of it is an rgba tint); --sl is a lightened
-               version for anything that has to be READ against the navy - the
-               edge, the heading, the icons. The saturated tones measured about
-               2.3:1 on this background, under the 4.5:1 a 0.7rem heading needs;
-               the light ones clear 4.5:1. Training and its admin section
-               deliberately share --sl, so they read as parent and child - keep
-               any new section's pair in that same relationship. */
+            /* Two tones per section. --sc is the saturated hue the admin picked
+               and only ever fills (every use of it is an rgba tint); --sl is
+               derived from it by sidebarReadableTone() and is what gets READ
+               against the navy - the edge, the heading, the icons. Nobody
+               picks --sl by hand: the saturated end of most hues measures
+               around 2,3:1 here, under the 4,5:1 a 0.7rem heading needs, so
+               the helper lightens each colour just far enough to clear it and
+               no further, which keeps the hue recognisable. The values below
+               are only the fallback for a menu rendered before settings load. */
             --sc: 148,163,184;
             --sl: 203,213,225;
             list-style: none;
@@ -245,17 +248,9 @@ if (isLoggedIn()) {
             border-radius: 0 10px 10px 0;
             overflow: hidden;
         }
-        .sidebar-sec[data-sec="general"]        { --sc: 226,232,240; --sl: 226,232,240; }
-        .sidebar-sec[data-sec="missions"]       { --sc: 74,222,128;  --sl: 187,247,208; }
-        .sidebar-sec[data-sec="manage"]         { --sc: 45,212,191;  --sl: 153,246,228; }
-        .sidebar-sec[data-sec="training"]       { --sc: 251,146,60;  --sl: 254,215,170; }
-        .sidebar-sec[data-sec="training-admin"] { --sc: 217,119,6;   --sl: 254,215,170; }
-        .sidebar-sec[data-sec="admin"]          { --sc: 192,132,252; --sl: 233,213,255; }
-        .sidebar-sec[data-sec="inventory"]      { --sc: 253,224,71;  --sl: 254,240,138; }
-        .sidebar-sec[data-sec="gamification"]   { --sc: 244,114,182; --sl: 251,207,232; }
-        .sidebar-sec[data-sec="citizens"]       { --sc: 163,230,53;  --sl: 217,249,157; }
-        .sidebar-sec[data-sec="comms"]          { --sc: 251,113,133; --sl: 254,205,211; }
-        .sidebar-sec[data-sec="system"]         { --sc: 148,163,184; --sl: 226,232,240; }
+<?php foreach (sidebarResolvedPalette() as $secKey => $secTones): ?>
+        .sidebar-sec[data-sec="<?= h($secKey) ?>"] { --sc: <?= $secTones['fill'] ?>; --sl: <?= $secTones['read'] ?>; }
+<?php endforeach; ?>
         .sidebar-sec--plain { background: rgba(255,255,255,0.07); }
 
         .sidebar-sec-h {
@@ -265,7 +260,13 @@ if (isLoggedIn()) {
             width: 100%;
             padding: 0.6rem 0.9rem;
             border: 0;
-            background: rgba(var(--sc), 0.16);
+            /* The tint plus a touch of black. Darkening the strip buys back
+               enough contrast for the heading to keep a recognisable amount of
+               its own hue; without it, clearing 4.5:1 washes every colour out
+               to near-white and the sections stop being told apart by colour
+               at all - which is the whole point of them having one. The 0.18
+               here is one of the three layers sidebarHeadingBand() models. */
+            background: linear-gradient(rgba(0,0,0,0.18), rgba(0,0,0,0.18)), rgba(var(--sc), 0.16);
             color: rgb(var(--sl));
             font-family: inherit;
             font-size: 0.7rem;
@@ -276,7 +277,7 @@ if (isLoggedIn()) {
             cursor: pointer;
             transition: background 0.2s ease;
         }
-        .sidebar-sec-h:hover { background: rgba(var(--sc), 0.28); }
+        .sidebar-sec-h:hover { background: linear-gradient(rgba(0,0,0,0.18), rgba(0,0,0,0.18)), rgba(var(--sc), 0.32); }
         .sidebar-sec-h .sec-t {
             flex: 1;
             min-width: 0;
@@ -298,6 +299,20 @@ if (isLoggedIn()) {
         }
         .sidebar-sec.collapsed .sec-chev { transform: rotate(-90deg); }
         .sidebar-sec.collapsed .sidebar-sec-items { display: none; }
+        /* Where you are, even folded. With the menu set to open collapsed the
+           active link is out of sight, so the heading has to carry the marker
+           instead - otherwise the one thing you always want to know, which
+           part of the app you are in, is the one thing the menu stops saying. */
+        .sidebar-sec.is-here > .sidebar-sec-h .sec-t::before {
+            content: '';
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            margin-right: 0.4rem;
+            border-radius: 50%;
+            background: currentColor;
+            vertical-align: middle;
+        }
         .sidebar-sec-items { padding-bottom: 0.2rem; }
 
         /* Inside a zone the link drops the hover slide: the block clips at
@@ -1748,24 +1763,48 @@ if (isLoggedIn()) {
         });
 
         /* Which sections stay open is a reading preference, so it lives in the
-           browser rather than on the account. A first visit opens only the
-           section holding the current page; after that the saved choice wins,
-           except that the current page's section is always opened so you can
-           never land on a page whose own link is folded away. */
+           browser rather than on the account. The admin sets the starting
+           point in Settings; what a person toggles themselves wins over it
+           from then on. The stored choices carry the mode they were made
+           against, so changing that setting takes effect for everyone rather
+           than only for people who had never touched the menu - otherwise the
+           setting would appear to do nothing for exactly the users who use the
+           menu most. An unrecognised or older stored shape simply falls back
+           to the mode, which is also how the pre-settings format retires. */
         var KEY = 'vo_sidebar_sections';
+        var MODE = <?= json_encode(sidebarDefaultState()) ?>;
         var saved = {};
-        var seen = false;
         try {
-            var raw = localStorage.getItem(KEY);
-            seen = raw !== null;
-            saved = JSON.parse(raw || '{}') || {};
+            var stored = JSON.parse(localStorage.getItem(KEY) || 'null');
+            if (stored && stored.mode === MODE && stored.open) { saved = stored.open; }
         } catch (e) {}
+
+        function persist() {
+            try {
+                localStorage.setItem(KEY, JSON.stringify({ mode: MODE, open: saved }));
+            } catch (e) {}
+        }
 
         Array.prototype.forEach.call(sidebar.querySelectorAll('.sidebar-sec'), function (block) {
             var head = block.querySelector('.sidebar-sec-h');
             if (!head) return;
             var key = block.getAttribute('data-sec');
-            var open = !!block.querySelector('.nav-link.active') || (seen && saved[key] === 1);
+            var here = !!block.querySelector('.nav-link.active');
+            var open;
+
+            block.classList.toggle('is-here', here);
+
+            if (saved[key] === 1) {
+                open = true;
+            } else if (saved[key] === 0) {
+                open = false;
+            } else if (MODE === 'expanded') {
+                open = true;
+            } else if (MODE === 'collapsed') {
+                open = false;
+            } else {
+                open = here;
+            }
 
             block.classList.toggle('collapsed', !open);
             head.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -1774,7 +1813,7 @@ if (isLoggedIn()) {
                 var nowOpen = !block.classList.toggle('collapsed');
                 head.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
                 saved[key] = nowOpen ? 1 : 0;
-                try { localStorage.setItem(KEY, JSON.stringify(saved)); } catch (e) {}
+                persist();
             });
         });
     })();
