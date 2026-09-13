@@ -43,6 +43,9 @@ return [
         'wr.access_denied' => 'Έχετε πρόσβαση στο Action Room μόνο για αποστολές στις οποίες είστε εγκεκριμένος/η.',
         'wr.session_expired_warning' => 'Η σύνδεσή σας έληξε — το στίγμα GPS σταμάτησε να στέλνεται. Πατήστε "Ανανέωση" και συνδεθείτε ξανά.',
         'wr.reload_btn' => 'Ανανέωση',
+        // Deliberately says "do not reload": this appears when the database is
+        // refusing connections, and a reload is one more connection attempt.
+        'wr.server_busy_warning' => 'Ο διακομιστής είναι προσωρινά υπερφορτωμένος. Η σύνδεσή σας δεν έχει λήξει — μην ανανεώνετε τη σελίδα, ξαναπροσπαθεί μόνη της.',
         'wr.mission_not_active' => 'Η αποστολή δεν είναι ενεργή στο Επιχειρησιακό.',
         'wr.perm.close_mission' => 'Δεν έχετε δικαίωμα να κλείσετε αυτή την αποστολή.',
         'wr.mission_closed_success' => 'Η αποστολή έκλεισε και αφαιρέθηκε από το Επιχειρησιακό.',
@@ -1425,6 +1428,7 @@ return [
         'wr.access_denied' => 'You only have access to Action Room for missions you are an approved participant of.',
         'wr.session_expired_warning' => 'Your session expired — GPS ping has stopped sending. Click "Reload" and log in again.',
         'wr.reload_btn' => 'Reload',
+        'wr.server_busy_warning' => 'The server is temporarily overloaded. You are still signed in — do not reload, this page keeps retrying by itself.',
         'wr.mission_not_active' => 'This mission is not active in Operations.',
         'wr.perm.close_mission' => 'You do not have permission to close this mission.',
         'wr.mission_closed_success' => 'The mission was closed and removed from Operations.',

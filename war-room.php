@@ -10823,7 +10823,34 @@ function openSuggestReplacementModal(volunteerId, volunteerName) {
 // response.redirected (or a non-JSON content-type, belt-and-braces) now
 // surfaces a loud, persistent banner instead of failing quietly.
 let sessionExpiredWarningShown = false;
+// Shown instead of the session banner when the database refused a connection
+// (includes/db.php answers 503 + Retry-After for that, precisely so it can be
+// told apart here). The session is fine in that case, so saying it expired is
+// a lie — and the Reload button below would be the worst possible advice,
+// since every press is one more connection attempt against a database that
+// has none left. This banner therefore has no button at all: the page's own
+// 5s poll is already the retry, and it clears this the moment one succeeds.
+let serverBusyBar = null;
+function showServerBusy() {
+    if (serverBusyBar) return;
+    serverBusyBar = document.createElement('div');
+    serverBusyBar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99998;background:#b45309;color:#fff;padding:12px 16px;text-align:center;font-weight:600;box-shadow:0 2px 8px #0006;';
+    serverBusyBar.textContent = t('wr.server_busy_warning');
+    document.body.prepend(serverBusyBar);
+}
+function clearServerBusy() {
+    if (!serverBusyBar) return;
+    serverBusyBar.remove();
+    serverBusyBar = null;
+}
 function checkSessionAlive(response) {
+    // 503 is this app's own "database refused another connection" answer. Check
+    // it before the content-type test below, which would otherwise classify the
+    // HTML error page as an expired session.
+    if (response.status === 503) {
+        showServerBusy();
+        return false;
+    }
     const contentType = response.headers.get('content-type') || '';
     if (response.redirected || !contentType.includes('json')) {
         if (!sessionExpiredWarningShown) {
@@ -11406,6 +11433,9 @@ function pollWarRoomData() {
     }).then(data => {
         if (!data) return;
         lastPollOkAt = Date.now();
+        // A poll got through, so whatever the database was refusing a moment
+        // ago it is answering now — take the overload banner down by itself.
+        clearServerBusy();
         renderPollStaleness();
         if (data.unchanged) {
             // Nothing to redraw, but the refresh clock still has to move —
