@@ -12,6 +12,11 @@
  * side deliberately uses session auth, not bearer, so it can log the
  * EARLIEST lifecycle points too (plugin missing, token issuance failing),
  * none of which have a bearer token yet.
+ * The detail cap is 4000, not 300: war-room.php's live-video diagnostic
+ * posts a whole buffered session here (UA, codec capabilities, both track
+ * states, RTP counters, ICE) because the phone that fails belongs to a
+ * volunteer and cannot be borrowed to read a screen. The 500KB truncation
+ * below still bounds the file.
  * GET (admin session) renders the log as plain text so it can be read from
  * a live domain this session has no direct file access to.
  */
@@ -50,11 +55,11 @@ if (isPost()) {
         $body = json_decode(file_get_contents('php://input'), true) ?? [];
         $source = substr((string) ($body['source'] ?? '?'), 0, 20);
         $event = substr((string) ($body['event'] ?? '?'), 0, 60);
-        $detail = substr((string) ($body['detail'] ?? ''), 0, 300);
+        $detail = substr((string) ($body['detail'] ?? ''), 0, 4000);
     } else {
         $source = substr((string) post('source', 'js'), 0, 20);
         $event = substr((string) post('event', '?'), 0, 60);
-        $detail = substr((string) post('detail', ''), 0, 300);
+        $detail = substr((string) post('detail', ''), 0, 4000);
     }
 
     $line = sprintf(

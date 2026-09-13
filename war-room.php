@@ -13821,7 +13821,15 @@ setInterval(function () {
     // three on the screen, so a screenshot from the field IS the diagnosis.
     const LIVE_DEBUG = /(^|[?&])livedebug=1(&|$)/.test(location.search);
     let dbgBox = null;
+    // Every line is kept whether or not the on-screen panel is on. The panel
+    // only helps someone holding the phone, and the phone that fails is a
+    // volunteer's, not the coordinator's — so the log has to be able to reach
+    // the server by itself. See liveReport().
+    const dbgBuf = [];
     function dbg(msg) {
+        const line = new Date().toTimeString().slice(0, 8) + ' ' + msg;
+        dbgBuf.push(line);
+        if (dbgBuf.length > 140) dbgBuf.shift();
         if (!LIVE_DEBUG) return;
         if (!dbgBox) {
             const host = document.querySelector('[data-card-id="myLiveCard"] .card-body')
@@ -13832,10 +13840,36 @@ setInterval(function () {
             dbgBox.style.cssText = 'max-height:38vh;overflow:auto;white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.35;';
             host.appendChild(dbgBox);
         }
-        const ts = new Date().toTimeString().slice(0, 8);
-        dbgBox.textContent += ts + ' ' + msg + '\n';
+        dbgBox.textContent += line + '\n';
         dbgBox.scrollTop = dbgBox.scrollHeight;
     }
+    // Ships the buffer to mobile-debug-log.php, where an admin reads it from
+    // any browser. This exists because the diagnosis kept depending on someone
+    // photographing a phone they do not own: the iPhone that fails belongs to a
+    // volunteer, and "open this URL with ?livedebug=1 and send me a screenshot"
+    // is not something you can ask mid-mission.
+    //
+    // Failure paths only. Nothing is sent when a stream works, so this costs
+    // one small request per broken attempt and none otherwise. Head AND tail
+    // are kept when trimming: the head carries the UA, the codec capability
+    // list and any CSP violation, the tail carries the stats that say what
+    // actually happened.
+    let liveReported = false;
+    function liveReport(reason) {
+        if (liveReported) return;
+        liveReported = true;
+        try {
+            const all = dbgBuf.join(' | ');
+            const detail = all.length <= 3500
+                ? all
+                : all.slice(0, 900) + ' ...CUT... ' + all.slice(-2500);
+            fetch('mobile-debug-log.php', {
+                method: 'POST',
+                body: new URLSearchParams({csrf_token: csrfToken, source: 'live', event: reason, detail})
+            }).catch(() => {});
+        } catch (e) { /* a diagnostic must never break the thing it watches */ }
+    }
+
     if (LIVE_DEBUG) {
         // The single most useful line this panel can print. A CSP refusal is
         // invisible everywhere else: no exception, no failed request, just
@@ -14069,7 +14103,16 @@ setInterval(function () {
         const LK = window.LivekitClient;
         const pub = pubRoom.localParticipant.getTrackPublication(LK.Track.Source.Camera);
         const sender = pub && pub.track && pub.track.sender;
-        if (!sender) return;
+        // NOT 'nothing to check'. No camera publication at all is precisely
+        // the failure shape being chased, and returning here is what made the
+        // watchdog silent in the one case it was built for.
+        if (!sender) {
+            dbg('watchdog: NO camera sender at ' + (attempt === 1 ? '8s' : '16s'));
+            if (attempt === 1) { setTimeout(() => pubWatchdog(2), 8000); return; }
+            liveReport('no-camera-sender');
+            pubErr(t('mylive.not_sending'));
+            return;
+        }
         let framesSent = 0;
         try {
             const stats = await sender.getStats();
@@ -14094,6 +14137,7 @@ setInterval(function () {
         }
         // Second look, still nothing. Tell the volunteer, because from here
         // only they can act — move, switch network, or restart the stream.
+        liveReport('zero-frames-16s');
         pubErr(t('mylive.not_sending'));
     }
 
@@ -14101,6 +14145,7 @@ setInterval(function () {
         const btn = el('myLiveStartBtn');
         if (btn) { btn.disabled = true; btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>' + t('mylive.starting'); }
         pubClearErr();
+        liveReported = false;
         try {
             const r = await post('accept');
             if (!r.ok) { pubErr(r.error || t('mylive.connect_error')); return; }
@@ -14189,6 +14234,10 @@ setInterval(function () {
 
             pubTick();
             pubTimer = setInterval(pubTick, 1000);
+            // One stats sample a second before the watchdog rules, so the
+            // buffer it reports actually contains numbers. Runs whether or
+            // not the panel is on — the whole point is the unattended case.
+            setTimeout(() => { try { pubDiagTick(); } catch (e) {} }, 7000);
             setTimeout(() => pubWatchdog(1), 8000);
             if (LIVE_DEBUG) { pubDiagTick(); pubDiagTimer = setInterval(pubDiagTick, 3000); }
 
@@ -14244,6 +14293,10 @@ setInterval(function () {
             // After stopPublishing, not before: its generic "ended" note would
             // otherwise overwrite the specific reason, and "the stream ended"
             // is useless to someone who just denied a camera prompt.
+            // A start that never got on air at all: the buffer holds the
+            // connect/publish sequence that led here, which is the part no
+            // screenshot ever captured.
+            liveReport('start-failed: ' + (denied ? 'permission' : (e && e.name ? e.name : 'error')));
             pubErr(msg, denied);
         } finally {
             if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-camera-video-fill me-1"></i>' + t('mylive.start'); }
