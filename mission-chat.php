@@ -132,6 +132,28 @@ if ($teamId) {
 
 // ── GET: poll for messages ──────────────────────────────────────────────────
 if (!isPost()) {
+    // Releases the PHP session file lock immediately, same as war-room.php's
+    // own ajax branch — everything this branch needs from the session ($userId
+    // and $canManageWarRoom) is already resolved above, and nothing below
+    // writes to it.
+    //
+    // This matters more here than anywhere else in the app because of how the
+    // unread badges poll: pollOtherRoomsForUnread() in war-room.php fires one
+    // request to this file per OTHER visible chat room every 5 seconds, and an
+    // ops screen sees the General room plus every team — 7 rooms on a six-team
+    // mission, so 8 requests land here at once from a single session. PHP's
+    // default session handler holds an exclusive lock on that session's file
+    // for the whole request, so those requests serialized against each other,
+    // and since the PDO connection opens in bootstrap.php BEFORE the session
+    // starts, each one sat on the lock holding an idle database connection.
+    // Measured during a 6-team/48-volunteer drill: at the connection peak, 32
+    // of 40 connections were in Sleep, i.e. held open while running no SQL.
+    //
+    // Deliberately inside the GET branch and not above it: the POST path below
+    // reads $_SESSION['csrf_token'], and while a read would still work after
+    // this call, an auth check is not the place to depend on that subtlety.
+    session_write_close();
+
     $afterId = (int) get('after_id');
     $teamSql = $teamId ? 'c.team_id = ?' : 'c.team_id IS NULL';
     $params = [$missionId];

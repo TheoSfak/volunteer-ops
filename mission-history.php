@@ -38,6 +38,18 @@ header('Content-Type: application/json');
 
 $userId = getCurrentUserId();
 
+// Releases the PHP session file lock immediately, same as war-room.php's own
+// ajax branch. This file is GET-only and never touches $_SESSION at all — the
+// one thing it needs from it is the id resolved on the line above — so there
+// is nothing below to keep the lock for.
+//
+// Without this, every open Action Room tab's Activity panel (one request here
+// every 15 seconds) queued behind that tab's own chat and map polls, because
+// the session lock is per-session and every tab of one user shares it. The
+// database connection opens in bootstrap.php BEFORE the session starts, so a
+// request waiting on the lock is a connection held open doing nothing.
+session_write_close();
+
 $missionId = (int) get('mission_id');
 
 $mission = dbFetchOne(
