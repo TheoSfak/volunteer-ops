@@ -153,6 +153,58 @@ function weightedWedgePolygonPoints(center, radiusMeters, startBearingDeg, sweep
     return [[center.lat, center.lng], ...boundary];
 }
 
+// The BAND between two LPB rings, optionally narrowed to one angular wedge
+// of it — what "ring N" actually means operationally for N > 0, since ring
+// N's disc wholly contains every smaller ring's. weightedWedgePolygonPoints()
+// above always spans center-to-radius, so using it for ring 2/3/4 hands a
+// team ground already assigned to the rings inside it; worse, it made
+// verified coverage measure a team's GPS against the whole disc while their
+// route only ever swept the band, under-reporting real coverage and tripping
+// the <60% "low coverage" warning on correctly-executed searches. Same
+// "don't re-walk the smaller ring(s)" reasoning sectorSearchLegPoints()
+// already applies to ROUTES, applied to the assigned AREA so the two finally
+// describe the same ground.
+//
+// innerRadiusMeters <= 0 returns the plain pie slice (center + outer arc) —
+// ring 0 genuinely has no hole, so it stays byte-identical to what
+// weightedWedgePolygonPoints() produced.
+//
+// Otherwise: outer arc from startBearingDeg to startBearingDeg+sweepDeg,
+// then the inner arc walked BACK along the same bearings, giving a 4-sided
+// annular wedge whose two radial edges are the wedge's own sides (the
+// implicit closing edge, last inner point -> first outer point, is the
+// second one). Both arcs sample INCLUSIVE of both bearings, the same
+// convention weightedWedgePolygonPoints() uses and for the same reason: a
+// team's area has to actually reach both edges of their wedge.
+//
+// At sweepDeg >= 360 (one team gets the whole ring) this closes into a
+// slit annulus: first and last outer points land on the same bearing, so
+// the shape pinches to zero width at that seam and the two coincident
+// radial edges there are traversed in opposite directions. That is safe for
+// the ray-casting pointInPolygon() in functions-warroom.php that sector
+// coverage runs — the zero-length edges contribute no crossings at all
+// (latI === latJ fails its own (latI > lat) !== (latJ > lat) test), and the
+// doubled seam is always crossed twice or not at all, so it cancels and
+// never flips the inside/outside parity.
+function annularWedgePolygonPoints(center, innerRadiusMeters, outerRadiusMeters, startBearingDeg, sweepDeg, numPoints) {
+    const n = Math.max(2, numPoints);
+    const bearingAt = i => startBearingDeg + sweepDeg * i / (n - 1);
+    const outer = [];
+    for (let i = 0; i < n; i++) {
+        const pt = destinationPoint(center, bearingAt(i), outerRadiusMeters);
+        outer.push([pt.lat, pt.lng]);
+    }
+    if (innerRadiusMeters <= 0) {
+        return [[center.lat, center.lng], ...outer];
+    }
+    const inner = [];
+    for (let i = n - 1; i >= 0; i--) {
+        const pt = destinationPoint(center, bearingAt(i), innerRadiusMeters);
+        inner.push([pt.lat, pt.lng]);
+    }
+    return [...outer, ...inner];
+}
+
 // Builds a mission_search_areas-shaped geo array (a flat [[lat,lng],...]
 // polygon, same shape circleToPolygonPoints() already produces) tracing an
 // LPB ring's full disc — center point, then numPoints boundary points from
@@ -407,6 +459,7 @@ if (typeof module !== 'undefined' && module.exports) {
         sectorSearchLegCount,
         ringDiscPolygonPoints,
         weightedWedgePolygonPoints,
+        annularWedgePolygonPoints,
         escapeHtml,
         parseCoordsInput,
         formatDistanceMeters,

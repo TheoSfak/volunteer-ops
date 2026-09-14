@@ -31,6 +31,7 @@ const {
     sectorSearchLegCount,
     ringDiscPolygonPoints,
     weightedWedgePolygonPoints,
+    annularWedgePolygonPoints,
     escapeHtml,
     parseCoordsInput,
     formatDistanceMeters,
@@ -269,6 +270,75 @@ test('weightedWedgePolygonPoints() area is proportional to sweepDeg, no seam gap
     const quarterWedgeArea = shoelaceArea(weightedWedgePolygonPoints(center, radius, 0, 90, numPoints));
     const ratio = quarterWedgeArea / fullDiscArea;
     assert.ok(Math.abs(ratio - 0.25) < 0.02, `expected a 90° wedge to enclose ~1/4 of the full disc's area, got ratio ${ratio}`);
+});
+
+// Ring 0 has no ring inside it, so its "band" is the whole disc and the
+// shape must stay exactly what weightedWedgePolygonPoints() produced —
+// otherwise this change would silently alter the one ring that was never
+// wrong.
+test('annularWedgePolygonPoints() with innerRadius 0 is the same pie slice as weightedWedgePolygonPoints()', () => {
+    const center = { lat: 35.0, lng: 24.0 };
+    assert.deepEqual(
+        annularWedgePolygonPoints(center, 0, 1000, 45, 90, 6),
+        weightedWedgePolygonPoints(center, 1000, 45, 90, 6)
+    );
+});
+
+test('annularWedgePolygonPoints() with an inner radius returns 2*numPoints vertices and no center point', () => {
+    const center = { lat: 35.0, lng: 24.0 };
+    const points = annularWedgePolygonPoints(center, 500, 1000, 45, 90, 6);
+    assert.equal(points.length, 12);
+    assert.ok(
+        !points.some(([lat, lng]) => lat === center.lat && lng === center.lng),
+        'an annular wedge must not include the center vertex — that is the whole point of it'
+    );
+});
+
+// The actual regression this shape exists to fix. The old full-disc wedge
+// handed a team ground from the datum outward, so verified coverage graded
+// their GPS against the inner rings' ground too. A band must exclude its own
+// hole — checked with the same ray-casting rule pointInPolygon() uses
+// server-side (functions-warroom.php), since that is what sector coverage
+// actually runs.
+test('annularWedgePolygonPoints() excludes the datum and the inner ring, but contains the band', () => {
+    const center = { lat: 0, lng: 0 };
+    const pointInPolygon = (lat, lng, geo) => {
+        let inside = false;
+        for (let i = 0, j = geo.length - 1; i < geo.length; j = i++) {
+            const [latI, lngI] = geo[i], [latJ, lngJ] = geo[j];
+            if (((latI > lat) !== (latJ > lat))
+                && (lng < (lngJ - lngI) * (lat - latI) / (latJ - latI) + lngI)) {
+                inside = !inside;
+            }
+        }
+        return inside;
+    };
+    // Full 360 band, the single-eligible-team case that closes into a slit
+    // annulus — the hardest one for the parity rule to get right.
+    const band = annularWedgePolygonPoints(center, 3000, 6000, 0, 360, 24);
+    const northAt = m => [m / 111320, 0.0001];
+    assert.equal(pointInPolygon(0, 0, band), false, 'the datum itself must be outside the band');
+    assert.equal(pointInPolygon(...northAt(1500), band), false, 'inside the inner ring must be outside the band');
+    assert.equal(pointInPolygon(...northAt(4500), band), true, 'mid-band must be inside');
+    assert.equal(pointInPolygon(...northAt(7500), band), false, 'beyond the outer radius must be outside');
+});
+
+test('annularWedgePolygonPoints() band area is the annulus area, scaled by sweepDeg', () => {
+    const center = { lat: 0, lng: 0 };
+    const shoelaceArea = poly => Math.abs(poly.reduce((sum, [x1, y1], i) => {
+        const [x2, y2] = poly[(i + 1) % poly.length];
+        return sum + (x1 * y2 - x2 * y1);
+    }, 0)) / 2;
+    const fullBand = shoelaceArea(annularWedgePolygonPoints(center, 500, 1000, 0, 360, 64));
+    const fullDisc = shoelaceArea(weightedWedgePolygonPoints(center, 1000, 0, 360, 64));
+    const innerDisc = shoelaceArea(weightedWedgePolygonPoints(center, 500, 0, 360, 64));
+    assert.ok(
+        Math.abs(fullBand - (fullDisc - innerDisc)) / (fullDisc - innerDisc) < 0.02,
+        `expected the band to enclose outer-minus-inner area, got ${fullBand} vs ${fullDisc - innerDisc}`
+    );
+    const quarterBand = shoelaceArea(annularWedgePolygonPoints(center, 500, 1000, 0, 90, 64));
+    const ratio = quarterBand / fullBand;
+    assert.ok(Math.abs(ratio - 0.25) < 0.02, `expected a 90° band wedge to be ~1/4 of the full band, got ${ratio}`);
 });
 
 test('escapeHtml() escapes all five special characters', () => {

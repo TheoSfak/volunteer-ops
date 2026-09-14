@@ -5521,9 +5521,10 @@ function openSplitSectorModal(sectorId) {
 function ringPolygonPointCount(radiusMeters) {
     return Math.min(30, Math.max(8, Math.round(2 * Math.PI * radiusMeters / 280)));
 }
-// "Send a team to this ring" — seeds the dispatch composer with a polygon
-// tracing the ring's boundary (so the team is assigned the whole disc area),
-// then opens it exactly like clicking the normal "New Dispatch" button
+// "Send a team to this ring" — seeds the dispatch composer with a polygon of
+// the ring's own BAND (annularWedgePolygonPoints(), war-room-utils.js: the
+// area between the previous ring's radius and this one), then opens it
+// exactly like clicking the normal "New Dispatch" button
 // would. teamId comes from the ring popup's own team select (required —
 // the button that calls this stays disabled until one is chosen, see the
 // popupopen listener below) and is carried on pendingDispatchSeed so the
@@ -5534,8 +5535,13 @@ function openDispatchForRing(ringIndex, teamId) {
     const radii = LPB_RING_TABLE[missingPerson.subject_category];
     if (!radii) return;
     const radius = radii[ringIndex];
+    const innerRadius = ringIndex > 0 ? radii[ringIndex - 1] : 0;
     const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
-    const points = circleToPolygonPoints(center, radius, ringPolygonPointCount(radius));
+    // Ring 0 has no ring inside it, so its band IS the whole disc — kept on
+    // circleToPolygonPoints() so that case stays exactly what it was.
+    const points = innerRadius > 0
+        ? annularWedgePolygonPoints(center, innerRadius, radius, 0, 360, ringPolygonPointCount(radius))
+        : circleToPolygonPoints(center, radius, ringPolygonPointCount(radius));
     const pct = [25, 50, 75, 95][ringIndex];
     pendingDispatchSeed = {points, label: t('missing_person.ring_generated_label', {pct}), teamId, ringIndex};
     map.closePopup();
@@ -5600,14 +5606,27 @@ function openInteriorSweepForRing(ringIndex, teamId) {
 // available cut is used.
 const RING_SECTOR_DIVISION_POINTS = 24;
 // "Divide this ring into sectors" — creates a mission_search_areas row
-// shaped like the ring's full disc (ringDiscPolygonPoints(), war-room-
+// shaped like the ring's own BAND (annularWedgePolygonPoints(), war-room-
 // utils.js) and immediately opens the existing, unmodified divide-into-
 // sectors tool (openDivideSectorsForArea() above) against it. Automates
 // only the geometry, same scope as the three ring buttons above — from here
-// the admin uses the normal chord-drawing tool to cut pie-slice sectors,
-// which save as ordinary mission_search_sectors rows with the app's
-// existing assign/self-report/coverage-tracking, no different from a
-// hand-drawn sector. Unlike the three buttons above, this one needs a real
+// the admin uses the normal chord-drawing tool, and the sectors it saves are
+// ordinary mission_search_sectors rows with the app's existing assign/
+// self-report/coverage-tracking, no different from a hand-drawn sector.
+//
+// Ring 0 keeps ringDiscPolygonPoints() and its seam-duplicate trick: it has
+// no ring inside it, so its band IS the full disc, and the cutting gesture
+// there stays center-to-boundary-vertex (a radial spoke). For rings 1-3 the
+// area is now an annulus with no center vertex, so the equivalent cut is
+// outer-vertex to the inner vertex facing it — still a radial cut producing
+// true annular sectors, but a different gesture, and the chord tool needs no
+// changes of its own either way since it is generic over any simple polygon's
+// vertex ring. One rough edge inherited from that generality: at sweepDeg 360
+// the annulus' first and last outer vertices are the same physical point, so
+// a chord drawn between those two indices is zero-length. isValidChord()'s
+// adjacency test is index-based and won't reject it.
+//
+// Unlike the three buttons above, this one needs a real
 // round trip before there's anything to act on, so it disables itself and
 // reports failure inline instead of closing the popup optimistically.
 function openDivideRingIntoSectors(ringIndex, btnEl) {
@@ -5615,8 +5634,11 @@ function openDivideRingIntoSectors(ringIndex, btnEl) {
     const radii = LPB_RING_TABLE[missingPerson.subject_category];
     if (!radii) return;
     const radius = radii[ringIndex];
+    const innerRadius = ringIndex > 0 ? radii[ringIndex - 1] : 0;
     const center = {lat: missingPerson.last_seen_lat, lng: missingPerson.last_seen_lng};
-    const geo = ringDiscPolygonPoints(center, radius, RING_SECTOR_DIVISION_POINTS);
+    const geo = innerRadius > 0
+        ? annularWedgePolygonPoints(center, innerRadius, radius, 0, 360, RING_SECTOR_DIVISION_POINTS)
+        : ringDiscPolygonPoints(center, radius, RING_SECTOR_DIVISION_POINTS);
     const pct = [25, 50, 75, 95][ringIndex];
     if (btnEl) btnEl.disabled = true;
     const data = new URLSearchParams({
@@ -5644,13 +5666,17 @@ function openDivideRingIntoSectors(ringIndex, btnEl) {
 // above: instead of the admin manually cutting wedges, this divides the
 // ring itself, sizing each team's angular share proportionally to how many
 // members it has (a 5-person team gets ~2.5x the width of a 2-person team),
-// and for each team creates BOTH a full-disc sector (weightedWedgePolygonPoints(),
-// war-room-utils.js — same 0-to-this-ring's-radius coverage the manual tool's
-// wedges get) assigned to that team, AND a sector-search route
-// (sectorSearchLegPoints(), war-room-utils.js) confined to that team's wedge
-// AND to the band between the previous ring's radius and this one — same
-// "don't re-walk the smaller ring(s)" reasoning openInteriorSweepForRing()
-// already applies, just per-team here. Teams
+// and for each team creates BOTH an annular-wedge sector
+// (annularWedgePolygonPoints(), war-room-utils.js) assigned to that team, AND
+// a sector-search route (sectorSearchLegPoints(), war-room-utils.js) — both
+// confined to that team's wedge AND to the band between the previous ring's
+// radius and this one, the same "don't re-walk the smaller ring(s)" reasoning
+// openInteriorSweepForRing() already applies, just per-team here. The sector
+// used to be a full-disc wedge (center out to this ring's radius) while its
+// route only ever swept the band, so verified coverage measured the team's
+// GPS against ground they were never routed through — under-reporting real
+// coverage and tripping the <60% low-coverage warning on a correctly
+// executed search. Area and route now describe the same ground. Teams
 // with 0 members are skipped entirely (nothing to meaningfully assign);
 // ties in member count resolve by team creation order (missionTeamsForRoute's
 // own natural order), no extra logic needed.
@@ -5711,7 +5737,7 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
     let completedCount = 0;
     for (const {team, startBearingDeg, sweepDeg} of wedges) {
         const areaNumPoints = Math.max(3, Math.round(basePointCount * sweepDeg / 360));
-        const wedgeGeo = weightedWedgePolygonPoints(center, radius, startBearingDeg, sweepDeg, areaNumPoints);
+        const wedgeGeo = annularWedgePolygonPoints(center, innerRadius, radius, startBearingDeg, sweepDeg, areaNumPoints);
         const areaLabel = t('missing_person.ring_auto_assign_area_label', {pct, team: team.label});
 
         const areaResult = await fetch('mission-sector.php', {method: 'POST', body: new URLSearchParams({
