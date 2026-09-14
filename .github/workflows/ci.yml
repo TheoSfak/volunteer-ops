@@ -26,6 +26,23 @@ jobs:
           done < <(git ls-files -z -- '*.php')
           exit $status
 
+      # sw.js's CACHE_VERSION is the only version marker this app exposes
+      # publicly, so it is the only way to confirm what a live site is actually
+      # running without credentials. It had been left at v3.212.0 for seventeen
+      # releases, and two of those could not be verified after deployment as a
+      # direct result. A checklist line did not prevent that; this does.
+      - name: Version markers agree (config.php APP_VERSION == sw.js CACHE_VERSION)
+        run: |
+          app=$(sed -n "s/.*define('APP_VERSION',[[:space:]]*'\([0-9.]*\)').*/\1/p" config.php | head -1)
+          sw=$(sed -n "s/.*CACHE_VERSION[[:space:]]*=[[:space:]]*'vo-v\([0-9.]*\)'.*/\1/p" sw.js | head -1)
+          if [ -z "$app" ]; then echo "::error file=config.php::could not read APP_VERSION"; exit 1; fi
+          if [ -z "$sw" ]; then echo "::error file=sw.js::could not read CACHE_VERSION"; exit 1; fi
+          if [ "$app" != "$sw" ]; then
+            echo "::error file=sw.js::CACHE_VERSION is 'vo-v$sw' but APP_VERSION is '$app' — bump sw.js to 'vo-v$app' in this release"
+            exit 1
+          fi
+          echo "both at $app"
+
       - name: Reject stray UTF-8 BOMs
         run: |
           status=0

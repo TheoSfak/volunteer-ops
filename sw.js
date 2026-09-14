@@ -13,7 +13,19 @@
 // can never satisfy an integrity check; each one 404'd-looking until its own
 // background stale-while-revalidate refetch (same code, further down) quietly
 // replaced it with a proper cors-mode response on the following load.
-const CACHE_VERSION = 'vo-v3.212.0';
+//
+// Since v3.229.0 this is no longer a judgement call: it tracks APP_VERSION on
+// EVERY release, and CI fails the build if the two ever disagree (see the
+// "Version markers agree" step in .github/workflows/ci.yml). Two reasons.
+// Deciding per release whether a cached asset "really" changed is exactly the
+// call that was got wrong in v3.153.6 above. And this string is the only
+// version marker the app exposes publicly, so it is the only way to check
+// what a live site is actually running without logging in — it had been stuck
+// at v3.212.0 for seventeen releases, which made two deploys unverifiable.
+//
+// Bumping costs a one-off refetch of CDN assets and static images. It does NOT
+// touch the map tile cache below, which is deliberately kept out of this.
+const CACHE_VERSION = 'vo-v3.229.0';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime';
 
