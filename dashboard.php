@@ -5,6 +5,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/subscription-iris.php';
+require_once __DIR__ . '/includes/shift-swap-functions.php';
 requireLogin();
 
 $pageTitle = 'Πίνακας Ελέγχου';
@@ -33,6 +34,33 @@ if (isPost() && in_array(post('action'), ['prepare_iris_renewal', 'report_iris_p
     } catch (RuntimeException $e) {
         setFlash('error', $e->getMessage());
     }
+    redirect('dashboard.php');
+}
+
+// Shift swap requests are answered straight from the dashboard card, so the
+// volunteer never has to go hunting for them in "Οι Αιτήσεις μου" first. Same
+// handlers as my-participations.php — see includes/shift-swap-functions.php.
+if (isPost() && in_array(post('action'), ['respond_swap', 'cancel_swap'], true)) {
+    verifyCsrf();
+    $result = post('action') === 'respond_swap'
+        ? shiftSwapRespond((int) post('swap_id'), $user, (string) post('response'))
+        : shiftSwapCancel((int) post('swap_id'), (int) $user['id']);
+    setFlash($result['level'], $result['message']);
+    redirect('dashboard.php');
+}
+
+// Τελική έγκριση/απόρριψη διαχειριστή — ίδιος κώδικας με shift-view.php.
+// isAdmin() είναι ο ίδιος έλεγχος που κάνει και το $canManage εκεί.
+if (isPost() && in_array(post('action'), ['approve_swap', 'reject_swap'], true)) {
+    verifyCsrf();
+    if (!isAdmin()) {
+        setFlash('error', 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.');
+        redirect('dashboard.php');
+    }
+    $result = post('action') === 'approve_swap'
+        ? shiftSwapAdminApprove((int) post('swap_id'), $user)
+        : shiftSwapAdminReject((int) post('swap_id'), $user);
+    setFlash($result['level'], $result['message']);
     redirect('dashboard.php');
 }
 
@@ -661,6 +689,10 @@ $liveExams = dbFetchAll("
 .ds-widget.accent-red .card-header { border-bottom-color: #ef4444; }
 .ds-widget.accent-cyan .card-header { border-bottom-color: #06b6d4; }
 .ds-widget.accent-purple .card-header { border-bottom-color: #8b5cf6; }
+/* Swap requests keep the same purple they carry on my-participations.php / shift-swap.php */
+.ds-widget.accent-swap .card-header { border-bottom-color: #8e44ad; }
+#dashboardSwapRequests .swap-row-incoming { border-left: 3px solid #8e44ad; }
+#dashboardSwapRequests .swap-row-admin { border-left: 3px solid #dc3545; }
 .ds-widget .card-header .widget-toggle { opacity: .4; transition: opacity .2s; }
 .ds-widget .card-header:hover .widget-toggle { opacity: 1; }
 /* Leaderboard list item */
@@ -711,6 +743,9 @@ $liveExams = dbFetchAll("
     #dashboardSubscription .card-header > .d-flex form,
     #dashboardSubscription .card-header > .d-flex .iris-renewal-disabled,
     #dashboardSubscription .card-header > .d-flex .btn { width: 100%; }
+    #dashboardSwapRequests .swap-actions { width: 100%; }
+    #dashboardSwapRequests .swap-actions form { flex: 1 1 0; }
+    #dashboardSwapRequests .swap-actions .btn { width: 100%; }
     .dashboard-progress-header { align-items: flex-start !important; flex-direction: column; gap: .75rem; }
     .dashboard-progress-header > .d-flex { width: 100%; flex-wrap: wrap; }
     .volunteer-shift-card > .d-flex { flex-direction: column; gap: .5rem; }
@@ -886,6 +921,165 @@ $randomQuote = $quotes[array_rand($quotes)];
         </div>
     </div>
 </div>
+
+<?php
+// Αιτήματα αντικατάστασης, αμέσως κάτω από το όνομα: και τα δύο σκέλη της ίδιας
+// συζήτησης — αυτά που περιμένουν ΤΗ ΔΙΚΗ ΣΟΥ απάντηση, και αυτά που άνοιξες
+// εσύ και περιμένουν κάποιον άλλο. Δεν είναι draggable widget: ένα αίτημα που
+// αφορά βάρδια της επόμενης μέρας δεν πρέπει να μπορεί να κρυφτεί.
+$swapIncoming = shiftSwapIncomingRequests((int) $user['id']);
+$swapOutgoing = shiftSwapOutgoingRequests((int) $user['id']);
+// Τρίτο σκέλος, μόνο για διαχειριστές: όσα έχουν ήδη αποδοχή εθελοντή και
+// περιμένουν την τελική έγκριση. Μέχρι τώρα φαίνονταν μόνο μέσα στη σελίδα
+// της βάρδιας — έπρεπε να ξέρεις ποια βάρδια να ανοίξεις για να τα βρεις.
+$swapAwaitingMe = isAdmin()
+    ? shiftSwapAwaitingAdmin($user['role'] === ROLE_DEPARTMENT_ADMIN ? (int) $user['department_id'] : null)
+    : [];
+?>
+<?php if ($swapIncoming || $swapOutgoing || $swapAwaitingMe): ?>
+<div class="card ds-widget accent-swap mb-4" id="dashboardSwapRequests">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5>
+            <i class="bi bi-arrow-left-right me-2" style="color:#8e44ad"></i>Αιτήματα Αντικατάστασης
+            <?php if (!empty($swapIncoming)): ?>
+                <span class="badge rounded-pill ms-1" style="background:#8e44ad"><?= count($swapIncoming) ?> προς εσάς</span>
+            <?php endif; ?>
+            <?php if (!empty($swapAwaitingMe)): ?>
+                <span class="badge rounded-pill ms-1 bg-danger"><?= count($swapAwaitingMe) ?> για έγκριση</span>
+            <?php endif; ?>
+        </h5>
+        <a href="my-participations.php" class="btn btn-sm btn-outline-secondary text-nowrap">
+            <i class="bi bi-list-check me-1"></i>Οι Αιτήσεις μου
+        </a>
+    </div>
+    <div class="list-group list-group-flush">
+
+        <?php foreach ($swapAwaitingMe as $sa): ?>
+        <div class="list-group-item swap-row-admin">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                <div class="flex-grow-1" style="min-width:min(100%, 18rem)">
+                    <span class="badge bg-danger mb-1"><i class="bi bi-shield-exclamation me-1"></i>Αναμένει την έγκρισή σας</span>
+                    <div>
+                        <strong><?= h($sa['from_volunteer_name']) ?></strong> αντικαθίσταται από
+                        <strong><?= h($sa['to_volunteer_name']) ?></strong>, που έχει ήδη αποδεχτεί:
+                    </div>
+                    <div class="mt-1 small">
+                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sa['mission_title']) ?>
+                        <span class="mx-1 text-muted">·</span>
+                        <i class="bi bi-calendar3 me-1 text-muted"></i><?= formatDateTime($sa['start_time'], 'd/m/Y') ?>
+                        <span class="mx-1 text-muted">·</span>
+                        <i class="bi bi-clock me-1 text-muted"></i><?= formatDateTime($sa['start_time'], 'H:i') ?>–<?= formatDateTime($sa['end_time'], 'H:i') ?>
+                        <span class="mx-1 text-muted">·</span>
+                        <a href="shift-view.php?id=<?= (int) $sa['shift_id'] ?>">Η βάρδια</a>
+                    </div>
+                    <?php if ($sa['message']): ?>
+                    <div class="mt-2 p-2 rounded" style="background:#ede7f6;font-size:.85rem;border-left:3px solid #8e44ad">
+                        <i class="bi bi-quote me-1"></i><?= h($sa['message']) ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <div class="swap-actions d-flex gap-2 flex-shrink-0">
+                    <form method="post" onsubmit="return confirm('Να εγκριθεί η αντικατάσταση; Ο αρχικός εθελοντής θα βγει από τη βάρδια και θα μπει ο αντικαταστάτης.')">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="approve_swap">
+                        <input type="hidden" name="swap_id" value="<?= (int) $sa['id'] ?>">
+                        <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check-lg me-1"></i>Έγκριση</button>
+                    </form>
+                    <form method="post" onsubmit="return confirm('Να απορριφθεί το αίτημα αντικατάστασης;')">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="reject_swap">
+                        <input type="hidden" name="swap_id" value="<?= (int) $sa['id'] ?>">
+                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-x-lg me-1"></i>Απόρριψη</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <?php endforeach; ?>
+
+        <?php foreach ($swapIncoming as $sr): ?>
+        <div class="list-group-item swap-row-incoming">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                <div class="flex-grow-1" style="min-width:min(100%, 18rem)">
+                    <span class="badge mb-1" style="background:#8e44ad"><i class="bi bi-hourglass-split me-1"></i>Χρειάζεται την απάντησή σας</span>
+                    <div>
+                        <strong><?= h($sr['requester_name']) ?></strong> σας ζητά να τον/την αντικαταστήσετε:
+                    </div>
+                    <div class="mt-1 small">
+                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sr['mission_title']) ?>
+                        <span class="mx-1 text-muted">·</span>
+                        <i class="bi bi-calendar3 me-1 text-muted"></i><?= formatDateTime($sr['start_time'], 'd/m/Y') ?>
+                        <span class="mx-1 text-muted">·</span>
+                        <i class="bi bi-clock me-1 text-muted"></i><?= formatDateTime($sr['start_time'], 'H:i') ?>–<?= formatDateTime($sr['end_time'], 'H:i') ?>
+                        <?php if ($sr['location']): ?>
+                            <span class="mx-1 text-muted">·</span>
+                            <i class="bi bi-geo-alt me-1 text-muted"></i><?= h($sr['location']) ?>
+                        <?php endif; ?>
+                    </div>
+                    <?php if ($sr['message']): ?>
+                    <div class="mt-2 p-2 rounded" style="background:#ede7f6;font-size:.85rem;border-left:3px solid #8e44ad">
+                        <i class="bi bi-quote me-1"></i><?= h($sr['message']) ?>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <div class="swap-actions d-flex gap-2 flex-shrink-0">
+                    <form method="post">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="respond_swap">
+                        <input type="hidden" name="swap_id" value="<?= (int) $sr['id'] ?>">
+                        <input type="hidden" name="response" value="accept">
+                        <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-check-lg me-1"></i>Αποδοχή</button>
+                    </form>
+                    <form method="post" onsubmit="return confirm('Να αρνηθείτε το αίτημα αντικατάστασης;')">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="respond_swap">
+                        <input type="hidden" name="swap_id" value="<?= (int) $sr['id'] ?>">
+                        <input type="hidden" name="response" value="decline">
+                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-x-lg me-1"></i>Άρνηση</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <?php endforeach; ?>
+
+        <?php foreach ($swapOutgoing as $sw): ?>
+        <div class="list-group-item">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                <div class="flex-grow-1" style="min-width:min(100%, 18rem)">
+                    <?php if ($sw['status'] === SWAP_ACCEPTED): ?>
+                        <span class="badge bg-success mb-1"><i class="bi bi-check-circle me-1"></i>Αποδέχτηκε — αναμένει έγκριση διαχειριστή</span>
+                    <?php else: ?>
+                        <span class="badge bg-warning text-dark mb-1"><i class="bi bi-hourglass-split me-1"></i>Σε αναμονή απάντησης</span>
+                    <?php endif; ?>
+                    <div>
+                        Ζητήσατε από τον/την <strong><?= h($sw['to_volunteer_name']) ?></strong> να σας αντικαταστήσει:
+                    </div>
+                    <div class="mt-1 small">
+                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sw['mission_title']) ?>
+                        <span class="mx-1 text-muted">·</span>
+                        <i class="bi bi-calendar3 me-1 text-muted"></i><?= formatDateTime($sw['start_time'], 'd/m/Y') ?>
+                        <span class="mx-1 text-muted">·</span>
+                        <i class="bi bi-clock me-1 text-muted"></i><?= formatDateTime($sw['start_time'], 'H:i') ?>–<?= formatDateTime($sw['end_time'], 'H:i') ?>
+                        <?php if ($sw['location']): ?>
+                            <span class="mx-1 text-muted">·</span>
+                            <i class="bi bi-geo-alt me-1 text-muted"></i><?= h($sw['location']) ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <div class="swap-actions d-flex gap-2 flex-shrink-0">
+                    <form method="post" onsubmit="return confirm('Να ακυρωθεί το αίτημα αντικατάστασης;')">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="cancel_swap">
+                        <input type="hidden" name="swap_id" value="<?= (int) $sw['id'] ?>">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x-circle me-1"></i>Ακύρωση αιτήματος</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <?php endforeach; ?>
+
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if (!isAdmin()): ?>
     <?php $dashboardSubscriptionDays = $dashboardSubscription ? (int)floor((strtotime($dashboardSubscription['expiry_date']) - strtotime(date('Y-m-d'))) / 86400) : null; $dashboardSubscriptionColor = $dashboardSubscriptionDays === null ? 'secondary' : ($dashboardSubscriptionDays < 0 ? 'danger' : ($dashboardSubscriptionDays <= 7 ? 'danger' : ($dashboardSubscriptionDays <= 30 ? 'warning' : ($dashboardSubscriptionDays <= 90 ? 'info' : 'success')))); ?>

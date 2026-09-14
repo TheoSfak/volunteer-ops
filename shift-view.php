@@ -4,6 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/shift-swap-functions.php';
 requireLogin();
 
 $id = (int) get('id');
@@ -544,106 +545,18 @@ if (isPost()) {
             }
             break;
 
+        // Shared with dashboard.php — see includes/shift-swap-functions.php
         case 'approve_swap':
             if ($canManage) {
-                $swapId = (int) post('swap_id');
-                $swap = dbFetchOne(
-                    "SELECT ssr.*, fu.name as from_name, fu.email as from_email, tu.name as to_name, tu.email as to_email
-                     FROM shift_swap_requests ssr
-                     JOIN users fu ON ssr.from_volunteer_id = fu.id
-                     JOIN users tu ON ssr.to_volunteer_id = tu.id
-                     WHERE ssr.id = ? AND ssr.shift_id = ? AND ssr.status = ?",
-                    [$swapId, $id, SWAP_ACCEPTED]
-                );
-                if ($swap) {
-                    $db = db();
-                    $db->beginTransaction();
-                    try {
-                        // Cancel original volunteer's participation
-                        dbExecute(
-                            "UPDATE participation_requests SET status = ?, updated_at = NOW() WHERE id = ?",
-                            [PARTICIPATION_CANCELED_BY_USER, $swap['participation_id']]
-                        );
-                        // Approve replacement volunteer (upsert)
-                        $existingPr = dbFetchOne(
-                            "SELECT id FROM participation_requests WHERE shift_id = ? AND volunteer_id = ?",
-                            [$id, $swap['to_volunteer_id']]
-                        );
-                        if ($existingPr) {
-                            dbExecute(
-                                "UPDATE participation_requests SET status = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
-                                [PARTICIPATION_APPROVED, $user['id'], $existingPr['id']]
-                            );
-                        } else {
-                            dbInsert(
-                                "INSERT INTO participation_requests (shift_id, volunteer_id, status, decided_by, decided_at, created_at, updated_at) VALUES (?,?,?,?,NOW(),NOW(),NOW())",
-                                [$id, $swap['to_volunteer_id'], PARTICIPATION_APPROVED, $user['id']]
-                            );
-                        }
-                        // Mark swap as approved
-                        dbExecute(
-                            "UPDATE shift_swap_requests SET status = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
-                            [SWAP_APPROVED, $user['id'], $swapId]
-                        );
-                        $db->commit();
-                        logAudit('approve_swap', 'shift_swap_requests', $swapId);
-
-                        // Notify both volunteers
-                        $shiftInfo = $shift['start_time'];
-                        $missionTitle = $shift['mission_title'] ?? 'Αποστολή';
-                        $vars = [
-                            'mission_title' => $missionTitle,
-                            'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
-                            'shift_time'    => formatDateTime($shift['start_time'], 'H:i') . ' - ' . formatDateTime($shift['end_time'], 'H:i'),
-                        ];
-                        if (!empty($swap['from_email']) && isNotificationEnabled('shift_swap_approved')) {
-                            sendNotificationEmail('shift_swap_approved', $swap['from_email'],
-                                array_merge($vars, ['user_name' => $swap['from_name'], 'replacement_name' => $swap['to_name']]));
-                        }
-                        if (!empty($swap['to_email']) && isNotificationEnabled('shift_swap_approved')) {
-                            sendNotificationEmail('shift_swap_approved', $swap['to_email'],
-                                array_merge($vars, ['user_name' => $swap['to_name'], 'replacement_name' => $swap['to_name']]));
-                        }
-                        sendNotification($swap['from_volunteer_id'], 'Αντικατάσταση Εγκρίθηκε',
-                            'Η αντικατάστασή σας από τον/την ' . $swap['to_name'] . ' εγκρίθηκε από τον διαχειριστή.', 'success', '', ['url' => 'shift-view.php?id=' . $id]);
-                        sendNotification($swap['to_volunteer_id'], 'Εγκρίθηκε η Συμμετοχή σας',
-                            'Εγκριθήκατε ως αντικατάσταση για τη βάρδια της αποστολής: ' . $missionTitle . '.', 'success', '', ['url' => 'shift-view.php?id=' . $id]);
-
-                        setFlash('success', 'Η αντικατάσταση εγκρίθηκε επιτυχώς.');
-                    } catch (Exception $e) {
-                        $db->rollBack();
-                        setFlash('error', 'Σφάλμα κατά την έγκριση αντικατάστασης.');
-                    }
-                } else {
-                    setFlash('error', 'Δεν βρέθηκε το αίτημα αντικατάστασης.');
-                }
+                $result = shiftSwapAdminApprove((int) post('swap_id'), $user, $id);
+                setFlash($result['level'], $result['message']);
             }
             break;
 
         case 'reject_swap':
             if ($canManage) {
-                $swapId = (int) post('swap_id');
-                $swap = dbFetchOne(
-                    "SELECT ssr.*, fu.name as from_name, tu.name as to_name
-                     FROM shift_swap_requests ssr
-                     JOIN users fu ON ssr.from_volunteer_id = fu.id
-                     JOIN users tu ON ssr.to_volunteer_id = tu.id
-                     WHERE ssr.id = ? AND ssr.shift_id = ? AND ssr.status = ?",
-                    [$swapId, $id, SWAP_ACCEPTED]
-                );
-                if ($swap) {
-                    dbExecute(
-                        "UPDATE shift_swap_requests SET status = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
-                        [SWAP_REJECTED, $user['id'], $swapId]
-                    );
-                    logAudit('reject_swap', 'shift_swap_requests', $swapId);
-                    // Notify both
-                    sendNotification($swap['from_volunteer_id'], 'Αίτημα Αντικατάστασης Απορρίφθηκε',
-                        'Ο διαχειριστής απέρριψε το αίτημα αντικατάστασης σας.', 'warning', '', ['url' => 'shift-view.php?id=' . $id]);
-                    sendNotification($swap['to_volunteer_id'], 'Αίτημα Αντικατάστασης Απορρίφθηκε',
-                        'Ο διαχειριστής απέρριψε το αίτημα αντικατάστασης.', 'warning', '', ['url' => 'shift-view.php?id=' . $id]);
-                    setFlash('warning', 'Το αίτημα αντικατάστασης απορρίφθηκε.');
-                }
+                $result = shiftSwapAdminReject((int) post('swap_id'), $user, $id);
+                setFlash($result['level'], $result['message']);
             }
             break;
     }
