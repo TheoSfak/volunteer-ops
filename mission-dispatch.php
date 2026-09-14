@@ -357,9 +357,21 @@ if ($action === 'delete') {
 // touches dispatches with a real ring_index, so a hand-drawn dispatch is
 // never at risk here regardless of how it was labeled.
 if ($action === 'clear_ring_generated') {
-    $count = (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_points WHERE mission_id = ? AND ring_index IS NOT NULL", [$missionId]);
-    dbExecute("DELETE FROM mission_dispatch_points WHERE mission_id = ? AND ring_index IS NOT NULL", [$missionId]);
-    logAudit('clear_ring_generated_mission_dispatch', 'mission_dispatch_points', null, null, ['mission_id' => $missionId, 'count' => $count]);
+    // Optional ring_index narrows the clear to ONE ring — see the same
+    // parameter on mission-sector.php's clear_ring_generated for why.
+    $ringIndexRaw = post('ring_index');
+    $ringIndex = ($ringIndexRaw !== '' && $ringIndexRaw !== null) ? (int) $ringIndexRaw : null;
+    if ($ringIndex !== null && ($ringIndex < 0 || $ringIndex > 3)) {
+        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+        exit;
+    }
+    // Two fixed literals chosen by a validated int, never interpolated input.
+    $scope = $ringIndex !== null ? ' = ?' : ' IS NOT NULL';
+    $args = $ringIndex !== null ? [$missionId, $ringIndex] : [$missionId];
+
+    $count = (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_points WHERE mission_id = ? AND ring_index$scope", $args);
+    dbExecute("DELETE FROM mission_dispatch_points WHERE mission_id = ? AND ring_index$scope", $args);
+    logAudit('clear_ring_generated_mission_dispatch', 'mission_dispatch_points', null, null, ['mission_id' => $missionId, 'ring_index' => $ringIndex, 'count' => $count]);
     echo json_encode(['ok' => true, 'dispatches' => loadMissionDispatchesForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant)]);
     exit;
 }

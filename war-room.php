@@ -5698,6 +5698,39 @@ function openDivideRingIntoSectors(ringIndex, btnEl) {
 // same-shape `async function` declaration stays invisible to the popup's
 // button handler outside the block. `var` sidesteps that: it hoists to the
 // enclosing script scope regardless of which block it's textually inside.
+// Auto-assign bails out on the first failed step, leaving whatever earlier
+// teams already got. It used to just say "use Reset to clean up" — but Reset
+// is global across all four rings, so following that advice destroyed work on
+// rings the admin never touched. This offers to undo only the ring that
+// failed, via the same three clear_ring_generated actions scoped by
+// ring_index. Declining leaves everything in place, which is a legitimate
+// choice: the teams that did get assigned have already been notified.
+// var + async function expression for the same Annex B reason documented on
+// openAutoAssignForRing() below.
+var rollbackAutoAssignRing = async function(ringIndex, pct) {
+    const body = () => new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_ring_generated', ring_index: ringIndex});
+    const [sectorResult, dispatchResult, routeResult] = await Promise.all([
+        fetch('mission-sector.php', {method: 'POST', body: body()}).then(r => r.json()).catch(() => ({ok: false})),
+        fetch('mission-dispatch.php', {method: 'POST', body: body()}).then(r => r.json()).catch(() => ({ok: false})),
+        fetch('mission-route.php', {method: 'POST', body: body()}).then(r => r.json()).catch(() => ({ok: false})),
+    ]);
+    if (sectorResult.ok) sectorRefreshAfter(sectorResult.sectors, sectorResult.areas);
+    if (dispatchResult.ok && dispatchResult.dispatches) renderDispatches(dispatches = dispatchResult.dispatches);
+    if (routeResult.ok && routeResult.routes) {
+        routes = routeResult.routes;
+        renderMyRoutes(routes);
+        renderRoutesAdmin(routes); renderRouteLayer(routes);
+    }
+    if (!sectorResult.ok || !dispatchResult.ok || !routeResult.ok) {
+        alert(t('missing_person.ring_auto_assign_rollback_failed', {pct}));
+    }
+};
+var failAutoAssign = async function(team, completedCount, ringIndex, pct, btnEl) {
+    if (btnEl) btnEl.disabled = false;
+    if (confirm(t('missing_person.ring_auto_assign_partial_failure', {team: team.label, count: completedCount, pct}))) {
+        await rollbackAutoAssignRing(ringIndex, pct);
+    }
+};
 var openAutoAssignForRing = async function(ringIndex, btnEl) {
     if (!missingPerson || !missingPerson.subject_category) return;
     const radii = LPB_RING_TABLE[missingPerson.subject_category];
@@ -5745,8 +5778,7 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
             geo: JSON.stringify(wedgeGeo), label: areaLabel, ring_index: ringIndex,
         })}).then(r => r.json()).catch(() => ({ok: false}));
         if (!areaResult.ok) {
-            alert(t('missing_person.ring_auto_assign_partial_failure', {team: team.label, count: completedCount}));
-            if (btnEl) btnEl.disabled = false;
+            await failAutoAssign(team, completedCount, ringIndex, pct, btnEl);
             return;
         }
 
@@ -5755,8 +5787,7 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
             area_id: areaResult.id, label: areaLabel, geo: JSON.stringify(wedgeGeo), team_id: team.id,
         })}).then(r => r.json()).catch(() => ({ok: false}));
         if (!sectorResult.ok) {
-            alert(t('missing_person.ring_auto_assign_partial_failure', {team: team.label, count: completedCount}));
-            if (btnEl) btnEl.disabled = false;
+            await failAutoAssign(team, completedCount, ringIndex, pct, btnEl);
             return;
         }
 
@@ -5769,8 +5800,7 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
             waypoints: JSON.stringify(routeWaypoints), is_closed_loop: '0', ring_index: ringIndex,
         })}).then(r => r.json()).catch(() => ({ok: false}));
         if (!routeResult.ok) {
-            alert(t('missing_person.ring_auto_assign_partial_failure', {team: team.label, count: completedCount}));
-            if (btnEl) btnEl.disabled = false;
+            await failAutoAssign(team, completedCount, ringIndex, pct, btnEl);
             return;
         }
 
@@ -5839,10 +5869,18 @@ document.getElementById('sectorsCardDivideBtn')?.addEventListener('click', () =>
 // below, nothing here depends on another call's result) and refreshes each
 // area's own client state from its own response.
 document.getElementById('ringResetBtn')?.addEventListener('click', () => {
-    const areaCount = areas.filter(a => a.ring_index !== null && a.ring_index !== undefined).length;
+    const ringAreaIds = new Set(areas.filter(a => a.ring_index !== null && a.ring_index !== undefined).map(a => String(a.id)));
+    const areaCount = ringAreaIds.size;
+    // Counted and shown separately from the areas, not folded into them: the
+    // areas cascade (mission_search_sectors.area_id is ON DELETE CASCADE), so
+    // hand-cutting a ring area into 24 sectors and then pressing Reset used to
+    // ask about "1 area" and silently take all 24 with it. The server has
+    // always counted these for its own audit row (clear_ring_generated in
+    // mission-sector.php); the number just never reached the person deciding.
+    const sectorCount = sectors.filter(s => ringAreaIds.has(String(s.area_id))).length;
     const dispatchCount = dispatches.filter(d => d.ring_index !== null && d.ring_index !== undefined).length;
     const routeCount = routes.filter(r => r.ring_index !== null && r.ring_index !== undefined && r.status === 'active').length;
-    if (!confirm(t('missing_person.ring_reset_confirm', {areas: areaCount, dispatches: dispatchCount, routes: routeCount}))) return;
+    if (!confirm(t('missing_person.ring_reset_confirm', {areas: areaCount, sectors: sectorCount, dispatches: dispatchCount, routes: routeCount}))) return;
     const btn = document.getElementById('ringResetBtn');
     btn.disabled = true;
     Promise.all([

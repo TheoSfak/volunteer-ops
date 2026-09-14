@@ -327,6 +327,21 @@ if ($action === 'create') {
         }
     }
 
+    // The cap checked further up counts only what the composer submitted. The
+    // return waypoint is appended AFTER it and is a real, tracked waypoint of
+    // its own (depart/arrive/complete like any other), so it has to count
+    // against the same 30 — otherwise it silently stored 31. That was reachable,
+    // not theoretical: a ring perimeter route arrives at exactly 30
+    // (ringPolygonPointCount() clamps there), ring routes always carry a team,
+    // and the composer only hides this checkbox in cross-team mode. Re-checked
+    // here rather than pre-emptively lowering the submit-time cap to 29, so a
+    // route that never asked for a return waypoint still gets its full 30 and
+    // the error names the real cause.
+    if (count($waypoints) > 30) {
+        echo json_encode(['ok' => false, 'error' => t('route.too_many_waypoints_with_return')]);
+        exit;
+    }
+
     $memberIdsRaw = json_decode((string) post('member_ids'), true);
     $submittedMemberIds = is_array($memberIdsRaw) ? array_map('intval', $memberIdsRaw) : [];
 
@@ -475,9 +490,21 @@ if ($action === 'clear_ring_generated') {
         echo json_encode(['ok' => false, 'error' => t('dispatch.no_manage_permission')]);
         exit;
     }
+    // Optional ring_index narrows the cancel to ONE ring — see the same
+    // parameter on mission-sector.php's clear_ring_generated for why.
+    $ringIndexRaw = post('ring_index');
+    $ringIndex = ($ringIndexRaw !== '' && $ringIndexRaw !== null) ? (int) $ringIndexRaw : null;
+    if ($ringIndex !== null && ($ringIndex < 0 || $ringIndex > 3)) {
+        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+        exit;
+    }
+    // Two fixed literals chosen by a validated int, never interpolated input.
+    $scope = $ringIndex !== null ? ' = ?' : ' IS NOT NULL';
+    $args = $ringIndex !== null ? [$missionId, $ringIndex] : [$missionId];
+
     $rows = dbFetchAll(
-        "SELECT id, order_id FROM mission_routes WHERE mission_id = ? AND ring_index IS NOT NULL AND cancelled_at IS NULL AND completed_at IS NULL",
-        [$missionId]
+        "SELECT id, order_id FROM mission_routes WHERE mission_id = ? AND ring_index$scope AND cancelled_at IS NULL AND completed_at IS NULL",
+        $args
     );
     $reason = t('missing_person.ring_reset_cancel_reason');
     foreach ($rows as $route) {
@@ -487,7 +514,7 @@ if ($action === 'clear_ring_generated') {
         }
         notifyRouteTeam($missionId, (int) $route['id'], $userId, 'mission_route_cancelled', 'route.notify_cancelled_title', [], 'route.notify_cancelled_message', ['mission' => $mission['title']]);
     }
-    logAudit('clear_ring_generated_mission_routes', 'mission_routes', null, null, ['mission_id' => $missionId, 'count' => count($rows)]);
+    logAudit('clear_ring_generated_mission_routes', 'mission_routes', null, null, ['mission_id' => $missionId, 'ring_index' => $ringIndex, 'count' => count($rows)]);
     echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
     exit;
 }

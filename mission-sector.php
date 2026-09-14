@@ -564,14 +564,30 @@ if ($action === 'clear_all_areas') {
 // ring-generated areas only. area_id is ON DELETE CASCADE, so deleting a
 // ring-origin area already removes its sectors too.
 if ($action === 'clear_ring_generated') {
-    $areaCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_search_areas WHERE mission_id = ? AND ring_index IS NOT NULL", [$missionId]);
+    // Optional ring_index narrows the clear to ONE ring. The global "reset
+    // ring assignments" button sends nothing and keeps the original all-rings
+    // behaviour; openAutoAssignForRing()'s failure path sends the ring it was
+    // working on, so a half-finished auto-assign can be rolled back without
+    // destroying rings the admin never touched. Same 0-3 validation as the
+    // create actions above.
+    $ringIndexRaw = post('ring_index');
+    $ringIndex = ($ringIndexRaw !== '' && $ringIndexRaw !== null) ? (int) $ringIndexRaw : null;
+    if ($ringIndex !== null && ($ringIndex < 0 || $ringIndex > 3)) {
+        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+        exit;
+    }
+    // Two fixed literals chosen by a validated int, never interpolated input.
+    $scope = $ringIndex !== null ? ' = ?' : ' IS NOT NULL';
+    $args = $ringIndex !== null ? [$missionId, $ringIndex] : [$missionId];
+
+    $areaCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_search_areas WHERE mission_id = ? AND ring_index$scope", $args);
     $sectorCount = (int) dbFetchValue(
-        "SELECT COUNT(*) FROM mission_search_sectors s JOIN mission_search_areas a ON a.id = s.area_id WHERE a.mission_id = ? AND a.ring_index IS NOT NULL",
-        [$missionId]
+        "SELECT COUNT(*) FROM mission_search_sectors s JOIN mission_search_areas a ON a.id = s.area_id WHERE a.mission_id = ? AND a.ring_index$scope",
+        $args
     );
-    dbExecute("DELETE FROM mission_search_areas WHERE mission_id = ? AND ring_index IS NOT NULL", [$missionId]);
+    dbExecute("DELETE FROM mission_search_areas WHERE mission_id = ? AND ring_index$scope", $args);
     logAudit('clear_ring_generated_mission_search_areas', 'mission_search_areas', null, null, [
-        'mission_id' => $missionId, 'area_count' => $areaCount, 'sector_count' => $sectorCount,
+        'mission_id' => $missionId, 'ring_index' => $ringIndex, 'area_count' => $areaCount, 'sector_count' => $sectorCount,
     ]);
     echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
