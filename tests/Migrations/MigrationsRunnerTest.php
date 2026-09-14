@@ -99,7 +99,7 @@ final class MigrationsRunnerTest extends TestCase
     }
 
     /**
-     * Regression test for a real production incident (epidrasi.iloveweb.gr,
+     * Regression test for a real production incident (epidrasis.iloveweb.gr,
      * found 2026-08-09): migration v128 originally hardcoded mission_types
      * id 7 for "Αναζήτηση Αγνοουμένου", assuming that id would always be
      * free. On a database where an admin had already created a custom type

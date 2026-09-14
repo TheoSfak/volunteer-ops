@@ -23,7 +23,7 @@ if (!defined('VOLUNTEEROPS')) {
  * Room name: one room per mission, prefixed by a per-install key.
  *
  * The prefix is load-bearing, not cosmetic. Mission ids are per-database, so
- * yphresies.gr and epidrasi.iloveweb.gr each have their own mission 42. If the
+ * yphresies.gr and epidrasis.iloveweb.gr each have their own mission 42. If the
  * two ever point at the same LiveKit project, an unprefixed name would drop
  * two different organisations into the SAME room — one's live incident footage
  * appearing in the other's Action Room. livekit_site_key is generated once by

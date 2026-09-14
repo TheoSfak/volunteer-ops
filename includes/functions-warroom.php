@@ -2258,7 +2258,7 @@ function loadPointsOfInterestForMission(int $missionId): array {
  * pinned this to a shared constant (id 7), assuming every deployment's
  * mission_types table would assign it the same id — broke on any database
  * that already had a different custom type sitting at id 7 (real incident:
- * epidrasi.iloveweb.gr's admin-created "Τ.Ε.Π." type, 61 real missions —
+ * epidrasis.iloveweb.gr's admin-created "Τ.Ε.Π." type, 61 real missions —
  * see v128's own comment, includes/migrations.php, for the full story).
  * Migration v134 creates the row wherever it's still missing, without
  * pinning an id, so each database can have it at whatever id it lands on —

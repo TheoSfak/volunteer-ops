@@ -6140,7 +6140,7 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
 
         [
             'version'     => 134,
-            'description' => 'Create the "Αναζήτηση Αγνοουμένου" mission_types row wherever v128 left it missing — without pinning an id. v128 hardcoded id 7 for this row on the assumption MISSION_TYPE_MISSING_PERSON_SEARCH (config.php) could stay one shared constant across every deployment; that broke for good on epidrasi.iloveweb.gr, where id 7 was already a real, actively-used custom type ("Τ.Ε.Π.", 61 missions) created via mission-types.php before v128 ever ran there — see v128\'s own comment above for the full incident. That constant is now retired: missingPersonMissionTypeId() (includes/functions-warroom.php) resolves the row by name at runtime instead, so it no longer matters which id this INSERT lands on, or whether it differs between deployments.',
+            'description' => 'Create the "Αναζήτηση Αγνοουμένου" mission_types row wherever v128 left it missing — without pinning an id. v128 hardcoded id 7 for this row on the assumption MISSION_TYPE_MISSING_PERSON_SEARCH (config.php) could stay one shared constant across every deployment; that broke for good on epidrasis.iloveweb.gr, where id 7 was already a real, actively-used custom type ("Τ.Ε.Π.", 61 missions) created via mission-types.php before v128 ever ran there — see v128\'s own comment above for the full incident. That constant is now retired: missingPersonMissionTypeId() (includes/functions-warroom.php) resolves the row by name at runtime instead, so it no longer matters which id this INSERT lands on, or whether it differs between deployments.',
             'up' => function () {
                 $existingType = dbFetchOne("SELECT id FROM mission_types WHERE name = ?", ['Αναζήτηση Αγνοουμένου']);
                 if (!$existingType) {
@@ -6614,7 +6614,7 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
 
         [
             'version'     => 148,
-            'description' => 'Action Room live video (LiveKit): order_type "live", mission_live_streams lifecycle table, a per-install livekit_site_key, and the mission_live_request notification code. The site key exists because mission ids are per-database — yphresies.gr and epidrasi.iloveweb.gr both have a mission 42 — so an unprefixed room name would put two different organisations into the SAME LiveKit room if they ever share a project. Generated once here rather than left as a setting an admin must remember to fill in.',
+            'description' => 'Action Room live video (LiveKit): order_type "live", mission_live_streams lifecycle table, a per-install livekit_site_key, and the mission_live_request notification code. The site key exists because mission ids are per-database — yphresies.gr and epidrasis.iloveweb.gr both have a mission 42 — so an unprefixed room name would put two different organisations into the SAME LiveKit room if they ever share a project. Generated once here rather than left as a setting an admin must remember to fill in.',
             'up' => function () {
                 dbExecute("ALTER TABLE mission_orders MODIFY COLUMN order_type ENUM('location','photo','video','task','message','return_to_base','route','charge_phone','live') NOT NULL");
 
