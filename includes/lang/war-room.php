@@ -622,7 +622,8 @@ return [
         'missing_person.ring_auto_assign_area_label' => 'Ζώνη {pct}% — {team} (αυτόματα)',
         'missing_person.ring_auto_assign_route_label' => 'Αυτόματη πορεία {pct}% — {team}',
         'missing_person.ring_auto_assign_partial_failure' => 'Η αυτόματη ανάθεση σταμάτησε στην ομάδα {team} μετά από {count} επιτυχημένες αναθέσεις. Να αναιρεθεί ό,τι δημιουργήθηκε στη ζώνη {pct}%; Οι υπόλοιπες ζώνες και ό,τι έχει σχεδιαστεί χειροκίνητα δεν επηρεάζονται.',
-        'missing_person.ring_auto_assign_rollback_failed' => 'Η αναίρεση δεν ολοκληρώθηκε. Ελέγξτε τη ζώνη {pct}% στον χάρτη και καθαρίστε χειροκίνητα ό,τι περίσσεψε.',
+        'missing_person.ring_clear_failed' => 'Ο καθαρισμός της ζώνης {pct}% δεν ολοκληρώθηκε. Ελέγξτε τον χάρτη και καθαρίστε χειροκίνητα ό,τι περίσσεψε.',
+        'missing_person.ring_replace_confirm' => 'Η ζώνη {pct}% έχει ήδη {areas} περιοχές, {sectors} τομείς, {dispatches} αποστολές στίγματος και {routes} ενεργές πορείες από προηγούμενη χρήση. Να αντικατασταθούν; Οι υπόλοιπες ζώνες και ό,τι έχει σχεδιαστεί χειροκίνητα δεν επηρεάζονται.',
 
         // missing-person-guide.php — bilingual explainer page linked from the
         // missing-person card, explains the ring/exposure/weather tools plus
@@ -1978,7 +1979,8 @@ return [
         'missing_person.ring_auto_assign_area_label' => 'Zone {pct}% — {team} (auto)',
         'missing_person.ring_auto_assign_route_label' => 'Auto route {pct}% — {team}',
         'missing_person.ring_auto_assign_partial_failure' => 'Auto-assign stopped at team {team} after {count} successful assignments. Undo what was created on the {pct}% zone? Other zones and anything drawn by hand are unaffected.',
-        'missing_person.ring_auto_assign_rollback_failed' => 'The undo did not finish. Check the {pct}% zone on the map and clear anything left over by hand.',
+        'missing_person.ring_clear_failed' => 'Clearing the {pct}% zone did not finish. Check the map and clear anything left over by hand.',
+        'missing_person.ring_replace_confirm' => 'The {pct}% zone already has {areas} areas, {sectors} sectors, {dispatches} dispatches and {routes} active routes from an earlier run. Replace them? Other zones and anything drawn by hand are unaffected.',
 
         // See the 'el' block's comment above.
         'guide.page_title' => 'Missing Person Search Guide',

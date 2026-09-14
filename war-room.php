@@ -5626,10 +5626,16 @@ const RING_SECTOR_DIVISION_POINTS = 24;
 // a chord drawn between those two indices is zero-length. isValidChord()'s
 // adjacency test is index-based and won't reject it.
 //
+// var + async function expression, not a plain declaration: this needs to
+// await the already-generated check below, and Annex B block-hoisting — which
+// is what makes every other helper in this block visible to the popup's button
+// handler outside it — explicitly excludes async functions. Same reasoning as
+// openAutoAssignForRing() further down.
+//
 // Unlike the three buttons above, this one needs a real
 // round trip before there's anything to act on, so it disables itself and
 // reports failure inline instead of closing the popup optimistically.
-function openDivideRingIntoSectors(ringIndex, btnEl) {
+var openDivideRingIntoSectors = async function(ringIndex, btnEl) {
     if (!missingPerson || !missingPerson.subject_category) return;
     const radii = LPB_RING_TABLE[missingPerson.subject_category];
     if (!radii) return;
@@ -5640,6 +5646,9 @@ function openDivideRingIntoSectors(ringIndex, btnEl) {
         ? annularWedgePolygonPoints(center, innerRadius, radius, 0, 360, RING_SECTOR_DIVISION_POINTS)
         : ringDiscPolygonPoints(center, radius, RING_SECTOR_DIVISION_POINTS);
     const pct = [25, 50, 75, 95][ringIndex];
+    // Running this twice on one ring used to leave two identical overlapping
+    // areas, each with their own sectors, and no way to clear just one of them.
+    if (!await confirmRingEmptyOrReplace(ringIndex, pct)) return;
     if (btnEl) btnEl.disabled = true;
     const data = new URLSearchParams({
         csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create_area',
@@ -5661,7 +5670,7 @@ function openDivideRingIntoSectors(ringIndex, btnEl) {
             if (btnEl) btnEl.disabled = false;
         }
     }).catch(() => { alert(t('common.send_failed')); if (btnEl) btnEl.disabled = false; });
-}
+};
 // "Auto-assign this ring" — the smart version of openDivideRingIntoSectors()
 // above: instead of the admin manually cutting wedges, this divides the
 // ring itself, sizing each team's angular share proportionally to how many
@@ -5698,16 +5707,15 @@ function openDivideRingIntoSectors(ringIndex, btnEl) {
 // same-shape `async function` declaration stays invisible to the popup's
 // button handler outside the block. `var` sidesteps that: it hoists to the
 // enclosing script scope regardless of which block it's textually inside.
-// Auto-assign bails out on the first failed step, leaving whatever earlier
-// teams already got. It used to just say "use Reset to clean up" — but Reset
-// is global across all four rings, so following that advice destroyed work on
-// rings the admin never touched. This offers to undo only the ring that
-// failed, via the same three clear_ring_generated actions scoped by
-// ring_index. Declining leaves everything in place, which is a legitimate
-// choice: the teams that did get assigned have already been notified.
+// Wipes exactly ONE ring's generated content, leaving the other three rings
+// and anything hand-drawn alone, via the three clear_ring_generated actions'
+// optional ring_index. Two callers want this: undoing a half-finished
+// auto-assign, and replacing what a ring already holds before running a
+// shortcut over it again. Before it existed the only cleanup was the global
+// Reset button, which takes all four rings with it.
 // var + async function expression for the same Annex B reason documented on
 // openAutoAssignForRing() below.
-var rollbackAutoAssignRing = async function(ringIndex, pct) {
+var clearRingGenerated = async function(ringIndex, pct) {
     const body = () => new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_ring_generated', ring_index: ringIndex});
     const [sectorResult, dispatchResult, routeResult] = await Promise.all([
         fetch('mission-sector.php', {method: 'POST', body: body()}).then(r => r.json()).catch(() => ({ok: false})),
@@ -5722,13 +5730,42 @@ var rollbackAutoAssignRing = async function(ringIndex, pct) {
         renderRoutesAdmin(routes); renderRouteLayer(routes);
     }
     if (!sectorResult.ok || !dispatchResult.ok || !routeResult.ok) {
-        alert(t('missing_person.ring_auto_assign_rollback_failed', {pct}));
+        alert(t('missing_person.ring_clear_failed', {pct}));
     }
+};
+// What ONE ring currently holds from an earlier shortcut run. Sectors are
+// counted through their parent area's ring_index, the same way the global
+// Reset button's confirm does — mission_search_sectors has no ring_index
+// column of its own, its area_id FK cascades instead. ring_index arrives as a
+// real int or null (cast server-side in functions-warroom.php), so === is safe.
+function ringGeneratedCounts(ringIndex) {
+    const ringAreaIds = new Set(areas.filter(a => a.ring_index === ringIndex).map(a => String(a.id)));
+    return {
+        areas: ringAreaIds.size,
+        sectors: sectors.filter(s => ringAreaIds.has(String(s.area_id))).length,
+        dispatches: dispatches.filter(d => d.ring_index === ringIndex).length,
+        routes: routes.filter(r => r.ring_index === ringIndex && r.status === 'active').length,
+    };
+}
+// Neither shortcut used to check whether its own ring had already been run.
+// Clicking Divide twice left two identical overlapping areas; clicking
+// Auto-assign twice built a second full set of wedges, sectors AND route
+// orders for every team — duplicate orders pushed to real phones, with the
+// global Reset as the only way out. Both now offer to replace just this ring
+// first. Returns true if the caller should go ahead.
+var confirmRingEmptyOrReplace = async function(ringIndex, pct) {
+    const have = ringGeneratedCounts(ringIndex);
+    if (!have.areas && !have.sectors && !have.dispatches && !have.routes) return true;
+    if (!confirm(t('missing_person.ring_replace_confirm', {
+        pct, areas: have.areas, sectors: have.sectors, dispatches: have.dispatches, routes: have.routes,
+    }))) return false;
+    await clearRingGenerated(ringIndex, pct);
+    return true;
 };
 var failAutoAssign = async function(team, completedCount, ringIndex, pct, btnEl) {
     if (btnEl) btnEl.disabled = false;
     if (confirm(t('missing_person.ring_auto_assign_partial_failure', {team: team.label, count: completedCount, pct}))) {
-        await rollbackAutoAssignRing(ringIndex, pct);
+        await clearRingGenerated(ringIndex, pct);
     }
 };
 var openAutoAssignForRing = async function(ringIndex, btnEl) {
@@ -5745,6 +5782,11 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
         alert(t('missing_person.ring_auto_assign_no_eligible_teams'));
         return;
     }
+
+    // Running this twice on one ring used to build a second full set of
+    // wedges, sectors and route orders for every team — duplicate orders on
+    // real phones, with the all-rings Reset as the only way back.
+    if (!await confirmRingEmptyOrReplace(ringIndex, pct)) return;
 
     const totalMembers = eligible.reduce((sum, tm) => sum + tm.members.length, 0);
     let cursor = 0;
@@ -5764,7 +5806,15 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
     // doctrine (radial legs from the ring's inner to outer radius) instead.
     const basePointCount = ringPolygonPointCount(radius);
 
-    map.closePopup();
+    // btnEl lives inside the popup, so it is only a real, re-enableable
+    // element while the popup is open. The popup used to be closed right
+    // here, before a single request had been made — which contradicted this
+    // button's own click handler comment ("only closes once
+    // openAutoAssignForRing() confirms the first step succeeded") and left
+    // every later `btnEl.disabled = false` writing to a detached node, so a
+    // failure on the very first team gave the admin no button to retry from.
+    // It now closes inside the loop, once the first round trip has actually
+    // come back ok.
     if (btnEl) btnEl.disabled = true;
 
     let completedCount = 0;
@@ -5781,6 +5831,11 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
             await failAutoAssign(team, completedCount, ringIndex, pct, btnEl);
             return;
         }
+        // The first round trip is back and succeeded, so the run is genuinely
+        // under way — only now is it safe to take the popup (and btnEl with
+        // it) away, which is what this button's click handler always claimed
+        // happened. A first-team failure above keeps the popup open instead.
+        if (completedCount === 0) map.closePopup();
 
         const sectorResult = await fetch('mission-sector.php', {method: 'POST', body: new URLSearchParams({
             csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create',
