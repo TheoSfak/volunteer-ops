@@ -120,6 +120,14 @@ $pingCount = (int) dbFetchValue(
     "SELECT COUNT(*) FROM volunteer_pings vp JOIN shifts s ON s.id = vp.shift_id WHERE s.mission_id = ? AND vp.source = 'manual'",
     [$missionId]
 );
+
+// Heart rate for the whole deployment. Returns [] when the feature is off or
+// nobody wore a sensor, which the card below renders as "nothing recorded"
+// rather than as an error — most missions will legitimately have none.
+// This page is already gated on missions_manage (or being the mission's
+// responsible) AND on the mission being closed, which is the right place for
+// health data: command staff, after the fact, not the live roster.
+$vitalsReport = loadVitalsReportForMission($missionId);
 $chatCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_chat_messages WHERE mission_id = ?", [$missionId]);
 
 // Recap map data: last-known ping per volunteer, dispatch points/areas, geo-tagged photos.
@@ -725,6 +733,73 @@ include __DIR__ . '/includes/header.php';
     <?php endif; ?>
 </div>
 
+<!-- Rescuer heart rate -->
+<div class="mstats-card">
+    <h2><i class="bi bi-heart-pulse-fill text-danger"></i>Καρδιακοί Παλμοί Διασώστη</h2>
+    <?php if (empty($vitalsReport['volunteers'])): ?>
+        <p class="mstats-empty">Δεν καταγράφηκαν καρδιακοί παλμοί σε αυτή την αποστολή.</p>
+    <?php else: ?>
+        <?php
+        // Compact "2ω 15λ" rather than formatDuration()'s "2 ώρες 15 λεπτά":
+        // this is four duration columns on every row of a table, where the
+        // long form pushes the numbers apart until they stop being comparable
+        // at a glance, which is the only reason to put them side by side.
+        $vitalsDur = function (int $seconds): string {
+            if ($seconds <= 0) return '—';
+            if ($seconds < 60) return $seconds . 'δ';
+            $h = intdiv($seconds, 3600);
+            $m = intdiv($seconds % 3600, 60);
+            return $h > 0 ? ($m > 0 ? "{$h}ω {$m}λ" : "{$h}ω") : "{$m}λ";
+        };
+        $vitalsTotalCritical = array_sum(array_column(array_column($vitalsReport['volunteers'], 'zone_secs'), 'critical'));
+        $vitalsTotalLow      = array_sum(array_column(array_column($vitalsReport['volunteers'], 'zone_secs'), 'low'));
+        ?>
+        <?php if ($vitalsTotalCritical > 0 || $vitalsTotalLow > 0): ?>
+        <div class="alert alert-danger py-2 px-3 small mb-3">
+            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+            Καταγράφηκαν επεισόδια εκτός ασφαλούς εύρους:
+            <?php if ($vitalsTotalCritical > 0): ?><strong><?= $vitalsDur($vitalsTotalCritical) ?></strong> σε ταχυκαρδία<?php endif; ?>
+            <?php if ($vitalsTotalCritical > 0 && $vitalsTotalLow > 0): ?> ·<?php endif; ?>
+            <?php if ($vitalsTotalLow > 0): ?><strong><?= $vitalsDur($vitalsTotalLow) ?></strong> σε βραδυκαρδία<?php endif; ?>
+            — δείτε ποιον αφορούν στον πίνακα παρακάτω.
+        </div>
+        <?php endif; ?>
+        <div class="mstats-chart-wrap tall"><canvas id="vitalsChart"></canvas></div>
+        <p class="text-muted small mt-2 mb-0">
+            Η γραμμή κάθε εθελοντή είναι ο μέσος όρος ανά <?= $vitalsReport['bucket_minutes'] ?> <?= $vitalsReport['bucket_minutes'] === 1 ? 'λεπτό' : 'λεπτά' ?>, ώστε να χωρά ολόκληρη η αποστολή σε έναν άξονα.
+            Οι διακεκομμένες γραμμές είναι τα όρια ζωνών για μέγιστη καρδιακή συχνότητα <?= $vitalsReport['max_hr'] ?> bpm:
+            κρίσιμοι <?= $vitalsReport['thresholds']['critical'] ?>, αυξημένοι <?= $vitalsReport['thresholds']['elevated'] ?>, επικίνδυνα χαμηλοί <?= $vitalsReport['thresholds']['low'] ?>.
+            <strong>Οι αριθμοί του πίνακα υπολογίζονται από κάθε μεμονωμένη μέτρηση</strong> (ανά <?= $vitalsReport['sample_seconds'] ?> δευτ.), όχι από τους μέσους όρους του γραφήματος — αλλιώς μια σύντομη αιχμή θα εξαφανιζόταν μέσα στον μέσο όρο του λεπτού της.
+        </p>
+        <!-- Eight columns of Greek headers do not fit a phone, and a clipped
+             table silently hides the bradycardia column, which is the last one
+             and one of the two that matter most. Scroll it instead. -->
+        <div class="table-responsive">
+        <table class="command-severity-table">
+            <thead><tr><th>Εθελοντής</th><th>Μ.Ο.</th><th>Ελάχ.</th><th>Μέγ.</th><th>Φυσιολογικοί</th><th>Αυξημένοι</th><th>Ταχυκαρδία</th><th>Βραδυκαρδία</th></tr></thead>
+            <tbody>
+            <?php foreach ($vitalsReport['volunteers'] as $v): ?>
+                <tr>
+                    <td><?= h($v['name']) ?><?= k9BadgeHtml((int) $v['user_id'], false, 'el') ?><?= captainBadgeHtml((int) $v['user_id'], false, 'el') ?></td>
+                    <td><?= $v['bpm_avg'] ?></td>
+                    <!-- The extremes get the same emphasis as the durations: a
+                         35 in the "lowest" column is the single most important
+                         number on the row, and it would otherwise read as
+                         quietly as an unremarkable 58. -->
+                    <td<?= $v['bpm_min'] <= $vitalsReport['thresholds']['low'] ? ' class="text-primary fw-bold"' : '' ?>><?= $v['bpm_min'] ?></td>
+                    <td<?= $v['bpm_max'] >= $vitalsReport['thresholds']['critical'] ? ' class="text-danger fw-bold"' : '' ?>><?= $v['bpm_max'] ?></td>
+                    <td><?= $vitalsDur($v['zone_secs']['ok']) ?></td>
+                    <td<?= $v['zone_secs']['elevated'] > 0 ? ' class="text-warning"' : '' ?>><?= $vitalsDur($v['zone_secs']['elevated']) ?></td>
+                    <td<?= $v['zone_secs']['critical'] > 0 ? ' class="text-danger fw-bold"' : '' ?>><?= $vitalsDur($v['zone_secs']['critical']) ?></td>
+                    <td<?= $v['zone_secs']['low'] > 0 ? ' class="text-primary fw-bold"' : '' ?>><?= $vitalsDur($v['zone_secs']['low']) ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+    <?php endif; ?>
+</div>
+
 <!-- Photo/video gallery -->
 <div class="mstats-card">
     <h2><i class="bi bi-images text-primary"></i>Φωτογραφίες & Βίντεο Πεδίου</h2>
@@ -861,6 +936,53 @@ mc('responseDetailChart', 'bar', {
         { label: 'Μέσος χρόνος ολοκλήρωσης (λεπ.)', data: <?= json_encode($orderTypeAvgFulfill) ?>, backgroundColor: PALETTE[5], borderRadius: 4 }
     ]
 }, { scales: { y: { beginAtZero: true } } });
+
+<?php if (!empty($vitalsReport['volunteers'])): ?>
+// Heart rate over the whole deployment, one line per volunteer.
+//
+// The three dashed guides are datasets rather than an annotation plugin
+// (Chart.js ships none in the UMD build this app loads) and are filtered out
+// of the legend below — a legend listing "Κρίσιμοι" as if it were a person
+// would be actively confusing next to eleven real names.
+//
+// spanGaps stays false on purpose: a volunteer whose sensor dropped for twenty
+// minutes gets a break in their line, not a straight line drawn across the
+// gap that reads as twenty minutes of steady, measured heart rate.
+mc('vitalsChart', 'line', {
+    labels: <?= json_encode($vitalsReport['labels']) ?>,
+    datasets: [
+        <?php foreach ($vitalsReport['volunteers'] as $i => $v): ?>
+        {
+            label: <?= json_encode($v['name']) ?>,
+            data: <?= json_encode($v['series']) ?>,
+            borderColor: PALETTE[<?= $i ?> % PALETTE.length],
+            backgroundColor: PALETTE[<?= $i ?> % PALETTE.length],
+            borderWidth: 2, pointRadius: 0, pointHitRadius: 8, tension: 0.25, spanGaps: false
+        },
+        <?php endforeach; ?>
+        {label: '__critical', data: <?= json_encode(array_fill(0, count($vitalsReport['labels']), $vitalsReport['thresholds']['critical'])) ?>,
+         borderColor: '#b91c1c', borderWidth: 1, borderDash: [6, 4], pointRadius: 0, fill: false},
+        {label: '__elevated', data: <?= json_encode(array_fill(0, count($vitalsReport['labels']), $vitalsReport['thresholds']['elevated'])) ?>,
+         borderColor: '#b45309', borderWidth: 1, borderDash: [6, 4], pointRadius: 0, fill: false},
+        {label: '__low', data: <?= json_encode(array_fill(0, count($vitalsReport['labels']), $vitalsReport['thresholds']['low'])) ?>,
+         borderColor: '#1d4ed8', borderWidth: 1, borderDash: [6, 4], pointRadius: 0, fill: false}
+    ]
+}, {
+    interaction: { mode: 'nearest', axis: 'x', intersect: false },
+    plugins: {
+        legend: { position: 'bottom', labels: { filter: item => !item.text.startsWith('__') } },
+        tooltip: { filter: item => !item.dataset.label.startsWith('__'),
+                   callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y} bpm` } }
+    },
+    scales: {
+        // Not beginAtZero: nobody's heart rate is near zero, and starting the
+        // axis there squashes every real line into the top third of the chart
+        // where the differences that matter stop being visible.
+        y: { suggestedMin: 40, suggestedMax: <?= max(180, $vitalsReport['thresholds']['critical'] + 20) ?>, title: { display: true, text: 'bpm' } },
+        x: { ticks: { maxTicksLimit: 12, autoSkip: true } }
+    }
+});
+<?php endif; ?>
 
 // Count-up animation for stat tiles. requestAnimationFrame is throttled/paused
 // on hidden or unfocused tabs (e.g. opened via "open in new tab" without

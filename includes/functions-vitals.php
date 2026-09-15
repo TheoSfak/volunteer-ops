@@ -414,10 +414,15 @@ function vitalsBadgeHtml(?array $reading, ?string $lang = null, ?int $userId = n
 }
 
 /**
- * Heart rate collapsed to one value per user per minute, for laying vitals
- * over the GPS trail ("Πορεία Ομάδων"): [userId][minuteBucket] => [bpm, zone].
+ * Heart rate collapsed to one value per user per time bucket:
+ * [userId][bucketIndex] => [bpm, zone], where bucketIndex is
+ * floor(unixTime / (bucketMinutes * 60)).
  *
- * Per minute rather than per sample because of what it is joined against. GPS
+ * The GPS trail ("Πορεία Ομάδων") uses the default one-minute bucket; the
+ * mission report widens it so a long deployment still fits a readable number
+ * of points on one axis.
+ *
+ * Bucketed rather than per sample because of what it is joined against. GPS
  * pings arrive every few minutes (war_room_auto_ping_seconds defaults to 180),
  * vitals every five seconds, so a trail point only ever needs "what was their
  * heart rate around then" — and matching each ping to its nearest individual
@@ -432,17 +437,19 @@ function vitalsBadgeHtml(?array $reading, ?string $lang = null, ?int $userId = n
  * five-second spike promoted to a red marker on the map would send command
  * staff looking for an emergency that a person's own pulse produces
  * routinely. The full sample-by-sample series, where a genuine spike is
- * visible, is loadVitalsSeriesForMission()'s job.
+ * visible, is loadVitalsReportForMission()'s job.
  *
  * No per-viewer gate here, unlike the live map: every caller of this is behind
  * mission-track.php's hard canManageActionRoom() check, so there is no
  * volunteer-facing path to leak through. That is a property of the caller, so
  * anything new that calls this must re-check it.
  */
-function loadVitalsByMinuteForMission(int $missionId): array {
+function loadVitalsBucketedForMission(int $missionId, int $bucketMinutes = 1): array {
     if (!vitalsEnabled()) {
         return [];
     }
+
+    $bucketMinutes = vitalsNormalizeBucketMinutes($bucketMinutes);
 
     $shiftIds = array_column(dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$missionId]), 'id');
     if (!$shiftIds) {
@@ -453,12 +460,12 @@ function loadVitalsByMinuteForMission(int $missionId): array {
     try {
         $rows = dbFetchAll(
             "SELECT user_id,
-                    FLOOR(UNIX_TIMESTAMP(recorded_at) / 60) AS minute_bucket,
+                    DATE_FORMAT(recorded_at - INTERVAL (MINUTE(recorded_at) % ?) MINUTE, '%Y-%m-%d %H:%i') AS bucket_key,
                     ROUND(AVG(bpm)) AS bpm
              FROM volunteer_vitals
              WHERE shift_id IN ({$placeholders})
-             GROUP BY user_id, minute_bucket",
-            $shiftIds
+             GROUP BY user_id, bucket_key",
+            array_merge([$bucketMinutes], $shiftIds)
         );
     } catch (Exception $e) {
         return [];
@@ -470,7 +477,7 @@ function loadVitalsByMinuteForMission(int $missionId): array {
 
     foreach ($rows as $row) {
         $bpm = (int) $row['bpm'];
-        $out[(int) $row['user_id']][(int) $row['minute_bucket']] = [
+        $out[(int) $row['user_id']][$row['bucket_key']] = [
             'bpm'  => $bpm,
             'zone' => vitalsZone($bpm, $maxHr, $config),
         ];
@@ -480,15 +487,81 @@ function loadVitalsByMinuteForMission(int $missionId): array {
 }
 
 /**
- * Full per-volunteer sample series for one mission, for the post-mission
- * report. Ordered oldest-first so a chart can consume it directly.
- *
- * This is the half of the feature that Huawei's cloud API was never going to
- * deliver: because the live stream is stored as it arrives, the debrief gets
- * the real second-by-second shape of the deployment rather than an hourly
- * aggregate synced some time after everyone went home.
+ * Bucket widths are restricted to divisors of 60 because the SQL above floors
+ * within the hour (MINUTE(x) % n). 7-minute buckets would restart at the top
+ * of every hour and produce a short, misaligned bucket there.
  */
-function loadVitalsSeriesForMission(int $missionId): array {
+function vitalsNormalizeBucketMinutes(int $bucketMinutes): int {
+    $allowed = [1, 2, 5, 10, 15, 30, 60];
+    return in_array($bucketMinutes, $allowed, true) ? $bucketMinutes : 1;
+}
+
+/**
+ * The bucket key a given instant falls in — the PHP twin of the DATE_FORMAT
+ * expression in loadVitalsBucketedForMission(), and the reason both sides
+ * agree.
+ *
+ * Keys are local-time strings ('2026-02-15 11:07') rather than epoch-derived
+ * integers, and that is a bug fix, not a style choice. The first version of
+ * this bucketed with FLOOR(UNIX_TIMESTAMP(recorded_at) / n) in SQL while PHP
+ * computed the matching index with floor(strtotime(...) / n). MySQL's
+ * UNIX_TIMESTAMP() converts a DATETIME using the MySQL session's time zone and
+ * PHP's strtotime() uses PHP's own — and on this stack those disagree for a
+ * date recorded under a different DST offset than the one in force when the
+ * report is opened. A February mission read back in September came out exactly
+ * 60 buckets adrift: every heart rate silently vanished from the second half
+ * of the chart, and the GPS trail overlay would have dropped every point of
+ * any winter mission reviewed in summer. Formatting on one side and formatting
+ * on the other removes the conversion entirely — neither side ever computes an
+ * epoch, so neither side can disagree about which epoch it is.
+ *
+ * (An operation running across the instant the clocks change still has one
+ * ambiguous hour, where two different instants format to the same local key
+ * and average together. That is one hour, twice a year, and it degrades to a
+ * slightly smoothed line rather than to missing data.)
+ */
+function vitalsBucketKey(int $unixTs, int $bucketMinutes = 1): string {
+    $bucketMinutes = vitalsNormalizeBucketMinutes($bucketMinutes);
+    $minute = (int) date('i', $unixTs);
+    // Seconds are dropped by the format itself, so only the minute needs
+    // flooring; subtracting them as well would be a no-op that reads as if it
+    // mattered.
+    return date('Y-m-d H:i', $unixTs - (($minute % $bucketMinutes) * 60));
+}
+
+/**
+ * Everything the post-mission report needs about heart rate, in one call:
+ * a shared time axis, one aligned series per volunteer, and per-volunteer
+ * totals. Returns [] when the feature is off or the mission recorded nothing.
+ *
+ * Two different resolutions on purpose, because the chart and the table are
+ * answering different questions:
+ *
+ *   - The CHART reads bucketed averages. A six-hour deployment of twelve
+ *     people is ~50.000 samples; drawing every one of them would ship a
+ *     megabyte of JSON into the page to paint lines a few hundred pixels wide,
+ *     where dozens of samples land on the same pixel column anyway.
+ *   - The TOTALS (average, lowest, highest, time in each zone) are computed by
+ *     the database over every individual sample. Deriving them from the same
+ *     bucketed averages would quietly erase exactly what a reader opens this
+ *     section to find: the peak. A minute averaging 140 can contain a 30-second
+ *     burst at 170, and that burst is the whole story.
+ *
+ * The bucket width adapts to the mission's length so the axis stays readable —
+ * one minute for a short callout, up to an hour for a multi-day operation —
+ * rather than being a fixed value that is too coarse for one and unusable for
+ * the other.
+ *
+ * The zone CASE expressions below mirror vitalsZone() deliberately, including
+ * its order: low is tested first (a dangerous bradycardia must not be reported
+ * as a comfortable "ok" merely because it is under every percentage cut-off),
+ * then critical, then elevated, then ok. They compare the same
+ * bpm / maxHeartRate * 100 percentage rather than a pre-multiplied bpm
+ * threshold, so no rounding can put a sample in a different zone here than the
+ * live badge put it in. If the ladder in vitalsZone() ever changes, this
+ * changes with it.
+ */
+function loadVitalsReportForMission(int $missionId): array {
     if (!vitalsEnabled()) {
         return [];
     }
@@ -499,58 +572,138 @@ function loadVitalsSeriesForMission(int $missionId): array {
     }
     $placeholders = implode(',', array_fill(0, count($shiftIds), '?'));
 
+    $config = vitalsConfig();
+    $maxHr  = vitalsMaxHeartRate();
+
     try {
-        $rows = dbFetchAll(
-            "SELECT v.user_id, u.name, v.bpm, v.bpm_min, v.bpm_max, v.recorded_at
-             FROM volunteer_vitals v
-             JOIN users u ON u.id = v.user_id
-             WHERE v.shift_id IN ({$placeholders})
-             ORDER BY v.user_id, v.recorded_at",
+        $span = dbFetchOne(
+            "SELECT MIN(recorded_at) AS first_at, MAX(recorded_at) AS last_at
+             FROM volunteer_vitals WHERE shift_id IN ({$placeholders})",
             $shiftIds
         );
     } catch (Exception $e) {
         return [];
     }
+    if (!$span || empty($span['first_at'])) {
+        return [];
+    }
 
-    $config = vitalsConfig();
-    $series = [];
+    $firstTs = strtotime($span['first_at']);
+    $lastTs  = strtotime($span['last_at']);
+    $spanMinutes = max(1, (int) ceil(($lastTs - $firstTs) / 60));
 
-    foreach ($rows as $row) {
+    // Widen the bucket until the axis holds at most ~480 points — about one
+    // per pixel-and-a-half on a full-width chart, past which more points only
+    // cost payload. Candidates are divisors of 60, see
+    // vitalsNormalizeBucketMinutes().
+    $bucketMinutes = 60;
+    foreach ([1, 2, 5, 10, 15, 30, 60] as $candidate) {
+        $bucketMinutes = $candidate;
+        if ($spanMinutes / $candidate <= 480) {
+            break;
+        }
+    }
+    $bucketSeconds = $bucketMinutes * 60;
+
+    // A mission crossing midnight (or a multi-day search) needs the date on
+    // the axis, or 02:00 on day two is indistinguishable from 02:00 on day one.
+    $labelFormat = ($lastTs - $firstTs) > 86400 ? 'd/m H:i' : 'H:i';
+
+    // The axis is built by walking bucket starts and formatting each one the
+    // same way the database did, so a label and its data share a key by
+    // construction rather than by both happening to agree about epochs.
+    $bucketKeys = [];
+    $labels     = [];
+    $cursor     = strtotime(vitalsBucketKey($firstTs, $bucketMinutes));
+    $lastKey    = vitalsBucketKey($lastTs, $bucketMinutes);
+    while (true) {
+        $key          = vitalsBucketKey($cursor, $bucketMinutes);
+        $bucketKeys[] = $key;
+        $labels[]     = date($labelFormat, $cursor);
+        if ($key === $lastKey || count($bucketKeys) > 5000) {
+            break; // the count guard is a runaway stop, not an expected exit
+        }
+        $cursor += $bucketSeconds;
+    }
+
+    try {
+        $totals = dbFetchAll(
+            "SELECT v.user_id, u.name,
+                    COUNT(*) AS samples,
+                    ROUND(AVG(v.bpm)) AS bpm_avg,
+                    MIN(v.bpm) AS bpm_min,
+                    MAX(v.bpm) AS bpm_max,
+                    SUM(CASE WHEN v.bpm <= ? THEN 1 ELSE 0 END) AS n_low,
+                    SUM(CASE WHEN v.bpm > ? AND (v.bpm * 100.0 / ?) >= ? THEN 1 ELSE 0 END) AS n_critical,
+                    SUM(CASE WHEN v.bpm > ? AND (v.bpm * 100.0 / ?) <  ? AND (v.bpm * 100.0 / ?) >= ? THEN 1 ELSE 0 END) AS n_elevated,
+                    SUM(CASE WHEN v.bpm > ? AND (v.bpm * 100.0 / ?) <  ? THEN 1 ELSE 0 END) AS n_ok
+             FROM volunteer_vitals v
+             JOIN users u ON u.id = v.user_id
+             WHERE v.shift_id IN ({$placeholders})
+             GROUP BY v.user_id, u.name
+             ORDER BY u.name",
+            array_merge(
+                [
+                    $config['low_bpm'],
+                    $config['low_bpm'], $maxHr, $config['critical_pct'],
+                    $config['low_bpm'], $maxHr, $config['critical_pct'], $maxHr, $config['elevated_pct'],
+                    $config['low_bpm'], $maxHr, $config['elevated_pct'],
+                ],
+                $shiftIds
+            )
+        );
+    } catch (Exception $e) {
+        return [];
+    }
+
+    $buckets = loadVitalsBucketedForMission($missionId, $bucketMinutes);
+
+    $volunteers = [];
+    foreach ($totals as $row) {
         $userId = (int) $row['user_id'];
-        if (!isset($series[$userId])) {
-            $series[$userId] = [
-                'user_id'    => $userId,
-                'name'       => $row['name'],
-                'max_hr'     => vitalsMaxHeartRate(),
-                'samples'    => [],
-                'bpm_min'    => null,
-                'bpm_max'    => null,
-                'bpm_sum'    => 0,
-                'zone_secs'  => ['low' => 0, 'ok' => 0, 'elevated' => 0, 'critical' => 0],
-            ];
+
+        // null, not zero, for a bucket with no sample: the volunteer was not
+        // wearing a sensor then (or was out of Bluetooth range), and a zero
+        // would draw their line diving to the floor and back as if their heart
+        // had stopped.
+        $series = [];
+        foreach ($bucketKeys as $key) {
+            $series[] = isset($buckets[$userId][$key]) ? (int) $buckets[$userId][$key]['bpm'] : null;
         }
 
-        $bpm = (int) $row['bpm'];
-        $entry = &$series[$userId];
-        $entry['samples'][] = ['t' => $row['recorded_at'], 'bpm' => $bpm];
-        $entry['bpm_sum']  += $bpm;
-        $entry['bpm_min']   = $entry['bpm_min'] === null ? $bpm : min($entry['bpm_min'], $bpm);
-        $entry['bpm_max']   = $entry['bpm_max'] === null ? $bpm : max($entry['bpm_max'], $bpm);
-        // Each stored row represents one sampling window, so time-in-zone is
-        // sample count x window length — not wall-clock between samples, which
-        // would silently charge a coverage gap to whatever zone preceded it.
-        $entry['zone_secs'][vitalsZone($bpm, $entry['max_hr'], $config)] += $config['sample_seconds'];
-        unset($entry);
+        $volunteers[] = [
+            'user_id'   => $userId,
+            'name'      => $row['name'],
+            'samples'   => (int) $row['samples'],
+            'bpm_avg'   => (int) $row['bpm_avg'],
+            'bpm_min'   => (int) $row['bpm_min'],
+            'bpm_max'   => (int) $row['bpm_max'],
+            'zone_secs' => [
+                'low'      => (int) $row['n_low']      * $config['sample_seconds'],
+                'ok'       => (int) $row['n_ok']       * $config['sample_seconds'],
+                'elevated' => (int) $row['n_elevated'] * $config['sample_seconds'],
+                'critical' => (int) $row['n_critical'] * $config['sample_seconds'],
+            ],
+            'series'    => $series,
+        ];
     }
 
-    foreach ($series as &$entry) {
-        $count = count($entry['samples']);
-        $entry['bpm_avg'] = $count ? (int) round($entry['bpm_sum'] / $count) : null;
-        unset($entry['bpm_sum']);
-    }
-    unset($entry);
-
-    return array_values($series);
+    return [
+        'labels'         => $labels,
+        'bucket_minutes' => $bucketMinutes,
+        'max_hr'         => $maxHr,
+        'sample_seconds' => $config['sample_seconds'],
+        'first_at'       => $span['first_at'],
+        'last_at'        => $span['last_at'],
+        // Drawn as horizontal guide lines on the chart. Rounded only here, for
+        // display — every actual classification above compares percentages.
+        'thresholds'     => [
+            'low'      => $config['low_bpm'],
+            'elevated' => (int) round($maxHr * $config['elevated_pct'] / 100),
+            'critical' => (int) round($maxHr * $config['critical_pct'] / 100),
+        ],
+        'volunteers'     => $volunteers,
+    ];
 }
 
 /**

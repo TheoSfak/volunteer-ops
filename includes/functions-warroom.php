@@ -701,10 +701,10 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
     // Heart rate for the same window, one value per user per minute, so each
     // trail point can carry what the volunteer's pulse was doing where they
     // were standing. Loaded once for the whole mission rather than per point —
-    // see loadVitalsByMinuteForMission() for why it is bucketed. Empty array
+    // see loadVitalsBucketedForMission() for why it is bucketed. Empty array
     // when the feature is off, which makes every lookup below a miss and every
     // point vitals-free, with no extra branch needed here.
-    $vitalsByMinute = loadVitalsByMinuteForMission($missionId);
+    $vitalsByMinute = loadVitalsBucketedForMission($missionId);
 
     $trailsByUser = [];
     foreach ($rows as $row) {
@@ -731,10 +731,9 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
         // understand. One minute of tolerance is well inside the resolution
         // this overlay claims.
         $pingTs = strtotime($row['created_at']);
-        $bucket = (int) floor($pingTs / 60);
-        $vitals = $vitalsByMinute[$userId][$bucket]
-            ?? $vitalsByMinute[$userId][$bucket - 1]
-            ?? $vitalsByMinute[$userId][$bucket + 1]
+        $vitals = $vitalsByMinute[$userId][vitalsBucketKey($pingTs)]
+            ?? $vitalsByMinute[$userId][vitalsBucketKey($pingTs - 60)]
+            ?? $vitalsByMinute[$userId][vitalsBucketKey($pingTs + 60)]
             ?? null;
 
         $trailsByUser[$userId]['points'][] = [
