@@ -58,6 +58,21 @@
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
+    <!-- Heart-rate sensor (@capacitor-community/bluetooth-le). Its own module
+         manifest already declares BLUETOOTH_SCAN, BLUETOOTH_CONNECT, the
+         pre-Android-12 BLUETOOTH/BLUETOOTH_ADMIN pair and a non-required
+         bluetooth_le feature, and the merger pulls all of that in — same
+         arrangement as the background-geolocation note below.
+
+         Deliberately NOT following the plugin README's suggestion to cap the
+         location permissions at maxSdkVersion="30" and to flag BLUETOOTH_SCAN
+         as neverForLocation. That advice is for apps whose only reason to
+         touch location is Bluetooth; this app tracks volunteers by GPS, so it
+         holds and requests ACCESS_FINE_LOCATION for real, at every API level.
+         Capping it here would fight the background-geolocation plugin's own
+         declaration, and BLUETOOTH_SCAN's Android 12+ location requirement is
+         already satisfied by a permission the volunteer has granted anyway. -->
+
     <!-- @capgo/background-geolocation's own module manifest already declares
          everything the background GPS ping feature needs (location,
          FOREGROUND_SERVICE + FOREGROUND_SERVICE_LOCATION, POST_NOTIFICATIONS,

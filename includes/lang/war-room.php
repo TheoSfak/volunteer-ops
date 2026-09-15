@@ -1420,6 +1420,17 @@ return [
         // Γραμμή στο popup του pin στον χάρτη, δίπλα στη μπαταρία.
         'vitals.pin_line' => '{bpm} bpm · {zone}',
         'vitals.unit_bpm' => 'bpm',
+        // Κάρτα σύνδεσης αισθητήρα στο "Το στίγμα μου" (assets/js/vitals-sensor.js).
+        'vitals.sensor_card_title' => 'Καρδιακοί Παλμοί',
+        'vitals.sensor_connect_btn' => 'Σύνδεση αισθητήρα',
+        'vitals.sensor_disconnect_btn' => 'Αποσύνδεση',
+        'vitals.sensor_connecting' => 'Σύνδεση…',
+        'vitals.sensor_connected' => 'Συνδεδεμένο: {device}',
+        'vitals.sensor_reconnecting' => 'Χάθηκε η σύνδεση — επανασύνδεση…',
+        'vitals.sensor_idle' => 'Δεν έχει συνδεθεί αισθητήρας. Χρειάζεται ζώνη στήθους ή περιβραχιόνιο Bluetooth, ή ρολόι/band Huawei με ενεργή «Εκπομπή καρδιακών παλμών».',
+        'vitals.sensor_error' => 'Η σύνδεση με τον αισθητήρα απέτυχε. Ελέγξτε ότι είναι φορεμένος και ότι το Bluetooth είναι ανοιχτό.',
+        'vitals.sensor_unsupported' => 'Η συσκευή αυτή δεν μπορεί να διαβάσει αισθητήρα παλμών. Χρησιμοποιήστε την εφαρμογή Android ή τον Chrome σε Android.',
+        'vitals.sensor_generic_name' => 'αισθητήρας παλμών',
     ],
     'en' => [
         'common.mission_not_found' => 'Mission not found.',
@@ -2765,5 +2776,16 @@ return [
         // Line in the map pin's popup, next to the battery line.
         'vitals.pin_line' => '{bpm} bpm · {zone}',
         'vitals.unit_bpm' => 'bpm',
+        // Sensor-pairing card inside "My location" (assets/js/vitals-sensor.js).
+        'vitals.sensor_card_title' => 'Heart Rate',
+        'vitals.sensor_connect_btn' => 'Pair a sensor',
+        'vitals.sensor_disconnect_btn' => 'Disconnect',
+        'vitals.sensor_connecting' => 'Connecting…',
+        'vitals.sensor_connected' => 'Connected: {device}',
+        'vitals.sensor_reconnecting' => 'Link lost — reconnecting…',
+        'vitals.sensor_idle' => 'No sensor paired. You need a Bluetooth chest strap or armband, or a Huawei watch/band with HR Data Broadcast switched on.',
+        'vitals.sensor_error' => 'Could not reach the sensor. Check that it is worn and that Bluetooth is on.',
+        'vitals.sensor_unsupported' => 'This device cannot read a heart-rate sensor. Use the Android app, or Chrome on Android.',
+        'vitals.sensor_generic_name' => 'heart-rate sensor',
     ],
 ];

@@ -2662,6 +2662,21 @@ include __DIR__ . '/includes/header.php';
                         <button type="button" class="btn btn-sm wr-touch-btn <?= $myFieldStatus === 'needs_help' ? 'btn-danger' : 'btn-outline-danger' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'needs_help')"><?= t('myping.btn_sos') ?></button>
                     </div>
                     <?php endforeach; ?>
+                    <?php if (vitalsEnabled()): ?>
+                    <!-- Heart-rate sensor. One per person, not per assignment,
+                         so it sits outside the loop above and uses the first
+                         shift: a volunteer with two consecutive shifts on one
+                         mission wears one strap, and pairing it twice would
+                         just fight itself over the same Bluetooth link. -->
+                    <hr class="my-2">
+                    <div class="small fw-bold mb-1"><i class="bi bi-heart-pulse-fill text-danger me-1"></i><?= t('vitals.sensor_card_title') ?></div>
+                    <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                        <button type="button" class="btn btn-sm btn-outline-danger" id="vitalsConnectBtn"><i class="bi bi-bluetooth me-1"></i><?= t('vitals.sensor_connect_btn') ?></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary d-none" id="vitalsDisconnectBtn"><?= t('vitals.sensor_disconnect_btn') ?></button>
+                        <span id="vitalsLiveReadout" class="d-none fw-bold text-danger fs-5"></span>
+                    </div>
+                    <div id="vitalsSensorStatus" class="small text-muted mb-2"></div>
+                    <?php endif; ?>
                     <?php $autoPingSeconds = (int) getSetting('war_room_auto_ping_seconds', '180'); ?>
                     <p class="small text-muted mb-0"><?= $autoPingSeconds >= 60
                         ? t('myping.auto_note_minutes', ['n' => (int) round($autoPingSeconds / 60)])
@@ -4334,6 +4349,9 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg==" crossorigin="anonymous"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-utils.js?v=<?= APP_VERSION ?>"></script>
+<?php if (vitalsEnabled()): ?>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/vitals-sensor.js?v=<?= APP_VERSION ?>"></script>
+<?php endif; ?>
 <script>
 const csrfToken = '<?= csrfToken() ?>';
 <?php $__wrStrings = loadLangStrings('war-room'); $__viewerLang = $user['language'] ?? DEFAULT_LANGUAGE; ?>
@@ -4345,6 +4363,26 @@ function t(key, vars = {}) {
     return text;
 }
 const jsLocale = <?= json_encode($__viewerLang === 'en' ? 'en-US' : 'el-GR') ?>;
+
+<?php if (vitalsEnabled() && !empty($myAssignments)): ?>
+// Heart-rate sensor. Started here rather than on DOMContentLoaded because
+// this script block already runs after the card's markup — and because a
+// volunteer who reloads mid-shift should be back on their strap before they
+// have put the phone away, not one event loop later.
+//
+// flushSeconds is fixed at 25 rather than configurable: at the default
+// 5-second sampling window that is five rows per request, which keeps the
+// batch small enough to retry cheaply over a bad link while still being one
+// request per half-minute rather than one per sample.
+VitalsSensor.init({
+    enabled: true,
+    sampleSeconds: <?= (int) vitalsConfig()['sample_seconds'] ?>,
+    flushSeconds: 25,
+    shiftId: <?= (int) $myAssignments[0]['shift_id'] ?>,
+    csrfToken: csrfToken,
+    endpoint: 'vitals-ingest.php',
+});
+<?php endif; ?>
 const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>;
 let pins = <?= json_encode($pins) ?>;
 // K9 handler registry, keyed by user id — the client-side twin of
