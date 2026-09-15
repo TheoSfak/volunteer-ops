@@ -171,8 +171,15 @@ include __DIR__ . '/includes/header.php';
     body.vr-focus .sidebar-toggle { display: none; }
     body.vr-focus .main-content { margin-left: 0; }
 
+    /* Chart.js with responsive+maintainAspectRatio:false sizes a canvas to its
+       PARENT, and writes an inline height while doing it — which beats any
+       height set on the canvas itself. Both charts therefore live in a wrapper
+       with a fixed height; without it the sparklines came out 256px instead of
+       38 and every volunteer card grew sevenfold, turning the page into a
+       7.000-pixel scroll. */
     .vr-chart-wrap { position: relative; height: 340px; }
-    .vr-spark { height: 38px; }
+    .vr-spark-wrap { position: relative; height: 40px; }
+    .vr-spark { display: block; }
     .vr-teambar { height: 8px; border-radius: 999px; background: #eee; overflow: hidden; }
     .vr-teambar > span { display: block; height: 100%; background: #b45309; }
 </style>
@@ -398,7 +405,7 @@ include __DIR__ . '/includes/header.php';
                             <span class="<?= $v['bpm_max'] >= $report['thresholds']['critical'] ? 'text-danger fw-bold' : 'text-muted' ?>"><?= (int) $v['bpm_max'] ?></span>
                         </div>
                     </div>
-                    <canvas class="vr-spark mt-2" data-series="<?= h(json_encode($v['series'])) ?>"></canvas>
+                    <div class="vr-spark-wrap mt-2"><canvas class="vr-spark" data-series="<?= h(json_encode($v['series'])) ?>"></canvas></div>
                     <div class="small mt-2">
                         <span class="text-success">Φυσιολογικοί <?= $vDur($z['ok']) ?></span> ·
                         <span class="<?= $z['elevated'] ? 'text-warning' : 'text-muted' ?>">Αυξημένοι <?= $vDur($z['elevated']) ?></span> ·
