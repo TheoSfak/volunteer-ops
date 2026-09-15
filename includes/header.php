@@ -1507,6 +1507,13 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
+            <?php if (isSystemAdmin() || hasPagePermission('volunteers_manage')): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'volunteer-notifications' ? 'active' : '' ?>" href="volunteer-notifications.php">
+                    <i class="bi bi-bell-slash"></i> Ειδοποιήσεις Εθελοντών
+                </a>
+            </li>
+            <?php endif; ?>
             <?php if (isSystemAdmin()): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'departments' ? 'active' : '' ?>" href="departments.php">
