@@ -134,13 +134,27 @@ include __DIR__ . '/includes/header.php';
     .vr-episode .meta { font-size: .82rem; color: #52514e; }
     .vr-episode .big { font-size: 1.25rem; font-weight: 700; }
 
+    /* Focus mode. Mirrors war-room.php's .war-room-focus exactly — hide the
+       chrome, give the content the whole width — because this page is meant
+       to end up on the second screen of a command post next to the map, and
+       a sidebar is not what anyone drove there to look at. */
+    body.vr-focus .sidebar,
+    body.vr-focus .sidebar-overlay,
+    body.vr-focus .sidebar-toggle { display: none; }
+    body.vr-focus .main-content { margin-left: 0; }
+
     .vr-chart-wrap { position: relative; height: 340px; }
     .vr-spark { height: 38px; }
     .vr-teambar { height: 8px; border-radius: 999px; background: #eee; overflow: hidden; }
     .vr-teambar > span { display: block; height: 100%; background: #b45309; }
 </style>
 
-<div class="container-fluid px-0">
+<!-- Everything inside #vrContent is what the auto-refresh replaces. The
+     chart payload rides along as JSON inside it, so a refreshed fragment
+     carries its own new data and vrDrawCharts() can simply run again —
+     no page reload, which is what would otherwise throw a wall display
+     out of fullscreen every thirty seconds. -->
+<div class="container-fluid px-0" id="vrContent">
 
     <div class="vr-hero mb-4 d-flex justify-content-between align-items-start flex-wrap gap-3">
         <div>
@@ -158,7 +172,10 @@ include __DIR__ . '/includes/header.php';
                 <span class="vr-live">ΚΛΕΙΣΤΗ ΑΠΟΣΤΟΛΗ · ιστορικό</span>
             <?php endif; ?>
             <div class="small opacity-75 mt-2">Ενημερώθηκε <?= date('H:i:s') ?></div>
-            <a href="war-room.php?id=<?= $missionId ?>" class="btn btn-sm btn-outline-light mt-2"><i class="bi bi-arrow-left me-1"></i>Action Room</a>
+            <div class="mt-2 d-flex gap-2 justify-content-end">
+                <button type="button" id="vrFocusToggle" class="btn btn-sm btn-outline-light"><i class="bi bi-arrows-fullscreen me-1"></i>Πλήρης Οθόνη</button>
+                <a href="war-room.php?id=<?= $missionId ?>" class="btn btn-sm btn-outline-light"><i class="bi bi-arrow-left me-1"></i>Action Room</a>
+            </div>
         </div>
     </div>
 
@@ -372,65 +389,153 @@ include __DIR__ . '/includes/header.php';
         Οι ζώνες υπολογίζονται με κοινή ηλικία αναφοράς <?= (int) $config['reference_age'] ?> ετών (μέγιστη καρδιακή συχνότητα <?= (int) $maxHr ?> bpm).
         Δεδομένα υγείας — ορατά μόνο στο επιτελείο της αποστολής.
     </p>
+<script type="application/json" id="vrChartData"><?= json_encode([
+        'labels' => $report['labels'] ?? [],
+        'volunteers' => array_map(fn($v) => ['name' => $v['name'], 'series' => $v['series']], $report['volunteers'] ?? []),
+        'thresholds' => $report['thresholds'] ?? null,
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?></script>
 </div>
 
 <script>
 const VR_PALETTE = ['#2a78d6','#008300','#e87ba4','#eda100','#1baf7a','#eb6834','#4a3aa7','#e34948'];
 
-<?php if (!empty($report['volunteers'])): ?>
-// Main chart: one line per volunteer plus three dashed guides, which are
-// datasets because the UMD Chart.js build this app loads ships no annotation
-// plugin. They are filtered out of the legend — a legend entry called
-// "Κρίσιμοι" sitting among real names reads as one more person.
-new Chart(document.getElementById('vrChart'), {
-    type: 'line',
-    data: {
-        labels: <?= json_encode($report['labels']) ?>,
-        datasets: [
-            <?php foreach ($report['volunteers'] as $i => $v): ?>
-            {label: <?= json_encode($v['name']) ?>, data: <?= json_encode($v['series']) ?>,
-             borderColor: VR_PALETTE[<?= $i ?> % VR_PALETTE.length], backgroundColor: VR_PALETTE[<?= $i ?> % VR_PALETTE.length],
-             borderWidth: 2, pointRadius: 0, pointHitRadius: 8, tension: .25, spanGaps: false},
-            <?php endforeach; ?>
-            {label: '__c', data: <?= json_encode(array_fill(0, count($report['labels']), $report['thresholds']['critical'])) ?>, borderColor: '#b91c1c', borderWidth: 1, borderDash: [6,4], pointRadius: 0},
-            {label: '__e', data: <?= json_encode(array_fill(0, count($report['labels']), $report['thresholds']['elevated'])) ?>, borderColor: '#b45309', borderWidth: 1, borderDash: [6,4], pointRadius: 0},
-            {label: '__l', data: <?= json_encode(array_fill(0, count($report['labels']), $report['thresholds']['low'])) ?>, borderColor: '#1d4ed8', borderWidth: 1, borderDash: [6,4], pointRadius: 0}
-        ]
-    },
-    options: {
-        responsive: true, maintainAspectRatio: false,
-        interaction: {mode: 'nearest', axis: 'x', intersect: false},
-        plugins: {
-            legend: {position: 'bottom', labels: {filter: i => !i.text.startsWith('__')}},
-            tooltip: {filter: i => !i.dataset.label.startsWith('__'), callbacks: {label: c => `${c.dataset.label}: ${c.parsed.y} bpm`}}
-        },
-        // Not beginAtZero: no heart rate is near zero, and anchoring there
-        // squashes every real line into the top of the chart.
-        scales: {y: {suggestedMin: 40, suggestedMax: <?= max(180, (int) $report['thresholds']['critical'] + 20) ?>, title: {display: true, text: 'bpm'}},
-                 x: {ticks: {maxTicksLimit: 14, autoSkip: true}}}
+// Built from the JSON block inside #vrContent rather than from PHP echoed
+// straight into this script, so the auto-refresh below can swap that container
+// and call this again. The alternative - re-running an inline <script> pulled
+// out of fetched HTML - works, but it re-runs everything else in here too.
+function vrDrawCharts() {
+    const raw = document.getElementById('vrChartData');
+    if (!raw) return;
+    const d = JSON.parse(raw.textContent || '{}');
+    if (!d.volunteers || !d.volunteers.length || !d.thresholds) return;
+
+    const canvas = document.getElementById('vrChart');
+    if (canvas) {
+        // A swapped container gives a brand-new canvas, but a window resize
+        // does not: destroy any chart still bound to this node first, or
+        // Chart.js refuses to take it.
+        const existing = Chart.getChart(canvas);
+        if (existing) existing.destroy();
+
+        const flat = v => new Array(d.labels.length).fill(v);
+        // The three dashed guides are datasets because the UMD Chart.js build
+        // this app loads ships no annotation plugin. They are filtered out of
+        // the legend - an entry reading "critical" among real names looks like
+        // one more person.
+        const datasets = d.volunteers.map((v, i) => ({
+            label: v.name, data: v.series,
+            borderColor: VR_PALETTE[i % VR_PALETTE.length], backgroundColor: VR_PALETTE[i % VR_PALETTE.length],
+            borderWidth: 2, pointRadius: 0, pointHitRadius: 8, tension: .25, spanGaps: false
+        })).concat([
+            {label: '__c', data: flat(d.thresholds.critical), borderColor: '#b91c1c', borderWidth: 1, borderDash: [6,4], pointRadius: 0},
+            {label: '__e', data: flat(d.thresholds.elevated), borderColor: '#b45309', borderWidth: 1, borderDash: [6,4], pointRadius: 0},
+            {label: '__l', data: flat(d.thresholds.low),      borderColor: '#1d4ed8', borderWidth: 1, borderDash: [6,4], pointRadius: 0}
+        ]);
+
+        new Chart(canvas, {
+            type: 'line',
+            data: {labels: d.labels, datasets},
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                // A wall display that re-animates every thirty seconds is a
+                // distraction, not feedback.
+                animation: false,
+                interaction: {mode: 'nearest', axis: 'x', intersect: false},
+                plugins: {
+                    legend: {position: 'bottom', labels: {filter: i => !i.text.startsWith('__')}},
+                    tooltip: {filter: i => !i.dataset.label.startsWith('__'),
+                              callbacks: {label: c => c.dataset.label + ': ' + c.parsed.y + ' bpm'}}
+                },
+                // Not beginAtZero: no heart rate is near zero, and anchoring
+                // there squashes every real line into the top of the chart.
+                scales: {y: {suggestedMin: 40, suggestedMax: Math.max(180, d.thresholds.critical + 20), title: {display: true, text: 'bpm'}},
+                         x: {ticks: {maxTicksLimit: 14, autoSkip: true}}}
+            }
+        });
+    }
+
+    // Sparklines: same series, stripped of every axis and label. At this size
+    // the shape is the whole message - the numbers are printed beside it.
+    document.querySelectorAll('.vr-spark').forEach(el => {
+        const prev = Chart.getChart(el);
+        if (prev) prev.destroy();
+        const data = JSON.parse(el.dataset.series || '[]');
+        new Chart(el, {
+            type: 'line',
+            data: {labels: data.map((_, i) => i), datasets: [{data, borderColor: '#b91c1c', borderWidth: 1.5, pointRadius: 0, tension: .3, spanGaps: false}]},
+            options: {responsive: true, maintainAspectRatio: false, animation: false,
+                      plugins: {legend: {display: false}, tooltip: {enabled: false}},
+                      scales: {x: {display: false}, y: {display: false}}}
+        });
+    });
+}
+vrDrawCharts();
+
+// Focus mode: body class plus the native Fullscreen API, tied to one button so
+// a native Esc exit also brings the sidebar back rather than leaving it hidden
+// with no visible way to undo it. Same arrangement as the Action Room's own
+// hero button, deliberately - someone who has learnt one has learnt both.
+//
+// Delegated from document, not bound to the button, because the refresh below
+// replaces that button along with the rest of the container; a listener on the
+// old node would stop working after the first refresh.
+function vrSetFocus(active) {
+    document.body.classList.toggle('vr-focus', active);
+    const btn = document.getElementById('vrFocusToggle');
+    if (btn) btn.innerHTML = active
+        ? '<i class="bi bi-fullscreen-exit me-1"></i>\u0388\u03be\u03bf\u03b4\u03bf\u03c2'
+        : '<i class="bi bi-arrows-fullscreen me-1"></i>\u03a0\u03bb\u03ae\u03c1\u03b7\u03c2 \u039f\u03b8\u03cc\u03bd\u03b7';
+}
+document.addEventListener('click', e => {
+    if (!e.target.closest('#vrFocusToggle')) return;
+    const entering = !document.body.classList.contains('vr-focus');
+    vrSetFocus(entering);
+    if (entering) {
+        if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+    } else if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
     }
 });
-
-// Sparklines: same series, stripped of every axis and label. At this size the
-// shape is the whole message — the numbers are already printed beside it.
-document.querySelectorAll('.vr-spark').forEach(el => {
-    const data = JSON.parse(el.dataset.series || '[]');
-    new Chart(el, {
-        type: 'line',
-        data: {labels: data.map((_, i) => i), datasets: [{data, borderColor: '#b91c1c', borderWidth: 1.5, pointRadius: 0, tension: .3, spanGaps: false}]},
-        options: {responsive: true, maintainAspectRatio: false,
-                  plugins: {legend: {display: false}, tooltip: {enabled: false}},
-                  scales: {x: {display: false}, y: {display: false}}}
-    });
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) vrSetFocus(false);
 });
-<?php endif; ?>
 
 <?php if ($isLive): ?>
-// A page about who is in trouble right now must not quietly go stale while it
-// sits on a second screen in the command post. Reload rather than poll: this
-// page has no partial-update machinery, every section derives from the same
-// snapshot, and a full reload every thirty seconds costs one request.
-setTimeout(() => { if (!document.hidden) location.reload(); }, 30000); // location.reload() keeps the ?window= the viewer picked
+// A page about who is in trouble right now must not go quietly stale while it
+// sits on a second screen in the command post.
+//
+// It refreshes by fetching itself and swapping #vrContent rather than calling
+// location.reload(), and that is not an optimisation. A reload unloads the
+// document, which drops the browser out of fullscreen - so a wall display
+// would have fallen out of fullscreen every thirty seconds, which is exactly
+// the setup the fullscreen button exists for. Swapping also keeps the scroll
+// position and avoids a white flash.
+//
+// The focus state survives because vr-focus lives on <body>, outside the
+// swapped container, and the click handler is delegated from document.
+async function vrRefresh() {
+    try {
+        const res = await fetch(location.href, {credentials: 'same-origin'});
+        if (!res.ok) return;
+        const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+        const fresh = doc.getElementById('vrContent');
+        const current = document.getElementById('vrContent');
+        // A session that expired mid-shift returns the login page, which has
+        // no #vrContent. Leave the last good render on screen rather than
+        // blanking the command post's display.
+        if (!fresh || !current) return;
+        current.replaceWith(fresh);
+        vrDrawCharts();
+        // The swap brings a freshly rendered button, which PHP always prints
+        // with the default label. Re-sync it from the state that actually
+        // survived — the body class — or a display left in fullscreen would
+        // start inviting the viewer to enter fullscreen again.
+        vrSetFocus(document.body.classList.contains('vr-focus'));
+    } catch (e) {
+        // Offline, or the server blinked - keep the last good render.
+    }
+}
+setInterval(() => { if (!document.hidden) vrRefresh(); }, 30000);
 <?php endif; ?>
 </script>
 
