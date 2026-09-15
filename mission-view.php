@@ -236,11 +236,10 @@ if (isPost()) {
                 // the very same function with the very same field names.
                 if (isset($_POST['notify_volunteers'])) {
                     $notify = sendMissionOpenedNotifications($id, $mission, $_POST);
-                    if ($notify['failed'] > 0) {
-                        setFlash('warning', 'Η αποστολή δημοσιεύτηκε. Emails: ' . $notify['sent'] . ' εστάλησαν σε (' . $notify['label'] . '), ' . $notify['failed'] . ' απέτυχαν (δείτε Audit Log).');
-                    } else {
-                        setFlash('success', 'Η αποστολή δημοσιεύτηκε και στάλθηκε email σε ' . $notify['sent'] . ' χρήστες (' . $notify['label'] . ').');
-                    }
+                    // Only a real delivery failure warrants a warning here;
+                    // opt-outs are reported inside the summary but stay success.
+                    setFlash($notify['failed'] > 0 ? 'warning' : 'success',
+                        'Η αποστολή δημοσιεύτηκε.' . missionNotifySummary($notify));
                 } else {
                     setFlash('success', 'Η αποστολή δημοσιεύτηκε.');
                 }

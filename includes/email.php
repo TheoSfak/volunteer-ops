@@ -485,17 +485,24 @@ function sendTestEmail(string $to): array {
  * Checks both global (admin) setting AND per-user preference.
  */
 function sendNotificationEmail(string $notificationCode, string $to, array $variables = []): array {
+    // The two returns below are deliberate SKIPS, not failures: the mail was
+    // never meant to go out. They carry 'skipped' => true so a caller counting
+    // results can tell "nobody wanted this" apart from "the server refused it".
+    // Callers that only look at 'success' are unaffected — the flag is additive.
+    // Everything further down (missing template, SMTP refusal) stays a real
+    // failure, because those mean a mail that SHOULD have been sent was not.
+
     // Check if notification is globally enabled by admin
     $setting = getNotificationSetting($notificationCode);
     if (!$setting || !$setting['email_enabled']) {
-        return ['success' => false, 'message' => 'Η ειδοποίηση δεν είναι ενεργοποιημένη'];
+        return ['success' => false, 'skipped' => true, 'message' => 'Η ειδοποίηση δεν είναι ενεργοποιημένη'];
     }
-    
+
     // Check per-user email preference (skip for non-configurable codes)
     if (!in_array($notificationCode, NON_CONFIGURABLE_NOTIFICATIONS)) {
         $recipientUser = dbFetchOne("SELECT id FROM users WHERE email = ? AND deleted_at IS NULL", [$to]);
         if ($recipientUser && !isUserNotifEnabled((int)$recipientUser['id'], $notificationCode, 'email')) {
-            return ['success' => false, 'message' => 'Ο χρήστης έχει απενεργοποιήσει αυτή την ειδοποίηση'];
+            return ['success' => false, 'skipped' => true, 'message' => 'Ο χρήστης έχει απενεργοποιήσει αυτή την ειδοποίηση'];
         }
     }
     
@@ -776,7 +783,17 @@ function sendMissionOpenedNotifications(int $missionId, array $mission, array $p
         );
     }
 
-    $sent = 0; $failed = 0; $lastError = '';
+    // $skipped is counted apart from $failed on purpose. A volunteer who has
+    // turned this notification off in notification-preferences.php is not a
+    // delivery problem, but it used to land in $failed, which then wrote an
+    // audit row literally named email_send_error and turned the admin's
+    // "mission published" flash into a warning telling them to go read it.
+    //
+    // $errors collects DISTINCT messages rather than keeping only the last
+    // one. With a single $lastError, a batch where five people opted out and
+    // one address genuinely bounced reported the opt-out text — whichever
+    // happened to come last — and the real bounce vanished.
+    $sent = 0; $failed = 0; $skipped = 0; $errors = [];
     foreach ($volunteers as $v) {
         if (!empty($v['email'])) {
             $result = sendNotificationEmail('new_mission', $v['email'], [
@@ -791,21 +808,56 @@ function sendMissionOpenedNotifications(int $missionId, array $mission, array $p
             ]);
             if ($result['success']) {
                 $sent++;
+            } elseif (!empty($result['skipped'])) {
+                $skipped++;
             } else {
                 $failed++;
-                $lastError = $result['message'];
+                $msg = (string)($result['message'] ?? 'Unknown error');
+                if (!in_array($msg, $errors, true)) {
+                    $errors[] = $msg;
+                }
             }
         }
     }
+    // Only a genuine delivery failure is worth an audit row. Opt-outs are
+    // normal operation and used to fill the log with entries named
+    // email_send_error that described nothing going wrong.
     if ($failed > 0) {
-        logAudit('email_send_error', 'missions', $missionId, 'Sent:' . $sent . ' Failed:' . $failed . ' Error:' . $lastError);
+        logAudit('email_send_error', 'missions', $missionId,
+            'Sent:' . $sent . ' Skipped:' . $skipped . ' Failed:' . $failed . ' Errors:' . implode(' | ', $errors));
     }
 
     return [
         'sent'       => $sent,
         'failed'     => $failed,
-        'lastError'  => $lastError,
+        'skipped'    => $skipped,
+        'errors'     => $errors,
+        // Kept so any caller still reading it kept working; it is now the
+        // first distinct real error rather than whatever came last.
+        'lastError'  => $errors[0] ?? '',
         'label'      => $targetLabel,
         'recipients' => count($volunteers),
     ];
+}
+
+/**
+ * The one sentence the three admin flashes use to report the outcome of
+ * sendMissionOpenedNotifications() — mission-form.php on both its update and
+ * create paths, and mission-view.php when publishing. Lives here so the
+ * wording cannot drift between them.
+ *
+ * Skips are named as what they are and never turn the flash into a warning on
+ * their own: a volunteer who switched this notification off in
+ * notification-preferences.php is not something the admin needs to act on.
+ * Only $failed does that.
+ */
+function missionNotifySummary(array $notify): string {
+    $s = ' Emails: ' . (int)$notify['sent'] . ' εστάλησαν σε (' . $notify['label'] . ')';
+    if (!empty($notify['skipped'])) {
+        $s .= ', ' . (int)$notify['skipped'] . ' παραλείφθηκαν (ρυθμίσεις ειδοποιήσεων χρήστη)';
+    }
+    if (!empty($notify['failed'])) {
+        $s .= ', ' . (int)$notify['failed'] . ' απέτυχαν (δείτε Audit Log)';
+    }
+    return $s . '.';
 }

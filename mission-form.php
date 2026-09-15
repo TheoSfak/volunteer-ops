@@ -170,9 +170,7 @@ if (isPost()) {
                 if ($mission['status'] === STATUS_DRAFT && $data['status'] === STATUS_OPEN
                     && isset($_POST['notify_volunteers'])) {
                     $notify = sendMissionOpenedNotifications($id, $data, $_POST);
-                    $message .= $notify['failed'] > 0
-                        ? ' Emails: ' . $notify['sent'] . ' εστάλησαν σε (' . $notify['label'] . '), ' . $notify['failed'] . ' απέτυχαν (δείτε Audit Log).'
-                        : ' Στάλθηκε email σε ' . $notify['sent'] . ' χρήστες (' . $notify['label'] . ').';
+                    $message .= missionNotifySummary($notify);
                 }
                 setFlash('success', $message);
                 if ($shiftsNeedManualUpdate) {
@@ -332,12 +330,12 @@ if (isPost()) {
                     $createFlash   = 'success';
                     if ($data['status'] === STATUS_OPEN && isset($_POST['notify_volunteers'])) {
                         $notify = sendMissionOpenedNotifications($newId, $data, $_POST);
+                        // Only a real delivery failure downgrades this to a
+                        // warning; opt-outs are reported but stay 'success'.
                         if ($notify['failed'] > 0) {
-                            $createFlash    = 'warning';
-                            $createMessage .= ' Emails: ' . $notify['sent'] . ' εστάλησαν σε (' . $notify['label'] . '), ' . $notify['failed'] . ' απέτυχαν (δείτε Audit Log).';
-                        } else {
-                            $createMessage .= ' Στάλθηκε email σε ' . $notify['sent'] . ' χρήστες (' . $notify['label'] . ').';
+                            $createFlash = 'warning';
                         }
+                        $createMessage .= missionNotifySummary($notify);
                     }
                     setFlash($createFlash, $createMessage);
                     redirect('mission-view.php?id=' . $newId);
