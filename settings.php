@@ -1082,19 +1082,40 @@ if (isPost()) {
         redirect('settings.php?tab=health');
 
     } elseif ($action === 'health_cleanup_logs') {
-        $months = (int) post('cleanup_months', 6);
+        $months = (int) post('cleanup_months', 1);
         if ($months < 1) $months = 1;
+        // "1 μηνών" is not Greek. The cutoff is a hidden field rather than a
+        // fixed literal, so both forms have to read correctly.
+        $monthLabel = $months === 1 ? 'ενός μήνα' : "$months μηνών";
         $deleted = dbExecute("DELETE FROM audit_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? MONTH)", [$months]);
-        logAudit('health_cleanup', 'audit_logs', null, "Διαγραφή $deleted εγγραφών παλαιότερων $months μηνών");
-        setFlash('success', "Διαγράφηκαν $deleted εγγραφές audit log παλαιότερες $months μηνών.");
+        logAudit('health_cleanup', 'audit_logs', null, "Διαγραφή $deleted εγγραφών παλαιότερων $monthLabel");
+        setFlash('success', "Διαγράφηκαν $deleted εγγραφές audit log παλαιότερες $monthLabel.");
         redirect('settings.php?tab=health');
 
     } elseif ($action === 'health_cleanup_email_logs') {
-        $months = (int) post('cleanup_months', 6);
+        $months = (int) post('cleanup_months', 1);
         if ($months < 1) $months = 1;
+        $monthLabel = $months === 1 ? 'ενός μήνα' : "$months μηνών";
         $deleted = dbExecute("DELETE FROM email_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? MONTH)", [$months]);
-        logAudit('health_cleanup', 'email_logs', null, "Διαγραφή $deleted email logs παλαιότερων $months μηνών");
-        setFlash('success', "Διαγράφηκαν $deleted εγγραφές email log παλαιότερες $months μηνών.");
+        logAudit('health_cleanup', 'email_logs', null, "Διαγραφή $deleted email logs παλαιότερων $monthLabel");
+        setFlash('success', "Διαγράφηκαν $deleted εγγραφές email log παλαιότερες $monthLabel.");
+        redirect('settings.php?tab=health');
+
+    // Same age-only rule as the two cleanups above: a notification past the
+    // cutoff goes whether or not it was ever read. Unread ones are
+    // deliberately NOT spared — sparing them was tried first and left the
+    // button unable to shrink the table at all on an install where nobody
+    // marks anything read (the demo database has 5.463 notifications, every
+    // one of them unread), and a month-old unread notification is not
+    // actionable anyway. Because this does remove user-facing state rather
+    // than a pure log, the button's confirm says so in as many words.
+    } elseif ($action === 'health_cleanup_notifications') {
+        $months = (int) post('cleanup_months', 1);
+        if ($months < 1) $months = 1;
+        $monthLabel = $months === 1 ? 'ενός μήνα' : "$months μηνών";
+        $deleted = dbExecute("DELETE FROM notifications WHERE created_at < DATE_SUB(NOW(), INTERVAL ? MONTH)", [$months]);
+        logAudit('health_cleanup', 'notifications', null, "Διαγραφή $deleted ειδοποιήσεων παλαιότερων $monthLabel");
+        setFlash('success', "Διαγράφηκαν $deleted ειδοποιήσεις παλαιότερες $monthLabel.");
         redirect('settings.php?tab=health');
 
     } elseif ($action === 'save_prerequisites') {
@@ -3161,17 +3182,25 @@ unset($_SESSION['health_results'], $_SESSION['health_ran']);
                     <form method="post" class="d-inline">
                         <?= csrfField() ?>
                         <input type="hidden" name="action" value="health_cleanup_logs">
-                        <input type="hidden" name="cleanup_months" value="6">
-                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή audit logs παλαιότερων 6 μηνών;')">
-                            <i class="bi bi-trash me-1"></i>Καθαρισμός Audit Log (&gt; 6μ)
+                        <input type="hidden" name="cleanup_months" value="1">
+                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή audit logs παλαιότερων ενός μήνα;')">
+                            <i class="bi bi-trash me-1"></i>Καθαρισμός Audit Log (&gt; 1μ)
                         </button>
                     </form>
                     <form method="post" class="d-inline">
                         <?= csrfField() ?>
                         <input type="hidden" name="action" value="health_cleanup_email_logs">
-                        <input type="hidden" name="cleanup_months" value="6">
-                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή email logs παλαιότερων 6 μηνών;')">
-                            <i class="bi bi-trash me-1"></i>Καθαρισμός Email Log (&gt; 6μ)
+                        <input type="hidden" name="cleanup_months" value="1">
+                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή email logs παλαιότερων ενός μήνα;')">
+                            <i class="bi bi-trash me-1"></i>Καθαρισμός Email Log (&gt; 1μ)
+                        </button>
+                    </form>
+                    <form method="post" class="d-inline">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="health_cleanup_notifications">
+                        <input type="hidden" name="cleanup_months" value="1">
+                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή ΟΛΩΝ των ειδοποιήσεων παλαιότερων ενός μήνα — και των αδιάβαστων. Συνέχεια;')">
+                            <i class="bi bi-trash me-1"></i>Καθαρισμός Ειδοποιήσεων (&gt; 1μ)
                         </button>
                     </form>
                 </div>
