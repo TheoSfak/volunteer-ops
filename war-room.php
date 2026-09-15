@@ -1030,6 +1030,32 @@ foreach (dbFetchAll(
     ];
 }
 
+// Heart rate rides the SAME payload key as the ping/fatigue data above rather
+// than getting its own poll: every open tab already hits this page every 5
+// seconds, and a second endpoint for one number per volunteer would double
+// that connection count for no new information. Returns [] when the feature
+// is switched off, so nothing below changes shape for an org that doesn't
+// use it.
+//
+// Gated per viewer, not merged wholesale: a heart rate is health data
+// (Article 9 GDPR), so command staff see everyone's and a volunteer sees only
+// their own. The gate lives here, on the payload, not in the template —
+// filtering only at render would still ship every volunteer's vitals to every
+// open browser, where anyone could read them straight out of the poll
+// response. Same reason phone numbers are gated in the roster markup.
+$vitalsByVolunteerId = loadLatestVitalsByVolunteerId($missionId, $missionShiftBinds, $missionShiftPlaceholders);
+foreach ($vitalsByVolunteerId as $vitalsUserId => $reading) {
+    if (!$canManageWarRoom && $vitalsUserId !== (int) $user['id']) {
+        continue;
+    }
+    if (!isset($participantLiveByVolunteerId[$vitalsUserId])) {
+        continue; // not an approved participant on this mission any more
+    }
+    $participantLiveByVolunteerId[$vitalsUserId]['heart_rate']      = (int) $reading['bpm'];
+    $participantLiveByVolunteerId[$vitalsUserId]['heart_rate_zone'] = $reading['zone'];
+    $participantLiveByVolunteerId[$vitalsUserId]['heart_rate_at']   = $reading['recorded_at'];
+}
+
 // Always returns each participant's LATEST ping regardless of age — a hard
 // "last 2 hours" cutoff used to make someone silently vanish from the live
 // map the moment their last ping aged past it, even though Team Trail (which
@@ -2774,9 +2800,17 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 $isCriticalFatigue = $isFatigued && $fatigueMinutes >= $warRoomCriticalShiftMinutes;
                 $fatigueH = $fatigueMinutes !== null ? intdiv($fatigueMinutes, 60) : 0;
                 $fatigueM = $fatigueMinutes !== null ? $fatigueMinutes % 60 : 0;
+                // Health data (Article 9 GDPR): command staff see everyone's
+                // heart rate, a volunteer only their own. This same gate also
+                // decides whether the always-present live slot is emitted at
+                // all — a viewer who may not see the reading gets no node for
+                // the 5s poll to fill, matching the gate already applied to
+                // the payload itself further up this file.
+                $maySeeVitals = $canManageWarRoom || (int)$participant['volunteer_id'] === (int)$user['id'];
+                $participantVitals = $maySeeVitals ? ($vitalsByVolunteerId[(int)$participant['volunteer_id']] ?? null) : null;
                 ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap" id="participant-row-<?= (int)$participant['volunteer_id'] ?>">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? 'presence-online' : 'presence-offline' ?>" title="<?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?><?= k9BadgeHtml((int) $participant['volunteer_id']) ?><?= captainBadgeHtml((int) $participant['volunteer_id']) ?></strong><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><?php if (!empty($participant['phone']) && ($canManageWarRoom || ($myTeamId && ($teamIdByUserId[(int)$participant['volunteer_id']] ?? null) === $myTeamId))): ?><br><a href="tel:<?= h($participant['phone']) ?>" class="text-decoration-none"><i class="bi bi-telephone me-1"></i><?= h($participant['phone']) ?></a><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping') ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= (!empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= $isFatigued ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? 'presence-online' : 'presence-offline' ?>" title="<?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?><?= k9BadgeHtml((int) $participant['volunteer_id']) ?><?= captainBadgeHtml((int) $participant['volunteer_id']) ?></strong><?= $maySeeVitals ? vitalsBadgeHtml($participantVitals, null, (int)$participant['volunteer_id']) : '' ?><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><?php if (!empty($participant['phone']) && ($canManageWarRoom || ($myTeamId && ($teamIdByUserId[(int)$participant['volunteer_id']] ?? null) === $myTeamId))): ?><br><a href="tel:<?= h($participant['phone']) ?>" class="text-decoration-none"><i class="bi bi-telephone me-1"></i><?= h($participant['phone']) ?></a><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping') ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= (!empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= $isFatigued ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>" id="status-badge-<?= (int)$participant['volunteer_id'] ?>">
                         <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
@@ -8820,6 +8854,27 @@ function renderParticipantLiveData(data) {
             }
         }
         if (suggestBtn) suggestBtn.classList.toggle('d-none', !isFatigued);
+
+        // Heart rate. The slot is always in the roster markup for a viewer
+        // allowed to see this person's reading, so a sensor that pairs after
+        // the page was rendered lights up within one poll tick instead of
+        // waiting for a reload. An absent heart_rate means "no reading, or
+        // not permitted" and must hide the badge rather than leave the last
+        // value frozen on screen — a stale number here reads as a live one.
+        const vitalsEl = document.getElementById('vitals-badge-' + uid);
+        if (vitalsEl) {
+            const bpm = info.heart_rate;
+            if (bpm === undefined || bpm === null) {
+                vitalsEl.classList.add('d-none');
+            } else {
+                const zone = info.heart_rate_zone || 'stale';
+                vitalsEl.className = 'vitals-badge vitals-zone-' + zone;
+                vitalsEl.innerHTML = '<i class="bi bi-heart-pulse-fill"></i> ' + bpm;
+                vitalsEl.title = zone === 'stale'
+                    ? t('vitals.badge_stale_tooltip', {bpm: bpm, time: info.heart_rate_at || ''})
+                    : t('vitals.badge_tooltip', {bpm: bpm, zone: t('vitals.zone_' + zone)});
+            }
+        }
     });
 }
 

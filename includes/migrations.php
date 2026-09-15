@@ -6700,6 +6700,43 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 150,
+            'description' => 'Add volunteer_vitals - rescuer heart rate from a standard Bluetooth LE Heart Rate Service sensor (0x180D), feeding both the Action Room live badge and the post-mission report from the same rows. Deliberately not a Huawei integration: Huawei rates heart rate "In hours" on both its cloud and on-device APIs, and Wear Engine exposes no BPM at all, only high/low alerts and only to enterprise developers - so a vendor API could never have served the live half. Off by default (vitals_enabled), so an org that does not use it pays nothing.',
+            'up' => function () {
+                // recorded_at is DATETIME, not TIMESTAMP, on purpose: this is
+                // the sample's own time (the client clock corrected by the
+                // measured skew, see recordVolunteerVitals()), and a second
+                // TIMESTAMP column in the same table invites MySQL's implicit
+                // "first TIMESTAMP gets CURRENT_TIMESTAMP" behaviour to differ
+                // between MySQL 8 and MariaDB depending on
+                // explicit_defaults_for_timestamp. created_at stays TIMESTAMP
+                // because it genuinely means "when the row was written".
+                //
+                // The unique key is what makes ingest idempotent: a client
+                // that flushes the same offline buffer twice (lost response,
+                // app restart mid-send) writes it once, so the report's curve
+                // cannot be drawn twice from one retry.
+                dbExecute("CREATE TABLE IF NOT EXISTS volunteer_vitals (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    user_id INT UNSIGNED NOT NULL,
+                    shift_id INT UNSIGNED NOT NULL,
+                    bpm SMALLINT UNSIGNED NOT NULL COMMENT 'Heart rate for this sampling window, beats per minute',
+                    bpm_min SMALLINT UNSIGNED NULL COMMENT 'Lowest 1Hz reading inside the window, best-effort',
+                    bpm_max SMALLINT UNSIGNED NULL COMMENT 'Highest 1Hz reading inside the window, best-effort',
+                    source ENUM('ble','manual','simulated') NOT NULL DEFAULT 'ble',
+                    device_name VARCHAR(64) NULL COMMENT 'Sensor name as advertised over BLE, for the tooltip',
+                    recorded_at DATETIME NOT NULL COMMENT 'Sample time: client clock corrected by measured server skew',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
+                    UNIQUE KEY uk_vitals_sample (user_id, shift_id, recorded_at),
+                    INDEX idx_vitals_shift_user (shift_id, user_id, id),
+                    INDEX idx_vitals_recorded (recorded_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

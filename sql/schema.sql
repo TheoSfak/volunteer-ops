@@ -1468,6 +1468,29 @@ CREATE TABLE IF NOT EXISTS `volunteer_pings` (
     INDEX `idx_pings_user_shift` (`user_id`, `shift_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- RESCUER VITALS (heart rate from a standard Bluetooth LE Heart Rate Service
+-- sensor, 0x180D -- chest strap, armband, or a Huawei watch/band in "HR Data
+-- Broadcast" mode). One table serves both the Action Room live badge and the
+-- post-mission report, so there is no separate history store to reconcile.
+-- The unique key makes ingest idempotent: a client re-flushing an offline
+-- buffer writes the batch once instead of drawing the curve twice.
+CREATE TABLE IF NOT EXISTS `volunteer_vitals` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT UNSIGNED NOT NULL,
+    `shift_id` INT UNSIGNED NOT NULL,
+    `bpm` SMALLINT UNSIGNED NOT NULL COMMENT 'Heart rate for this sampling window, beats per minute',
+    `bpm_min` SMALLINT UNSIGNED NULL COMMENT 'Lowest 1Hz reading inside the window, best-effort',
+    `bpm_max` SMALLINT UNSIGNED NULL COMMENT 'Highest 1Hz reading inside the window, best-effort',
+    `source` ENUM('ble','manual','simulated') NOT NULL DEFAULT 'ble',
+    `device_name` VARCHAR(64) NULL COMMENT 'Sensor name as advertised over BLE, for the tooltip',
+    `recorded_at` DATETIME NOT NULL COMMENT 'Sample time: client clock corrected by measured server skew',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`shift_id`) REFERENCES `shifts`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY `uk_vitals_sample` (`user_id`, `shift_id`, `recorded_at`),
+    INDEX `idx_vitals_shift_user` (`shift_id`, `user_id`, `id`),
+    INDEX `idx_vitals_recorded` (`recorded_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- MOBILE APP API TOKENS (native Android/iOS wrapper — bearer-token auth for
 -- the background-location plugin, which posts pings from detached native code
 -- with no live browser session/CSRF token to hand off)

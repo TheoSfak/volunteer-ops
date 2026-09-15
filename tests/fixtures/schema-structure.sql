@@ -2338,6 +2338,28 @@ CREATE TABLE `volunteer_teams` (
   UNIQUE KEY `uq_volunteer_teams_name` (`name`)
 ) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `volunteer_vitals`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `volunteer_vitals` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int(10) unsigned NOT NULL,
+  `shift_id` int(10) unsigned NOT NULL,
+  `bpm` smallint(5) unsigned NOT NULL,
+  `bpm_min` smallint(5) unsigned DEFAULT NULL,
+  `bpm_max` smallint(5) unsigned DEFAULT NULL,
+  `source` enum('ble','manual','simulated') NOT NULL DEFAULT 'ble',
+  `device_name` varchar(64) DEFAULT NULL,
+  `recorded_at` datetime NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_vitals_sample` (`user_id`,`shift_id`,`recorded_at`),
+  KEY `idx_vitals_shift_user` (`shift_id`,`user_id`,`id`),
+  KEY `idx_vitals_recorded` (`recorded_at`),
+  CONSTRAINT `volunteer_vitals_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `volunteer_vitals_ibfk_2` FOREIGN KEY (`shift_id`) REFERENCES `shifts` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `war_room_layouts`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;

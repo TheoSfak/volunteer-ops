@@ -1270,6 +1270,51 @@ if (isLoggedIn()) {
             white-space: nowrap;
             cursor: help;
         }
+
+        /* Rescuer heart rate (volunteer_vitals) — same pill geometry as
+           .k9-badge/.captain-badge so a name carrying several badges still
+           sits on one line. Unlike those two this one is LIVE data whose
+           colour carries the meaning, so every zone is a flat, deliberately
+           chosen background rather than a Bootstrap contextual class: all
+           five clear 4.5:1 against the white text (green 5.0, amber 5.0,
+           red 6.3, blue 6.3, grey 4.7), which the -subtle/-emphasis pairs
+           would not at this 0.62em size.
+           See vitalsBadgeHtml() in includes/functions-vitals.php. */
+        .vitals-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-size: .62em;
+            font-weight: 700;
+            color: #fff;
+            background: #6c757d;
+            border-radius: 999px;
+            padding: 1px 6px;
+            margin-left: 4px;
+            vertical-align: top;
+            line-height: 1.4;
+            white-space: nowrap;
+            cursor: help;
+        }
+        .vitals-zone-ok       { background: #15803d; }
+        .vitals-zone-elevated { background: #b45309; }
+        .vitals-zone-critical { background: #b91c1c; animation: vitalsPulse 1.4s ease-in-out infinite; }
+        /* Blue, not a third shade of red: a dangerously LOW heart rate is a
+           different emergency from a dangerously high one, and command staff
+           must be able to tell which one they are looking at across a room. */
+        .vitals-zone-low      { background: #1d4ed8; }
+        /* Stale keeps the grey default and drops to the weight of a hint —
+           the number is history at this point, not a reading. */
+        .vitals-zone-stale    { background: #6c757d; opacity: .65; }
+
+        @keyframes vitalsPulse {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: .55; }
+        }
+        /* Respect a reader who has asked the system to stop animating things. */
+        @media (prefers-reduced-motion: reduce) {
+            .vitals-zone-critical { animation: none; }
+        }
     </style>
 </head>
 <body>

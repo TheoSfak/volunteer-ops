@@ -45,6 +45,18 @@ $defaults = [
     'war_room_auto_ping_seconds' => '180',
     'war_room_low_battery_pct' => '60',
     'war_room_max_shift_minutes' => '480',
+    // Rescuer heart rate (volunteer_vitals). Off by default: it needs a
+    // sensor per volunteer and it collects health data, so it must be an
+    // explicit decision by the org, never something that starts working
+    // because they upgraded. Defaults mirror vitalsConfig() exactly.
+    'vitals_enabled' => '0',
+    'vitals_sample_seconds' => '5',
+    'vitals_elevated_pct' => '75',
+    'vitals_critical_pct' => '88',
+    'vitals_low_bpm' => '40',
+    'vitals_reference_age' => '40',
+    'vitals_stale_seconds' => '120',
+    'vitals_retention_days' => '365',
     'admin_email' => '',
     'developer_email' => '',
     'timezone' => 'Europe/Athens',
@@ -599,6 +611,7 @@ if (isPost()) {
         // Save general settings
         $fieldsToUpdate = [
             'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes',
+            'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct', 'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
             'admin_email', 'developer_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
@@ -613,7 +626,7 @@ if (isPost()) {
         foreach ($fieldsToUpdate as $field) {
             $value = isset($_POST[$field]) ? $_POST[$field] : '';
 
-            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled'])) {
+            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'vitals_enabled'])) {
                 $value = isset($_POST[$field]) ? '1' : '0';
             }
 
@@ -638,6 +651,24 @@ if (isPost()) {
             // clamping server-side too.
             if ($field === 'war_room_max_shift_minutes') {
                 $value = (string) max(30, min(2880, (int) $value ?: 480));
+            }
+
+            // vitalsConfig() clamps every one of these again on read, so this
+            // is not the safety guard — it exists so the number an admin sees
+            // in this form is the number the app is actually using, instead of
+            // a stored 9999 silently behaving as 1800 everywhere.
+            $vitalsBounds = [
+                'vitals_sample_seconds'  => [1, 60, 5],
+                'vitals_elevated_pct'    => [40, 100, 75],
+                'vitals_critical_pct'    => [50, 100, 88],
+                'vitals_low_bpm'         => [25, 60, 40],
+                'vitals_reference_age'   => [16, 90, 40],
+                'vitals_stale_seconds'   => [30, 1800, 120],
+                'vitals_retention_days'  => [7, 3650, 365],
+            ];
+            if (isset($vitalsBounds[$field])) {
+                [$vMin, $vMax, $vDefault] = $vitalsBounds[$field];
+                $value = (string) max($vMin, min($vMax, (int) $value ?: $vDefault));
             }
 
             // Closed <select> in the form only offers these two — a crafted
@@ -1456,6 +1487,64 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <input type="number" class="form-control" style="max-width:160px;" name="war_room_max_shift_minutes"
                                value="<?= h($settings['war_room_max_shift_minutes']) ?>" min="30" max="2880" step="30">
                         <small class="text-muted">Λεπτά συνεχόμενης παρουσίας εθελοντή σε αλυσίδα εγκεκριμένων βαρδιών στην ίδια αποστολή, πάνω από τα οποία εμφανίζεται προειδοποίηση κόπωσης στο Action Room (ρόστερ, χάρτης, Κοντινές Ομάδες, Αποστάσεις Ομάδων) και προτείνεται αντικατάσταση. Προεπιλογή 480 = 8 ώρες. Η "κρίσιμη" ένδειξη (κόκκινο) εμφανίζεται στο 1,5x του ορίου.</small>
+                    </div>
+
+                    <hr class="my-4">
+                    <h6 class="fw-bold mb-2"><i class="bi bi-heart-pulse me-1"></i>Καρδιακοί Παλμοί Διασώστη</h6>
+                    <p class="text-muted small">
+                        Ζωντανή ένδειξη παλμών δίπλα στο όνομα κάθε εθελοντή στο Action Room, και αναλυτική καμπύλη παλμών ανά εθελοντή στην αναφορά μετά την αποστολή — από τις ίδιες μετρήσεις.
+                        Χρειάζεται αισθητήρα με <strong>τυπικό Bluetooth LE Heart Rate Service</strong>: ζώνη στήθους ή περιβραχιόνιο (Polar, Garmin, Wahoo, ή οικονομικές ζώνες), ή ρολόι/band Huawei σε λειτουργία «Εκπομπή καρδιακών παλμών» (Ρυθμίσεις → HR Data Broadcasts — δεν το διαθέτουν όλα τα μοντέλα).
+                        Οι παλμοί είναι <strong>δεδομένα υγείας (άρθρο 9 GDPR)</strong>: τους βλέπει μόνο το επιτελείο και ο ίδιος ο εθελοντής, ποτέ οι υπόλοιποι εθελοντές. Χρειάζεται ρητή συγκατάθεση κάθε εθελοντή πριν φορέσει αισθητήρα.
+                    </p>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="vitals_enabled" id="vitalsEnabled"
+                               <?= ($settings['vitals_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="vitalsEnabled">
+                            Ενεργοποίηση παρακολούθησης καρδιακών παλμών
+                        </label>
+                        <div><small class="text-muted">Όσο είναι κλειστό, η εφαρμογή δεν ζητά, δεν αποθηκεύει και δεν εμφανίζει καμία μέτρηση παλμών — ούτε εκτελεί επιπλέον ερώτημα στη βάση.</small></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Συχνότητα Καταγραφής (δευτ.)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_sample_seconds"
+                               value="<?= h($settings['vitals_sample_seconds'] ?? '5') ?>" min="1" max="60" step="1">
+                        <small class="text-muted">Ο αισθητήρας στέλνει μέτρηση κάθε δευτερόλεπτο· εδώ ορίζεται πόσα δευτερόλεπτα συμπυκνώνονται σε μία αποθηκευμένη τιμή. Προεπιλογή 5 δευτ. — αρκετά πυκνό για την καμπύλη της αναφοράς, χωρίς να γράφει ~21.600 γραμμές ανά εθελοντή σε βάρδια 6 ωρών.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Όριο «Αυξημένων» Παλμών (% μέγιστης καρδιακής συχνότητας)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_elevated_pct"
+                               value="<?= h($settings['vitals_elevated_pct'] ?? '75') ?>" min="40" max="100" step="1">
+                        <small class="text-muted">Πάνω από αυτό το ποσοστό η ένδειξη γίνεται πορτοκαλί. Η μέγιστη καρδιακή συχνότητα υπολογίζεται ως 220 − ηλικία αναφοράς (βλ. παρακάτω).</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Ηλικία Αναφοράς (έτη)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_reference_age"
+                               value="<?= h($settings['vitals_reference_age'] ?? '40') ?>" min="16" max="90" step="1">
+                        <small class="text-muted">Η εφαρμογή <strong>δεν αποθηκεύει ημερομηνία γέννησης εθελοντή</strong> (υπάρχει μόνο στις αιτήσεις υποψηφίων και στους πολίτες), οπότε τα όρια ζωνών υπολογίζονται με κοινή ηλικία αναφοράς για όλους: μέγιστη καρδιακή συχνότητα = 220 − αυτή η τιμή. Με 40 έτη βγαίνει 180 bpm, άρα «αυξημένοι» στους 135 και «κρίσιμοι» στους ~158. Βάλτε τη μέση ηλικία του δικού σας μητρώου.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Όριο «Κρίσιμων» Παλμών (% μέγιστης καρδιακής συχνότητας)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_critical_pct"
+                               value="<?= h($settings['vitals_critical_pct'] ?? '88') ?>" min="50" max="100" step="1">
+                        <small class="text-muted">Πάνω από αυτό το ποσοστό η ένδειξη γίνεται κόκκινη και αναβοσβήνει. Πρέπει να είναι μεγαλύτερο από το όριο των αυξημένων — αλλιώς διορθώνεται αυτόματα.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Όριο Επικίνδυνα Χαμηλών Παλμών (bpm)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_low_bpm"
+                               value="<?= h($settings['vitals_low_bpm'] ?? '40') ?>" min="25" max="60" step="1">
+                        <small class="text-muted">Απόλυτο όριο, όχι ποσοστό: η βραδυκαρδία είναι το ίδιο επικίνδυνη σε κάθε ηλικία. Κάτω από αυτό η ένδειξη γίνεται μπλε — σκόπιμα διαφορετικό χρώμα από το κόκκινο των υψηλών, ώστε να ξεχωρίζει από απόσταση ποιο από τα δύο συμβαίνει.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Όριο Παλαιότητας Μέτρησης (δευτ.)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_stale_seconds"
+                               value="<?= h($settings['vitals_stale_seconds'] ?? '120') ?>" min="30" max="1800" step="10">
+                        <small class="text-muted">Μετά από τόση ώρα χωρίς νέα μέτρηση, η ένδειξη γκριζάρει ως «χωρίς σήμα». Σκόπιμα μικρότερο από το αντίστοιχο όριο του GPS: αισθητήρας που σταμάτησε σημαίνει συνήθως ότι έφυγε η ζώνη ή κόπηκε το Bluetooth, και αυτό το θέλει γρήγορα το επιτελείο.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Διατήρηση Μετρήσεων (ημέρες)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_retention_days"
+                               value="<?= h($settings['vitals_retention_days'] ?? '365') ?>" min="7" max="3650" step="1">
+                        <small class="text-muted">Μετά από τόσες ημέρες οι μετρήσεις διαγράφονται αυτόματα. Είναι ο πυκνότερος πίνακας της εφαρμογής και ταυτόχρονα δεδομένα υγείας — κρατήστε τον όσο χρειάζεται για τις αναφορές των αποστολών, όχι περισσότερο.</small>
                     </div>
                 </div>
             </div>

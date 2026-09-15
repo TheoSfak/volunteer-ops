@@ -1400,6 +1400,23 @@ return [
         // Half/full width toggle on each left-column card, visible only while
         // the card layout is unlocked.
         'layout.width_toggle_title' => 'Μισό ή πλήρες πλάτος',
+
+        // Ζωτικά σημεία διασώστη — καρδιακοί παλμοί από τυπικό αισθητήρα
+        // Bluetooth LE (Heart Rate Service 0x180D): ζώνη στήθους,
+        // περιβραχιόνιο, ή ρολόι/band Huawei σε λειτουργία «Εκπομπή
+        // καρδιακών παλμών». Οι ίδιες μετρήσεις τροφοδοτούν και το ζωντανό
+        // badge δίπλα στο όνομα και την αναφορά μετά την αποστολή.
+        'vitals.disabled' => 'Η παρακολούθηση καρδιακών παλμών είναι απενεργοποιημένη.',
+        'vitals.no_samples' => 'Δεν στάλθηκαν μετρήσεις.',
+        'vitals.no_valid_samples' => 'Καμία έγκυρη μέτρηση — ελέγξτε την επαφή του αισθητήρα.',
+        'vitals.storage_unavailable' => 'Οι μετρήσεις δεν αποθηκεύτηκαν — εκκρεμεί αναβάθμιση της βάσης.',
+        'vitals.badge_tooltip' => 'Καρδιακοί παλμοί: {bpm} bpm — {zone}',
+        'vitals.badge_stale_tooltip' => 'Τελευταία μέτρηση {bpm} bpm στις {time} — χωρίς νεότερο σήμα',
+        'vitals.zone_low' => 'πολύ χαμηλοί',
+        'vitals.zone_ok' => 'φυσιολογικοί',
+        'vitals.zone_elevated' => 'αυξημένοι',
+        'vitals.zone_critical' => 'κρίσιμα υψηλοί',
+        'vitals.zone_stale' => 'χωρίς σήμα',
     ],
     'en' => [
         'common.mission_not_found' => 'Mission not found.',
@@ -2726,5 +2743,21 @@ return [
         // Half/full width toggle on each left-column card, visible only while
         // the card layout is unlocked.
         'layout.width_toggle_title' => 'Half or full width',
+
+        // Rescuer vitals — heart rate from a standard Bluetooth LE sensor
+        // (Heart Rate Service 0x180D): chest strap, armband, or a Huawei
+        // watch/band in "HR Data Broadcast" mode. The same samples feed both
+        // the live badge next to the name and the post-mission report.
+        'vitals.disabled' => 'Heart-rate monitoring is switched off.',
+        'vitals.no_samples' => 'No readings were sent.',
+        'vitals.no_valid_samples' => 'No valid reading — check the sensor contact.',
+        'vitals.storage_unavailable' => 'Readings were not stored — a database upgrade is pending.',
+        'vitals.badge_tooltip' => 'Heart rate: {bpm} bpm — {zone}',
+        'vitals.badge_stale_tooltip' => 'Last reading {bpm} bpm at {time} — no newer signal',
+        'vitals.zone_low' => 'very low',
+        'vitals.zone_ok' => 'normal',
+        'vitals.zone_elevated' => 'elevated',
+        'vitals.zone_critical' => 'critically high',
+        'vitals.zone_stale' => 'no signal',
     ],
 ];
