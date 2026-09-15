@@ -1417,6 +1417,8 @@ return [
         'vitals.zone_elevated' => 'αυξημένοι',
         'vitals.zone_critical' => 'κρίσιμα υψηλοί',
         'vitals.zone_stale' => 'χωρίς σήμα',
+        // Γραμμή στο popup του pin στον χάρτη, δίπλα στη μπαταρία.
+        'vitals.pin_line' => '{bpm} bpm · {zone}',
     ],
     'en' => [
         'common.mission_not_found' => 'Mission not found.',
@@ -2759,5 +2761,7 @@ return [
         'vitals.zone_elevated' => 'elevated',
         'vitals.zone_critical' => 'critically high',
         'vitals.zone_stale' => 'no signal',
+        // Line in the map pin's popup, next to the battery line.
+        'vitals.pin_line' => '{bpm} bpm · {zone}',
     ],
 ];

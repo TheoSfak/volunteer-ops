@@ -1043,9 +1043,17 @@ foreach (dbFetchAll(
 // filtering only at render would still ship every volunteer's vitals to every
 // open browser, where anyone could read them straight out of the poll
 // response. Same reason phone numbers are gated in the roster markup.
+//
+// One closure, three consumers (this payload, the roster markup, and the map
+// pins) so the rule is written once. Three copies of the same condition is how
+// one of them eventually drifts and leaks.
 $vitalsByVolunteerId = loadLatestVitalsByVolunteerId($missionId, $missionShiftBinds, $missionShiftPlaceholders);
+$viewerUserId = (int) $user['id'];
+$canSeeVitalsOf = function (int $subjectUserId) use ($canManageWarRoom, $viewerUserId): bool {
+    return $canManageWarRoom || $subjectUserId === $viewerUserId;
+};
 foreach ($vitalsByVolunteerId as $vitalsUserId => $reading) {
-    if (!$canManageWarRoom && $vitalsUserId !== (int) $user['id']) {
+    if (!$canSeeVitalsOf($vitalsUserId)) {
         continue;
     }
     if (!isset($participantLiveByVolunteerId[$vitalsUserId])) {
@@ -1062,7 +1070,7 @@ foreach ($vitalsByVolunteerId as $vitalsUserId => $reading) {
 // has no such cutoff) still showed them. The map now shows every last-known
 // position always, marking it 'is_stale' (reusing the same $pingStaleThresholdSeconds
 // as the sidebar list) once it's past due, rather than hiding it outright.
-$loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds, $continuousFieldMinutesByVolunteerId, $missionShiftBinds, $missionShiftPlaceholders) {
+$loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds, $continuousFieldMinutesByVolunteerId, $missionShiftBinds, $missionShiftPlaceholders, $vitalsByVolunteerId, $canSeeVitalsOf) {
     try {
         $field = $hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status';
         // The latest ping per volunteer+shift, plus the one immediately before
@@ -1183,6 +1191,14 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
             }
 
             [$homeBg, $homeFg] = teamBadgeColors($pin['home_team_color']);
+            // Heart rate on the pin itself, through the same one-place gate as
+            // the roster and the poll payload. Null here means either "no
+            // reading" or "not this viewer's to see" — the client draws a
+            // plain dot for both, which is correct: a viewer who may not see a
+            // reading must not be able to infer one exists from the marker.
+            $pinVitals = $canSeeVitalsOf((int) $pin['user_id'])
+                ? ($vitalsByVolunteerId[(int) $pin['user_id']] ?? null)
+                : null;
             $pins[] = [
                 'user_id' => (int) $pin['user_id'],
                 'lat' => (float) $pin['lat'], 'lng' => (float) $pin['lng'], 'name' => $pin['name'],
@@ -1200,6 +1216,8 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 'is_stale' => $isStale, 'is_moving' => $isMoving, 'heading_deg' => $headingDeg,
                 'battery_level' => $pin['battery_level'] !== null ? (int) $pin['battery_level'] : null,
                 'continuous_field_minutes' => $continuousFieldMinutesByVolunteerId[(int) $pin['user_id']] ?? null,
+                'heart_rate' => $pinVitals ? (int) $pinVitals['bpm'] : null,
+                'heart_rate_zone' => $pinVitals ? $pinVitals['zone'] : null,
             ];
         }
         return $pins;
@@ -2059,6 +2077,38 @@ include __DIR__ . '/includes/header.php';
         .war-room-banner-track { font-size: <?= (float) getSetting('war_room_banner_font_size', '1.35') ?>rem; }
     }
     @keyframes warRoomPulseRed { 0%, 100% { box-shadow: 0 0 0 0 rgba(220,53,69,0); } 50% { box-shadow: 0 0 0 10px rgba(220,53,69,0.4); } }
+    /* Map pin for a volunteer in tachycardia or bradycardia: the position dot
+       becomes a heart (buildPinMarker()). Same box as the dot it replaces, so
+       the heading arrow still orbits it correctly.
+       U+2665 rather than the ❤ emoji on purpose — an emoji renders in its own
+       fixed colour on every platform, which would make red-for-high and
+       blue-for-low indistinguishable. This glyph takes the CSS colour.
+       The white halo is the same trick the heading arrow uses: without it the
+       shape disappears over dark satellite imagery and over red terrain. */
+    .wr-pin-heart {
+        position: relative;
+        display: block;
+        width: 18px; height: 18px;
+        font-size: 18px; line-height: 18px; text-align: center;
+        text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 1px 3px rgba(0,0,0,.55);
+        animation: warRoomHeartBeat 1.1s ease-in-out infinite;
+    }
+    /* Lub-dub, not a single throb: two beats close together then a pause is
+       the rhythm everyone recognises as a heart, which is what makes this
+       readable as a medical alarm at a glance rather than as one more
+       flashing map marker. */
+    @keyframes warRoomHeartBeat {
+        0%, 100% { transform: scale(1); }
+        14%      { transform: scale(1.28); }
+        28%      { transform: scale(1); }
+        42%      { transform: scale(1.16); }
+        56%      { transform: scale(1); }
+    }
+    /* Respect a reader who has asked the system to stop animating things: the
+       colour and the shape still carry the whole message without the motion. */
+    @media (prefers-reduced-motion: reduce) {
+        .wr-pin-heart { animation: none; }
+    }
     #sosOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
     /* Unacknowledged = maximum drama: full dark-red scrim + rotating beacon +
        scrolling "who's in danger" text, same full-takeover idea as the
@@ -2806,7 +2856,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 // all — a viewer who may not see the reading gets no node for
                 // the 5s poll to fill, matching the gate already applied to
                 // the payload itself further up this file.
-                $maySeeVitals = $canManageWarRoom || (int)$participant['volunteer_id'] === (int)$user['id'];
+                $maySeeVitals = $canSeeVitalsOf((int)$participant['volunteer_id']);
                 $participantVitals = $maySeeVitals ? ($vitalsByVolunteerId[(int)$participant['volunteer_id']] ?? null) : null;
                 ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap" id="participant-row-<?= (int)$participant['volunteer_id'] ?>">
@@ -7095,6 +7145,13 @@ function batteryTier(pct) {
     if (pct >= 35) return {cls: 'text-warning', key: 'map.pin_battery_moderate'};
     return {cls: 'text-danger', key: 'map.pin_battery_low'};
 }
+// Text colour for the heart-rate line in a pin popup. Bootstrap utility
+// classes rather than the filled .vitals-badge pill used in the roster: inside
+// a popup this sits in a stack of one-line facts (battery, fatigue) and has to
+// read as one more of them, not as a second badge competing with the name.
+// Blue for a dangerously LOW rate, matching the badge — bradycardia and
+// tachycardia are different emergencies and must never share a colour.
+const VITALS_ZONE_TEXT_CLASS = {ok: 'text-success', elevated: 'text-warning', critical: 'text-danger', low: 'text-primary', stale: 'text-muted'};
 // Deliberately separate from LOW_BATTERY_PCT above, fixed (not a Settings
 // field) — LOW_BATTERY_PCT gates the passive "getting low" badge, this
 // gates the active charge-alert button (below/right of the Navigate
@@ -7160,7 +7217,32 @@ function buildPinMarker(pin, interactive = true) {
     const headingArrow = (pin.is_moving && pin.heading_deg !== null && pin.heading_deg !== undefined)
         ? `<span style="position:absolute;left:50%;top:50%;width:0;height:0;transform:rotate(${pin.heading_deg}deg);"><span style="position:absolute;left:-6px;top:-21px;width:12px;text-align:center;color:${color};text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff;font-size:11px;line-height:1;">▲</span></span>`
         : '';
-    const icon = L.divIcon({className:'', html:`<span style="position:relative;display:block;width:16px;height:16px;background:${color};${ring}${opacity}border-radius:50%;box-shadow:0 1px 4px #0008">${headingArrow}</span>`, iconSize:[16,16], iconAnchor:[8,8]});
+    // Tachycardia or bradycardia turns the position dot itself into a beating
+    // heart — red for too high, blue for too low. Deliberately a SHAPE change
+    // to the one existing mark rather than a badge beside it, for the same
+    // reason the old "moving" badge was removed above: at map scale anything
+    // drawn next to a filled circle reads as a second person. The heading
+    // arrow still orbits it, because the span keeps the same size and
+    // position:relative box it had as a dot.
+    //
+    // Only the two genuine emergencies do this. An ELEVATED heart rate on
+    // someone walking uphill with a pack is the normal state of this job; if
+    // it lit up the map, the map would be lit up all day and the real alarm
+    // would stop meaning anything. Elevated shows in the popup line only.
+    // A stale reading never alarms either — the zone is 'stale' by then, which
+    // is history, not a heart in trouble.
+    // The alarm deliberately does NOT inherit the stale-position dimming the
+    // dot gets. Those are two different kinds of stale: the GPS fix is old,
+    // the heart rate is not — the zone would read 'stale' and not alarm at all
+    // if it were. Fading an active medical alarm to 45% because the last fix
+    // is a few minutes old is exactly backwards, and it cannot become a ghost
+    // that outlives the volunteer's phone: no sample inside vitals_stale_seconds
+    // means no alarm. The popup still says the position is stale, in words.
+    const hrZone = pin.heart_rate_zone;
+    const hrAlarm = hrZone === 'critical' || hrZone === 'low';
+    const icon = hrAlarm
+        ? L.divIcon({className:'', html:`<span class="wr-pin-heart" style="color:${hrZone === 'critical' ? '#dc2626' : '#1d4ed8'};">&#9829;${headingArrow}</span>`, iconSize:[18,18], iconAnchor:[9,9]})
+        : L.divIcon({className:'', html:`<span style="position:relative;display:block;width:16px;height:16px;background:${color};${ring}${opacity}border-radius:50%;box-shadow:0 1px 4px #0008">${headingArrow}</span>`, iconSize:[16,16], iconAnchor:[8,8]});
     const statusLine = pinStatusLabel(pin.status);
     const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
         : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
@@ -7172,6 +7254,16 @@ function buildPinMarker(pin, interactive = true) {
     const batteryPinTier = (pin.battery_level !== null && pin.battery_level !== undefined) ? batteryTier(pin.battery_level) : null;
     const batteryLine = batteryPinTier
         ? `<br><span class="${batteryPinTier.cls} small">🔋 ${t(batteryPinTier.key, {pct: pin.battery_level})}</span>`
+        : '';
+    // Heart rate: same "always rendered when a reading exists" rule as the
+    // battery line, not the "only when over the limit" rule the fatigue line
+    // below uses. A number that only appears when it is bad teaches the reader
+    // that its absence means healthy, when it far more often means the strap
+    // came off. Absent here also covers "not this viewer's to see" — the
+    // server sends null for both, and the popup must look identical either
+    // way, or the marker would leak that a reading exists.
+    const heartRateLine = (pin.heart_rate !== null && pin.heart_rate !== undefined)
+        ? `<br><span class="${VITALS_ZONE_TEXT_CLASS[hrZone] || 'text-muted'} small">&#9829; ${t('vitals.pin_line', {bpm: pin.heart_rate, zone: t('vitals.zone_' + hrZone)})}</span>`
         : '';
     // Fatigue: same "only rendered when actually over" idiom as batteryLine above.
     const fatigueLine = (pin.continuous_field_minutes !== null && pin.continuous_field_minutes !== undefined && pin.continuous_field_minutes > WR_MAX_SHIFT_MINUTES)
@@ -7200,7 +7292,7 @@ function buildPinMarker(pin, interactive = true) {
     // (depends on which render*() happened to run last that poll tick). A
     // volunteer's own live position should never be the one that silently
     // disappears underneath another marker.
-    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
+    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${heartRateLine}${fatigueLine}${navLine}`);
 }
 
 function renderPins(items) {
