@@ -67,8 +67,36 @@ $maxHr     = vitalsMaxHeartRate();
 $elevatedBpm = vitalsZoneBpm($config['elevated_pct'], $maxHr);
 $criticalBpm = vitalsZoneBpm($config['critical_pct'], $maxHr);
 
-$activeEpisodes = array_values(array_filter($episodes, fn($e) => $e['active']));
-$pastEpisodes   = array_values(array_filter($episodes, fn($e) => !$e['active']));
+// Tachycardia and bradycardia are EVENTS — a moment something happened to one
+// person, worth a card each. Sustained strain is a WORKLOAD, and on a real
+// mountain callout it fires for nearly everyone: a rescuer climbing for two
+// hours with a pack sits above 75% of maximum almost the whole way. A drill of
+// ten people produced twenty-one episodes of which seventeen were strain, and
+// the two moments that actually mattered — a rescuer's fall, and the medic's
+// resting bradycardia — were buried in the middle of them.
+//
+// So the two clinical kinds keep their cards, and strain is collapsed to one
+// row per volunteer with a total. Nothing is hidden; the same minutes are all
+// still reported, in the shape that answers the question they belong to.
+$clinical      = array_values(array_filter($episodes, fn($e) => $e['type'] !== 'strain'));
+$activeEpisodes = array_values(array_filter($clinical, fn($e) => $e['active']));
+$pastEpisodes   = array_values(array_filter($clinical, fn($e) => !$e['active']));
+
+$strainByUser = [];
+foreach ($episodes as $e) {
+    if ($e['type'] !== 'strain') continue;
+    $u = $e['user_id'];
+    if (!isset($strainByUser[$u])) {
+        $strainByUser[$u] = ['name' => $e['name'], 'team_label' => $e['team_label'],
+                             'spells' => 0, 'minutes' => 0, 'longest' => 0, 'peak' => 0, 'active' => false];
+    }
+    $strainByUser[$u]['spells']++;
+    $strainByUser[$u]['minutes'] += $e['minutes'];
+    $strainByUser[$u]['longest']  = max($strainByUser[$u]['longest'], $e['minutes']);
+    $strainByUser[$u]['peak']     = max($strainByUser[$u]['peak'], $e['bpm_peak']);
+    $strainByUser[$u]['active']   = $strainByUser[$u]['active'] || $e['active'];
+}
+uasort($strainByUser, fn($a, $b) => $b['minutes'] <=> $a['minutes']);
 
 // Same compact duration format as the mission recap — four duration columns on
 // one row stop being comparable at a glance in the long form.
@@ -283,15 +311,15 @@ include __DIR__ . '/includes/header.php';
 
     <!-- Episode history -->
     <div class="vr-card">
-        <h2><i class="bi bi-list-columns-reverse text-primary"></i>Επεισόδια αποστολής<?= $pastEpisodes ? ' (' . count($pastEpisodes) . ')' : '' ?></h2>
+        <h2><i class="bi bi-list-columns-reverse text-primary"></i>Έκτακτα συμβάντα παλμών<?= $pastEpisodes ? ' (' . count($pastEpisodes) . ')' : '' ?></h2>
         <p class="text-muted small">
-            Κατώφλια: ταχυκαρδία ≥ <?= (int) $config['tachy_bpm'] ?> bpm για ≥ <?= (int) $config['tachy_minutes'] ?> λεπτά ·
-            βραδυκαρδία ≤ <?= (int) $config['brady_bpm'] ?> bpm για ≥ <?= (int) $config['brady_minutes'] ?> λεπτά ·
-            παρατεταμένη καταπόνηση ≥ <?= $elevatedBpm ?> bpm για ≥ <?= (int) $config['strain_minutes'] ?> λεπτά.
+            Ταχυκαρδία ≥ <?= (int) $config['tachy_bpm'] ?> bpm για ≥ <?= (int) $config['tachy_minutes'] ?> λεπτά ·
+            βραδυκαρδία ≤ <?= (int) $config['brady_bpm'] ?> bpm για ≥ <?= (int) $config['brady_minutes'] ?> λεπτά.
             Η <strong>διάρκεια</strong> είναι που ξεχωρίζει το σήμα από τον θόρυβο: διασώστης που ανεβαίνει πλαγιά με εξοπλισμό αγγίζει στιγμιαία τους <?= $criticalBpm ?> συνεχώς — <?= (int) $config['tachy_minutes'] ?> λεπτά <em>πάνω</em> από αυτούς είναι εντελώς άλλη δήλωση.
+            Η παρατεταμένη καταπόνηση είναι φορτίο, όχι συμβάν, και συνοψίζεται χωριστά παρακάτω.
         </p>
         <?php if (empty($pastEpisodes)): ?>
-            <p class="vr-empty">Κανένα ολοκληρωμένο επεισόδιο εκτός ορίων.</p>
+            <p class="vr-empty">Κανένα ολοκληρωμένο έκτακτο συμβάν παλμών.</p>
         <?php else: ?>
             <?php foreach ($pastEpisodes as $e): ?>
                 <div class="vr-episode <?= $episodeCls[$e['type']] ?>">
@@ -314,6 +342,40 @@ include __DIR__ . '/includes/header.php';
             <?php endforeach; ?>
         <?php endif; ?>
     </div>
+
+    <!-- Sustained load, summarised per person rather than listed per spell -->
+    <?php if ($strainByUser): ?>
+    <div class="vr-card">
+        <h2><i class="bi bi-hourglass-split text-warning"></i>Παρατεταμένη καταπόνηση</h2>
+        <p class="text-muted small">
+            Συνεχόμενος χρόνος πάνω από <?= $elevatedBpm ?> bpm σε περιόδους ≥ <?= (int) $config['strain_minutes'] ?> λεπτών.
+            Σε ορεινή αποστολή αυτό αφορά σχεδόν όλους — γι' αυτό μετράει το <strong>σύνολο</strong> και όχι το πλήθος:
+            δείχνει ποιος δούλεψε πιο σκληρά και ποιος χρειάζεται αντικατάσταση πρώτος.
+        </p>
+        <div class="table-responsive">
+        <table class="vr-table">
+            <thead><tr><th>Εθελοντής</th><th>Ομάδα</th><th>Συνολικά</th><th>Περίοδοι</th><th>Μεγαλύτερη</th><th>Κορυφή</th><th></th></tr></thead>
+            <tbody>
+            <?php $strainMax = max(array_column($strainByUser, 'minutes')) ?: 1; ?>
+            <?php foreach ($strainByUser as $uid => $st): ?>
+                <tr>
+                    <td class="fw-bold"><?= h($st['name']) ?><?= k9BadgeHtml((int) $uid, false, 'el') ?><?= captainBadgeHtml((int) $uid, false, 'el') ?></td>
+                    <td class="small text-muted"><?= h($st['team_label'] ?: '—') ?></td>
+                    <td class="fw-bold"><?= $vMin((int) $st['minutes']) ?></td>
+                    <td><?= (int) $st['spells'] ?></td>
+                    <td><?= $vMin((int) $st['longest']) ?></td>
+                    <td><?= (int) $st['peak'] ?> bpm</td>
+                    <td style="min-width:130px;">
+                        <div class="vr-teambar"><span style="width: <?= (int) round(($st['minutes'] / $strainMax) * 100) ?>%;"></span></div>
+                        <?php if ($st['active']): ?><span class="badge bg-warning text-dark mt-1">σε εξέλιξη</span><?php endif; ?>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <!-- Per volunteer -->
     <?php if (!empty($report['volunteers'])): ?>
