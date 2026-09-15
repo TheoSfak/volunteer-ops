@@ -75,8 +75,12 @@ function vitalsConfig(): array {
         'elevated_pct'    => max(40, min(100, (int) getSetting('vitals_elevated_pct', '75'))),
         'critical_pct'    => max(50, min(100, (int) getSetting('vitals_critical_pct', '88'))),
         // An absolute floor, not a percentage: bradycardia is dangerous at
-        // the same number whatever your age or fitness.
-        'low_bpm'         => max(VITALS_MIN_BPM, min(60, (int) getSetting('vitals_low_bpm', '40'))),
+        // the same number whatever your age or fitness. 45 rather than the
+        // textbook 40 because of who this is for — 42 bpm in a resting, fit
+        // adult is unremarkable, but in someone carrying a stretcher up a
+        // gorge it is worth a look, and this app only ever measures the
+        // second kind of person.
+        'low_bpm'         => max(VITALS_MIN_BPM, min(60, (int) getSetting('vitals_low_bpm', '45'))),
         // Age the zone thresholds are computed against. This app stores no
         // date of birth for a user — birth_date exists only on
         // volunteer_applications/citizens, never on users — so the zones are
@@ -90,6 +94,9 @@ function vitalsConfig(): array {
         // quickly rather than after the next GPS interval.
         'stale_seconds'   => max(30, min(1800, (int) getSetting('vitals_stale_seconds', '120'))),
         'retention_days'  => max(7, min(3650, (int) getSetting('vitals_retention_days', '365'))),
+        'tachy_minutes'   => max(1, min(120, (int) getSetting('vitals_episode_tachy_minutes', '10'))),
+        'brady_minutes'   => max(1, min(120, (int) getSetting('vitals_episode_brady_minutes', '5'))),
+        'strain_minutes'  => max(5, min(240, (int) getSetting('vitals_episode_strain_minutes', '20'))),
     ];
 
     // A critical threshold at or below the elevated one would make "elevated"
@@ -99,6 +106,27 @@ function vitalsConfig(): array {
     if ($config['critical_pct'] <= $config['elevated_pct']) {
         $config['critical_pct'] = min(100, $config['elevated_pct'] + 5);
     }
+
+    // Episode thresholds are the ZONE thresholds. Only the duration is an
+    // episode's own idea.
+    //
+    // This started out as two more settings — "tachycardia = 150 bpm", set
+    // independently of the zone — and the first test showed why that is a
+    // trap: a volunteer at 41 bpm sat in a table headed «Φυσιολογικοί»
+    // directly above an active episode headed «Βραδυκαρδία», because 41 was
+    // above the zone's floor of 40 and below the episode's of 45. Two numbers
+    // for one word, disagreeing on screen, in a report someone reads to decide
+    // whether to pull a person out of a gorge.
+    //
+    // So there is one line per band, and everything uses it: the badge on the
+    // roster, the colour of the map pin, the ring on the trail, the report's
+    // curve and the episodes below it. An org that wants tachycardia to mean
+    // 150 moves the critical threshold and the whole app moves with it.
+    // Inlined rather than vitalsMaxHeartRate(), which calls this function —
+    // same formula, no recursion.
+    $maxHeartRate = 220 - $config['reference_age'];
+    $config['tachy_bpm'] = (int) ceil($maxHeartRate * $config['critical_pct'] / 100);
+    $config['brady_bpm'] = $config['low_bpm'];
 
     return $config;
 }
@@ -150,6 +178,22 @@ function vitalsMaxHeartRate(?string $birthDate = null): int {
  * property of the timestamp, not of the value, so it is not this function's
  * business.
  */
+/**
+ * The lowest whole heart rate that reaches a given percentage of the maximum —
+ * the number to PRINT when explaining a zone.
+ *
+ * ceil, not round, and that is not pedantry. vitalsZone() tests
+ * bpm / maxHeartRate * 100 >= pct, so at a maximum of 180 and a critical
+ * threshold of 88% the first qualifying reading is 159, while round() prints
+ * 158. A report whose caption says the red line is at 158 while its episode
+ * list says 159 teaches the reader that the numbers are approximate, and the
+ * whole value of this page is that they are not.
+ */
+function vitalsZoneBpm(int $percent, ?int $maxHeartRate = null): int {
+    $maxHeartRate = $maxHeartRate ?? vitalsMaxHeartRate();
+    return (int) ceil($maxHeartRate * $percent / 100);
+}
+
 function vitalsZone(int $bpm, int $maxHeartRate, ?array $config = null): string {
     $config = $config ?? vitalsConfig();
 
@@ -561,7 +605,7 @@ function vitalsBucketKey(int $unixTs, int $bucketMinutes = 1): string {
  * live badge put it in. If the ladder in vitalsZone() ever changes, this
  * changes with it.
  */
-function loadVitalsReportForMission(int $missionId): array {
+function loadVitalsReportForMission(int $missionId, ?int $sinceTs = null): array {
     if (!vitalsEnabled()) {
         return [];
     }
@@ -590,6 +634,20 @@ function loadVitalsReportForMission(int $missionId): array {
 
     $firstTs = strtotime($span['first_at']);
     $lastTs  = strtotime($span['last_at']);
+
+    // An optional window, applied to the AXIS only — the per-volunteer totals
+    // below still come from every sample the mission ever recorded, because
+    // "his highest all day was 171" does not stop being true because you are
+    // currently looking at the last two hours.
+    //
+    // It exists for the live case. A mission that was reopened weeks later, or
+    // simply ran across three days, otherwise squeezes the hours anyone
+    // actually cares about into a few pixels at the right-hand edge while a
+    // fortnight of nothing occupies the rest of the chart.
+    if ($sinceTs !== null && $sinceTs > $firstTs && $sinceTs < $lastTs) {
+        $firstTs = $sinceTs;
+    }
+
     $spanMinutes = max(1, (int) ceil(($lastTs - $firstTs) / 60));
 
     // Widen the bucket until the axis holds at most ~480 points — about one
@@ -699,8 +757,8 @@ function loadVitalsReportForMission(int $missionId): array {
         // display — every actual classification above compares percentages.
         'thresholds'     => [
             'low'      => $config['low_bpm'],
-            'elevated' => (int) round($maxHr * $config['elevated_pct'] / 100),
-            'critical' => (int) round($maxHr * $config['critical_pct'] / 100),
+            'elevated' => vitalsZoneBpm($config['elevated_pct'], $maxHr),
+            'critical' => vitalsZoneBpm($config['critical_pct'], $maxHr),
         ],
         'volunteers'     => $volunteers,
     ];

@@ -53,10 +53,13 @@ $defaults = [
     'vitals_sample_seconds' => '5',
     'vitals_elevated_pct' => '75',
     'vitals_critical_pct' => '88',
-    'vitals_low_bpm' => '40',
+    'vitals_low_bpm' => '45',
     'vitals_reference_age' => '40',
     'vitals_stale_seconds' => '120',
     'vitals_retention_days' => '365',
+    'vitals_episode_tachy_minutes' => '10',
+    'vitals_episode_brady_minutes' => '5',
+    'vitals_episode_strain_minutes' => '20',
     'admin_email' => '',
     'developer_email' => '',
     'timezone' => 'Europe/Athens',
@@ -612,6 +615,7 @@ if (isPost()) {
         $fieldsToUpdate = [
             'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes',
             'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct', 'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
+            'vitals_episode_tachy_minutes', 'vitals_episode_brady_minutes', 'vitals_episode_strain_minutes',
             'admin_email', 'developer_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
@@ -661,10 +665,13 @@ if (isPost()) {
                 'vitals_sample_seconds'  => [1, 60, 5],
                 'vitals_elevated_pct'    => [40, 100, 75],
                 'vitals_critical_pct'    => [50, 100, 88],
-                'vitals_low_bpm'         => [25, 60, 40],
+                'vitals_low_bpm'         => [25, 60, 45],
                 'vitals_reference_age'   => [16, 90, 40],
                 'vitals_stale_seconds'   => [30, 1800, 120],
                 'vitals_retention_days'  => [7, 3650, 365],
+                'vitals_episode_tachy_minutes' => [1, 120, 10],
+                'vitals_episode_brady_minutes' => [1, 120, 5],
+                'vitals_episode_strain_minutes'=> [5, 240, 20],
             ];
             if (isset($vitalsBounds[$field])) {
                 [$vMin, $vMax, $vDefault] = $vitalsBounds[$field];
@@ -1545,6 +1552,35 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <input type="number" class="form-control" style="max-width:160px;" name="vitals_retention_days"
                                value="<?= h($settings['vitals_retention_days'] ?? '365') ?>" min="7" max="3650" step="1">
                         <small class="text-muted">Μετά από τόσες ημέρες οι μετρήσεις διαγράφονται αυτόματα. Είναι ο πυκνότερος πίνακας της εφαρμογής και ταυτόχρονα δεδομένα υγείας — κρατήστε τον όσο χρειάζεται για τις αναφορές των αποστολών, όχι περισσότερο.</small>
+                    </div>
+
+                    <h6 class="fw-bold mt-4 mb-2">Κατώφλια Επεισοδίων (Αναφορά Παλμών)</h6>
+                    <p class="text-muted small">
+                        Ορίζουν πότε μια περίοδος καταγράφεται ως <strong>επεισόδιο</strong> στην Αναφορά Παλμών του Action Room.
+                        Εδώ ρυθμίζετε <strong>μόνο τη διάρκεια</strong>: τα όρια σε bpm είναι τα ίδια ακριβώς που χρωματίζουν το badge και το στίγμα στον χάρτη (παραπάνω) — μία γραμμή ανά ζώνη για όλη την εφαρμογή, ώστε να μη γράφει ποτέ ο πίνακας «Φυσιολογικοί» δίπλα σε επεισόδιο «Βραδυκαρδία».
+                        Η διάρκεια είναι που ξεχωρίζει το σήμα από τον θόρυβο: διασώστης που ανεβαίνει πλαγιά με εξοπλισμό αγγίζει στιγμιαία το όριο συνέχεια — δέκα λεπτά <em>πάνω</em> από αυτό είναι εντελώς άλλη δήλωση. Αν τις χαλαρώσετε, η σελίδα θα είναι μόνιμα κόκκινη και θα πάψει να σημαίνει κάτι.
+                    </p>
+                    <?php $__vc = vitalsConfig(); ?>
+                    <p class="small mb-2">
+                        Με τις τρέχουσες ρυθμίσεις: <strong>ταχυκαρδία ≥ <?= (int) $__vc['tachy_bpm'] ?> bpm</strong> ·
+                        <strong>βραδυκαρδία ≤ <?= (int) $__vc['brady_bpm'] ?> bpm</strong> ·
+                        <strong>καταπόνηση ≥ <?= vitalsZoneBpm($__vc['elevated_pct']) ?> bpm</strong>.
+                        Για να γίνει η ταχυκαρδία π.χ. 150 bpm, αλλάξτε το ποσοστό «κρίσιμων» παραπάνω.
+                    </p>
+                    <div class="row g-3 mb-3">
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small">Ταχυκαρδία: λεπτά</label>
+                            <input type="number" class="form-control" name="vitals_episode_tachy_minutes" value="<?= h($settings['vitals_episode_tachy_minutes'] ?? '10') ?>" min="1" max="120" step="1">
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small">Βραδυκαρδία: λεπτά</label>
+                            <input type="number" class="form-control" name="vitals_episode_brady_minutes" value="<?= h($settings['vitals_episode_brady_minutes'] ?? '5') ?>" min="1" max="120" step="1">
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small">Παρατεταμένη καταπόνηση: λεπτά</label>
+                            <input type="number" class="form-control" name="vitals_episode_strain_minutes" value="<?= h($settings['vitals_episode_strain_minutes'] ?? '20') ?>" min="5" max="240" step="1">
+                            <small class="text-muted">Συνεχόμενος χρόνος πάνω από το όριο «αυξημένων» παλμών.</small>
+                        </div>
                     </div>
                 </div>
             </div>

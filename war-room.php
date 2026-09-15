@@ -2335,6 +2335,14 @@ include __DIR__ . '/includes/header.php';
                  the view toggle below and gets the whole console. */ ?>
         <?php if ($canManageWarRoom && !$volunteerTabs): ?>
         <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
+        <?php if (vitalsEnabled()): ?>
+        <!-- A new tab, not a modal like its neighbour: this one carries a
+             chart, three tables and a list of episodes, and it is meant to sit
+             open on a second screen in the command post while the map keeps
+             running here. A modal would put it behind the thing it exists to
+             be read alongside. -->
+        <a href="mission-vitals-report.php?id=<?= $missionId ?>" target="_blank" rel="noopener" class="btn btn-outline-light"><i class="bi bi-heart-pulse me-1"></i><?= t('hero.btn_vitals_report') ?></a>
+        <?php endif; ?>
         <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i><?= t('hero.btn_team_trail') ?></button>
         <button type="button" id="coverageModeToggle" class="btn btn-outline-light"><i class="bi bi-broadcast me-1"></i><?= t('hero.btn_verified_coverage') ?></button>
         <?php endif; ?>

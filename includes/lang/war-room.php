@@ -412,6 +412,8 @@ return [
         'hero.status_upcoming' => 'ΠΡΟΣΕΧΩΣ',
         'hero.status_overdue' => 'ΕΚΚΡΕΜΕΙ ΚΛΕΙΣΙΜΟ',
         'hero.btn_response_report' => 'Αναφορά Χρόνων',
+        'hero.btn_vitals_report' => 'Αναφορά Παλμών',
+        'vitals.report_no_team' => 'Χωρίς ομάδα',
         'hero.btn_team_trail' => 'Πορεία Ομάδων',
         'hero.btn_verified_coverage' => 'Επαληθευμένη Κάλυψη',
         // Layout override for command staff — labelled by the view it takes
@@ -1815,6 +1817,8 @@ return [
         'hero.status_upcoming' => 'UPCOMING',
         'hero.status_overdue' => 'CLOSING PENDING',
         'hero.btn_response_report' => 'Response Report',
+        'hero.btn_vitals_report' => 'Heart Rate Report',
+        'vitals.report_no_team' => 'No team',
         'hero.btn_team_trail' => 'Team Trails',
         'hero.btn_verified_coverage' => 'Verified Coverage',
         'hero.btn_command_view' => 'Command View',
