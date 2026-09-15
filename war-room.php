@@ -2109,6 +2109,51 @@ include __DIR__ . '/includes/header.php';
     @media (prefers-reduced-motion: reduce) {
         .wr-pin-heart { animation: none; }
     }
+    /* On a trail the heart marks the LAST point of a track that ended in
+       alarm, sitting among dozens of small route dots rather than alone on an
+       open map, so it is sized to the dot it replaces and does not beat — a
+       row of throbbing hearts along a recorded route is noise, not urgency.
+       The live pin is the one that has something happening right now. */
+    .wr-pin-heart-trail { width: 16px; height: 16px; font-size: 16px; line-height: 16px; animation: none; }
+
+    /* Heart rate as the headline of a map popup — live pin and every trail
+       point share it (heartRateBlockHtml()). Grid rather than flex so the
+       number, the unit and the zone word keep their own columns/rows and the
+       baseline does not shift between a 2- and a 3-digit reading, which on a
+       live pin updating every few seconds would jitter the whole popup. */
+    .wr-hr-block {
+        display: grid;
+        grid-template-columns: auto auto auto;
+        grid-template-areas: "heart num unit" "heart zone zone";
+        align-items: center;
+        column-gap: 5px;
+        margin: 6px 0 2px;
+        padding: 5px 9px 5px 7px;
+        border-left: 4px solid var(--hr-color);
+        border-radius: 4px;
+        background: var(--hr-tint);
+        color: var(--hr-color);
+    }
+    .wr-hr-heart { grid-area: heart; font-size: 22px; line-height: 1; margin-right: 2px; }
+    .wr-hr-num   { grid-area: num;   font-size: 24px; font-weight: 700; line-height: 1.05; }
+    .wr-hr-unit  { grid-area: unit;  font-size: 11px; opacity: .85; align-self: end; padding-bottom: 2px; }
+    .wr-hr-zone  { grid-area: zone;  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .02em; }
+    /* One colour pair per zone, set as custom properties so the four rules
+       above never have to be repeated per zone. Tints are deliberately faint:
+       the popup sits on a map, and a saturated panel would fight the terrain
+       underneath it for attention. */
+    .wr-hr-ok       { --hr-color: #15803d; --hr-tint: rgba(21,128,61,.10); }
+    .wr-hr-elevated { --hr-color: #b45309; --hr-tint: rgba(180,83,9,.12); }
+    .wr-hr-critical { --hr-color: #b91c1c; --hr-tint: rgba(185,28,28,.14); }
+    .wr-hr-low      { --hr-color: #1d4ed8; --hr-tint: rgba(29,78,216,.12); }
+    .wr-hr-stale    { --hr-color: #6c757d; --hr-tint: rgba(108,117,125,.10); }
+    /* Only the two emergencies beat, matching the map marker exactly — if the
+       heart beat on every popup it would stop meaning "look at this one". */
+    .wr-hr-critical .wr-hr-heart,
+    .wr-hr-low .wr-hr-heart { animation: warRoomHeartBeat 1.1s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) {
+        .wr-hr-critical .wr-hr-heart, .wr-hr-low .wr-hr-heart { animation: none; }
+    }
     #sosOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
     /* Unacknowledged = maximum drama: full dark-red scrim + rotating beacon +
        scrolling "who's in danger" text, same full-takeover idea as the
@@ -7152,6 +7197,30 @@ function batteryTier(pct) {
 // Blue for a dangerously LOW rate, matching the badge — bradycardia and
 // tachycardia are different emergencies and must never share a colour.
 const VITALS_ZONE_TEXT_CLASS = {ok: 'text-success', elevated: 'text-warning', critical: 'text-danger', low: 'text-primary', stale: 'text-muted'};
+// The heart rate as the headline of a popup rather than one more line in the
+// stack: a big number, a big heart, and the zone spelled out underneath.
+//
+// Deliberately louder than the battery/fatigue lines it sits above. Those are
+// logistics — you read them when you get round to it. This is the one fact in
+// the popup that can mean a person is in trouble right now, and at the moment
+// someone clicks a pin they are usually already looking for a reason to worry
+// about that specific volunteer. It is the same data the small roster badge
+// carries; the popup is where there is room to make it unmissable.
+//
+// Shared by the live pin and by every point of the GPS trail, so a heart rate
+// looks identical whether you are watching it happen or reading it back an
+// hour later — the whole point of storing the live stream was that history and
+// live are the same numbers.
+function heartRateBlockHtml(bpm, zone) {
+    if (bpm === null || bpm === undefined) return '';
+    const z = zone || 'stale';
+    return `<div class="wr-hr-block wr-hr-${z}">`
+        + `<span class="wr-hr-heart">&#9829;</span>`
+        + `<span class="wr-hr-num">${bpm}</span>`
+        + `<span class="wr-hr-unit">${t('vitals.unit_bpm')}</span>`
+        + `<span class="wr-hr-zone">${t('vitals.zone_' + z)}</span>`
+        + `</div>`;
+}
 // Deliberately separate from LOW_BATTERY_PCT above, fixed (not a Settings
 // field) — LOW_BATTERY_PCT gates the passive "getting low" badge, this
 // gates the active charge-alert button (below/right of the Navigate
@@ -7262,9 +7331,10 @@ function buildPinMarker(pin, interactive = true) {
     // came off. Absent here also covers "not this viewer's to see" — the
     // server sends null for both, and the popup must look identical either
     // way, or the marker would leak that a reading exists.
-    const heartRateLine = (pin.heart_rate !== null && pin.heart_rate !== undefined)
-        ? `<br><span class="${VITALS_ZONE_TEXT_CLASS[hrZone] || 'text-muted'} small">&#9829; ${t('vitals.pin_line', {bpm: pin.heart_rate, zone: t('vitals.zone_' + hrZone)})}</span>`
-        : '';
+    // Placed directly under the name in the popup below, above the timestamp
+    // and the logistics lines, because it is the one fact here that can mean
+    // someone is in trouble right now.
+    const heartRateBlock = heartRateBlockHtml(pin.heart_rate, hrZone);
     // Fatigue: same "only rendered when actually over" idiom as batteryLine above.
     const fatigueLine = (pin.continuous_field_minutes !== null && pin.continuous_field_minutes !== undefined && pin.continuous_field_minutes > WR_MAX_SHIFT_MINUTES)
         ? `<br><span class="${pin.continuous_field_minutes >= WR_CRITICAL_SHIFT_MINUTES ? 'text-danger' : 'text-warning'} small">⏱ ${t('fatigue.pin_line', fatigueHm(pin.continuous_field_minutes))}</span>`
@@ -7292,7 +7362,7 @@ function buildPinMarker(pin, interactive = true) {
     // (depends on which render*() happened to run last that poll tick). A
     // volunteer's own live position should never be the one that silently
     // disappears underneath another marker.
-    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${heartRateLine}${fatigueLine}${navLine}`);
+    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}${heartRateBlock}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
 }
 
 function renderPins(items) {
@@ -7484,12 +7554,29 @@ function renderTrailUpTo(trails, cutoffTs) {
         points.forEach((point, i) => {
             const isLast = i === points.length - 1;
             const isFirst = i === 0 && points.length > 1;
+            // A point recorded while the volunteer was in tachycardia or
+            // bradycardia is ringed in the alarm colour instead of white, so a
+            // stretch of route where someone was in trouble reads as a
+            // highlighted section of their track rather than as something you
+            // have to click every dot to discover. That is the whole reason
+            // to put vitals on the trail: not the number, but WHERE it
+            // happened — which slope, how far from the road, how long before
+            // anyone noticed.
+            const trailAlarm = point.hr_zone === 'critical' || point.hr_zone === 'low';
+            const alarmColor = point.hr_zone === 'critical' ? '#dc2626' : '#1d4ed8';
             let marker;
             if (isLast) {
-                const icon = L.divIcon({className:'', html:`<span style="display:block;width:16px;height:16px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 4px #0008"></span>`, iconSize:[16,16], iconAnchor:[8,8]});
+                const icon = trailAlarm
+                    ? L.divIcon({className:'', html:`<span class="wr-pin-heart wr-pin-heart-trail" style="color:${alarmColor};">&#9829;</span>`, iconSize:[16,16], iconAnchor:[8,8]})
+                    : L.divIcon({className:'', html:`<span style="display:block;width:16px;height:16px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 4px #0008"></span>`, iconSize:[16,16], iconAnchor:[8,8]});
                 marker = L.marker([point.lat, point.lng], {icon}).addTo(trailLayer);
             } else {
-                marker = L.circleMarker([point.lat, point.lng], {radius: isFirst ? 7 : 5, color:'#fff', weight: isFirst ? 3 : 2, fillColor: color, fillOpacity: 1}).addTo(trailLayer);
+                marker = L.circleMarker([point.lat, point.lng], {
+                    radius: trailAlarm ? 7 : (isFirst ? 7 : 5),
+                    color: trailAlarm ? alarmColor : '#fff',
+                    weight: trailAlarm ? 4 : (isFirst ? 3 : 2),
+                    fillColor: color, fillOpacity: 1
+                }).addTo(trailLayer);
             }
             const sourceLabel = point.source === 'auto' ? t('trail.auto_suffix') : '';
             // Speed isn't reported by the device/stored on the ping — it's the
@@ -7503,7 +7590,10 @@ function renderTrailUpTo(trails, cutoffTs) {
                 ? L.latLng(prevPoint.lat, prevPoint.lng).distanceTo(L.latLng(point.lat, point.lng)) / (point.ts - prevPoint.ts) * 3.6
                 : null;
             const speedLabel = speedKmh === null ? '—' : speedKmh.toFixed(1) + ' km/h';
-            marker.bindPopup(`<strong>${escapeHtml(trail.name)}</strong><br>${point.time}${sourceLabel}<br>${t('trail.speed_label')}: ${speedLabel}`);
+            // Same block as the live pin, on purpose: reading a trail back an
+            // hour later must not look like a different kind of information
+            // from watching it live, because it is literally the same samples.
+            marker.bindPopup(`<strong>${escapeHtml(trail.name)}</strong>${heartRateBlockHtml(point.bpm, point.hr_zone)}<br>${point.time}${sourceLabel}<br>${t('trail.speed_label')}: ${speedLabel}`);
             bounds.push([point.lat, point.lng]);
         });
     });

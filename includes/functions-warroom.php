@@ -698,6 +698,14 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
         [$missionId, $teamId, $teamId, $includeAuto ? 1 : 0]
     );
 
+    // Heart rate for the same window, one value per user per minute, so each
+    // trail point can carry what the volunteer's pulse was doing where they
+    // were standing. Loaded once for the whole mission rather than per point —
+    // see loadVitalsByMinuteForMission() for why it is bucketed. Empty array
+    // when the feature is off, which makes every lookup below a miss and every
+    // point vitals-free, with no extra branch needed here.
+    $vitalsByMinute = loadVitalsByMinuteForMission($missionId);
+
     $trailsByUser = [];
     foreach ($rows as $row) {
         $userId = (int) $row['user_id'];
@@ -715,9 +723,25 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
         if (count($trailsByUser[$userId]['points']) >= 1000) {
             array_shift($trailsByUser[$userId]['points']);
         }
+        // The ping's own minute first, then the two either side. A ping and a
+        // heart-rate sample are produced by two independent timers that never
+        // line up, so a ping landing at 10:03:59 routinely has its nearest
+        // reading in the 10:04 bucket — insisting on an exact bucket match
+        // would drop roughly one point in three for no reason a viewer could
+        // understand. One minute of tolerance is well inside the resolution
+        // this overlay claims.
+        $pingTs = strtotime($row['created_at']);
+        $bucket = (int) floor($pingTs / 60);
+        $vitals = $vitalsByMinute[$userId][$bucket]
+            ?? $vitalsByMinute[$userId][$bucket - 1]
+            ?? $vitalsByMinute[$userId][$bucket + 1]
+            ?? null;
+
         $trailsByUser[$userId]['points'][] = [
             'lat'    => (float) $row['lat'],
             'lng'    => (float) $row['lng'],
+            'bpm'    => $vitals ? $vitals['bpm'] : null,
+            'hr_zone' => $vitals ? $vitals['zone'] : null,
             // 'd/m H:i' (not the live dot's bare 'H:i') — a trail is often
             // reviewed on a different day than it was recorded. Formatted
             // server-side since PHP/MySQL are both synced to Europe/Athens;

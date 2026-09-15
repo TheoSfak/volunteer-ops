@@ -1419,6 +1419,7 @@ return [
         'vitals.zone_stale' => 'χωρίς σήμα',
         // Γραμμή στο popup του pin στον χάρτη, δίπλα στη μπαταρία.
         'vitals.pin_line' => '{bpm} bpm · {zone}',
+        'vitals.unit_bpm' => 'bpm',
     ],
     'en' => [
         'common.mission_not_found' => 'Mission not found.',
@@ -2763,5 +2764,6 @@ return [
         'vitals.zone_stale' => 'no signal',
         // Line in the map pin's popup, next to the battery line.
         'vitals.pin_line' => '{bpm} bpm · {zone}',
+        'vitals.unit_bpm' => 'bpm',
     ],
 ];

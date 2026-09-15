@@ -414,6 +414,72 @@ function vitalsBadgeHtml(?array $reading, ?string $lang = null, ?int $userId = n
 }
 
 /**
+ * Heart rate collapsed to one value per user per minute, for laying vitals
+ * over the GPS trail ("Πορεία Ομάδων"): [userId][minuteBucket] => [bpm, zone].
+ *
+ * Per minute rather than per sample because of what it is joined against. GPS
+ * pings arrive every few minutes (war_room_auto_ping_seconds defaults to 180),
+ * vitals every five seconds, so a trail point only ever needs "what was their
+ * heart rate around then" — and matching each ping to its nearest individual
+ * sample would mean either a correlated subquery per point (thousands of them)
+ * or pulling every sample of the mission into PHP (a six-hour deployment of
+ * twelve people is ~50.000 rows) to throw almost all of it away. The GROUP BY
+ * does that collapse in the database and returns at most 60 rows per user per
+ * hour.
+ *
+ * The zone comes from the minute's average, not its peak: this is an overlay
+ * on a route, answering "roughly what was happening here", and a single
+ * five-second spike promoted to a red marker on the map would send command
+ * staff looking for an emergency that a person's own pulse produces
+ * routinely. The full sample-by-sample series, where a genuine spike is
+ * visible, is loadVitalsSeriesForMission()'s job.
+ *
+ * No per-viewer gate here, unlike the live map: every caller of this is behind
+ * mission-track.php's hard canManageActionRoom() check, so there is no
+ * volunteer-facing path to leak through. That is a property of the caller, so
+ * anything new that calls this must re-check it.
+ */
+function loadVitalsByMinuteForMission(int $missionId): array {
+    if (!vitalsEnabled()) {
+        return [];
+    }
+
+    $shiftIds = array_column(dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$missionId]), 'id');
+    if (!$shiftIds) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($shiftIds), '?'));
+
+    try {
+        $rows = dbFetchAll(
+            "SELECT user_id,
+                    FLOOR(UNIX_TIMESTAMP(recorded_at) / 60) AS minute_bucket,
+                    ROUND(AVG(bpm)) AS bpm
+             FROM volunteer_vitals
+             WHERE shift_id IN ({$placeholders})
+             GROUP BY user_id, minute_bucket",
+            $shiftIds
+        );
+    } catch (Exception $e) {
+        return [];
+    }
+
+    $maxHr  = vitalsMaxHeartRate();
+    $config = vitalsConfig();
+    $out    = [];
+
+    foreach ($rows as $row) {
+        $bpm = (int) $row['bpm'];
+        $out[(int) $row['user_id']][(int) $row['minute_bucket']] = [
+            'bpm'  => $bpm,
+            'zone' => vitalsZone($bpm, $maxHr, $config),
+        ];
+    }
+
+    return $out;
+}
+
+/**
  * Full per-volunteer sample series for one mission, for the post-mission
  * report. Ordered oldest-first so a chart can consume it directly.
  *
