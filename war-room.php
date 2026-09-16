@@ -13080,6 +13080,19 @@ document.querySelectorAll('.team-form').forEach(form => {
         return faces.map(ring => ring.map(idx => currentArea.geo[idx]));
     }
 
+    // The area's own size, printed in whatever unit the figures currently on
+    // screen are using, so the header and the list under it can be read
+    // against each other. Both panes call it with their own group tier —
+    // renderWedges() with the pieces, renderGridPreview() with the cells.
+    function setAreaHeader(tier) {
+        if (!currentArea) {
+            areaLabelEl.textContent = '';
+            return;
+        }
+        const size = formatAreaSquareMeters(polygonAreaSquareMeters(currentArea.geo), tier);
+        areaLabelEl.textContent = `${currentArea.label} · ${t('sector.area_size', {size})}`;
+    }
+
     function wedgeCentroid(poly) {
         const lat = poly.reduce((s, p) => s + p[0], 0) / poly.length;
         const lng = poly.reduce((s, p) => s + p[1], 0) / poly.length;
@@ -13137,6 +13150,11 @@ document.querySelectorAll('.team-form').forEach(form => {
     function renderWedges() {
         wedgeLayer.clearLayers();
         const wedges = computeWedges();
+        // Measured once here rather than per row, because the unit they all
+        // print in depends on the whole set (and on the area above them).
+        const wedgeAreas = wedges.map(poly => polygonAreaSquareMeters(poly));
+        const wedgeTier = areaTierForGroup([polygonAreaSquareMeters(currentArea ? currentArea.geo : []), ...wedgeAreas]);
+        setAreaHeader(wedgeTier);
         const existingValues = Array.from(wedgeListEl.querySelectorAll('.wedge-label-input')).map(inp => inp.value);
         const existingTeamIds = Array.from(wedgeListEl.querySelectorAll('.wedge-team-select')).map(sel => sel.value);
         wedgeListEl.innerHTML = '';
@@ -13193,7 +13211,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             // not?" decision is actually being made.
             const sizeEl = document.createElement('div');
             sizeEl.className = 'form-text small mt-0 mb-2';
-            sizeEl.textContent = t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(poly))});
+            sizeEl.textContent = t('sector.area_size', {size: formatAreaSquareMeters(wedgeAreas[i], wedgeTier)});
             wedgeListEl.appendChild(sizeEl);
         });
         saveBtn.disabled = wedges.length === 0;
@@ -13331,11 +13349,17 @@ document.querySelectorAll('.team-form').forEach(form => {
         // overshoots the area's own size wherever a cell hangs over the
         // boundary; that overshoot is real walking, so it belongs in the total.
         const cellM2 = g.actual_w_m * g.actual_h_m;
+        const taskedM2 = cellM2 * g.kept;
+        // One unit across everything on this pane, chosen by the smallest of
+        // them (areaTierForGroup) — a sector in στρέμματα beside a total in
+        // square kilometres hides that the total is just so many of the sector.
+        const gridTier = areaTierForGroup([cellM2, taskedM2, polygonAreaSquareMeters(currentArea.geo)]);
+        setAreaHeader(gridTier);
         gridStats.innerHTML = [
             t('grid.preview', {cols: g.cols, rows: g.rows}),
             t('grid.kept', {kept: g.kept, total: g.total}),
             t('grid.actual_size', {w, h}),
-            t('grid.each_sector_area', {each: formatAreaSquareMeters(cellM2), total: formatAreaSquareMeters(cellM2 * g.kept)}),
+            t('grid.each_sector_area', {each: formatAreaSquareMeters(cellM2, gridTier), total: formatAreaSquareMeters(taskedM2, gridTier)}),
         ].map(escapeHtml).join('<br>');
 
         // Shown whenever the cells came out meaningfully smaller than what was
@@ -13398,9 +13422,8 @@ document.querySelectorAll('.team-form').forEach(form => {
     modalEl.addEventListener('shown.bs.modal', () => {
         currentArea = areas.find(a => a.id === pendingDivideAreaId) || null;
         pendingDivideAreaId = null;
-        areaLabelEl.textContent = currentArea
-            ? `${currentArea.label} · ${t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(currentArea.geo))})}`
-            : '';
+        // The header is written by setAreaHeader(), called from whichever pane
+        // is showing — resetDivision() below reaches it through renderWedges().
         if (!composerMap) {
             composerMap = L.map('divideSectorsMap');
             addMapBaseLayers(composerMap, 'divideSectorsSatelliteToggle');
@@ -13538,6 +13561,17 @@ document.querySelectorAll('.team-form').forEach(form => {
         L.circleMarker(pt, {radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1, interactive: false}).addTo(previewLayer);
     }
 
+    // Twin of the divide modal's setAreaHeader(): the sector being cut is
+    // printed in the same unit as the two halves listed under it.
+    function setSectorHeader(tier) {
+        if (!currentSector) {
+            labelEl.textContent = '';
+            return;
+        }
+        const size = formatAreaSquareMeters(polygonAreaSquareMeters(currentSector.geo), tier);
+        labelEl.textContent = `${currentSector.label} · ${t('sector.area_size', {size})}`;
+    }
+
     function renderSplitPreview() {
         previewLayer.clearLayers();
         renderBoundary();
@@ -13552,14 +13586,19 @@ document.querySelectorAll('.team-form').forEach(form => {
             swatch2.style.background = COLOR_2;
             // The two halves are the point of this screen: a cut that leaves
             // one team 40 στρέμματα and the other 4 is one the coordinator
-            // wants to see BEFORE saving, not after a team reports in.
-            sizeEl1.textContent = t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(halves[0]))});
-            sizeEl2.textContent = t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(halves[1]))});
+            // wants to see BEFORE saving, not after a team reports in. Which
+            // is also why all three figures here share one unit.
+            const halfAreas = halves.map(half => polygonAreaSquareMeters(half));
+            const splitTier = areaTierForGroup([polygonAreaSquareMeters(currentSector.geo), ...halfAreas]);
+            setSectorHeader(splitTier);
+            sizeEl1.textContent = t('sector.area_size', {size: formatAreaSquareMeters(halfAreas[0], splitTier)});
+            sizeEl2.textContent = t('sector.area_size', {size: formatAreaSquareMeters(halfAreas[1], splitTier)});
             if (!labelInput1.value) labelInput1.value = t('sector.split_label_suffix', {label: currentSector.label, letter: 'Α'});
             if (!labelInput2.value) labelInput2.value = t('sector.split_label_suffix', {label: currentSector.label, letter: 'Β'});
             previewEl.style.display = '';
         } else {
             previewEl.style.display = 'none';
+            setSectorHeader(null);
         }
         saveBtn.disabled = halves.length !== 2;
     }
@@ -13644,9 +13683,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     modalEl.addEventListener('shown.bs.modal', () => {
         currentSector = sectors.find(s => s.id === pendingSplitSectorId) || null;
         pendingSplitSectorId = null;
-        labelEl.textContent = currentSector
-            ? `${currentSector.label} · ${t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(currentSector.geo))})}`
-            : '';
+        // Written by setSectorHeader(), reached through resetSplit() below.
         if (!composerMap) {
             composerMap = L.map('splitSectorMap');
             addMapBaseLayers(composerMap, 'splitSectorSatelliteToggle');

@@ -16,6 +16,7 @@ global.t = function (key) {
         'common.unit_area_mid': 'στρ.',
         'common.unit_area_mid_divisor': '1000',
         'common.unit_area_km2': 'τ.χλμ.',
+        'common.number_locale': 'el-GR',
         'compass.n': 'Β', 'compass.ne': 'ΒΑ', 'compass.e': 'Α', 'compass.se': 'ΝΑ',
         'compass.s': 'Ν', 'compass.sw': 'ΝΔ', 'compass.w': 'Δ', 'compass.nw': 'ΒΔ',
         'route.deliverable_photo': 'φωτογραφία',
@@ -42,6 +43,7 @@ const {
     pointAtRingPos,
     splitRingAtCutPositions,
     formatAreaSquareMeters,
+    areaTierForGroup,
     formatDistanceMeters,
     bearingToCompassAbbr,
     missingRouteDeliverablesClientSide,
@@ -686,15 +688,15 @@ test('polygonAreaSquareMeters() handles a concave ring', () => {
 });
 
 test('formatAreaSquareMeters() stays in square metres below a hectare', () => {
-    assert.equal(formatAreaSquareMeters(4800), '4800 τ.μ.');
-    assert.equal(formatAreaSquareMeters(9999.4), '9999 τ.μ.');
+    assert.equal(formatAreaSquareMeters(4800), '4.800 τ.μ.');
+    assert.equal(formatAreaSquareMeters(9999.4), '9.999 τ.μ.');
 });
 
 test('formatAreaSquareMeters() switches to the middle unit at a hectare', () => {
     // 1.000 m² per στρέμμα in Greek (10.000 per hectare in English) — the
     // divisor comes from the language file, not from the formatter.
-    assert.equal(formatAreaSquareMeters(10000), '10.0 στρ.');
-    assert.equal(formatAreaSquareMeters(16500), '16.5 στρ.');
+    assert.equal(formatAreaSquareMeters(10000), '10,0 στρ.');
+    assert.equal(formatAreaSquareMeters(16500), '16,5 στρ.');
 });
 
 test('formatAreaSquareMeters() drops the decimal once it stops buying anything', () => {
@@ -703,8 +705,8 @@ test('formatAreaSquareMeters() drops the decimal once it stops buying anything',
 });
 
 test('formatAreaSquareMeters() switches to square kilometres at a million', () => {
-    assert.equal(formatAreaSquareMeters(1000000), '1.00 τ.χλμ.');
-    assert.equal(formatAreaSquareMeters(12500000), '12.50 τ.χλμ.');
+    assert.equal(formatAreaSquareMeters(1000000), '1,00 τ.χλμ.');
+    assert.equal(formatAreaSquareMeters(12500000), '12,50 τ.χλμ.');
     assert.equal(formatAreaSquareMeters(250000000), '250 τ.χλμ.');
 });
 
@@ -811,4 +813,51 @@ test('pointAtRingPos() returns the vertex itself at a whole position', () => {
     const half = pointAtRingPos(ring, 0.5);
     assert.ok(Math.abs(half[0] - (ring[0][0] + ring[1][0]) / 2) < 1e-12);
     assert.ok(Math.abs(half[1] - (ring[0][1] + ring[1][1]) / 2) < 1e-12);
+});
+
+// ── areaTierForGroup + forced units ───────────────────────────────────────
+// Figures shown side by side (a sector beside the total it is part of, an
+// area beside the pieces it was cut into) must share one unit, or the reader
+// converts before they can compare. The unit is the finest any member needs.
+
+test('areaTierForGroup() takes its unit from the smallest member', () => {
+    // A 400 m sector (160.000 m²) inside a 35 km² total: the total alone would
+    // say square kilometres, but that would render the sector as 0,16.
+    assert.equal(areaTierForGroup([160000, 35600000]), 'mid');
+    assert.equal(areaTierForGroup([4800, 35600000]), 'm2');
+    assert.equal(areaTierForGroup([2000000, 35600000]), 'km2');
+});
+
+test('areaTierForGroup() ignores members that are not real areas', () => {
+    // A grid with nothing inside the polygon contributes a 0 total, and an
+    // empty group has no unit to impose on anyone.
+    assert.equal(areaTierForGroup([160000, 0]), 'mid');
+    assert.equal(areaTierForGroup([0, NaN, null, undefined]), null);
+    assert.equal(areaTierForGroup([]), null);
+    assert.equal(areaTierForGroup(undefined), null);
+});
+
+test('formatAreaSquareMeters() honours a forced unit instead of its own', () => {
+    const tier = areaTierForGroup([345600, 35596800]);   // one 600x576 cell, 103 of them
+    assert.equal(tier, 'mid');
+    assert.equal(formatAreaSquareMeters(345600, tier), '346 στρ.');
+    assert.equal(formatAreaSquareMeters(35596800, tier), '35.597 στρ.');
+    // Without the group it splits across two units, which is the thing being
+    // fixed: 346 στρ. next to 35,60 τ.χλμ. hides that one is 103 of the other.
+    assert.equal(formatAreaSquareMeters(35596800), '35,60 τ.χλμ.');
+});
+
+test('formatAreaSquareMeters() still picks its own unit for a lone figure', () => {
+    // Map popups and the drawing badge show one number and nothing to compare
+    // it against, so they stay free to choose.
+    assert.equal(formatAreaSquareMeters(345600, null), '346 στρ.');
+    assert.equal(formatAreaSquareMeters(345600, undefined), '346 στρ.');
+});
+
+test('formatAreaSquareMeters() groups thousands the way the language does', () => {
+    // Greek: full stop for thousands, comma for the decimal. 35597 unseparated
+    // is not a number anyone reads at a glance mid-callout.
+    assert.equal(formatAreaSquareMeters(35596800, 'mid'), '35.597 στρ.');
+    assert.equal(formatAreaSquareMeters(1234567890, 'm2'), '1.234.567.890 τ.μ.');
+    assert.equal(formatAreaSquareMeters(16500, 'mid'), '16,5 στρ.');
 });

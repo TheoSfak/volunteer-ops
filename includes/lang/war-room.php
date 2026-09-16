@@ -103,6 +103,9 @@ return [
         'common.unit_area_mid' => 'στρ.',
         'common.unit_area_mid_divisor' => '1000',
         'common.unit_area_km2' => 'τ.χλμ.',
+        // Thousands/decimal marks for those figures — a group held to one unit
+        // reaches five digits routinely, and 35597 is unreadable where 35.597 is not.
+        'common.number_locale' => 'el-GR',
         'compass.n' => 'Β',
         'compass.ne' => 'ΒΑ',
         'compass.e' => 'Α',
@@ -1555,6 +1558,7 @@ return [
         'common.unit_area_mid' => 'ha',
         'common.unit_area_mid_divisor' => '10000',
         'common.unit_area_km2' => 'km²',
+        'common.number_locale' => 'en-GB',
         'compass.n' => 'N',
         'compass.ne' => 'NE',
         'compass.e' => 'E',

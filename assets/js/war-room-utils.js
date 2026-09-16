@@ -478,18 +478,66 @@ function formatDistanceMeters(m) {
 // says στρέμματα there and English says hectares, so the divisor lives in
 // the language file beside the unit name — it is a property of the locale in
 // the same way a decimal separator is, not a magic number in this file.
-function formatAreaSquareMeters(m2) {
+const AREA_TIER_MID_FROM_M2 = 10000;
+const AREA_TIER_KM2_FROM_M2 = 1000000;
+
+// Which of the three tiers a set of figures shown TOGETHER should all use:
+// whichever one the smallest of them would have picked on its own.
+//
+// Areas printed side by side are there to be compared, and a sector reading
+// "346 στρ." next to a total reading "35.60 τ.χλμ." makes the reader convert
+// units before they can see that one is simply 103 of the other. So a group
+// commits to one unit — and it has to be the finest one any member needs.
+// The small figure is the one actually being decided (how big to make a
+// sector); pushing it up into square kilometres renders it as 0.35 and
+// destroys the very number the group exists to show, whereas pulling the
+// large one down only makes it longer, which grouped thousands then fix.
+function areaTierForGroup(valuesM2) {
+    const usable = (valuesM2 || []).filter(v => typeof v === 'number' && isFinite(v) && v > 0);
+    if (!usable.length) return null;
+    const smallest = Math.min(...usable);
+    if (smallest < AREA_TIER_MID_FROM_M2) return 'm2';
+    if (smallest < AREA_TIER_KM2_FROM_M2) return 'mid';
+    return 'km2';
+}
+
+// Grouped thousands and the language's own decimal mark. Holding a whole
+// group to στρέμματα routinely produces five digits, and 35597 is not a
+// number anyone reads at a glance during a callout — Greek writes it 35.597
+// and writes a half 16,5, English does the reverse, which is why the locale
+// tag sits in the language file beside the units rather than here. The
+// formatters are cached because building an Intl.NumberFormat is the
+// expensive part and sector popups are rebuilt for every sector on every
+// five-second poll tick.
+const AREA_NUMBER_FORMATTERS = {};
+function formatAreaNumber(value, decimals) {
+    const locale = t('common.number_locale') || 'en-GB';
+    const key = locale + '/' + decimals;
+    if (!AREA_NUMBER_FORMATTERS[key]) {
+        AREA_NUMBER_FORMATTERS[key] = new Intl.NumberFormat(locale, {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals,
+        });
+    }
+    return AREA_NUMBER_FORMATTERS[key].format(value);
+}
+
+// `tier` forces the unit, for a figure being shown alongside others — pass
+// areaTierForGroup([…]) over the whole set. Left out, the figure picks its
+// own, which is right for a lone number in a popup or a badge.
+function formatAreaSquareMeters(m2, tier) {
     if (m2 === null || m2 === undefined || !isFinite(m2) || m2 <= 0) return '';
-    if (m2 < 10000) return `${Math.round(m2)} ${t('common.unit_area_m2')}`;
-    if (m2 < 1000000) {
+    const unit = tier || areaTierForGroup([m2]);
+    if (unit === 'm2') return `${formatAreaNumber(m2, 0)} ${t('common.unit_area_m2')}`;
+    if (unit === 'mid') {
         const perMidUnit = Number(t('common.unit_area_mid_divisor')) || 1000;
         const mid = m2 / perMidUnit;
         // One decimal only while it buys something. At three digits the
         // tenth of a στρέμμα is noise on a number used to size a sweep.
-        return `${mid < 100 ? mid.toFixed(1) : Math.round(mid)} ${t('common.unit_area_mid')}`;
+        return `${formatAreaNumber(mid, mid < 100 ? 1 : 0)} ${t('common.unit_area_mid')}`;
     }
     const km2 = m2 / 1000000;
-    return `${km2 < 100 ? km2.toFixed(2) : Math.round(km2)} ${t('common.unit_area_km2')}`;
+    return `${formatAreaNumber(km2, km2 < 100 ? 2 : 0)} ${t('common.unit_area_km2')}`;
 }
 
 function bearingToCompassAbbr(deg) {
@@ -707,6 +755,7 @@ if (typeof module !== 'undefined' && module.exports) {
         parseCoordsInput,
         formatDistanceMeters,
         formatAreaSquareMeters,
+        areaTierForGroup,
         bearingToCompassAbbr,
         missingRouteDeliverablesClientSide,
         shouldSkipVideoCompression,

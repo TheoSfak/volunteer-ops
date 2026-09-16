@@ -25,7 +25,7 @@
 //
 // Bumping costs a one-off refetch of CDN assets and static images. It does NOT
 // touch the map tile cache below, which is deliberately kept out of this.
-const CACHE_VERSION = 'vo-v3.256.0';
+const CACHE_VERSION = 'vo-v3.256.1';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime';
 
