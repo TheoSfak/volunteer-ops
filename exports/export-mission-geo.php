@@ -217,7 +217,10 @@ $sectorRows = dbFetchAll(
             mt.codename, mt.team_number, mt.color AS team_color
      FROM mission_search_sectors s
      LEFT JOIN mission_teams mt ON mt.id = s.team_id
-     WHERE s.mission_id = ? ORDER BY s.created_at",
+     -- s.id breaks the created_at tie a bulk-generated grid creates
+     -- (see loadMissionSectorsForUser), so an exported grid comes out in
+     -- label order rather than whatever the storage engine felt like.
+     WHERE s.mission_id = ? ORDER BY s.created_at, s.id",
     [$missionId]
 );
 foreach ($sectorRows as $row) {

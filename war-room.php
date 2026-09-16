@@ -4346,7 +4346,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                             <label class="form-label small mb-1 d-flex justify-content-between w-100" for="gridSizeRange">
                                 <span><?= t('grid.sector_size') ?></span><strong id="gridSizeValue"></strong>
                             </label>
-                            <input type="range" class="form-range" id="gridSizeRange" min="150" max="<?= max(200, min(GRID_SECTOR_SIZE_MAX_M, (int) getSetting('war_room_grid_max_size_m', '900'))) ?>" step="50" value="400">
+                            <input type="range" class="form-range" id="gridSizeRange" min="150" max="<?= gridMaxSectorSizeM() ?>" step="50" value="400">
                         </div>
                         <div>
                             <label class="form-label small mb-1" for="gridPrefixInput"><?= t('grid.prefix') ?></label>
@@ -13234,7 +13234,9 @@ document.querySelectorAll('.team-form').forEach(form => {
     // shape and the count before committing, and so the button can say how
     // many sectors it is about to make. Both sides run the same algorithm,
     // pinned to tests/fixtures/grid-cases.json.
-    const MAX_GRID_CELLS = <?= MAX_GRID_CELLS ?>;
+    // The CONFIGURED limit (Settings -> war_room_grid_max_cells), not
+    // config.php's own ceiling — same number generate_grid enforces.
+    const MAX_GRID_CELLS = <?= gridMaxCells() ?>;
     const linesPane = document.getElementById('divideSectorsLinesPane');
     const gridPane = document.getElementById('divideSectorsGridPane');
     const gridSizeRange = document.getElementById('gridSizeRange');

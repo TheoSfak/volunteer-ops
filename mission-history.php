@@ -200,7 +200,9 @@ $sectorCreatedRows = dbFetchAll(
      LEFT JOIN users cu ON cu.id = s.created_by
      LEFT JOIN mission_teams mt ON mt.id = s.team_id
      WHERE s.mission_id = ?
-     ORDER BY s.created_at DESC LIMIT 200",
+     -- s.id breaks the created_at tie a bulk-generated grid creates; without
+     -- it, LIMIT 200 would keep an arbitrary slice of one grid's own sectors.
+     ORDER BY s.created_at DESC, s.id DESC LIMIT 200",
     [$missionId]
 );
 foreach ($sectorCreatedRows as $row) {

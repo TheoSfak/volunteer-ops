@@ -529,8 +529,9 @@ if ($action === 'generate_grid') {
         echo json_encode(['ok' => false, 'error' => t('grid.no_cells')]);
         exit;
     }
-    if ($grid['kept'] > MAX_GRID_CELLS) {
-        echo json_encode(['ok' => false, 'error' => t('grid.too_many', ['n' => $grid['kept'], 'max' => MAX_GRID_CELLS])]);
+    $maxCells = gridMaxCells();
+    if ($grid['kept'] > $maxCells) {
+        echo json_encode(['ok' => false, 'error' => t('grid.too_many', ['n' => $grid['kept'], 'max' => $maxCells])]);
         exit;
     }
 

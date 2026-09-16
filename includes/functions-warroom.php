@@ -284,7 +284,11 @@ function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageW
          LEFT JOIN users au ON au.id = s.acknowledged_by
          LEFT JOIN users cu ON cu.id = s.created_by
          WHERE s.mission_id = ?
-         ORDER BY s.created_at",
+         -- id breaks the tie: a generated grid inserts every one of its
+         -- sectors in a single statement, so they all share one created_at
+         -- and MySQL is free to return Α36 first. Insert order is label
+         -- order, so this is what makes the list read Α1, Α2, Α3.
+         ORDER BY s.created_at, s.id",
         [$missionId]
     );
     if (empty($rows)) {
@@ -2999,6 +3003,32 @@ function pointToSegmentDistanceMeters(float $lat, float $lng, float $latA, float
     $projX = $ax + $t * $dx;
     $projY = $ay + $t * $dy;
     return sqrt($projX * $projX + $projY * $projY);
+}
+
+/**
+ * The two operator-tunable limits of the automatic sector grid, read from
+ * Settings and clamped to the hard ceilings in config.php.
+ *
+ * Functions rather than inline getSetting() calls because each is read in two
+ * places that must never disagree — the endpoint that enforces the limit and
+ * the page that renders it into the tool the coordinator sees — and a clamp
+ * copy-pasted into the second of those is a clamp that will eventually be
+ * edited in only one.
+ *
+ * MAX_GRID_CELLS is a ceiling nobody can raise past, not the number an
+ * operation gets: every sector of a mission ships in full on every 5-second
+ * poll to every open Action Room tab, at a measured 739 bytes each, so the
+ * 120 default is already ~87KB a tick. GRID_SECTOR_SIZE_MAX_M plays the same
+ * role for the size slider, whose lower end stays at the 150m the tool itself
+ * offers. The floors here (10 cells, 200m) exist so a mistyped 0 cannot leave
+ * the tool unable to produce anything at all.
+ */
+function gridMaxCells(): int {
+    return max(10, min(MAX_GRID_CELLS, (int) getSetting('war_room_grid_max_cells', '120') ?: 120));
+}
+
+function gridMaxSectorSizeM(): int {
+    return max(200, min(GRID_SECTOR_SIZE_MAX_M, (int) getSetting('war_room_grid_max_size_m', '900') ?: 900));
 }
 
 /**

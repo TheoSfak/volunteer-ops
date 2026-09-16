@@ -46,6 +46,7 @@ $defaults = [
     'war_room_low_battery_pct' => '60',
     'war_room_max_shift_minutes' => '480',
     'war_room_grid_max_size_m' => '900',
+    'war_room_grid_max_cells' => '120',
     // Rescuer heart rate (volunteer_vitals). Off by default: it needs a
     // sensor per volunteer and it collects health data, so it must be an
     // explicit decision by the org, never something that starts working
@@ -614,7 +615,7 @@ if (isPost()) {
 
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_grid_max_size_m',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_grid_max_size_m', 'war_room_grid_max_cells',
             'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct', 'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
             'vitals_episode_tachy_minutes', 'vitals_episode_brady_minutes', 'vitals_episode_strain_minutes',
             'admin_email', 'developer_email', 'timezone', 'date_format',
@@ -666,6 +667,15 @@ if (isPost()) {
             // where buildSectorGridCells() clamps on both sides regardless.
             if ($field === 'war_room_grid_max_size_m') {
                 $value = (string) max(200, min(GRID_SECTOR_SIZE_MAX_M, (int) $value ?: 900));
+            }
+
+            // Ceiling is MAX_GRID_CELLS (config.php), which exists because
+            // every sector rides the 5-second Action Room poll to every open
+            // tab — see that constant's own note for the measured cost. Same
+            // browser-hint reasoning as every clamp above for why this is
+            // enforced here and not just by the form's max attribute.
+            if ($field === 'war_room_grid_max_cells') {
+                $value = (string) max(10, min(MAX_GRID_CELLS, (int) $value ?: 120));
             }
 
             // vitalsConfig() clamps every one of these again on read, so this
@@ -1510,7 +1520,13 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <label class="form-label">Μέγιστο Μέγεθος Τομέα Αυτόματου Πλέγματος (μ.)</label>
                         <input type="number" class="form-control" style="max-width:160px;" name="war_room_grid_max_size_m"
                                value="<?= h($settings['war_room_grid_max_size_m'] ?? '900') ?>" min="200" max="<?= GRID_SECTOR_SIZE_MAX_M ?>" step="50">
-                        <small class="text-muted">Πόσο μεγάλο τομέα μπορεί να ζητήσει ο συντονιστής στο «Αυτόματο πλέγμα» του Action Room — το πάνω άκρο του διακόπτη. Το κάτω άκρο μένει στα 150 μ. Μεγαλύτερος τομέας σημαίνει λιγότερους τομείς για την ίδια περιοχή: σε μεγάλες ορεινές περιοχές το 900 μπορεί να μη φτάνει και το πλέγμα να κόβεται από το όριο των <?= MAX_GRID_CELLS ?> τομέων ανά περιοχή. Προεπιλογή 900, μέγιστο <?= GRID_SECTOR_SIZE_MAX_M ?>.</small>
+                        <small class="text-muted">Πόσο μεγάλο τομέα μπορεί να ζητήσει ο συντονιστής στο «Αυτόματο πλέγμα» του Action Room — το πάνω άκρο του διακόπτη. Το κάτω άκρο μένει στα 150 μ. Μεγαλύτερος τομέας σημαίνει λιγότερους τομείς για την ίδια περιοχή: σε μεγάλες ορεινές περιοχές το 900 μπορεί να μη φτάνει και το πλέγμα να κόβεται από το όριο τομέων ανά περιοχή που ορίζεται ακριβώς παρακάτω. Προεπιλογή 900, μέγιστο <?= GRID_SECTOR_SIZE_MAX_M ?>.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Μέγιστοι Τομείς ανά Αυτόματο Πλέγμα</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_grid_max_cells"
+                               value="<?= h($settings['war_room_grid_max_cells'] ?? '120') ?>" min="10" max="<?= MAX_GRID_CELLS ?>" step="10">
+                        <small class="text-muted">Πόσους τομείς το πολύ μπορεί να παράγει ένα πλέγμα σε μία περιοχή έρευνας. Πάνω από αυτό, το κουμπί δημιουργίας κλειδώνει και ζητείται μεγαλύτερο μέγεθος τομέα. <strong>Δεν είναι όριο της βάσης — είναι όριο δικτύου:</strong> κάθε τομέας της αποστολής στέλνεται ολόκληρος σε κάθε ανανέωση των 5 δευτερολέπτων, σε κάθε ανοιχτή οθόνη Action Room, και κοστίζει περίπου 739 bytes (μετρημένο σε πραγματική αποστολή). Με 120 τομείς αυτό είναι ~87KB ανά 5 δευτερόλεπτα ανά οθόνη, με 400 γίνεται ~290KB. Ανεβάστε το μόνο αν χρειάζεστε πυκνότερο πλέγμα και οι συντονιστές δεν κρατούν πολλές οθόνες ανοιχτές ταυτόχρονα. Επίσης: κάθε τομέας ζωγραφίζει μόνιμη ετικέτα στον χάρτη, και ήδη στους 49 αρχίζουν να στριμώχνονται μεταξύ τους. Προεπιλογή 120, μέγιστο <?= MAX_GRID_CELLS ?>.</small>
                     </div>
 
                     <hr class="my-4">

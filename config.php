@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.254.0');
+define('APP_VERSION', '3.255.0');
 define('DB_SCHEMA_VERSION', 150);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
@@ -111,21 +111,25 @@ define('MISSION_PHOTO_THUMB_LONG_EDGE', 720);
 define('MISSION_PHOTO_THUMB_QUALITY', 82);
 
 // Automatic sector grid (buildSectorGridCells(), mission-sector.php's
-// generate_grid action).
+// generate_grid action). Both numbers here are HARD CEILINGS, not what the
+// tool actually uses: the working limits live in Settings as
+// war_room_grid_max_cells (default 120) and war_room_grid_max_size_m
+// (default 900), read through gridMaxCells()/gridMaxSectorSizeM() and
+// clamped to these. An admin can tune within them and cannot get past them.
 //
-// The cell cap is not about insert cost — 400 rows insert instantly. It is
-// about the 5-second poll: every sector of a mission ships in full on every
-// tick of it, to every open Action Room tab, with its polygon, its buildings
-// and its whole status log (loadMissionSectorsForUser(), war-room.php's own
-// ajax payload). Measured on a real 55km2 mission area, a grid cell costs
-// 739 bytes of that payload — so 120 cells is ~87KB every 5 seconds, to
-// every open tab, and 400 would be ~290KB. The September 2026 load drill
-// established that what breaks this app under a real operation is payload
-// size times open tabs, not slow SQL, which is why this number is set from
-// the poll and not from what MySQL can insert. 120 still covers an 11x11
-// grid, past any realistic search area. The map agrees: each sector draws a
-// permanent Leaflet label, and they already crowd each other at 49.
-define('MAX_GRID_CELLS', 120);
+// The cell ceiling is not about insert cost — 400 rows insert instantly. It
+// is about the 5-second poll: every sector of a mission ships in full on
+// every tick of it, to every open Action Room tab, with its polygon, its
+// buildings and its whole status log (loadMissionSectorsForUser(),
+// war-room.php's own ajax payload). Measured on a real 55km2 mission area, a
+// grid cell costs 739 bytes of that payload — so the 120 default is ~87KB
+// every five seconds per open tab, and this 400 ceiling is ~290KB. The
+// September 2026 load drill established that what breaks this app under a
+// real operation is payload size times open tabs, not slow SQL, which is why
+// these numbers come from the poll and not from what MySQL can insert. The
+// map agrees: each sector draws a permanent Leaflet label, and they already
+// crowd each other at 49.
+define('MAX_GRID_CELLS', 400);
 
 // Accepted range for the requested cell size, in meters. The slider in the
 // grid tool offers a narrower 150-900 (the sizes a ground crew actually gets
