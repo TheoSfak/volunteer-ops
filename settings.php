@@ -45,6 +45,7 @@ $defaults = [
     'war_room_auto_ping_seconds' => '180',
     'war_room_low_battery_pct' => '60',
     'war_room_max_shift_minutes' => '480',
+    'war_room_grid_max_size_m' => '900',
     // Rescuer heart rate (volunteer_vitals). Off by default: it needs a
     // sensor per volunteer and it collects health data, so it must be an
     // explicit decision by the org, never something that starts working
@@ -613,7 +614,7 @@ if (isPost()) {
 
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_grid_max_size_m',
             'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct', 'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
             'vitals_episode_tachy_minutes', 'vitals_episode_brady_minutes', 'vitals_episode_strain_minutes',
             'admin_email', 'developer_email', 'timezone', 'date_format',
@@ -655,6 +656,16 @@ if (isPost()) {
             // clamping server-side too.
             if ($field === 'war_room_max_shift_minutes') {
                 $value = (string) max(30, min(2880, (int) $value ?: 480));
+            }
+
+            // Upper end of the sector-size slider in the Action Room's grid
+            // tool. Same "form attribute is only a browser hint" reasoning as
+            // the two above. The floor is 200 rather than the slider's own
+            // 150m minimum so the slider always has room to move, and the
+            // ceiling matches GRID_SECTOR_SIZE_MAX_M (config.php), which is
+            // where buildSectorGridCells() clamps on both sides regardless.
+            if ($field === 'war_room_grid_max_size_m') {
+                $value = (string) max(200, min(GRID_SECTOR_SIZE_MAX_M, (int) $value ?: 900));
             }
 
             // vitalsConfig() clamps every one of these again on read, so this
@@ -1494,6 +1505,12 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <input type="number" class="form-control" style="max-width:160px;" name="war_room_max_shift_minutes"
                                value="<?= h($settings['war_room_max_shift_minutes']) ?>" min="30" max="2880" step="30">
                         <small class="text-muted">Λεπτά συνεχόμενης παρουσίας εθελοντή σε αλυσίδα εγκεκριμένων βαρδιών στην ίδια αποστολή, πάνω από τα οποία εμφανίζεται προειδοποίηση κόπωσης στο Action Room (ρόστερ, χάρτης, Κοντινές Ομάδες, Αποστάσεις Ομάδων) και προτείνεται αντικατάσταση. Προεπιλογή 480 = 8 ώρες. Η "κρίσιμη" ένδειξη (κόκκινο) εμφανίζεται στο 1,5x του ορίου.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Μέγιστο Μέγεθος Τομέα Αυτόματου Πλέγματος (μ.)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_grid_max_size_m"
+                               value="<?= h($settings['war_room_grid_max_size_m'] ?? '900') ?>" min="200" max="<?= GRID_SECTOR_SIZE_MAX_M ?>" step="50">
+                        <small class="text-muted">Πόσο μεγάλο τομέα μπορεί να ζητήσει ο συντονιστής στο «Αυτόματο πλέγμα» του Action Room — το πάνω άκρο του διακόπτη. Το κάτω άκρο μένει στα 150 μ. Μεγαλύτερος τομέας σημαίνει λιγότερους τομείς για την ίδια περιοχή: σε μεγάλες ορεινές περιοχές το 900 μπορεί να μη φτάνει και το πλέγμα να κόβεται από το όριο των <?= MAX_GRID_CELLS ?> τομέων ανά περιοχή. Προεπιλογή 900, μέγιστο <?= GRID_SECTOR_SIZE_MAX_M ?>.</small>
                     </div>
 
                     <hr class="my-4">
