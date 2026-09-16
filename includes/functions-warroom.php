@@ -1121,10 +1121,13 @@ function loadMissionAnnotationsForMission(int $missionId): array {
 /**
  * War Room: load $userId's own personal orders for a mission — the "Οι
  * Εντολές μου" self-service checklist. Covers every order_type that targets
- * one specific recipient and is meaningful to track as "still owed" (task,
- * plus the three field-request types: location/photo/video) — NOT route
- * (its own dedicated myRouteCard with map/step UI) or charge_phone (a
- * system nudge, not something asked of the volunteer).
+ * one specific recipient and is meaningful to track as "still owed": task,
+ * the field-request types (location/photo/video/live), and charge_phone.
+ *
+ * charge_phone has no fulfilment event of its own — nothing in the app can
+ * observe a phone being plugged in — so for that ONE type acknowledging it is
+ * completing it, and war-room.php's renderer branches on that. Treating it
+ * like the rest would leave a row nothing could ever clear.
  *
  * 'task' is the only type ever manually completed by the recipient
  * (mission-order.php action=complete) — location/photo/video instead
@@ -1140,17 +1143,23 @@ function loadMissionAnnotationsForMission(int $missionId): array {
  * loadMissionPhotosForUser above.
  */
 function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
-    // The order types NOT listed below are excluded on purpose, not by
-    // oversight: 'message' and 'return_to_base' are broadcasts with nothing to
-    // do, 'route' has its own myRouteCard, and 'charge_phone' is answered by
-    // plugging the phone in. Anything NEW that asks the volunteer to act
-    // belongs in this list — 'live' was added late and missed it, so a
-    // request arrived by push with no trace in the volunteer's orders card.
+    // The two order types NOT listed below are excluded on purpose, not by
+    // oversight: 'message' and 'return_to_base' are broadcasts. They announce
+    // something rather than ask this person for anything, so a row for one
+    // could never be cleared and would hold the volunteer's orders badge on
+    // for the rest of the mission. Anything NEW that asks the volunteer to act
+    // belongs in this list — 'live' was added late and missed it, so a request
+    // arrived by push with no trace in the volunteer's orders card.
+    //
+    // 'route' belongs in that card too but not in this query: it lives in
+    // mission_routes with its own waypoint UI, so war-room.php folds it in
+    // client-side as a summary row — same for assigned sectors, and for
+    // dispatch points/areas, which are not mission_orders rows at all.
     $rows = dbFetchAll(
         "SELECT o.id AS order_id, o.order_type, o.task_text, o.created_at, r.acknowledged_at, r.fulfilled_at
          FROM mission_order_recipients r
          JOIN mission_orders o ON o.id = r.order_id
-         WHERE o.mission_id = ? AND r.user_id = ? AND o.order_type IN ('task', 'location', 'photo', 'video', 'live')
+         WHERE o.mission_id = ? AND r.user_id = ? AND o.order_type IN ('task', 'location', 'photo', 'video', 'live', 'charge_phone')
          ORDER BY o.created_at DESC",
         [$missionId, $userId]
     );

@@ -900,7 +900,7 @@ DROP TABLE IF EXISTS `mission_orders`;
 CREATE TABLE `mission_orders` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `mission_id` int(10) unsigned NOT NULL,
-  `order_type` enum('location','photo','video','task','message','return_to_base','route','charge_phone') NOT NULL,
+  `order_type` enum('location','photo','video','task','message','return_to_base','route','charge_phone','live') NOT NULL,
   `task_text` text DEFAULT NULL,
   `created_by` int(10) unsigned NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),

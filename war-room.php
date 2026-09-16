@@ -2034,6 +2034,12 @@ include __DIR__ . '/includes/header.php';
        it here would let that unrelated logic silently override this
        preference. !important wins over any inline/utility display too. */
     .wr-card-hidden { display: none !important; }
+    /* Brief highlight when "Οι Εντολές μου" scrolls you to the card that
+       actually drives a route or a sector — without it the page just jumps
+       and you have to work out for yourself which card it landed on. */
+    @keyframes wrCardFlash { 0%, 100% { box-shadow: 0 0 0 0 rgba(13,110,253,0); } 35% { box-shadow: 0 0 0 6px rgba(13,110,253,.45); } }
+    .wr-card-flash { animation: wrCardFlash 1.6s ease-in-out 1; }
+    @media (prefers-reduced-motion: reduce) { .wr-card-flash { animation: none; outline: 3px solid rgba(13,110,253,.55); } }
     #warRoomMap { height: 520px; border-radius: 12px; }
     #mapCard.map-fullscreen-active { position: fixed; inset: 0; z-index: 1040; border-radius: 0; }
     #mapCard.map-fullscreen-active #warRoomMap { height: 100%; border-radius: 0; }
@@ -5621,6 +5627,7 @@ function dispatchTeamLabelHtml(item) {
 // dispatch changed, including its live ETA.
 let dispatchesRenderedSig = null;
 function renderDispatches(items) {
+    refreshMyOrdersCard();
     const sig = JSON.stringify(items);
     if (sig === dispatchesRenderedSig) return;
     dispatchesRenderedSig = sig;
@@ -5651,21 +5658,7 @@ function renderDispatches(items) {
         const ackHtml = item.can_ack
             ? `<br><button type="button" class="btn btn-sm btn-success mt-1 dispatch-ack-btn" data-id="${item.id}"><i class="bi bi-check-lg me-1"></i>${t('dispatch.arrival_btn')}</button>`
             : (item.my_ack ? `<div class="small text-success mt-1">${t('dispatch.arrived_at_prefix', {time: item.my_ack})}</div>` : '');
-        // Google Maps opened with no "origin" resolves directions from the
-        // device's own current location — simpler and more reliable than us
-        // grabbing navigator.geolocation ourselves (works even if this page
-        // was never granted location permission). A polygon has no single
-        // point, so route to its centroid instead.
-        let destLat, destLng;
-        if (item.type === 'point') {
-            destLat = item.geo.lat;
-            destLng = item.geo.lng;
-        } else {
-            const sum = item.geo.reduce((acc, pt) => [acc[0] + pt[0], acc[1] + pt[1]], [0, 0]);
-            destLat = sum[0] / item.geo.length;
-            destLng = sum[1] / item.geo.length;
-        }
-        const directionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}&travelmode=driving`;
+        const directionsUrl = dispatchDirectionsUrl(item);
         const directionsHtml = `<br><a href="${directionsUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-success mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
         // Live ETA — only ever present for a point sent to one specific team
         // (see computeDispatchEta()'s own scoping); null means either that
@@ -5698,6 +5691,53 @@ function renderDispatches(items) {
         }
     });
     if (reopenLayer) reopenLayer.openPopup();
+}
+// Google Maps opened with no "origin" resolves directions from the device's
+// own current location — simpler and more reliable than us grabbing
+// navigator.geolocation ourselves (works even if this page was never granted
+// location permission). A polygon has no single point, so route to its
+// centroid instead. Shared by the map popup and by "Οι Εντολές μου", so the
+// two can never disagree about where "there" is.
+function dispatchDirectionsUrl(item) {
+    let lat, lng;
+    if (item.type === 'point') {
+        lat = item.geo.lat;
+        lng = item.geo.lng;
+    } else {
+        const sum = item.geo.reduce((acc, pt) => [acc[0] + pt[0], acc[1] + pt[1]], [0, 0]);
+        lat = sum[0] / item.geo.length;
+        lng = sum[1] / item.geo.length;
+    }
+    return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+}
+// "Ελήφθη" (receive) and "Άφιξη" (ack) for a dispatch point/area, from either
+// of the two places that now offer them: the map popup and the orders card.
+// The server answers with the whole dispatch list and that is what gets
+// re-rendered — same "the server is the source of truth, re-render from its
+// response" shape postRouteAction() already uses.
+function postDispatchAction(action, id, btnEl) {
+    if (btnEl) btnEl.disabled = true;
+    const data = new URLSearchParams({csrf_token: csrfToken, action: action, mission_id: '<?= $missionId ?>', id: String(id)});
+    return fetch('mission-dispatch.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+        if (result.ok) {
+            if (map) map.closePopup();
+            if (result.dispatches) renderDispatches(dispatches = result.dispatches);
+        } else {
+            alert(result.error || t('common.send_failed'));
+            if (btnEl) btnEl.disabled = false;
+        }
+        return result;
+    }).catch(() => { if (btnEl) btnEl.disabled = false; });
+}
+// Jump to the card that really drives a route or a sector. On the volunteer
+// tab layout every card these point at already sits on the same "Εγώ" pane,
+// so there is never a tab to switch first.
+function scrollToCard(cardId) {
+    const el = document.querySelector('[data-card-id="' + cardId + '"]');
+    if (!el) return;
+    el.scrollIntoView({behavior: 'smooth', block: 'start'});
+    el.classList.add('wr-card-flash');
+    setTimeout(() => el.classList.remove('wr-card-flash'), 1800);
 }
 // Battle-map annotations: rebuilt from scratch every poll, exactly like
 // renderDispatches above — but never touches annotationDrawLayer, which
@@ -5756,25 +5796,11 @@ dispatchLayer.on('popupopen', event => {
     }
     const ackBtn = popupEl.querySelector('.dispatch-ack-btn');
     if (ackBtn) {
-        ackBtn.addEventListener('click', () => {
-            ackBtn.disabled = true;
-            const data = new URLSearchParams({csrf_token: csrfToken, action: 'ack', mission_id: <?= $missionId ?>, id: ackBtn.dataset.id});
-            fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
-                if (result.ok) { map.closePopup(); if (result.dispatches) renderDispatches(dispatches = result.dispatches); }
-                else { alert(result.error || t('common.send_failed')); ackBtn.disabled = false; }
-            });
-        });
+        ackBtn.addEventListener('click', () => postDispatchAction('ack', ackBtn.dataset.id, ackBtn));
     }
     const receiveBtn = popupEl.querySelector('.dispatch-receive-btn');
     if (receiveBtn) {
-        receiveBtn.addEventListener('click', () => {
-            receiveBtn.disabled = true;
-            const data = new URLSearchParams({csrf_token: csrfToken, action: 'receive', mission_id: <?= $missionId ?>, id: receiveBtn.dataset.id});
-            fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
-                if (result.ok) { map.closePopup(); if (result.dispatches) renderDispatches(dispatches = result.dispatches); }
-                else { alert(result.error || t('common.send_failed')); receiveBtn.disabled = false; }
-            });
-        });
+        receiveBtn.addEventListener('click', () => postDispatchAction('receive', receiveBtn.dataset.id, receiveBtn));
     }
 });
 
@@ -7252,6 +7278,7 @@ function sectorFloorChecklistHtml(building, canAct) {
 // primary real-world surface for a volunteer physically walking building to
 // building, not a fallback for when the map isn't available.
 function renderMySectors(items) {
+    refreshMyOrdersCard();
     const list = document.getElementById('mySectorsList');
     if (!list) return;
     const mine = items.filter(s => s.is_my_team);
@@ -8509,21 +8536,52 @@ document.getElementById('mediaViewModal').addEventListener('hidden.bs.modal', ()
     document.getElementById('mediaViewModalBody').innerHTML = '';
 });
 
-function renderMyTasks(items) {
-    const list = document.getElementById('myTasksList');
-    if (!items.length) {
-        list.innerHTML = '<p class="text-muted mb-0">' + t('mytasks.empty') + '</p>';
-        return;
-    }
-    list.innerHTML = items.map(task => {
+// ── "Οι Εντολές μου" — one inbox for everything asked of this volunteer ─────
+// This card used to list mission_orders rows only, which left three of the
+// things command can hand someone invisible here: a dispatch point or area
+// (its own tables, not a mission_orders row at all — for the recipient it
+// existed purely as a purple pin they had to spot on the map), an active
+// Route Order, and a sector assigned to their team. The "Εγώ" tab badge is
+// fed from this one function, so whatever was missing from the card was
+// missing from the badge too: an area could be sent to a volunteer and
+// produce no countable signal anywhere that an order had arrived at all.
+//
+// Route and sector rows are summaries, not second copies. Each says what is
+// still outstanding and jumps to the purpose-built card that actually drives
+// it — waypoint steps, floor checklists — because duplicating those controls
+// here would mean two places to keep in sync and two places to misread.
+//
+// Still deliberately absent: 'message' and 'return_to_base'. Both announce
+// something rather than ask this person for anything, so their rows could
+// never be cleared and would hold the badge on for the rest of the mission.
+
+// One row shape, so every source reads the same way down the list.
+function myOrderRow(labelHtml, metaHtml, actionHtml) {
+    return `<div class="border rounded p-2 mb-2">
+        <div class="small">${labelHtml}</div>
+        <div class="text-muted" style="font-size:.75rem;">${metaHtml}</div>
+        <div class="mt-1">${actionHtml}</div>
+    </div>`;
+}
+
+function myOrderEntriesFromOrders(items) {
+    return (items || []).map(task => {
         const isTask = task.order_type === 'task';
+        // A battery alert has no fulfilment event — nothing in the app can
+        // observe a phone being plugged in — so for that one type the
+        // acknowledgement IS the completion (see loadMyTaskOrdersForUser()).
+        // Without this branch it would fall into the "⏳ Εκκρεμεί" case below
+        // and stay outstanding, and counted, for the rest of the mission.
+        const isNudge = task.order_type === 'charge_phone';
         let actionHtml;
         if (task.fulfilled_at) {
             actionHtml = `<span class="badge bg-success">${t('mytasks.completed_at_prefix', {time: task.fulfilled_at})}</span>`;
+        } else if (isNudge && task.acknowledged_at) {
+            actionHtml = `<span class="badge bg-success">${t('mytasks.acknowledged_at_prefix', {time: task.acknowledged_at})}</span>`;
         } else if (isTask && task.acknowledged_at) {
             actionHtml = `<button type="button" class="btn btn-sm btn-success w-100 my-task-complete-btn" data-order-id="${task.order_id}">${t('mytasks.complete_btn')}</button>`;
         } else if (!isTask && task.acknowledged_at) {
-            // location/photo/video have no manual "complete" step — they
+            // location/photo/video/live have no manual "complete" step — they
             // fulfill themselves the moment the volunteer actually does the
             // real thing (see loadMyTaskOrdersForUser()'s docblock), so once
             // acknowledged there's nothing left to click here but waiting.
@@ -8533,22 +8591,121 @@ function renderMyTasks(items) {
         }
         // task.label is already the right display text either way (raw
         // task_text for a task, the localized "order.X.title" string
-        // otherwise) — only the free-typed task case needs escaping here,
-        // same as before this just had one branch.
+        // otherwise) — only the free-typed task case needs escaping here.
         const labelHtml = isTask ? escapeHtml(task.label) : task.label;
-        return `<div class="border rounded p-2 mb-2">
-            <div class="small">${labelHtml}</div>
-            <div class="text-muted" style="font-size:.75rem;">${t('mytasks.sent_prefix', {time: task.sent_at})}</div>
-            <div class="mt-1">${actionHtml}</div>
-        </div>`;
-    }).join('');
+        const done = isNudge ? !!task.acknowledged_at : !!task.fulfilled_at;
+        return {outstanding: !done, html: myOrderRow(labelHtml, t('mytasks.sent_prefix', {time: task.sent_at}), actionHtml)};
+    });
+}
+
+// A dispatch is "mine" when the server left me something to do with it, or a
+// record that I already did: can_receive/can_ack already fold in both "am I
+// on the targeted team" and "am I an approved participant", while my_receipt/
+// my_ack cover the steps I have taken. An admin looking at another team's
+// dispatch matches none of the four and correctly gets no row — which is why
+// this needs no separate eligibility flag from the server.
+function myOrderEntriesFromDispatches(items) {
+    return (items || [])
+        .filter(d => d.can_receive || d.can_ack || d.my_receipt || d.my_ack)
+        .map(d => {
+            const kind = d.type === 'point' ? t('mytasks.dispatch_point_label') : t('mytasks.dispatch_area_label');
+            const labelHtml = escapeHtml(kind + (d.label ? ' — ' + d.label : ''));
+            let actionHtml;
+            if (d.can_receive) {
+                actionHtml = `<button type="button" class="btn btn-sm btn-warning w-100 my-dispatch-receive-btn" data-id="${d.id}">${t('banner.ack_btn')}</button>`;
+            } else if (d.can_ack) {
+                actionHtml = `<button type="button" class="btn btn-sm btn-success w-100 my-dispatch-ack-btn" data-id="${d.id}">${t('dispatch.arrival_btn')}</button>`;
+            } else if (d.my_ack) {
+                actionHtml = `<span class="badge bg-success">${t('dispatch.arrived_at_prefix', {time: d.my_ack})}</span>`;
+            } else {
+                actionHtml = `<span class="badge bg-warning text-dark">${t('mytasks.pending_action_badge')}</span>`;
+            }
+            const receiptHtml = (d.my_receipt && !d.my_ack)
+                ? `<div class="small text-muted mb-1">${t('dispatch.received_at_prefix', {time: d.my_receipt})}</div>`
+                : '';
+            // The complaint this fixes was a volunteer having to find a pin on
+            // the map before they could act on it at all, so the row carries
+            // its own way to actually get there.
+            const directionsHtml = `<a href="${dispatchDirectionsUrl(d)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success w-100 mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
+            return {
+                outstanding: !d.my_ack,
+                html: myOrderRow(labelHtml, escapeHtml(d.team_label), receiptHtml + actionHtml + directionsHtml)
+            };
+        });
+}
+
+function myOrderEntriesFromRoutes(items) {
+    return (items || [])
+        .filter(route => route.is_route_member && route.status === 'active')
+        .map(route => {
+            const done = route.waypoints.filter(wp => wp.completed_at || wp.skipped_at).length;
+            const labelHtml = escapeHtml(t('mytasks.route_label') + ' — ' + (route.title || t('route.default_title')));
+            const actionHtml = !route.my_acknowledged_at
+                ? `<button type="button" class="btn btn-sm btn-warning w-100 my-route-ack-btn" data-id="${route.id}" data-order-id="${route.order_id}">${t('banner.ack_btn')}</button>`
+                : `<button type="button" class="btn btn-sm btn-outline-primary w-100 my-open-card-btn" data-card="myRouteCard">${t('mytasks.open_card_btn')}</button>`;
+            return {
+                outstanding: true,
+                html: myOrderRow(labelHtml, t('mytasks.route_progress', {done: done, total: route.waypoints.length}), actionHtml)
+            };
+        });
+}
+
+function myOrderEntriesFromSectors(items) {
+    return (items || [])
+        .filter(sector => sector.is_my_team && sector.status !== 'completed')
+        .map(sector => {
+            const actionHtml = sector.can_acknowledge
+                ? `<button type="button" class="btn btn-sm btn-warning w-100 my-sector-ack-btn" data-id="${sector.id}">${t('banner.ack_btn')}</button>`
+                : `<button type="button" class="btn btn-sm btn-outline-primary w-100 my-open-card-btn" data-card="mySectorsCard">${t('mytasks.open_card_btn')}</button>`;
+            return {
+                outstanding: true,
+                html: myOrderRow(escapeHtml(t('mytasks.sector_label', {label: sector.label})), escapeHtml(sector.status_label), actionHtml)
+            };
+        });
+}
+
+// renderDispatches/renderMySectors/renderMyRoutes each call this, because a
+// change in any of the three now changes this card too. They call it before
+// their own signature guards: those guards protect their own DOM, and this
+// card has its own below.
+function refreshMyOrdersCard() {
+    renderMyTasks(myTasks);
+}
+
+// Same whole-list-JSON signature technique as renderDispatches/renderMyRoutes,
+// and it earns its keep more here: this now runs on every tick of three other
+// renderers as well as its own, and an unguarded rebuild would re-wire every
+// listener several times a second for nothing.
+let myOrdersRenderedSig = null;
+function renderMyTasks(items) {
+    const list = document.getElementById('myTasksList');
+    if (!list) return;
+
+    const entries = myOrderEntriesFromOrders(items)
+        .concat(myOrderEntriesFromDispatches(dispatches))
+        .concat(myOrderEntriesFromRoutes(routes))
+        .concat(myOrderEntriesFromSectors(sectors));
+    // Outstanding first, finished below it. Array#sort is stable, so within
+    // each half the source order survives — orders newest-first exactly as
+    // before, then dispatches, then the route, then sectors.
+    entries.sort((a, b) => Number(b.outstanding) - Number(a.outstanding));
+
+    const sig = JSON.stringify(entries);
+    if (sig === myOrdersRenderedSig) return;
+    myOrdersRenderedSig = sig;
+
+    list.innerHTML = entries.length
+        ? entries.map(entry => entry.html).join('')
+        : '<p class="text-muted mb-0">' + t('mytasks.empty') + '</p>';
+
     // Drives the "Εγώ" tab's badge (see the wr-my-tasks-updated listener in
     // the tabs IIFE) — a genuine outstanding-count, not an "unread since you
     // last looked" indicator like the chat badge, so it's recomputed fresh
     // from current state every time this renders rather than incremented.
     document.dispatchEvent(new CustomEvent('wr-my-tasks-updated', {
-        detail: {count: items.filter(task => !task.fulfilled_at).length}
+        detail: {count: entries.filter(entry => entry.outstanding).length}
     }));
+
     list.querySelectorAll('.my-task-ack-btn').forEach(btn => btn.addEventListener('click', () => {
         btn.disabled = true;
         const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge', order_id: btn.dataset.orderId});
@@ -8571,8 +8728,20 @@ function renderMyTasks(items) {
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
         }).catch(() => { btn.disabled = false; });
     }));
+    // The other four reuse the exact handlers their own cards use, so a
+    // receive/arrival/acknowledge means the same thing whichever surface it
+    // was tapped on, and the server's response re-renders both of them.
+    list.querySelectorAll('.my-dispatch-receive-btn').forEach(btn =>
+        btn.addEventListener('click', () => postDispatchAction('receive', btn.dataset.id, btn)));
+    list.querySelectorAll('.my-dispatch-ack-btn').forEach(btn =>
+        btn.addEventListener('click', () => postDispatchAction('ack', btn.dataset.id, btn)));
+    list.querySelectorAll('.my-route-ack-btn').forEach(btn =>
+        btn.addEventListener('click', () => routeAcknowledge(btn.dataset.id, btn.dataset.orderId, btn)));
+    list.querySelectorAll('.my-sector-ack-btn').forEach(btn =>
+        btn.addEventListener('click', () => sectorAcknowledge(btn.dataset.id, btn)));
+    list.querySelectorAll('.my-open-card-btn').forEach(btn =>
+        btn.addEventListener('click', () => scrollToCard(btn.dataset.card)));
 }
-
 // ── Route Orders ("Εντολή Πορείας") ─────────────────────────────────────────
 // One team-scoped multi-waypoint patrol. A map-less viewer has no map/media panel at
 // all (see the map block above), so this card is fully
@@ -9143,6 +9312,7 @@ function renderRouteWaypointUpcoming(wp) {
 // check already exists to solve for its own note input.
 let myRoutesRenderedSig = null;
 function renderMyRoutes(allRoutes) {
+    refreshMyOrdersCard();
     const sig = JSON.stringify(allRoutes);
     if (sig === myRoutesRenderedSig) return;
     myRoutesRenderedSig = sig;
