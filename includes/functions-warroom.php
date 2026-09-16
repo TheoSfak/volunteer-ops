@@ -1456,6 +1456,68 @@ function loadMissionTeamsForMission(int $missionId): array {
 }
 
 /**
+ * War Room: which OTHER team of this mission each volunteer currently belongs
+ * to, keyed by user id. Exists so a volunteer can be moved between teams in a
+ * single save: both team forms need to show "this person is on ΒΡΑΒΟ 2" next
+ * to the checkbox, and both handlers need to know who to unassign.
+ *
+ * Before this, neither form would even list someone already on another team,
+ * so a move was two separate saves — remove from A, then add to B — and
+ * between them the volunteer had no team room at all (see syncRoomTabs() in
+ * war-room.php, which correctly takes their team chat away the moment the
+ * first save lands).
+ */
+function loadOtherTeamAssignments(int $missionId, int $excludeTeamId = 0): array {
+    $rows = dbFetchAll(
+        "SELECT mtm.user_id, mt.id AS team_id, mt.codename, mt.team_number, mt.color, mt.leader_id,
+                (SELECT COUNT(*) FROM mission_team_members x WHERE x.team_id = mt.id) AS member_count
+         FROM mission_team_members mtm
+         JOIN mission_teams mt ON mt.id = mtm.team_id
+         WHERE mtm.mission_id = ? AND mt.id != ?",
+        [$missionId, $excludeTeamId]
+    );
+    $byUserId = [];
+    foreach ($rows as $row) {
+        $byUserId[(int) $row['user_id']] = [
+            'team_id'      => (int) $row['team_id'],
+            'label'        => teamLabel($row['codename'], $row['team_number']),
+            'color'        => $row['color'],
+            'leader_id'    => $row['leader_id'] !== null ? (int) $row['leader_id'] : null,
+            'member_count' => (int) $row['member_count'],
+        ];
+    }
+    return $byUserId;
+}
+
+/**
+ * War Room: of the volunteers about to be pulled onto another team, which ones
+ * cannot be taken without breaking the team they would leave — returns those
+ * teams' labels (deduplicated), empty when the move is safe.
+ *
+ * Blocked in two cases, which are really one: the app's own invariant is that
+ * a team's leader is always one of its members (both create_team and
+ * update_team enforce it), so taking a leader would leave a team pointing at
+ * someone who is no longer on it. A one-member team is the same case — that
+ * member is necessarily its leader — and taking them would also silently
+ * leave an empty team behind.
+ *
+ * Deliberately a refusal rather than an auto-promotion: who leads a team mid
+ * operation is a command decision, and quietly picking the next name on the
+ * roster is exactly the kind of guess that gets found out at the worst moment.
+ */
+function teamsBlockedFromMemberMove(array $userIds, array $otherAssignments): array {
+    $labels = [];
+    foreach ($userIds as $userId) {
+        $current = $otherAssignments[(int) $userId] ?? null;
+        if (!$current) continue;
+        if ($current['leader_id'] === (int) $userId || $current['member_count'] <= 1) {
+            $labels[$current['label']] = $current['label'];
+        }
+    }
+    return array_values($labels);
+}
+
+/**
  * War Room: command-staff recipient set for admin-facing alerts (shortage
  * reports, and reusable for similar future cases) — system/dept admins +
  * this mission's shift leaders + the mission's responsible_user_id, MINUS

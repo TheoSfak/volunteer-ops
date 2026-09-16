@@ -473,20 +473,24 @@ if (isPost()) {
         );
         $namesByUserId = array_column($approvedVolunteers, 'name', 'volunteer_id');
         $approvedIds = array_map('intval', array_column($approvedVolunteers, 'volunteer_id'));
-        $assignedIds = array_map('intval', array_column(
-            dbFetchAll("SELECT user_id FROM mission_team_members WHERE mission_id = ?", [$missionId]),
-            'user_id'
-        ));
-        $eligibleIds = array_diff($approvedIds, $assignedIds);
+        // Same relaxation as update_team below: a volunteer already on another
+        // team can be picked here and is MOVED into the new one. Splitting a
+        // big team in two is the common case, and it used to mean emptying
+        // people out of the old team first in a separate save.
+        $otherAssignments = loadOtherTeamAssignments($missionId);
 
         $memberIds = array_values(array_unique(array_intersect(
             array_map('intval', (array)($_POST['member_ids'] ?? [])),
-            $eligibleIds
+            $approvedIds
         )));
         $leaderId = (int) post('leader_id');
+        $movedIds = array_values(array_filter($memberIds, fn($id) => isset($otherAssignments[$id])));
+        $blockedTeams = teamsBlockedFromMemberMove($movedIds, $otherAssignments);
 
         if (empty($memberIds)) {
             setFlash('warning', t('team.create.select_member_warning'));
+        } elseif (!empty($blockedTeams)) {
+            setFlash('warning', t('team.move.leader_blocked', ['teams' => implode(', ', $blockedTeams)]));
         } elseif (!in_array($leaderId, $memberIds, true)) {
             setFlash('warning', t('team.leader_must_be_member'));
         } else {
@@ -517,17 +521,36 @@ if (isPost()) {
             if ($numberGenerationFailed) {
                 setFlash('error', t('team.create.number_failed'));
             } else {
-                $teamId = dbInsert(
-                    "INSERT INTO mission_teams (mission_id, codename, team_number, color, leader_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
-                    [$missionId, $codename, $teamNumber, $teamColor, $leaderId, $user['id']]
-                );
-                foreach ($memberIds as $memberId) {
-                    dbInsert(
-                        "INSERT INTO mission_team_members (team_id, mission_id, user_id, added_at) VALUES (?, ?, ?, NOW())",
-                        [$teamId, $missionId, $memberId]
+                db()->beginTransaction();
+                try {
+                    $teamId = dbInsert(
+                        "INSERT INTO mission_teams (mission_id, codename, team_number, color, leader_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+                        [$missionId, $codename, $teamNumber, $teamColor, $leaderId, $user['id']]
                     );
+                    if (!empty($movedIds)) {
+                        $movePlaceholders = implode(',', array_fill(0, count($movedIds), '?'));
+                        dbExecute(
+                            "DELETE FROM mission_team_members WHERE mission_id = ? AND user_id IN ($movePlaceholders)",
+                            array_merge([$missionId], $movedIds)
+                        );
+                    }
+                    foreach ($memberIds as $memberId) {
+                        dbInsert(
+                            "INSERT INTO mission_team_members (team_id, mission_id, user_id, added_at) VALUES (?, ?, ?, NOW())",
+                            [$teamId, $missionId, $memberId]
+                        );
+                    }
+                    db()->commit();
+                } catch (Throwable $e) {
+                    db()->rollBack();
+                    throw $e;
                 }
-                logAudit('create_mission_team', 'mission_teams', $teamId, null, ['mission_id' => $missionId, 'member_ids' => $memberIds, 'leader_id' => $leaderId]);
+                logAudit('create_mission_team', 'mission_teams', $teamId, null, [
+                    'mission_id' => $missionId,
+                    'member_ids' => $memberIds,
+                    'leader_id'  => $leaderId,
+                    'moved_from' => array_map(fn($id) => ['user_id' => $id, 'team' => $otherAssignments[$id]['label']], $movedIds),
+                ]);
                 notifyMissionTeamMembers($missionId, $mission['title'], $codename, $teamNumber, $memberIds, $leaderId, $namesByUserId);
                 setFlash('success', t('team.create.success_flash', ['team' => $codename . ' ' . $teamNumber]));
             }
@@ -556,20 +579,25 @@ if (isPost()) {
         );
         $namesByUserId = array_column($approvedVolunteers, 'name', 'volunteer_id');
         $approvedIds = array_map('intval', array_column($approvedVolunteers, 'volunteer_id'));
-        $assignedElsewhereIds = array_map('intval', array_column(
-            dbFetchAll("SELECT user_id FROM mission_team_members WHERE mission_id = ? AND team_id != ?", [$missionId, $teamId]),
-            'user_id'
-        ));
-        $eligibleIds = array_diff($approvedIds, $assignedElsewhereIds);
+        // Anyone approved on the mission is selectable here, including people
+        // already on another team — ticking one MOVES them, in this same save.
+        // It used to be array_diff($approvedIds, $assignedElsewhereIds), which
+        // made a move two saves (remove from A, save; add to B, save) with the
+        // volunteer holding no team chat room in between.
+        $otherAssignments = loadOtherTeamAssignments($missionId, $teamId);
 
         $memberIds = array_values(array_unique(array_intersect(
             array_map('intval', (array)($_POST['member_ids'] ?? [])),
-            $eligibleIds
+            $approvedIds
         )));
         $leaderId = (int) post('leader_id');
+        $movedIds = array_values(array_filter($memberIds, fn($id) => isset($otherAssignments[$id])));
+        $blockedTeams = teamsBlockedFromMemberMove($movedIds, $otherAssignments);
 
         if (empty($memberIds)) {
             setFlash('warning', t('team.update.select_member_warning'));
+        } elseif (!empty($blockedTeams)) {
+            setFlash('warning', t('team.move.leader_blocked', ['teams' => implode(', ', $blockedTeams)]));
         } elseif (!in_array($leaderId, $memberIds, true)) {
             setFlash('warning', t('team.leader_must_be_member'));
         } else {
@@ -577,17 +605,47 @@ if (isPost()) {
                 dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]),
                 'user_id'
             ));
-            dbExecute("DELETE FROM mission_team_members WHERE team_id = ?", [$teamId]);
-            foreach ($memberIds as $memberId) {
-                dbInsert(
-                    "INSERT INTO mission_team_members (team_id, mission_id, user_id, added_at) VALUES (?, ?, ?, NOW())",
-                    [$teamId, $missionId, $memberId]
-                );
+            // One transaction: a move is a delete from the old team plus an
+            // insert into this one, and a volunteer left in neither — or in
+            // both — is worse than the edit simply failing.
+            db()->beginTransaction();
+            try {
+                if (!empty($movedIds)) {
+                    $movePlaceholders = implode(',', array_fill(0, count($movedIds), '?'));
+                    dbExecute(
+                        "DELETE FROM mission_team_members WHERE mission_id = ? AND team_id != ? AND user_id IN ($movePlaceholders)",
+                        array_merge([$missionId, $teamId], $movedIds)
+                    );
+                }
+                dbExecute("DELETE FROM mission_team_members WHERE team_id = ?", [$teamId]);
+                foreach ($memberIds as $memberId) {
+                    dbInsert(
+                        "INSERT INTO mission_team_members (team_id, mission_id, user_id, added_at) VALUES (?, ?, ?, NOW())",
+                        [$teamId, $missionId, $memberId]
+                    );
+                }
+                dbExecute("UPDATE mission_teams SET leader_id = ?, updated_at = NOW() WHERE id = ?", [$leaderId, $teamId]);
+                db()->commit();
+            } catch (Throwable $e) {
+                db()->rollBack();
+                throw $e;
             }
-            dbExecute("UPDATE mission_teams SET leader_id = ?, updated_at = NOW() WHERE id = ?", [$leaderId, $teamId]);
-            logAudit('update_mission_team', 'mission_teams', $teamId, ['member_ids' => $oldMemberIds], ['member_ids' => $memberIds, 'leader_id' => $leaderId]);
+            logAudit('update_mission_team', 'mission_teams', $teamId, ['member_ids' => $oldMemberIds], [
+                'member_ids' => $memberIds,
+                'leader_id'  => $leaderId,
+                // Who was taken and from where — without this the audit trail
+                // shows a team gaining a member and says nothing about the
+                // other team quietly losing one in the same action.
+                'moved_from' => array_map(fn($id) => ['user_id' => $id, 'team' => $otherAssignments[$id]['label']], $movedIds),
+            ]);
             notifyMissionTeamMembers($missionId, $mission['title'], $team['codename'], ($team['team_number'] !== null ? (int) $team['team_number'] : null), $memberIds, $leaderId, $namesByUserId);
-            setFlash('success', t('team.update.success_flash', ['team' => teamLabel($team['codename'], $team['team_number'])]));
+            $teamLabelForFlash = teamLabel($team['codename'], $team['team_number']);
+            setFlash('success', empty($movedIds)
+                ? t('team.update.success_flash', ['team' => $teamLabelForFlash])
+                : t('team.update.success_with_moves_flash', [
+                    'team'  => $teamLabelForFlash,
+                    'moved' => implode(', ', array_map(fn($id) => ($namesByUserId[$id] ?? ('#' . $id)) . ' (' . $otherAssignments[$id]['label'] . ')', $movedIds)),
+                ]));
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'delete_team') {
@@ -3891,6 +3949,44 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 </div>
 
 <?php if ($canManageWarRoom): ?>
+<?php
+/**
+ * One checkbox row in either team form. Both forms now offer people who are
+ * already on another team, because ticking one moves them in the same save —
+ * so the row has to say which team it would be taking them from, and grey out
+ * the ones that cannot be taken at all (a team's leader, or its only member,
+ * either of which would leave that team broken behind you). The server
+ * re-checks both in teamsBlockedFromMemberMove(); this is so the admin never
+ * gets that far.
+ */
+$teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamId) use ($teamIdByUserId, $teamLabelByUserId, $teamColorByUserId, $teams) {
+    $userId = (int) $person['user_id'];
+    $fromTeamId = $teamIdByUserId[$userId] ?? null;
+    $isElsewhere = $fromTeamId !== null && $fromTeamId !== $currentTeamId;
+    $blocked = false;
+    if ($isElsewhere && isset($teams[$fromTeamId])) {
+        $fromTeam = $teams[$fromTeamId];
+        $blocked = ((int) ($fromTeam['leader_id'] ?? 0) === $userId) || count($fromTeam['members']) <= 1;
+    }
+    ob_start();
+    ?>
+    <label class="form-check d-flex align-items-center gap-2 py-1<?= $blocked ? ' opacity-50' : '' ?>">
+        <input class="form-check-input team-member-check" type="checkbox" name="member_ids[]"
+               value="<?= $userId ?>" data-name="<?= h($person['name']) ?>"
+               <?= $checked ? 'checked' : '' ?> <?= $blocked ? 'disabled' : '' ?>>
+        <span><?= h($person['name']) ?></span>
+        <?php if ($isElsewhere): ?>
+            <?php [$fromBg, $fromFg] = teamBadgeColors($teamColorByUserId[$userId] ?? null); ?>
+            <span class="badge" style="background:<?= h($fromBg) ?>;color:<?= h($fromFg) ?>;font-size:.68rem;"><?= h($teamLabelByUserId[$userId] ?? '') ?></span>
+            <?php if ($blocked): ?>
+            <span class="small text-muted"><?= t('teams.move.cannot_take') ?></span>
+            <?php endif; ?>
+        <?php endif; ?>
+    </label>
+    <?php
+    return ob_get_clean();
+};
+?>
 <div class="modal fade" id="createTeamModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -3903,17 +3999,26 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <input type="hidden" name="action" value="create_team">
                 <div class="modal-body">
                     <p class="small text-muted"><?= t('teams.create_modal.select_note') ?></p>
+                    <?php
+                        // Unassigned volunteers first - they are the natural picks -
+                        // then everyone already on a team, who can be pulled across
+                        // into the new one without emptying their old team first.
+                        $createPool = array_merge(
+                            $unassignedApproved,
+                            array_values(array_filter($distinctApprovedById, fn($p) => isset($teamIdByUserId[$p['user_id']])))
+                        );
+                    ?>
                     <div class="border rounded p-2 mb-3" style="max-height:220px;overflow:auto;">
-                        <?php foreach ($unassignedApproved as $person): ?>
-                        <label class="form-check d-flex align-items-center gap-2 py-1">
-                            <input class="form-check-input team-member-check" type="checkbox" name="member_ids[]" value="<?= $person['user_id'] ?>" data-name="<?= h($person['name']) ?>">
-                            <span><?= h($person['name']) ?></span>
-                        </label>
+                        <?php foreach ($createPool as $person): ?>
+                        <?= $teamMemberCheckbox($person, false, null) ?>
                         <?php endforeach; ?>
-                        <?php if (empty($unassignedApproved)): ?>
+                        <?php if (empty($createPool)): ?>
                         <div class="text-muted small"><?= t('teams.create_modal.no_available') ?></div>
                         <?php endif; ?>
                     </div>
+                    <?php if (!empty($teams)): ?>
+                    <p class="small text-muted mb-3"><i class="bi bi-info-circle me-1"></i><?= t('teams.move_note') ?></p>
+                    <?php endif; ?>
                     <label class="form-label small fw-semibold"><?= t('teams.custom_name_label') ?></label>
                     <input type="text" class="form-control mb-3" name="custom_codename" maxlength="20" placeholder="<?= t('teams.custom_name_placeholder') ?>">
                     <label class="form-label small fw-semibold"><?= t('teams.leader_label') ?></label>
@@ -3933,9 +4038,16 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 <?php foreach ($teams as $team): ?>
 <?php
     $memberIdsInTeam = array_column($team['members'], 'user_id');
+    // People on OTHER teams are now offered too: ticking one moves them here
+    // in this same save. teamMemberCheckbox() badges them with the team they
+    // would be leaving, and disables the ones that cannot be taken.
     $editablePool = array_merge(
         $team['members'],
-        array_values(array_filter($unassignedApproved, fn($p) => !in_array($p['user_id'], $memberIdsInTeam, true)))
+        array_values(array_filter($unassignedApproved, fn($p) => !in_array($p['user_id'], $memberIdsInTeam, true))),
+        array_values(array_filter(
+            $distinctApprovedById,
+            fn($p) => isset($teamIdByUserId[$p['user_id']]) && $teamIdByUserId[$p['user_id']] !== $team['id']
+        ))
     );
 ?>
 <div class="modal fade" id="editTeamModal-<?= $team['id'] ?>" tabindex="-1">
@@ -3952,14 +4064,12 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <div class="modal-body">
                     <div class="border rounded p-2 mb-3" style="max-height:220px;overflow:auto;">
                         <?php foreach ($editablePool as $person): ?>
-                        <label class="form-check d-flex align-items-center gap-2 py-1">
-                            <input class="form-check-input team-member-check" type="checkbox" name="member_ids[]"
-                                   value="<?= $person['user_id'] ?>" data-name="<?= h($person['name']) ?>"
-                                   <?= in_array($person['user_id'], $memberIdsInTeam, true) ? 'checked' : '' ?>>
-                            <span><?= h($person['name']) ?></span>
-                        </label>
+                        <?= $teamMemberCheckbox($person, in_array($person['user_id'], $memberIdsInTeam, true), (int) $team['id']) ?>
                         <?php endforeach; ?>
                     </div>
+                    <?php if (count($teams) > 1): ?>
+                    <p class="small text-muted"><i class="bi bi-info-circle me-1"></i><?= t('teams.move_note') ?></p>
+                    <?php endif; ?>
                     <label class="form-label small fw-semibold"><?= t('teams.leader_label') ?></label>
                     <select class="form-select team-leader-select" name="leader_id" id="editTeamLeader-<?= $team['id'] ?>" required data-current="<?= $team['leader_id'] ?>"></select>
                 </div>
