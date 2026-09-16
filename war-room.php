@@ -4595,6 +4595,11 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <?php endif; ?>
 <script>
 const csrfToken = '<?= csrfToken() ?>';
+// Settings → Γενικές → «Μονάδα Έκτασης». Consumed by areaTierForGroup()
+// in war-room-utils.js, which is why it is a bare global rather than a
+// property of something: that file has no access to anything this page
+// scopes, exactly as it already reads t().
+const AREA_UNIT_PREFERENCE = '<?= areaUnitSetting() ?>';
 // The viewer's own user id. First top-level mirror of it in this file - the
 // chat IIFE had the only copy, embedded at its own call site - and it is here
 // rather than duplicated again because renderTeamRosters() now needs it too,

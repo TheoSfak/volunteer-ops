@@ -3027,6 +3027,21 @@ function gridMaxCells(): int {
     return max(10, min(MAX_GRID_CELLS, (int) getSetting('war_room_grid_max_cells', '120') ?: 120));
 }
 
+/**
+ * Which unit the Action Room prints areas in: 'auto' (each group of figures
+ * shown together picks the finest unit any of them needs), 'mid' (στρέμματα
+ * in Greek, hectares in English — the language file decides, see
+ * common.unit_area_mid_divisor) or 'm2' (square metres, always).
+ *
+ * Read here and rendered into war-room.php as AREA_UNIT_PREFERENCE, which
+ * areaTierForGroup() in assets/js/war-room-utils.js consults. Anything not
+ * recognised falls back to 'auto' rather than erroring, the same way the
+ * ticker-position setting does.
+ */
+function areaUnitSetting(): string {
+    $value = (string) getSetting('war_room_area_unit', 'auto');
+    return in_array($value, ['auto', 'mid', 'm2'], true) ? $value : 'auto';
+}
 function gridMaxSectorSizeM(): int {
     return max(200, min(GRID_SECTOR_SIZE_MAX_M, (int) getSetting('war_room_grid_max_size_m', '900') ?: 900));
 }
@@ -3063,8 +3078,10 @@ function gridMaxSectorSizeM(): int {
  * bites: cols and rows are each derived from the bounding box measured in
  * METERS, so the cells come out square-ish on the ground. Same flat local
  * projection (111320 m/deg, times cos(lat) for longitude) as every other
- * meters-per-degree conversion in this file, evaluated once at the area's
- * own center latitude; at mission scale it sits well inside GPS error.
+ * own center latitude. The conversion itself is WGS84 (metersPerDegreeLat()
+ * / metersPerDegreeLng() above), not the flat 111320 this used to carry for
+ * both, which reported cells 0.34% taller and 0.11% narrower than the ground
+ * they cover — a bias, not noise, and always in the same direction.
  *
  * $geo is a ring of [lat, lng] pairs — mission_search_areas.geo's own shape,
  * not GeoJSON's [lng, lat], same as pointInPolygon() above. Cells come back
@@ -3078,6 +3095,33 @@ function gridMaxSectorSizeM(): int {
  * comes back 0. That is a real outcome, not an error to raise here — the
  * caller decides what to tell the admin (see generate_grid's grid.no_cells).
  */
+/**
+ * Metres per degree of latitude, and per degree of longitude at that
+ * latitude, on the WGS84 ellipsoid. PHP twin of metersPerDegreeLat() /
+ * metersPerDegreeLng() in assets/js/war-room-utils.js — see that file for
+ * why the flat 111320 they replaced was a systematic 0.08%-0.24% overstatement
+ * everywhere in Greece, worst in Crete.
+ *
+ * Used by buildSectorGridCells() below, which must agree with its JS twin
+ * cell for cell (tests/fixtures/grid-cases.json), so the two have to be
+ * changed together or CI fails.
+ */
+define('WGS84_A', 6378137.0);
+define('WGS84_E2', 0.00669437999014);
+
+function metersPerDegreeLat(float $latDeg): float {
+    $sinLat = sin(deg2rad($latDeg));
+    return deg2rad(1.0) * (WGS84_A * (1 - WGS84_E2)) / pow(1 - WGS84_E2 * $sinLat * $sinLat, 1.5);
+}
+
+function metersPerDegreeLng(float $latDeg): float {
+    $sinLat = sin(deg2rad($latDeg));
+    // cos clamped exactly as before, so a polygon at the pole cannot make
+    // zero-width grid columns.
+    $cosLat = max(0.01, cos(deg2rad($latDeg)));
+    return deg2rad(1.0) * (WGS84_A / sqrt(1 - WGS84_E2 * $sinLat * $sinLat)) * $cosLat;
+}
+
 function buildSectorGridCells(array $geo, int $sizeM): array {
     $sizeM = max(GRID_SECTOR_SIZE_MIN_M, min(GRID_SECTOR_SIZE_MAX_M, $sizeM));
 
@@ -3089,8 +3133,8 @@ function buildSectorGridCells(array $geo, int $sizeM): array {
     $maxLng = max($lngs);
 
     $centerLat = ($minLat + $maxLat) / 2;
-    $mPerDegLat = 111320.0;
-    $mPerDegLng = 111320.0 * max(0.01, cos(deg2rad($centerLat)));
+    $mPerDegLat = metersPerDegreeLat($centerLat);
+    $mPerDegLng = metersPerDegreeLng($centerLat);
 
     $bboxH = ($maxLat - $minLat) * $mPerDegLat;
     $bboxW = ($maxLng - $minLng) * $mPerDegLng;

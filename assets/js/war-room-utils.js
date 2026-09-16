@@ -278,15 +278,54 @@ function pointInPolygon(lat, lng, geo) {
     return inside;
 }
 
-// Flat shoelace over a local equirectangular projection — deliberately the
-// SAME approximation, and the same 111320 m/degree constant taken at the
-// bounding box's own centre latitude, that gridCellsForPolygon() below uses
-// for its cell metres. A geodesic formula would be a shade more accurate in
-// absolute terms, but then the grid preview's "397 × 412 m" and the square
-// metres printed next to it would quietly disagree about the same rectangle.
-// Two numbers describing one piece of ground have to come from one model;
-// being 0.3% off on a figure nobody checks with a tape measure is the
-// cheaper error.
+// Metres per degree of latitude, and per degree of longitude at that
+// latitude, on the WGS84 ellipsoid — the same reference frame the GPS in
+// every phone reports against, so these are the numbers that make a figure
+// on screen mean the ground under a rescuer.
+//
+// What they replace was a flat 111320 for latitude and 111320·cos φ for
+// longitude. That is a sphere's number, and it is wrong in the same
+// direction everywhere in Greece: at 35°N a degree of latitude is really
+// 110.941 m, not 111.320, while a degree of longitude is 91.289 m, not
+// 91.189. Checked against the closed-form area of a graticule quadrangle on
+// WGS84 — exact, no approximation — that pushed every area here between
+// 0.08% (Thrace) and 0.24% (Crete) too HIGH. Small beside GPS error, but a
+// bias rather than noise: it never averages out, and it reported a 359.2
+// στρέμματα sector as 360.0. With these it is 0.00001%.
+//
+// They are also what the grid measures its bounding box with, so a cell the
+// tool calls 600 m really is 600 m of ground rather than 598.
+const WGS84_A = 6378137.0;                  // semi-major axis, metres
+const WGS84_E2 = 0.00669437999014;          // first eccentricity squared, f(2−f)
+const DEG_TO_RAD = Math.PI / 180;
+
+function metersPerDegreeLat(latDeg) {
+    const sinLat = Math.sin(latDeg * DEG_TO_RAD);
+    // Meridian radius of curvature M(φ), one degree of it.
+    return DEG_TO_RAD * (WGS84_A * (1 - WGS84_E2)) / Math.pow(1 - WGS84_E2 * sinLat * sinLat, 1.5);
+}
+
+function metersPerDegreeLng(latDeg) {
+    const sinLat = Math.sin(latDeg * DEG_TO_RAD);
+    // Prime-vertical radius N(φ) times cos φ — the radius of the parallel.
+    // cos is clamped exactly as it was before, so a polygon at the pole
+    // cannot produce zero-width grid columns.
+    const cosLat = Math.max(0.01, Math.cos(latDeg * DEG_TO_RAD));
+    return DEG_TO_RAD * (WGS84_A / Math.sqrt(1 - WGS84_E2 * sinLat * sinLat)) * cosLat;
+}
+
+// Flat shoelace over a local equirectangular projection, using the WGS84
+// metres-per-degree above taken at the bounding box's own centre latitude —
+// deliberately the same projection gridCellsForPolygon() below measures its
+// cells with, so the square metres and the "397 × 412 m" printed beside them
+// can never disagree about the same rectangle.
+//
+// Accuracy against the exact ellipsoidal quadrangle area is better than
+// 0.001% anywhere in Greece at mission scale, which is two or three orders
+// of magnitude inside GPS error — see the accuracy tests, which measure it
+// rather than assert a rounded sample. The one thing the flat projection
+// still assumes is that an edge drawn between two vertices is straight on
+// the map, which is exactly what the person drawing it meant.
 // A point on a closed ring addressed by a "ring position": floor(r) is the
 // edge index (the edge running from ring[i] to ring[i+1]) and frac(r) is how
 // far along that edge, so r = 3 is vertex 3 itself and r = 3.5 is halfway to
@@ -359,8 +398,8 @@ function polygonAreaSquareMeters(geo) {
     const lats = geo.map(pt => Number(pt[0]));
     const lngs = geo.map(pt => Number(pt[1]));
     const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
-    const mPerDegLat = 111320;
-    const mPerDegLng = 111320 * Math.max(0.01, Math.cos(centerLat * Math.PI / 180));
+    const mPerDegLat = metersPerDegreeLat(centerLat);
+    const mPerDegLng = metersPerDegreeLng(centerLat);
 
     // Metres relative to the first vertex, not absolute ones. Subtracting the
     // origin up front keeps the cross products small; multiplying raw
@@ -388,8 +427,8 @@ function gridCellsForPolygon(geo, sizeM) {
     const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
 
     const centerLat = (minLat + maxLat) / 2;
-    const mPerDegLat = 111320;
-    const mPerDegLng = 111320 * Math.max(0.01, Math.cos(centerLat * Math.PI / 180));
+    const mPerDegLat = metersPerDegreeLat(centerLat);
+    const mPerDegLng = metersPerDegreeLng(centerLat);
 
     const bboxH = (maxLat - minLat) * mPerDegLat;
     const bboxW = (maxLng - minLng) * mPerDegLng;
@@ -492,9 +531,25 @@ const AREA_TIER_KM2_FROM_M2 = 1000000;
 // sector); pushing it up into square kilometres renders it as 0.35 and
 // destroys the very number the group exists to show, whereas pulling the
 // large one down only makes it longer, which grouped thousands then fix.
+// The unit an admin pinned in Settings → Γενικές, if this page declares one.
+// war-room.php emits AREA_UNIT_PREFERENCE from the stored setting; every
+// other context (and the tests) simply has no such global, and 'auto' — the
+// shipped default — lets each group choose for itself as described above.
+// Read through typeof rather than a bare reference so an undeclared global
+// is not a ReferenceError.
+function areaUnitPreference() {
+    const pref = typeof AREA_UNIT_PREFERENCE !== 'undefined' ? AREA_UNIT_PREFERENCE : 'auto';
+    return pref === 'mid' || pref === 'm2' ? pref : 'auto';
+}
+
 function areaTierForGroup(valuesM2) {
     const usable = (valuesM2 || []).filter(v => typeof v === 'number' && isFinite(v) && v > 0);
+    // Nothing to show is nothing to show, whatever the admin picked.
     if (!usable.length) return null;
+
+    const forced = areaUnitPreference();
+    if (forced !== 'auto') return forced;
+
     const smallest = Math.min(...usable);
     if (smallest < AREA_TIER_MID_FROM_M2) return 'm2';
     if (smallest < AREA_TIER_KM2_FROM_M2) return 'mid';
@@ -534,7 +589,11 @@ function formatAreaSquareMeters(m2, tier) {
         const mid = m2 / perMidUnit;
         // One decimal only while it buys something. At three digits the
         // tenth of a στρέμμα is noise on a number used to size a sweep.
-        return `${formatAreaNumber(mid, mid < 100 ? 1 : 0)} ${t('common.unit_area_mid')}`;
+        // Two below ten, because an admin who pinned στρέμματα in Settings
+        // still gets shown small plots in them, and 0,05 στρ. has to stay
+        // distinguishable from 0,1 rather than collapsing onto it.
+        const decimals = mid < 10 ? 2 : (mid < 100 ? 1 : 0);
+        return `${formatAreaNumber(mid, decimals)} ${t('common.unit_area_mid')}`;
     }
     const km2 = m2 / 1000000;
     return `${formatAreaNumber(km2, km2 < 100 ? 2 : 0)} ${t('common.unit_area_km2')}`;
@@ -745,6 +804,8 @@ if (typeof module !== 'undefined' && module.exports) {
         sectorSearchLegCount,
         ringDiscPolygonPoints,
         pointInPolygon,
+        metersPerDegreeLat,
+        metersPerDegreeLng,
         gridCellsForPolygon,
         polygonAreaSquareMeters,
         pointAtRingPos,
@@ -756,6 +817,7 @@ if (typeof module !== 'undefined' && module.exports) {
         formatDistanceMeters,
         formatAreaSquareMeters,
         areaTierForGroup,
+        areaUnitPreference,
         bearingToCompassAbbr,
         missingRouteDeliverablesClientSide,
         shouldSkipVideoCompression,

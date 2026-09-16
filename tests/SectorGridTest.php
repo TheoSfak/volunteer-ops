@@ -67,13 +67,16 @@ final class SectorGridTest extends TestCase
         $this->assertLessThan(500, $grid['actual_w_m']);
         $this->assertLessThan(500, $grid['actual_h_m']);
 
-        // 3637m / 8 columns and 2226m / 5 rows. Whole cells, covering the
+        // 3641m / 8 columns and 2219m / 5 rows. Whole cells, covering the
         // whole bounding box, which is the entire point of rounding the count
-        // up rather than the size down.
+        // up rather than the size down. The bounding box is measured on the
+        // WGS84 ellipsoid; on the flat 111320 this file used to assume, the
+        // same rectangle read 3637m x 2226m — 7m taller than the ground it
+        // covers.
         $this->assertSame(8, $grid['cols']);
         $this->assertSame(5, $grid['rows']);
-        $this->assertEqualsWithDelta(454.7, $grid['actual_w_m'], 1.0);
-        $this->assertEqualsWithDelta(445.3, $grid['actual_h_m'], 1.0);
+        $this->assertEqualsWithDelta(455.2, $grid['actual_w_m'], 1.0);
+        $this->assertEqualsWithDelta(443.8, $grid['actual_h_m'], 1.0);
     }
 
     public function testEveryCellOfARectangularAreaIsKept(): void

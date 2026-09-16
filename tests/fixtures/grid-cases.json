@@ -3,7 +3,7 @@
     "cases": [
         {
             "name": "crete_rect_500",
-            "why": "The flagship case: a rectangle on Psiloritis, 2226m x 3637m, which is a whole number of cells in neither direction. Proves cols/rows rounding, the always-smaller actual size, and full coverage when nothing is dropped.",
+            "why": "The flagship case: a rectangle on Psiloritis, 2219m x 3641m of WGS84 ground, which is a whole number of cells in neither direction. Proves cols/rows rounding, the always-smaller actual size, and full coverage when nothing is dropped.",
             "geo": [[35.24, 24.75], [35.24, 24.79], [35.22, 24.79], [35.22, 24.75]],
             "size_m": 500,
             "expect": {
@@ -55,8 +55,8 @@
                 "total": 40,
                 "kept": 40,
                 "requested_m": 500,
-                "actual_w_m": 454.7,
-                "actual_h_m": 445.3
+                "actual_w_m": 455.2,
+                "actual_h_m": 443.8
             }
         },
         {
@@ -118,8 +118,8 @@
                 "total": 40,
                 "kept": 20,
                 "requested_m": 500,
-                "actual_w_m": 454.7,
-                "actual_h_m": 445.3
+                "actual_w_m": 455.2,
+                "actual_h_m": 443.8
             }
         },
         {
@@ -184,8 +184,8 @@
                 "total": 40,
                 "kept": 34,
                 "requested_m": 600,
-                "actual_w_m": 568.3,
-                "actual_h_m": 556.6
+                "actual_w_m": 569,
+                "actual_h_m": 554.7
             }
         },
         {
@@ -206,8 +206,8 @@
                 "total": 4,
                 "kept": 4,
                 "requested_m": 2000,
-                "actual_w_m": 1818.6,
-                "actual_h_m": 1113.2
+                "actual_w_m": 1820.6,
+                "actual_h_m": 1109.4
             }
         },
         {
@@ -228,8 +228,8 @@
                 "total": 4,
                 "kept": 4,
                 "requested_m": 2000,
-                "actual_w_m": 1818.6,
-                "actual_h_m": 1113.2
+                "actual_w_m": 1820.6,
+                "actual_h_m": 1109.4
             }
         },
         {
@@ -267,7 +267,7 @@
                 "kept": 20,
                 "requested_m": 50,
                 "actual_w_m": 45.5,
-                "actual_h_m": 44.5
+                "actual_h_m": 44.4
             }
         },
         {

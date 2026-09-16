@@ -47,6 +47,7 @@ $defaults = [
     'war_room_max_shift_minutes' => '480',
     'war_room_grid_max_size_m' => '900',
     'war_room_grid_max_cells' => '120',
+    'war_room_area_unit' => 'auto',
     // Rescuer heart rate (volunteer_vitals). Off by default: it needs a
     // sensor per volunteer and it collects health data, so it must be an
     // explicit decision by the org, never something that starts working
@@ -615,7 +616,7 @@ if (isPost()) {
 
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_grid_max_size_m', 'war_room_grid_max_cells',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_grid_max_size_m', 'war_room_grid_max_cells', 'war_room_area_unit',
             'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct', 'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
             'vitals_episode_tachy_minutes', 'vitals_episode_brady_minutes', 'vitals_episode_strain_minutes',
             'admin_email', 'developer_email', 'timezone', 'date_format',
@@ -676,6 +677,13 @@ if (isPost()) {
             // enforced here and not just by the form's max attribute.
             if ($field === 'war_room_grid_max_cells') {
                 $value = (string) max(10, min(MAX_GRID_CELLS, (int) $value ?: 120));
+            }
+
+            // Same allowlist-or-fall-back shape as war_room_ticker_position
+            // below: a value outside the three the form offers can only come
+            // from a hand-made POST, and 'auto' is the harmless answer.
+            if ($field === 'war_room_area_unit' && !in_array($value, ['auto', 'mid', 'm2'], true)) {
+                $value = 'auto';
             }
 
             // vitalsConfig() clamps every one of these again on read, so this
@@ -1527,6 +1535,16 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <input type="number" class="form-control" style="max-width:160px;" name="war_room_grid_max_cells"
                                value="<?= h($settings['war_room_grid_max_cells'] ?? '120') ?>" min="10" max="<?= MAX_GRID_CELLS ?>" step="10">
                         <small class="text-muted">Πόσους τομείς το πολύ μπορεί να παράγει ένα πλέγμα σε μία περιοχή έρευνας. Πάνω από αυτό, το κουμπί δημιουργίας κλειδώνει και ζητείται μεγαλύτερο μέγεθος τομέα. <strong>Δεν είναι όριο της βάσης — είναι όριο δικτύου:</strong> κάθε τομέας της αποστολής στέλνεται ολόκληρος σε κάθε ανανέωση των 5 δευτερολέπτων, σε κάθε ανοιχτή οθόνη Action Room, και κοστίζει περίπου 739 bytes (μετρημένο σε πραγματική αποστολή). Με 120 τομείς αυτό είναι ~87KB ανά 5 δευτερόλεπτα ανά οθόνη, με 400 γίνεται ~290KB. Ανεβάστε το μόνο αν χρειάζεστε πυκνότερο πλέγμα και οι συντονιστές δεν κρατούν πολλές οθόνες ανοιχτές ταυτόχρονα. Επίσης: κάθε τομέας ζωγραφίζει μόνιμη ετικέτα στον χάρτη, και ήδη στους 49 αρχίζουν να στριμώχνονται μεταξύ τους. Προεπιλογή 120, μέγιστο <?= MAX_GRID_CELLS ?>.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Μονάδα Έκτασης Action Room</label>
+                        <select class="form-select" style="max-width:260px;" name="war_room_area_unit">
+                            <option value="auto" <?= ($settings['war_room_area_unit'] ?? 'auto') === 'auto' ? 'selected' : '' ?>>Αυτόματη επιλογή</option>
+                            <option value="mid" <?= ($settings['war_room_area_unit'] ?? 'auto') === 'mid' ? 'selected' : '' ?>>Πάντα στρέμματα</option>
+                            <option value="m2" <?= ($settings['war_room_area_unit'] ?? 'auto') === 'm2' ? 'selected' : '' ?>>Πάντα τετραγωνικά μέτρα</option>
+                        </select>
+                        <small class="text-muted">Σε ποια μονάδα εμφανίζεται η έκταση μιας περιοχής έρευνας ή ενός τομέα — όσο τη σχεδιάζετε, στο «Αυτόματο πλέγμα», στη διαίρεση σε τομείς και στα popup του χάρτη. <strong>Αυτόματη επιλογή:</strong> τετραγωνικά μέτρα κάτω από 10 στρέμματα, στρέμματα μέχρι το 1 τ.χλμ., τετραγωνικά χιλιόμετρα πάνω από εκεί — και όσα νούμερα εμφανίζονται μαζί μοιράζονται πάντα την ίδια μονάδα, αυτή του μικρότερου, ώστε να συγκρίνονται με τη μία. <strong>Πάντα στρέμματα:</strong> ποτέ τ.χλμ., οπότε μια περιοχή 35 τ.χλμ. γράφει 35.604 στρ. <strong>Πάντα τετραγωνικά μέτρα:</strong> η ίδια περιοχή γράφει 35.604.000 τ.μ. — διαβάζεται δύσκολα σε μεγάλες περιοχές, αλλά είναι η μονάδα που ζητούν κάποιες υπηρεσίες σε αναφορά. Σε αγγλικό περιβάλλον η μεσαία μονάδα είναι εκτάρια (1 εκτάριο = 10 στρέμματα).</small>
                     </div>
 
                     <hr class="my-4">
