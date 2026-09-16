@@ -1458,7 +1458,9 @@ function loadMissionTeamsForMission(int $missionId): array {
 /**
  * War Room: command-staff recipient set for admin-facing alerts (shortage
  * reports, and reusable for similar future cases) — system/dept admins +
- * this mission's shift leaders + the mission's responsible_user_id. Mirrors
+ * this mission's shift leaders + the mission's responsible_user_id, MINUS
+ * anyone in that set who could not actually open the mission's command view
+ * (see filterActionRoomManagers() below for why the two differ). Mirrors
  * the resolution already duplicated in mission-dispatch.php/mission-photo.php/
  * mission-chat.php/volunteer-status.php; centralized here for new code only,
  * not retrofitted into those four.
@@ -1476,7 +1478,63 @@ function getMissionCommandStaffIds(int $missionId, ?int $responsibleUserId, int 
     if ($responsibleUserId) {
         $ids[] = (int) $responsibleUserId;
     }
-    return array_values(array_unique(array_diff($ids, [$excludeUserId])));
+    $ids = array_values(array_unique(array_diff($ids, [$excludeUserId])));
+    return filterActionRoomManagers($ids, $responsibleUserId);
+}
+
+/**
+ * Narrows a set of user ids to those who could actually open this mission's
+ * command view — the per-user, set-based twin of canManageActionRoom(), which
+ * can only ever answer for the logged-in session.
+ *
+ * Exists because getMissionCommandStaffIds() above selects by ACCOUNT ROLE
+ * (SYSTEM_ADMIN / DEPARTMENT_ADMIN / SHIFT_LEADER) while every visibility gate
+ * in the Action Room asks canManageActionRoom(), which is a PERMISSION check
+ * (missions_manage) plus the mission's own responsible user. Those two sets
+ * are not the same, and where they diverged the app notified people about
+ * things it then refused to show them: an "Αρχηγός Βάρδιας" whose role has no
+ * missions_manage was sent every team's chat, dispatch acks, photo uploads,
+ * sector events, needs_help escalations, shortage reports and SOS alerts, and
+ * could open none of them — tapping through landed on a page with no such
+ * panel, or bounced to the dashboard outright. Reported as "I get messages
+ * from a team channel I cannot find".
+ *
+ * Nobody gains access here; people simply stop being sent alerts that were
+ * dead on arrival. If a deployment WANTS its shift leaders to be command
+ * staff, the supported way is to grant their role missions_manage — which
+ * gives them the screens to act on the alert as well as the alert.
+ */
+function filterActionRoomManagers(array $userIds, ?int $responsibleUserId): array {
+    $userIds = array_values(array_unique(array_map('intval', $userIds)));
+    if (empty($userIds)) return [];
+
+    $placeholders = implode(',', array_fill(0, count($userIds), '?'));
+    try {
+        $rows = dbFetchAll(
+            "SELECT u.id FROM users u
+             WHERE u.id IN ($placeholders)
+               AND (u.is_external IS NULL OR u.is_external = 0)
+               AND (u.role = ?
+                    OR EXISTS (SELECT 1 FROM custom_role_permissions p
+                               WHERE p.role_id = u.custom_role_id AND p.page_slug = 'missions_manage'))",
+            array_merge($userIds, [ROLE_SYSTEM_ADMIN])
+        );
+    } catch (Throwable $e) {
+        // Same defensive stance hasPagePermission() takes around this table.
+        // Fails OPEN on purpose: these are SOS/shortage/needs_help paths, and
+        // an alert that reaches someone who cannot act on it is a far smaller
+        // failure than an alert that reaches nobody at all.
+        error_log('filterActionRoomManagers() permission lookup failed: ' . $e->getMessage());
+        return $userIds;
+    }
+
+    $allowed = array_map('intval', array_column($rows, 'id'));
+    // Second half of canManageActionRoom(): the mission's responsible user
+    // manages its Action Room whatever their sitewide permissions say.
+    if ($responsibleUserId && in_array((int) $responsibleUserId, $userIds, true)) {
+        $allowed[] = (int) $responsibleUserId;
+    }
+    return array_values(array_unique($allowed));
 }
 
 /**
