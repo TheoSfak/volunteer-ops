@@ -110,7 +110,7 @@ $scoreReview = dbFetchOne(
 );
 $scoreTierHex = ['good' => '#0ca30c', 'warning' => '#a56600', 'critical' => '#d03b3b'];
 $observerNarrative = generateMissionObserverNarrative($score, $mission['title']);
-$teamComparisonNarrative = generateTeamComparisonNarrative($score['teams']);
+$teamComparisonNarrative = generateTeamComparisonNarrative($score['teams'], $score['forgotten_orders']);
 $commandNarrative = generateCommandNarrative($score['command']);
 
 // Per-order-type breakdown (ack vs fulfill, forgotten-aware) — shared with
@@ -176,19 +176,31 @@ $showPillarRadar = count($radarPillars) >= 3; // a 1-2 axis "radar" is degenerat
 // data" from "scored near zero" the way a null point would look, so a
 // partial team is cleanly excluded (with a caption) rather than plotted
 // misleadingly. Capped well below where overlaid polygons get unreadable.
+// Third axis is CONSISTENCY, not shortage handling. Shortage data exists for
+// only a minority of teams in a typical mission, and since the team-level
+// shortage pillar stopped defaulting to a fabricated 100 for teams that
+// reported nothing, keying a comparison chart on it would draw almost nobody.
+// Consistency is derived from the very orders that qualified a team for the
+// leaderboard in the first place, so it is present whenever the other two
+// axes are, and it adds a dimension the other two structurally cannot show
+// (see missionTeamConsistency()). Shortage handling stays in the leaderboard
+// and in the narrative, where an absent value can simply go unmentioned
+// instead of being drawn as a score.
 $teamRadarMaxTeams = 5;
 $qualifyingTeams = array_values(array_filter($score['teams'], fn($t) =>
-    $t['pillars']['response']['available'] && $t['pillars']['completion']['available'] && $t['pillars']['shortage']['available']
+    $t['pillars']['response']['available'] && $t['pillars']['completion']['available'] && $t['pillars']['consistency']['available']
 ));
 $teamRadarTeams = array_slice($qualifyingTeams, 0, $teamRadarMaxTeams); // $score['teams'] is already rank-sorted
 $showTeamRadar = count($teamRadarTeams) >= 2; // matches generateTeamComparisonNarrative()'s own >=2 gate
 $teamRadarOmittedCount = count($score['teams']) - count($teamRadarTeams);
-// Team-level pillars carry no 'label' of their own — sourced from the
-// mission-wide pillars, which always have one regardless of availability.
-$teamRadarLabels = [$score['pillars']['response']['label'], $score['pillars']['completion']['label'], $score['pillars']['shortage']['label']];
+// Team-level pillars carry no 'label' of their own — the first two are
+// sourced from the mission-wide pillars, which always have one regardless of
+// availability; consistency has no mission-wide counterpart, so it is named
+// here.
+$teamRadarLabels = [$score['pillars']['response']['label'], $score['pillars']['completion']['label'], 'Συνέπεια Ρυθμού'];
 $teamRadarDatasets = array_map(fn($t) => [
     'label' => teamLabel($t['codename'], $t['team_number']),
-    'data' => [round($t['pillars']['response']['score'], 1), round($t['pillars']['completion']['score'], 1), round($t['pillars']['shortage']['score'], 1)],
+    'data' => [round($t['pillars']['response']['score'], 1), round($t['pillars']['completion']['score'], 1), round($t['pillars']['consistency']['score'], 1)],
     'borderColor' => $t['color'],
     'backgroundColor' => $t['color'] . '1A', // ~10% alpha
     'pointBackgroundColor' => $t['color'],

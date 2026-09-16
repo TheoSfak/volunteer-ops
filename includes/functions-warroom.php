@@ -3818,6 +3818,100 @@ function missionSpeedBucketStats(array $minutesList, int $thresholdMinutes): arr
 }
 
 /**
+ * War Room: linear-interpolated percentile of an already-sorted numeric list.
+ * Small-sample friendly (the team leaderboard routinely works with 3-10
+ * orders per team), and interpolating rather than nearest-rank keeps p90 from
+ * snapping onto the single worst value the moment a list has fewer than ten
+ * entries — which would make every small team look equally erratic.
+ */
+function missionPercentile(array $sortedValues, float $p): ?float {
+    $n = count($sortedValues);
+    if ($n === 0) return null;
+    if ($n === 1) return (float) $sortedValues[0];
+    $pos = ($n - 1) * $p;
+    $lo = (int) floor($pos);
+    $hi = (int) ceil($pos);
+    if ($lo === $hi) return (float) $sortedValues[$lo];
+    return $sortedValues[$lo] + ($sortedValues[$hi] - $sortedValues[$lo]) * ($pos - $lo);
+}
+
+/**
+ * War Room: how CONSISTENT a team's acknowledgment rhythm was, as a 0-100
+ * score independent of how fast it was on average. The speed pillar can only
+ * see the mean, and a mean hides the difference that matters most to a
+ * commander: ack times of 1, 1, 1, 60 and 15, 16, 16, 16 average the same,
+ * but the first team is unpredictable and the second is dependable.
+ *
+ * Measured as the dispersion ratio p90/median rather than a standard
+ * deviation: minute-deltas are strongly right-skewed (a long tail of slow
+ * responses, a hard floor at zero), so an SD is dominated by the tail and a
+ * coefficient of variation inherits that. The ratio is also scale-free — a
+ * team that answers in 2/2/8 minutes is exactly as erratic as one answering
+ * in 20/20/80, which is the intended reading.
+ *
+ * Forgotten entries are excluded (the speed pillar already charges for them
+ * directly and they would swamp the ratio), and nulls with them. Needs at
+ * least $minSamples real observations — below that a spread figure is noise,
+ * so the metric reports itself unavailable rather than guessing.
+ */
+function missionTeamConsistency(array $minutesList, int $thresholdMinutes, int $minSamples = 3): array {
+    $vals = array_values(array_filter($minutesList, fn($m) => $m !== null && $m <= $thresholdMinutes));
+    if (count($vals) < $minSamples) {
+        return ['available' => false, 'score' => null, 'median' => null, 'p90' => null, 'spread' => null, 'sample' => count($vals)];
+    }
+    sort($vals);
+    $median = missionPercentile($vals, 0.5);
+    $p90 = missionPercentile($vals, 0.9);
+    // Floor the denominator at 1 minute: a team answering everything inside
+    // 60 seconds has a median of 0, which would divide by zero and, worse,
+    // brand the fastest possible team as infinitely inconsistent.
+    $spread = $p90 / max(1.0, (float) $median);
+    // spread 1.0 (p90 == median, perfectly even) => 100. Half-life of 3 on
+    // the excess: spread 4 => 50, spread 7 => 25. Asymptotic, never negative,
+    // same shape as the speed decay so the two read on one mental scale.
+    $score = 100 * (0.5 ** (max(0.0, $spread - 1.0) / 3.0));
+    return ['available' => true, 'score' => $score, 'median' => round((float) $median, 1), 'p90' => round((float) $p90, 1), 'spread' => round($spread, 2), 'sample' => count($vals)];
+}
+
+/**
+ * War Room: did a team hold its pace, or did it fade? Splits the team's own
+ * orders at the midpoint of its own activity window and compares the average
+ * acknowledgment time of each half. Nothing else in the report can see this:
+ * every other figure is a single number for the whole mission, so a team that
+ * started sharp and drifted after hour four reads identically to one that was
+ * mediocre throughout — and those are completely different debrief
+ * conversations.
+ *
+ * Split by sent_at order, not by wall-clock halves of the mission: a team
+ * that only received orders in the last two hours should still be judged on
+ * its own first-half-vs-second-half, not compared against an empty window.
+ *
+ * Needs >=2 answered orders on BOTH sides to say anything, and uses a +-25%
+ * dead zone — deliberately wider than missionMinutesTrend()'s +-10%, because
+ * half of one mission is a far smaller and noisier sample than a historical
+ * baseline built from every past mission of the same type.
+ */
+function missionTeamTrajectory(array $timeline, int $thresholdMinutes): array {
+    $unavailable = ['available' => false, 'direction' => null, 'first_avg' => null, 'second_avg' => null, 'change_pct' => null];
+    $rows = array_values(array_filter($timeline, fn($r) => $r['sent_at'] !== null));
+    if (count($rows) < 4) return $unavailable;
+    usort($rows, fn($a, $b) => strtotime($a['sent_at']) <=> strtotime($b['sent_at']));
+    $half = intdiv(count($rows), 2);
+    $avg = function (array $slice) use ($thresholdMinutes): ?float {
+        $vals = array_values(array_filter(array_column($slice, 'ack_minutes'), fn($m) => $m !== null && $m <= $thresholdMinutes));
+        return count($vals) >= 2 ? array_sum($vals) / count($vals) : null;
+    };
+    $firstAvg = $avg(array_slice($rows, 0, $half));
+    $secondAvg = $avg(array_slice($rows, $half));
+    if ($firstAvg === null || $secondAvg === null || $firstAvg <= 0) return $unavailable;
+    $changePct = round((($secondAvg - $firstAvg) / $firstAvg) * 100);
+    if ($changePct >= 25) $direction = 'worse';
+    elseif ($changePct <= -25) $direction = 'better';
+    else $direction = 'steady';
+    return ['available' => true, 'direction' => $direction, 'first_avg' => round($firstAvg, 1), 'second_avg' => round($secondAvg, 1), 'change_pct' => (int) $changePct];
+}
+
+/**
  * War Room: turns a raw list of minute-deltas (order-ack, shortage-seen,
  * shortage-resolved — anything "how long until X happened") into a 0-100
  * speed score that a single forgotten outlier can't destroy. Built on
@@ -3837,11 +3931,34 @@ function missionSpeedBucketStats(array $minutesList, int $thresholdMinutes): arr
  * unresolved-critical shortages elsewhere in computeMissionScore()) — so a
  * forgotten item still costs real points, it just can't single-handedly
  * zero out an otherwise-fast team.
+ *
+ * $countUnanswered (opt-in, off by default so no existing caller shifts)
+ * closes a real hole: missionSpeedBucketStats() drops every null, and a null
+ * here means "never acknowledged at all". Without this flag a team with ten
+ * orders, one acknowledged in 2 minutes and nine never touched, scored ~94 on
+ * this pillar — i.e. never answering ranked BETTER than answering after five
+ * hours, which costs a real -15. Switched on, the decayed base is multiplied
+ * by the answered-rate.
+ *
+ * Deliberately a RATE multiplier rather than another per-occurrence penalty
+ * like the forgotten one, even though per-occurrence is this file's usual
+ * idiom: a flat cost per unanswered order inverts the ranking by volume — a
+ * team with 20 orders and 3 unanswered (85% answered, good) would lose 3x the
+ * points of a team with 3 orders and 1 unanswered (67% answered, worse). The
+ * multiplier is volume-neutral and has the useful property that a team which
+ * answered everything gets rate = 1.0, i.e. a score byte-identical to what
+ * this function returned before the flag existed.
  */
-function missionScoreForgottenAwareSpeed(array $minutesList, float $halfLifeMinutes, int $thresholdMinutes, int $penaltyPerForgotten): array {
+function missionScoreForgottenAwareSpeed(array $minutesList, float $halfLifeMinutes, int $thresholdMinutes, int $penaltyPerForgotten, bool $countUnanswered = false): array {
     $bucket = missionSpeedBucketStats($minutesList, $thresholdMinutes);
-    if ($bucket['total_count'] === 0) {
-        return ['available' => false, 'score' => null, 'avg_minutes' => null, 'forgotten_count' => 0];
+    $unansweredCount = $countUnanswered ? count($minutesList) - $bucket['total_count'] : 0;
+    // Nothing answered AND nothing to penalise — genuinely no data. When
+    // $countUnanswered is on and the list is all-nulls, that's NOT "no data":
+    // it's the worst possible outcome (orders sent, none ever acknowledged),
+    // so it must stay available and score 0 rather than silently drop out and
+    // let the pillar renormalise the failure away.
+    if ($bucket['total_count'] === 0 && $unansweredCount === 0) {
+        return ['available' => false, 'score' => null, 'avg_minutes' => null, 'forgotten_count' => 0, 'unanswered_count' => 0, 'answered_rate' => null];
     }
     $avgNormal = $bucket['avg_minutes'];
     // No normal-speed data at all (every single response was forgotten) —
@@ -3852,12 +3969,18 @@ function missionScoreForgottenAwareSpeed(array $minutesList, float $halfLifeMinu
     // pushing 0.5^negative above 100; no lower clamp is needed since the
     // exponential is already bounded in (0,100] for any non-negative input.
     $base = $avgNormal !== null ? min(100, 100 * (0.5 ** ($avgNormal / $halfLifeMinutes))) : 100.0;
-    $score = max(0, $base - $bucket['forgotten_count'] * $penaltyPerForgotten);
+    // answered_rate is 1.0 for every caller that leaves $countUnanswered off,
+    // so their arithmetic is untouched.
+    $considered = $bucket['total_count'] + $unansweredCount;
+    $answeredRate = $considered > 0 ? $bucket['total_count'] / $considered : 1.0;
+    $score = max(0, $base * $answeredRate - $bucket['forgotten_count'] * $penaltyPerForgotten);
     return [
-        'available'       => true,
-        'score'           => $score,
-        'avg_minutes'     => $avgNormal,
-        'forgotten_count' => $bucket['forgotten_count'],
+        'available'        => true,
+        'score'            => $score,
+        'avg_minutes'      => $avgNormal,
+        'forgotten_count'  => $bucket['forgotten_count'],
+        'unanswered_count' => $unansweredCount,
+        'answered_rate'    => $countUnanswered ? $answeredRate : null,
     ];
 }
 
@@ -3928,7 +4051,7 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     $forgottenOrders = [];
     foreach ($scoredDetail as $row) {
         if ($row['ack_minutes'] !== null && $row['ack_minutes'] > $forgottenThresholdMinutes) {
-            $forgottenOrders[] = ['label' => $row['type_label'], 'user_name' => $row['user_name'], 'team_label' => $row['team_label'], 'minutes' => $row['ack_minutes']];
+            $forgottenOrders[] = ['label' => $row['type_label'], 'order_label' => $row['label'], 'user_name' => $row['user_name'], 'team_label' => $row['team_label'], 'minutes' => $row['ack_minutes']];
         }
     }
     usort($forgottenOrders, fn($a, $b) => $b['minutes'] <=> $a['minutes']);
@@ -3945,7 +4068,10 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     $pillars = [];
 
     $ackMinutesForScoring = array_column($scoredDetail, 'ack_minutes');
-    $responseCalc = missionScoreForgottenAwareSpeed($ackMinutesForScoring, $responseHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty);
+    // true = count never-acknowledged orders against the score (see
+    // missionScoreForgottenAwareSpeed()'s docblock). $ackMinutesForScoring
+    // already carries the nulls, they were simply being discarded.
+    $responseCalc = missionScoreForgottenAwareSpeed($ackMinutesForScoring, $responseHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty, true);
     if ($responseCalc['available']) {
         $pillars['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => true, 'score' => $responseCalc['score'], 'raw' => ['avg_minutes' => $responseCalc['avg_minutes'], 'forgotten_count' => $responseCalc['forgotten_count']]];
     } else {
@@ -4029,7 +4155,14 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     //    command staff's reaction time on. Same forgotten-aware treatment as
     //    the response pillar — a shortage seen 16 hours late shouldn't erase
     //    every other same-day acknowledgment from the average. ────────────
-    $seenCalc = missionScoreForgottenAwareSpeed(array_column($scoredShortage, 'seen_minutes'), $responseHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty);
+    // Asymmetric on purpose. SEEN counts never-seen reports against the score
+    // (same hole as the response pillar: a report command staff never even
+    // opened must not outrank one they opened late). RESOLVED does NOT — this
+    // score is documented right above as grading *speed*, with the separate
+    // 'shortage' pillar grading the *outcome*; folding never-resolved in here
+    // would quietly turn half of the command score into a second outcome
+    // measure and double-count the same failure on two different reports.
+    $seenCalc = missionScoreForgottenAwareSpeed(array_column($scoredShortage, 'seen_minutes'), $responseHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty, true);
     $resolvedCalc = missionScoreForgottenAwareSpeed(array_column($scoredShortage, 'resolved_minutes'), $resolutionHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty);
     $seenCount = count(array_filter($scoredShortage, fn($d) => $d['seen_minutes'] !== null));
 
@@ -4182,14 +4315,25 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
         $tid = $row['team_id'];
         if ($tid === null) continue;
         if (!isset($byTeamOrders[$tid])) {
-            $byTeamOrders[$tid] = ['count' => 0, 'ack_minutes' => [], 'fulfill_count' => 0];
+            $byTeamOrders[$tid] = ['count' => 0, 'ack_minutes' => [], 'fulfill_count' => 0, 'timeline' => [], 'worst' => null, 'unanswered_example' => null];
         }
         $byTeamOrders[$tid]['count']++;
-        if ($row['ack_minutes'] !== null) {
-            $byTeamOrders[$tid]['ack_minutes'][] = $row['ack_minutes'];
-        }
+        // Nulls are pushed too, unlike before — the speed helper is now told
+        // to count them as "never acknowledged" rather than silently dropping
+        // them, so it needs to actually see them.
+        $byTeamOrders[$tid]['ack_minutes'][] = $row['ack_minutes'];
         if ($row['fulfill_minutes'] !== null) {
             $byTeamOrders[$tid]['fulfill_count']++;
+        }
+        // Kept for the narrative only (trajectory + named worst-order
+        // callout); no pillar arithmetic reads either of these.
+        $byTeamOrders[$tid]['timeline'][] = ['sent_at' => $row['sent_at'], 'ack_minutes' => $row['ack_minutes']];
+        $worst = $byTeamOrders[$tid]['worst'];
+        if ($row['ack_minutes'] !== null && ($worst === null || $row['ack_minutes'] > $worst['minutes'])) {
+            $byTeamOrders[$tid]['worst'] = ['label' => $row['type_label'], 'order_label' => $row['label'], 'user_name' => $row['user_name'], 'minutes' => $row['ack_minutes']];
+        }
+        if ($row['ack_minutes'] === null && $byTeamOrders[$tid]['unanswered_example'] === null) {
+            $byTeamOrders[$tid]['unanswered_example'] = ['label' => $row['type_label'], 'order_label' => $row['label'], 'user_name' => $row['user_name']];
         }
     }
     $byTeamShortage = [];
@@ -4223,7 +4367,7 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
         // teams on dispatch-arrival time, which depends on how far each
         // team's point was and isn't a fair performance signal.
         $teamPillars = [];
-        $teamResponseCalc = $orders ? missionScoreForgottenAwareSpeed($orders['ack_minutes'], $responseHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty) : ['available' => false, 'score' => null, 'avg_minutes' => null, 'forgotten_count' => 0];
+        $teamResponseCalc = $orders ? missionScoreForgottenAwareSpeed($orders['ack_minutes'], $responseHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty, true) : ['available' => false, 'score' => null, 'avg_minutes' => null, 'forgotten_count' => 0, 'unanswered_count' => 0, 'answered_rate' => null];
         if ($teamResponseCalc['available']) {
             $teamPillars['response'] = ['weight' => 45, 'available' => true, 'score' => $teamResponseCalc['score'], 'raw' => ['avg_minutes' => $teamResponseCalc['avg_minutes'], 'forgotten_count' => $teamResponseCalc['forgotten_count']]];
         } else {
@@ -4238,8 +4382,29 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
             $rate = $shortages['resolved'] / $shortages['count'] * 100;
             $teamPillars['shortage'] = ['weight' => 20, 'available' => true, 'score' => max(0, min(100, $rate - $shortages['unresolvedCritical'] * 15)), 'raw' => ['resolved' => $shortages['resolved'], 'total' => $shortages['count']]];
         } else {
-            $teamPillars['shortage'] = ['weight' => 20, 'available' => true, 'score' => 100.0, 'raw' => ['resolved' => 0, 'total' => 0]];
+            // Unavailable, NOT a neutral 100. The mission-wide pillar can
+            // afford "nothing reported = nothing went wrong" because it is one
+            // score standing alone; here the teams are ranked against each
+            // other, and a free 100 on a fifth of the weight systematically
+            // floated every team that reported nothing above every team that
+            // reported real problems and fixed them. With it unavailable the
+            // remaining weights renormalise (45/35 of 80), so a team is only
+            // ever ranked on dimensions it actually has data for — the same
+            // rule the mission-wide pillars have always followed. 'raw' keeps
+            // its shape so existing total-based filters still read cleanly.
+            $teamPillars['shortage'] = ['weight' => 20, 'available' => false, 'score' => null, 'raw' => ['resolved' => 0, 'total' => 0]];
         }
+        // Always-available third dimension. Replaces 'shortage' as the radar
+        // chart's third axis in mission-report-print.php: shortage data is
+        // absent for most teams in most missions, so keying a comparison
+        // chart on it drew almost nobody, while consistency is derived from
+        // the very orders that qualified the team for the leaderboard.
+        // Weight 0 — it deliberately does NOT move the team's score (that
+        // would double-count the same acknowledgment times the response
+        // pillar already grades); it exists to be described, ranked and
+        // plotted.
+        $teamConsistency = missionTeamConsistency($orders['ack_minutes'] ?? [], $forgottenThresholdMinutes);
+        $teamPillars['consistency'] = ['weight' => 0, 'available' => $teamConsistency['available'], 'score' => $teamConsistency['score'], 'raw' => ['median' => $teamConsistency['median'], 'p90' => $teamConsistency['p90'], 'spread' => $teamConsistency['spread'], 'sample' => $teamConsistency['sample']]];
 
         $tWeightSum = 0;
         $tWeightedScore = 0.0;
@@ -4261,6 +4426,17 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
             'tier'        => missionScoreTierMeta($tScore),
             'order_count' => $orders['count'] ?? 0,
             'pillars'     => $teamPillars,
+            // ── narrative-only enrichment below. None of it feeds $tScore;
+            //    it exists so generateTeamComparisonNarrative() can say WHY a
+            //    team ranked where it did instead of only restating the rank.
+            'shortage_count'   => $shortages['count'] ?? 0,
+            'unanswered_count' => $teamResponseCalc['unanswered_count'] ?? 0,
+            'answered_rate'    => $teamResponseCalc['answered_rate'],
+            'forgotten_count'  => $teamResponseCalc['forgotten_count'] ?? 0,
+            'consistency'      => $teamConsistency,
+            'trajectory'       => missionTeamTrajectory($orders['timeline'] ?? [], $forgottenThresholdMinutes),
+            'worst_order'      => $orders['worst'] ?? null,
+            'unanswered_example' => $orders['unanswered_example'] ?? null,
         ];
     }
     usort($teamScores, fn($a, $b) => ($b['score'] <=> $a['score']) ?: ($b['order_count'] <=> $a['order_count']));
@@ -4517,7 +4693,8 @@ function generateMissionObserverNarrative(array $score, string $missionTitle): s
         $worst = $score['forgotten_orders'][0];
         $hours = round($worst['minutes'] / 60, 1);
         $extra = count($score['forgotten_orders']) > 1 ? ', εκ των οποίων δεν ήταν η μοναδική τέτοια περίπτωση.' : '.';
-        $sentences[] = "Ιδιαίτερη προσοχή χρειάζεται η εντολή «{$worst['label']}» προς {$worst['user_name']} ({$worst['team_label']}), η οποία παρέμεινε αναπάντητη για περίπου {$hours} ώρες" . $extra;
+        $worstName = trim((string) ($worst['order_label'] ?? '')) !== '' ? $worst['order_label'] : $worst['label'];
+        $sentences[] = "Ιδιαίτερη προσοχή χρειάζεται η εντολή «{$worstName}» προς {$worst['user_name']} ({$worst['team_label']}), η οποία έμεινε χωρίς επιβεβαίωση παραλαβής για περίπου {$hours} ώρες" . $extra;
     }
 
     $recommendations = missionScoreRecommendations();
@@ -4588,7 +4765,32 @@ function generateCommandNarrative(array $command): string {
 
 /**
  * War Room: the team-vs-team comparison paragraph appended after the main
- * observer narrative. Deliberately compares teams ONLY on dimensions that
+ * observer narrative.
+ *
+ * Structure is a salience-ranked finding pool, not a fixed sentence order.
+ * Every candidate observation is generated with a 0-100 salience and only the
+ * six strongest are printed, so a mission where the teams differed mainly in
+ * consistency reads differently from one where they differed mainly in speed
+ * — the previous version emitted the same four slots in the same order every
+ * time, which made every report read alike and buried the one thing that
+ * actually mattered. Salience is computed from effect size rather than raw
+ * difference wherever the two diverge (speed uses the ratio, not the minute
+ * gap: 2-vs-8 minutes is a fourfold gap in reflexes while 40-vs-46 is noise,
+ * yet both differ by six minutes).
+ *
+ * The opening (leaderboard spread) and the closing sample caveat sit outside
+ * the ranking on purpose: the first is the topic sentence and the last
+ * qualifies everything before it, so neither should have to compete for a
+ * slot.
+ *
+ * $alreadyCited is the caller's $score['forgotten_orders']. Both callers print
+ * generateMissionObserverNarrative() immediately above this paragraph, and
+ * that function names forgotten_orders[0] by name — so without this the same
+ * order gets called out twice, one sentence apart, which reads as two separate
+ * incidents. Passing it in lets this paragraph spend the slot on something the
+ * reader has not already been told.
+ *
+ * Deliberately compares teams ONLY on dimensions that
  * are fair regardless of geography — order-ACKNOWLEDGMENT speed (a
  * device/UI action: tapping "Ελήφθη" doesn't require traveling anywhere),
  * completion RATE (measures follow-through, not raw travel time), and
@@ -4601,29 +4803,143 @@ function generateCommandNarrative(array $command): string {
  * its own $pillars sub-array carrying the same 'raw' shape as the
  * mission-wide pillars).
  */
-function generateTeamComparisonNarrative(array $teams): string {
+function generateTeamComparisonNarrative(array $teams, array $alreadyCited = []): string {
     if (count($teams) < 2) {
         return '';
     }
     $label = fn($t) => teamLabel($t['codename'], $t['team_number']);
-    $sentences = [];
+    $fmt = fn($n) => rtrim(rtrim(number_format((float) $n, 1, '.', ''), '0'), '.');
+
+    // Every candidate observation lands here as ['salience' => 0-100, 'text']
+    // and only the strongest few survive — see this function's docblock for
+    // why the order is earned rather than fixed.
+    $findings = [];
+    // FILLER_SALIENCE sits below MIN_REAL_SALIENCE so a “the teams were much
+    // the same” sentence can never displace an observation that actually
+    // distinguishes two teams, however small that distinction is. Without the
+    // floor a marginal-but-real speed gap scored 5.6 and lost its slot to a
+    // fixed-value filler scored 12.
+    $FILLER_SALIENCE = 5.0;
+    $MIN_REAL_SALIENCE = 10.0;
+    $findings = [];
+    $add = function (float $salience, string $text) use (&$findings, $MIN_REAL_SALIENCE) {
+        if ($text !== '') $findings[] = ['salience' => max($MIN_REAL_SALIENCE, $salience), 'text' => $text];
+    };
+    $addFiller = function (string $text) use (&$findings, $FILLER_SALIENCE) {
+        $findings[] = ['salience' => $FILLER_SALIENCE, 'text' => $text];
+    };
+
+    // ── opening: the spread of the leaderboard itself ────────────────────
+    $byScore = $teams;
+    usort($byScore, fn($a, $b) => $b['score'] <=> $a['score']);
+    $top = $byScore[0];
+    $bottom = $byScore[count($byScore) - 1];
+    $topLabel = $label($top);
+    $bottomLabel = $label($bottom);
+    $gap = round($top['score'] - $bottom['score'], 1);
+    if ($gap < 0.05) {
+        // A literal dead heat otherwise printed "διαφορά μόλις 0 μονάδων",
+        // which is a strange way to say the teams tied — and it happens often
+        // enough to matter (every team scoring 0, or every team scoring 100).
+        $opening = 'Όλες οι ομάδες κατέληξαν σε πρακτικά ταυτόσημη βαθμολογία (' . number_format($top['score'], 1) . '/100), οπότε η κατάταξη από μόνη της δεν ξεχωρίζει καμία.';
+    } elseif ($gap < 5) {
+        $opening = "Η συνολική βαθμολογία των ομάδων ήταν ιδιαίτερα ομοιογενής, με διαφορά μόλις {$gap} μονάδων μεταξύ {$topLabel} και {$bottomLabel}.";
+    } elseif ($gap < 20) {
+        $opening = "Υπήρξε μέτρια απόκλιση {$gap} μονάδων μεταξύ της κορυφαίας ομάδας ({$topLabel}) και της {$bottomLabel}.";
+    } else {
+        $opening = "Η απόσταση βαθμολογίας μεταξύ της κορυφαίας ομάδας ({$topLabel}, " . number_format($top['score'], 1) . ") και της {$bottomLabel} (" . number_format($bottom['score'], 1) . ") έφτασε τις {$gap} μονάδες, υποδεικνύοντας σημαντική ανομοιογένεια στην απόδοση μεταξύ των ομάδων.";
+    }
+
+    // ── who else was in contention — stops a 5-team mission from being
+    //    described entirely through its best and its worst team ───────────
+    if (count($byScore) >= 3 && $gap >= 0.05) {
+        $contenders = [];
+        foreach (array_slice($byScore, 1, count($byScore) - 2) as $t) {
+            if ($top['score'] - $t['score'] <= 5) $contenders[] = $label($t);
+        }
+        if (!empty($contenders)) {
+            $add(45, 'Στα ίδια επίπεδα με την κορυφαία κινήθηκαν και ' . implode(', ', $contenders) . (count($contenders) === 1 ? ' (εντός 5 μονάδων).' : ' (εντός 5 μονάδων η κάθε μία).'));
+        }
+    }
+
+    // ── orders left with no acknowledgment at all ────────────────────────
+    $unanswered = array_values(array_filter($teams, fn($t) => ($t['unanswered_count'] ?? 0) > 0));
+    if (!empty($unanswered)) {
+        usort($unanswered, fn($a, $b) => $b['unanswered_count'] <=> $a['unanswered_count']);
+        $w = $unanswered[0];
+        $n = $w['unanswered_count'];
+        $total = $w['order_count'];
+        $sentence = 'Η ομάδα ' . $label($w) . ' άφησε ' . ($n === 1 ? 'μία' : $n) . " από τις {$total} εντολές της χωρίς καμία απάντηση"
+            . ($n === 1 ? '' : ' (' . round($n / max(1, $total) * 100) . '% του συνόλου της)')
+            . ' — κενό βαρύτερο από μια απλή καθυστέρηση, καθώς η διοίκηση δεν έλαβε ποτέ επιβεβαίωση παραλαβής.';
+        if (!empty($w['unanswered_example'])) {
+            $ex = $w['unanswered_example'];
+            // An order can carry neither task_text nor a resolvable type label
+            // (seen on real data). Naming it then reads as "η εντολή  προς X",
+            // so the clause drops the identifier rather than the callout.
+            $what = trim(!empty($ex['order_label']) ? '«' . $ex['order_label'] . '»' : (string) ($ex['label'] ?? ''));
+            $sentence .= $what !== ''
+                ? " Χαρακτηριστική περίπτωση η εντολή {$what} προς {$ex['user_name']}."
+                : " Μεταξύ αυτών και εντολή προς {$ex['user_name']}.";
+        }
+        if (count($unanswered) > 1) {
+            $sentence .= ' Αναπάντητες εντολές κατέγραψαν συνολικά ' . count($unanswered) . ' ομάδες.';
+        }
+        $add(min(100.0, 55 + $n * 12), $sentence);
+    }
 
     // ── response speed (order acknowledgment) ───────────────────────────
-    $withResponse = array_values(array_filter($teams, fn($t) => $t['pillars']['response']['available']));
+    $withResponse = array_values(array_filter($teams, fn($t) => $t['pillars']['response']['available'] && $t['pillars']['response']['raw']['avg_minutes'] !== null));
     if (count($withResponse) >= 2) {
         usort($withResponse, fn($a, $b) => $a['pillars']['response']['raw']['avg_minutes'] <=> $b['pillars']['response']['raw']['avg_minutes']);
         $fastest = $withResponse[0];
         $slowest = $withResponse[count($withResponse) - 1];
-        $fMin = $fastest['pillars']['response']['raw']['avg_minutes'];
-        $sMin = $slowest['pillars']['response']['raw']['avg_minutes'];
+        $fMin = (float) $fastest['pillars']['response']['raw']['avg_minutes'];
+        $sMin = (float) $slowest['pillars']['response']['raw']['avg_minutes'];
         if ($label($fastest) === $label($slowest) || abs($fMin - $sMin) < 0.5) {
-            $sentences[] = 'Ως προς την ταχύτητα αποδοχής εντολών, οι ομάδες παρουσίασαν παρόμοια απόδοση.';
+            $addFiller('Ως προς την ταχύτητα αποδοχής εντολών, οι ομάδες παρουσίασαν παρόμοια απόδοση.');
         } else {
-            $sentences[] = 'Ως προς την ταχύτητα αποδοχής εντολών, η ομάδα ' . $label($fastest) . " ξεχώρισε με μέσο χρόνο {$fMin} λεπτών, έναντι {$sMin} λεπτών της " . $label($slowest) . '.';
+            // Ratio, not absolute difference: 2 vs 8 minutes is a fourfold gap
+            // in operational reflexes while 40 vs 46 is noise, yet the two
+            // differ by the same handful of minutes.
+            $ratio = $sMin / max(0.5, $fMin);
+            $extra = $ratio >= 2 ? ' — διαφορά ' . $fmt($ratio) . ' φορές.' : '.';
+            $add(min(100.0, ($ratio - 1) * 45), 'Ως προς την ταχύτητα αποδοχής εντολών, η ομάδα ' . $label($fastest) . ' ξεχώρισε με μέσο χρόνο ' . $fmt($fMin) . ' λεπτών, έναντι ' . $fmt($sMin) . ' λεπτών της ' . $label($slowest) . $extra);
         }
     }
 
-    // ── completion rate ──────────────────────────────────────────────────
+    // ── consistency: the thing an average structurally cannot show ───────
+    $withConsistency = array_values(array_filter($teams, fn($t) => !empty($t['consistency']['available'])));
+    if (count($withConsistency) >= 2) {
+        usort($withConsistency, fn($a, $b) => $a['consistency']['spread'] <=> $b['consistency']['spread']);
+        $steady = $withConsistency[0];
+        $erratic = $withConsistency[count($withConsistency) - 1];
+        if ($erratic['consistency']['spread'] >= 2.5 && $erratic['consistency']['spread'] > $steady['consistency']['spread'] * 1.5) {
+            $add(min(100.0, ($erratic['consistency']['spread'] - 1) * 22),
+                'Πέρα από τον μέσο όρο, η ομάδα ' . $label($steady) . ' κράτησε σταθερό ρυθμό (διάμεσος ' . $fmt($steady['consistency']['median']) . ' λεπτά, με το 90% των αποκρίσεών της εντός ' . $fmt($steady['consistency']['p90']) . ' λεπτών), ενώ η ομάδα ' . $label($erratic) . ' κινήθηκε ανομοιόμορφα (διάμεσος ' . $fmt($erratic['consistency']['median']) . ' λεπτά, αλλά αποκρίσεις που έφταναν τα ' . $fmt($erratic['consistency']['p90']) . ' λεπτά) — στοιχείο που ο μέσος όρος από μόνος του δεν αποκαλύπτει.');
+        }
+    }
+
+    // ── did the pace hold, or did the team fade? ─────────────────────────
+    $moved = array_values(array_filter($teams, fn($t) => !empty($t['trajectory']['available']) && $t['trajectory']['direction'] !== 'steady'));
+    if (!empty($moved)) {
+        usort($moved, fn($a, $b) => abs($b['trajectory']['change_pct']) <=> abs($a['trajectory']['change_pct']));
+        $m = $moved[0];
+        $tr = $m['trajectory'];
+        $pct = abs($tr['change_pct']);
+        // Past ~3x the eye stops reading a percentage as a quantity — “1829%
+        // πιο αργά” is technically right and operationally meaningless, where
+        // “19 φορές πιο αργά” lands immediately.
+        $slower = $tr['direction'] === 'worse'
+            ? ($tr['second_avg'] / max(0.1, (float) $tr['first_avg']))
+            : ($tr['first_avg'] / max(0.1, (float) $tr['second_avg']));
+        $magnitude = $pct >= 200 ? $fmt(round($slower, 1)) . ' φορές' : $pct . '%';
+        $add(min(100.0, $pct * 0.8), $tr['direction'] === 'worse'
+            ? 'Η ομάδα ' . $label($m) . ' έχασε ρυθμό κατά τη διάρκεια της αποστολής: από ' . $fmt($tr['first_avg']) . ' λεπτά μέσο χρόνο απόκρισης στο πρώτο μισό των εντολών της, πήγε στα ' . $fmt($tr['second_avg']) . " λεπτά στο δεύτερο ({$magnitude} πιο αργά) — ένδειξη κόπωσης ή χαλάρωσης της επικοινωνίας προς το τέλος."
+            : 'Η ομάδα ' . $label($m) . ' βελτιώθηκε καθώς προχωρούσε η αποστολή, από ' . $fmt($tr['first_avg']) . ' σε ' . $fmt($tr['second_avg']) . " λεπτά μέσο χρόνο απόκρισης ({$magnitude} ταχύτερα στο δεύτερο μισό των εντολών της).");
+    }
+
+    // ── completion rate ─────────────────────────────────────────────────
     $withCompletion = array_values(array_filter($teams, fn($t) => $t['pillars']['completion']['available']));
     if (count($withCompletion) >= 2) {
         $rates = array_map(function ($t) use ($label) {
@@ -4634,15 +4950,15 @@ function generateTeamComparisonNarrative(array $teams): string {
         $best = $rates[0];
         $worst = $rates[count($rates) - 1];
         if ($best['label'] === $worst['label'] || abs($best['rate'] - $worst['rate']) < 10) {
-            $sentences[] = 'Στο ποσοστό ολοκλήρωσης εντολών, οι ομάδες κινήθηκαν σε παρόμοια επίπεδα.';
+            $addFiller('Στο ποσοστό ολοκλήρωσης εντολών, οι ομάδες κινήθηκαν σε παρόμοια επίπεδα.');
         } else {
-            $sentences[] = "Στο ποσοστό ολοκλήρωσης εντολών, η {$best['label']} πέτυχε {$best['rate']}% ({$best['raw']['fulfilled']}/{$best['raw']['total']}), έναντι {$worst['rate']}% ({$worst['raw']['fulfilled']}/{$worst['raw']['total']}) της {$worst['label']}.";
+            $add(min(100.0, (float) ($best['rate'] - $worst['rate'])), "Στο ποσοστό ολοκλήρωσης εντολών, η {$best['label']} πέτυχε {$best['rate']}% ({$best['raw']['fulfilled']}/{$best['raw']['total']}), έναντι {$worst['rate']}% ({$worst['raw']['fulfilled']}/{$worst['raw']['total']}) της {$worst['label']}.");
         }
     }
 
-    // ── shortage handling — only teams that actually reported ≥1, so a team
-    //    with zero reports (neutral 100 by design) never gets falsely
-    //    compared against a team that genuinely resolved real reports ──────
+    // ── shortage handling — only teams that actually reported >=1, so a team
+    //    with zero reports is never compared against a team that genuinely
+    //    resolved real reports ─────────────────────────────────────────────
     $withShortage = array_values(array_filter($teams, fn($t) => $t['pillars']['shortage']['raw']['total'] > 0));
     if (count($withShortage) >= 2) {
         $rates = array_map(function ($t) use ($label) {
@@ -4653,31 +4969,56 @@ function generateTeamComparisonNarrative(array $teams): string {
         $best = $rates[0];
         $worst = $rates[count($rates) - 1];
         if ($best['label'] !== $worst['label'] && $best['rate'] !== $worst['rate']) {
-            $sentences[] = "Στη διαχείριση αναφορών έλλειψης, η {$best['label']} έλυσε {$best['raw']['resolved']}/{$best['raw']['total']} αναφορές, ενώ η {$worst['label']} μόλις {$worst['raw']['resolved']}/{$worst['raw']['total']}.";
+            $add(min(100.0, (float) ($best['rate'] - $worst['rate'])), "Στη διαχείριση αναφορών έλλειψης, η {$best['label']} έλυσε {$best['raw']['resolved']}/{$best['raw']['total']} αναφορές, ενώ η {$worst['label']} μόλις {$worst['raw']['resolved']}/{$worst['raw']['total']}.");
         }
     }
 
-    // ── overall score gap ────────────────────────────────────────────────
-    $byScore = $teams;
-    usort($byScore, fn($a, $b) => $b['score'] <=> $a['score']);
-    $top = $byScore[0];
-    $bottom = $byScore[count($byScore) - 1];
-    $topLabel = $label($top);
-    $bottomLabel = $label($bottom);
-    $topFmt = number_format($top['score'], 1);
-    $bottomFmt = number_format($bottom['score'], 1);
-    $gap = round($top['score'] - $bottom['score'], 1);
-    if ($gap < 5) {
-        $sentences[] = "Η συνολική βαθμολογία των ομάδων ήταν ιδιαίτερα ομοιογενής, με διαφορά μόλις {$gap} μονάδων μεταξύ {$topLabel} και {$bottomLabel}.";
-    } elseif ($gap < 20) {
-        $sentences[] = "Υπήρξε μέτρια απόκλιση {$gap} μονάδων μεταξύ της κορυφαίας ομάδας ({$topLabel}) και της {$bottomLabel}.";
-    } else {
-        $sentences[] = "Η απόσταση βαθμολογίας μεταξύ της κορυφαίας ομάδας ({$topLabel}, {$topFmt}) και της {$bottomLabel} ({$bottomFmt}) έφτασε τις {$gap} μονάδες, υποδεικνύοντας σημαντική ανομοιογένεια στην απόδοση μεταξύ των ομάδων.";
+    // ── a forgotten-but-eventually-answered order, named ─────────────────
+    $lateTeams = array_values(array_filter($teams, fn($t) => ($t['forgotten_count'] ?? 0) > 0 && !empty($t['worst_order'])));
+    // Drop any team whose worst order is the one the mission-wide paragraph
+    // has already named (it names only forgotten_orders[0]); matching on
+    // recipient + minutes is enough to identify a single order here.
+    $cited = $alreadyCited[0] ?? null;
+    if ($cited !== null) {
+        $lateTeams = array_values(array_filter($lateTeams, fn($t) =>
+            !($t['worst_order']['user_name'] === $cited['user_name']
+              && abs($t['worst_order']['minutes'] - $cited['minutes']) < 0.5)));
+    }
+    if (!empty($lateTeams)) {
+        usort($lateTeams, fn($a, $b) => $b['worst_order']['minutes'] <=> $a['worst_order']['minutes']);
+        $lt = $lateTeams[0];
+        $wo = $lt['worst_order'];
+        $hours = round($wo['minutes'] / 60, 1);
+        $what = trim(!empty($wo['order_label']) ? '«' . $wo['order_label'] . '»' : (string) ($wo['label'] ?? ''));
+        $add(min(100.0, 40 + $hours * 4), $what !== ''
+            ? 'Στην ομάδα ' . $label($lt) . " η εντολή {$what} προς {$wo['user_name']} χρειάστηκε περίπου {$hours} ώρες για να επιβεβαιωθεί, τη μεγαλύτερη καθυστέρηση της αποστολής."
+            : 'Στην ομάδα ' . $label($lt) . " μία εντολή προς {$wo['user_name']} χρειάστηκε περίπου {$hours} ώρες για να επιβεβαιωθεί, τη μεγαλύτερη καθυστέρηση της αποστολής.");
+    }
+
+    // ── workload distribution: a command-side finding, stated as such ────
+    $counts = array_map(fn($t) => $t['order_count'], $teams);
+    $maxOrders = max($counts);
+    $minOrders = min($counts);
+    if ($minOrders > 0 && $maxOrders / $minOrders >= 2.5) {
+        $busiest = $teams[array_search($maxOrders, $counts, true)];
+        $quietest = $teams[array_search($minOrders, $counts, true)];
+        $add(min(100.0, ($maxOrders / $minOrders - 1) * 20), 'Ο φόρτος μοιράστηκε άνισα: η ομάδα ' . $label($busiest) . " δέχτηκε {$maxOrders} εντολές, ενώ η ομάδα " . $label($quietest) . " μόλις {$minOrders}. Αυτό αφορά τον σχεδιασμό της διοίκησης περισσότερο από την απόδοση των ομάδων, και καθιστά τη μεταξύ τους σύγκριση λιγότερο ασφαλή.");
+    }
+
+    usort($findings, fn($a, $b) => $b['salience'] <=> $a['salience']);
+    $sentences = array_merge([$opening], array_column(array_slice($findings, 0, 6), 'text'));
+
+    // ── closing caveats, deliberately never ranked: they qualify
+    //    everything above rather than competing with it ──────────────────
+    $thin = array_values(array_filter($teams, fn($t) => $t['order_count'] < 3 && ($t['shortage_count'] ?? 0) === 0));
+    if (!empty($thin)) {
+        $names = array_map($label, $thin);
+        $sentences[] = (count($thin) === 1 ? 'Η ομάδα ' . $names[0] . ' αξιολογήθηκε' : implode(', ', $names) . ' αξιολογήθηκαν')
+            . ' σε ελάχιστες εντολές, οπότε η θέση ' . (count($thin) === 1 ? 'της' : 'τους') . ' στην κατάταξη είναι ενδεικτική και όχι ασφαλής σύγκριση.';
     }
 
     return implode(' ', $sentences);
 }
-
 /**
  * War Room: cross-mission pillar aggregates for reports.php's "Action Room"
  * trends tab, one row per mission_type_id (including 0/"no type", and every
@@ -4846,11 +5187,31 @@ function computeWarRoomTypeAggregates(string $startDate, string $endDate, ?int $
     foreach ($responseRows as $row) {
         $minutesByType[(int) $row['tid']][] = (float) $row['mins'];
     }
+    // Never-acknowledged recipients are filtered out by the query above (it
+    // needs acknowledged_at to compute a delta at all), so they are counted
+    // separately and padded back in as nulls — missionScoreForgottenAwareSpeed()
+    // reads a null as "never answered" and charges for it. Without this the
+    // trends tab would keep scoring a type that never acknowledged anything as
+    // if those orders had not been sent, and would then disagree with the
+    // single-mission score on the very same missions.
+    $recipientRows = dbFetchAll(
+        "SELECT COALESCE(m.mission_type_id,0) AS tid, COUNT(*) AS total,
+                SUM(CASE WHEN r.acknowledged_at IS NULL THEN 1 ELSE 0 END) AS unanswered
+         FROM mission_order_recipients r JOIN mission_orders o ON o.id = r.order_id JOIN missions m ON m.id = o.mission_id
+         WHERE $where GROUP BY tid",
+        $params
+    );
+    foreach ($recipientRows as $row) {
+        $tid = (int) $row['tid'];
+        $unanswered = (int) $row['unanswered'];
+        if (!isset($result[$tid]) || $unanswered === 0) continue;
+        for ($i = 0; $i < $unanswered; $i++) $minutesByType[$tid][] = null;
+    }
     foreach ($minutesByType as $tid => $minutesList) {
         if (!isset($result[$tid])) continue;
-        $speed = missionScoreForgottenAwareSpeed($minutesList, $responseHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty);
+        $speed = missionScoreForgottenAwareSpeed($minutesList, $responseHalfLifeMinutes, $forgottenThresholdMinutes, $forgottenPenalty, true);
         if ($speed['available']) {
-            $result[$tid]['pillars']['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => true, 'score' => $speed['score'], 'raw' => ['avg_minutes' => $speed['avg_minutes'], 'forgotten_count' => $speed['forgotten_count']]];
+            $result[$tid]['pillars']['response'] = ['label' => 'Ταχύτητα Απόκρισης', 'weight' => 25, 'available' => true, 'score' => $speed['score'], 'raw' => ['avg_minutes' => $speed['avg_minutes'], 'forgotten_count' => $speed['forgotten_count'], 'unanswered_count' => $speed['unanswered_count']]];
         }
     }
 

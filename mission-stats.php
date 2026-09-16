@@ -155,7 +155,7 @@ $scoreReview = dbFetchOne(
     [$missionId]
 );
 $observerNarrative = generateMissionObserverNarrative($score, $mission['title']);
-$teamComparisonNarrative = generateTeamComparisonNarrative($score['teams']);
+$teamComparisonNarrative = generateTeamComparisonNarrative($score['teams'], $score['forgotten_orders']);
 $commandNarrative = generateCommandNarrative($score['command']);
 $scoreTierHex = ['good' => '#0ca30c', 'warning' => '#a56600', 'critical' => '#d03b3b'];
 
