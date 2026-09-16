@@ -2037,7 +2037,16 @@ include __DIR__ . '/includes/header.php';
     #warRoomMap { height: 520px; border-radius: 12px; }
     #mapCard.map-fullscreen-active { position: fixed; inset: 0; z-index: 1040; border-radius: 0; }
     #mapCard.map-fullscreen-active #warRoomMap { height: 100%; border-radius: 0; }
-    #mapCard.map-fullscreen-active #warRoomBanner { position: absolute; left: 0; right: 0; bottom: 0; z-index: 600; border-top: 2px solid #dc2626; border-bottom: none; }
+    /* top:auto is load-bearing here, not tidiness. A rule only overrides the
+       properties it actually names, and .war-room-banner[data-ticker-pos="top"]
+       below sets top:0 — so without this reset the banner ends up with BOTH
+       top:0 and bottom:0 inside the fullscreen map, stretches to fill the whole
+       card, and its own max-height:40vh then caps it into a 40vh-tall black slab
+       across the top of the map with the scrolling text stranded at its upper
+       edge. That is what appeared the instant the first ticker row arrived in
+       fullscreen, and only in fullscreen: outside it the banner is position:
+       fixed with height:auto, where top:0 on its own is exactly right. */
+    #mapCard.map-fullscreen-active #warRoomBanner { position: absolute; left: 0; right: 0; top: auto; bottom: 0; z-index: 600; border-top: 2px solid #dc2626; border-bottom: none; }
     /* Strips Leaflet's default white tooltip box/arrow so only our own colored
        pill (inline-styled per team in dispatchTeamLabelHtml()) shows through. */
     .dispatch-team-label { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
@@ -2140,8 +2149,9 @@ include __DIR__ . '/includes/header.php';
        links, matching header.php's own --sidebar-width/991.98px breakpoint
        for when that sidebar goes off-canvas. data-ticker-pos (from Settings'
        war_room_ticker_position) picks top vs bottom; #mapCard.map-fullscreen
-       -active #warRoomBanner below still wins over both via its higher
-       ID-based specificity, unchanged. */
+       -active #warRoomBanner above wins over both — but only for the offsets
+       it names, which is why it has to reset top explicitly rather than rely
+       on out-specifying this rule. */
     .war-room-banner { display: none; flex-direction: column; background: #000; position: fixed; left: var(--sidebar-width, 260px); right: 0; z-index: 1900; max-height: 40vh; overflow-y: auto; }
     @media (max-width: 991.98px) { .war-room-banner { left: 0; } }
     .war-room-banner[data-ticker-pos="top"] { top: 0; border-bottom: 2px solid #dc2626; }
