@@ -709,6 +709,7 @@ return [
         // Team create/edit modals
         'teams.create_modal.select_note' => 'Επιλέξτε μέλη για την ομάδα.',
         'teams.move_note' => 'Όποιος ανήκει ήδη σε άλλη ομάδα εμφανίζεται με το σήμα της· τσεκάροντάς τον μεταφέρεται εδώ με την ίδια αποθήκευση.',
+        'teams.my_team_badge' => 'Η ομάδα μου',
         'teams.move.cannot_take' => 'υπεύθυνος/μοναδικό μέλος — δεν μεταφέρεται',
         'teams.create_modal.no_available' => 'Δεν υπάρχουν διαθέσιμοι εθελοντές.',
         'teams.custom_name_label' => 'Όνομα Ομάδας (προαιρετικό)',
@@ -2100,6 +2101,7 @@ return [
 
         'teams.create_modal.select_note' => 'Select members for the team.',
         'teams.move_note' => 'Anyone already on another team is shown with that team\'s badge; ticking them moves them here in the same save.',
+        'teams.my_team_badge' => 'My team',
         'teams.move.cannot_take' => 'leads / only member — cannot be moved',
         'teams.create_modal.no_available' => 'There are no available volunteers.',
         'teams.custom_name_label' => 'Team Name (optional)',

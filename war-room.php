@@ -1889,6 +1889,22 @@ include __DIR__ . '/includes/header.php';
     /* The active pill is solid blue, where a red badge on it reads as noise
        and loses contrast - invert it there instead. */
     .chat-room-tab.active .chat-tab-badge { background: #fff; color: #0d6efd; }
+    /* The viewer's own team in the Ομάδες Αποστολής roster. A volunteer sees
+       every team on the mission, and until now their own looked exactly like
+       the rest - they had to find their own name in a list that can run to
+       48 people. Left accent + tint, so it reads at a glance without
+       shouting; the "Η ομάδα μου" pill next to the team badge carries the
+       actual statement. */
+    .wr-my-team {
+        border-left: 4px solid #198754 !important;
+        background: rgba(25, 135, 84, .06);
+    }
+    /* And the viewer's own name inside that roster. */
+    .wr-me-chip {
+        border-color: #198754 !important;
+        border-width: 2px !important;
+        font-weight: 600;
+    }
     /* SOS is the one control that must never be a scroll or a tab away, so it
        owns the centre slot and is raised out of the bar. Hold-to-fire (not a
        plain tap): this rides in a jacket pocket. */
@@ -2930,19 +2946,40 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
             <div class="collapse show" id="teamsCollapse">
             <div class="list-group list-group-flush">
-                <?php foreach ($teams as $team): ?>
-                <?php [$teamBg, $teamFg] = teamBadgeColors($team['color']); ?>
-                <div class="list-group-item" data-team-id="<?= $team['id'] ?>">
+                <?php
+                    // Own team first. A volunteer sees every team on the
+                    // mission and, until now, their own was indistinguishable
+                    // from the rest — on a six-team callout that means hunting
+                    // for your own name before you know where you belong.
+                    // Deliberately a COPY: $teams is keyed by team id and the
+                    // briefing-token backfill and $teamMemberCheckbox both
+                    // index into it, so the real array must keep its order.
+                    // renderTeamRosters() re-applies this same reorder after a
+                    // live change, so being moved between teams keeps it true.
+                    $teamsForCard = $teams;
+                    if ($myTeamId && isset($teamsForCard[$myTeamId])) {
+                        $mineFirst = [$myTeamId => $teamsForCard[$myTeamId]];
+                        unset($teamsForCard[$myTeamId]);
+                        $teamsForCard = $mineFirst + $teamsForCard;
+                    }
+                ?>
+                <?php foreach ($teamsForCard as $team): ?>
+                <?php
+                    [$teamBg, $teamFg] = teamBadgeColors($team['color']);
+                    $isMyTeam = $myTeamId && (int) $team['id'] === (int) $myTeamId;
+                ?>
+                <div class="list-group-item<?= $isMyTeam ? ' wr-my-team' : '' ?>" data-team-id="<?= $team['id'] ?>">
                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
                         <div class="wr-team-roster">
                             <span class="badge fs-6 me-2" style="background:<?= h($teamBg) ?>;color:<?= h($teamFg) ?>;"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
+                            <?php if ($isMyTeam): ?><span class="badge bg-success me-2"><i class="bi bi-person-check-fill me-1"></i><?= t('teams.my_team_badge') ?></span><?php endif; ?>
                             <?php if ($team['leader_name']): ?>
                             <span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i><?= h($team['leader_name']) ?></span>
                             <?= homeTeamCornerBadgeHtml($team['leader_home_team_name'], $team['leader_home_team_color'], $team['leader_is_external'], $team['leader_guest_country_code']) ?>
                             <?php endif; ?>
                             <div class="small mt-2">
                                 <?php foreach ($team['members'] as $member): ?>
-                                <span class="badge bg-light text-dark border me-1 mb-1"><?= guestNameHtml($member['name'], $member['is_external'], $member['home_team_name'], $member['home_team_color'], $member['guest_country_code']) ?><?= k9BadgeHtml((int) $member['user_id'], true) ?><?= captainBadgeHtml((int) $member['user_id'], true) ?><?= $member['user_id'] === $team['leader_id'] ? ' ⭐' : '' ?></span>
+                                <span class="badge bg-light text-dark border me-1 mb-1<?= (int) $member['user_id'] === (int) $user['id'] ? ' wr-me-chip' : '' ?>"><?= guestNameHtml($member['name'], $member['is_external'], $member['home_team_name'], $member['home_team_color'], $member['guest_country_code']) ?><?= k9BadgeHtml((int) $member['user_id'], true) ?><?= captainBadgeHtml((int) $member['user_id'], true) ?><?= $member['user_id'] === $team['leader_id'] ? ' ⭐' : '' ?></span>
                                 <?php endforeach; ?>
                             </div>
                         </div>
@@ -4492,6 +4529,11 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <?php endif; ?>
 <script>
 const csrfToken = '<?= csrfToken() ?>';
+// The viewer's own user id. First top-level mirror of it in this file - the
+// chat IIFE had the only copy, embedded at its own call site - and it is here
+// rather than duplicated again because renderTeamRosters() now needs it too,
+// to keep marking "my team" after a live roster change.
+const WR_MY_USER_ID = <?= (int) $user['id'] ?>;
 <?php $__wrStrings = loadLangStrings('war-room'); $__viewerLang = $user['language'] ?? DEFAULT_LANGUAGE; ?>
 const WR_STRINGS = <?= json_encode($__wrStrings[$__viewerLang] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 const WR_STRINGS_FALLBACK = <?= json_encode($__wrStrings[DEFAULT_LANGUAGE] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
@@ -5460,16 +5502,26 @@ function homeTeamCornerBadgeHtml(teamName, teamColor, isExternal, countryCode) {
 // Rebuilds one team's roster HTML (badge, leader line, member badges) —
 // exactly what the PHP template's own #teamsCard loop renders for
 // .wr-team-roster, kept in sync by hand since this is client-only data.
+function teamIsMine(team) {
+    return (team.members || []).some(m => Number(m.user_id) === WR_MY_USER_ID);
+}
 function teamRosterHtml(team) {
     const [teamBg, teamFg] = teamBadgeColorsJs(team.color);
     let html = `<span class="badge fs-6 me-2" style="background:${teamBg};color:${teamFg};">${escapeHtml(teamLabel(team.codename, team.team_number))}</span>`;
+    // Mirrors the PHP render of this card exactly - without it, the first
+    // poll after any roster change would quietly wipe the "Η ομάδα μου" pill
+    // off a server-rendered row.
+    if (teamIsMine(team)) {
+        html += `<span class="badge bg-success me-2"><i class="bi bi-person-check-fill me-1"></i>${escapeHtml(t('teams.my_team_badge'))}</span>`;
+    }
     if (team.leader_name) {
         html += `<span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i>${escapeHtml(team.leader_name)}</span>`;
         html += homeTeamCornerBadgeHtml(team.leader_home_team_name, team.leader_home_team_color, team.leader_is_external, team.leader_guest_country_code);
     }
     html += '<div class="small mt-2">' + team.members.map(m => {
         const [mBg, mFg] = teamBadgeColorsJs(m.home_team_color);
-        return `<span class="badge bg-light text-dark border me-1 mb-1">${guestNameHtml(m.name, m.is_external, m.home_team_name, mBg, mFg, m.guest_country_code)}${k9BadgeHtml(m.user_id, true)}${captainBadgeHtml(m.user_id, true)}${m.user_id === team.leader_id ? ' ⭐' : ''}</span>`;
+        const meClass = Number(m.user_id) === WR_MY_USER_ID ? ' wr-me-chip' : '';
+        return `<span class="badge bg-light text-dark border me-1 mb-1${meClass}">${guestNameHtml(m.name, m.is_external, m.home_team_name, mBg, mFg, m.guest_country_code)}${k9BadgeHtml(m.user_id, true)}${captainBadgeHtml(m.user_id, true)}${m.user_id === team.leader_id ? ' ⭐' : ''}</span>`;
     }).join('') + '</div>';
     return html;
 }
@@ -5498,6 +5550,12 @@ function renderTeamRosters(items) {
     });
     const listEl = document.querySelector('[data-card-id="teamsCard"] .list-group');
     if (!listEl) return;
+    // The row's own class is set here rather than in teamRosterHtml(), which
+    // only owns the roster div inside it.
+    document.querySelectorAll('[data-card-id="teamsCard"] [data-team-id]').forEach(row => {
+        const team = byId.get(row.dataset.teamId);
+        row.classList.toggle('wr-my-team', !!team && teamIsMine(team));
+    });
     items.forEach(team => {
         if (seenIds.has(String(team.id))) return;
         document.getElementById('teamsEmptyMessage')?.remove();
@@ -5529,6 +5587,16 @@ function renderTeamRosters(items) {
         }
         listEl.appendChild(row);
     });
+
+    // Own team back to the top, the same order the PHP render lays out. Being
+    // moved to another team is exactly when a volunteer looks at this card,
+    // and it is also exactly when the row order would otherwise be wrong -
+    // the new team's row is appended last, at the bottom of the list.
+    const mineRow = Array.from(listEl.querySelectorAll('[data-team-id]'))
+        .find(row => teamIsMine(byId.get(row.dataset.teamId) || {members: []}));
+    if (mineRow && mineRow !== listEl.firstElementChild) {
+        listEl.insertBefore(mineRow, listEl.firstElementChild);
+    }
 }
 // Small colored pill (team's own badge color, or the dark "all teams" fallback
 // teamBadgeColors() already returns for a null team) shown as a permanent —
@@ -12161,11 +12229,9 @@ document.querySelectorAll('.team-form').forEach(form => {
     if (!chatMessagesEl || !chatForm) return;
 
     const missionId = <?= $missionId ?>;
-    // Needed by syncRoomTabs() below to answer "which team am I on NOW?"
-    // against the live roster the poll delivers. Embedded at the call site
-    // rather than promoted to a global, matching how this file already
-    // handles $missionId in every other top-level function.
-    const myUserId = <?= (int) $user['id'] ?>;
+    // Answers "which team am I on NOW?" for syncRoomTabs() below. Reads the
+    // one top-level WR_MY_USER_ID rather than embedding a second copy.
+    const myUserId = WR_MY_USER_ID;
     let activeTeamId = '';
     let lastIdByRoom = {};
     // Per-room unread counts, one per chat room pill. The data to build these
