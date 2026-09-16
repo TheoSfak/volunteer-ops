@@ -11910,7 +11910,20 @@ function pollWarRoomData() {
             renderWeatherControl(weather);
         }
         if (data.areas) areas = data.areas;
-        if (data.teams) renderTeamRosters(data.teams);
+        if (data.teams) {
+            renderTeamRosters(data.teams);
+            // Chat room tabs are server-rendered ONCE, at page load, from
+            // $chatTeams - so a volunteer put on a team AFTER opening this
+            // page never grew their team's tab, and one moved off a team kept
+            // a tab mission-chat.php would now refuse. That is the normal
+            // order of a real operation: people open the Action Room first,
+            // command staff builds the teams after, which is exactly when the
+            // room they most need starts existing. Event rather than a direct
+            // call because the chat code owns lastIdByRoom/activeTeamId and
+            // its own click handlers inside a closure - same reason
+            // wr-chat-unread travels the other way.
+            document.dispatchEvent(new CustomEvent('wr-teams-updated', {detail: {teams: data.teams}}));
+        }
         if (data.sectors) {
             sectors = data.sectors;
             renderMySectors(sectors);
@@ -12018,6 +12031,11 @@ document.querySelectorAll('.team-form').forEach(form => {
     if (!chatMessagesEl || !chatForm) return;
 
     const missionId = <?= $missionId ?>;
+    // Needed by syncRoomTabs() below to answer "which team am I on NOW?"
+    // against the live roster the poll delivers. Embedded at the call site
+    // rather than promoted to a global, matching how this file already
+    // handles $missionId in every other top-level function.
+    const myUserId = <?= (int) $user['id'] ?>;
     let activeTeamId = '';
     let lastIdByRoom = {};
 
@@ -12065,6 +12083,18 @@ document.querySelectorAll('.team-form').forEach(form => {
             .catch(() => { chatMessagesEl.textContent = t('chat.load_error'); });
     }
 
+    // Sets a room's unread cursor to "everything already said", without ever
+    // rendering it. Used for every room this viewer can see but is not
+    // looking at: at load for the other tabs, and - since syncRoomTabs() -
+    // for a room that only appears mid-session.
+    function baselineRoom(teamId) {
+        fetch(`mission-chat.php?mission_id=${missionId}&team_id=${teamId}&after_id=0`)
+            .then(response => response.json())
+            .then(data => {
+                lastIdByRoom[teamId] = (data.ok && data.messages.length) ? data.messages[data.messages.length - 1].id : 0;
+            })
+            .catch(() => {});
+    }
     // Overlap guard — see pollWarRoomData()'s own flag for why.
     let roomPollInFlight = false;
     function pollRoom() {
@@ -12120,11 +12150,103 @@ document.querySelectorAll('.team-form').forEach(form => {
         });
     }
 
-    document.querySelectorAll('.chat-room-tab').forEach(tab => tab.addEventListener('click', () => {
-        document.querySelectorAll('.chat-room-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        loadRoom(tab.dataset.teamId);
-    }));
+    function wireRoomTab(tab) {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.chat-room-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            loadRoom(tab.dataset.teamId);
+        });
+    }
+    document.querySelectorAll('.chat-room-tab').forEach(wireRoomTab);
+
+    // Keeps the room tabs in step with the live team roster, so a volunteer
+    // who is put on a team while this page is open gets their team's room
+    // without reloading. Mirrors the server's own $chatTeams rule exactly -
+    // command staff get every team's room, everyone else only the team they
+    // are on right now - so a tab added here is always one mission-chat.php
+    // will actually serve, and a tab removed here is always one it would
+    // refuse.
+    function syncRoomTabs(teams) {
+        const tabList = document.getElementById('chatRoomTabs');
+        if (!tabList || !Array.isArray(teams)) return;
+        const visible = CAN_MANAGE_WAR_ROOM
+            ? teams
+            : teams.filter(team => (team.members || []).some(m => Number(m.user_id) === myUserId));
+        const wanted = new Map(visible.map(team => [String(team.id), teamLabel(team.codename, team.team_number)]));
+
+        // Drop rooms this viewer can no longer read - team deleted, or they
+        // were moved off it. Leaving the tab up is worse than removing it:
+        // the server refuses the room, so the tab can only ever render an
+        // error message where the conversation used to be.
+        document.querySelectorAll('.chat-room-tab').forEach(tab => {
+            const teamId = tab.dataset.teamId;
+            if (teamId === '' || wanted.has(teamId)) return;
+            const wasActive = tab.classList.contains('active');
+            delete lastIdByRoom[teamId];
+            const li = tab.closest('li');
+            if (li) { li.remove(); } else { tab.remove(); }
+            // Never strand them staring at a room that is gone - fall back to
+            // the General room, the one every participant can always read.
+            if (wasActive) {
+                const generalTab = document.querySelector('.chat-room-tab[data-team-id=""]');
+                if (generalTab) generalTab.classList.add('active');
+                loadRoom('');
+            }
+        });
+
+        visible.forEach(team => {
+            const teamId = String(team.id);
+            const label = wanted.get(teamId);
+            const existing = document.querySelector('.chat-room-tab[data-team-id="' + teamId + '"]');
+            if (existing) {
+                // Defensive resync only: nothing in the UI can rename a team
+                // today (update_team does not touch the codename), so this
+                // normally never fires - it is here so the tab cannot drift
+                // from the roster card if that ever changes.
+                if (existing.textContent !== label) existing.textContent = label;
+                return;
+            }
+            const li = document.createElement('li');
+            li.className = 'nav-item';
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'nav-link chat-room-tab';
+            btn.dataset.teamId = teamId;
+            btn.textContent = label;
+            li.appendChild(btn);
+            tabList.appendChild(li);
+            wireRoomTab(btn);
+            // Same baseline the load-time block sets for every other room, so
+            // the unread badge counts what arrives from NOW rather than
+            // announcing the room's entire backlog the moment the tab appears.
+            if (document.body.classList.contains('wr-tabs-ready')) baselineRoom(teamId);
+        });
+
+        syncExportMenu(visible);
+    }
+
+    // The export menu is built from the same $chatTeams list as the tabs, so
+    // it goes stale the same way - and export-mission-chat.php re-checks team
+    // membership itself, so a stale entry is a link that only redirects with
+    // an access error.
+    function syncExportMenu(visible) {
+        const menu = document.querySelector('[data-card-id="chatCard"] .dropdown-menu');
+        if (!menu) return;
+        // Index 0 is the General room, which is never team-scoped and so
+        // never needs rebuilding.
+        Array.from(menu.querySelectorAll('li')).slice(1).forEach(li => li.remove());
+        visible.forEach(team => {
+            const li = document.createElement('li');
+            const a = document.createElement('a');
+            a.className = 'dropdown-item';
+            a.href = 'exports/export-mission-chat.php?mission_id=' + missionId + '&team_id=' + team.id;
+            a.textContent = teamLabel(team.codename, team.team_number);
+            li.appendChild(a);
+            menu.appendChild(li);
+        });
+    }
+
+    document.addEventListener('wr-teams-updated', e => syncRoomTabs(e.detail.teams));
 
     chatForm.addEventListener('submit', event => {
         event.preventDefault();
@@ -12150,14 +12272,8 @@ document.querySelectorAll('.team-form').forEach(form => {
     // messages only, not that room's entire pre-existing history.
     if (document.body.classList.contains('wr-tabs-ready')) {
         document.querySelectorAll('.chat-room-tab').forEach(tab => {
-            const otherTeamId = tab.dataset.teamId;
-            if (otherTeamId === activeTeamId) return;
-            fetch(`mission-chat.php?mission_id=${missionId}&team_id=${otherTeamId}&after_id=0`)
-                .then(response => response.json())
-                .then(data => {
-                    lastIdByRoom[otherTeamId] = (data.ok && data.messages.length) ? data.messages[data.messages.length - 1].id : 0;
-                })
-                .catch(() => {});
+            if (tab.dataset.teamId === activeTeamId) return;
+            baselineRoom(tab.dataset.teamId);
         });
     }
     setInterval(() => { if (!document.hidden) pollRoom(); }, 5000);
