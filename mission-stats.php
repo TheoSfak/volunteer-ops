@@ -401,7 +401,7 @@ include __DIR__ . '/includes/header.php';
     <h3 class="mt-3 mb-2"><i class="bi bi-trophy-fill text-warning"></i> Κατάταξη Ομάδων</h3>
     <?php foreach ($score['teams'] as $t): ?>
         <div class="score-leaderboard-row" style="border-left-color:<?= h($t['color']) ?>;">
-            <div class="score-leaderboard-rank"><?= $t['rank'] === 1 ? '🥇' : ($t['rank'] === 2 ? '🥈' : ($t['rank'] === 3 ? '🥉' : $t['rank'])) ?></div>
+            <div class="score-leaderboard-rank"><?= $t['rank'] === null ? '—' : ($t['rank'] === 1 ? '🥇' : ($t['rank'] === 2 ? '🥈' : ($t['rank'] === 3 ? '🥉' : $t['rank']))) ?></div>
             <span class="badge" style="background:<?= h($t['color']) ?>;color:#fff;"><?= h(teamLabel($t['codename'], $t['team_number'])) ?></span>
             <div class="score-leaderboard-team"><?= h($t['tier'][1]) ?></div>
             <div class="score-leaderboard-score" style="color:<?= $scoreTierHex[$t['tier'][0]] ?>;"><?= number_format($t['score'], 1) ?></div>

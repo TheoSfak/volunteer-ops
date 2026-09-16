@@ -3985,6 +3985,220 @@ function missionScoreForgottenAwareSpeed(array $minutesList, float $halfLifeMinu
 }
 
 /**
+ * War Room: per-team fieldwork signals — everything the Action Room already
+ * records about what a team physically did, which until now no part of the
+ * report read. Keyed by team_id; teams with no fieldwork at all simply do not
+ * appear. One grouped query per concern, never per team: this file has a
+ * documented history of connection exhaustion under load, and the mission
+ * report is exactly the kind of page that gets opened by several people at
+ * once right after a mission ends.
+ *
+ * The split between what is SCORED and what is only DESCRIBED is deliberate
+ * and must not be quietly widened:
+ *
+ *  - Scored (see the 'discipline' pillar in computeMissionScore()): route
+ *    waypoint closure, out-of-sequence visits, assigned-sector coverage, and
+ *    restricted-area breaches. All four measure whether a team did what it was
+ *    told, the way it was told — none of them depends on how far the team had
+ *    to travel, which is the same fairness line generateTeamComparisonNarrative()
+ *    already draws around dispatch arrival times.
+ *
+ *  - Never scored, only described: SOS alerts and casualty incidents. Scoring
+ *    either one would reward a team for NOT raising them, which is a safety
+ *    hazard, not a scoring imperfection — a team must never have a numeric
+ *    reason to sit on a mayday. Field media and Points of Interest are also
+ *    left unscored for a plainer reason: a team that found nothing may have
+ *    been given an empty sector, and counting finds would score the ground
+ *    rather than the crew.
+ */
+function computeMissionTeamFieldwork(int $missionId): array {
+    $teams = [];
+    $seed = function (int $tid) use (&$teams) {
+        if (!isset($teams[$tid])) {
+            $teams[$tid] = [
+                'waypoints_total' => 0, 'waypoints_completed' => 0, 'waypoints_skipped' => 0,
+                'waypoints_skipped_with_reason' => 0, 'waypoints_untouched' => 0,
+                'out_of_sequence' => 0, 'skip_reason_example' => null,
+                'sectors_assigned' => 0, 'sectors_completed' => 0, 'sectors_in_progress' => 0,
+                'sectors_needs_recheck' => 0, 'sectors_not_started' => 0,
+                'breaches' => 0, 'breach_area' => null,
+                'sos_alerts' => 0, 'incidents' => 0, 'poi_photos' => 0, 'field_media' => 0,
+            ];
+        }
+    };
+
+    // ── route waypoints. A cancelled route is excluded outright: command
+    //    staff called it off, so its unvisited stops are not the team's doing.
+    //    One progress row already exists per waypoint (created with the
+    //    route), so COUNT(*) here is "stops this team was given", not "stops
+    //    it touched". ───────────────────────────────────────────────────────
+    $routeRows = dbFetchAll(
+        "SELECT p.team_id,
+                COUNT(*) AS total,
+                SUM(CASE WHEN p.completed_at IS NOT NULL THEN 1 ELSE 0 END) AS completed,
+                SUM(CASE WHEN p.skipped_at IS NOT NULL THEN 1 ELSE 0 END) AS skipped,
+                SUM(CASE WHEN p.skipped_at IS NOT NULL AND p.skip_reason IS NOT NULL AND p.skip_reason <> '' THEN 1 ELSE 0 END) AS skipped_with_reason,
+                SUM(CASE WHEN p.out_of_sequence = 1 THEN 1 ELSE 0 END) AS out_of_sequence
+         FROM mission_route_progress p
+         JOIN mission_routes r ON r.id = p.route_id
+         WHERE r.mission_id = ? AND r.cancelled_at IS NULL AND p.team_id IS NOT NULL
+         GROUP BY p.team_id",
+        [$missionId]
+    );
+    foreach ($routeRows as $row) {
+        $tid = (int) $row['team_id'];
+        $seed($tid);
+        $teams[$tid]['waypoints_total'] = (int) $row['total'];
+        $teams[$tid]['waypoints_completed'] = (int) $row['completed'];
+        $teams[$tid]['waypoints_skipped'] = (int) $row['skipped'];
+        $teams[$tid]['waypoints_skipped_with_reason'] = (int) $row['skipped_with_reason'];
+        $teams[$tid]['out_of_sequence'] = (int) $row['out_of_sequence'];
+        $teams[$tid]['waypoints_untouched'] = max(0, (int) $row['total'] - (int) $row['completed'] - (int) $row['skipped']);
+    }
+
+    // one representative skip reason per team, for the narrative to quote
+    foreach (dbFetchAll(
+        "SELECT p.team_id, p.skip_reason, w.label, w.seq
+         FROM mission_route_progress p
+         JOIN mission_routes r ON r.id = p.route_id
+         JOIN mission_route_waypoints w ON w.id = p.waypoint_id
+         WHERE r.mission_id = ? AND r.cancelled_at IS NULL AND p.team_id IS NOT NULL
+           AND p.skipped_at IS NOT NULL AND p.skip_reason IS NOT NULL AND p.skip_reason <> ''
+         ORDER BY p.skipped_at",
+        [$missionId]
+    ) as $row) {
+        $tid = (int) $row['team_id'];
+        $seed($tid);
+        if ($teams[$tid]['skip_reason_example'] === null) {
+            $teams[$tid]['skip_reason_example'] = [
+                'reason' => $row['skip_reason'],
+                'waypoint' => ($row['label'] !== null && $row['label'] !== '') ? $row['label'] : ('#' . $row['seq']),
+            ];
+        }
+    }
+
+    // ── assigned search sectors ─────────────────────────────────────────
+    foreach (dbFetchAll(
+        "SELECT team_id, status, COUNT(*) AS cnt
+         FROM mission_search_sectors
+         WHERE mission_id = ? AND team_id IS NOT NULL
+         GROUP BY team_id, status",
+        [$missionId]
+    ) as $row) {
+        $tid = (int) $row['team_id'];
+        $seed($tid);
+        $cnt = (int) $row['cnt'];
+        $teams[$tid]['sectors_assigned'] += $cnt;
+        switch ($row['status']) {
+            case 'completed':      $teams[$tid]['sectors_completed'] += $cnt; break;
+            case 'needs_recheck':  $teams[$tid]['sectors_needs_recheck'] += $cnt; break;
+            case 'in_progress':
+            case 'en_route':       $teams[$tid]['sectors_in_progress'] += $cnt; break;
+            default:               $teams[$tid]['sectors_not_started'] += $cnt; break;
+        }
+    }
+
+    // ── restricted-area breaches ────────────────────────────────────────
+    foreach (dbFetchAll(
+        "SELECT team_id, COUNT(*) AS cnt, MIN(area_label) AS area
+         FROM mission_restricted_area_breaches
+         WHERE mission_id = ? AND team_id IS NOT NULL
+         GROUP BY team_id",
+        [$missionId]
+    ) as $row) {
+        $tid = (int) $row['team_id'];
+        $seed($tid);
+        $teams[$tid]['breaches'] = (int) $row['cnt'];
+        $teams[$tid]['breach_area'] = $row['area'];
+    }
+
+    // ── described-only signals ──────────────────────────────────────────
+    foreach ([
+        ['mission_sos_alerts', 'sos_alerts'],
+        ['mission_incidents', 'incidents'],
+    ] as [$table, $key]) {
+        foreach (dbFetchAll("SELECT team_id, COUNT(*) AS cnt FROM $table WHERE mission_id = ? AND team_id IS NOT NULL GROUP BY team_id", [$missionId]) as $row) {
+            $tid = (int) $row['team_id'];
+            $seed($tid);
+            $teams[$tid][$key] = (int) $row['cnt'];
+        }
+    }
+
+    // mission_photos carries no team_id — a photo belongs to whoever uploaded
+    // it, and mission_team_members is unique on (mission_id, user_id), so the
+    // uploader maps to exactly one team with no fan-out risk.
+    foreach (dbFetchAll(
+        "SELECT tm.team_id,
+                COUNT(*) AS media,
+                SUM(CASE WHEN ph.poi_id IS NOT NULL THEN 1 ELSE 0 END) AS poi_media
+         FROM mission_photos ph
+         JOIN mission_team_members tm ON tm.user_id = ph.user_id AND tm.mission_id = ph.mission_id
+         WHERE ph.mission_id = ?
+         GROUP BY tm.team_id",
+        [$missionId]
+    ) as $row) {
+        $tid = (int) $row['team_id'];
+        $seed($tid);
+        $teams[$tid]['field_media'] = (int) $row['media'];
+        $teams[$tid]['poi_photos'] = (int) $row['poi_media'];
+    }
+
+    return $teams;
+}
+
+/**
+ * War Room: turns one team's computeMissionTeamFieldwork() row into the
+ * 0-100 'discipline' pillar. Split out so the formula sits next to its own
+ * explanation rather than inside computeMissionScore()'s already long body.
+ *
+ * Route stops and search sectors are averaged together weighted by their own
+ * counts, not 50/50: a team with twenty waypoints and one sector should be
+ * judged almost entirely on the waypoints, and a 50/50 blend would let a
+ * single untouched sector cancel out a flawless twenty-stop route.
+ *
+ * A stop the team explicitly SKIPPED with a reason earns half credit, while
+ * one it simply never touched earns none. That gap is the whole point: both
+ * leave the ground uncovered, but one of them told command about it at the
+ * time and the other left the map quietly lying. Scoring them identically
+ * would remove any reason to file the skip.
+ */
+function missionTeamDisciplineScore(array $fw): array {
+    $parts = [];
+
+    $wpTotal = $fw['waypoints_total'];
+    if ($wpTotal > 0) {
+        $credit = $fw['waypoints_completed'] + 0.5 * $fw['waypoints_skipped_with_reason'];
+        $parts[] = ['score' => min(100.0, $credit / $wpTotal * 100), 'weight' => $wpTotal];
+    }
+
+    $secTotal = $fw['sectors_assigned'];
+    if ($secTotal > 0) {
+        // in_progress/en_route earn half: the team engaged with the sector but
+        // never closed it out, which is materially different from not starting.
+        $credit = $fw['sectors_completed'] + 0.5 * $fw['sectors_in_progress'];
+        $parts[] = ['score' => min(100.0, $credit / $secTotal * 100), 'weight' => $secTotal];
+    }
+
+    if (empty($parts)) {
+        // Breaches alone do not make a discipline score. A team with no route
+        // and no sector assignment has no body of work to be disciplined
+        // about, and grading it purely on a penalty would manufacture a very
+        // low score out of a single GPS event. The breach is still described
+        // in the narrative.
+        return ['available' => false, 'score' => null];
+    }
+
+    $weightSum = array_sum(array_column($parts, 'weight'));
+    $base = array_sum(array_map(fn($p) => $p['score'] * $p['weight'], $parts)) / $weightSum;
+    // Same per-occurrence scale the rest of this file uses (15 for a serious
+    // failure); an out-of-sequence visit is a smaller thing than walking into
+    // a restricted area, and the app asks for confirmation before allowing it
+    // rather than blocking it, so it is a flag and not an offence.
+    $score = max(0.0, $base - $fw['out_of_sequence'] * 5 - $fw['breaches'] * 15);
+    return ['available' => true, 'score' => $score];
+}
+
+/**
  * War Room: post-mission performance score — an overall 0-100 grade plus a
  * per-team leaderboard, for mission-stats.php's score-validation section and
  * mission-report-print.php's read-only display. Reuses
@@ -4351,12 +4565,31 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
         }
     }
 
+    // One batch of grouped queries for every team's fieldwork, fetched before
+    // the loop rather than inside it — see computeMissionTeamFieldwork()'s own
+    // note on why this page must not issue per-team queries.
+    $fieldwork = computeMissionTeamFieldwork($missionId);
+    $emptyFieldwork = [
+        'waypoints_total' => 0, 'waypoints_completed' => 0, 'waypoints_skipped' => 0,
+        'waypoints_skipped_with_reason' => 0, 'waypoints_untouched' => 0,
+        'out_of_sequence' => 0, 'skip_reason_example' => null,
+        'sectors_assigned' => 0, 'sectors_completed' => 0, 'sectors_in_progress' => 0,
+        'sectors_needs_recheck' => 0, 'sectors_not_started' => 0,
+        'breaches' => 0, 'breach_area' => null,
+        'sos_alerts' => 0, 'incidents' => 0, 'poi_photos' => 0, 'field_media' => 0,
+    ];
+
     $teamScores = [];
     foreach ($teams as $team) {
         $tid = (int) $team['id'];
         $orders = $byTeamOrders[$tid] ?? null;
         $shortages = $byTeamShortage[$tid] ?? null;
-        if ($orders === null && $shortages === null) {
+        $fw = $fieldwork[$tid] ?? $emptyFieldwork;
+        $fwDiscipline = missionTeamDisciplineScore($fw);
+        // Fieldwork alone is now enough to put a team on the leaderboard. A
+        // team can be given a route to walk and no radio orders at all, and
+        // before this it vanished from the report entirely.
+        if ($orders === null && $shortages === null && !$fwDiscipline['available']) {
             continue; // nothing to score this team on — excluded from the leaderboard entirely
         }
 
@@ -4403,6 +4636,16 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
         // would double-count the same acknowledgment times the response
         // pillar already grades); it exists to be described, ranked and
         // plotted.
+        // Weight 25 alongside response 45 / completion 35 / shortage 20. It is
+        // unavailable whenever a mission used neither Route Orders nor search
+        // sectors, which is most of them — so for those missions the weights
+        // renormalise back to exactly what they were before this pillar
+        // existed, and no historical score shifts. The mission-wide score is
+        // deliberately NOT given a matching pillar: it feeds the stored
+        // computed_score and the same-type historical baseline, and re-weighting
+        // it again would make those incomparable across this release.
+        $teamPillars['discipline'] = ['weight' => 25, 'available' => $fwDiscipline['available'], 'score' => $fwDiscipline['score'], 'raw' => $fw];
+
         $teamConsistency = missionTeamConsistency($orders['ack_minutes'] ?? [], $forgottenThresholdMinutes);
         $teamPillars['consistency'] = ['weight' => 0, 'available' => $teamConsistency['available'], 'score' => $teamConsistency['score'], 'raw' => ['median' => $teamConsistency['median'], 'p90' => $teamConsistency['p90'], 'spread' => $teamConsistency['spread'], 'sample' => $teamConsistency['sample']]];
 
@@ -4417,6 +4660,25 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
         if ($tWeightSum === 0) continue;
         $tScore = round($tWeightedScore / $tWeightSum, 2);
 
+        // Scores computed over different pillar sets are not comparable, and
+        // the renormalise-on-unavailable rule means a team measured on one
+        // narrow thing can post a perfect number. A team that walked four
+        // waypoints and was never given a radio order scored 100.00 and
+        // outranked a team that scored 96.73 across four pillars and nineteen
+        // observations — which is not a finer-grained judgement, it is a
+        // category error.
+        //
+        // So a single-pillar team is shown with its score but left out of the
+        // ranking, exactly as computeMissionScore() already leaves $overall
+        // null when no substantive pillar has data, and as
+        // mission-report-print.php already refuses to draw a 1-2 axis radar
+        // ("degenerate"). Its score is still real — it just is not a placing.
+        // 'consistency' is excluded from the count: it is a weight-0
+        // descriptive pillar and contributes nothing to $tScore, so counting
+        // it would let a team qualify on evidence its score never saw.
+        $scoringPillars = array_filter($teamPillars, fn($p, $k) => $p['available'] && $k !== 'consistency', ARRAY_FILTER_USE_BOTH);
+        $isRanked = count($scoringPillars) >= 2;
+
         $teamScores[] = [
             'team_id'     => $tid,
             'codename'    => $team['codename'],
@@ -4424,6 +4686,8 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
             'color'       => $team['color'] ?: '#898781',
             'score'       => $tScore,
             'tier'        => missionScoreTierMeta($tScore),
+            'ranked'      => $isRanked,
+            'pillar_count' => count($scoringPillars),
             'order_count' => $orders['count'] ?? 0,
             'pillars'     => $teamPillars,
             // ── narrative-only enrichment below. None of it feeds $tScore;
@@ -4437,11 +4701,19 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
             'trajectory'       => missionTeamTrajectory($orders['timeline'] ?? [], $forgottenThresholdMinutes),
             'worst_order'      => $orders['worst'] ?? null,
             'unanswered_example' => $orders['unanswered_example'] ?? null,
+            'fieldwork'        => $fw,
         ];
     }
-    usort($teamScores, fn($a, $b) => ($b['score'] <=> $a['score']) ?: ($b['order_count'] <=> $a['order_count']));
-    foreach ($teamScores as $i => &$t) {
-        $t['rank'] = $i + 1;
+    // Ranked teams first and numbered; unranked ones keep their score, sort
+    // among themselves, and carry rank null so every renderer has to decide
+    // what to show rather than silently printing a placing it did not earn.
+    usort($teamScores, fn($a, $b) =>
+        ($b['ranked'] <=> $a['ranked'])
+        ?: ($b['score'] <=> $a['score'])
+        ?: ($b['order_count'] <=> $a['order_count']));
+    $place = 0;
+    foreach ($teamScores as &$t) {
+        $t['rank'] = $t['ranked'] ? ++$place : null;
     }
     unset($t);
 
@@ -4783,6 +5055,15 @@ function generateCommandNarrative(array $command): string {
  * qualifies everything before it, so neither should have to compete for a
  * slot.
  *
+ * Fieldwork findings (route stops, assigned sectors, restricted-area
+ * breaches) join the same pool and compete on salience like everything else.
+ * Two of them never compete on equal terms by design: a restricted-area breach
+ * enters high because it is a safety matter rather than a performance one, and
+ * an SOS or casualty incident enters high because it EXPLAINS a team's other
+ * numbers — a crew that ran a mayday will look slow on every speed metric in
+ * this report, and a debrief that does not know that is an unfair one. Neither
+ * SOS alerts nor incidents touch any pillar; see computeMissionTeamFieldwork().
+ *
  * $alreadyCited is the caller's $score['forgotten_orders']. Both callers print
  * generateMissionObserverNarrative() immediately above this paragraph, and
  * that function names forgotten_orders[0] by name — so without this the same
@@ -4830,7 +5111,26 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
     };
 
     // ── opening: the spread of the leaderboard itself ────────────────────
-    $byScore = $teams;
+    //    Overall scores computed over different pillar sets are not comparable
+    //    (see computeMissionScore()'s ranking gate), so this sentence and the
+    //    contenders clause below use ranked teams only. Every dimension-
+    //    specific finding further down is unaffected: those compare two teams
+    //    on one measure that both of them actually have.
+    //    A team array without the key at all is treated as ranked: the flag is
+    //    set by computeMissionScore(), and a future caller that assembles
+    //    teams some other way should get the normal paragraph rather than
+    //    silently collapse to the "cannot be ranked" one.
+    $isRankedTeam = fn($t) => !array_key_exists('ranked', $t) || !empty($t['ranked']);
+    $rankedTeams = array_values(array_filter($teams, $isRankedTeam));
+    $unranked = array_values(array_filter($teams, fn($t) => !$isRankedTeam($t)));
+    if (count($rankedTeams) < 2) {
+        // Nothing may be said about relative standing. Report what each team
+        // was measured on instead of inventing a comparison.
+        if (empty($unranked)) return '';
+        $bits = array_map(fn($t) => $label($t) . ' (' . number_format($t['score'], 1) . ')', $teams);
+        return 'Δεν προκύπτει ασφαλής κατάταξη μεταξύ των ομάδων: η κάθε μία αξιολογήθηκε σε διαφορετική βάση δεδομένων και οι βαθμοί τους δεν είναι μεταξύ τους συγκρίσιμοι — ' . implode(', ', $bits) . '.';
+    }
+    $byScore = $rankedTeams;
     usort($byScore, fn($a, $b) => $b['score'] <=> $a['score']);
     $top = $byScore[0];
     $bottom = $byScore[count($byScore) - 1];
@@ -4995,6 +5295,114 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
             : 'Στην ομάδα ' . $label($lt) . " μία εντολή προς {$wo['user_name']} χρειάστηκε περίπου {$hours} ώρες για να επιβεβαιωθεί, τη μεγαλύτερη καθυστέρηση της αποστολής.");
     }
 
+    // ── fieldwork: what the team physically did ─────────────────────────
+    $fwOf = fn($t) => $t['fieldwork'] ?? null;
+
+    // Walking into a restricted area outranks almost everything else here.
+    $breached = array_values(array_filter($teams, fn($t) => ($fwOf($t)['breaches'] ?? 0) > 0));
+    if (!empty($breached)) {
+        usort($breached, fn($a, $b) => $b['fieldwork']['breaches'] <=> $a['fieldwork']['breaches']);
+        $b = $breached[0];
+        $n = $b['fieldwork']['breaches'];
+        $area = trim((string) ($b['fieldwork']['breach_area'] ?? ''));
+        $where = $area !== '' ? " («{$area}»)" : '';
+        $add(min(100.0, 60 + $n * 12), 'Η ομάδα ' . $label($b) . ($n === 1 ? " κατέγραψε είσοδο σε απαγορευμένη ζώνη{$where}." : " κατέγραψε {$n} εισόδους σε απαγορευμένη ζώνη{$where}.")
+            . ' Ανεξάρτητα από τη βαθμολογία, αυτό αφορά την ασφάλεια και αξίζει να συζητηθεί στο debrief.');
+    }
+
+    // Route stops: untouched is the real failure, a reported skip is not.
+    $withRoute = array_values(array_filter($teams, fn($t) => ($fwOf($t)['waypoints_total'] ?? 0) > 0));
+    if (count($withRoute) >= 2) {
+        $rates = array_map(function ($t) use ($label) {
+            $f = $t['fieldwork'];
+            return ['label' => $label($t), 'rate' => round($f['waypoints_completed'] / $f['waypoints_total'] * 100), 'f' => $f];
+        }, $withRoute);
+        usort($rates, fn($a, $b) => $b['rate'] <=> $a['rate']);
+        $best = $rates[0];
+        $worst = $rates[count($rates) - 1];
+        if ($best['label'] !== $worst['label'] && $best['rate'] - $worst['rate'] >= 15) {
+            $add(min(100.0, (float) ($best['rate'] - $worst['rate'])),
+                "Στα σημεία πορείας, η {$best['label']} έκλεισε {$best['f']['waypoints_completed']}/{$best['f']['waypoints_total']} ({$best['rate']}%), έναντι {$worst['f']['waypoints_completed']}/{$worst['f']['waypoints_total']} ({$worst['rate']}%) της {$worst['label']}.");
+        }
+    }
+
+    $untouched = array_values(array_filter($teams, fn($t) => ($fwOf($t)['waypoints_untouched'] ?? 0) > 0));
+    if (!empty($untouched)) {
+        usort($untouched, fn($a, $b) => $b['fieldwork']['waypoints_untouched'] <=> $a['fieldwork']['waypoints_untouched']);
+        $u = $untouched[0];
+        $f = $u['fieldwork'];
+        $n = $f['waypoints_untouched'];
+        $add(min(100.0, 45 + $n * 10), 'Η ομάδα ' . $label($u) . ' άφησε ' . ($n === 1 ? 'ένα σημείο' : "{$n} σημεία") . " της πορείας της χωρίς καμία ενέργεια — ούτε ολοκλήρωση ούτε δήλωση παράλειψης, οπότε ο χάρτης έδειχνε εκκρεμότητα που στην πραγματικότητα δεν παρακολουθούσε κανείς.");
+    }
+
+    // A skip WITH a reason is good practice being surfaced, not a complaint.
+    $skipped = array_values(array_filter($teams, fn($t) => ($fwOf($t)['waypoints_skipped_with_reason'] ?? 0) > 0 && !empty($fwOf($t)['skip_reason_example'])));
+    if (!empty($skipped)) {
+        usort($skipped, fn($a, $b) => $b['fieldwork']['waypoints_skipped_with_reason'] <=> $a['fieldwork']['waypoints_skipped_with_reason']);
+        $sk = $skipped[0];
+        $f = $sk['fieldwork'];
+        $ex = $f['skip_reason_example'];
+        $n = $f['waypoints_skipped_with_reason'];
+        $add(min(100.0, 25 + $n * 8), 'Η ομάδα ' . $label($sk) . ' δήλωσε ρητά ' . ($n === 1 ? 'μία παράλειψη σημείου' : "{$n} παραλείψεις σημείων") . " με αιτιολόγηση (π.χ. «{$ex['waypoint']}»: {$ex['reason']}) — πρακτική που κρατά την εικόνα του χάρτη ειλικρινή και προτιμότερη από ένα σημείο που μένει σιωπηλά ανοιχτό.");
+    }
+
+    $outOfSeq = array_values(array_filter($teams, fn($t) => ($fwOf($t)['out_of_sequence'] ?? 0) > 0));
+    if (!empty($outOfSeq)) {
+        usort($outOfSeq, fn($a, $b) => $b['fieldwork']['out_of_sequence'] <=> $a['fieldwork']['out_of_sequence']);
+        $o = $outOfSeq[0];
+        $n = $o['fieldwork']['out_of_sequence'];
+        $add(min(100.0, 20 + $n * 10), 'Η ομάδα ' . $label($o) . ' προσπέλασε ' . ($n === 1 ? 'ένα σημείο' : "{$n} σημεία") . ' εκτός της σειράς της πορείας. Δεν είναι από μόνο του σφάλμα — το σύστημα το επιτρέπει μετά από επιβεβαίωση — αλλά αξίζει να επιβεβαιωθεί ότι ήταν συνειδητή επιλογή και όχι σύγχυση για το πού βρισκόταν η ομάδα.');
+    }
+
+    // Assigned search sectors.
+    $withSectors = array_values(array_filter($teams, fn($t) => ($fwOf($t)['sectors_assigned'] ?? 0) > 0));
+    if (count($withSectors) >= 2) {
+        $rates = array_map(function ($t) use ($label) {
+            $f = $t['fieldwork'];
+            return ['label' => $label($t), 'rate' => round($f['sectors_completed'] / $f['sectors_assigned'] * 100), 'f' => $f];
+        }, $withSectors);
+        usort($rates, fn($a, $b) => $b['rate'] <=> $a['rate']);
+        $best = $rates[0];
+        $worst = $rates[count($rates) - 1];
+        if ($best['label'] !== $worst['label'] && $best['rate'] !== $worst['rate']) {
+            $add(min(100.0, (float) ($best['rate'] - $worst['rate'])),
+                "Στην κάλυψη ανατεθειμένων τομέων, η {$best['label']} ολοκλήρωσε {$best['f']['sectors_completed']}/{$best['f']['sectors_assigned']}, ενώ η {$worst['label']} {$worst['f']['sectors_completed']}/{$worst['f']['sectors_assigned']}. Η δυσκολία ενός τομέα δεν είναι σταθερή, οπότε το νούμερο διαβάζεται μαζί με το μέγεθος και το έδαφος που ανατέθηκε στην κάθε ομάδα.");
+        }
+    }
+    $recheck = array_values(array_filter($teams, fn($t) => ($fwOf($t)['sectors_needs_recheck'] ?? 0) > 0));
+    if (!empty($recheck)) {
+        $names = array_map($label, $recheck);
+        $totalRecheck = array_sum(array_map(fn($t) => $t['fieldwork']['sectors_needs_recheck'], $recheck));
+        $add(min(100.0, 35 + $totalRecheck * 10), ($totalRecheck === 1 ? 'Ένας τομέας σημάνθηκε' : "{$totalRecheck} τομείς σημάνθηκαν") . ' για επανέλεγχο (' . implode(', ', $names) . '), εκκρεμότητα που πρέπει να μεταφερθεί στην επόμενη βάρδια αντί να κλείσει μαζί με την αποστολή.');
+    }
+
+    // ── context that EXPLAINS the numbers above rather than scoring them ──
+    //    A team that ran a mayday or worked a casualty will look slow on every
+    //    speed metric in this report, and saying so is the difference between
+    //    a fair debrief and an unfair one. Never phrased as a fault, and
+    //    deliberately absent from every pillar — see computeMissionTeamFieldwork().
+    $disrupted = array_values(array_filter($teams, fn($t) => (($fwOf($t)['sos_alerts'] ?? 0) + ($fwOf($t)['incidents'] ?? 0)) > 0));
+    if (!empty($disrupted)) {
+        usort($disrupted, fn($a, $b) =>
+            ($b['fieldwork']['sos_alerts'] * 2 + $b['fieldwork']['incidents'])
+            <=> ($a['fieldwork']['sos_alerts'] * 2 + $a['fieldwork']['incidents']));
+        $d = $disrupted[0];
+        $f = $d['fieldwork'];
+        $bits = [];
+        if ($f['sos_alerts'] > 0) $bits[] = $f['sos_alerts'] === 1 ? 'σήμανε συναγερμό SOS' : "σήμανε {$f['sos_alerts']} συναγερμούς SOS";
+        if ($f['incidents'] > 0) $bits[] = $f['incidents'] === 1 ? 'διαχειρίστηκε ένα περιστατικό τραυματισμού' : "διαχειρίστηκε {$f['incidents']} περιστατικά τραυματισμού";
+        $add(min(100.0, 50 + $f['sos_alerts'] * 20 + $f['incidents'] * 10),
+            'Η ομάδα ' . $label($d) . ' ' . implode(' και ', $bits) . ' κατά τη διάρκεια της αποστολής. Αυτό δεν επηρεάζει τη βαθμολογία της, αλλά εξηγεί σε μεγάλο βαθμό τυχόν καθυστερήσεις της στους υπόλοιπους δείκτες και πρέπει να ληφθεί υπόψη πριν συγκριθεί με τις άλλες ομάδες.');
+    }
+
+    $contributors = array_values(array_filter($teams, fn($t) => ($fwOf($t)['poi_photos'] ?? 0) > 0));
+    if (!empty($contributors)) {
+        usort($contributors, fn($a, $b) => $b['fieldwork']['poi_photos'] <=> $a['fieldwork']['poi_photos']);
+        $c = $contributors[0];
+        $n = $c['fieldwork']['poi_photos'];
+        $add(22, 'Η ομάδα ' . $label($c) . ' κατέγραψε ' . ($n === 1 ? 'ένα ευρήμα' : "{$n} ευρήματα") . ' με φωτογραφική τεκμηρίωση στο πεδίο. Ο αριθμός ευρημάτων δεν βαθμολογείται — εξαρτάται από το τι υπήρχε στον τομέα της κάθε ομάδας, όχι από το πόσο καλά έψαξε.');
+    }
+
     // ── workload distribution: a command-side finding, stated as such ────
     $counts = array_map(fn($t) => $t['order_count'], $teams);
     $maxOrders = max($counts);
@@ -5006,11 +5414,39 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
     }
 
     usort($findings, fn($a, $b) => $b['salience'] <=> $a['salience']);
-    $sentences = array_merge([$opening], array_column(array_slice($findings, 0, 6), 'text'));
+    // Six was the cap when the pool held at most eight candidates. Fieldwork
+    // roughly doubled it, and a mission that used routes, sectors and radio
+    // orders genuinely has more to report than one that used orders alone —
+    // so the cap follows the pool instead of silently discarding half of it.
+    // Still bounded: this is one paragraph in a printed report, not a log.
+    $cap = count($findings) > 9 ? 9 : 6;
+    $sentences = array_merge([$opening], array_column(array_slice($findings, 0, $cap), 'text'));
+
+    if (!empty($unranked)) {
+        $bits = array_map(function ($t) use ($label) {
+            $had = [];
+            $f = $t['fieldwork'] ?? null;
+            if (($f['waypoints_total'] ?? 0) > 0) $had[] = $f['waypoints_total'] . ' σημεία πορείας';
+            if (($f['sectors_assigned'] ?? 0) > 0) $had[] = $f['sectors_assigned'] . ' τομείς';
+            if ($t['order_count'] > 0) $had[] = $t['order_count'] . ' εντολές';
+            if (($t['shortage_count'] ?? 0) > 0) $had[] = $t['shortage_count'] . ' αναφορές έλλειψης';
+            return $label($t) . (empty($had) ? '' : ' (' . implode(', ', $had) . ', βαθμός ' . number_format($t['score'], 1) . ')');
+        }, $unranked);
+        $one = count($unranked) === 1;
+        $sentences[] = ($one ? 'Η ομάδα ' : 'Οι ομάδες ') . implode(', ', $bits)
+            . ($one ? ' δεν κατατάσσεται: μετρήθηκε σε έναν μόνο τομέα, οπότε ο βαθμός της δεν είναι συγκρίσιμος με των υπολοίπων.'
+                        : ' δεν κατατάσσονται: μετρήθηκαν σε έναν μόνο τομέα, οπότε οι βαθμοί τους δεν είναι συγκρίσιμοι με των υπολοίπων.');
+    }
 
     // ── closing caveats, deliberately never ranked: they qualify
     //    everything above rather than competing with it ──────────────────
-    $thin = array_values(array_filter($teams, fn($t) => $t['order_count'] < 3 && ($t['shortage_count'] ?? 0) === 0));
+    // A team judged on fieldwork instead of radio traffic is not a thin
+    // sample — it was measured on a different axis, and saying "evaluated on
+    // very few orders" about a team that walked a full route is simply wrong.
+    $thin = array_values(array_filter($teams, fn($t) =>
+        $t['order_count'] < 3
+        && ($t['shortage_count'] ?? 0) === 0
+        && empty($t['pillars']['discipline']['available'])));
     if (!empty($thin)) {
         $names = array_map($label, $thin);
         $sentences[] = (count($thin) === 1 ? 'Η ομάδα ' . $names[0] . ' αξιολογήθηκε' : implode(', ', $names) . ' αξιολογήθηκαν')

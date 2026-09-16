@@ -563,7 +563,7 @@ $printDate = date('d/m/Y H:i');
     <h2>🏆 Κατάταξη Ομάδων</h2>
     <?php foreach ($score['teams'] as $t): ?>
         <div class="lb-row" style="border-left-color:<?= h($t['color']) ?>;">
-            <div class="lb-rank"><?= $t['rank'] === 1 ? '🥇' : ($t['rank'] === 2 ? '🥈' : ($t['rank'] === 3 ? '🥉' : $t['rank'])) ?></div>
+            <div class="lb-rank"><?= $t['rank'] === null ? '—' : ($t['rank'] === 1 ? '🥇' : ($t['rank'] === 2 ? '🥈' : ($t['rank'] === 3 ? '🥉' : $t['rank']))) ?></div>
             <span class="lb-team-badge" style="background:<?= h($t['color']) ?>;"><?= h(teamLabel($t['codename'], $t['team_number'])) ?></span>
             <div class="lb-tier"><?= h($t['tier'][1]) ?></div>
             <div class="lb-score" style="color:<?= $scoreTierHex[$t['tier'][0]] ?>;"><?= number_format($t['score'], 1) ?></div>
