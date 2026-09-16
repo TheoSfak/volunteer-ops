@@ -1816,6 +1816,21 @@ include __DIR__ . '/includes/header.php';
         border-radius: 9px; background: #dc3545; color: #fff;
         font-size: .625rem; font-weight: 700; line-height: 18px; text-align: center;
     }
+    /* Per-room unread count on each chat room pill. Sibling of .wr-tab-badge
+       above and deliberately the same red: the bottom bar says "there are new
+       messages", these say WHICH room they are in. Only ever populated by
+       pollOtherRoomsForUnread(), which is gated on the volunteer's tabbed
+       layout - on a desktop or an ops screen the span is rendered and simply
+       stays empty. */
+    .chat-tab-badge {
+        display: inline-block; margin-left: 6px; vertical-align: 1px;
+        min-width: 17px; padding: 0 5px;
+        border-radius: 9px; background: #dc3545; color: #fff;
+        font-size: .625rem; font-weight: 700; line-height: 17px; text-align: center;
+    }
+    /* The active pill is solid blue, where a red badge on it reads as noise
+       and loses contrast - invert it there instead. */
+    .chat-room-tab.active .chat-tab-badge { background: #fff; color: #0d6efd; }
     /* SOS is the one control that must never be a scroll or a tab away, so it
        owns the centre slot and is raised out of the bar. Hold-to-fire (not a
        plain tap): this rides in a jacket pocket. */
@@ -3976,12 +3991,17 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
     </div>
     <div class="card-body">
         <ul class="nav nav-pills mb-3 flex-wrap" id="chatRoomTabs">
+            <?php /* The label gets its own span so the unread badge can live
+                     inside the button without becoming part of the room name -
+                     syncRoomTabs() compares against .chat-tab-label, not the
+                     button's whole textContent, which would otherwise pick up
+                     the badge digits. */ ?>
             <li class="nav-item">
-                <button type="button" class="nav-link active chat-room-tab" data-team-id=""><?= t('chat.general_room') ?></button>
+                <button type="button" class="nav-link active chat-room-tab" data-team-id=""><span class="chat-tab-label"><?= t('chat.general_room') ?></span><span class="chat-tab-badge d-none" data-count="0"></span></button>
             </li>
             <?php foreach ($chatTeams as $ct): ?>
             <li class="nav-item">
-                <button type="button" class="nav-link chat-room-tab" data-team-id="<?= $ct['id'] ?>"><?= h(teamLabel($ct['codename'], $ct['team_number'])) ?></button>
+                <button type="button" class="nav-link chat-room-tab" data-team-id="<?= $ct['id'] ?>"><span class="chat-tab-label"><?= h(teamLabel($ct['codename'], $ct['team_number'])) ?></span><span class="chat-tab-badge d-none" data-count="0"></span></button>
             </li>
             <?php endforeach; ?>
         </ul>
@@ -4819,7 +4839,7 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
         const next = (parseInt(el.dataset.count, 10) || 0) + n;
         el.dataset.count = String(next);
         el.textContent = next > 9 ? '9+' : String(next);
-        el.setAttribute('aria-label', next + ' ' + t('tabs.unread_chat'));
+        el.setAttribute('aria-label', next + ' ' + t(next === 1 ? 'tabs.unread_chat_one' : 'tabs.unread_chat'));
         el.classList.remove('d-none');
     }
     // Unlike bumpBadge above (increments, skipped while already looking at
@@ -12038,6 +12058,38 @@ document.querySelectorAll('.team-form').forEach(form => {
     const myUserId = <?= (int) $user['id'] ?>;
     let activeTeamId = '';
     let lastIdByRoom = {};
+    // Per-room unread counts, one per chat room pill. The data to build these
+    // already existed: pollOtherRoomsForUnread() has always known which room
+    // each new message arrived in, and threw that away to report a single
+    // combined number to the bottom tab bar. Nothing extra is fetched here.
+    let roomUnread = {};
+
+    function renderRoomBadge(teamId) {
+        const tab = document.querySelector('.chat-room-tab[data-team-id="' + teamId + '"]');
+        const el = tab && tab.querySelector('.chat-tab-badge');
+        if (!el) return;
+        const n = roomUnread[teamId] || 0;
+        el.dataset.count = String(n);
+        if (n > 0) {
+            // Capped like the bottom bar's badge - past about ten the exact
+            // number stops meaning anything and the pill starts stretching.
+            el.textContent = n > 9 ? '9+' : String(n);
+            el.setAttribute('aria-label', n + ' ' + t(n === 1 ? 'tabs.unread_chat_one' : 'tabs.unread_chat'));
+            el.classList.remove('d-none');
+        } else {
+            el.textContent = '';
+            el.removeAttribute('aria-label');
+            el.classList.add('d-none');
+        }
+    }
+    function bumpRoomUnread(teamId, n) {
+        roomUnread[teamId] = (roomUnread[teamId] || 0) + n;
+        renderRoomBadge(teamId);
+    }
+    function clearRoomUnread(teamId) {
+        roomUnread[teamId] = 0;
+        renderRoomBadge(teamId);
+    }
 
     function renderMessage(msg) {
         const wrap = document.createElement('div');
@@ -12071,6 +12123,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     function loadRoom(teamId) {
         activeTeamId = teamId;
         lastIdByRoom[teamId] = 0;
+        clearRoomUnread(teamId);
         chatMessagesEl.innerHTML = '';
         fetch(`mission-chat.php?mission_id=${missionId}&team_id=${teamId}&after_id=0`)
             .then(response => response.json())
@@ -12137,6 +12190,10 @@ document.querySelectorAll('.team-form').forEach(form => {
                 .then(data => {
                     if (!data.ok || !data.messages.length) return;
                     lastIdByRoom[otherTeamId] = data.messages[data.messages.length - 1].id;
+                    bumpRoomUnread(otherTeamId, data.messages.length);
+                    // Unchanged: the bottom tab bar still gets the combined
+                    // "there are new messages" signal. The pill badges say
+                    // which room, the bar badge survives them being off-screen.
                     document.dispatchEvent(new CustomEvent('wr-chat-unread', {detail: {count: data.messages.length}}));
                 })
                 .catch(() => {});
@@ -12183,6 +12240,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             if (teamId === '' || wanted.has(teamId)) return;
             const wasActive = tab.classList.contains('active');
             delete lastIdByRoom[teamId];
+            delete roomUnread[teamId];
             const li = tab.closest('li');
             if (li) { li.remove(); } else { tab.remove(); }
             // Never strand them staring at a room that is gone - fall back to
@@ -12202,8 +12260,11 @@ document.querySelectorAll('.team-form').forEach(form => {
                 // Defensive resync only: nothing in the UI can rename a team
                 // today (update_team does not touch the codename), so this
                 // normally never fires - it is here so the tab cannot drift
-                // from the roster card if that ever changes.
-                if (existing.textContent !== label) existing.textContent = label;
+                // from the roster card if that ever changes. Reads and writes
+                // .chat-tab-label rather than the button itself, whose
+                // textContent also carries the unread badge's digits.
+                const labelEl = existing.querySelector('.chat-tab-label');
+                if (labelEl && labelEl.textContent !== label) labelEl.textContent = label;
                 return;
             }
             const li = document.createElement('li');
@@ -12212,7 +12273,16 @@ document.querySelectorAll('.team-form').forEach(form => {
             btn.type = 'button';
             btn.className = 'nav-link chat-room-tab';
             btn.dataset.teamId = teamId;
-            btn.textContent = label;
+            // Same two-span shape the PHP template renders, so the badge
+            // machinery works on a live-created tab with no special case.
+            const labelEl = document.createElement('span');
+            labelEl.className = 'chat-tab-label';
+            labelEl.textContent = label;
+            const badgeEl = document.createElement('span');
+            badgeEl.className = 'chat-tab-badge d-none';
+            badgeEl.dataset.count = '0';
+            btn.appendChild(labelEl);
+            btn.appendChild(badgeEl);
             li.appendChild(btn);
             tabList.appendChild(li);
             wireRoomTab(btn);

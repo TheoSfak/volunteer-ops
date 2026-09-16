@@ -1398,6 +1398,7 @@ return [
         'tabs.sos_hold_hint' => 'Κρατήστε πατημένο για SOS',
         'tabs.sos_sent' => 'Το SOS στάλθηκε!',
         'tabs.unread_chat' => 'νέα μηνύματα',
+        'tabs.unread_chat_one' => 'νέο μήνυμα',
 
         // Half/full width toggle on each left-column card, visible only while
         // the card layout is unlocked.
@@ -2757,6 +2758,7 @@ return [
         'tabs.sos_hold_hint' => 'Hold to send SOS',
         'tabs.sos_sent' => 'SOS sent!',
         'tabs.unread_chat' => 'new messages',
+        'tabs.unread_chat_one' => 'new message',
 
         // Half/full width toggle on each left-column card, visible only while
         // the card layout is unlocked.
