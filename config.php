@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.252.1');
+define('APP_VERSION', '3.253.0');
 define('DB_SCHEMA_VERSION', 150);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
@@ -109,6 +109,30 @@ define('ALLOWED_EXTENSIONS', ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png']);
 // Costs ~45KB against the ~400KB of the stored 1920px original.
 define('MISSION_PHOTO_THUMB_LONG_EDGE', 720);
 define('MISSION_PHOTO_THUMB_QUALITY', 82);
+
+// Automatic sector grid (buildSectorGridCells(), mission-sector.php's
+// generate_grid action).
+//
+// The cell cap is not about insert cost — 400 rows insert instantly. It is
+// about the 5-second poll: every sector of a mission ships in full on every
+// tick of it, to every open Action Room tab, with its polygon, its buildings
+// and its whole status log (loadMissionSectorsForUser(), war-room.php's own
+// ajax payload). Measured on a real 55km2 mission area, a grid cell costs
+// 739 bytes of that payload — so 120 cells is ~87KB every 5 seconds, to
+// every open tab, and 400 would be ~290KB. The September 2026 load drill
+// established that what breaks this app under a real operation is payload
+// size times open tabs, not slow SQL, which is why this number is set from
+// the poll and not from what MySQL can insert. 120 still covers an 11x11
+// grid, past any realistic search area. The map agrees: each sector draws a
+// permanent Leaflet label, and they already crowd each other at 49.
+define('MAX_GRID_CELLS', 120);
+
+// Accepted range for the requested cell size, in meters. The slider in the
+// grid tool offers a narrower 150-900 (the sizes a ground crew actually gets
+// tasked with); these are the outer bounds the endpoint clamps to, so a
+// hand-built or replayed request cannot ask for 5m cells.
+define('GRID_SECTOR_SIZE_MIN_M', 50);
+define('GRID_SECTOR_SIZE_MAX_M', 2000);
 
 // Training module upload settings
 define('TRAINING_UPLOAD_PATH', __DIR__ . '/uploads/training/materials/');

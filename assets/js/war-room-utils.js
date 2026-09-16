@@ -229,6 +229,122 @@ function ringDiscPolygonPoints(center, radiusMeters, numPoints) {
     return [[center.lat, center.lng], ...boundary, boundary[0]];
 }
 
+// ── Automatic sector grid ───────────────────────────────────────────────────
+// Mirror of buildSectorGridCells() in includes/functions-warroom.php. That
+// function's comment carries the reasoning behind every choice repeated here
+// (meters only decide cols/rows, the cells themselves are cut out of the
+// bounding box in degrees, a cell is kept when its CENTER is inside).
+//
+// This copy exists for the live preview in war-room.php's grid tool. The
+// server recomputes the grid from the stored area polygon and never accepts
+// a cell list from the client, so these two must produce the same cells or
+// the preview's "Create 13 sectors" button is lying about what it is about
+// to do. tests/fixtures/grid-cases.json is asserted by both sides for
+// exactly that reason — the fixture, not discipline, is what holds them
+// together.
+//
+// Deliberately does NOT reuse destinationPoint() above: that one is
+// spherical (R=6371000) while the PHP side is flat local meters, and mixing
+// the two models is precisely how two implementations of "the same" grid
+// drift apart.
+const GRID_SECTOR_SIZE_MIN_M = 50;
+const GRID_SECTOR_SIZE_MAX_M = 2000;
+
+// PHP's round() rounds halves away from zero; JS's Math.round() rounds them
+// toward +Infinity, and the two languages' libm can differ in the last bit
+// anyway. Matching PHP's direction here keeps them as close as they can get;
+// the shared fixture compares coordinates with a 1e-6 tolerance (~11cm, well
+// inside GPS error) and compares the counts exactly, since the counts are
+// what the UI promises out loud.
+function roundTo(n, decimals) {
+    const f = Math.pow(10, decimals);
+    return Math.sign(n) * Math.round(Math.abs(n) * f) / f;
+}
+
+// Ray casting, odd-number-of-crossings rule — the JS twin of
+// pointInPolygon() in includes/functions-warroom.php, same ring of
+// [lat, lng] pairs (not GeoJSON's [lng, lat]). Nothing on this side of the
+// app had one before the grid preview needed it.
+function pointInPolygon(lat, lng, geo) {
+    let inside = false;
+    for (let i = 0, j = geo.length - 1; i < geo.length; j = i++) {
+        const latI = Number(geo[i][0]), lngI = Number(geo[i][1]);
+        const latJ = Number(geo[j][0]), lngJ = Number(geo[j][1]);
+        if (((latI > lat) !== (latJ > lat))
+            && (lng < (lngJ - lngI) * (lat - latI) / (latJ - latI) + lngI)) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+function gridCellsForPolygon(geo, sizeM) {
+    const size = Math.max(GRID_SECTOR_SIZE_MIN_M, Math.min(GRID_SECTOR_SIZE_MAX_M, sizeM));
+
+    const lats = geo.map(pt => Number(pt[0]));
+    const lngs = geo.map(pt => Number(pt[1]));
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+
+    const centerLat = (minLat + maxLat) / 2;
+    const mPerDegLat = 111320;
+    const mPerDegLng = 111320 * Math.max(0.01, Math.cos(centerLat * Math.PI / 180));
+
+    const bboxH = (maxLat - minLat) * mPerDegLat;
+    const bboxW = (maxLng - minLng) * mPerDegLng;
+
+    // The ratio is rounded before ceil() on both sides. It is the one place
+    // where a last-bit difference between PHP's and JS's cos() would not stay
+    // microscopic: on an area whose width divides exactly by the cell size,
+    // 8.000000000000001 and 8.0 ceil to 9 and 8 — a whole extra column of
+    // sectors on one side and not the other. 9 decimals of a ratio is half a
+    // micron of ground; nothing real survives down there to be lost.
+    const cols = Math.max(1, Math.ceil(roundTo(bboxW / size, 9)));
+    const rows = Math.max(1, Math.ceil(roundTo(bboxH / size, 9)));
+
+    const latStep = (maxLat - minLat) / rows;
+    const lngStep = (maxLng - minLng) / cols;
+
+    const cells = [];
+    // Cells whose centre missed the area. The server ignores them; the
+    // preview draws them dashed, so a coordinator can see the grid's full
+    // extent and which corners of it are not being tasked. Produced by the
+    // same single loop as the kept ones rather than a second pass, so there
+    // is no way for the two sets to disagree about where a cell was.
+    const dropped = [];
+    for (let r = 0; r < rows; r++) {
+        const latTop = maxLat - r * latStep;
+        const latBottom = maxLat - (r + 1) * latStep;
+        for (let c = 0; c < cols; c++) {
+            const lngLeft = minLng + c * lngStep;
+            const lngRight = minLng + (c + 1) * lngStep;
+            const cell = [
+                [roundTo(latTop, 6), roundTo(lngLeft, 6)],
+                [roundTo(latTop, 6), roundTo(lngRight, 6)],
+                [roundTo(latBottom, 6), roundTo(lngRight, 6)],
+                [roundTo(latBottom, 6), roundTo(lngLeft, 6)],
+            ];
+            if (pointInPolygon((latTop + latBottom) / 2, (lngLeft + lngRight) / 2, geo)) {
+                cells.push(cell);
+            } else {
+                dropped.push(cell);
+            }
+        }
+    }
+
+    return {
+        cells,
+        dropped,
+        cols,
+        rows,
+        total: cols * rows,
+        kept: cells.length,
+        requested_m: size,
+        actual_w_m: roundTo(bboxW / cols, 1),
+        actual_h_m: roundTo(bboxH / rows, 1),
+    };
+}
+
 function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 }
@@ -458,6 +574,8 @@ if (typeof module !== 'undefined' && module.exports) {
         sectorSearchLegPoints,
         sectorSearchLegCount,
         ringDiscPolygonPoints,
+        pointInPolygon,
+        gridCellsForPolygon,
         weightedWedgePolygonPoints,
         annularWedgePolygonPoints,
         escapeHtml,

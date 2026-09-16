@@ -109,6 +109,35 @@ function loadSectorPollPayload(int $missionId, int $userId, bool $canManageWarRo
     ];
 }
 
+/**
+ * The next free number for a grid prefix within a mission, so a second grid
+ * continues where the first stopped instead of restarting at 1 and putting
+ * two different "Α3"s on the same map.
+ *
+ * Reads the numbers back off the labels rather than keeping a counter,
+ * because the label is the only durable record there is: sectors are hard
+ * DELETEs here (and cascade when their area goes), so there is no row left to
+ * count once one is gone. The consequence is deliberate and worth stating —
+ * delete Α3 and the next grid can hand Α3 to different ground. Anything
+ * stronger means a counter table surviving the deletes, which is a promise
+ * the rest of this feature does not make either: an admin can rename any
+ * sector to anything at any time. The audit log is what reconstructs an
+ * after-action record, not the label.
+ *
+ * Matches a trailing number after the prefix anywhere in the label, so a
+ * renamed "Ρέμα Α7" still counts against Α.
+ */
+function nextSectorGridNumber(int $missionId, string $prefix): int {
+    $rows = dbFetchAll("SELECT label FROM mission_search_sectors WHERE mission_id = ?", [$missionId]);
+    $highest = 0;
+    foreach ($rows as $row) {
+        if (preg_match('/' . preg_quote($prefix, '/') . '(\d+)\s*$/u', (string) $row['label'], $m)) {
+            $highest = max($highest, (int) $m[1]);
+        }
+    }
+    return $highest + 1;
+}
+
 $userId = getCurrentUserId();
 $user = getCurrentUser();
 
@@ -432,6 +461,128 @@ if ($action === 'create') {
     }
 
     echo json_encode(['ok' => true, 'id' => (int) $sectorId] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
+    exit;
+}
+
+// Fills an empty search area with a grid of numbered sectors in one shot —
+// the automatic counterpart to war-room.php's chord tool, which cuts an area
+// into sectors one hand-drawn line at a time. Everything it creates is an
+// ordinary sector: same table, same columns, same lifecycle, same assignment
+// path. There is no such thing as a "grid sector" after this action returns.
+//
+// The cells are recomputed here from the area's own stored polygon and never
+// read from the request. Not for authorization — the same admin can already
+// POST any polygon they like through `create` above — but because a grid is
+// one act: 120 cells through `create` would be 120 requests, 120 audit rows
+// and no way to fail cleanly halfway. One action, one transaction, one audit
+// entry, all or nothing.
+//
+// No team, no notification. Cells are born not_started and unassigned, so an
+// admin laying out a grid before deciding who searches what does not fire a
+// push per cell — the same reasoning `create` already applies to an
+// unassigned hand-drawn sector. Assignment happens afterwards through the
+// existing per-sector UI, which notifies exactly the team that got it.
+if ($action === 'generate_grid') {
+    $areaId = (int) post('area_id');
+    $area = dbFetchOne("SELECT id, label, geo FROM mission_search_areas WHERE id = ? AND mission_id = ?", [$areaId, $missionId]);
+    if (!$area) {
+        echo json_encode(['ok' => false, 'error' => t('sector.area_not_found')]);
+        exit;
+    }
+
+    // Same mutual exclusion the chord tool already enforces in the UI
+    // (renderAreaLayer in war-room.php offers Divide OR Clear, never both):
+    // a second division laid over an existing one produces two overlapping
+    // sets of sectors covering the same ground, and nothing downstream —
+    // coverage, the roll-up, a team's own sector list — could tell them
+    // apart. Clear first, then re-divide.
+    $existing = (int) dbFetchValue("SELECT COUNT(*) FROM mission_search_sectors WHERE area_id = ?", [$areaId]);
+    if ($existing > 0) {
+        echo json_encode(['ok' => false, 'error' => t('grid.area_already_divided')]);
+        exit;
+    }
+
+    $geo = json_decode((string) $area['geo'], true);
+    if (!is_array($geo) || count($geo) < 3) {
+        echo json_encode(['ok' => false, 'error' => t('dispatch.polygon_needs_3_points')]);
+        exit;
+    }
+
+    // One or two capitals, Greek or Latin. The prefix is what keeps two grids
+    // in the same mission from both numbering their cells from 1 — on the
+    // radio "Alpha 3" has to mean one sector, not one per area.
+    $prefix = mb_strtoupper(trim((string) post('prefix')), 'UTF-8');
+    if ($prefix === '') {
+        $prefix = 'Α';
+    }
+    if (!preg_match('/^[A-ZΑ-Ω]{1,2}$/u', $prefix)) {
+        echo json_encode(['ok' => false, 'error' => t('grid.invalid_prefix')]);
+        exit;
+    }
+
+    // buildSectorGridCells() clamps the size itself (both implementations do,
+    // so the preview and the server agree about a nonsense value too) and
+    // reports back what it actually used.
+    $grid = buildSectorGridCells($geo, (int) post('sector_size_m'));
+
+    if ($grid['kept'] === 0) {
+        echo json_encode(['ok' => false, 'error' => t('grid.no_cells')]);
+        exit;
+    }
+    if ($grid['kept'] > MAX_GRID_CELLS) {
+        echo json_encode(['ok' => false, 'error' => t('grid.too_many', ['n' => $grid['kept'], 'max' => MAX_GRID_CELLS])]);
+        exit;
+    }
+
+    $startNumber = nextSectorGridNumber($missionId, $prefix);
+
+    // One multi-row INSERT rather than a loop of them: 120 round trips inside
+    // an open transaction is 120 chances for the connection ceiling this app
+    // has already been bitten by. Placeholders stay bound — only the row
+    // template is repeated into the SQL.
+    $rowSql = [];
+    $params = [];
+    foreach ($grid['cells'] as $i => $cell) {
+        $rowSql[] = "(?, ?, ?, ?, 'not_started', ?, NOW())";
+        array_push(
+            $params,
+            $missionId,
+            $areaId,
+            t('grid.sector_label', ['prefix' => $prefix, 'n' => $startNumber + $i]),
+            json_encode($cell),
+            $userId
+        );
+    }
+
+    db()->beginTransaction();
+    try {
+        dbExecute(
+            "INSERT INTO mission_search_sectors (mission_id, area_id, label, geo, status, created_by, created_at)
+             VALUES " . implode(', ', $rowSql),
+            $params
+        );
+        db()->commit();
+    } catch (Exception $e) {
+        db()->rollBack();
+        echo json_encode(['ok' => false, 'error' => t('common.failed')]);
+        exit;
+    }
+
+    // One entry for the whole act, not one per cell — the admin performed a
+    // single operation, and 120 audit rows would bury the rest of the
+    // mission's history under it. Same bulk shape as clear_area_sectors below.
+    logAudit('generate_mission_sector_grid', 'mission_search_areas', $areaId, null, [
+        'mission_id'  => $missionId,
+        'count'       => $grid['kept'],
+        'cols'        => $grid['cols'],
+        'rows'        => $grid['rows'],
+        'requested_m' => $grid['requested_m'],
+        'actual_w_m'  => $grid['actual_w_m'],
+        'actual_h_m'  => $grid['actual_h_m'],
+        'prefix'      => $prefix,
+    ]);
+
+    echo json_encode(['ok' => true, 'created' => $grid['kept']] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 

@@ -4328,13 +4328,40 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
             </div>
             <div class="modal-body p-0 d-flex flex-column flex-md-row">
                 <div class="p-2 border-bottom border-md-bottom-0 border-md-end d-flex flex-column gap-2" style="width:100%;max-width:320px;">
-                    <div class="small text-muted" id="divideSectorsHint"><?= t('sector.hub_hint') ?></div>
-                    <div id="divideSectorsWedgeList" class="flex-grow-1" style="overflow-y:auto;min-height:0;"></div>
-                    <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-outline-secondary btn-sm" id="divideSectorsClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
-                        <button type="button" class="btn btn-success btn-sm flex-grow-1" id="divideSectorsSaveBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.divide_save_btn') ?></button>
+                    <ul class="nav nav-pills nav-fill flex-nowrap gap-1" id="divideSectorsTabs">
+                        <li class="nav-item"><button type="button" class="nav-link active w-100 py-1 px-1 small text-nowrap" data-divide-mode="lines"><i class="bi bi-scissors me-1"></i><?= t('grid.tab_lines') ?></button></li>
+                        <li class="nav-item"><button type="button" class="nav-link w-100 py-1 px-1 small text-nowrap" data-divide-mode="grid"><i class="bi bi-grid-3x3 me-1"></i><?= t('grid.tab_grid') ?></button></li>
+                    </ul>
+                    <div id="divideSectorsLinesPane" class="d-flex flex-column gap-2 flex-grow-1" style="min-height:0;">
+                        <div class="small text-muted" id="divideSectorsHint"><?= t('sector.hub_hint') ?></div>
+                        <div id="divideSectorsWedgeList" class="flex-grow-1" style="overflow-y:auto;min-height:0;"></div>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" id="divideSectorsClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
+                            <button type="button" class="btn btn-success btn-sm flex-grow-1" id="divideSectorsSaveBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.divide_save_btn') ?></button>
+                        </div>
+                    </div>
+                    <div id="divideSectorsGridPane" class="d-none flex-column gap-2 flex-grow-1" style="min-height:0;">
+                        <div class="small text-muted"><?= t('grid.hint') ?></div>
+                        <div>
+                            <label class="form-label small mb-1 d-flex justify-content-between w-100" for="gridSizeRange">
+                                <span><?= t('grid.sector_size') ?></span><strong id="gridSizeValue"></strong>
+                            </label>
+                            <input type="range" class="form-range" id="gridSizeRange" min="150" max="900" step="50" value="400">
+                        </div>
+                        <div>
+                            <label class="form-label small mb-1" for="gridPrefixInput"><?= t('grid.prefix') ?></label>
+                            <input type="text" class="form-control form-control-sm" id="gridPrefixInput" maxlength="2" value="Α" style="max-width:5rem;">
+                            <div class="form-text small mt-0"><?= t('grid.prefix_hint') ?></div>
+                        </div>
+                        <div class="small lh-sm" id="gridStats"></div>
+                        <div class="alert alert-warning py-1 px-2 small mb-0 d-none" id="gridSizeWarning"></div>
+                        <div class="alert alert-danger py-1 px-2 small mb-0 d-none" id="gridError"></div>
+                        <div class="mt-auto pt-2">
+                            <button type="button" class="btn btn-success btn-sm w-100" id="gridCreateBtn" disabled><i class="bi bi-grid-3x3-gap-fill me-1"></i><span id="gridCreateLabel"></span></button>
+                        </div>
                     </div>
                 </div>
+
                 <div id="divideSectorsMap" style="flex:1;min-height:300px;"></div>
             </div>
         </div>
@@ -13193,6 +13220,144 @@ document.querySelectorAll('.team-form').forEach(form => {
         }).catch(() => { alert(t('common.send_failed')); saveBtn.disabled = false; });
     });
 
+    // ── Grid mode ───────────────────────────────────────────────────────────
+    // The second way to divide the same area: instead of the admin cutting it
+    // by hand one line at a time, pick a cell size and the whole area comes
+    // back as numbered sectors. Deliberately inside this IIFE rather than in a
+    // panel of its own — it is the same area, the same map, the same reference
+    // layers and the same "an area gets divided once" rule, and a second entry
+    // point elsewhere in the page would be a third place that creates sectors.
+    //
+    // Everything below is preview only. The cells that actually get created
+    // are recomputed server-side from the stored area polygon (generate_grid
+    // in mission-sector.php); this side exists so the coordinator sees the
+    // shape and the count before committing, and so the button can say how
+    // many sectors it is about to make. Both sides run the same algorithm,
+    // pinned to tests/fixtures/grid-cases.json.
+    const MAX_GRID_CELLS = <?= MAX_GRID_CELLS ?>;
+    const linesPane = document.getElementById('divideSectorsLinesPane');
+    const gridPane = document.getElementById('divideSectorsGridPane');
+    const gridSizeRange = document.getElementById('gridSizeRange');
+    const gridSizeValue = document.getElementById('gridSizeValue');
+    const gridPrefixInput = document.getElementById('gridPrefixInput');
+    const gridStats = document.getElementById('gridStats');
+    const gridSizeWarning = document.getElementById('gridSizeWarning');
+    const gridError = document.getElementById('gridError');
+    const gridCreateBtn = document.getElementById('gridCreateBtn');
+    const gridCreateLabel = document.getElementById('gridCreateLabel');
+    let gridLayer = null;
+
+    function setDivideMode(mode) {
+        modalEl.querySelectorAll('[data-divide-mode]').forEach(btn => btn.classList.toggle('active', btn.dataset.divideMode === mode));
+        // d-none and d-flex are toggled together on purpose: Bootstrap's
+        // display utilities are all !important, and .d-flex is defined after
+        // .d-none, so leaving d-flex on a "hidden" pane leaves it visible.
+        linesPane.classList.toggle('d-none', mode !== 'lines');
+        linesPane.classList.toggle('d-flex', mode === 'lines');
+        gridPane.classList.toggle('d-none', mode !== 'grid');
+        gridPane.classList.toggle('d-flex', mode === 'grid');
+
+        if (mode === 'grid') {
+            // The chord tool's own feedback has to get out of the way — its
+            // vertex dots are still clickable otherwise, and a half-drawn cut
+            // sitting under a grid preview is just noise. The chords
+            // themselves are kept, so switching back restores the work.
+            wedgeLayer.clearLayers();
+            vertexMarkers.forEach(m => composerMap.removeLayer(m));
+            vertexMarkers = [];
+            gridSizeRange.value = defaultGridSize();
+            renderGridPreview();
+        } else {
+            gridLayer.clearLayers();
+            renderVertexMarkers();
+            renderWedges();
+        }
+    }
+
+    // Opens on the smallest size from 400m up that the cell cap allows. A 50
+    // square-kilometre area on the default 400m is thousands of cells, and
+    // landing on a red error the admin has to clear by guessing at a slider
+    // is a bad first second of a callout.
+    function defaultGridSize() {
+        if (!currentArea) return 400;
+        const max = parseInt(gridSizeRange.max, 10);
+        for (let size = 400; size <= max; size += 50) {
+            if (gridCellsForPolygon(currentArea.geo, size).kept <= MAX_GRID_CELLS) return size;
+        }
+        return max;
+    }
+
+    function renderGridPreview() {
+        if (!currentArea || !gridLayer) return;
+        const size = parseInt(gridSizeRange.value, 10);
+        gridSizeValue.textContent = size + ' ' + t('common.unit_m');
+
+        const g = gridCellsForPolygon(currentArea.geo, size);
+        const w = Math.round(g.actual_w_m), h = Math.round(g.actual_h_m);
+
+        gridStats.innerHTML = [
+            t('grid.preview', {cols: g.cols, rows: g.rows}),
+            t('grid.kept', {kept: g.kept, total: g.total}),
+            t('grid.actual_size', {w, h}),
+        ].map(escapeHtml).join('<br>');
+
+        // Shown whenever the cells came out meaningfully smaller than what was
+        // asked for. Cell size drives sweep time and how many people a sector
+        // needs, so a coordinator who asked for 500m and is getting 341m has
+        // to be told before the sectors exist, not after a team reports in.
+        const off = g.kept > 0 && (Math.abs(g.actual_w_m - size) > size * 0.05 || Math.abs(g.actual_h_m - size) > size * 0.05);
+        gridSizeWarning.textContent = t('grid.size_warning', {req: size, w, h});
+        gridSizeWarning.classList.toggle('d-none', !off);
+
+        let error = '';
+        if (g.kept === 0) error = t('grid.no_cells');
+        else if (g.kept > MAX_GRID_CELLS) error = t('grid.too_many', {n: g.kept, max: MAX_GRID_CELLS});
+        gridError.textContent = error;
+        gridError.classList.toggle('d-none', !error);
+
+        gridLayer.clearLayers();
+        // Nothing is drawn while the grid is over the cap. It cannot be
+        // created anyway, and painting several thousand Leaflet polygons on
+        // every slider step would lock up the very laptop the callout is being
+        // run from — the failure mode this whole cap exists to prevent.
+        if (!error) {
+            g.dropped.forEach(cell => L.polygon(cell, {
+                color: '#6c757d', weight: 1, dashArray: '4,4', fill: false, interactive: false,
+            }).addTo(gridLayer));
+            g.cells.forEach(cell => L.polygon(cell, {
+                color: '#0d6efd', weight: 2, fillColor: '#0d6efd', fillOpacity: 0.12, interactive: false,
+            }).addTo(gridLayer));
+        }
+
+        gridCreateBtn.disabled = !!error;
+        gridCreateLabel.textContent = t('grid.create_cta', {n: g.kept});
+    }
+
+    modalEl.querySelectorAll('[data-divide-mode]').forEach(btn => {
+        btn.addEventListener('click', () => setDivideMode(btn.dataset.divideMode));
+    });
+    gridSizeRange.addEventListener('input', renderGridPreview);
+
+    gridCreateBtn.addEventListener('click', () => {
+        if (!currentArea) return;
+        gridCreateBtn.disabled = true;
+        // Only the area, the size and the prefix are sent. The cell list stays
+        // here — the server builds its own from the area it already has.
+        const data = new URLSearchParams({
+            csrf_token: csrfToken, action: 'generate_grid', mission_id: <?= $missionId ?>,
+            area_id: currentArea.id, sector_size_m: gridSizeRange.value, prefix: gridPrefixInput.value,
+        });
+        fetch('mission-sector.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (!result.ok) {
+                alert(result.error || t('common.send_failed'));
+                gridCreateBtn.disabled = false;
+                return;
+            }
+            sectorRefreshAfter(result.sectors, result.areas);
+            bootstrap.Modal.getInstance(modalEl).hide();
+        }).catch(() => { alert(t('common.send_failed')); gridCreateBtn.disabled = false; });
+    });
+
     modalEl.addEventListener('shown.bs.modal', () => {
         currentArea = areas.find(a => a.id === pendingDivideAreaId) || null;
         pendingDivideAreaId = null;
@@ -13202,6 +13367,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             addMapBaseLayers(composerMap, 'divideSectorsSatelliteToggle');
             refLayer = L.layerGroup().addTo(composerMap);
             wedgeLayer = L.layerGroup().addTo(composerMap);
+            gridLayer = L.layerGroup().addTo(composerMap);
             // Leaflet's built-in marker-pane (icon markers, e.g. the
             // missing-person pin drawn by renderFullMapReference() below)
             // sits at z-index 600, above the built-in overlay-pane (SVG
@@ -13224,12 +13390,14 @@ document.querySelectorAll('.team-form').forEach(form => {
             composerMap.fitBounds(L.latLngBounds(currentArea.geo), {padding: [30, 30]});
         }
         resetDivision();
+        setDivideMode('lines');
         document.addEventListener('keydown', keydownHandler);
         setTimeout(() => composerMap.invalidateSize(), 100);
     });
 
     modalEl.addEventListener('hidden.bs.modal', () => {
         document.removeEventListener('keydown', keydownHandler);
+        if (gridLayer) gridLayer.clearLayers();
     });
 })();
 

@@ -3002,6 +3002,122 @@ function pointToSegmentDistanceMeters(float $lat, float $lng, float $latA, float
 }
 
 /**
+ * Divides a search-area polygon into a grid of equal cells, keeping only the
+ * cells whose CENTER falls inside the polygon. The pure geometry half of
+ * mission-sector.php's generate_grid action — no database, no permission, no
+ * request state, so it is testable on its own (tests/SectorGridTest.php).
+ *
+ * Mirrored in JS as gridCellsForPolygon() (assets/js/war-room-utils.js) for
+ * the live preview in war-room.php's grid tool. The two MUST agree cell for
+ * cell: the preview's button promises "Create 13 sectors" and the server is
+ * what actually creates them, so a disagreement is a lie told to a
+ * coordinator mid-callout. Both are pinned to the same fixture file,
+ * tests/fixtures/grid-cases.json, asserted by PHPUnit and by node --test —
+ * that shared fixture, not discipline, is what keeps them from drifting.
+ *
+ * $sizeM is a REQUEST, not a result. An area 3637m wide cannot hold whole
+ * 500m cells, so cols = ceil(3637/500) = 8 and the cells come out 455m wide
+ * — always smaller than asked, never larger, so a whole number of them
+ * covers the area. Callers are expected to show actual_w_m/actual_h_m back
+ * to the admin before anything is created: cell size drives sweep time and
+ * crew allocation, so a 30% deviation nobody was shown is a planning error,
+ * not a rounding detail.
+ *
+ * Cells are cut out of the bounding box in DEGREES, as an even cols x rows
+ * split, rather than by stepping meters and converting back each time. That
+ * keeps neighbouring cells exactly edge to edge with no accumulated rounding
+ * gap, and keeps the PHP and JS results identical instead of merely close.
+ * The real danger in "a grid in degrees" — a degree of longitude in Crete
+ * being ~91km against ~111km for latitude, so an equal-degree step yields
+ * "squares" a fifth longer than they are wide — is handled where it actually
+ * bites: cols and rows are each derived from the bounding box measured in
+ * METERS, so the cells come out square-ish on the ground. Same flat local
+ * projection (111320 m/deg, times cos(lat) for longitude) as every other
+ * meters-per-degree conversion in this file, evaluated once at the area's
+ * own center latitude; at mission scale it sits well inside GPS error.
+ *
+ * $geo is a ring of [lat, lng] pairs — mission_search_areas.geo's own shape,
+ * not GeoJSON's [lng, lat], same as pointInPolygon() above. Cells come back
+ * in reading order (row 0 northernmost, column 0 westernmost), each a
+ * 4-point ring [NW, NE, SE, SW] rounded to 6 decimals: ~11cm, far past GPS
+ * precision, and it stops the 5-second poll from carrying fifteen
+ * meaningless digits per corner for every cell of every grid.
+ *
+ * A degenerate area (all points identical, or a sliver with no width) yields
+ * a 1x1 grid whose single cell has no inside to be centered in, so 'kept'
+ * comes back 0. That is a real outcome, not an error to raise here — the
+ * caller decides what to tell the admin (see generate_grid's grid.no_cells).
+ */
+function buildSectorGridCells(array $geo, int $sizeM): array {
+    $sizeM = max(GRID_SECTOR_SIZE_MIN_M, min(GRID_SECTOR_SIZE_MAX_M, $sizeM));
+
+    $lats = array_map(fn($pt) => (float) $pt[0], $geo);
+    $lngs = array_map(fn($pt) => (float) $pt[1], $geo);
+    $minLat = min($lats);
+    $maxLat = max($lats);
+    $minLng = min($lngs);
+    $maxLng = max($lngs);
+
+    $centerLat = ($minLat + $maxLat) / 2;
+    $mPerDegLat = 111320.0;
+    $mPerDegLng = 111320.0 * max(0.01, cos(deg2rad($centerLat)));
+
+    $bboxH = ($maxLat - $minLat) * $mPerDegLat;
+    $bboxW = ($maxLng - $minLng) * $mPerDegLng;
+
+    // The ratio is rounded before ceil() on both sides. It is the one place
+    // where a last-bit difference between PHP's and JS's cos() would not stay
+    // microscopic: on an area whose width divides exactly by the cell size,
+    // 8.000000000000001 and 8.0 ceil to 9 and 8 — a whole extra column of
+    // sectors on one side and not the other. 9 decimals of a ratio is half a
+    // micron of ground; nothing real survives down there to be lost.
+    $cols = max(1, (int) ceil(round($bboxW / $sizeM, 9)));
+    $rows = max(1, (int) ceil(round($bboxH / $sizeM, 9)));
+
+    $latStep = ($maxLat - $minLat) / $rows;
+    $lngStep = ($maxLng - $minLng) / $cols;
+
+    $cells = [];
+    $dropped = [];
+    for ($r = 0; $r < $rows; $r++) {
+        $latTop = $maxLat - $r * $latStep;
+        $latBottom = $maxLat - ($r + 1) * $latStep;
+        for ($c = 0; $c < $cols; $c++) {
+            $lngLeft = $minLng + $c * $lngStep;
+            $lngRight = $minLng + ($c + 1) * $lngStep;
+            // The center is the whole keep-or-drop rule: a cell more than
+            // half outside the search area is not worth sending a crew to,
+            // and one more than half inside is. Cheap, and it never leaves a
+            // hole in the middle of the area the way an "entirely inside"
+            // test would along every edge.
+            $cell = [
+                [round($latTop, 6), round($lngLeft, 6)],
+                [round($latTop, 6), round($lngRight, 6)],
+                [round($latBottom, 6), round($lngRight, 6)],
+                [round($latBottom, 6), round($lngLeft, 6)],
+            ];
+            if (pointInPolygon(($latTop + $latBottom) / 2, ($lngLeft + $lngRight) / 2, $geo)) {
+                $cells[] = $cell;
+            } else {
+                $dropped[] = $cell;
+            }
+        }
+    }
+
+    return [
+        'cells'       => $cells,
+        'dropped'     => $dropped,
+        'cols'        => $cols,
+        'rows'        => $rows,
+        'total'       => $cols * $rows,
+        'kept'        => count($cells),
+        'requested_m' => $sizeM,
+        'actual_w_m'  => round($bboxW / $cols, 1),
+        'actual_h_m'  => round($bboxH / $rows, 1),
+    ];
+}
+
+/**
  * Spatial index over the pings and walked segments a coverage sweep has to
  * test cells against, bucketed at sweep-radius resolution.
  *
