@@ -278,6 +278,107 @@ function pointInPolygon(lat, lng, geo) {
     return inside;
 }
 
+// Flat shoelace over a local equirectangular projection — deliberately the
+// SAME approximation, and the same 111320 m/degree constant taken at the
+// bounding box's own centre latitude, that gridCellsForPolygon() below uses
+// for its cell metres. A geodesic formula would be a shade more accurate in
+// absolute terms, but then the grid preview's "397 × 412 m" and the square
+// metres printed next to it would quietly disagree about the same rectangle.
+// Two numbers describing one piece of ground have to come from one model;
+// being 0.3% off on a figure nobody checks with a tape measure is the
+// cheaper error.
+// A point on a closed ring addressed by a "ring position": floor(r) is the
+// edge index (the edge running from ring[i] to ring[i+1]) and frac(r) is how
+// far along that edge, so r = 3 is vertex 3 itself and r = 3.5 is halfway to
+// vertex 4. One representation covers both "clicked an existing corner" and
+// "clicked partway along an edge" — a corner-only model can never split a
+// triangle, since joining any two of its corners is an existing edge.
+function pointAtRingPos(ring, r) {
+    const n = ring.length;
+    const i = ((Math.floor(r) % n) + n) % n;
+    const t = r - Math.floor(r);
+    const a = ring[i];
+    if (t < 1e-9) return a.slice();
+    const b = ring[(i + 1) % n];
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+}
+
+// Cuts a closed ring into two along the straight line between two ring
+// positions. Returns [] when either piece degenerates to fewer than three
+// points. Both pieces walk their own arc IN RING ORDER and then close over
+// the shared cut line, so the two of them tile the original exactly.
+//
+// That last property is the whole point, and it is what the previous
+// inline version in war-room.php got wrong. It built the second piece by
+// sweeping i = 0..n and keeping whatever fell outside the first arc, which
+// emits (0, 1, …, r1-1, r2+1, …, n-1) whenever the second arc wraps past
+// index 0 — in other words, for every cut whose first point was not on the
+// ring's very first vertex. That is not a ring order at all: the polygon
+// jumps from just before the first cut straight to just after the second and
+// folds into a bowtie whose lobes cancel. Shipped in v3.154.3 and invisible
+// until a sector's area was put on screen and two halves stopped adding up
+// to the whole they came from. Hence the tiling assertions in this
+// function's tests: a split that does not conserve area is not a split.
+function splitRingAtCutPositions(ring, rA, rB) {
+    if (!Array.isArray(ring) || ring.length < 3) return [];
+    let r1 = rA, r2 = rB;
+    if (r1 > r2) { const tmp = r1; r1 = r2; r2 = tmp; }
+    if (r1 === r2) return [];
+
+    const n = ring.length;
+    const p1 = pointAtRingPos(ring, r1);
+    const p2 = pointAtRingPos(ring, r2);
+
+    // The near arc is a contiguous ascending run, so a plain sweep is
+    // already in ring order.
+    const polyA = [p1];
+    for (let i = 0; i < n; i++) {
+        if (i > r1 && i < r2) polyA.push(ring[i]);
+    }
+    polyA.push(p2);
+
+    // The far arc is the one that wraps, so it is walked outward from the
+    // second cut point and round, stopping at the first vertex that belongs
+    // to the near arc instead. Same membership test as before; only the
+    // order changes.
+    const polyB = [p2];
+    for (let step = 0; step < n; step++) {
+        const i = (Math.floor(r2) + 1 + step) % n;
+        if (!(i > r2 || i < r1)) break;
+        polyB.push(ring[i]);
+    }
+    polyB.push(p1);
+
+    if (polyA.length < 3 || polyB.length < 3) return [];
+    return [polyA, polyB];
+}
+
+function polygonAreaSquareMeters(geo) {
+    if (!Array.isArray(geo) || geo.length < 3) return 0;
+
+    const lats = geo.map(pt => Number(pt[0]));
+    const lngs = geo.map(pt => Number(pt[1]));
+    const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+    const mPerDegLat = 111320;
+    const mPerDegLng = 111320 * Math.max(0.01, Math.cos(centerLat * Math.PI / 180));
+
+    // Metres relative to the first vertex, not absolute ones. Subtracting the
+    // origin up front keeps the cross products small; multiplying raw
+    // ~4-million-metre coordinates together and leaning on the subtraction to
+    // hand back a few thousand is exactly the shape of a cancellation bug.
+    const x = lngs.map(lng => (lng - lngs[0]) * mPerDegLng);
+    const y = lats.map(lat => (lat - lats[0]) * mPerDegLat);
+
+    let twiceArea = 0;
+    for (let i = 0, j = geo.length - 1; i < geo.length; j = i++) {
+        twiceArea += x[j] * y[i] - x[i] * y[j];
+    }
+    // abs() — a ring drawn clockwise and the same ring drawn the other way
+    // round are the same piece of ground. Nothing upstream enforces a winding
+    // order: an area is whatever order the admin happened to click in.
+    return Math.abs(twiceArea) / 2;
+}
+
 function gridCellsForPolygon(geo, sizeM) {
     const size = Math.max(GRID_SECTOR_SIZE_MIN_M, Math.min(GRID_SECTOR_SIZE_MAX_M, sizeM));
 
@@ -368,6 +469,27 @@ function parseCoordsInput(raw) {
 function formatDistanceMeters(m) {
     if (m === null || m === undefined) return '';
     return m < 1000 ? `${Math.round(m)} ${t('common.unit_m')}` : `${(m / 1000).toFixed(1)} ${t('common.unit_km')}`;
+}
+
+// Square metres up to a hectare, then the unit the language actually thinks
+// in, then square kilometres. The middle band is the one that matters: a
+// search sector is usually a few hundred thousand square metres, which is
+// precisely the size nobody can picture written out in square metres. Greek
+// says στρέμματα there and English says hectares, so the divisor lives in
+// the language file beside the unit name — it is a property of the locale in
+// the same way a decimal separator is, not a magic number in this file.
+function formatAreaSquareMeters(m2) {
+    if (m2 === null || m2 === undefined || !isFinite(m2) || m2 <= 0) return '';
+    if (m2 < 10000) return `${Math.round(m2)} ${t('common.unit_area_m2')}`;
+    if (m2 < 1000000) {
+        const perMidUnit = Number(t('common.unit_area_mid_divisor')) || 1000;
+        const mid = m2 / perMidUnit;
+        // One decimal only while it buys something. At three digits the
+        // tenth of a στρέμμα is noise on a number used to size a sweep.
+        return `${mid < 100 ? mid.toFixed(1) : Math.round(mid)} ${t('common.unit_area_mid')}`;
+    }
+    const km2 = m2 / 1000000;
+    return `${km2 < 100 ? km2.toFixed(2) : Math.round(km2)} ${t('common.unit_area_km2')}`;
 }
 
 function bearingToCompassAbbr(deg) {
@@ -576,11 +698,15 @@ if (typeof module !== 'undefined' && module.exports) {
         ringDiscPolygonPoints,
         pointInPolygon,
         gridCellsForPolygon,
+        polygonAreaSquareMeters,
+        pointAtRingPos,
+        splitRingAtCutPositions,
         weightedWedgePolygonPoints,
         annularWedgePolygonPoints,
         escapeHtml,
         parseCoordsInput,
         formatDistanceMeters,
+        formatAreaSquareMeters,
         bearingToCompassAbbr,
         missingRouteDeliverablesClientSide,
         shouldSkipVideoCompression,

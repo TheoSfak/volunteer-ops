@@ -94,6 +94,15 @@ return [
         'nearby.no_own_ping' => 'Στείλτε το στίγμα σας για να δείτε αποστάσεις.',
         'common.unit_m' => 'μ',
         'common.unit_km' => 'χλμ',
+        // Area units, tiered by formatAreaSquareMeters() (war-room-utils.js).
+        // The middle tier's divisor is a translated value on purpose: Greek
+        // sizes land in στρέμματα (1.000 m²), English in hectares (10.000 m²),
+        // and that is a property of the locale exactly like the unit name next
+        // to it — not something the formatter can hardcode for both.
+        'common.unit_area_m2' => 'τ.μ.',
+        'common.unit_area_mid' => 'στρ.',
+        'common.unit_area_mid_divisor' => '1000',
+        'common.unit_area_km2' => 'τ.χλμ.',
         'compass.n' => 'Β',
         'compass.ne' => 'ΒΑ',
         'compass.e' => 'Α',
@@ -263,6 +272,7 @@ return [
         'sector.area_select_placeholder' => '— Επιλέξτε περιοχή —',
         'sector.area_not_found' => 'Η περιοχή έρευνας δεν βρέθηκε.',
         'sector.area_rollup' => '{completed}/{total} τομείς ολοκληρώθηκαν',
+        'sector.area_size' => 'Έκταση: {size}',
         'sector.area_delete_confirm' => 'Διαγραφή περιοχής «{label}» — θα διαγραφούν {count} τομείς. Συνέχεια;',
         'sector.area_empty_list' => 'Δεν έχουν οριστεί περιοχές έρευνας.',
         // Divide-into-sectors tool — cut an area into sectors from its own vertices
@@ -328,6 +338,7 @@ return [
         'grid.preview' => 'Πλέγμα {cols} × {rows}',
         'grid.kept' => 'Εντός περιοχής: {kept} από {total}',
         'grid.actual_size' => 'Πραγματικό μέγεθος: {w} × {h} μ.',
+        'grid.each_sector_area' => 'Κάθε τομέας ≈ {each} · σύνολο {total}',
         'grid.size_warning' => 'Ζητήθηκαν {req} μ. Η περιοχή χωράει ακέραιους τομείς των {w} × {h} μ.',
         'grid.create_cta' => 'Δημιουργία {n} τομέων',
         'grid.sector_label' => 'Τομέας {prefix}{n}',
@@ -1540,6 +1551,10 @@ return [
         'nearby.no_own_ping' => 'Send your own ping to see distances.',
         'common.unit_m' => 'm',
         'common.unit_km' => 'km',
+        'common.unit_area_m2' => 'm²',
+        'common.unit_area_mid' => 'ha',
+        'common.unit_area_mid_divisor' => '10000',
+        'common.unit_area_km2' => 'km²',
         'compass.n' => 'N',
         'compass.ne' => 'NE',
         'compass.e' => 'E',
@@ -1700,6 +1715,7 @@ return [
         'sector.area_select_placeholder' => '— Select an area —',
         'sector.area_not_found' => 'Search area not found.',
         'sector.area_rollup' => '{completed}/{total} sectors complete',
+        'sector.area_size' => 'Area: {size}',
         'sector.area_delete_confirm' => 'Delete area "{label}" — this will delete {count} sectors. Continue?',
         'sector.area_empty_list' => 'No search areas have been defined.',
         // Divide-into-sectors tool — cut an area into sectors from its own vertices
@@ -1765,6 +1781,7 @@ return [
         'grid.preview' => '{cols} × {rows} grid',
         'grid.kept' => 'Inside the area: {kept} of {total}',
         'grid.actual_size' => 'Actual size: {w} × {h} m',
+        'grid.each_sector_area' => 'Each sector ≈ {each} · {total} in total',
         'grid.size_warning' => 'Requested {req} m. The area fits whole sectors of {w} × {h} m.',
         'grid.create_cta' => 'Create {n} sectors',
         'grid.sector_label' => 'Sector {prefix}{n}',

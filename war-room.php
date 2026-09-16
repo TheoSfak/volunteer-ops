@@ -4380,14 +4380,16 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                 <div class="p-2 border-bottom border-md-bottom-0 border-md-end d-flex flex-column gap-2" style="width:100%;max-width:320px;">
                     <div class="small text-muted" id="splitSectorHint"><?= t('sector.split_hint') ?></div>
                     <div id="splitSectorPreview" style="display:none;">
-                        <div class="input-group input-group-sm mb-2">
+                        <div class="input-group input-group-sm mb-1">
                             <span class="input-group-text justify-content-center text-white" id="splitSectorSwatch1" style="min-width:34px;">Α</span>
                             <input type="text" class="form-control" id="splitSectorLabelInput1" maxlength="255">
                         </div>
-                        <div class="input-group input-group-sm mb-2">
+                        <div class="form-text small mt-0 mb-2" id="splitSectorSize1"></div>
+                        <div class="input-group input-group-sm mb-1">
                             <span class="input-group-text justify-content-center text-white" id="splitSectorSwatch2" style="min-width:34px;">Β</span>
                             <input type="text" class="form-control" id="splitSectorLabelInput2" maxlength="255">
                         </div>
+                        <div class="form-text small mt-0 mb-2" id="splitSectorSize2"></div>
                     </div>
                     <div class="flex-grow-1"></div>
                     <div class="d-flex gap-2">
@@ -4419,6 +4421,13 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                         <button type="button" class="btn btn-outline-secondary" id="areaCoordsAddBtn" title="<?= t('dispatch.coords_add_title') ?>"><i class="bi bi-plus-lg"></i></button>
                     </div>
                     <input type="text" id="areaLabelInput" class="form-control" style="max-width:220px;" maxlength="255" placeholder="<?= t('sector.area_label_placeholder') ?>">
+                    <!-- Deliberately in the toolbar and not on the map. The whole
+                         point of this number is "stretch it or pull it in?", a
+                         question asked while looking at the shape, so it has to be
+                         somewhere the eye can park without anything covering the
+                         ground being drawn. Empty (d-none) until three vertices
+                         exist, since two points enclose nothing. -->
+                    <span class="badge text-bg-dark align-self-center d-none" id="areaSizeReadout"></span>
                     <div class="ms-auto d-flex gap-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="areaClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
                         <button type="button" class="btn btn-success btn-sm" id="areaSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.save_btn') ?></button>
@@ -4451,6 +4460,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                         <button type="button" class="btn btn-outline-secondary" id="restrictedAreaCoordsAddBtn" title="<?= t('dispatch.coords_add_title') ?>"><i class="bi bi-plus-lg"></i></button>
                     </div>
                     <input type="text" id="restrictedAreaLabelInput" class="form-control" style="max-width:220px;" maxlength="255" placeholder="<?= t('restricted_area.label_placeholder') ?>">
+                    <span class="badge text-bg-dark align-self-center d-none" id="restrictedAreaSizeReadout"></span>
                     <div class="ms-auto d-flex gap-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="restrictedAreaClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
                         <button type="button" class="btn btn-danger btn-sm" id="restrictedAreaSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.save_btn') ?></button>
@@ -6452,6 +6462,13 @@ function renderAreaLayer(items) {
 
     items.forEach(item => {
         const rollup = `<div class="small mt-1">${t('sector.area_rollup', {completed: item.completed_count, total: item.sector_count})}</div>`;
+        // Size is popup-only, here and on sectors below, and never a second
+        // permanent on-map label. Every area and every sector already carries
+        // one (.wr-polygon-label); hanging a number off each of them turns a
+        // divided callout map into a wall of digits laid over the ground the
+        // map exists to show. A number consulted while planning can afford a
+        // click; a label scanned at a glance cannot afford a neighbour.
+        const sizeLine = `<div class="small text-muted">${t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(item.geo))})}</div>`;
         // Divide vs Clear are mutually exclusive by design — re-dividing an
         // area that already has sectors would fan a second, overlapping set
         // from scratch, so the supported path is clear-then-redivide, not
@@ -6464,7 +6481,7 @@ function renderAreaLayer(items) {
                 ${divideOrClearBtn}
                 <button type="button" class="btn btn-sm btn-outline-danger mt-1 area-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
             </div>` : '';
-        const popupHtml = `<strong>${escapeHtml(item.label)}</strong>${rollup}${manageHtml}`;
+        const popupHtml = `<strong>${escapeHtml(item.label)}</strong>${rollup}${sizeLine}${manageHtml}`;
 
         const layer = L.polygon(item.geo, {pane: 'areaPane', color: '#dc3545', weight: 4, dashArray: '10,6', fillColor: '#dc3545', fillOpacity: 0.06}).addTo(areaLayer).bindPopup(popupHtml);
         L.marker(areaLabelAnchor(item.geo), {icon: L.divIcon({className: '', iconSize: [0, 0]}), interactive: false})
@@ -6863,9 +6880,10 @@ function renderSectorLayer(items) {
                     ${item.status === 'not_started' && !item.buildings.length ? `<button type="button" class="btn btn-sm btn-outline-secondary mt-1 sector-split-btn" data-id="${item.id}"><i class="bi bi-scissors me-1"></i>${t('sector.split_btn')}</button>` : ''}
                     <button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
                 </div>` : '';
+            const sizeLine = `<div class="small text-muted mt-1">${t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(item.geo))})}</div>`;
             const popupHtml = `<strong>${escapeHtml(item.label)}</strong><br>` +
                 `<span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span> ${escapeHtml(item.team_label)}${sectorCoverageBadgeHtml(item)}` +
-                buildingsSummary + completePrompt + ackBtn + selfReportBtn + manageHtml;
+                sizeLine + buildingsSummary + completePrompt + ackBtn + selfReportBtn + manageHtml;
 
             const layer = L.polygon(item.geo, {pane: 'sectorPane', color, fillColor: color, fillOpacity: 0.35, weight: 2}).addTo(sectorLayer).bindPopup(popupHtml);
             // Same sectorCoverageBadgeHtml() as the popup above (so the
@@ -13139,7 +13157,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             }).addTo(wedgeLayer);
 
             const row = document.createElement('div');
-            row.className = 'input-group input-group-sm mb-2';
+            row.className = 'input-group input-group-sm mb-1';
             const swatch = document.createElement('span');
             swatch.className = 'input-group-text justify-content-center text-white';
             swatch.style.cssText = `background:${color};min-width:34px;`;
@@ -13169,6 +13187,14 @@ document.querySelectorAll('.team-form').forEach(form => {
             row.appendChild(input);
             row.appendChild(teamSelect);
             wedgeListEl.appendChild(row);
+            // Under the row rather than on the wedge itself. The map already
+            // carries a big coloured letter per piece; the size belongs beside
+            // the label being typed for it, which is where the "one more cut or
+            // not?" decision is actually being made.
+            const sizeEl = document.createElement('div');
+            sizeEl.className = 'form-text small mt-0 mb-2';
+            sizeEl.textContent = t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(poly))});
+            wedgeListEl.appendChild(sizeEl);
         });
         saveBtn.disabled = wedges.length === 0;
     }
@@ -13297,10 +13323,19 @@ document.querySelectorAll('.team-form').forEach(form => {
         const g = gridCellsForPolygon(currentArea.geo, size);
         const w = Math.round(g.actual_w_m), h = Math.round(g.actual_h_m);
 
+        // Cell area comes from the same actual_w_m/actual_h_m the line above
+        // prints, not from polygonAreaSquareMeters() run on each cell — two
+        // figures describing one rectangle must come from one source, or
+        // "400 × 400 m" ends up sitting next to something that is not 160
+        // στρέμματα. The total is the ground being TASKED (kept cells), which
+        // overshoots the area's own size wherever a cell hangs over the
+        // boundary; that overshoot is real walking, so it belongs in the total.
+        const cellM2 = g.actual_w_m * g.actual_h_m;
         gridStats.innerHTML = [
             t('grid.preview', {cols: g.cols, rows: g.rows}),
             t('grid.kept', {kept: g.kept, total: g.total}),
             t('grid.actual_size', {w, h}),
+            t('grid.each_sector_area', {each: formatAreaSquareMeters(cellM2), total: formatAreaSquareMeters(cellM2 * g.kept)}),
         ].map(escapeHtml).join('<br>');
 
         // Shown whenever the cells came out meaningfully smaller than what was
@@ -13363,7 +13398,9 @@ document.querySelectorAll('.team-form').forEach(form => {
     modalEl.addEventListener('shown.bs.modal', () => {
         currentArea = areas.find(a => a.id === pendingDivideAreaId) || null;
         pendingDivideAreaId = null;
-        areaLabelEl.textContent = currentArea ? currentArea.label : '';
+        areaLabelEl.textContent = currentArea
+            ? `${currentArea.label} · ${t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(currentArea.geo))})}`
+            : '';
         if (!composerMap) {
             composerMap = L.map('divideSectorsMap');
             addMapBaseLayers(composerMap, 'divideSectorsSatelliteToggle');
@@ -13413,6 +13450,8 @@ document.querySelectorAll('.team-form').forEach(form => {
     const swatch2 = document.getElementById('splitSectorSwatch2');
     const labelInput1 = document.getElementById('splitSectorLabelInput1');
     const labelInput2 = document.getElementById('splitSectorLabelInput2');
+    const sizeEl1 = document.getElementById('splitSectorSize1');
+    const sizeEl2 = document.getElementById('splitSectorSize2');
     const clearBtn = document.getElementById('splitSectorClearBtn');
     const saveBtn = document.getElementById('splitSectorSaveBtn');
 
@@ -13436,15 +13475,9 @@ document.querySelectorAll('.team-form').forEach(form => {
     let cutPoint2 = null;
     let actionStack = [];
 
-    function pointAtRingPos(ring, r) {
-        const n = ring.length;
-        const i = ((Math.floor(r) % n) + n) % n;
-        const t = r - Math.floor(r);
-        const a = ring[i];
-        if (t < 1e-9) return a.slice();
-        const b = ring[(i + 1) % n];
-        return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-    }
+    // pointAtRingPos() and the ring-splitting itself live in
+    // war-room-utils.js, where they can be unit-tested — see the tiling
+    // assertions there and the bowtie they exist to keep out of the DB.
 
     // Closest point on segment a-b to point p, all as [lat,lng] — flat local
     // approximation, accurate enough at mission scale (a few km at most).
@@ -13488,21 +13521,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     // edge) is rejected here, before Save is ever enabled.
     function computeSplit() {
         if (cutPoint1 === null || cutPoint2 === null || !currentSector || cutPoint1 === cutPoint2) return [];
-        let r1 = cutPoint1, r2 = cutPoint2;
-        if (r1 > r2) { const tmp = r1; r1 = r2; r2 = tmp; }
-        const ring = currentSector.geo;
-        const p1 = pointAtRingPos(ring, r1);
-        const p2 = pointAtRingPos(ring, r2);
-        const polyA = [p1];
-        const polyB = [p2];
-        for (let i = 0; i < ring.length; i++) {
-            if (i > r1 && i < r2) polyA.push(ring[i]);
-            else if (i > r2 || i < r1) polyB.push(ring[i]);
-        }
-        polyA.push(p2);
-        polyB.push(p1);
-        if (polyA.length < 3 || polyB.length < 3) return [];
-        return [polyA, polyB];
+        return splitRingAtCutPositions(currentSector.geo, cutPoint1, cutPoint2);
     }
 
     function renderBoundary() {
@@ -13531,6 +13550,11 @@ document.querySelectorAll('.team-form').forEach(form => {
             L.polygon(halves[1], {color: COLOR_2, weight: 2, fillColor: COLOR_2, fillOpacity: 0.35, interactive: false}).addTo(previewLayer);
             swatch1.style.background = COLOR_1;
             swatch2.style.background = COLOR_2;
+            // The two halves are the point of this screen: a cut that leaves
+            // one team 40 στρέμματα and the other 4 is one the coordinator
+            // wants to see BEFORE saving, not after a team reports in.
+            sizeEl1.textContent = t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(halves[0]))});
+            sizeEl2.textContent = t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(halves[1]))});
             if (!labelInput1.value) labelInput1.value = t('sector.split_label_suffix', {label: currentSector.label, letter: 'Α'});
             if (!labelInput2.value) labelInput2.value = t('sector.split_label_suffix', {label: currentSector.label, letter: 'Β'});
             previewEl.style.display = '';
@@ -13620,7 +13644,9 @@ document.querySelectorAll('.team-form').forEach(form => {
     modalEl.addEventListener('shown.bs.modal', () => {
         currentSector = sectors.find(s => s.id === pendingSplitSectorId) || null;
         pendingSplitSectorId = null;
-        labelEl.textContent = currentSector ? currentSector.label : '';
+        labelEl.textContent = currentSector
+            ? `${currentSector.label} · ${t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(currentSector.geo))})}`
+            : '';
         if (!composerMap) {
             composerMap = L.map('splitSectorMap');
             addMapBaseLayers(composerMap, 'splitSectorSatelliteToggle');
@@ -13655,6 +13681,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     const labelInput = document.getElementById('areaLabelInput');
     const clearBtn = document.getElementById('areaClearBtn');
     const sendBtn = document.getElementById('areaSendBtn');
+    const sizeReadout = document.getElementById('areaSizeReadout');
 
     let composerMap = null;
     let refLayer = null;
@@ -13679,6 +13706,18 @@ document.querySelectorAll('.team-form').forEach(form => {
         renderFullMapReference(refLayer);
     }
 
+    // Live square metres, from the third vertex on. An unclosed ring is
+    // measured as though its last point already joined back to its first —
+    // which is exactly the shape the closing click produces, so the number
+    // never jumps at the moment of closing. Waiting for a closed ring would
+    // put the figure on screen only after the decision it informs.
+    function updateSizeReadout() {
+        const m2 = drawPoints.length >= 3 ? polygonAreaSquareMeters(drawPoints) : 0;
+        const text = formatAreaSquareMeters(m2);
+        sizeReadout.textContent = text ? t('sector.area_size', {size: text}) : '';
+        sizeReadout.classList.toggle('d-none', !text);
+    }
+
     function resetDrawing() {
         drawPoints = [];
         isClosed = false;
@@ -13687,9 +13726,14 @@ document.querySelectorAll('.team-form').forEach(form => {
         vertexMarkers = [];
         if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
         sendBtn.disabled = true;
+        updateSizeReadout();
     }
 
     function updateShapePreview() {
+        // Before the early return below, not after it: every add, drag, undo
+        // and close already funnels through here, so this is the one hook that
+        // cannot be forgotten at a new call site later.
+        updateSizeReadout();
         if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
         if (drawPoints.length < 2) return;
         shapeLayer = isClosed
@@ -13856,6 +13900,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     const labelInput = document.getElementById('restrictedAreaLabelInput');
     const clearBtn = document.getElementById('restrictedAreaClearBtn');
     const sendBtn = document.getElementById('restrictedAreaSendBtn');
+    const sizeReadout = document.getElementById('restrictedAreaSizeReadout');
 
     let composerMap = null;
     let refLayer = null;
@@ -13879,6 +13924,14 @@ document.querySelectorAll('.team-form').forEach(form => {
         renderFullMapReference(refLayer);
     }
 
+    // Twin of the search-area composer's own readout above, same reasoning.
+    function updateSizeReadout() {
+        const m2 = drawPoints.length >= 3 ? polygonAreaSquareMeters(drawPoints) : 0;
+        const text = formatAreaSquareMeters(m2);
+        sizeReadout.textContent = text ? t('sector.area_size', {size: text}) : '';
+        sizeReadout.classList.toggle('d-none', !text);
+    }
+
     function resetDrawing() {
         drawPoints = [];
         isClosed = false;
@@ -13887,9 +13940,11 @@ document.querySelectorAll('.team-form').forEach(form => {
         vertexMarkers = [];
         if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
         sendBtn.disabled = true;
+        updateSizeReadout();
     }
 
     function updateShapePreview() {
+        updateSizeReadout();
         if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
         if (drawPoints.length < 2) return;
         shapeLayer = isClosed

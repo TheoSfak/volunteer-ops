@@ -12,6 +12,10 @@ global.t = function (key) {
     const strings = {
         'common.unit_m': 'μ.',
         'common.unit_km': 'χλμ.',
+        'common.unit_area_m2': 'τ.μ.',
+        'common.unit_area_mid': 'στρ.',
+        'common.unit_area_mid_divisor': '1000',
+        'common.unit_area_km2': 'τ.χλμ.',
         'compass.n': 'Β', 'compass.ne': 'ΒΑ', 'compass.e': 'Α', 'compass.se': 'ΝΑ',
         'compass.s': 'Ν', 'compass.sw': 'ΝΔ', 'compass.w': 'Δ', 'compass.nw': 'ΒΔ',
         'route.deliverable_photo': 'φωτογραφία',
@@ -34,6 +38,10 @@ const {
     annularWedgePolygonPoints,
     escapeHtml,
     parseCoordsInput,
+    polygonAreaSquareMeters,
+    pointAtRingPos,
+    splitRingAtCutPositions,
+    formatAreaSquareMeters,
     formatDistanceMeters,
     bearingToCompassAbbr,
     missingRouteDeliverablesClientSide,
@@ -619,4 +627,188 @@ test('shareablePayload() returns null when no file payload is shareable at all',
 
 test('shouldSkipPhotoCompression() always skips gif, even when large, to protect animation', () => {
     assert.equal(shouldSkipPhotoCompression(5 * 1024 * 1024, 'image/gif'), true);
+});
+
+// ── polygonAreaSquareMeters / formatAreaSquareMeters ────────────────────────
+// The square metres shown while drawing a search area, while dividing one,
+// and in the area/sector popups on the live map.
+
+// Builds a rectangle of exactly widthM × heightM using the SAME projection
+// constants war-room-utils.js uses, so a disagreement here is a real bug in
+// the shoelace and not a difference of opinion about the shape of the earth.
+function rectangleAt(lat, lng, widthM, heightM) {
+    const dLat = heightM / 111320;
+    const dLng = widthM / (111320 * Math.cos(lat * Math.PI / 180));
+    return [
+        [lat, lng],
+        [lat, lng + dLng],
+        [lat + dLat, lng + dLng],
+        [lat + dLat, lng],
+    ];
+}
+
+test('polygonAreaSquareMeters() measures a 400 x 400 m square', () => {
+    const m2 = polygonAreaSquareMeters(rectangleAt(35.33, 24.85, 400, 400));
+    // 0.1% tolerance: the projection is taken at the ring's centre latitude
+    // while the ring itself spans a few metres of latitude either side.
+    assert.ok(Math.abs(m2 - 160000) < 160, `expected ~160000, got ${m2}`);
+});
+
+test('polygonAreaSquareMeters() ignores winding direction', () => {
+    const ring = rectangleAt(35.33, 24.85, 250, 300);
+    const reversed = ring.slice().reverse();
+    assert.ok(Math.abs(polygonAreaSquareMeters(ring) - polygonAreaSquareMeters(reversed)) < 1e-6);
+});
+
+test('polygonAreaSquareMeters() returns 0 for anything that encloses nothing', () => {
+    assert.equal(polygonAreaSquareMeters([]), 0);
+    assert.equal(polygonAreaSquareMeters([[35, 24], [35.1, 24.1]]), 0);
+    assert.equal(polygonAreaSquareMeters(null), 0);
+});
+
+test('polygonAreaSquareMeters() handles a concave ring', () => {
+    // An L shape: a 400 x 400 square with its top-right 200 x 200 quarter bitten
+    // out, so 160000 - 40000. Concave rings are the normal case for a hand-drawn
+    // area, and a shoelace that only worked on convex ones would pass every
+    // rectangle test above and still be wrong in the field.
+    const lat = 35.33, lng = 24.85;
+    const d = m => m / 111320;
+    const e = m => m / (111320 * Math.cos(lat * Math.PI / 180));
+    const ring = [
+        [lat, lng],
+        [lat, lng + e(400)],
+        [lat + d(200), lng + e(400)],
+        [lat + d(200), lng + e(200)],
+        [lat + d(400), lng + e(200)],
+        [lat + d(400), lng],
+    ];
+    assert.ok(Math.abs(polygonAreaSquareMeters(ring) - 120000) < 200);
+});
+
+test('formatAreaSquareMeters() stays in square metres below a hectare', () => {
+    assert.equal(formatAreaSquareMeters(4800), '4800 τ.μ.');
+    assert.equal(formatAreaSquareMeters(9999.4), '9999 τ.μ.');
+});
+
+test('formatAreaSquareMeters() switches to the middle unit at a hectare', () => {
+    // 1.000 m² per στρέμμα in Greek (10.000 per hectare in English) — the
+    // divisor comes from the language file, not from the formatter.
+    assert.equal(formatAreaSquareMeters(10000), '10.0 στρ.');
+    assert.equal(formatAreaSquareMeters(16500), '16.5 στρ.');
+});
+
+test('formatAreaSquareMeters() drops the decimal once it stops buying anything', () => {
+    // A 400 m grid cell — the single most common sector size in the app.
+    assert.equal(formatAreaSquareMeters(160000), '160 στρ.');
+});
+
+test('formatAreaSquareMeters() switches to square kilometres at a million', () => {
+    assert.equal(formatAreaSquareMeters(1000000), '1.00 τ.χλμ.');
+    assert.equal(formatAreaSquareMeters(12500000), '12.50 τ.χλμ.');
+    assert.equal(formatAreaSquareMeters(250000000), '250 τ.χλμ.');
+});
+
+test('formatAreaSquareMeters() returns empty string for nothing to show', () => {
+    assert.equal(formatAreaSquareMeters(0), '');
+    assert.equal(formatAreaSquareMeters(null), '');
+    assert.equal(formatAreaSquareMeters(undefined), '');
+    assert.equal(formatAreaSquareMeters(NaN), '');
+});
+
+// ── splitRingAtCutPositions ────────────────────────────────────────────────
+// Cutting one sector into two in the Action Room. The governing property is
+// conservation: the two halves must tile the sector they came from. The
+// version this replaced conserved area only when the first cut point landed
+// on the ring's very first vertex, and produced a self-intersecting bowtie
+// for every other cut — which is what these tests exist to keep out.
+
+// A regular polygon, so every vertex is an equally plausible cut point and no
+// single arrangement can accidentally satisfy the tiling check.
+// Signed-area shoelace straight on [lat, lng] degrees — no projection, so two
+// pieces that tile a whole sum to it to full double precision.
+function planarArea(ring) {
+    let a = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        a += ring[j][1] * ring[i][0] - ring[i][1] * ring[j][0];
+    }
+    return Math.abs(a) / 2;
+}
+
+function regularRing(n, lat, lng, radiusM) {
+    return Array.from({length: n}, (_, i) => {
+        const a = (2 * Math.PI * i) / n;
+        return [
+            lat + (radiusM * Math.cos(a)) / 111320,
+            lng + (radiusM * Math.sin(a)) / (111320 * Math.cos(lat * Math.PI / 180)),
+        ];
+    });
+}
+
+test('splitRingAtCutPositions() conserves area from EVERY pair of cut points', () => {
+    const ring = regularRing(12, 35.33, 24.85, 1200);
+    // Measured with a raw planar shoelace on the degrees themselves, NOT with
+    // polygonAreaSquareMeters(): that one picks its projection from each
+    // polygon's own centre latitude, so two halves legitimately disagree with
+    // their parent in the sixth decimal place and would force a tolerance loose
+    // enough to let a real defect through. Tiling is planar geometry and holds
+    // exactly, so it is asserted exactly.
+    const whole = planarArea(ring);
+    let checked = 0;
+    // Whole-number positions are cuts on a corner, the .5s are cuts partway
+    // along an edge; both are reachable by clicking in the split composer.
+    for (let a = 0; a < 12; a += 0.5) {
+        for (let b = a + 1; b < 12; b += 0.5) {
+            const halves = splitRingAtCutPositions(ring, a, b);
+            if (!halves.length) continue;
+            const sum = planarArea(halves[0]) + planarArea(halves[1]);
+            assert.ok(
+                Math.abs(sum - whole) / whole < 1e-9,
+                `cut ${a}-${b} lost area: ${sum} vs ${whole} (self-intersecting half)`
+            );
+            checked++;
+        }
+    }
+    assert.ok(checked > 200, `expected many cut pairs, checked ${checked}`);
+});
+
+test('splitRingAtCutPositions() walks the wrapping arc in ring order', () => {
+    // The exact shape of the old bug: cut points 2 and 4 of a hexagon leave
+    // the far arc as 5, 0, 1 — which the old sweep emitted as 0, 1, 5.
+    const ring = regularRing(6, 35.33, 24.85, 800);
+    const [, far] = splitRingAtCutPositions(ring, 2, 4);
+    // [p2(=v4), v5, v0, v1, p1(=v2)]
+    assert.deepEqual(far.slice(1, 4), [ring[5], ring[0], ring[1]]);
+});
+
+test('splitRingAtCutPositions() puts each cut point in both halves', () => {
+    const ring = regularRing(8, 35.33, 24.85, 600);
+    const [near, far] = splitRingAtCutPositions(ring, 1.5, 5.25);
+    const p1 = pointAtRingPos(ring, 1.5), p2 = pointAtRingPos(ring, 5.25);
+    assert.deepEqual(near[0], p1);
+    assert.deepEqual(near[near.length - 1], p2);
+    assert.deepEqual(far[0], p2);
+    assert.deepEqual(far[far.length - 1], p1);
+});
+
+test('splitRingAtCutPositions() refuses a cut that makes no second piece', () => {
+    const ring = regularRing(4, 35.33, 24.85, 500);
+    // Two points on the SAME edge: the far side would be a sliver of two
+    // points, which is not a polygon.
+    assert.deepEqual(splitRingAtCutPositions(ring, 1.2, 1.8), []);
+    assert.deepEqual(splitRingAtCutPositions(ring, 2, 2), []);
+    assert.deepEqual(splitRingAtCutPositions([[35, 24], [35.1, 24.1]], 0, 1), []);
+});
+
+test('splitRingAtCutPositions() takes its two cut points in either order', () => {
+    const ring = regularRing(7, 35.33, 24.85, 900);
+    assert.deepEqual(splitRingAtCutPositions(ring, 5.5, 1.25), splitRingAtCutPositions(ring, 1.25, 5.5));
+});
+
+test('pointAtRingPos() returns the vertex itself at a whole position', () => {
+    const ring = regularRing(5, 35.33, 24.85, 400);
+    assert.deepEqual(pointAtRingPos(ring, 3), ring[3]);
+    // Halfway along the edge from vertex 0 to vertex 1.
+    const half = pointAtRingPos(ring, 0.5);
+    assert.ok(Math.abs(half[0] - (ring[0][0] + ring[1][0]) / 2) < 1e-12);
+    assert.ok(Math.abs(half[1] - (ring[0][1] + ring[1][1]) / 2) < 1e-12);
 });
