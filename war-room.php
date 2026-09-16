@@ -6455,6 +6455,128 @@ function areaLabelAnchor(geo) {
     return [north[0] + 0.00025, north[1]];
 }
 
+// Zoom-tiered polygon names. Every area, sector and restricted area carries a
+// permanent on-map label, and one divided area can hold up to
+// war_room_grid_max_cells of them (120 by default, MAX_GRID_CELLS 400 ceiling)
+// -- zoomed out to the whole mission that is a wall of "Sector A1" laid over
+// the ground the map exists to show.
+//
+// The tier is decided per polygon by how big THAT shape is on screen right
+// now, never by a zoom level. A fixed zoom threshold is wrong in half the
+// missions: a 20 km2 area still reads fine at z=13 while a 300m grid is
+// already soup there. Going by on-screen size also buys the right priority
+// for free -- an area is a much larger shape than the sectors inside it, so
+// it keeps its name far deeper into a zoom-out than they do, which is exactly
+// what an overview should answer first.
+//
+// Nothing is lost by dropping a name: a sector's fill already encodes its
+// status (SECTOR_STATUS_HEX), and that colour pattern is what actually gets
+// read from above -- while every popup still opens with the full label, so
+// any shape on this map is one tap away from naming itself.
+const LABEL_PX_PER_CHAR = 8.5;   // .wr-polygon-label is 14px/900 weight; Greek caps run wide
+const LABEL_MIN_HEIGHT_PX = 16;
+const LABEL_PAD_PX = 6;
+const LABEL_ALREADY_SHORT_CHARS = 4;
+// Restricted areas give up their name LAST -- "do not go in there" is the one
+// label on this map that must never quietly vanish while someone is zoomed out.
+//
+// A slack multiplier alone does NOT buy that, which only showed up against real
+// data: a hazard is named for what it is ("Landslides -- eastern slope", 31
+// characters) and is drawn around a small footprint, so it needed far more room
+// than the eight-character sectors beside it and went silent FIRST, exactly
+// backwards. The fix is that a hazard gets a short form the others cannot have:
+// a warning glyph. Its danger was never carried by the wording, so one character
+// says everything the shape's own red hatch does not, at a width no zoom-out can
+// take away. The slack then only governs when the full wording returns.
+const LABEL_SLACK_RESTRICTED = 0.45;
+const LABEL_RESTRICTED_SHORT = '\u26A0\uFE0F';
+
+// "Sector A1" -> "A1", for the middle tier. A label is free text in the DB, so
+// the prefix word is read off the label TEMPLATES rather than hardcoded -- and
+// off BOTH the viewer's language and the fallback one, because an admin who
+// drew the grid in Greek and a viewer reading that same map in English are one
+// mission, and the stored label only ever carries the creator's language.
+const POLYGON_LABEL_PREFIXES = (() => {
+    const out = [];
+    for (const table of [WR_STRINGS, WR_STRINGS_FALLBACK]) {
+        for (const key of ['grid.sector_label', 'sector.wedge_label_placeholder']) {
+            const word = (table[key] || '').split('{')[0].trim();
+            if (word && !out.includes(word)) out.push(word);
+        }
+    }
+    return out;
+})();
+// null means there is no HONEST short form. A hand-typed area name has no code
+// hiding inside it, and cutting one mid-word reads worse than showing nothing,
+// so a label like that skips the middle tier and goes straight from full to
+// hidden rather than inventing an abbreviation nobody chose.
+function polygonLabelShortForm(text) {
+    for (const prefix of POLYGON_LABEL_PREFIXES) {
+        if (text.length <= prefix.length) continue;
+        if (text.slice(0, prefix.length).toLowerCase() !== prefix.toLowerCase()) continue;
+        const rest = text.slice(prefix.length);
+        if (!/^\s/.test(rest) || !rest.trim()) continue;
+        return rest.trim();
+    }
+    return text.length <= LABEL_ALREADY_SHORT_CHARS ? text : null;
+}
+
+function polygonPixelSize(bounds) {
+    const nw = map.latLngToLayerPoint(bounds.getNorthWest());
+    const se = map.latLngToLayerPoint(bounds.getSouthEast());
+    return {w: Math.abs(se.x - nw.x), h: Math.abs(se.y - nw.y)};
+}
+
+// Binds the permanent label AND records what the tier pass needs to re-decide
+// it later. bounds come from the polygon's own geo even when the tooltip hangs
+// off a separate invisible marker (an area labels itself just outside its
+// northernmost corner -- see areaLabelAnchor above): it is the SHAPE's size on
+// screen that decides whether naming it is worth the ink, never the anchor's.
+function bindTieredPolygonLabel(layer, text, geo, className, opts = {}) {
+    layer._wrLabel = {
+        full: text,
+        short: opts.short || polygonLabelShortForm(text),
+        bounds: L.latLngBounds(geo),
+        suffix: opts.suffix || '',
+        slack: opts.slack || 1,
+    };
+    layer.bindTooltip(escapeHtml(text) + (opts.suffix || ''), {permanent: true, direction: opts.direction || 'center', className, interactive: false});
+    return layer;
+}
+
+// Re-decides every label's tier. Called at the end of each of the three render
+// functions (the layer groups are rebuilt on every poll tick) and on every
+// zoomend. It walks the live layer groups instead of keeping a registry of its
+// own, so a label a re-render dropped simply stops existing rather than going
+// stale -- and it costs nothing on the wire, which matters on a map where a
+// single sector already spends ~739 bytes of every 5-second poll.
+function applyPolygonLabelTiers(group) {
+    if (!map) return;
+    const groups = group ? [group] : [areaLayer, sectorLayer, restrictedAreaLayer, searchRingsLayer];
+    groups.forEach(g => g?.eachLayer(layer => {
+        const meta = layer._wrLabel;
+        const tooltip = meta && layer.getTooltip();
+        if (!tooltip) return;
+        // A bounding box overestimates the room inside a pie-slice sector, so a
+        // thin wedge holds onto its name a little longer than it strictly earns.
+        // That is the forgiving direction to be wrong in.
+        const px = polygonPixelSize(meta.bounds);
+        const fits = chars => px.w >= (chars * LABEL_PX_PER_CHAR + LABEL_PAD_PX) * meta.slack
+                           && px.h >= LABEL_MIN_HEIGHT_PX * meta.slack;
+        let text = null;
+        if (fits(meta.full.length)) text = meta.full;
+        else if (meta.short && fits(meta.short.length)) text = meta.short;
+
+        if (text === null) {
+            if (layer.isTooltipOpen()) layer.closeTooltip();
+            return;
+        }
+        tooltip.setContent(escapeHtml(text) + meta.suffix);
+        if (!layer.isTooltipOpen()) layer.openTooltip();
+    }));
+}
+map?.on('zoomend', () => applyPolygonLabelTiers());
+
 let areasRenderedSig = null;
 function renderAreaLayer(items) {
     if (!areaLayer) return;
@@ -6489,13 +6611,14 @@ function renderAreaLayer(items) {
         const popupHtml = `<strong>${escapeHtml(item.label)}</strong>${rollup}${sizeLine}${manageHtml}`;
 
         const layer = L.polygon(item.geo, {pane: 'areaPane', color: '#dc3545', weight: 4, dashArray: '10,6', fillColor: '#dc3545', fillOpacity: 0.06}).addTo(areaLayer).bindPopup(popupHtml);
-        L.marker(areaLabelAnchor(item.geo), {icon: L.divIcon({className: '', iconSize: [0, 0]}), interactive: false})
-            .bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'wr-polygon-label', interactive: false})
-            .addTo(areaLayer);
+        const areaLabelMarker = L.marker(areaLabelAnchor(item.geo), {icon: L.divIcon({className: '', iconSize: [0, 0]}), interactive: false});
+        bindTieredPolygonLabel(areaLabelMarker, item.label, item.geo, 'wr-polygon-label');
+        areaLabelMarker.addTo(areaLayer);
         layer.areaId = item.id;
         if (String(item.id) === String(openAreaId)) reopenAreaLayer = layer;
     });
 
+    applyPolygonLabelTiers(areaLayer);
     if (reopenAreaLayer) reopenAreaLayer.openPopup();
 }
 areaLayer?.on('popupopen', event => {
@@ -6538,11 +6661,12 @@ function renderRestrictedAreaLayer(items) {
                 <button type="button" class="btn btn-sm btn-outline-danger restricted-area-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
             </div>` : '');
         const layer = L.polygon(item.geo, {pane: 'restrictedAreaPane', color: '#dc3545', weight: 3, fillColor: 'url(#restrictedHatch)', fillOpacity: 0.55}).addTo(restrictedAreaLayer).bindPopup(popupHtml);
-        layer.bindTooltip(escapeHtml(item.label), {permanent: true, direction: 'center', className: 'wr-polygon-label wr-polygon-label-restricted', interactive: false});
+        bindTieredPolygonLabel(layer, item.label, item.geo, 'wr-polygon-label wr-polygon-label-restricted', {slack: LABEL_SLACK_RESTRICTED, short: LABEL_RESTRICTED_SHORT});
         layer.restrictedAreaId = item.id;
         if (String(item.id) === String(openId)) reopenLayer = layer;
     });
 
+    applyPolygonLabelTiers(restrictedAreaLayer);
     if (reopenLayer) reopenLayer.openPopup();
 }
 restrictedAreaLayer?.on('popupopen', event => {
@@ -6897,7 +7021,7 @@ function renderSectorLayer(items) {
             // Verified Coverage mode is active, so scanning the map answers
             // "which sectors still need walking" without opening every popup.
             const tooltipCoverage = coverageModeActive ? sectorCoverageBadgeHtml(item) : '';
-            layer.bindTooltip(escapeHtml(item.label) + tooltipCoverage, {permanent: true, direction: 'center', className: 'wr-polygon-label', interactive: false});
+            bindTieredPolygonLabel(layer, item.label, item.geo, 'wr-polygon-label', {suffix: tooltipCoverage});
             layer.sectorId = item.id;
             // Verified Coverage gap-cell detail is only ever drawn for whichever
             // sector's popup is currently open (never all sectors at once — see
@@ -6912,6 +7036,8 @@ function renderSectorLayer(items) {
             addSectorBuildingMarker(b, item);
         });
     });
+
+    applyPolygonLabelTiers(sectorLayer);
 }
 sectorLayer?.on('popupopen', event => {
     const popupEl = event.popup.getElement();
@@ -9898,7 +10024,8 @@ function renderSearchRingsLayer(item) {
     for (let i = 3; i >= 0; i--) {
         if (i === openRingIndex) continue; // preserved above, left untouched
         const km = (radii[i] / 1000).toLocaleString(jsLocale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
-        const label = t('missing_person.ring_tooltip', {pct: pct[i], km}) + ringCoverageBadgeHtml(i);
+        const ringText = t('missing_person.ring_tooltip', {pct: pct[i], km});
+        const label = ringText + ringCoverageBadgeHtml(i);
         // Dispatch/Perimeter/Interior-sweep are all single-team actions, so
         // they share one team picker right here in the popup — asking "which
         // team" and "what kind of sweep" together, instead of silently
@@ -9941,7 +10068,17 @@ function renderSearchRingsLayer(item) {
             // Outermost ring only: an always-visible caption (not just a
             // hover tooltip) so the feature reads as self-explanatory the
             // first time anyone opens this map.
-            circle.bindTooltip(`${label} — ${t('missing_person.ring_caption')}`, {permanent: true, direction: 'top', className: 'search-rings-caption'});
+            //
+            // Zoom-tiered like every other permanent label here (see
+            // bindTieredPolygonLabel): a whole sentence is the widest single
+            // thing on this map, and zoomed out to the region it was landing
+            // wider than the ring cluster it exists to explain. Its middle
+            // tier is the ring's own figure with the explanation dropped --
+            // the sentence teaches you once, the number is what you re-read.
+            // The mission map opens at z13, where the full caption still
+            // shows, so nothing about that first reading changes.
+            bindTieredPolygonLabel(circle, `${ringText} — ${t('missing_person.ring_caption')}`, circle.getBounds(),
+                'search-rings-caption', {short: ringText, suffix: ringCoverageBadgeHtml(i), direction: 'top'});
         } else {
             circle.bindTooltip(label, {sticky: true});
         }
@@ -9954,6 +10091,8 @@ function renderSearchRingsLayer(item) {
     // otherwise land on top of it in the SVG, breaking click targeting until
     // that popup next closes.
     for (let i = 3; i >= 0; i--) { layersByIndex[i]?.bringToFront(); }
+
+    applyPolygonLabelTiers(searchRingsLayer);
 }
 // Delegated the same way sectorLayer's own popupopen listener is — buttons
 // are inert HTML until a popup actually opens, then this wires them up by
