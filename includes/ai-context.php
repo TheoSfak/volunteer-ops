@@ -197,7 +197,19 @@ function aiMissionForbiddenNames(int $missionId): array {
     // form; they are added to the forbidden list so that even a stray mention
     // inside someone else's free text is caught.
     foreach (dbFetchAll("SELECT patient_name FROM mission_incidents WHERE mission_id = ? AND patient_name IS NOT NULL", [$missionId]) as $row) {
-        $names[] = $row['patient_name'];
+        // Anything in brackets is a DESCRIPTION, not part of the name, and it
+        // must not become a forbidden word. Coordinators really do type
+        // "Νίκος Βαρδάκης (διασώστης ΑΛΦΑ)" — and with the bracketed half
+        // included, the ordinary noun "διασώστης" became a name this gate
+        // then hunted for, so the word "διασώστης" appearing anywhere in the
+        // mission's own chat blocked every report and every question. A
+        // common noun cannot be allowed to take the feature down.
+        //
+        // Nothing is lost: the patient's actual name sits outside the
+        // brackets and stays protected, and anyone named inside them is
+        // either a mission participant (already covered by the query above)
+        // or someone this list never reached in the first place.
+        $names[] = preg_replace('/\([^)]*\)/u', ' ', (string) $row['patient_name']) ?? $row['patient_name'];
     }
 
     $codenames = [];
@@ -210,6 +222,14 @@ function aiMissionForbiddenNames(int $missionId): array {
     $tokens = [];
     foreach ($names as $name) {
         foreach (preg_split('/[\s\-\.]+/u', (string) $name, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
+            // Punctuation off both ends BEFORE anything else. A real patient
+            // row reads "Νίκος Βαρδάκης (διασώστης ΑΛΦΑ)", which splits into
+            // "(διασώστης" and "ΑΛΦΑ)" — and "ΑΛΦΑ)" does not match the
+            // codename "ΑΛΦΑ", so the deliberate codename exclusion below
+            // missed it and the team's own call-sign became a forbidden name.
+            // Every mention of that team anywhere in the digest then tripped
+            // the gate, which is a total block caused entirely by a bracket.
+            $token = preg_replace('/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/u', '', $token) ?? $token;
             if (mb_strlen($token, 'UTF-8') < 4) continue;
             if (isset($codenames[aiFoldGreek($token)])) continue;
             $tokens[aiFoldGreek($token)] = $token;
@@ -248,9 +268,23 @@ function aiScanDigestForLeaks(array $digest, array $forbiddenNames): array {
     // token here would pass a digest still carrying "Γιώργου" while the
     // redactor was looking for "Γιώργος", i.e. the gate would agree with
     // itself and still be wrong.
+    //
+    // The stem must start at a WORD BOUNDARY, and that is where this gate
+    // deliberately parts company with the redactor. The redactor has no
+    // start-of-word anchor on purpose: over-matching there costs one extra
+    // redacted word. Over-matching HERE costs the whole request, and a
+    // four-letter Greek stem is a substring of ordinary words far too often —
+    // "Νίκος" stems to "νικο", which sits inside "γενικό", "τεχνικό" and
+    // "μηχανικό", so an organisation with a volunteer called Νίκος would have
+    // had every report and every question blocked by a name that was never
+    // actually there. A real name in real text always begins a word; one
+    // glued to a preceding letter would have been caught by the redactor
+    // first, since that is the case the redactor's missing anchor exists for.
     foreach ($forbiddenNames as $token) {
         if (mb_strlen($token, 'UTF-8') < 4) continue;
-        if (mb_strpos($folded, aiNameStem($token), 0, 'UTF-8') !== false) {
+        $stem = aiNameStem($token);
+        if ($stem === '') continue;
+        if (preg_match('/(?<!\p{L})' . preg_quote($stem, '/') . '/u', $folded)) {
             $violations[] = 'Εντοπίστηκε όνομα προσώπου («' . $token . '») μέσα στα δεδομένα προς αποστολή.';
         }
     }

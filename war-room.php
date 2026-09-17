@@ -2551,6 +2551,46 @@ include __DIR__ . '/includes/header.php';
         text-transform: uppercase; color: #64748b; margin: .9rem 0 .4rem;
     }
     .assistant-section-title:first-child { margin-top: 0; }
+    /* ── Assistant chat («Ρώτα τον βοηθό») ──────────────────────────────── */
+    .assistant-ask-divider {
+        display: flex; align-items: center; gap: .6rem;
+        margin: 1.1rem 0 .6rem; color: #64748b;
+        font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    }
+    .assistant-ask-divider::after {
+        content: ''; flex: 1 1 auto; height: 1px; background: rgba(100,116,139,.3);
+    }
+    /* Outside .modal-body on purpose: the body scrolls, and an input that
+       scrolls away is one the coordinator has to hunt for mid-question. */
+    .assistant-ask-bar {
+        padding: .6rem 1rem; border-top: 1px solid rgba(100,116,139,.2);
+    }
+    .assistant-focus-note { font-size: .72rem; color: #0ea5e9; }
+    .assistant-turn { margin-bottom: .7rem; }
+    .assistant-q {
+        background: #172554; color: #fff; border-radius: 10px 10px 2px 10px;
+        padding: .4rem .65rem; font-size: .88rem; margin-left: auto; max-width: 85%; width: fit-content;
+    }
+    .assistant-a {
+        background: rgba(100,116,139,.12); border-radius: 10px 10px 10px 2px;
+        padding: .5rem .7rem; font-size: .9rem; margin-top: .35rem; white-space: pre-wrap;
+    }
+    /* The citations are the point, not decoration: they are what lets a
+       coordinator check a claim in the same second they read it. */
+    .assistant-cites { margin-top: .4rem; font-size: .72rem; color: #64748b; }
+    .assistant-cite {
+        display: inline-block; background: rgba(14,165,233,.12); color: #0369a1;
+        border-radius: 4px; padding: 0 .35rem; margin: .12rem .2rem .12rem 0;
+    }
+    .assistant-warn {
+        margin-top: .4rem; font-size: .74rem; color: #b45309;
+        background: rgba(202,138,4,.12); border-radius: 4px; padding: .25rem .4rem;
+    }
+    .assistant-a-error {
+        background: rgba(220,38,38,.10); color: #b91c1c;
+    }
+    .assistant-thinking { font-size: .82rem; color: #64748b; font-style: italic; }
+
     /* Two pulses on the card the assistant just sent you to. Without it a
        smooth scroll into a dense console leaves you looking for which of nine
        cards was meant. */
@@ -2667,16 +2707,59 @@ include __DIR__ . '/includes/header.php';
                 <h5 class="modal-title"><i class="bi bi-binoculars me-1"></i><?= t('assistant.title') ?></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body" id="assistantBody">
-                <div class="text-muted small"><?= t('common.loading') ?></div>
+            <div class="modal-body">
+                <div id="assistantBody">
+                    <div class="text-muted small"><?= t('common.loading') ?></div>
+                </div>
+                <?php /* Sits directly under the list it describes, not in the
+                         modal footer where it started: the moment a chat was
+                         added below, a footer-wide "no AI involved" became a
+                         claim about the AI's own answers. */ ?>
+                <div class="small text-muted mt-2">
+                    <i class="bi bi-database me-1"></i><?= t('assistant.footer_note') ?>
+                </div>
+                <?php /* The chat lives INSIDE the scrollable body while its
+                         input sits below it, so the transcript can grow
+                         without ever pushing the box you type in off-screen. */ ?>
+                <div class="assistant-ask-divider">
+                    <span><i class="bi bi-stars me-1"></i><?= t('assistant.ask_heading') ?></span>
+                </div>
+                <div id="assistantAskIntro" class="small text-muted mb-2">
+                    <?php if (aiIsConfigured()): ?>
+                        <?= t('assistant.ask_intro') ?>
+                    <?php else: ?>
+                        <i class="bi bi-exclamation-circle me-1"></i><?= t('assistant.ask_disabled') ?>
+                    <?php endif; ?>
+                </div>
+                <div id="assistantTranscript"></div>
             </div>
+            <?php if (aiIsConfigured()): ?>
+            <div class="assistant-ask-bar">
+                <div class="input-group input-group-sm">
+                    <input type="text" id="assistantAskInput" class="form-control"
+                           maxlength="500" placeholder="<?= t('assistant.ask_placeholder') ?>"
+                           autocomplete="off">
+                    <button type="button" id="assistantAskBtn" class="btn btn-primary">
+                        <i class="bi bi-send"></i>
+                    </button>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-1">
+                    <span id="assistantFocusNote" class="assistant-focus-note d-none">
+                        <i class="bi bi-geo-alt me-1"></i><?= t('assistant.focus_on') ?>
+                    </span>
+                    <button type="button" id="assistantAskClear" class="btn btn-link btn-sm p-0 ms-auto d-none">
+                        <?= t('assistant.ask_clear') ?>
+                    </button>
+                </div>
+            </div>
+            <?php endif; ?>
             <div class="modal-footer d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div class="small text-muted flex-grow-1" style="min-width:220px;">
-                    <i class="bi bi-database me-1"></i><?= t('assistant.footer_note') ?>
+                    <?= t('assistant.mark_seen_hint') ?>
                 </div>
                 <div class="d-flex align-items-center gap-2">
                     <span id="assistantSeenMsg" class="small text-success"></span>
-                    <button type="button" id="assistantSeenBtn" class="btn btn-sm btn-primary" title="<?= t('assistant.mark_seen_hint') ?>">
+                    <button type="button" id="assistantSeenBtn" class="btn btn-sm btn-primary">
                         <i class="bi bi-check2-all me-1"></i><?= t('assistant.mark_seen') ?>
                     </button>
                 </div>
@@ -13076,6 +13159,140 @@ document.getElementById('assistantSeenBtn')?.addEventListener('click', function 
         setTimeout(() => { msg.textContent = ''; }, 4000);
     });
 });
+
+// ── «Ρώτα τον βοηθό»: free questions about the live mission ─────────────────
+<?php if (aiIsConfigured()): ?>
+// Kept in memory only, for this tab, for as long as the page is open. No
+// table, no localStorage: an AI answer must never become part of the
+// operational record, and a transcript that outlived the shift would invite
+// exactly that. It exists so a follow-up like "και η άλλη ομάδα;" resolves.
+let assistantHistory = [];
+let assistantAsking = false;
+
+function assistantScrollToLatest() {
+    const body = document.querySelector('#assistantModal .modal-body');
+    if (body) body.scrollTop = body.scrollHeight;
+}
+
+function assistantAppendQuestion(text) {
+    const turn = document.createElement('div');
+    turn.className = 'assistant-turn';
+    turn.innerHTML = `<div class="assistant-q">${escapeHtml(text)}</div>
+        <div class="assistant-a assistant-thinking">${escapeHtml(t('assistant.ask_thinking'))}</div>`;
+    document.getElementById('assistantTranscript').appendChild(turn);
+    document.getElementById('assistantAskClear').classList.remove('d-none');
+    assistantScrollToLatest();
+    return turn.querySelector('.assistant-a');
+}
+
+function assistantRenderAnswer(slot, res) {
+    if (!res || !res.ok) {
+        slot.className = 'assistant-a assistant-a-error';
+        slot.textContent = (res && res.error) || t('assistant.ask_failed');
+        assistantScrollToLatest();
+        return;
+    }
+
+    slot.className = 'assistant-a';
+    slot.textContent = res.answer;
+
+    // The citations are what make this usable in an operation: the claim and
+    // the records behind it arrive together, so a coordinator can check one
+    // against the other before acting.
+    if (res.citations && res.citations.length) {
+        const cites = document.createElement('div');
+        cites.className = 'assistant-cites';
+        cites.innerHTML = escapeHtml(t('assistant.cited')) + ' '
+            + res.citations.map(c => `<span class="assistant-cite">${escapeHtml(c.label)}</span>`).join('');
+        slot.appendChild(cites);
+    } else if (res.answerable !== false) {
+        // Not hidden and not deleted. An answer citing nothing may be
+        // perfectly good ("how long has the mission been running?") or may be
+        // invention; the reader is the one who can tell, so say it plainly.
+        //
+        // Skipped when the answer already admits it cannot answer: an
+        // "unevidenced" warning stacked on top of "I don't know" is two
+        // notices saying the same thing, and a box that cries twice about one
+        // fact is a box people stop reading.
+        const warn = document.createElement('div');
+        warn.className = 'assistant-warn';
+        warn.textContent = t('assistant.uncited');
+        slot.appendChild(warn);
+    }
+
+    if (res.answerable === false && res.missing) {
+        const missing = document.createElement('div');
+        missing.className = 'assistant-warn';
+        missing.textContent = t('assistant.unanswerable') + ' — ' + t('assistant.missing_label') + ' ' + res.missing;
+        slot.appendChild(missing);
+    }
+    if (res.notice) {
+        const notice = document.createElement('div');
+        notice.className = 'assistant-warn';
+        notice.textContent = res.notice;
+        slot.appendChild(notice);
+    }
+    assistantScrollToLatest();
+}
+
+function assistantAsk() {
+    if (assistantAsking) return;
+    const input = document.getElementById('assistantAskInput');
+    const question = input.value.trim();
+    if (!question) return;
+
+    assistantAsking = true;
+    input.value = '';
+    document.getElementById('assistantAskBtn').disabled = true;
+    const slot = assistantAppendQuestion(question);
+
+    const body = new FormData();
+    body.append('csrf_token', csrfToken);
+    body.append('mission_id', '<?= $missionId ?>');
+    body.append('action', 'ask');
+    body.append('question', question);
+    body.append('history', JSON.stringify(assistantHistory.slice(-4)));
+    // The point on the map travels as a plain lat/lng to OUR server, which
+    // turns it into "2,4 χλμ ΒΑ από τη βάση" before anything leaves for a
+    // provider. No coordinate is ever in the digest.
+    if (typeof map !== 'undefined' && map) {
+        const c = map.getCenter();
+        body.append('focus_lat', c.lat);
+        body.append('focus_lng', c.lng);
+    }
+
+    fetch('mission-assistant.php', {method: 'POST', body}).then(r => r.json()).then(res => {
+        assistantRenderAnswer(slot, res);
+        if (res && res.ok) {
+            assistantHistory.push({role: 'user', content: question});
+            assistantHistory.push({role: 'assistant', content: res.answer});
+            assistantHistory = assistantHistory.slice(-8);
+        }
+    }).catch(() => {
+        assistantRenderAnswer(slot, {ok: false, error: t('assistant.ask_failed')});
+    }).finally(() => {
+        assistantAsking = false;
+        document.getElementById('assistantAskBtn').disabled = false;
+        input.focus();
+    });
+}
+
+document.getElementById('assistantAskBtn')?.addEventListener('click', assistantAsk);
+document.getElementById('assistantAskInput')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); assistantAsk(); }
+});
+document.getElementById('assistantAskClear')?.addEventListener('click', () => {
+    document.getElementById('assistantTranscript').innerHTML = '';
+    assistantHistory = [];
+    document.getElementById('assistantAskClear').classList.add('d-none');
+});
+
+// Only claim to use the map point when there is a map on this page to use —
+// in the tabbed volunteer layout there may not be one yet.
+if (typeof map !== 'undefined' && map) {
+    document.getElementById('assistantFocusNote')?.classList.remove('d-none');
+}
+<?php endif; ?>
 
 renderAssistant(assistantData);
 <?php endif; ?>

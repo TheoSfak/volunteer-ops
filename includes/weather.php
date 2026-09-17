@@ -430,3 +430,40 @@ function _owmMaxSeverity(string $a, string $b): string
     static $rank = ['none' => 0, 'warning' => 1, 'danger' => 2];
     return ($rank[$a] ?? 0) >= ($rank[$b] ?? 0) ? $a : $b;
 }
+
+/**
+ * Forecast for one arbitrary point, for "what is the weather doing where I am
+ * looking on the map" — the Action Room assistant's one external lookup.
+ *
+ * Deliberately NOT cached in weather_cache: that table is keyed by mission_id
+ * and holds the mission's own forecast, which several cards read on every
+ * poll. Writing an ad-hoc point into it would silently replace the mission's
+ * weather with wherever somebody last panned the map. The caller is expected
+ * to ask rarely (see the distance rule in includes/ai-live.php), so an
+ * uncached call is the right trade rather than a second cache table.
+ *
+ * $targetTs defaults to now. Returns the same shape as getWeatherForMission()
+ * on success, or null — never throws, because the assistant must still answer
+ * everything else when OpenWeatherMap is down or unconfigured.
+ */
+function getWeatherForPoint(float $lat, float $lon, ?int $targetTs = null): ?array
+{
+    $apiKey = getSetting('openweathermap_api_key', '');
+    if ($apiKey === '') {
+        return null;
+    }
+
+    try {
+        $data = _owmFetchForecast($lat, $lon, $targetTs ?? time(), $apiKey);
+    } catch (Throwable $e) {
+        error_log('getWeatherForPoint() failed: ' . $e->getMessage());
+        return null;
+    }
+    if ($data === null) {
+        return null;
+    }
+
+    $data = array_merge($data, _owmParseWarnings($data));
+    $data['status'] = 'ok';
+    return $data;
+}

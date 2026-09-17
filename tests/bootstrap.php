@@ -29,6 +29,7 @@ require_once __DIR__ . '/../includes/ai.php';
 require_once __DIR__ . '/../includes/ai-context.php';
 require_once __DIR__ . '/../includes/ai-observer.php';
 require_once __DIR__ . '/../includes/ai-translate.php';
+require_once __DIR__ . '/../includes/ai-live.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/i18n.php';
 require_once __DIR__ . '/../includes/permissions.php';
