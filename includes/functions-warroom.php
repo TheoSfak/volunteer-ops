@@ -1128,10 +1128,18 @@ function loadMissionAnnotationsForMission(int $missionId): array {
  * one specific recipient and is meaningful to track as "still owed": task,
  * the field-request types (location/photo/video/live), and charge_phone.
  *
- * charge_phone has no fulfilment event of its own — nothing in the app can
- * observe a phone being plugged in — so for that ONE type acknowledging it is
- * completing it, and war-room.php's renderer branches on that. Treating it
- * like the rest would leave a row nothing could ever clear.
+ * charge_phone and speak have no fulfilment event of their own — nothing in
+ * the app can observe a phone being plugged in, or a person hearing a
+ * sentence — so for those two types acknowledging IS completing, and
+ * war-room.php's renderer branches on that. Treating them like the rest
+ * would leave a row nothing could ever clear.
+ *
+ * A voice announcement belongs in this card even though it is broadcast-ish,
+ * unlike 'message' below, for one reason: it is the only order whose content
+ * can be missed entirely and leave no trace. Sound plays once, into whatever
+ * the volunteer's surroundings happen to be, and a browser that has not yet
+ * seen a tap may refuse to play it at all. The row is where they read it and
+ * press play again.
  *
  * 'task' is the only type ever manually completed by the recipient
  * (mission-order.php action=complete) — location/photo/video instead
@@ -1163,7 +1171,7 @@ function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
         "SELECT o.id AS order_id, o.order_type, o.task_text, o.created_at, r.acknowledged_at, r.fulfilled_at
          FROM mission_order_recipients r
          JOIN mission_orders o ON o.id = r.order_id
-         WHERE o.mission_id = ? AND r.user_id = ? AND o.order_type IN ('task', 'location', 'photo', 'video', 'live', 'charge_phone')
+         WHERE o.mission_id = ? AND r.user_id = ? AND o.order_type IN ('task', 'speak', 'location', 'photo', 'video', 'live', 'charge_phone')
          ORDER BY o.created_at DESC",
         [$missionId, $userId]
     );
@@ -1172,7 +1180,11 @@ function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
         'order_id'        => (int) $row['order_id'],
         'order_type'      => $row['order_type'],
         'task_text'       => $row['task_text'],
-        'label'           => $row['order_type'] === 'task' ? $row['task_text'] : t('order.' . $row['order_type'] . '.title'),
+        // 'speak' joins 'task' here: both store what the coordinator actually
+        // typed, and for an announcement the text IS the order — a row reading
+        // "Voice Announcement" would hide the one thing the volunteer needs to
+        // re-read when the words went past them. war-room.php escapes both.
+        'label'           => in_array($row['order_type'], ['task', 'speak'], true) ? $row['task_text'] : t('order.' . $row['order_type'] . '.title'),
         'sent_at'         => date('d/m H:i', strtotime($row['created_at'])),
         'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
         'fulfilled_at'    => $row['fulfilled_at'] ? date('d/m H:i', strtotime($row['fulfilled_at'])) : null,
@@ -2075,6 +2087,7 @@ function createMissionOrderAndNotify(
         'route'          => 'order.route.admin_fyi',
         'charge_phone'   => 'order.charge_phone.admin_fyi',
         'live'           => 'order.live.admin_fyi',
+        'speak'          => 'order.speak.admin_fyi',
     ];
     $fyiKey = $adminFyiKeys[$orderType] ?? null;
     $adminBystanderIds = $fyiKey ? array_values(array_diff(getSystemAdminIds($createdBy), $recipientIds)) : [];
@@ -3760,6 +3773,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
         'return_to_base' => t('report.type_return_to_base', [], $lang),
         'route'    => t('report.type_route', [], $lang),
         'charge_phone' => t('report.type_charge_phone', [], $lang),
+        'speak'    => t('report.type_speak', [], $lang),
     ];
 
     $teamLabels = [];
@@ -3789,7 +3803,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
             'team_label'  => $teamId ? ($teamLabels[$teamId] ?? '—') : t('history.no_team_capitalized', [], $lang),
             'user_id'     => (int) $row['user_id'],
             'user_name'   => $row['user_name'],
-            'label'       => in_array($row['order_type'], ['task', 'message', 'route', 'charge_phone'], true) ? $row['task_text'] : null,
+            'label'       => in_array($row['order_type'], ['task', 'speak', 'message', 'route', 'charge_phone'], true) ? $row['task_text'] : null,
             'sent_at'     => $row['sent_at'],
             'ack_at'      => $row['acknowledged_at'],
             'fulfill_at'  => $row['fulfilled_at'],
@@ -6288,7 +6302,7 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
         ];
     }
 
-    $orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'return_to_base' => '🏁', 'route' => '🧭', 'charge_phone' => '🔋'];
+    $orderTypeIcons = ['location' => '📍', 'photo' => '📷', 'video' => '🎥', 'task' => '📋', 'message' => '📢', 'return_to_base' => '🏁', 'route' => '🧭', 'charge_phone' => '🔋', 'speak' => '🔊'];
     $orderRows = dbFetchAll(
         "SELECT o.order_type, o.task_text, o.created_at AS sent_at, r.team_id, r.acknowledged_at, r.fulfilled_at,
                 u.name AS actor_name, mt.codename, mt.team_number
@@ -6303,7 +6317,7 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
         $icon = $orderTypeIcons[$row['order_type']] ?? '📋';
         $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'χωρίς ομάδα';
         $extra = '';
-        if (in_array($row['order_type'], ['task', 'message', 'route', 'charge_phone'], true) && $row['task_text']) {
+        if (in_array($row['order_type'], ['task', 'speak', 'message', 'route', 'charge_phone'], true) && $row['task_text']) {
             $snippet = mb_strlen($row['task_text']) > 120 ? mb_substr($row['task_text'], 0, 117) . '…' : $row['task_text'];
             $extra = ' — «' . h($snippet) . '»';
         } elseif ($row['order_type'] === 'return_to_base') {

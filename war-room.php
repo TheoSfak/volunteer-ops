@@ -349,6 +349,45 @@ if (isPost()) {
             setFlash('success', t('order.task.sent_flash', ['count' => count($requestedIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
+    } elseif (post('action') === 'request_speak') {
+        // Voice announcement: the same shape as request_task above, and
+        // deliberately so — the coordinator picks people the same way and the
+        // text is stored in the same column. The only difference is what the
+        // recipient's device does with it on arrival, which is decided by the
+        // alarmStyle below, not by anything here.
+        if (!$canManageWarRoom) {
+            setFlash('error', t('wr.perm.request_speak'));
+            redirect('war-room.php?id=' . $missionId);
+        }
+
+        // Same 500 as a task order. It is also about as much as anyone will
+        // hold from one spoken pass — roughly forty seconds of Greek read at
+        // announcement pace.
+        $speakText = trim((string) post('speak_text'));
+        $speakText = mb_substr($speakText, 0, 500);
+
+        $requestedIds = resolveRequestedActiveRecipients($missionId);
+
+        if ($speakText === '') {
+            setFlash('warning', t('order.speak.empty_warning'));
+        } elseif (empty($requestedIds)) {
+            setFlash('warning', t('common.select_active_volunteer'));
+        } else {
+            createMissionOrderAndNotify(
+                $missionId, $mission['title'], 'speak', $user['id'], $requestedIds,
+                'order.speak.title', ['mission' => $mission['title']], $speakText, '', [],
+                // alarmStyle is the existing "what should the banner DO when it
+                // lands" channel (return_to_base uses it for the red-screen
+                // siren). Reused rather than adding a second flag beside it:
+                // it already survives the trip through sendNotification's
+                // pushData, the notifications row and the war-room poll, which
+                // is the whole journey this needs to make.
+                $speakText, 'speak'
+            );
+            logAudit('request_mission_speak', 'missions', $missionId, null, ['recipient_ids' => $requestedIds, 'speak_text' => $speakText]);
+            setFlash('success', t('order.speak.sent_flash', ['count' => count($requestedIds)]));
+        }
+        redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'global_message') {
         if (!$canManageWarRoom) {
             setFlash('error', t('wr.perm.global_message'));
@@ -2181,6 +2220,16 @@ include __DIR__ . '/includes/header.php';
     body.wr-tabs-ready .war-room-banner[data-ticker-pos="bottom"] { bottom: 78px; }
     .war-room-banner-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; }
     .war-room-banner-row + .war-room-banner-row { border-top: 1px solid rgba(255,59,48,.35); }
+    /* A play button whose speech the browser refused for want of a tap. Nothing
+       else on the page says that out loud, so the button has to ask for one. */
+    .wr-speak-waiting { animation: wr-speak-pulse 1.2s ease-in-out infinite; }
+    @keyframes wr-speak-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(13,202,240,.75); }
+        50%      { box-shadow: 0 0 0 .45rem rgba(13,202,240,0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .wr-speak-waiting { animation: none; outline: 2px solid #0dcaf0; outline-offset: 1px; }
+    }
     .war-room-banner-track { flex: 1; overflow: hidden; white-space: nowrap; position: relative; height: 1.6em; }
     .war-room-banner-track span { display: inline-block; position: absolute; white-space: nowrap; padding-left: 100%; color: #ff3b30; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; animation: warRoomBannerScroll 14s linear infinite; }
     @keyframes warRoomBannerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
@@ -3283,6 +3332,50 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                                 </div>
                                 <button type="submit" name="request_scope" value="selected" class="btn btn-outline-warning w-100 fw-semibold">
                                     <i class="bi bi-person-check me-1"></i><?= t('common.request_selected') ?>
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-6">
+                <div class="card shadow-sm h-100 border-info" data-card-id="requestSpeakCard">
+                    <div class="card-header bg-info bg-opacity-25 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#requestSpeakCollapse" role="button" aria-expanded="false" aria-controls="requestSpeakCollapse">
+                        <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-megaphone-fill me-1"></i><?= t('request.speak.card_title') ?></span><i class="bi bi-chevron-down wr-collapsible-chevron"></i></h5>
+                    </div>
+                    <div class="card-body collapse" id="requestSpeakCollapse">
+                        <?php if (empty($activeParticipants)): ?>
+                            <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
+                        <?php else: ?>
+                            <p class="small text-muted"><?= t('request.speak.note') ?></p>
+                            <?php // Filled in by JS only when the browser turns out to have no
+                                  // speech engine at all. Hidden by default rather than shown and
+                                  // hidden, so the ordinary case never flickers a warning. ?>
+                            <div class="alert alert-warning py-1 px-2 small d-none" id="speakNoSupport"><i class="bi bi-exclamation-triangle me-1"></i><?= t('request.speak.no_support') ?></div>
+                            <form method="post">
+                                <?= csrfField() ?>
+                                <input type="hidden" name="action" value="request_speak">
+                                <textarea name="speak_text" id="speakText" class="form-control mb-2" rows="3" maxlength="500" placeholder="<?= t('request.speak.placeholder') ?>" required></textarea>
+                                <?php // Speaks the draft on THIS machine before anyone is woken by
+                                      // it. It is also the tap that satisfies the browser's own
+                                      // "no speech without user interaction" rule, which is why it
+                                      // sits above the send buttons rather than beside them. ?>
+                                <button type="button" class="btn btn-outline-info btn-sm w-100 mb-2" id="speakPreviewBtn">
+                                    <i class="bi bi-volume-up me-1"></i><?= t('request.speak.preview_btn') ?>
+                                </button>
+                                <button type="submit" name="request_scope" value="all" class="btn btn-info w-100 fw-semibold mb-3">
+                                    <i class="bi bi-broadcast me-1"></i><?= t('request.speak.send_all', ['count' => count($activeParticipants)]) ?>
+                                </button>
+                                <div class="small fw-semibold mb-2"><?= t('common.or_select_volunteers') ?></div>
+                                <div class="border rounded p-2 mb-3" style="max-height:190px;overflow:auto;">
+                                    <?php foreach ($activeParticipants as $participant): ?>
+                                    <label class="form-check d-flex align-items-center justify-content-between gap-2 py-1">
+                                        <span><input class="form-check-input me-2" type="checkbox" name="volunteers[]" value="<?= $participant['volunteer_id'] ?>"><?= h($participant['name']) ?></span>
+                                    </label>
+                                    <?php endforeach; ?>
+                                </div>
+                                <button type="submit" name="request_scope" value="selected" class="btn btn-outline-info w-100 fw-semibold">
+                                    <i class="bi bi-person-check me-1"></i><?= t('request.speak.send_selected') ?>
                                 </button>
                             </form>
                         <?php endif; ?>
@@ -8807,16 +8900,18 @@ function myOrderRow(labelHtml, metaHtml, actionHtml) {
 function myOrderEntriesFromOrders(items) {
     return (items || []).map(task => {
         const isTask = task.order_type === 'task';
-        // A battery alert has no fulfilment event — nothing in the app can
-        // observe a phone being plugged in — so for that one type the
-        // acknowledgement IS the completion (see loadMyTaskOrdersForUser()).
-        // Without this branch it would fall into the "⏳ Εκκρεμεί" case below
+        const isSpeak = task.order_type === 'speak';
+        // A battery alert and a voice announcement have no fulfilment event —
+        // nothing in the app can observe a phone being plugged in, or a person
+        // hearing a sentence — so for those two the acknowledgement IS the
+        // completion (see loadMyTaskOrdersForUser()).
+        // Without this branch they would fall into the "⏳ Εκκρεμεί" case below
         // and stay outstanding, and counted, for the rest of the mission.
-        const isNudge = task.order_type === 'charge_phone';
+        const ackCompletes = task.order_type === 'charge_phone' || isSpeak;
         let actionHtml;
         if (task.fulfilled_at) {
             actionHtml = `<span class="badge bg-success">${t('mytasks.completed_at_prefix', {time: task.fulfilled_at})}</span>`;
-        } else if (isNudge && task.acknowledged_at) {
+        } else if (ackCompletes && task.acknowledged_at) {
             actionHtml = `<span class="badge bg-success">${t('mytasks.acknowledged_at_prefix', {time: task.acknowledged_at})}</span>`;
         } else if (isTask && task.acknowledged_at) {
             actionHtml = `<button type="button" class="btn btn-sm btn-success w-100 my-task-complete-btn" data-order-id="${task.order_id}">${t('mytasks.complete_btn')}</button>`;
@@ -8829,11 +8924,20 @@ function myOrderEntriesFromOrders(items) {
         } else {
             actionHtml = `<button type="button" class="btn btn-sm btn-warning w-100 my-task-ack-btn" data-order-id="${task.order_id}">${t('banner.ack_btn')}</button>`;
         }
+        // A voice announcement keeps its play button for the rest of the
+        // mission, acknowledged or not. Sound happens once, into whatever the
+        // volunteer's surroundings were at that second; what they need an hour
+        // later is the message again, not a receipt for it.
+        if (isSpeak) {
+            actionHtml = `<button type="button" class="btn btn-sm btn-outline-info w-100 mb-1 wr-speak-btn my-speak-replay-btn" data-order-id="${task.order_id}"><i class="bi bi-volume-up me-1"></i>${t('mytasks.replay_btn')}</button>` + actionHtml;
+        }
         // task.label is already the right display text either way (raw
-        // task_text for a task, the localized "order.X.title" string
-        // otherwise) — only the free-typed task case needs escaping here.
-        const labelHtml = isTask ? escapeHtml(task.label) : task.label;
-        const done = isNudge ? !!task.acknowledged_at : !!task.fulfilled_at;
+        // task_text for a task or an announcement, the localized
+        // "order.X.title" string otherwise) — only the free-typed cases need
+        // escaping here, and BOTH of them do: 'speak' now reaches this line
+        // carrying whatever the coordinator typed.
+        const labelHtml = (isTask || isSpeak) ? escapeHtml(task.label) : task.label;
+        const done = ackCompletes ? !!task.acknowledged_at : !!task.fulfilled_at;
         return {outstanding: !done, html: myOrderRow(labelHtml, t('mytasks.sent_prefix', {time: task.sent_at}), actionHtml)};
     });
 }
@@ -8944,6 +9048,14 @@ function renderMyTasks(items) {
     // from current state every time this renders rather than incremented.
     document.dispatchEvent(new CustomEvent('wr-my-tasks-updated', {
         detail: {count: entries.filter(entry => entry.outstanding).length}
+    }));
+
+    // Reads the text back out of myTasks rather than carrying it in a data-
+    // attribute: the announcement is up to 500 characters of free text, and
+    // this row is rebuilt on every poll that changes anything.
+    list.querySelectorAll('.my-speak-replay-btn').forEach(btn => btn.addEventListener('click', () => {
+        const item = (myTasks || []).find(task => String(task.order_id) === btn.dataset.orderId);
+        if (item) speakAnnouncement(item.task_text || item.label);
     }));
 
     list.querySelectorAll('.my-task-ack-btn').forEach(btn => btn.addEventListener('click', () => {
@@ -11090,6 +11202,169 @@ function playWarRoomAlertSound() {
     });
 }
 
+// ── Voice announcements (order_type 'speak') ────────────────────────────────
+// A coordinator types a line and every recipient's own device reads it out
+// loud. There is no audio file and nothing to fetch: this is the browser's own
+// speech engine — the Microsoft voices on Windows, the system voices on
+// Android — so an announcement costs one row in mission_orders and no
+// bandwidth at all, which is what makes it usable on a field connection.
+//
+// The language is taken from the TEXT, never from the viewer's account
+// setting. A Greek sentence read by an English voice is not merely accented,
+// it is unintelligible — and the two populations this app serves, Greek
+// volunteers and foreign guest teams, both receive announcements written in
+// whichever language the coordinator chose for that message.
+const SPEECH_SUPPORTED = typeof window.speechSynthesis !== 'undefined'
+                      && typeof window.SpeechSynthesisUtterance !== 'undefined';
+
+// Greek + Greek Extended. A single Greek letter decides it: operational text
+// mixes freely ("ΑΛΦΑ team στο σημείο 3"), and it is the Greek words that are
+// destroyed by an English voice, not the reverse.
+function announcementLang(text) {
+    return /[Ͱ-Ͽἀ-῿]/.test(String(text)) ? 'el-GR' : 'en-US';
+}
+
+// getVoices() comes back empty on the first call in Chrome and fills in
+// asynchronously, so it is re-read on voiceschanged rather than cached once.
+let speechVoices = [];
+function refreshSpeechVoices() {
+    if (SPEECH_SUPPORTED) speechVoices = window.speechSynthesis.getVoices() || [];
+}
+if (SPEECH_SUPPORTED) {
+    refreshSpeechVoices();
+    window.speechSynthesis.addEventListener('voiceschanged', refreshSpeechVoices);
+}
+
+function pickAnnouncementVoice(lang, localOnly) {
+    if (!speechVoices.length) return null;
+    const base = lang.slice(0, 2).toLowerCase();
+    let candidates = speechVoices.filter(v => String(v.lang || '').toLowerCase().replace('_', '-').startsWith(base));
+    if (localOnly) candidates = candidates.filter(v => v.localService);
+    if (!candidates.length) return null;
+    // Windows carries two generations of Microsoft voice for the same language
+    // and reports the same lang for both: the old SAPI ones and the "Natural"/
+    // "Online" ones, which are markedly easier to follow through a phone
+    // speaker in wind. Left alone, the browser hands back the older one.
+    const score = v => {
+        const n = String(v.name || '');
+        return (/natural|online/i.test(n) ? 4 : 0) + (/microsoft/i.test(n) ? 2 : 0) + (v.localService ? 1 : 0);
+    };
+    return candidates.slice().sort((a, b) => score(b) - score(a))[0];
+}
+
+// Chrome stops mid-utterance after roughly 15 seconds unless it is nudged — a
+// long-standing engine bug, not a policy. A 500-character announcement runs
+// well past that, so without this the field hears the first sentence and takes
+// it for the whole message.
+let speechKeepAlive = null;
+function stopSpeechKeepAlive() {
+    if (speechKeepAlive) { clearInterval(speechKeepAlive); speechKeepAlive = null; }
+}
+function startSpeechKeepAlive() {
+    stopSpeechKeepAlive();
+    speechKeepAlive = setInterval(() => {
+        const synth = window.speechSynthesis;
+        if (!synth.speaking) { stopSpeechKeepAlive(); return; }
+        if (!synth.paused) { synth.pause(); synth.resume(); }
+    }, 10000);
+}
+
+// Browsers refuse to speak until the page has seen a real tap. Unlike the
+// alert beep — whose AudioContext can be resumed on the first gesture and then
+// used forever — there is nothing to pre-arm here, so the refusal is handled
+// after the fact: the play buttons start pulsing and the volunteer's own tap on
+// one of them is both the permission and the replay.
+let announcementBlocked = false;
+function markAnnouncementBlocked() {
+    if (announcementBlocked) return;
+    announcementBlocked = true;
+    document.querySelectorAll('.wr-speak-btn').forEach(b => b.classList.add('wr-speak-waiting'));
+}
+['click', 'touchstart', 'keydown'].forEach(evt => document.addEventListener(evt, () => {
+    if (!announcementBlocked) return;
+    announcementBlocked = false;
+    document.querySelectorAll('.wr-speak-waiting').forEach(b => b.classList.remove('wr-speak-waiting'));
+}));
+
+// Errors worth trying a different voice for. Everything outside this list is
+// either fatal for every voice (text-too-long, invalid-argument) or is not a
+// failure at all — see the generation guard below for those.
+const SPEECH_RETRYABLE_ERRORS = ['network', 'synthesis-failed', 'synthesis-unavailable', 'voice-unavailable', 'audio-busy'];
+
+// Which utterance is the current one. cancel() delivers an error event to the
+// utterance it stops, so without this a superseded announcement would react to
+// its own interruption — retrying itself, cancelling the newer message, and
+// clearing the keep-alive timer that now belongs to that newer message.
+let speechGeneration = 0;
+
+function speakAnnouncement(text, localOnly) {
+    text = String(text || '').trim();
+    if (!SPEECH_SUPPORTED || !text) return false;
+    const synth = window.speechSynthesis;
+    try {
+        // A newer announcement interrupts an older one instead of queueing
+        // behind it: forty seconds into a superseded message is the worst
+        // possible moment to find out there is a newer one waiting.
+        synth.cancel();
+        const generation = ++speechGeneration;
+        const lang = announcementLang(text);
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = lang;
+        // Slightly under default. One pass, outdoors, often through a pocket.
+        utterance.rate = 0.95;
+        utterance.volume = 1;
+        const voice = pickAnnouncementVoice(lang, localOnly);
+        if (voice) utterance.voice = voice;
+        utterance.onend = () => { if (generation === speechGeneration) stopSpeechKeepAlive(); };
+        utterance.onerror = (ev) => {
+            // Superseded: whatever happened to this one, the page has already
+            // moved on to a newer announcement. Say nothing, touch nothing.
+            if (generation !== speechGeneration) return;
+            stopSpeechKeepAlive();
+            const err = (ev && ev.error) || '';
+            if (err === 'not-allowed') {
+                markAnnouncementBlocked();
+            } else if (!localOnly && SPEECH_RETRYABLE_ERRORS.indexOf(err) !== -1) {
+                // An "Online (Natural)" voice that could not be fetched. The
+                // offline one is worse to listen to and infinitely better than
+                // silence — and this is the failure that actually happens in
+                // the field, where the network is the thing that is missing.
+                speakAnnouncement(text, true);
+            }
+        };
+        synth.speak(utterance);
+        startSpeechKeepAlive();
+        return true;
+    } catch (e) {
+        stopSpeechKeepAlive();
+        return false;
+    }
+}
+
+// The composer side of the same feature: hear the draft on THIS machine before
+// anyone in the field is interrupted by it. Doubles as the page's user gesture,
+// which is why an admin who previews never meets the blocked-speech case at all.
+(function () {
+    const btn = document.getElementById('speakPreviewBtn');
+    const box = document.getElementById('speakText');
+    if (!btn || !box) return;
+    if (!SPEECH_SUPPORTED) {
+        // Sent from a browser with no speech engine, the announcement still
+        // reaches the field and is still read aloud there — it is the recipient's
+        // device that speaks, not this one. So the notice says what is actually
+        // lost (the preview), and nothing is disabled.
+        const warn = document.getElementById('speakNoSupport');
+        if (warn) warn.classList.remove('d-none');
+        btn.disabled = true;
+        return;
+    }
+    btn.addEventListener('click', () => {
+        const text = box.value.trim();
+        if (!text) { box.focus(); return; }
+        speakAnnouncement(text);
+    });
+})();
+
 // Continuous SOS siren — distinct from the one-shot triple-beep above, reuses
 // the same shared warRoomAudioCtx. Guarded by sosSirenOsc so repeated calls
 // across successive poll ticks don't stack additional oscillators.
@@ -11511,19 +11786,38 @@ function showWarRoomBanner(id, text, orderId, alarmStyle) {
     if (activeBannerRows.has(id)) return;
     playWarRoomAlertSound();
     if (alarmStyle === 'return_to_base') triggerReturnToBaseAlarm(text);
+    // Spoken only for the people it was actually addressed to. A bystander
+    // system admin receives the same banner with no orderId (see
+    // createMissionOrderAndNotify) and its text is a third-person FYI naming
+    // the real recipients — an operations room reading that out loud would be
+    // producing noise, not information.
+    const isSpoken = alarmStyle === 'speak' && !!orderId;
 
     const row = document.createElement('div');
     row.className = 'war-room-banner-row';
     row.innerHTML = `
-        <i class="bi bi-broadcast"></i>
+        <i class="bi bi-${isSpoken ? 'megaphone-fill' : 'broadcast'}"></i>
         <div class="war-room-banner-track"><span></span></div>
-        <button type="button" class="btn btn-sm btn-light fw-semibold${orderId ? '' : ' d-none'}" style="flex-shrink:0;">${t('banner.ack_btn')}</button>
+        ${isSpoken ? `<button type="button" class="btn btn-sm btn-light fw-semibold wr-speak-btn" style="flex-shrink:0;" aria-label="${t('banner.speak_btn')}" title="${t('banner.speak_btn')}"><i class="bi bi-volume-up"></i></button>` : ''}
+        <button type="button" class="btn btn-sm btn-light fw-semibold wr-ack-btn${orderId ? '' : ' d-none'}" style="flex-shrink:0;">${t('banner.ack_btn')}</button>
         <button type="button" class="war-room-banner-close" aria-label="${t('common.close')}">&times;</button>
     `;
     row.querySelector('span').textContent = text;
 
+    if (isSpoken) {
+        const speakBtn = row.querySelector('.wr-speak-btn');
+        if (announcementBlocked) speakBtn.classList.add('wr-speak-waiting');
+        speakBtn.addEventListener('click', () => speakAnnouncement(text));
+        // After the alert beep, not over it. The triple beep is what makes
+        // people look up; a voice competing with it is simply lost.
+        setTimeout(() => speakAnnouncement(text), 1100);
+    }
+
     if (orderId) {
-        const ackBtn = row.querySelector('.btn-light');
+        // .wr-ack-btn, not .btn-light: the play button above is also a
+        // .btn-light and sits earlier in the row, so the positional selector
+        // this used to be would now wire acknowledgement to the wrong button.
+        const ackBtn = row.querySelector('.wr-ack-btn');
         ackBtn.onclick = () => {
             ackBtn.disabled = true;
             const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge', order_id: orderId});

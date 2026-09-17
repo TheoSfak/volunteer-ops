@@ -80,7 +80,7 @@ if ($action === 'acknowledge') {
                     'route.notify_acknowledged_message', ['team' => $teamLbl, 'mission' => $route['mission_title']]
                 );
             }
-        } elseif (in_array($recipient['order_type'], ['task', 'message', 'live'], true)) {
+        } elseif (in_array($recipient['order_type'], ['task', 'speak', 'message', 'live'], true)) {
             $order = dbFetchOne(
                 "SELECT o.mission_id, m.title AS mission_title, m.responsible_user_id
                  FROM mission_orders o
@@ -95,6 +95,19 @@ if ($action === 'acknowledge') {
                         (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
                         'mission_task_acknowledged', 'order.task.notify_acknowledged_title', [],
                         'order.task.notify_acknowledged_message', ['name' => $recipientName, 'mission' => $order['mission_title']]
+                    );
+                } elseif ($recipient['order_type'] === 'speak') {
+                    // A voice announcement is the one order that can fail
+                    // silently on the recipient's side — a muted phone, a
+                    // browser that has not been tapped yet, a helicopter
+                    // overhead. The acknowledgement is therefore not a
+                    // courtesy here, it is the only confirmation command gets
+                    // that the words landed, so it sounds the same alert as
+                    // the other three.
+                    notifyCommandStaffBanner(
+                        (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
+                        'mission_speak_acknowledged', 'order.speak.notify_acknowledged_title', [],
+                        'order.speak.notify_acknowledged_message', ['name' => $recipientName, 'mission' => $order['mission_title']]
                     );
                 } elseif ($recipient['order_type'] === 'live') {
                     notifyCommandStaffBanner(

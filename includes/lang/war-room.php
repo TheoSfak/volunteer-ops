@@ -54,6 +54,7 @@ return [
         'wr.perm.request_video' => 'Δεν έχετε δικαίωμα να ζητήσετε βίντεο.',
         'wr.perm.request_live' => 'Δεν έχετε δικαίωμα να ζητήσετε ζωντανή μετάδοση.',
         'wr.perm.request_task' => 'Δεν έχετε δικαίωμα να δώσετε εντολή.',
+        'wr.perm.request_speak' => 'Δεν έχετε δικαίωμα να στείλετε φωνητική ανακοίνωση.',
         'wr.perm.global_message' => 'Δεν έχετε δικαίωμα να στείλετε καθολικό μήνυμα.',
         'wr.perm.create_team' => 'Δεν έχετε δικαίωμα να δημιουργήσετε ομάδες.',
         'wr.perm.update_team' => 'Δεν έχετε δικαίωμα να επεξεργαστείτε ομάδες.',
@@ -182,6 +183,17 @@ return [
         'order.task.notify_acknowledged_message' => '{name} έλαβε τη Γενική Εντολή της αποστολής «{mission}».',
         'order.task.notify_completed_title' => '✅ Ολοκληρώθηκε Γενική Εντολή',
         'order.task.notify_completed_message' => 'Ο/Η {name} ολοκλήρωσε τη Γενική Εντολή της αποστολής «{mission}».',
+
+        // Voice announcement (speak order) — the text is read aloud by the
+        // recipient's own device. The title is what a push notification shows
+        // on a locked screen, so it has to say what arrived; the spoken text
+        // itself is the message body.
+        'order.speak.empty_warning' => 'Γράψτε το κείμενο της ανακοίνωσης πριν την αποστολή.',
+        'order.speak.title' => '🔊 Φωνητική Ανακοίνωση — {mission}',
+        'order.speak.sent_flash' => 'Η φωνητική ανακοίνωση στάλθηκε σε {count} ενεργούς εθελοντές.',
+        'order.speak.admin_fyi' => '{actor} έστειλε φωνητική ανακοίνωση σε: {recipients} — «{text}» (αποστολή «{mission}»).',
+        'order.speak.notify_acknowledged_title' => '👍 Ελήφθη Φωνητική Ανακοίνωση',
+        'order.speak.notify_acknowledged_message' => '{name} έλαβε τη φωνητική ανακοίνωση της αποστολής «{mission}».',
 
         // Battery alert (charge-phone order)
         'order.charge_phone.title' => '🔋 Ειδοποίηση Μπαταρίας',
@@ -464,6 +476,7 @@ return [
 
         // Banner
         'banner.ack_btn' => 'Ελήφθη',
+        'banner.speak_btn' => 'Ακρόαση ανακοίνωσης',
 
         // Map / trail
         'map.title' => 'Ζωντανός χάρτης αποστολής',
@@ -538,6 +551,13 @@ return [
         'request.task.card_title' => 'Γενική Εντολή',
         'request.task.note' => 'Στέλνει άμεση ειδοποίηση push με έντονη δόνηση και ελεύθερο κείμενο εντολής. Ο εθελοντής επιβεβαιώνει χειροκίνητα την ολοκλήρωση.',
         'request.task.placeholder' => 'Περιγράψτε την εντολή…',
+        'request.speak.card_title' => 'Φωνητική Ανακοίνωση',
+        'request.speak.note' => 'Το κείμενο εκφωνείται δυνατά από τη συσκευή κάθε παραλήπτη. Η γλώσσα αναγνωρίζεται από το ίδιο το κείμενο: ελληνικά διαβάζονται με ελληνική φωνή, αγγλικά με αγγλική — γράψτε το όπως θέλετε να ακουστεί.',
+        'request.speak.placeholder' => 'Γράψτε την ανακοίνωση όπως θέλετε να ακουστεί…',
+        'request.speak.preview_btn' => 'Ακούστε το πρώτα',
+        'request.speak.send_all' => 'Εκφώνηση σε όλους ({count})',
+        'request.speak.send_selected' => 'Εκφώνηση στους επιλεγμένους',
+        'request.speak.no_support' => 'Αυτό το πρόγραμμα περιήγησης δεν έχει φωνητική σύνθεση — η ανακοίνωση θα φτάσει ως κείμενο, χωρίς εκφώνηση.',
 
         // Activity
         'activity.panel_title' => 'Δραστηριότητα',
@@ -859,6 +879,7 @@ return [
         'mytasks.empty' => 'Δεν έχετε ανατεθειμένες εντολές σε αυτή την αποστολή.',
         'mytasks.completed_at_prefix' => '✓ Ολοκληρώθηκε στις {time}',
         'mytasks.complete_btn' => 'Ολοκληρώθηκε',
+        'mytasks.replay_btn' => 'Ακρόαση ξανά',
         'mytasks.sent_prefix' => 'Στάλθηκε {time}',
         'mytasks.pending_action_badge' => '⏳ Εκκρεμεί',
         'mytasks.acknowledged_at_prefix' => '✓ Ελήφθη στις {time}',
@@ -1170,6 +1191,7 @@ return [
         'report.type_photo' => '📷 Φωτογραφία',
         'report.type_video' => '🎥 Βίντεο',
         'report.type_task' => '📋 Γενική Εντολή',
+        'report.type_speak' => '🔊 Φωνητική Ανακοίνωση',
         'report.type_charge_phone' => '🔋 Ειδοποίηση Μπαταρίας',
         'report.type_message' => '📢 Καθολικό Μήνυμα',
         'report.type_dispatch' => '🧭 Εντολή Κίνησης',
@@ -1518,6 +1540,7 @@ return [
         'wr.perm.request_video' => 'You do not have permission to request a video.',
         'wr.perm.request_live' => 'You do not have permission to request a live stream.',
         'wr.perm.request_task' => 'You do not have permission to issue a task.',
+        'wr.perm.request_speak' => 'You do not have permission to send a voice announcement.',
         'wr.perm.global_message' => 'You do not have permission to send a broadcast message.',
         'wr.perm.create_team' => 'You do not have permission to create teams.',
         'wr.perm.update_team' => 'You do not have permission to edit teams.',
@@ -1634,6 +1657,14 @@ return [
         'order.task.notify_acknowledged_message' => '{name} acknowledged the Task Order for mission "{mission}".',
         'order.task.notify_completed_title' => '✅ Task Order completed',
         'order.task.notify_completed_message' => '{name} completed the Task Order for mission "{mission}".',
+
+        // Voice announcement (speak order) — read aloud by the recipient's own device.
+        'order.speak.empty_warning' => 'Write the announcement text before sending.',
+        'order.speak.title' => '🔊 Voice Announcement — {mission}',
+        'order.speak.sent_flash' => 'Voice announcement sent to {count} active volunteers.',
+        'order.speak.admin_fyi' => '{actor} sent a voice announcement to: {recipients} — "{text}" (mission "{mission}").',
+        'order.speak.notify_acknowledged_title' => '👍 Voice Announcement acknowledged',
+        'order.speak.notify_acknowledged_message' => '{name} acknowledged the voice announcement for mission "{mission}".',
 
         // Battery alert (charge-phone order)
         'order.charge_phone.title' => '🔋 Battery Alert',
@@ -1904,6 +1935,7 @@ return [
         'hero.btn_back_ops' => 'Operations',
 
         'banner.ack_btn' => 'Acknowledge',
+        'banner.speak_btn' => 'Play announcement',
 
         'map.title' => 'Live mission map',
         'map.follow_title' => 'The map centres on the positions automatically — click to pause',
@@ -1974,6 +2006,13 @@ return [
         'request.task.card_title' => 'General Task',
         'request.task.note' => 'Sends an immediate push notification with strong vibration and free-form task text. The volunteer manually confirms completion.',
         'request.task.placeholder' => 'Describe the task…',
+        'request.speak.card_title' => 'Voice Announcement',
+        'request.speak.note' => 'The text is read aloud by each recipient’s own device. The language is taken from the text itself: Greek is read by a Greek voice, English by an English one — write it the way you want it to sound.',
+        'request.speak.placeholder' => 'Write the announcement the way it should sound…',
+        'request.speak.preview_btn' => 'Hear it first',
+        'request.speak.send_all' => 'Announce to all ({count})',
+        'request.speak.send_selected' => 'Announce to selected',
+        'request.speak.no_support' => 'This browser has no speech synthesis — the announcement will arrive as text, without being read aloud.',
 
         'activity.panel_title' => 'Activity',
         'activity.export_btn' => 'Export Excel',
@@ -2278,6 +2317,7 @@ return [
         'mytasks.empty' => 'You have no tasks assigned on this mission.',
         'mytasks.completed_at_prefix' => '✓ Completed at {time}',
         'mytasks.complete_btn' => 'Completed',
+        'mytasks.replay_btn' => 'Play again',
         'mytasks.sent_prefix' => 'Sent {time}',
         'mytasks.pending_action_badge' => '⏳ Pending',
         'mytasks.acknowledged_at_prefix' => '✓ Received at {time}',
@@ -2574,6 +2614,7 @@ return [
         'report.type_photo' => '📷 Photo',
         'report.type_video' => '🎥 Video',
         'report.type_task' => '📋 General Task',
+        'report.type_speak' => '🔊 Voice Announcement',
         'report.type_charge_phone' => '🔋 Battery Alert',
         'report.type_message' => '📢 Broadcast Message',
         'report.type_dispatch' => '🧭 Movement Order',

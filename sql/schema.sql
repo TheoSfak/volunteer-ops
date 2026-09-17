@@ -2125,7 +2125,7 @@ CREATE TABLE IF NOT EXISTS `mission_photos` (
 CREATE TABLE IF NOT EXISTS `mission_orders` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `mission_id` INT UNSIGNED NOT NULL,
-    `order_type` ENUM('location','photo','video','task','message','return_to_base','route','charge_phone','live') NOT NULL,
+    `order_type` ENUM('location','photo','video','task','message','return_to_base','route','charge_phone','live','speak') NOT NULL,
     `task_text` TEXT NULL,
     `created_by` INT UNSIGNED NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

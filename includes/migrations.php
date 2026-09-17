@@ -6836,6 +6836,14 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 155,
+            'description' => 'Widen mission_orders.order_type ENUM to add speak (Voice Announcement — the coordinator types a line and the recipients\' own devices read it aloud through the browser speech engine, Microsoft voices on Windows). Stored as a real order rather than a chat message so it carries the same acknowledgement, audit trail and mission report line as every other thing command asks of the field: an announcement nobody confirms hearing is exactly the one worth knowing about. The spoken text lives in the existing task_text column — no new column, it is the same free-typed 500 characters a task order already stores.',
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_orders MODIFY COLUMN order_type ENUM('location','photo','video','task','message','return_to_base','route','charge_phone','live','speak') NOT NULL");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
