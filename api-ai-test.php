@@ -40,7 +40,22 @@ $result = aiChat([
 ], ['temperature' => 0.2, 'max_tokens' => 60, 'timeout' => 30, 'ignore_master_switch' => true]);
 
 if (!$result['ok']) {
-    echo json_encode(['ok' => false, 'message' => $result['error']], JSON_UNESCAPED_UNICODE);
+    // A failed test is usually a retired model name, and the provider's own
+    // 404 does not say what to use instead. Ask the key what it can actually
+    // call, so the answer arrives with the fix in it.
+    $message = $result['error'];
+    $listing = aiListModels();
+    if ($listing['ok'] && $listing['models']) {
+        $usable = array_values(array_filter(
+            $listing['models'],
+            fn($m) => !preg_match('/embedding|imagen|veo|aqa|-tts|vision-exp|learnlm/i', $m)
+        ));
+        if (!$usable) $usable = $listing['models'];
+        $message .= ' — Διαθέσιμα μοντέλα για αυτό το key: ' . implode(', ', array_slice($usable, 0, 25))
+                  . (count($usable) > 25 ? ' …' : '')
+                  . '. Αντιγράψτε ένα από αυτά στο πεδίο «Μοντέλο» και αποθηκεύστε.';
+    }
+    echo json_encode(['ok' => false, 'message' => $message], JSON_UNESCAPED_UNICODE);
     exit;
 }
 

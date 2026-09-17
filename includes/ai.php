@@ -188,20 +188,20 @@ function aiChat(array $messages, array $opts = []): array {
     $decoded = json_decode((string) $raw, true);
 
     if ($httpCode !== 200) {
-        // Providers disagree on everything except that the useful part lives
-        // under error.message — surface it verbatim rather than a generic
-        // "failed", because for the two most common mistakes (wrong key,
-        // retired model name) their own message names the problem exactly.
-        $detail = $decoded['error']['message'] ?? $decoded['message'] ?? '';
-        $detail = is_string($detail) ? trim($detail) : '';
-        if ($detail === '') $detail = 'HTTP ' . $httpCode;
-        if ($httpCode === 401 || $httpCode === 403) {
-            return $fail('Το API key απορρίφθηκε από τον πάροχο (' . $detail . ').');
+        $detail = aiExtractProviderError($decoded, (string) $raw);
+        if ($httpCode === 401 || $httpCode === 403 || $httpCode === 400) {
+            return $fail('Ο πάροχος απέρριψε το αίτημα: ' . $detail);
+        }
+        if ($httpCode === 404) {
+            // Almost always the model name, and the admin cannot guess that
+            // from "HTTP 404" — so name what was actually called.
+            return $fail('Δεν βρέθηκε το ζητούμενο (HTTP 404). Συνήθως το όνομα μοντέλου είναι λάθος ή έχει αποσυρθεί. '
+                       . 'Ζητήθηκε μοντέλο «' . $cfg['model'] . '» στο ' . $cfg['base_url'] . '. Απάντηση παρόχου: ' . $detail);
         }
         if ($httpCode === 429) {
             return $fail('Ο πάροχος επέστρεψε υπέρβαση ορίου χρήσης. Δοκιμάστε ξανά σε λίγο (' . $detail . ').');
         }
-        return $fail('Ο πάροχος απάντησε με σφάλμα: ' . $detail);
+        return $fail('Ο πάροχος απάντησε με σφάλμα (HTTP ' . $httpCode . '): ' . $detail);
     }
 
     $content = $decoded['choices'][0]['message']['content'] ?? null;
@@ -234,6 +234,93 @@ function aiChat(array $messages, array $opts = []): array {
         'model'    => $cfg['model'],
         'provider' => $cfg['provider'],
     ];
+}
+
+/**
+ * Pull the provider's own error text out of a failed response.
+ *
+ * Every provider agrees the useful part lives at error.message and then
+ * disagrees about where error lives. Gemini's OpenAI-compatibility layer
+ * returns it wrapped in a TOP-LEVEL ARRAY:
+ *
+ *     [{ "error": { "code": 400, "message": "Please pass a valid API key" } }]
+ *
+ * Reading only $decoded['error']['message'] therefore found nothing and the
+ * admin got a bare "HTTP 404" — losing the one sentence that said what was
+ * wrong. That is a real reported failure, not a hypothetical.
+ *
+ * Falls back to a truncated slice of the raw body: an unparseable error is
+ * still more useful than a status code, and this is only ever shown to an
+ * administrator.
+ */
+function aiExtractProviderError($decoded, string $raw): string {
+    $candidates = [];
+    if (is_array($decoded)) {
+        $candidates[] = $decoded['error']['message'] ?? null;
+        $candidates[] = $decoded['error'] ?? null;          // some proxies return a plain string
+        $candidates[] = $decoded['message'] ?? null;
+        $candidates[] = $decoded[0]['error']['message'] ?? null;
+        $candidates[] = $decoded[0]['message'] ?? null;
+    }
+    foreach ($candidates as $c) {
+        if (is_string($c) && trim($c) !== '') {
+            return trim($c);
+        }
+    }
+    $raw = trim(preg_replace('/\s+/u', ' ', $raw) ?? $raw);
+    return $raw !== '' ? mb_substr($raw, 0, 300, 'UTF-8') : 'χωρίς μήνυμα από τον πάροχο';
+}
+
+/**
+ * The model ids this key can actually call, newest-looking first.
+ *
+ * Exists because the single most likely configuration mistake is a model name
+ * that has been retired — provider model catalogues turn over every few
+ * months, and no default shipped in code stays correct. The settings test
+ * button calls this on failure so a 404 answers itself instead of sending an
+ * admin to search the provider's docs.
+ *
+ * Returns ['ok' => bool, 'models' => string[], 'error' => ?string].
+ */
+function aiListModels(): array {
+    $cfg = aiConfig();
+    if ($cfg['api_key'] === '' || !function_exists('curl_init')) {
+        return ['ok' => false, 'models' => [], 'error' => 'Δεν έχει οριστεί API key.'];
+    }
+
+    $ch = curl_init($cfg['base_url'] . '/models');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_USERAGENT      => 'VolunteerOps/' . APP_VERSION,
+        CURLOPT_HTTPHEADER     => ['Authorization: Bearer ' . $cfg['api_key']],
+    ]);
+    $raw      = curl_exec($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($raw === false) {
+        return ['ok' => false, 'models' => [], 'error' => 'Αποτυχία δικτύου.'];
+    }
+    $decoded = json_decode((string) $raw, true);
+    if ($httpCode !== 200 || !is_array($decoded)) {
+        return ['ok' => false, 'models' => [], 'error' => aiExtractProviderError($decoded, (string) $raw)];
+    }
+
+    $ids = [];
+    foreach (($decoded['data'] ?? []) as $m) {
+        $id = $m['id'] ?? null;
+        if (!is_string($id) || $id === '') continue;
+        // Gemini returns ids as "models/gemini-2.5-flash" but accepts either
+        // form on /chat/completions; show the short one, which is what an
+        // admin will paste back into the model field.
+        $ids[] = str_starts_with($id, 'models/') ? substr($id, 7) : $id;
+    }
+    sort($ids);
+    return ['ok' => true, 'models' => $ids, 'error' => null];
 }
 
 /**
