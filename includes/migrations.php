@@ -6844,6 +6844,21 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 156,
+            'description' => 'Add mission_assistant_checkpoints - one row per (mission, coordinator) holding the moment they last pressed "Το είδα" in the Action Room assistant. Read-state has to be per person, not per mission: two coordinators on the same operation have genuinely different answers to "what did I miss", and the same coordinator moving from laptop to phone has the same one, which is why this is a row here and not localStorage. Nothing in this table is ever an input to an alarm, a score or a state change - it only narrows which chat and media the panel calls new. A missing row means "never caught up" and the panel falls back to a 30-minute window rather than replaying the whole mission.',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_assistant_checkpoints (
+                    mission_id INT UNSIGNED NOT NULL,
+                    user_id INT UNSIGNED NOT NULL,
+                    seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Last explicit press of «Το είδα» - NOT advanced by merely opening the panel',
+                    PRIMARY KEY (mission_id, user_id),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

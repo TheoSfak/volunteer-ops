@@ -1564,6 +1564,19 @@ if (get('ajax') === '1') {
         'teamDistances' => $teamProximity['teamDistances'],
         'k9Handlers' => k9Handlers(),
         'teamCaptains' => teamCaptains(),
+        // «Τι μου ξέφυγε» — the whole assistant panel, not just its badge
+        // count. It rides here rather than behind its own endpoint for two
+        // reasons: the popup then opens with no network round trip at all
+        // (which is the entire point of a control you reach for when you have
+        // seconds), and the number on the button cannot disagree with the list
+        // behind it, because they are the same object.
+        //
+        // Command staff only. Every query behind this reads the whole
+        // mission's field traffic, so a volunteer's tab must not pay for it
+        // and must not receive it.
+        'assistant' => $canManageWarRoom
+            ? buildMissionAssistantPanel($missionId, (int) $user['id'], $missionShiftIds)
+            : null,
     ];
 
     // Don't re-send 51KB that the client already has.
@@ -1708,6 +1721,13 @@ $teamProximity = $loadTeamProximity();
 $nearbyTeams = $teamProximity['nearbyTeams'];
 $teamDistances = $teamProximity['teamDistances'];
 $restrictedAreaProximity = $loadRestrictedAreaProximity();
+// See the ajax branch's own copy of this above. Computed here as well so the
+// badge is already right on first paint rather than popping into existence
+// five seconds later — the first five seconds after opening the Action Room
+// are exactly when a coordinator is asking what they missed.
+$assistantPanel = $canManageWarRoom
+    ? buildMissionAssistantPanel($missionId, (int) $user['id'], $missionShiftIds)
+    : null;
 
 $firstShift = $shifts[0]['start_time'] ?? $mission['start_datetime'];
 $lastShift = !empty($shifts) ? end($shifts)['end_time'] : $mission['end_datetime'];
@@ -2473,6 +2493,73 @@ include __DIR__ . '/includes/header.php';
         -webkit-box-orient: vertical;
         overflow: hidden;
     }
+
+    /* ── Assistant: «Τι μου ξέφυγε» ────────────────────────────────────────
+       The count badge rides on both the hero button and the floating one, so
+       it is styled once by class. Absolute inside a .position-relative host. */
+    .assistant-badge {
+        position: absolute; top: -6px; right: -6px;
+        min-width: 20px; height: 20px; padding: 0 5px;
+        border-radius: 10px; background: #dc2626; color: #fff;
+        font-size: .72rem; font-weight: 700; line-height: 20px; text-align: center;
+        box-shadow: 0 0 0 2px rgba(0,0,0,.25);
+    }
+    /* Nothing urgent in the list — still worth a number, but it must not look
+       like an alarm, or the red badge stops meaning anything when one is. */
+    .assistant-badge.assistant-badge-quiet { background: #64748b; }
+
+    /* Sits above the map and its controls but BELOW the ticker (z-index 1900)
+       and the SOS overlay: an assistant badge must never cover an actual
+       alarm. Bottom offset clears the phone tab bar when it is present. */
+    .assistant-fab {
+        position: fixed; right: 16px; bottom: 96px; z-index: 1200;
+        width: 52px; height: 52px; border-radius: 50%;
+        border: none; background: #172554; color: #fff;
+        box-shadow: 0 4px 14px rgba(0,0,0,.35);
+        font-size: 1.25rem; line-height: 1;
+    }
+    body.wr-tabs-ready .assistant-fab { bottom: 140px; }
+    .assistant-fab:hover { background: #1e3a8a; }
+
+    /* One row per finding. The left border is the severity, so a coordinator
+       reads the shape of the list before reading a single word of it. */
+    .assistant-item {
+        display: flex; gap: .6rem; align-items: flex-start;
+        padding: .5rem .65rem; margin-bottom: .35rem;
+        border-left: 4px solid #94a3b8; border-radius: 6px;
+        background: rgba(148,163,184,.10); cursor: pointer;
+    }
+    .assistant-item:hover { background: rgba(148,163,184,.20); }
+    .assistant-item[data-sev="critical"] { border-left-color: #dc2626; background: rgba(220,38,38,.10); }
+    .assistant-item[data-sev="high"]     { border-left-color: #ea580c; background: rgba(234,88,12,.10); }
+    .assistant-item[data-sev="warn"]     { border-left-color: #ca8a04; background: rgba(202,138,4,.10); }
+    .assistant-item[data-sev="info"]     { border-left-color: #0ea5e9; background: rgba(14,165,233,.08); }
+    .assistant-item .assistant-icon { font-size: 1.05rem; line-height: 1.4; opacity: .85; }
+    .assistant-item .assistant-text { flex: 1 1 auto; min-width: 0; }
+    .assistant-item .assistant-title { font-weight: 600; font-size: .92rem; }
+    .assistant-item .assistant-detail {
+        font-size: .8rem; color: #64748b;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .assistant-item .assistant-age { font-size: .75rem; color: #64748b; white-space: nowrap; }
+    .assistant-new-tag {
+        font-size: .62rem; font-weight: 700; letter-spacing: .04em;
+        background: #0ea5e9; color: #fff; border-radius: 3px; padding: 0 4px; margin-left: .35rem;
+    }
+    .assistant-section-title {
+        font-size: .72rem; font-weight: 700; letter-spacing: .06em;
+        text-transform: uppercase; color: #64748b; margin: .9rem 0 .4rem;
+    }
+    .assistant-section-title:first-child { margin-top: 0; }
+    /* Two pulses on the card the assistant just sent you to. Without it a
+       smooth scroll into a dense console leaves you looking for which of nine
+       cards was meant. */
+    .assistant-flash { animation: assistantFlash 1.8s ease-out; }
+    @keyframes assistantFlash {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(23,37,84,0); }
+        15%, 55% { box-shadow: 0 0 0 4px rgba(37,99,235,.55); }
+        35%, 75% { box-shadow: 0 0 0 0 rgba(37,99,235,0); }
+    }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
@@ -2500,6 +2587,19 @@ include __DIR__ . '/includes/header.php';
                  ~190px for exactly that reason, and these four all act on the
                  map, which is a tab away — a squad lead who needs them taps
                  the view toggle below and gets the whole console. */ ?>
+        <?php if ($canManageWarRoom): ?>
+        <!-- «Τι μου ξέφυγε». Deliberately kept in the TABBED hero too, unlike
+             the four command tools below: those all act on the map and are a
+             tab away, while this one answers a question you have wherever you
+             are standing — and it is the squad lead on a phone who is least
+             likely to have been watching every card. The badge is what makes
+             it work: an assistant that only speaks when asked cannot, by
+             definition, catch the thing you did not know to ask about. -->
+        <button type="button" id="assistantBtn" class="btn btn-outline-light position-relative" data-bs-toggle="modal" data-bs-target="#assistantModal">
+            <i class="bi bi-binoculars me-1"></i><?= t('assistant.btn') ?>
+            <span id="assistantBtnBadge" class="assistant-badge d-none">0</span>
+        </button>
+        <?php endif; ?>
         <?php if ($canManageWarRoom && !$volunteerTabs): ?>
         <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
         <?php if (vitalsEnabled()): ?>
@@ -2547,6 +2647,44 @@ include __DIR__ . '/includes/header.php';
 <?= showFlash() ?>
 
 <div id="warRoomBanner" class="war-room-banner" data-ticker-pos="<?= getSetting('war_room_ticker_position', 'top') === 'bottom' ? 'bottom' : 'top' ?>"></div>
+
+<?php if ($canManageWarRoom): ?>
+<!-- The hero is not sticky (nothing on this page is), so the button up there
+     is off-screen the moment the coordinator scrolls to the map or the Teams
+     card — which is where they spend the operation. This follows them, and
+     deliberately only appears when BOTH are true: the hero has scrolled away
+     AND there is something to report. A permanent floating button would be one
+     more thing covering the map for nothing. -->
+<button type="button" id="assistantFab" class="assistant-fab d-none" data-bs-toggle="modal" data-bs-target="#assistantModal" aria-label="<?= t('assistant.title') ?>">
+    <i class="bi bi-binoculars"></i>
+    <span id="assistantFabBadge" class="assistant-badge">0</span>
+</button>
+
+<div class="modal fade" id="assistantModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-binoculars me-1"></i><?= t('assistant.title') ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="assistantBody">
+                <div class="text-muted small"><?= t('common.loading') ?></div>
+            </div>
+            <div class="modal-footer d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div class="small text-muted flex-grow-1" style="min-width:220px;">
+                    <i class="bi bi-database me-1"></i><?= t('assistant.footer_note') ?>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span id="assistantSeenMsg" class="small text-success"></span>
+                    <button type="button" id="assistantSeenBtn" class="btn btn-sm btn-primary" title="<?= t('assistant.mark_seen_hint') ?>">
+                        <i class="bi bi-check2-all me-1"></i><?= t('assistant.mark_seen') ?>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if ($canManageWarRoom): ?>
 <div id="sosOverlay">
@@ -5218,6 +5356,17 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
 
     bar.querySelectorAll('[data-tab-target]').forEach(b => {
         b.addEventListener('click', () => setTab(b.dataset.tabTarget));
+    });
+
+    // Lets code outside this closure ask for a tab by name — the assistant
+    // panel jumps to the card behind a finding, and in this view that card can
+    // be in a pane that is display:none, where scrollIntoView does nothing.
+    // An event rather than a window export for the same reason wr-chat-unread
+    // and wr-teams-updated are events: this closure owns activeTab and its own
+    // click handlers, and nothing outside it should be able to bypass setTab.
+    document.addEventListener('wr-goto-tab', e => {
+        const tab = e.detail && e.detail.tab;
+        if (tab) setTab(tab);
     });
 
     let initial = 'me';
@@ -12725,6 +12874,212 @@ function retryPollNow() {
 // said when the connection first died.
 setInterval(renderPollStaleness, 5000);
 
+<?php if ($canManageWarRoom): ?>
+// ── Assistant: «Τι μου ξέφυγε» ───────────────────────────────────────────────
+// Rendering only. Every judgement about what is urgent, what counts as silence
+// and what is merely new was made server-side in functions-warroom-assistant.php
+// and arrives already decided, so the badge and the list cannot drift apart.
+let assistantData = <?= json_encode($assistantPanel, JSON_UNESCAPED_UNICODE) ?>;
+let assistantHeroOnScreen = true;
+
+// Relative time is computed HERE, from the absolute epoch the server sent, and
+// deliberately never server-side: a pre-computed "πριν 7′" would change that
+// object every single minute, and it rides inside the poll payload whose md5
+// is the only thing stopping 51KB being re-sent to every open tab every 5s.
+function assistantAgo(ts) {
+    const mins = Math.floor((Date.now() / 1000 - ts) / 60);
+    if (mins < 1) return t('assistant.ago_now');
+    if (mins < 60) return t('assistant.ago_min', {n: mins});
+    return t('assistant.ago_hm', {h: Math.floor(mins / 60), m: mins % 60});
+}
+
+// hour12 false everywhere, including for an English viewer: the rest of this
+// page prints H:i and a console that mixes "13:40" with "1:40 PM" makes two
+// timestamps look like different kinds of fact. The date rides along because
+// "πριν 43 ώρες" is true but useless — the hour it happened is what a
+// coordinator matches against their own memory of the shift.
+function assistantClock(ts) {
+    return new Date(ts * 1000).toLocaleString(jsLocale, {
+        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+}
+
+function assistantItemHtml(item) {
+    const tag = item.is_new ? `<span class="assistant-new-tag">${t('assistant.new_badge')}</span>` : '';
+    const detail = item.detail ? `<div class="assistant-detail">${escapeHtml(item.detail)}</div>` : '';
+    return `<div class="assistant-item" data-sev="${escapeHtml(item.sev)}" data-target="${escapeHtml(item.target || '')}" data-ts="${Number(item.ts)}">
+        <div class="assistant-icon"><i class="bi ${escapeHtml(item.icon)}"></i></div>
+        <div class="assistant-text">
+            <div class="assistant-title">${escapeHtml(item.title)}${tag}</div>
+            ${detail}
+        </div>
+        <div class="assistant-age" title="${escapeHtml(assistantClock(item.ts))}">${escapeHtml(assistantAgo(item.ts))}</div>
+    </div>`;
+}
+
+// Ages tick on their own clock, and they must not do it by redrawing the list:
+// a coordinator reading a long panel would be thrown back to the top every
+// half-minute. Rewrites the one text node that actually changed instead.
+function assistantRefreshAges() {
+    document.querySelectorAll('#assistantBody .assistant-item').forEach(row => {
+        const age = row.querySelector('.assistant-age');
+        if (age) age.textContent = assistantAgo(Number(row.dataset.ts));
+    });
+}
+
+function assistantSectionHtml(title, items, more, emptyText) {
+    let html = `<div class="assistant-section-title">${escapeHtml(title)}</div>`;
+    if (!items.length) {
+        return html + `<div class="small text-muted ps-1">${escapeHtml(emptyText)}</div>`;
+    }
+    html += items.map(assistantItemHtml).join('');
+    if (more > 0) html += `<div class="small text-muted ps-1 mt-1">${escapeHtml(t('assistant.more', {n: more}))}</div>`;
+    return html;
+}
+
+function renderAssistantBody() {
+    const body = document.getElementById('assistantBody');
+    if (!body || !assistantData) return;
+    const d = assistantData;
+    if (d.counts.total === 0) {
+        body.innerHTML = `<div class="text-center text-muted py-4">
+            <i class="bi bi-check2-circle" style="font-size:2rem;opacity:.5;"></i>
+            <div class="mt-2">${escapeHtml(t('assistant.empty_all'))}</div>
+        </div>`;
+        return;
+    }
+    const sinceLabel = new Date(d.since_ts * 1000)
+        .toLocaleTimeString(jsLocale, {hour: '2-digit', minute: '2-digit', hour12: false});
+    // Poll ticks land while this panel is open and being read. Redrawing it
+    // would otherwise snap a half-read list back to the top mid-sentence.
+    const scroll = body.scrollTop;
+    body.innerHTML =
+        assistantSectionHtml(t('assistant.section_pending'), d.pending, d.pending_more, t('assistant.empty_pending'))
+        + assistantSectionHtml(
+            t(d.is_first ? 'assistant.section_new_first' : 'assistant.section_new', {time: sinceLabel}),
+            d.new, d.new_more, t('assistant.empty_new')
+        );
+    body.scrollTop = scroll;
+}
+
+function updateAssistantFab() {
+    const fab = document.getElementById('assistantFab');
+    if (!fab) return;
+    const n = assistantData ? assistantData.counts.total : 0;
+    fab.classList.toggle('d-none', assistantHeroOnScreen || n === 0);
+}
+
+function renderAssistant(data) {
+    if (!data) return;
+    assistantData = data;
+    const n = data.counts.total;
+    // A list holding nothing worse than 'info' still deserves a number, but a
+    // red one would make red stop meaning anything on the day it matters.
+    const quiet = data.counts.worst === 'info' || data.counts.worst === null;
+    ['assistantBtnBadge', 'assistantFabBadge'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = n > 99 ? '99+' : String(n);
+        el.classList.toggle('d-none', n === 0);
+        el.classList.toggle('assistant-badge-quiet', quiet);
+    });
+    const btn = document.getElementById('assistantBtn');
+    if (btn) {
+        // Greek inflects the verb with the number, so "1 θέματα χρειάζονται"
+        // is broken Greek — and so is "1 items need" in English.
+        btn.title = n === 0 ? t('assistant.badge_title_clear')
+            : t(n === 1 ? 'assistant.badge_title_one' : 'assistant.badge_title', {n});
+    }
+    updateAssistantFab();
+    renderAssistantBody();
+}
+
+// Ages go stale on their own clock, not the poll's — a quiet mission can go
+// minutes without the payload changing, and "πριν 3′" must not still say that
+// a quarter of an hour later.
+setInterval(() => { if (!document.hidden) assistantRefreshAges(); }, 30000);
+
+const assistantHeroEl = document.querySelector('.war-room-hero');
+if (assistantHeroEl && 'IntersectionObserver' in window) {
+    new IntersectionObserver(entries => {
+        assistantHeroOnScreen = entries[0].isIntersecting;
+        updateAssistantFab();
+    }, {threshold: 0}).observe(assistantHeroEl);
+}
+
+// Jump from a finding to the card that can actually do something about it.
+function assistantGoto(target) {
+    if (!target) return;
+    if (target === 'reportModal') {
+        const el = document.getElementById('reportModal');
+        if (el) bootstrap.Modal.getOrCreateInstance(el).show();
+        return;
+    }
+    const card = document.querySelector('[data-card-id="' + target + '"]');
+    if (!card) return;
+    // In the tabbed view the card may be in a pane that is display:none, where
+    // scrollIntoView silently does nothing. The tab bar owns its own state in
+    // a closure, so ask it through the same event channel the roster already
+    // uses rather than reaching in.
+    const pane = card.closest('.wr-tab-pane');
+    if (pane && pane.dataset.tab) {
+        document.dispatchEvent(new CustomEvent('wr-goto-tab', {detail: {tab: pane.dataset.tab}}));
+    }
+    // Several of these cards keep their body collapsed on a phone. Pointing
+    // someone at a card and leaving it shut is a dead end.
+    const collapsed = card.querySelector('.collapse:not(.show)');
+    if (collapsed) bootstrap.Collapse.getOrCreateInstance(collapsed).show();
+    setTimeout(() => {
+        card.scrollIntoView({behavior: 'smooth', block: 'center'});
+        card.classList.add('assistant-flash');
+        setTimeout(() => card.classList.remove('assistant-flash'), 1800);
+    }, pane ? 140 : 0);
+}
+
+document.getElementById('assistantBody')?.addEventListener('click', e => {
+    const row = e.target.closest('.assistant-item');
+    if (!row || !row.dataset.target) return;
+    const target = row.dataset.target;
+    const modalEl = document.getElementById('assistantModal');
+    // Wait for this modal to finish closing before acting: Bootstrap removes
+    // the backdrop on hidden.bs.modal, and opening a second modal before that
+    // leaves the page permanently dimmed with no way out.
+    modalEl.addEventListener('hidden.bs.modal', () => assistantGoto(target), {once: true});
+    bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+});
+
+document.getElementById('assistantSeenBtn')?.addEventListener('click', function () {
+    const btn = this;
+    const msg = document.getElementById('assistantSeenMsg');
+    btn.disabled = true;
+    const body = new FormData();
+    body.append('csrf_token', csrfToken);
+    body.append('mission_id', '<?= $missionId ?>');
+    body.append('action', 'seen');
+    fetch('mission-assistant.php', {method: 'POST', body}).then(r => r.json()).then(res => {
+        if (res && res.ok) {
+            msg.className = 'small text-success';
+            msg.textContent = t('assistant.mark_seen_done');
+            // Don't make them wait up to 5s watching a list they just cleared:
+            // the server has moved the checkpoint, so the very next payload is
+            // already different and the poll's hash will let it through.
+            retryPollNow();
+        } else {
+            msg.className = 'small text-danger';
+            msg.textContent = (res && res.error) || t('assistant.mark_seen_failed');
+        }
+    }).catch(() => {
+        msg.className = 'small text-danger';
+        msg.textContent = t('assistant.mark_seen_failed');
+    }).finally(() => {
+        btn.disabled = false;
+        setTimeout(() => { msg.textContent = ''; }, 4000);
+    });
+});
+
+renderAssistant(assistantData);
+<?php endif; ?>
+
 // Named (not the previous inline arrow passed straight to setInterval) so
 // the Page Visibility handling below can also call it directly, once, the
 // moment this tab becomes visible again — rather than leaving the user
@@ -12881,6 +13236,10 @@ function pollWarRoomData() {
         if (data.onlinePresence) renderPresence(data.onlinePresence, data.pingStaleness);
         if (data.pingStaleness) renderPingStaleness(data.pingStaleness);
         if (data.participantLive) renderParticipantLiveData(data.participantLive);
+        // typeof-guarded, not truthiness-guarded on the key: the payload
+        // always carries this key and it is legitimately null for a
+        // volunteer, whose page never defines the renderer at all.
+        if (data.assistant && typeof renderAssistant === 'function') renderAssistant(data.assistant);
         if (data.nearbyTeams) renderNearbyTeams(nearbyTeams = data.nearbyTeams);
         if (data.restrictedAreaProximity) renderRestrictedAreaProximity(restrictedAreaProximity = data.restrictedAreaProximity);
         if (data.teamDistances) renderTeamDistances(teamDistances = data.teamDistances);

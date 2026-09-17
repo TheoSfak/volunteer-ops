@@ -2751,4 +2751,25 @@ CREATE TABLE IF NOT EXISTS `ai_translation_cache` (
     INDEX `idx_translation_lang` (`lang`, `used_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ACTION ROOM ASSISTANT CHECKPOINTS. One row per (mission, coordinator): the
+-- moment they last explicitly pressed "I have seen this" in the assistant
+-- popup. Read-state is per person, not per mission -- two coordinators on the
+-- same operation have genuinely different answers to "what did I miss", and
+-- the same coordinator moving from laptop to phone has the same one, which is
+-- why this is a row here and not browser storage.
+-- Deliberately NOT advanced by merely opening the panel: you open it, you get
+-- called away, and everything you had not read yet would be gone.
+-- Nothing in this table ever feeds an alarm, a score or a state change. It
+-- only narrows which chat and media the panel calls new; a missing row means
+-- "never caught up" and the panel falls back to a 30-minute window rather
+-- than replaying the whole mission.
+CREATE TABLE IF NOT EXISTS `mission_assistant_checkpoints` (
+    `mission_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `seen_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`mission_id`, `user_id`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

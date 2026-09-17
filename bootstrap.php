@@ -14,6 +14,7 @@ require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/countries.php';
 require_once __DIR__ . '/includes/functions-core.php';
 require_once __DIR__ . '/includes/functions-warroom.php';
+require_once __DIR__ . '/includes/functions-warroom-assistant.php';
 require_once __DIR__ . '/includes/functions-vitals.php';
 require_once __DIR__ . '/includes/functions-vitals-report.php';
 require_once __DIR__ . '/includes/auth.php';
