@@ -106,39 +106,88 @@ final class AiFailoverTest extends TestCase
     {
         $order = aiFailoverOrder();
         $this->assertSame('deepseek', end($order), 'the metered provider must be the last one tried');
-        $this->assertSame(['gemini', 'grok'], array_slice($order, 0, 2));
+        $this->assertSame(['gemini', 'groq'], array_slice($order, 0, 2), 'the two free tiers lead');
     }
 
     /**
-     * The whole point of the rank: with all three keys stored and the default
-     * primary, a busy Gemini hands the work to Grok, and only a Grok failure
-     * too reaches the provider that charges for it.
+     * The rank ordering in full, as one statement: the providers that cost
+     * nothing are exhausted before either of the ones that bill, and the one
+     * kept for last is last.
+     */
+    public function testTheFullOrderIsFreeThenMeteredThenLastResort(): void
+    {
+        $this->assertSame(['gemini', 'groq', 'grok', 'deepseek'], aiFailoverOrder());
+    }
+
+    /**
+     * The whole point of the rank: with every key stored and the default
+     * primary, a busy Gemini hands the work to the other FREE provider, and
+     * only after that does anything reach a provider that charges.
      */
     public function testTheDefaultChainSpendsNothingUntilBothFreeTiersFail(): void
     {
-        $this->assertSame(
-            ['gemini', 'grok', 'deepseek'],
-            aiBuildChain('gemini', aiFailoverOrder(), ['deepseek', 'gemini', 'grok'])
+        $chain = aiBuildChain('gemini', aiFailoverOrder(), ['deepseek', 'gemini', 'grok', 'groq']);
+        $this->assertSame(['gemini', 'groq', 'grok', 'deepseek'], $chain);
+        // Stated as the property rather than the literal order, so this keeps
+        // meaning the same thing when a fifth provider is added: nothing that
+        // bills may be attempted while a free tier is still untried.
+        $free = ['gemini', 'groq'];
+        foreach ($chain as $i => $provider) {
+            if (in_array($provider, $free, true)) continue;
+            $this->assertSame(
+                $free,
+                array_slice($chain, 0, $i),
+                "metered provider '{$provider}' was reached before every free tier had been tried"
+            );
+            break;
+        }
+    }
+
+    /**
+     * Groq (groq.com, free) and xAI Grok (x.ai, billed per call) are different
+     * providers one letter apart. Pinned because a chain that silently swapped
+     * them would spend money and read as correct at a glance — which is exactly
+     * the failure this whole ranking exists to prevent.
+     */
+    public function testGroqAndGrokAreDistinctProvidersInTheRightOrder(): void
+    {
+        $providers = aiProviders();
+        $this->assertArrayHasKey('groq', $providers);
+        $this->assertArrayHasKey('grok', $providers);
+        $this->assertNotSame($providers['groq']['base_url'], $providers['grok']['base_url']);
+        $this->assertStringContainsString('groq.com', $providers['groq']['base_url']);
+        $this->assertStringContainsString('x.ai', $providers['grok']['base_url']);
+
+        $order = aiFailoverOrder();
+        $this->assertLessThan(
+            array_search('grok', $order, true),
+            array_search('groq', $order, true),
+            'the free provider must be tried before the one that bills per call'
         );
     }
 
     /**
-     * Choosing the metered provider on purpose still puts it first. An admin
+     * Choosing a metered provider on purpose still puts it first. An admin
      * who picks it has decided to pay for the first attempt — a cost rule that
      * overrode an explicit choice would be a bug, not a saving.
      */
     public function testAnExplicitlyChosenMeteredProviderStillLeads(): void
     {
         $this->assertSame(
-            ['deepseek', 'gemini', 'grok'],
-            aiBuildChain('deepseek', aiFailoverOrder(), ['deepseek', 'gemini', 'grok'])
+            ['deepseek', 'gemini', 'groq', 'grok'],
+            aiBuildChain('deepseek', aiFailoverOrder(), ['deepseek', 'gemini', 'grok', 'groq'])
+        );
+        $this->assertSame(
+            ['grok', 'gemini', 'groq', 'deepseek'],
+            aiBuildChain('grok', aiFailoverOrder(), ['deepseek', 'gemini', 'grok', 'groq'])
         );
     }
 
     /**
-     * Every provider offered in Settings must declare where it is tried, or it
-     * silently lands mid-chain on the default rank of 50 — between the free
-     * tiers and the metered one, which is a position nobody chose.
+     * Every provider offered in Settings must declare where it is tried. An
+     * undeclared one falls on aiFailoverOrder()'s default of 50, which is now
+     * also xAI Grok's rank — so it would tie with a metered provider and land
+     * ahead of the last-resort one, a position nobody chose for it.
      */
     public function testEveryProviderDeclaresAFailoverRank(): void
     {

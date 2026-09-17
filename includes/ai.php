@@ -7,10 +7,10 @@
  * parsed answer. Nothing in here knows what a mission is.
  *
  * WHY OpenAI-compatible and nothing else: every provider this app offers
- * (Google Gemini, xAI Grok and DeepSeek) speaks the same /chat/completions
- * dialect, so switching between them — or away from all of them, to an
- * EU-hosted endpoint — is a base-URL string, not a rewrite. That is the whole
- * exit strategy, and it costs nothing to keep today.
+ * (Google Gemini, Groq, xAI Grok and DeepSeek) speaks the same
+ * /chat/completions dialect, so switching between them — or away from all of
+ * them, to an EU-hosted endpoint — is a base-URL string, not a rewrite. That is
+ * the whole exit strategy, and it costs nothing to keep today.
  *
  * Follows includes/weather.php's contract exactly: no key configured means
  * the feature is ABSENT, not broken — every entry point returns null/ok=false
@@ -59,10 +59,39 @@ function aiProviders(): array {
             // order written here, so Gemini stays the first one tried.
             'failover_rank' => 10,
         ],
+        // GROQ AND GROK ARE DIFFERENT COMPANIES, one letter apart, and they sit
+        // next to each other in this list. Groq (groq.com) is an inference host
+        // running open-weight models on its own hardware, with a free key; Grok
+        // (x.ai) is xAI's own model, billed per call. Both key_hints say so
+        // out loud, because the two were already confused once while this
+        // provider was being added — by the person adding it.
+        'groq' => [
+            'label'         => 'Groq',
+            // Groq's OpenAI-compatible surface. Note the /openai/ segment: the
+            // bare https://api.groq.com is not the API root, and leaving it out
+            // 404s every call in a way that reads like a wrong model name.
+            'base_url'      => 'https://api.groq.com/openai/v1',
+            // Open-weight models on someone else's hardware, so the names here
+            // rot even faster than the other providers' — they are whatever
+            // Groq is hosting this quarter. The Settings test button lists what
+            // a given key can actually call.
+            'default_model' => 'llama-3.3-70b-versatile',
+            'models'        => ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b',
+                                'moonshotai/kimi-k2-instruct', 'qwen/qwen3-32b', 'llama-3.1-8b-instant'],
+            // Supported by SOME of the models above and rejected with a 400 by
+            // others (the Llama ones), and which is which changes as the
+            // catalogue does. Never sent, same as the other two: an
+            // optimisation is not worth a failed round trip on every call.
+            'reasoning_effort' => false,
+            'key_url'       => 'https://console.groq.com/keys',
+            'key_hint'      => 'Δωρεάν API key με γενναιόδωρα ημερήσια όρια, και από τους ταχύτερους παρόχους. ΠΡΟΣΟΧΗ: είναι το Groq (groq.com), ΟΧΙ το Grok της xAI παρακάτω.',
+            'jurisdiction'  => 'ΗΠΑ / Groq',
+            'failover_rank' => 10,
+        ],
         'grok' => [
             'label'         => 'xAI Grok',
             // xAI ships an OpenAI-compatible API at this path — same
-            // /chat/completions and /models shapes as the other two, so it
+            // /chat/completions and /models shapes as the others, so it
             // needs no client code of its own.
             'base_url'      => 'https://api.x.ai/v1',
             'default_model' => 'grok-4-fast-reasoning',
@@ -76,9 +105,13 @@ function aiProviders(): array {
             // round trip on at every single call.
             'reasoning_effort' => false,
             'key_url'       => 'https://console.x.ai',
-            'key_hint'      => 'Με χρέωση από προπληρωμένη πίστωση — ελέγξτε το υπόλοιπο στο console πριν από άσκηση ή αποστολή.',
+            'key_hint'      => 'Με χρέωση από προπληρωμένη πίστωση — ελέγξτε το υπόλοιπο στο console πριν από άσκηση ή αποστολή. ΠΡΟΣΟΧΗ: είναι το Grok της xAI, ΟΧΙ το Groq (groq.com) παραπάνω.',
             'jurisdiction'  => 'ΗΠΑ / xAI',
-            'failover_rank' => 10,
+            // 50, between the free tiers and the last resort. It bills per call
+            // like DeepSeek, so it has no business being tried before a
+            // provider that costs nothing — but it is a deliberate part of the
+            // chain, so it goes comfortably ahead of the one kept for last.
+            'failover_rank' => 50,
         ],
         'deepseek' => [
             'label'         => 'DeepSeek',
@@ -625,7 +658,10 @@ function aiChatModelsFromList(array $ids): array {
     $usable = array_values(array_filter(
         $ids,
         fn($m) => is_string($m) && $m !== '' && !preg_match(
-            '/embedding|imagen|veo|aqa|-tts|vision|learnlm|image|audio|-live|computer-use|deep-research|antigravity|customtools/i',
+            // whisper/guard are Groq's contribution to this list: a real Groq
+            // key returns speech-to-text and moderation models alongside the
+            // chat ones, and neither can write a report.
+            '/embedding|imagen|veo|aqa|-tts|vision|learnlm|image|audio|-live|computer-use|deep-research|antigravity|customtools|whisper|guard/i',
             $m
         )
     ));
