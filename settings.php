@@ -2021,13 +2021,18 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                     ?>
                     <?php foreach ($aiProviders as $pk => $pm):
                         $stored = !empty($settings['ai_api_key_' . $pk] ?? ''); ?>
-                    <div class="ai-provider-block" data-ai-provider="<?= h($pk) ?>">
-                    <hr>
-                    <div class="fw-bold mb-2">
+                    <?php // A bordered card per provider, not an <hr> between runs of
+                          // fields: when two or three of these are open at once, the
+                          // fields of one provider have to be visibly INSIDE that
+                          // provider, or an admin reads the wrong Μοντέλο line and
+                          // believes the app is offering another provider's models. ?>
+                    <div class="ai-provider-block card mb-3" data-ai-provider="<?= h($pk) ?>">
+                    <div class="card-header py-2 fw-bold">
                         <?= h($pm['label']) ?>
                         <span class="badge bg-primary ms-1" data-ai-badge="primary" hidden>κύριος</span>
                         <span class="badge bg-success-subtle text-success-emphasis ms-1" data-ai-badge="fallback" hidden>εφεδρεία</span>
                     </div>
+                    <div class="card-body py-2">
                     <div class="mb-2">
                         <label class="form-label small mb-1" for="aiKey_<?= h($pk) ?>">API Key</label>
                         <div class="input-group">
@@ -2061,6 +2066,7 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                                name="ai_base_url_<?= h($pk) ?>" autocomplete="off"
                                placeholder="<?= h($pm['base_url']) ?>"
                                value="<?= h($settings['ai_base_url_' . $pk] ?? '') ?>">
+                    </div>
                     </div>
                     </div>
                     <?php endforeach; ?>
@@ -4091,6 +4097,10 @@ document.getElementById('btnTestWeatherKey') && document.getElementById('btnTest
             var isPrimary = block.getAttribute('data-ai-provider') === chosen;
             block.hidden = !isPrimary && !showAll;
             if (!isPrimary && !showAll) hidden++;
+            // Outlined when chosen. With the fallbacks expanded this is what
+            // separates "the provider I picked" from "the two I can also
+            // configure" at a glance, rather than on a badge.
+            block.classList.toggle('border-primary', isPrimary);
 
             var pb = block.querySelector('[data-ai-badge="primary"]');
             var fb = block.querySelector('[data-ai-badge="fallback"]');
@@ -4107,7 +4117,21 @@ document.getElementById('btnTestWeatherKey') && document.getElementById('btnTest
         }
     }
 
-    sel.addEventListener('change', apply);
+    // Choosing a provider is an act of focus, so the other two get out of the
+    // way — even if they were expanded when the page loaded because one of them
+    // already holds a key. Reported: picked Grok, read the Μοντέλο field of the
+    // Gemini block still sitting above it, and concluded Grok was offering
+    // Gemini's models. Three near-identical stacks of API Key / Μοντέλο / Base
+    // URL are genuinely easy to read across.
+    //
+    // The arrival behaviour is deliberately left alone: landing on a page that
+    // hides a configured fallback would be its own way of losing track of it.
+    // This is only about what happens when the admin actively picks one.
+    sel.addEventListener('change', function () {
+        showAll = false;
+        if (toggle) toggle.setAttribute('aria-expanded', 'false');
+        apply();
+    });
     if (toggle) {
         toggle.addEventListener('click', function () {
             showAll = !showAll;
