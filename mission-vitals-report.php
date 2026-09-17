@@ -364,6 +364,11 @@ include __DIR__ . '/includes/header.php';
         <?php else: ?>
             <div class="vr-chart-wrap"><canvas id="vrChart"></canvas></div>
             <p class="text-muted small mt-2 mb-0">
+                <?php if (!empty($report['gaps'])): ?>
+                    <span class="text-dark"><i class="bi bi-scissors me-1"></i>Ο άξονας παραλείπει
+                    <?= (int) $report['gaps'] === 1 ? 'μία περίοδο' : (int) $report['gaps'] . ' περιόδους' ?>
+                    χωρίς καμία μέτρηση — το «⋯» δείχνει πού.</span>
+                <?php endif; ?>
                 Μέσος όρος ανά <?= (int) $report['bucket_minutes'] ?> <?= $report['bucket_minutes'] === 1 ? 'λεπτό' : 'λεπτά' ?>.
                 Διακεκομμένες: κρίσιμοι <?= (int) $report['thresholds']['critical'] ?>, αυξημένοι <?= (int) $report['thresholds']['elevated'] ?>, χαμηλοί <?= (int) $report['thresholds']['low'] ?> bpm
                 (μέγιστη καρδιακή συχνότητα <?= (int) $maxHr ?>).

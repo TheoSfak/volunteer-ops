@@ -231,6 +231,77 @@ final class VitalsProblemsTest extends TestCase
         $this->assertStringContainsString('171', $detail);
     }
 
+    // ── The chart axis skips time nobody recorded ──────────────────────────
+
+    /** Probe-block indices for a run starting at $fromBlock, $count blocks long. */
+    private function blocks(int $fromBlock, int $count): array
+    {
+        return range($fromBlock, $fromBlock + $count - 1);
+    }
+
+    public function testAContinuousRunIsOneUninterruptedPeriod(): void
+    {
+        // The ordinary mission. Nothing about the axis may change for it —
+        // this is the regression guard on the whole gap feature.
+        $periods = vitalsGroupBlocksIntoPeriods($this->blocks(1000, 12), 1000 * 600, 1012 * 600);
+
+        $this->assertCount(1, $periods);
+        $this->assertSame(1000 * 600, $periods[0]['from']);
+        $this->assertSame(1012 * 600, $periods[0]['to']);
+    }
+
+    public function testAMonthOfNothingBetweenTwoRunsBecomesTwoPeriods(): void
+    {
+        // The real case: two hours of readings in August and ninety minutes in
+        // September spread four hours of data across twenty-seven days, and
+        // "Όλη η αποστολή" drew two hairlines with a month of white between.
+        $august    = $this->blocks(1000, 12);
+        $september = $this->blocks(1000 + 4000, 9);
+        $periods   = vitalsGroupBlocksIntoPeriods(
+            array_merge($august, $september),
+            1000 * 600,
+            (1000 + 4000 + 9) * 600
+        );
+
+        $this->assertCount(2, $periods);
+        $this->assertSame(1012 * 600, $periods[0]['to']);
+        $this->assertSame(5000 * 600, $periods[1]['from']);
+    }
+
+    public function testAShortGapIsKeptBecauseItIsInformation(): void
+    {
+        // Under the threshold a gap is a stand-down, a vehicle move or a strap
+        // that came off, and the reader should see it rather than have the
+        // axis quietly close it up.
+        $short = array_merge($this->blocks(1000, 6), $this->blocks(1006 + 6, 6)); // one hour apart
+        $this->assertCount(1, vitalsGroupBlocksIntoPeriods($short, 1000 * 600, 1018 * 600));
+
+        // And at the threshold itself it splits.
+        $long = array_merge($this->blocks(1000, 6), $this->blocks(1006 + 12, 6)); // two hours apart
+        $this->assertCount(2, vitalsGroupBlocksIntoPeriods($long, 1000 * 600, 1024 * 600));
+    }
+
+    public function testThePeriodsNeverReachOutsideTheRequestedWindow(): void
+    {
+        // Probe blocks round outwards; the window the coordinator picked does
+        // not, and an axis wider than the window would redraw what they just
+        // narrowed away.
+        $from = 1000 * 600 + 120;
+        $to   = 1012 * 600 - 120;
+        $periods = vitalsGroupBlocksIntoPeriods($this->blocks(1000, 12), $from, $to);
+
+        $this->assertSame($from, $periods[0]['from']);
+        $this->assertSame($to, $periods[count($periods) - 1]['to']);
+    }
+
+    public function testNoReadingsAtAllFallsBackToTheWholeRange(): void
+    {
+        // Returning no periods would build an empty axis; the caller treats
+        // "one period covering everything" as the safe default.
+        $periods = vitalsGroupBlocksIntoPeriods([], 500, 900);
+        $this->assertSame([['from' => 500, 'to' => 900]], $periods);
+    }
+
     // ── Presentation ───────────────────────────────────────────────────────
 
     public function testLongDurationsAreReadableRatherThanRawMinutes(): void

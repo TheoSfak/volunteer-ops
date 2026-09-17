@@ -574,6 +574,113 @@ function vitalsBucketKey(int $unixTs, int $bucketMinutes = 1): string {
 }
 
 /**
+ * Resolution at which the chart asks "was anyone recording then?".
+ *
+ * Coarse on purpose: one GROUP BY over ten-minute blocks answers it in a few
+ * dozen rows for a mission with tens of thousands of samples, and nothing
+ * below cares about a gap shorter than this.
+ */
+const VITALS_CHART_PROBE_SECONDS = 600;
+
+/**
+ * A gap longer than this is dropped from the chart's axis instead of drawn.
+ *
+ * Under two hours a gap is information — a stand-down, a vehicle move, a strap
+ * that came off — and the reader should see it. Above it, on a view that
+ * covers a whole mission, it is dead space that squeezes the readings into
+ * nothing.
+ */
+const VITALS_CHART_GAP_COLLAPSE_MINUTES = 120;
+
+/**
+ * The stretches of a mission that actually contain readings, oldest first, as
+ * [['from' => unix, 'to' => unix], ...].
+ *
+ * Exists because "first sample to last sample" is the wrong axis for a mission
+ * that did not run continuously. A real one in the demo data has two hours of
+ * readings on 19 August and ninety minutes on 15 September: twenty-seven days
+ * of axis for four hours of data, drawn as two hairlines with a month of white
+ * space between them. The window buttons were the previous answer to that, and
+ * they cannot answer it — "Όλη η αποστολή" is exactly the case they exclude.
+ *
+ * Always returns at least one period, so a caller can treat the continuous
+ * case as "one period" and keep a single code path.
+ */
+function vitalsActivePeriods(array $shiftIds, int $fromTs, int $toTs): array {
+    $whole = [['from' => $fromTs, 'to' => $toTs]];
+    if (!$shiftIds) {
+        return $whole;
+    }
+
+    $placeholders = implode(',', array_fill(0, count($shiftIds), '?'));
+    try {
+        $rows = dbFetchAll(
+            "SELECT DISTINCT FLOOR(UNIX_TIMESTAMP(recorded_at) / ?) AS block
+             FROM volunteer_vitals
+             WHERE shift_id IN ({$placeholders})
+               AND recorded_at >= FROM_UNIXTIME(?) AND recorded_at <= FROM_UNIXTIME(?)
+             ORDER BY block",
+            array_merge([VITALS_CHART_PROBE_SECONDS], $shiftIds, [$fromTs, $toTs])
+        );
+    } catch (Exception $e) {
+        return $whole;
+    }
+    if (!$rows) {
+        return $whole;
+    }
+
+    return vitalsGroupBlocksIntoPeriods(
+        array_map(fn($row) => (int) $row['block'], $rows),
+        $fromTs,
+        $toTs
+    );
+}
+
+/**
+ * The grouping half of vitalsActivePeriods(), without the query, so the part
+ * with the arithmetic in it can be tested.
+ *
+ * $blocks are probe-block indices (unix seconds / VITALS_CHART_PROBE_SECONDS),
+ * ascending. Consecutive blocks are one period; a run separated from the next
+ * by VITALS_CHART_GAP_COLLAPSE_MINUTES or more starts a new one.
+ */
+function vitalsGroupBlocksIntoPeriods(array $blocks, int $fromTs, int $toTs): array {
+    if (!$blocks) {
+        return [['from' => $fromTs, 'to' => $toTs]];
+    }
+
+    $gapSeconds = VITALS_CHART_GAP_COLLAPSE_MINUTES * 60;
+    $periods    = [];
+    $start      = null;
+    $end        = null;
+
+    foreach ($blocks as $block) {
+        $blockStart = $block * VITALS_CHART_PROBE_SECONDS;
+        $blockEnd   = $blockStart + VITALS_CHART_PROBE_SECONDS;
+
+        if ($start === null) {
+            $start = $blockStart;
+            $end   = $blockEnd;
+            continue;
+        }
+        if ($blockStart - $end >= $gapSeconds) {
+            $periods[] = ['from' => $start, 'to' => $end];
+            $start = $blockStart;
+        }
+        $end = $blockEnd;
+    }
+    $periods[] = ['from' => $start, 'to' => $end];
+
+    // Never draw outside what the caller asked for: the probe blocks are
+    // rounded outwards, and the window the coordinator picked is not.
+    $periods[0]['from'] = max($periods[0]['from'], $fromTs);
+    $last = count($periods) - 1;
+    $periods[$last]['to'] = min($periods[$last]['to'], $toTs);
+
+    return $periods;
+}
+
+/**
  * Everything the post-mission report needs about heart rate, in one call:
  * a shared time axis, one aligned series per volunteer, and per-volunteer
  * totals. Returns [] when the feature is off or the mission recorded nothing.
@@ -648,7 +755,22 @@ function loadVitalsReportForMission(int $missionId, ?int $sinceTs = null): array
         $firstTs = $sinceTs;
     }
 
-    $spanMinutes = max(1, (int) ceil(($lastTs - $firstTs) / 60));
+    // Only the stretches that contain readings are drawn. A mission that ran
+    // twice a month apart otherwise spends its whole axis on the weeks in
+    // between — see vitalsActivePeriods(). A continuous mission comes back as
+    // one period and everything below behaves exactly as it did before.
+    $periods = vitalsActivePeriods($shiftIds, $firstTs, $lastTs);
+
+    // Sized from the minutes that will actually be DRAWN, not from wall-clock
+    // distance between the first and last sample. Getting this wrong was half
+    // the problem: four hours of readings inside a 27-day span picked the
+    // 60-minute bucket, so even with the empty weeks removed the chart would
+    // have had four points.
+    $spanMinutes = 0;
+    foreach ($periods as $period) {
+        $spanMinutes += max(1, (int) ceil(($period['to'] - $period['from']) / 60));
+    }
+    $spanMinutes = max(1, $spanMinutes);
 
     // Widen the bucket until the axis holds at most ~480 points — about one
     // per pixel-and-a-half on a full-width chart, past which more points only
@@ -665,23 +787,36 @@ function loadVitalsReportForMission(int $missionId, ?int $sinceTs = null): array
 
     // A mission crossing midnight (or a multi-day search) needs the date on
     // the axis, or 02:00 on day two is indistinguishable from 02:00 on day one.
-    $labelFormat = ($lastTs - $firstTs) > 86400 ? 'd/m H:i' : 'H:i';
+    // More than one period means the same thing for a stronger reason: the
+    // axis jumps, and the reader has to be able to see where.
+    $labelFormat = (($lastTs - $firstTs) > 86400 || count($periods) > 1) ? 'd/m H:i' : 'H:i';
 
     // The axis is built by walking bucket starts and formatting each one the
     // same way the database did, so a label and its data share a key by
     // construction rather than by both happening to agree about epochs.
     $bucketKeys = [];
     $labels     = [];
-    $cursor     = strtotime(vitalsBucketKey($firstTs, $bucketMinutes));
-    $lastKey    = vitalsBucketKey($lastTs, $bucketMinutes);
-    while (true) {
-        $key          = vitalsBucketKey($cursor, $bucketMinutes);
-        $bucketKeys[] = $key;
-        $labels[]     = date($labelFormat, $cursor);
-        if ($key === $lastKey || count($bucketKeys) > 5000) {
-            break; // the count guard is a runaway stop, not an expected exit
+    foreach ($periods as $i => $period) {
+        // One empty bucket between periods. Without it the last reading of
+        // August and the first of September become adjacent points and
+        // Chart.js draws a straight line between them — a month of invented
+        // heart rate. The datasets use spanGaps: false, so a null here is a
+        // visible break.
+        if ($i > 0) {
+            $bucketKeys[] = null;
+            $labels[]     = '⋯';
         }
-        $cursor += $bucketSeconds;
+        $cursor  = strtotime(vitalsBucketKey($period['from'], $bucketMinutes));
+        $lastKey = vitalsBucketKey($period['to'], $bucketMinutes);
+        while (true) {
+            $key          = vitalsBucketKey($cursor, $bucketMinutes);
+            $bucketKeys[] = $key;
+            $labels[]     = date($labelFormat, $cursor);
+            if ($key === $lastKey || count($bucketKeys) > 5000) {
+                break; // the count guard is a runaway stop, not an expected exit
+            }
+            $cursor += $bucketSeconds;
+        }
     }
 
     try {
@@ -726,7 +861,12 @@ function loadVitalsReportForMission(int $missionId, ?int $sinceTs = null): array
         // had stopped.
         $series = [];
         foreach ($bucketKeys as $key) {
-            $series[] = isset($buckets[$userId][$key]) ? (int) $buckets[$userId][$key]['bpm'] : null;
+            // A null key is the spacer between two periods and belongs to
+            // nobody; isset() would resolve it to the '' key and could pick up
+            // a real bucket by accident.
+            $series[] = ($key !== null && isset($buckets[$userId][$key]))
+                ? (int) $buckets[$userId][$key]['bpm']
+                : null;
         }
 
         $volunteers[] = [
@@ -748,6 +888,10 @@ function loadVitalsReportForMission(int $missionId, ?int $sinceTs = null): array
 
     return [
         'labels'         => $labels,
+        // How many stretches of empty time the axis skipped. The page says so
+        // under the chart: an axis that jumps without admitting it is worse
+        // than one that is mostly white space.
+        'gaps'           => max(0, count($periods) - 1),
         'bucket_minutes' => $bucketMinutes,
         'max_hr'         => $maxHr,
         'sample_seconds' => $config['sample_seconds'],
