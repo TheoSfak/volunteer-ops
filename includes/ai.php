@@ -6,11 +6,11 @@
  * OpenAI-compatible provider the admin picked in Settings, and give back the
  * parsed answer. Nothing in here knows what a mission is.
  *
- * WHY OpenAI-compatible and nothing else: both providers this app offers
- * (DeepSeek and Google Gemini) speak the same /chat/completions dialect, so
- * switching between them — or away from both, to an EU-hosted endpoint — is a
- * base-URL string, not a rewrite. That is the whole exit strategy, and it
- * costs nothing to keep today.
+ * WHY OpenAI-compatible and nothing else: every provider this app offers
+ * (Google Gemini, xAI Grok and DeepSeek) speaks the same /chat/completions
+ * dialect, so switching between them — or away from all of them, to an
+ * EU-hosted endpoint — is a base-URL string, not a rewrite. That is the whole
+ * exit strategy, and it costs nothing to keep today.
  *
  * Follows includes/weather.php's contract exactly: no key configured means
  * the feature is ABSENT, not broken — every entry point returns null/ok=false
@@ -31,26 +31,12 @@
 // datalist suggestions, never a closed list: the field is free text and the
 // Settings "Έλεγχος σύνδεσης" button reports the provider's own error
 // verbatim, so a retired model name is a 5-second fix instead of a mystery.
+//
+// DECLARATION ORDER IS THE FAILOVER ORDER for providers of equal rank, and
+// 'failover_rank' overrides it — see aiFailoverOrder() for why a metered
+// provider has to sit at the back of the queue no matter where it is written.
 function aiProviders(): array {
     return [
-        'deepseek' => [
-            'label'         => 'DeepSeek',
-            'base_url'      => 'https://api.deepseek.com/v1',
-            'default_model' => 'deepseek-flash',
-            'models'        => ['deepseek-flash', 'deepseek-v4-pro'],
-            // Whether this provider honours OpenAI's reasoning_effort
-            // parameter. Declared per provider rather than sent blindly: an
-            // unknown parameter is usually ignored, but a provider that
-            // rejects it would fail every call with a 400, and the failover
-            // chain would then walk straight into the same wall.
-            'reasoning_effort' => false,
-            'key_url'       => 'https://platform.deepseek.com/api_keys',
-            'key_hint'      => 'Με χρέωση, αλλά πολύ φθηνό: μια πλήρης ανάλυση αποστολής κοστίζει κλάσματα του λεπτού.',
-            // Where the provider processes and stores the request. Shown in
-            // Settings because it is the single fact that decides whether a
-            // given deployment may use it at all.
-            'jurisdiction'  => 'Λ.Δ. Κίνας',
-        ],
         'gemini' => [
             'label'         => 'Google Gemini',
             // Google's own OpenAI-compatibility layer. The native
@@ -69,8 +55,79 @@ function aiProviders(): array {
             'key_url'       => 'https://aistudio.google.com/apikey',
             'key_hint'      => 'Διαθέτει δωρεάν επίπεδο με ημερήσιο όριο αιτημάτων — αρκετό για εκθέσεις αποστολών.',
             'jurisdiction'  => 'ΗΠΑ / Google',
+            // Free tier: tried before anything metered. Ties are broken by the
+            // order written here, so Gemini stays the first one tried.
+            'failover_rank' => 10,
+        ],
+        'grok' => [
+            'label'         => 'xAI Grok',
+            // xAI ships an OpenAI-compatible API at this path — same
+            // /chat/completions and /models shapes as the other two, so it
+            // needs no client code of its own.
+            'base_url'      => 'https://api.x.ai/v1',
+            'default_model' => 'grok-4-fast-reasoning',
+            'models'        => ['grok-4-fast-reasoning', 'grok-4-fast-non-reasoning', 'grok-4', 'grok-3-mini', 'grok-3'],
+            // false, and not because the models cannot reason: xAI accepts
+            // reasoning_effort on its small models and REJECTS it outright on
+            // the grok-4 family. Sending it would 400 every call on the
+            // default model. aiChatOnce() does retry a reasoning-shaped 400
+            // without the parameter, but that is a safety net for a model
+            // whose support changed under us, not something to spend a failed
+            // round trip on at every single call.
+            'reasoning_effort' => false,
+            'key_url'       => 'https://console.x.ai',
+            'key_hint'      => 'Με χρέωση από προπληρωμένη πίστωση — ελέγξτε το υπόλοιπο στο console πριν από άσκηση ή αποστολή.',
+            'jurisdiction'  => 'ΗΠΑ / xAI',
+            'failover_rank' => 10,
+        ],
+        'deepseek' => [
+            'label'         => 'DeepSeek',
+            'base_url'      => 'https://api.deepseek.com/v1',
+            'default_model' => 'deepseek-flash',
+            'models'        => ['deepseek-flash', 'deepseek-v4-pro'],
+            // Whether this provider honours OpenAI's reasoning_effort
+            // parameter. Declared per provider rather than sent blindly: an
+            // unknown parameter is usually ignored, but a provider that
+            // rejects it would fail every call with a 400, and the failover
+            // chain would then walk straight into the same wall.
+            'reasoning_effort' => false,
+            'key_url'       => 'https://platform.deepseek.com/api_keys',
+            'key_hint'      => 'Με χρέωση, αλλά πολύ φθηνό: μια πλήρης ανάλυση αποστολής κοστίζει κλάσματα του λεπτού. Χρησιμοποιείται ως τελευταία εφεδρεία, όταν κανένας άλλος πάροχος δεν απαντά.',
+            // Where the provider processes and stores the request. Shown in
+            // Settings because it is the single fact that decides whether a
+            // given deployment may use it at all.
+            'jurisdiction'  => 'Λ.Δ. Κίνας',
+            // Last resort. Every call here is billed, so it is worth reaching
+            // only once the free tiers have actually failed.
+            'failover_rank' => 90,
         ],
     ];
+}
+
+/**
+ * Provider keys in the order failover walks them, cheapest-to-reach first.
+ *
+ * WHY A RANK AND NOT JUST THE ARRAY ORDER: the array order is easy to change
+ * by accident — adding a provider, sorting the list alphabetically, moving a
+ * block while editing a comment — and the cost of getting it wrong is silent.
+ * Nothing breaks; the app simply starts paying DeepSeek for work a free tier
+ * would have done, and no one finds out until the invoice. The rank states the
+ * intent where it cannot be lost: metered providers are reached only after the
+ * free ones have been tried and failed.
+ *
+ * Equal ranks keep the order aiProviders() declares them in — PHP's sort has
+ * been stable since 8.0, and the app requires 8.2.
+ *
+ * The admin's own choice still outranks all of this: aiBuildChain() puts the
+ * chosen provider first whatever its rank says. Picking DeepSeek as the
+ * primary is a deliberate decision to pay for the first attempt, and this must
+ * not quietly overrule it.
+ */
+function aiFailoverOrder(): array {
+    $providers = aiProviders();
+    $keys      = array_keys($providers);
+    usort($keys, fn($a, $b) => ($providers[$a]['failover_rank'] ?? 50) <=> ($providers[$b]['failover_rank'] ?? 50));
+    return $keys;
 }
 
 /**
@@ -127,7 +184,8 @@ function aiConfig(): array {
 
 /**
  * The order providers are tried in: the chosen one first, then every other
- * provider that has a key, in the order aiProviders() declares them.
+ * provider that has a key, in aiFailoverOrder() — free tiers before metered
+ * ones.
  *
  * Holding a key is what makes a provider eligible — there is no separate
  * "use for failover" switch, because an admin who does not want a provider
@@ -141,7 +199,7 @@ function aiFailoverChain(): array {
             $keyed[] = $provider;
         }
     }
-    return aiBuildChain(aiPrimaryProvider(), array_keys(aiProviders()), $keyed);
+    return aiBuildChain(aiPrimaryProvider(), aiFailoverOrder(), $keyed);
 }
 
 /**
@@ -152,6 +210,10 @@ function aiFailoverChain(): array {
  * exercised with more than one configuration in a single test run — and the
  * ordering is the part worth pinning. A primary without a key must not appear
  * (it cannot serve anything), and no provider may appear twice.
+ *
+ * $allProviders arrives already sorted by the caller (aiFailoverOrder()), so
+ * the cost ordering lives in one place and this function stays a pure
+ * "primary first, then the rest as given" rule.
  */
 function aiBuildChain(string $primary, array $allProviders, array $keyedProviders): array {
     $keyed = array_flip($keyedProviders);

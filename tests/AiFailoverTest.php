@@ -93,4 +93,57 @@ final class AiFailoverTest extends TestCase
             aiBuildChain('retired-provider', self::ALL, ['deepseek', 'gemini'])
         );
     }
+
+    /**
+     * aiFailoverOrder() — free tiers before metered ones.
+     *
+     * This is the rule with a money consequence rather than a correctness one,
+     * which is exactly why it needs a test: getting it wrong breaks nothing.
+     * The reports still come out, they just come out of the provider that
+     * bills for them, and nobody notices until the invoice.
+     */
+    public function testMeteredProvidersAreTriedLast(): void
+    {
+        $order = aiFailoverOrder();
+        $this->assertSame('deepseek', end($order), 'the metered provider must be the last one tried');
+        $this->assertSame(['gemini', 'grok'], array_slice($order, 0, 2));
+    }
+
+    /**
+     * The whole point of the rank: with all three keys stored and the default
+     * primary, a busy Gemini hands the work to Grok, and only a Grok failure
+     * too reaches the provider that charges for it.
+     */
+    public function testTheDefaultChainSpendsNothingUntilBothFreeTiersFail(): void
+    {
+        $this->assertSame(
+            ['gemini', 'grok', 'deepseek'],
+            aiBuildChain('gemini', aiFailoverOrder(), ['deepseek', 'gemini', 'grok'])
+        );
+    }
+
+    /**
+     * Choosing the metered provider on purpose still puts it first. An admin
+     * who picks it has decided to pay for the first attempt — a cost rule that
+     * overrode an explicit choice would be a bug, not a saving.
+     */
+    public function testAnExplicitlyChosenMeteredProviderStillLeads(): void
+    {
+        $this->assertSame(
+            ['deepseek', 'gemini', 'grok'],
+            aiBuildChain('deepseek', aiFailoverOrder(), ['deepseek', 'gemini', 'grok'])
+        );
+    }
+
+    /**
+     * Every provider offered in Settings must declare where it is tried, or it
+     * silently lands mid-chain on the default rank of 50 — between the free
+     * tiers and the metered one, which is a position nobody chose.
+     */
+    public function testEveryProviderDeclaresAFailoverRank(): void
+    {
+        foreach (aiProviders() as $key => $meta) {
+            $this->assertArrayHasKey('failover_rank', $meta, "provider '{$key}' has no failover_rank");
+        }
+    }
 }

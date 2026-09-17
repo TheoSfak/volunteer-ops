@@ -1967,11 +1967,28 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                     // The failover order, shown rather than described: an admin
                     // needs to know at a glance which provider a busy primary
                     // will hand the work to.
+                    //
+                    // Built by calling the SAME function the real calls order
+                    // themselves with, rather than repeating the rule here. The
+                    // previous copy of it was already one release behind the
+                    // moment ranking arrived, and a settings page that shows a
+                    // different order from the one used is worse than showing
+                    // nothing: it is the only place an admin can check.
+                    $aiKeyed = [];
+                    foreach (array_keys($aiProviders) as $ck) {
+                        if (!empty($settings['ai_api_key_' . $ck] ?? '')) $aiKeyed[] = $ck;
+                    }
+                    $aiChainKeys = aiBuildChain($aiProviderKey, aiFailoverOrder(), $aiKeyed);
                     $aiChain = [];
-                    foreach (array_merge([$aiProviderKey], array_keys($aiProviders)) as $ck) {
-                        if (isset($aiChain[$ck]) || empty($settings['ai_api_key_' . $ck] ?? '')) continue;
+                    foreach ($aiChainKeys as $ck) {
                         $aiChain[$ck] = $aiProviders[$ck]['label'];
                     }
+                    // Whether the chain actually ends on a metered provider, so
+                    // the "paid last" sentence is only shown when it describes
+                    // this install and not as a general claim.
+                    $aiLastKey = $aiChainKeys ? end($aiChainKeys) : null;
+                    $aiMeteredLast = count($aiChainKeys) > 1 && $aiLastKey !== null
+                        && ($aiProviders[$aiLastKey]['failover_rank'] ?? 50) >= 90;
                     ?>
                     <div class="alert <?= count($aiChain) > 1 ? 'alert-success' : 'alert-secondary' ?> py-2 px-3 small">
                         <i class="bi bi-arrow-repeat me-1"></i>
@@ -1979,6 +1996,10 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <strong>Αυτόματη εναλλαγή ενεργή.</strong> Σειρά: <?= h(implode(' → ', $aiChain)) ?>.
                         Αν ο πρώτος είναι υπερφορτωμένος (HTTP 503), σε υπέρβαση ορίου ή δεν απαντά, το αίτημα
                         πηγαίνει αυτόματα στον επόμενο. Η έκθεση καταγράφει ποιος την έγραψε τελικά.
+                        <?php if ($aiMeteredLast): ?>
+                        Ο <strong><?= h($aiProviders[$aiLastKey]['label']) ?></strong> χρεώνεται ανά κλήση, γι' αυτό μπαίνει
+                        τελευταίος: τον πληρώνετε μόνο όταν όντως δεν απάντησε κανένας άλλος.
+                        <?php endif; ?>
                         <?php else: ?>
                         <strong>Χωρίς εφεδρεία.</strong> Με key σε έναν μόνο πάροχο, μια υπερφόρτωση (HTTP 503)
                         σημαίνει ότι η ανάλυση δεν μπορεί να παραχθεί εκείνη τη στιγμή. Προσθέστε key και σε δεύτερο
