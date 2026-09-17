@@ -151,6 +151,46 @@ final class AiRedactionTest extends TestCase
         $this->assertNotEmpty(aiScanDigestForLeaks(['Παπαδόπουλος' => ['λεπτα' => 12]], self::NAMES));
     }
 
+    /**
+     * The false positive that aborted a real report on yphresies.gr: two
+     * answered orders out of three serialise as 0.6666666666666666, sixteen
+     * decimals, which is indistinguishable from a coordinate to a pattern that
+     * looks for a long decimal tail. Nothing geographic was ever in the
+     * digest. aiRatePercent() is the fix — ratios enter as whole percentages.
+     */
+    public function testAnUnroundedRatioIsNotMistakenForACoordinate(): void
+    {
+        $this->assertNotEmpty(
+            aiScanDigestForLeaks(['ποσοστο_απαντησης' => 2 / 3], []),
+            'A raw ratio really does trip the rule — which is why it must never reach the digest'
+        );
+        $this->assertSame(
+            [],
+            aiScanDigestForLeaks(['ποσοστο_απαντησης' => aiRatePercent(2 / 3)], []),
+            'Converted to a whole percentage it must pass'
+        );
+    }
+
+    public function testRatePercentRoundsAndPreservesNull(): void
+    {
+        $this->assertSame(67, aiRatePercent(2 / 3));
+        $this->assertSame(100, aiRatePercent(1.0));
+        $this->assertSame(0, aiRatePercent(0.0));
+        $this->assertNull(aiRatePercent(null));
+    }
+
+    /**
+     * A gate that says only "something was found" leaves an administrator with
+     * no move except to switch it off — the worst outcome for a control that
+     * exists to stop a personal-data leak. It has to quote the match.
+     */
+    public function testAViolationQuotesWhatItMatched(): void
+    {
+        $violations = aiScanDigestForLeaks(['x' => 'θέση 35.3387123'], []);
+        $this->assertNotEmpty($violations);
+        $this->assertStringContainsString('35.3387123', $violations[0]);
+    }
+
     public function testCatchesContactDetailsAndCoordinatesRegardlessOfNameList(): void
     {
         $this->assertNotEmpty(aiScanDigestForLeaks(['x' => 'επικοινωνία 6971234567'], []));

@@ -39,6 +39,23 @@ const AI_TEXT_CAP_SHORT = 300;
 const AI_TEXT_CAP_LONG  = 2000;
 
 /**
+ * A 0-1 ratio as a whole percentage, or null.
+ *
+ * Not cosmetic. An unrounded ratio serialises as 0.6666666666666666, sixteen
+ * decimals, which is indistinguishable from a GPS coordinate to any pattern
+ * that looks for "a number with a long decimal tail" — and that is exactly
+ * what the leak gate looks for. Two answered orders out of three aborted a
+ * real report on yphresies with "γεωγραφική συντεταγμένη εντοπίστηκε", which
+ * was both alarming and false.
+ *
+ * It is also simply wrong as data: the field is labelled a percentage, so a
+ * model reading 0.667 has to guess whether that means 67% or 0.667%.
+ */
+function aiRatePercent($ratio): ?int {
+    return $ratio === null ? null : (int) round(((float) $ratio) * 100);
+}
+
+/**
  * The pseudonym stem used for people in the digest.
  *
  * Language-aware because an English report reading "ΜΕΛΟΣ-3" looks like a
@@ -241,12 +258,22 @@ function aiScanDigestForLeaks(array $digest, array $forbiddenNames): array {
     $patterns = [
         'διεύθυνση email'        => '/[\w.+-]+@[\w-]+\.[\w.]{2,}/u',
         'αριθμός τηλεφώνου'      => '/(?<![\d])(?:\+?30[\s.\-]?)?(?:69|2\d)\d[\s.\-]?\d{3}[\s.\-]?\d{4}(?![\d])/u',
+        // Anything with five or more decimal places. A legitimate figure in
+        // this report never needs that precision, so a long decimal tail is
+        // either a coordinate or a bug — and the quoted match below is what
+        // tells them apart. An unrounded ratio (0.6666666666666666) once
+        // aborted a real report as a "coordinate", and with no quoted value
+        // the message was impossible to argue with. See aiRatePercent().
         'γεωγραφική συντεταγμένη' => '/(?<![\d])\d{1,3}\.\d{5,}(?![\d])/u',
         'αριθμός μητρώου/ταυτότητας' => '/(?<![\d])\d{9,}(?![\d])/u',
     ];
     foreach ($patterns as $what => $pattern) {
-        if (preg_match($pattern, $json)) {
-            $violations[] = 'Εντοπίστηκε ' . $what . ' μέσα στα δεδομένα προς αποστολή.';
+        if (preg_match($pattern, $json, $m)) {
+            // Quote what matched. A gate that says only "something was found"
+            // leaves an administrator with no move except to disable it, which
+            // is the worst possible outcome for a control that exists to stop
+            // a personal-data leak.
+            $violations[] = 'Εντοπίστηκε ' . $what . ' («' . mb_substr($m[0], 0, 40, 'UTF-8') . '») μέσα στα δεδομένα προς αποστολή.';
         }
     }
 
@@ -405,7 +432,7 @@ function buildMissionAiDigest(int $missionId, array $mission, array $score, arra
             'εντολες' => [
                 'συνολο'                  => $t['order_count'],
                 'ποτε_δεν_απαντηθηκαν'    => $t['unanswered_count'],
-                'ποσοστο_απαντησης'       => $t['answered_rate'],
+                'ποσοστο_απαντησης'       => aiRatePercent($t['answered_rate']),
                 'απαντηθηκαν_μετα_4ωρο'   => $t['forgotten_count'],
                 'μο_λεπτα_επιβεβαιωσης'   => $p['response']['raw']['avg_minutes'] ?? null,
                 'ολοκληρωμενες'           => $p['completion']['raw']['fulfilled'] ?? null,
@@ -758,7 +785,7 @@ function buildTeamAiDigest(int $missionId, array $mission, array $score, array $
     $digest['εντολες'] = [
         'συνολο'                 => $team['order_count'],
         'ποτε_δεν_απαντηθηκαν'   => $team['unanswered_count'],
-        'ποσοστο_απαντησης'      => $team['answered_rate'],
+        'ποσοστο_απαντησης'      => aiRatePercent($team['answered_rate']),
         'απαντηθηκαν_μετα_4ωρο'  => $team['forgotten_count'],
         'μο_λεπτα_επιβεβαιωσης'  => $p['response']['raw']['avg_minutes'] ?? null,
         'ολοκληρωμενες'          => $p['completion']['raw']['fulfilled'] ?? null,
