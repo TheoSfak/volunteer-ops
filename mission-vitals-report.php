@@ -49,6 +49,8 @@ $isLive    = $mission['status'] === STATUS_OPEN;
 $now       = loadVitalsNowForMission($missionId);
 $episodes  = detectVitalsEpisodes($missionId);
 $teamLoad  = loadVitalsTeamLoadForMission($missionId, $episodes);
+// $problems is assembled further down, once the zone thresholds exist — it is
+// a pure reading of the three arrays above and costs no query of its own.
 // Chart window. A live mission defaults to the last eight hours — one shift,
 // the span a command post is actually reasoning about — while a closed one
 // shows everything, because by then the question is "what happened", not
@@ -66,6 +68,8 @@ $maxHr     = vitalsMaxHeartRate();
 // render either way.
 $elevatedBpm = vitalsZoneBpm($config['elevated_pct'], $maxHr);
 $criticalBpm = vitalsZoneBpm($config['critical_pct'], $maxHr);
+
+$problems = detectVitalsProblems($now, $episodes, $teamLoad, $config, $elevatedBpm);
 
 // Tachycardia and bradycardia are EVENTS — a moment something happened to one
 // person, worth a card each. Sustained strain is a WORKLOAD, and on a real
@@ -143,6 +147,21 @@ include __DIR__ . '/includes/header.php';
     .vr-tile.elev { border-left-color: #b45309; } .vr-tile.elev .v { color: #b45309; }
     .vr-tile.ok   { border-left-color: #15803d; } .vr-tile.ok .v   { color: #15803d; }
     .vr-tile.mute { border-left-color: #6c757d; } .vr-tile.mute .v { color: #6c757d; }
+
+    /* The findings panel. A left bar per severity rather than a coloured
+       background: three amber blocks in a row read as one warning, and the
+       point of this card is that you can count what is wrong. */
+    .vr-problems { border-top: 4px solid #b91c1c; }
+    .vr-problem { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border-left: 4px solid #cfd4da; background: #fafaf9; border-radius: 0 8px 8px 0; margin-bottom: 8px; }
+    .vr-problem:last-child { margin-bottom: 0; }
+    .vr-problem > i { font-size: 1.05rem; line-height: 1.35; color: #6c757d; }
+    .vr-problem .t { font-weight: 700; font-size: .92rem; }
+    .vr-problem .d { font-size: .82rem; color: #52514e; }
+    .vr-problem.high { border-left-color: #b91c1c; background: rgba(185,28,28,.06); }
+    .vr-problem.high > i, .vr-problem.high .t { color: #b91c1c; }
+    .vr-problem.warn { border-left-color: #b45309; background: rgba(180,83,9,.06); }
+    .vr-problem.warn > i, .vr-problem.warn .t { color: #b45309; }
+    .vr-problem.info { border-left-color: #6c757d; }
 
     .vr-table { width: 100%; font-size: .88rem; }
     .vr-table th { text-align: left; color: #898781; font-weight: 600; font-size: .72rem; text-transform: uppercase; padding: 5px 8px; border-bottom: 2px solid #eee; white-space: nowrap; }
@@ -222,6 +241,42 @@ include __DIR__ . '/includes/header.php';
         <div class="col-6 col-lg-2"><div class="vr-tile elev"><div class="v"><?= (int) $now['summary']['elevated'] ?></div><div class="l">Με αυξημένους παλμούς</div></div></div>
         <div class="col-6 col-lg-2"><div class="vr-tile mute"><div class="v"><?= (int) $now['summary']['stale'] ?></div><div class="l">Έχασαν σήμα</div></div></div>
         <div class="col-6 col-lg-2"><div class="vr-tile mute"><div class="v"><?= (int) $now['summary']['no_sensor'] ?></div><div class="l">Χωρίς αισθητήρα</div></div></div>
+    </div>
+
+    <?php /* What the numbers MEAN, above the numbers themselves. The tiles and
+             tables below answer "what is everyone's heart doing" and leave the
+             conclusion to the reader — which at hour four of an eight-hour
+             search is the work a tired coordinator does worst. Deterministic,
+             computed from what this page already has, no second query and no
+             AI: a heart-rate problem is a threshold, and this is Article 9
+             health data that has no business leaving the server to have prose
+             written about it. */ ?>
+    <div class="vr-card vr-problems">
+        <h2><i class="bi bi-clipboard2-pulse-fill text-danger"></i>Τι χρειάζεται προσοχή</h2>
+        <?php if ($problems['nothing_to_assess']): ?>
+            <p class="vr-empty mb-0">
+                <i class="bi bi-eye-slash me-1"></i>
+                Κανένας από τους <?= (int) $problems['expected'] ?> εγκεκριμένους συμμετέχοντες δεν φοράει
+                αισθητήρα παλμών, οπότε δεν υπάρχει τίποτα να αξιολογηθεί. Τα μηδενικά παρακάτω σημαίνουν
+                «καμία μέτρηση», όχι «κανένα πρόβλημα».
+            </p>
+        <?php elseif (!$problems['findings']): ?>
+            <p class="vr-empty mb-0">
+                <i class="bi bi-check2-circle me-1"></i>
+                Κανένα εύρημα. Όλοι όσοι φοράνε αισθητήρα είναι εντός ορίων και κανείς δεν είναι
+                παρατεταμένα σε αυξημένους παλμούς.
+            </p>
+        <?php else: ?>
+            <?php foreach ($problems['findings'] as $p): ?>
+                <div class="vr-problem <?= h($p['sev']) ?>">
+                    <i class="bi <?= h($p['icon']) ?>"></i>
+                    <div>
+                        <div class="t"><?= h($p['title']) ?></div>
+                        <div class="d"><?= h($p['detail']) ?></div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
     </div>
 
     <!-- Active episodes first: this is the reason someone opens the page mid-mission -->

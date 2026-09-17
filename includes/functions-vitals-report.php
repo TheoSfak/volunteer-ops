@@ -389,3 +389,233 @@ function loadVitalsTeamLoadForMission(int $missionId, array $episodes = []): arr
     uasort($teams, fn($a, $b) => ($b['bpm_avg'] ?? 0) <=> ($a['bpm_avg'] ?? 0));
     return array_values($teams);
 }
+
+/**
+ * How long somebody may stay continuously in the elevated zone before the
+ * absence of a relief becomes the finding rather than the effort.
+ *
+ * Derived from the org's own strain threshold rather than being a second knob:
+ * an organisation that considers twenty minutes above 75% an episode considers
+ * forty minutes of it unrelieved. The floor stops a very short strain setting
+ * from firing this on everyone who walks uphill.
+ */
+function vitalsUnrelievedMinutes(array $config): int {
+    return max(30, ((int) ($config['strain_minutes'] ?? 20)) * 2);
+}
+
+/**
+ * Minutes in hours and minutes once there are enough of them to matter.
+ *
+ * "3342λ" is a number the reader has to divide before it means anything, and
+ * on a closed mission — where the last reading can be days old — that is every
+ * row in the panel.
+ */
+function vitalsMinutesWords(int $minutes): string {
+    if ($minutes < 60) {
+        return max(0, $minutes) . 'λ';
+    }
+    $h = intdiv($minutes, 60);
+    $m = $minutes % 60;
+    if ($h >= 48) {
+        return intdiv($h, 24) . ' ημέρες';
+    }
+    return $m > 0 ? $h . 'ω ' . $m . 'λ' : $h . 'ω';
+}
+
+/**
+ * At most this many people are named in one finding; the count in the title
+ * stays truthful and the rest become "+N ακόμη". Six names with a duration
+ * each is a wall of text in a card meant to be read in one glance.
+ */
+const VITALS_PROBLEM_NAME_CAP = 4;
+
+/** "Α, Β, Γ +2 ακόμη" — the cap applied, with the remainder acknowledged. */
+function vitalsNameList(array $parts): string {
+    $shown = array_slice($parts, 0, VITALS_PROBLEM_NAME_CAP);
+    $rest  = count($parts) - count($shown);
+    return implode(' · ', $shown) . ($rest > 0 ? ' +' . $rest . ' ακόμη' : '');
+}
+
+/**
+ * A team is carrying a disproportionate share when its elevated-time ratio is
+ * this many times the mission's own average. Not an absolute percentage: on a
+ * mountain callout everybody is elevated most of the time, and the finding is
+ * about IMBALANCE between teams, not about effort being high.
+ */
+const VITALS_TEAM_IMBALANCE_FACTOR = 1.5;
+
+/** Below this much elevated time a team's ratio is noise, whatever it is. */
+const VITALS_TEAM_IMBALANCE_MIN_MINUTES = 20;
+
+/**
+ * What is WRONG, in words, rather than what the numbers are.
+ *
+ * The rest of this page answers "what is everyone's heart doing" and leaves
+ * the conclusion to the reader. At hour four of an eight-hour search, with six
+ * tiles, three tables and a chart on screen, that reading is exactly the work
+ * a tired coordinator does badly. This does it for them, in the same shape as
+ * the Action Room's «Τι μου ξέφυγε» panel — and for the same reason it is
+ * DETERMINISTIC. A heart-rate problem IS a threshold; there is no judgement
+ * here for a model to add, and heart rate is Article 9 health data that has no
+ * business leaving this server to have prose written about it.
+ *
+ * Pure: takes what the page has already computed and issues no query of its
+ * own. The page reloads itself every thirty seconds while a mission is live.
+ *
+ * Returns ['findings' => [...], 'nothing_to_assess' => bool, 'expected' => int].
+ * The second is the ordinary case for an organisation that owns no straps:
+ * every volunteer reads zero, and a panel full of "no data" rows would be
+ * worse than one sentence saying nobody is wearing a sensor.
+ */
+function detectVitalsProblems(array $now, array $episodes, array $teamLoad, array $config, int $elevatedBpm): array
+{
+    $volunteers = $now['volunteers'] ?? [];
+    $summary    = $now['summary'] ?? [];
+    $expected   = (int) ($summary['expected'] ?? count($volunteers));
+
+    $byZone = fn(string $zone) => array_values(array_filter(
+        $volunteers,
+        fn($v) => ($v['zone'] ?? '') === $zone
+    ));
+
+    // "Nobody ever wore one" is NOT the same as summary['wearing'] === 0, which
+    // also counts zero the moment everyone's signal goes stale — including a
+    // finished mission with hours of recorded data behind it, where there is a
+    // great deal to assess. The real test is whether anyone produced a reading
+    // at all, which is exactly the volunteers NOT in the 'none' zone.
+    $measured = count($volunteers) - count($byZone('none'));
+    if ($measured === 0) {
+        return ['findings' => [], 'nothing_to_assess' => true, 'expected' => $expected];
+    }
+
+    $findings = [];
+    $withBpm = fn(array $rows) => vitalsNameList(array_map(
+        fn($v) => trim((string) ($v['name'] ?? '')) . ' (' . (int) ($v['bpm'] ?? 0) . ')',
+        $rows
+    ));
+
+    // ── Someone is measurably in trouble right now ──────────────────────
+    $acute = [
+        ['critical', 'bi-heart-pulse-fill', 'Σε ταχυκαρδία αυτή τη στιγμή',
+         'Διακόψτε τη δραστηριότητά τους και ελέγξτε τους. '],
+        ['low', 'bi-arrow-down-circle-fill', 'Σε βραδυκαρδία αυτή τη στιγμή',
+         'Χαμηλοί παλμοί σε άνθρωπο που κινείται δεν είναι φυσιολογικοί — ελέγξτε τους. '],
+    ];
+    foreach ($acute as [$zone, $icon, $title, $advice]) {
+        $rows = $byZone($zone);
+        if (!$rows) continue;
+        $findings[] = [
+            'sev'    => 'high',
+            'icon'   => $icon,
+            'title'  => $title . ' (' . count($rows) . ')',
+            'detail' => $advice . $withBpm($rows),
+        ];
+    }
+
+    // ── Effort nobody has relieved ──────────────────────────────────────
+    // The zone is not the finding; the DURATION with no relief is. Someone at
+    // 145 bpm for four minutes is climbing. The same person at 145 for fifty
+    // minutes is a rotation that never happened.
+    $unrelieved = vitalsUnrelievedMinutes($config);
+    $tired = array_values(array_filter(
+        $volunteers,
+        fn($v) => ($v['zone'] ?? '') === 'elevated'
+            && ($v['zone_minutes'] ?? null) !== null
+            && (int) $v['zone_minutes'] >= $unrelieved
+    ));
+    if ($tired) {
+        usort($tired, fn($a, $b) => (int) $b['zone_minutes'] <=> (int) $a['zone_minutes']);
+        $findings[] = [
+            'sev'    => 'high',
+            'icon'   => 'bi-hourglass-bottom',
+            'title'  => 'Πάνω από ' . $unrelieved . ' λεπτά σε αυξημένους παλμούς χωρίς ανάπαυλα (' . count($tired) . ')',
+            'detail' => 'Σκεφτείτε αντικατάσταση. ' . vitalsNameList(array_map(
+                fn($v) => trim((string) ($v['name'] ?? '')) . ' — '
+                    . vitalsMinutesWords((int) $v['zone_minutes']) . ' στη ζώνη',
+                $tired
+            )),
+        ];
+    }
+
+    // ── A sensor that went quiet mid-operation ──────────────────────────
+    // Not the same as never wearing one: this person WAS being monitored and
+    // now is not, which is a question mark rather than a known absence.
+    $stale = $byZone('stale');
+    if ($stale) {
+        usort($stale, fn($a, $b) => (int) ($b['age_seconds'] ?? 0) <=> (int) ($a['age_seconds'] ?? 0));
+        $findings[] = [
+            'sev'    => 'warn',
+            'icon'   => 'bi-reception-0',
+            'title'  => 'Έχασαν σήμα ενώ φορούσαν αισθητήρα (' . count($stale) . ')',
+            'detail' => 'Ο ιμάντας μπορεί να έφυγε ή να έπεσε το Bluetooth. ' . vitalsNameList(array_map(
+                fn($v) => trim((string) ($v['name'] ?? '')) . ' — '
+                    . vitalsMinutesWords(max(1, (int) round(((int) ($v['age_seconds'] ?? 0)) / 60)))
+                    . ' χωρίς μέτρηση',
+                $stale
+            )),
+        ];
+    }
+
+    // ── One team doing more than its share ──────────────────────────────
+    $withMinutes = array_values(array_filter($teamLoad, fn($t) => (int) ($t['minutes'] ?? 0) > 0));
+    if (count($withMinutes) >= 2) {
+        $totalMinutes  = array_sum(array_column($withMinutes, 'minutes'));
+        $totalElevated = array_sum(array_column($withMinutes, 'elevated_minutes'));
+        $missionRatio  = $totalMinutes > 0 ? $totalElevated / $totalMinutes : 0.0;
+        if ($missionRatio > 0) {
+            foreach ($withMinutes as $team) {
+                $elevated = (int) $team['elevated_minutes'];
+                $minutes  = (int) $team['minutes'];
+                if ($elevated < VITALS_TEAM_IMBALANCE_MIN_MINUTES) continue;
+                $ratio = $elevated / $minutes;
+                if ($ratio < $missionRatio * VITALS_TEAM_IMBALANCE_FACTOR) continue;
+                $findings[] = [
+                    'sev'    => 'warn',
+                    'icon'   => 'bi-diagram-3-fill',
+                    'title'  => 'Η ' . $team['label'] . ' σηκώνει δυσανάλογο φορτίο',
+                    'detail' => round($ratio * 100) . '% του χρόνου της σε αυξημένους παλμούς, έναντι '
+                        . round($missionRatio * 100) . '% κατά μέσο όρο στην αποστολή'
+                        . (!empty($team['bpm_avg']) ? ' · μέσος όρος ' . (int) $team['bpm_avg'] . ' bpm' : '') . '.',
+                ];
+            }
+        }
+    }
+
+    // ── Clinical episodes that have already ended ───────────────────────
+    // Worth one line, not a finding each: they are listed in full lower down,
+    // and what the reader needs here is whether today had any at all.
+    $past = array_values(array_filter(
+        $episodes,
+        fn($e) => ($e['type'] ?? '') !== 'strain' && empty($e['active'])
+    ));
+    if ($past) {
+        $worst = 0;
+        foreach ($past as $e) {
+            $worst = max($worst, (int) ($e['bpm_peak'] ?? 0));
+        }
+        $findings[] = [
+            'sev'    => 'warn',
+            'icon'   => 'bi-clock-history',
+            'title'  => 'Κλινικά επεισόδια που πέρασαν (' . count($past) . ')',
+            'detail' => 'Τελείωσαν, αλλά συνέβησαν σε αυτή την αποστολή'
+                . ($worst ? ' · ακραία τιμή ' . $worst . ' bpm' : '') . '.',
+        ];
+    }
+
+    // ── People the report simply cannot see ─────────────────────────────
+    $none = count($byZone('none'));
+    if ($none > 0) {
+        $findings[] = [
+            'sev'    => 'info',
+            'icon'   => 'bi-eye-slash',
+            'title'  => $none . ' από ' . $expected . ' χωρίς καμία μέτρηση',
+            'detail' => 'Ό,τι λέει αυτή η αναφορά αφορά μόνο τους ' . $measured
+                . ' που κατέγραψαν παλμούς. Για τους υπόλοιπους δεν ξέρουμε τίποτα — που δεν σημαίνει ότι είναι καλά.',
+        ];
+    }
+
+    $rank = ['high' => 0, 'warn' => 1, 'info' => 2];
+    usort($findings, fn($a, $b) => ($rank[$a['sev']] ?? 3) <=> ($rank[$b['sev']] ?? 3));
+
+    return ['findings' => $findings, 'nothing_to_assess' => false, 'expected' => $expected];
+}
