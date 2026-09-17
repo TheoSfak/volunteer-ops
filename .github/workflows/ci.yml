@@ -85,6 +85,21 @@ jobs:
       - name: Load test schema
         run: mysql -h 127.0.0.1 -u root volunteer_ops_test < tests/fixtures/schema-structure.sql
 
+      # The snapshot above lags behind migrations by design, but most of the
+      # suite assumes the shared fixture is already fully migrated (see
+      # FreshInstallTest's docblock, which states that contract). Nothing
+      # enforced it, so this job had been failing since migration 154 added
+      # ai_translation_cache — eight releases — while passing on every
+      # developer machine, whose test database accumulates tables from earlier
+      # runs of MigrationsRunnerTest.
+      - name: Bring the fixture schema up to DB_SCHEMA_VERSION
+        env:
+          TEST_DB_HOST: 127.0.0.1
+          TEST_DB_NAME: volunteer_ops_test
+          TEST_DB_USER: root
+          TEST_DB_PASS: ""
+        run: php tests/migrate-fixture.php
+
       - name: Run PHPUnit
         env:
           TEST_DB_HOST: 127.0.0.1
