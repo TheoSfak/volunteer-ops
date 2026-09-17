@@ -46,14 +46,11 @@ if (!$result['ok']) {
     $message = $result['error'];
     $listing = aiListModels();
     if ($listing['ok'] && $listing['models']) {
-        $usable = array_values(array_filter(
-            $listing['models'],
-            fn($m) => !preg_match('/embedding|imagen|veo|aqa|-tts|vision-exp|learnlm/i', $m)
-        ));
-        if (!$usable) $usable = $listing['models'];
-        $message .= ' — Διαθέσιμα μοντέλα για αυτό το key: ' . implode(', ', array_slice($usable, 0, 25))
-                  . (count($usable) > 25 ? ' …' : '')
-                  . '. Αντιγράψτε ένα από αυτά στο πεδίο «Μοντέλο» και αποθηκεύστε.';
+        $usable = aiChatModelsFromList($listing['models']);
+        $message .= ' — Μοντέλα συνομιλίας διαθέσιμα για αυτό το key (νεότερα πρώτα): '
+                  . implode(', ', array_slice($usable, 0, 30))
+                  . (count($usable) > 30 ? ' …' : '')
+                  . '. Αντιγράψτε ένα στο πεδίο «Μοντέλο» και αποθηκεύστε.';
     }
     echo json_encode(['ok' => false, 'message' => $message], JSON_UNESCAPED_UNICODE);
     exit;

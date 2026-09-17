@@ -51,8 +51,14 @@ function aiProviders(): array {
             // generateContent API is a different shape entirely; this path
             // lets one client serve both providers.
             'base_url'      => 'https://generativelanguage.googleapis.com/v1beta/openai',
-            'default_model' => 'gemini-2.5-flash',
-            'models'        => ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-2.5-pro'],
+            // gemini-2.5-flash was the default here for exactly one release and
+            // failed on a fresh key with "no longer available to new users" —
+            // Google keeps retired models callable for existing projects, so a
+            // name that works on one account 404s on another. Treat every entry
+            // below as a suggestion with a shelf life; the Settings test button
+            // lists what a given key can actually call.
+            'default_model' => 'gemini-3.6-flash',
+            'models'        => ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro'],
             'key_url'       => 'https://aistudio.google.com/apikey',
             'key_hint'      => 'Διαθέτει δωρεάν επίπεδο με ημερήσιο όριο αιτημάτων — αρκετό για εκθέσεις αποστολών.',
             'jurisdiction'  => 'ΗΠΑ / Google',
@@ -319,8 +325,39 @@ function aiListModels(): array {
         // admin will paste back into the model field.
         $ids[] = str_starts_with($id, 'models/') ? substr($id, 7) : $id;
     }
-    sort($ids);
     return ['ok' => true, 'models' => $ids, 'error' => null];
+}
+
+/**
+ * Narrow a provider's raw model catalogue to the ones that could actually
+ * write a report, newest first.
+ *
+ * A real Gemini key returns dozens of ids and most of them cannot: image and
+ * audio generators, the Live realtime API, computer-use, deep-research, and
+ * tool-specific variants. On the first real key this was tried against, the
+ * unfiltered alphabetical list buried the newest generation past the display
+ * cap — so the model the provider's OWN retirement notice told the admin to
+ * switch to was not among the ones shown.
+ *
+ * Natural-order descending, so 3.6 sorts above 3.5 above 3.1 above 2.5; plain
+ * string sorting puts 3.1 above 3.6 and the oldest generation on top.
+ *
+ * Never returns an empty list when given a non-empty one: if the filter
+ * matches everything, the unfiltered set is better than nothing.
+ */
+function aiChatModelsFromList(array $ids): array {
+    $usable = array_values(array_filter(
+        $ids,
+        fn($m) => is_string($m) && $m !== '' && !preg_match(
+            '/embedding|imagen|veo|aqa|-tts|vision|learnlm|image|audio|-live|computer-use|deep-research|antigravity|customtools/i',
+            $m
+        )
+    ));
+    if (!$usable) {
+        $usable = array_values(array_filter($ids, fn($m) => is_string($m) && $m !== ''));
+    }
+    usort($usable, fn($a, $b) => strnatcasecmp($b, $a));
+    return $usable;
 }
 
 /**
