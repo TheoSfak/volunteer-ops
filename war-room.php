@@ -4745,8 +4745,21 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
             <div class="modal-body">
                 <div class="row row-cols-1 row-cols-md-2 g-2" id="cardVisibilityList"></div>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" id="cardVisibilityShowAllBtn"><?= t('card_visibility.show_all_btn') ?></button>
+            <?php /* The two bulk buttons sit together and away from Close,
+                     because they are each other's undo: hiding everything is
+                     recoverable in one press, and the gear that reopens this
+                     modal lives in the hero header rather than in a card, so
+                     turning every card off cannot lock anyone out of turning
+                     them back on. */ ?>
+            <div class="modal-footer justify-content-between">
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-outline-secondary" id="cardVisibilityShowAllBtn">
+                        <i class="bi bi-check2-all me-1"></i><?= t('card_visibility.show_all_btn') ?>
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" id="cardVisibilityHideAllBtn">
+                        <i class="bi bi-slash-circle me-1"></i><?= t('card_visibility.hide_all_btn') ?>
+                    </button>
+                </div>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= t('common.close') ?></button>
             </div>
         </div>
@@ -5376,6 +5389,26 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
         showAllBtn.addEventListener('click', () => {
             Array.from(hiddenCards).forEach(id => setCardHidden(id, false));
             hiddenCards.clear();
+            renderCardVisibilityList();
+            scheduleSaveLayout();
+        });
+    }
+    const hideAllBtn = document.getElementById('cardVisibilityHideAllBtn');
+    if (hideAllBtn) {
+        hideAllBtn.addEventListener('click', () => {
+            // Read the ids off the zones rather than out of cardLabels: the
+            // list in this modal is built from the zones too, so a card that
+            // is not on this page (a feature switched off, a card this viewer
+            // cannot see) is never added to hiddenCards and cannot be saved
+            // into a layout as hidden-but-nonexistent.
+            Array.from(zoneMain.children)
+                .concat(Array.from(zoneSidebar.children))
+                .map(el => el.getAttribute('data-card-id'))
+                .filter(Boolean)
+                .forEach(id => {
+                    hiddenCards.add(id);
+                    setCardHidden(id, true);
+                });
             renderCardVisibilityList();
             scheduleSaveLayout();
         });

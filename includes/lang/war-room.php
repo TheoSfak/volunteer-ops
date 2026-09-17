@@ -782,6 +782,7 @@ return [
         // Show/hide cards modal (gear icon in the hero header)
         'card_visibility.modal_title' => 'Εμφάνιση/Απόκρυψη Καρτών',
         'card_visibility.show_all_btn' => 'Εμφάνιση Όλων',
+        'card_visibility.hide_all_btn' => 'Αφαίρεση Όλων',
         'card_visibility.label_participants' => 'Εγκεκριμένοι εθελοντές',
 
         // Response-time report modal
@@ -2407,6 +2408,7 @@ return [
         // Show/hide cards modal (gear icon in the hero header)
         'card_visibility.modal_title' => 'Show/Hide Cards',
         'card_visibility.show_all_btn' => 'Show All',
+        'card_visibility.hide_all_btn' => 'Hide All',
         'card_visibility.label_participants' => 'Approved volunteers',
 
         'report.modal_title' => 'Response Time Report',
