@@ -13132,6 +13132,19 @@ let assistantHeroOnScreen = true;
 // Whether there is a provider to ask at all. The deterministic panel works
 // without one, so every AI affordance has to be able to disappear on its own.
 const ASSISTANT_CAN_ASK = <?= aiIsConfigured() ? 'true' : 'false' ?>;
+<?php
+// Whether a heart-rate question has anything to work with: the feature on, and
+// at least one volunteer on this mission who actually recorded something. The
+// same test the digest uses to decide whether to include the section at all,
+// so the button and the data cannot disagree.
+$assistantHasVitals = false;
+if (vitalsEnabled()) {
+    foreach (loadVitalsNowForMission($missionId)['volunteers'] ?? [] as $__v) {
+        if (($__v['zone'] ?? '') !== 'none') { $assistantHasVitals = true; break; }
+    }
+}
+?>
+const ASSISTANT_HAS_VITALS = <?= $assistantHasVitals ? 'true' : 'false' ?>;
 
 // Relative time is computed HERE, from the absolute epoch the server sent, and
 // deliberately never server-side: a pre-computed "πριν 7′" would change that
@@ -13552,7 +13565,13 @@ const ASSISTANT_QUESTION_GROUPS = [
     {group: 'search',  keys: ['coverage', 'nearest', 'clues', 'reposition']},
     {group: 'crew',    keys: ['relief', 'isolated', 'reinforce', 'pace']},
     {group: 'flow',    keys: ['orders', 'field', 'unsaid']},
-    {group: 'risk',    keys: ['weather', 'safety', 'incidents']},
+    // 'vitals' is only answerable when the heart-rate feature is on AND
+    // somebody recorded something — the digest omits the whole section
+    // otherwise. Rendered conditionally rather than always, because a preset
+    // that reliably answers "I have no data" trains people to stop pressing
+    // the presets.
+    {group: 'risk',    keys: ['weather', 'safety', 'incidents']
+        .concat(ASSISTANT_HAS_VITALS ? ['vitals'] : [])},
     {group: 'time',    keys: ['supplies', 'clock', 'brief']},
 ];
 

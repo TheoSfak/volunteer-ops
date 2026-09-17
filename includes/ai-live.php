@@ -107,6 +107,16 @@ const AI_LIVE_RATE_WINDOW  = 600;
  */
 const AI_LIVE_CREW_CAP = 60;
 
+/**
+ * Heart-rate episodes carried in the digest, clinical ones first.
+ *
+ * Strain fires for nearly everyone on a real callout — a ten-person drill
+ * produced twenty-one episodes of which seventeen were strain — so an uncapped
+ * list would bury the two that matter and pay for the burial by the token. The
+ * totals beside it stay truthful whatever this drops.
+ */
+const AI_LIVE_VITALS_EPISODE_CAP = 20;
+
 // ─── Geometry, in words rather than numbers ──────────────────────────────────
 
 /**
@@ -904,6 +914,116 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
                 : '');
     }
 
+    // ── heart rate ───────────────────────────────────────────────────────
+    //
+    // ARTICLE 9 HEALTH DATA, AND THE ONLY SUCH DATA IN THIS DIGEST. Patient
+    // details are stripped from the incidents section a few hundred lines up
+    // for exactly this reason, and rescuer heart rate is the same legal
+    // category. It is here because the coordinator asked for it, with the
+    // safeguard they specified: names travel as the SAME pseudonyms as
+    // everywhere else, and come back as real names only on this server, in
+    // aiObserverRehydrate(), after the provider has answered.
+    //
+    // Absent entirely when the feature is off or nobody recorded anything, so
+    // an organisation that does not use straps ships no health data at all and
+    // the model is not left inferring from an empty array.
+    //
+    // The deterministic panel on mission-vitals-report.php remains the primary
+    // reading of this data and needs no provider. This exists so a question
+    // asked in the Action Room can join heart rate to everything else in the
+    // operation — the sector a team is working, the order they are answering,
+    // the weather they are doing it in — which a page about heart rate alone
+    // cannot do.
+    if (vitalsEnabled()) {
+        $vNow      = loadVitalsNowForMission($missionId);
+        $vMeasured = array_values(array_filter(
+            $vNow['volunteers'] ?? [],
+            fn($v) => ($v['zone'] ?? '') !== 'none'
+        ));
+
+        if ($vMeasured) {
+            $vConfig  = vitalsConfig();
+            $vMaxHr   = vitalsMaxHeartRate();
+            $zoneWord = [
+                'critical' => 'ταχυκαρδια',
+                'low'      => 'βραδυκαρδια',
+                'elevated' => 'αυξημενοι',
+                'ok'       => 'φυσιολογικοι',
+                'stale'    => 'χωρις_σημα',
+                'none'     => 'χωρις_αισθητηρα',
+            ];
+
+            $people = [];
+            foreach ($vMeasured as $v) {
+                $people[] = [
+                    'ονομα'               => $pseudo($v['name'] ?? null),
+                    'ομαδα'               => ($v['team_label'] ?? '') !== '' ? $v['team_label'] : 'Χωρίς ομάδα',
+                    'ζωνη'                => $zoneWord[$v['zone'] ?? ''] ?? ($v['zone'] ?? ''),
+                    'bpm'                 => $v['bpm'] === null ? null : (int) $v['bpm'],
+                    'λεπτα_στη_ζωνη'      => $v['zone_minutes'] === null ? null : (int) $v['zone_minutes'],
+                    // In words, not raw minutes. On a mission whose last
+                    // reading is two days old this field reads "3313", and the
+                    // prompt forbids the model doing arithmetic on it — so it
+                    // would repeat the number at a coordinator who then has to
+                    // divide it themselves.
+                    'χωρις_μετρηση'       => ($v['zone'] ?? '') === 'stale' && $v['age_seconds'] !== null
+                                             ? vitalsMinutesWords((int) round(((int) $v['age_seconds']) / 60))
+                                             : null,
+                ];
+            }
+
+            // Strain fires for nearly everyone on a real callout — a ten-person
+            // drill produced twenty-one episodes of which seventeen were strain
+            // — so the clinical ones come first and the list is capped. The
+            // totals below stay truthful whatever the cap drops.
+            $vEpisodes = detectVitalsEpisodes($missionId);
+            usort($vEpisodes, function ($a, $b) {
+                $clinical = fn($e) => ($e['type'] ?? '') === 'strain' ? 1 : 0;
+                if ($clinical($a) !== $clinical($b)) return $clinical($a) <=> $clinical($b);
+                if (!empty($a['active']) !== !empty($b['active'])) return !empty($b['active']) <=> !empty($a['active']);
+                return (int) ($b['minutes'] ?? 0) <=> (int) ($a['minutes'] ?? 0);
+            });
+            $episodeWord = [
+                'tachycardia' => 'ταχυκαρδια',
+                'bradycardia' => 'βραδυκαρδια',
+                'strain'      => 'παρατεταμενη_καταπονηση',
+            ];
+            $episodes = [];
+            foreach (array_slice($vEpisodes, 0, AI_LIVE_VITALS_EPISODE_CAP) as $e) {
+                $episodes[] = [
+                    'ειδος'       => $episodeWord[$e['type'] ?? ''] ?? ($e['type'] ?? ''),
+                    'ονομα'       => $pseudo($e['name'] ?? null),
+                    'ομαδα'       => ($e['team_label'] ?? '') !== '' ? $e['team_label'] : 'Χωρίς ομάδα',
+                    'λεπτα'       => (int) ($e['minutes'] ?? 0),
+                    'ακραια_τιμη' => (int) ($e['bpm_peak'] ?? 0),
+                    'σε_εξελιξη'  => !empty($e['active']),
+                ];
+            }
+
+            $refs['VITALS'] = 'Αναφορά παλμών';
+            $digest['παλμοι'] = [
+                'ref'      => 'VITALS',
+                'τι_ειναι' => 'Καρδιακοι παλμοι οσων φοραν αισθητηρα. Ολοκληρη η αναφορα ειναι στη σελιδα «Αναφορα Παλμων» της αποστολης.',
+                'ορια_bpm' => [
+                    'ταχυκαρδια_απο'   => (int) $vConfig['tachy_bpm'],
+                    'βραδυκαρδια_εως'  => (int) $vConfig['brady_bpm'],
+                    'αυξημενοι_απο'    => vitalsZoneBpm($vConfig['elevated_pct'], $vMaxHr),
+                    'μεγιστη_αναφορας' => (int) $vMaxHr,
+                ],
+                'συνολα' => [
+                    'σε_βαρδια'        => (int) ($vNow['summary']['expected'] ?? 0),
+                    'με_μετρησεις'     => count($vMeasured),
+                    'χωρις_αισθητηρα'  => (int) ($vNow['summary']['no_sensor'] ?? 0),
+                    'χωρις_σημα_τωρα'  => (int) ($vNow['summary']['stale'] ?? 0),
+                    'επεισοδια_συνολο' => count($vEpisodes),
+                ],
+                'ατομα'     => array_slice($people, 0, AI_LIVE_CREW_CAP),
+                'επεισοδια' => $episodes,
+                'κανονες'   => 'Η ΔΙΑΡΚΕΙΑ ξεχωριζει το σημα απο τον θορυβο: διασωστης που ανεβαινει πλαγια αγγιζει στιγμιαια υψηλους παλμους, ενω πολλα λεπτα πανω απο το οριο ειναι αλλη δηλωση. «Χωρις σημα» σημαινει οτι ο ιμαντας εφυγε ή επεσε το Bluetooth, ΟΧΙ οτι σταματησε η καρδια. Για οσους δεν φοραν αισθητηρα δεν ξερεις τιποτα — μην πεις οτι ειναι καλα. ΔΕΝ κανεις ιατρικη διαγνωση και δεν προτεινεις θεραπεια· λες τι δειχνουν τα νουμερα και τι επιχειρησιακη ενεργεια αξιζει (αντικατασταση, αναπαυση, ελεγχος).',
+            ];
+        }
+    }
+
     // ── chat: the largest untrusted surface in this digest ───────────────
     $chatRows = dbFetchAll(
         "SELECT c.team_id, c.message, UNIX_TIMESTAMP(c.created_at) AS ts, u.name AS who,
@@ -966,6 +1086,7 @@ function aiLiveSystemPrompt(): string {
 - Για το πού βρίσκεται συγκεκριμένο πρόσωπο κοίτα το «θεσεις_προσωπικου». Η θέση μιας ομάδας είναι το στίγμα οποιουδήποτε μέλους της και ΔΕΝ είναι η θέση του επικεφαλής.
 - Τα ονόματα προσώπων είναι ψευδώνυμα (ΜΕΛΟΣ-1 κ.λπ.). Χρησιμοποίησέ τα αυτούσια, ακόμη κι αν η ερώτηση φαίνεται να αναφέρει πρόσωπο.
 - Στοιχεία ασθενών δεν σου δόθηκαν ποτέ. Αν σου ζητηθούν, πες ότι δεν τα έχεις και ότι βρίσκονται στην καρτέλα περιστατικού.
+- Οι καρδιακοί παλμοί (αν υπάρχουν στα δεδομένα) αφορούν ΤΟΥΣ ΔΙΚΟΥΣ ΜΑΣ και είναι ευαίσθητα δεδομένα υγείας. Δεν κάνεις διάγνωση, δεν προτείνεις θεραπεία, δεν εικάζεις για παθήσεις. Λες τι δείχνουν τα νούμερα και ποια επιχειρησιακή ενέργεια αξίζει — αντικατάσταση, ανάπαυση, έλεγχος. Για όποιον δεν φοράει αισθητήρα δεν ξέρεις τίποτα και δεν λες ότι είναι καλά.
 - Τα σήματα SOS και τα περιστατικά δεν είναι δείκτης κακής απόδοσης. Εξηγούν γιατί μια ομάδα φαίνεται αργή.
 - Μην προτείνεις ποτέ ενέργεια που θέτει κάποιον σε κίνδυνο για να κερδηθεί χρόνος.
 
