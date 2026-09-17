@@ -171,6 +171,8 @@ $aiAssessment  = loadMissionAiAssessment($missionId);
 $aiTeamsHtml   = $aiAssessment ? renderAiObserverSection($aiAssessment['payload']['teams'], 'Αξιολόγηση Πεδίου & Αποστολής') : '';
 $aiCommandHtml = $aiAssessment ? renderAiObserverSection($aiAssessment['payload']['command'], 'Αξιολόγηση Συντονιστικού') : '';
 $aiMetaHtml    = $aiAssessment ? renderAiObserverMeta($aiAssessment) : '';
+// Per-team debrief sheets, one query for the whole leaderboard.
+$aiTeamDebriefs = $aiConfigured ? missionTeamDebriefIndex($missionId) : [];
 
 // ── Team roster — mirrors war-room.php's team query (leader/members), extended
 //    with a fan-out-safe pre-aggregated hours subquery (a volunteer can hold
@@ -322,7 +324,12 @@ include __DIR__ . '/includes/header.php';
     .score-pillar-track { flex: 1; height: 14px; background: #eee; border-radius: 999px; overflow: hidden; }
     .score-pillar-fill { height: 100%; border-radius: 999px; }
     .score-pillar-value { width: 46px; flex-shrink: 0; text-align: right; font-weight: 700; font-size: .85rem; }
-    .score-leaderboard-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; background: #f9f9f7; margin-bottom: 8px; border-left: 5px solid; }
+    /* flex-wrap so the per-team debrief buttons drop to their own line on a
+       narrow screen instead of squeezing the codename badge. */
+    .score-leaderboard-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; background: #f9f9f7; margin-bottom: 8px; border-left: 5px solid; flex-wrap: wrap; }
+    .td-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .td-actions-label { font-size: .78rem; color: #6b665c; }
+    .td-btn { --bs-btn-padding-y: .1rem; --bs-btn-padding-x: .45rem; --bs-btn-font-size: .75rem; }
     .score-leaderboard-rank { font-size: 1.3rem; width: 32px; text-align: center; flex-shrink: 0; }
     .score-leaderboard-team { font-weight: 700; flex: 1; }
     .score-leaderboard-score { font-weight: 800; font-size: 1.1rem; }
@@ -425,6 +432,24 @@ include __DIR__ . '/includes/header.php';
             <span class="badge" style="background:<?= h($t['color']) ?>;color:#fff;"><?= h(teamLabel($t['codename'], $t['team_number'])) ?></span>
             <div class="score-leaderboard-team"><?= h($t['tier'][1]) ?></div>
             <div class="score-leaderboard-score" style="color:<?= $scoreTierHex[$t['tier'][0]] ?>;"><?= number_format($t['score'], 1) ?></div>
+            <?php if ($aiCanGenerate): ?>
+            <?php // One printable sheet per team per language. A foreign crew cannot
+                  // open this page at all, so this is the only way anything in
+                  // writing reaches them. ?>
+            <div class="td-actions">
+                <span class="td-actions-label"><i class="bi bi-file-earmark-text"></i> Φύλλο ομάδας:</span>
+                <?php foreach (['el' => 'ΕΛ', 'en' => 'EN'] as $code => $labelText):
+                    $exists = isset($aiTeamDebriefs[(int) $t['team_id']][$code]); ?>
+                <button type="button"
+                        class="btn btn-sm <?= $exists ? 'btn-outline-success' : 'btn-outline-secondary' ?> td-btn"
+                        data-team="<?= (int) $t['team_id'] ?>" data-lang="<?= h($code) ?>"
+                        data-exists="<?= $exists ? '1' : '0' ?>"
+                        title="<?= $exists ? 'Άνοιγμα φύλλου απολογισμού' : 'Δημιουργία φύλλου απολογισμού' ?>">
+                    <?= $exists ? '<i class="bi bi-box-arrow-up-right"></i> ' : '<i class="bi bi-stars"></i> ' ?><?= h($labelText) ?>
+                </button>
+                <?php endforeach; ?>
+            </div>
+            <?php endif; ?>
         </div>
     <?php endforeach; ?>
     <?php endif; ?>
@@ -1170,6 +1195,27 @@ if (mapEl) {
             post(base + '&action=delete', del, 'Διαγραφή…', function () { window.location.reload(); });
         });
     }
+
+    // Per-team debrief sheets. An already-generated sheet opens straight away;
+    // a missing one is generated and the page reloads so the button turns into
+    // an open button. Deliberately two clicks rather than opening the tab from
+    // inside the fetch callback — by then the user gesture is spent and a
+    // popup blocker eats the window, which looks exactly like a failure.
+    document.querySelectorAll('.td-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var team = btn.getAttribute('data-team');
+            var lang = btn.getAttribute('data-lang');
+            var url  = 'mission-team-debrief-print.php?mission_id=<?= (int) $missionId ?>&team_id=' + team + '&lang=' + lang;
+
+            if (btn.getAttribute('data-exists') === '1') {
+                window.open(url, '_blank', 'noopener');
+                return;
+            }
+            post(base + '&team_id=' + team + '&lang=' + lang, btn, 'Σύνταξη…', function () {
+                window.location.reload();
+            });
+        });
+    });
 })();
 </script>
 <?php endif; ?>

@@ -57,8 +57,23 @@ if (!in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED], true)) {
     $respond(false, 'Η ανάλυση είναι διαθέσιμη μόνο για κλειστές ή ολοκληρωμένες αποστολές.');
 }
 
+// A team_id switches this from the mission-wide assessment to one team's own
+// debrief sheet. Same gate, same mission, different scope and storage.
+$teamId = (int) post('team_id');
+$lang   = post('lang') === 'en' ? 'en' : 'el';
+if ($teamId > 0) {
+    $teamOk = dbFetchValue("SELECT COUNT(*) FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
+    if (!$teamOk) {
+        $respond(false, 'Η ομάδα δεν ανήκει σε αυτή την αποστολή.');
+    }
+}
+
 // ── delete ───────────────────────────────────────────────────────────────────
 if (post('action') === 'delete') {
+    if ($teamId > 0) {
+        dbExecute("DELETE FROM mission_team_ai_debriefs WHERE mission_id = ? AND team_id = ? AND lang = ?", [$missionId, $teamId, $lang]);
+        $respond(true, 'Το φύλλο απολογισμού διαγράφηκε.');
+    }
     dbExecute("DELETE FROM mission_ai_assessments WHERE mission_id = ?", [$missionId]);
     $respond(true, 'Η ανάλυση διαγράφηκε.');
 }
@@ -80,6 +95,17 @@ $score  = computeMissionScore($missionId, $report);
 // the upstream call, not after.
 if (session_status() === PHP_SESSION_ACTIVE) {
     session_write_close();
+}
+
+if ($teamId > 0) {
+    $result = generateTeamAiDebrief($missionId, $mission, $score, $report, $teamId, $lang, $userId);
+    if (!$result['ok']) {
+        $respond(false, $result['error'] ?? 'Η δημιουργία απέτυχε.');
+    }
+    $respond(true, 'Το φύλλο απολογισμού ετοιμάστηκε.', [
+        'generated_at' => $result['debrief']['generated_at'] ?? null,
+        'open_url'     => 'mission-team-debrief-print.php?mission_id=' . $missionId . '&team_id=' . $teamId . '&lang=' . $lang,
+    ]);
 }
 
 $result = generateMissionAiAssessment($missionId, $mission, $score, $report, $userId);

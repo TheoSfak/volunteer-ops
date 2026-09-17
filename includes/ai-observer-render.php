@@ -50,14 +50,15 @@ CSS;
  * Returns '' when the section carries nothing, so the caller can decide
  * whether the surrounding card is worth drawing at all.
  */
-function renderAiObserverSection(array $section, string $heading): string {
+function renderAiObserverSection(array $section, string $heading, string $lang = 'el'): string {
     if (!aiObserverSectionHasContent($section)) {
         return '';
     }
+    $w = fn(string $el, string $en) => $lang === 'en' ? $en : $el;
 
     $out  = '<div class="aio-wrap">';
     $out .= '<div class="aio-head"><h6 class="aio-title">' . h($heading) . '</h6>'
-          . '<span class="aio-tag">Ανάλυση AI</span></div>';
+          . '<span class="aio-tag">' . h($w('Ανάλυση AI', 'AI analysis')) . '</span></div>';
 
     if ($section['verdict'] !== null) {
         $out .= '<div class="aio-verdict">' . h($section['verdict']) . '</div>';
@@ -67,9 +68,9 @@ function renderAiObserverSection(array $section, string $heading): string {
     }
 
     if (!empty($section['findings'])) {
-        $out .= '<div class="aio-h">Ευρήματα</div>';
+        $out .= '<div class="aio-h">' . h($w('Ευρήματα', 'Findings')) . '</div>';
         foreach ($section['findings'] as $f) {
-            [$label, $colour] = aiObserverSeverityMeta($f['severity']);
+            [$label, $colour] = aiObserverSeverityMeta($f['severity'], $lang);
             $out .= '<div class="aio-item" style="--aio-c:' . h($colour) . ';">'
                   . '<span class="aio-sev">' . h($label) . '</span>';
             if ($f['title'] !== '') {
@@ -80,9 +81,9 @@ function renderAiObserverSection(array $section, string $heading): string {
     }
 
     if (!empty($section['recommendations'])) {
-        $out .= '<div class="aio-h">Συστάσεις</div>';
+        $out .= '<div class="aio-h">' . h($w('Συστάσεις', 'Recommendations')) . '</div>';
         foreach ($section['recommendations'] as $r) {
-            [$label, $colour] = aiObserverPriorityMeta($r['priority']);
+            [$label, $colour] = aiObserverPriorityMeta($r['priority'], $lang);
             $out .= '<div class="aio-item" style="--aio-c:' . h($colour) . ';">'
                   . '<span class="aio-sev">' . h($label) . '</span>'
                   . '<div>' . h($r['text']) . '</div></div>';
@@ -109,7 +110,12 @@ function renderAiObserverSection(array $section, string $heading): string {
  * The data-gaps list is NOT boilerplate and stays above it — it is the model
  * naming what it could not judge, which is content.
  */
-function renderAiObserverMeta(array $assessment): string {
+function renderAiObserverMeta(array $assessment, ?string $lang = null): string {
+    // A stored assessment knows its own language; the parameter exists for
+    // callers that render a section in a language the row does not carry.
+    $lang = $lang ?? ($assessment['lang'] ?? 'el');
+    $w = fn(string $el, string $en) => $lang === 'en' ? $en : $el;
+
     $bits = [h($assessment['model'])];
     if (!empty($assessment['generated_at'])) {
         $bits[] = h(formatDateTime($assessment['generated_at']));
@@ -120,16 +126,17 @@ function renderAiObserverMeta(array $assessment): string {
     // something is actually wrong with what the reader is looking at.
     if (!empty($assessment['dropped_claims'])) {
         $n = (int) $assessment['dropped_claims'];
-        $out .= ' · ' . $n . ($n === 1 ? ' ισχυρισμός αφαιρέθηκε' : ' ισχυρισμοί αφαιρέθηκαν')
-              . ' ως ατεκμηρίωτ' . ($n === 1 ? 'ος' : 'οι');
+        $out .= ' · ' . $n . ($lang === 'en'
+            ? ($n === 1 ? ' claim removed as unevidenced' : ' claims removed as unevidenced')
+            : (($n === 1 ? ' ισχυρισμός αφαιρέθηκε' : ' ισχυρισμοί αφαιρέθηκαν') . ' ως ατεκμηρίωτ' . ($n === 1 ? 'ος' : 'οι')));
     }
     if (!empty($assessment['is_stale'])) {
-        $out .= ' · παλαιότερη έκδοση οδηγιών — αξίζει επαναδημιουργία';
+        $out .= ' · ' . $w('παλαιότερη έκδοση οδηγιών — αξίζει επαναδημιουργία', 'older prompt version — worth regenerating');
     }
     $out .= '</div>';
 
     if (!empty($assessment['payload']['data_gaps'])) {
-        $gaps = '<div class="aio-gaps"><strong>Κενά τεκμηρίωσης:</strong><ul style="margin:4px 0 0; padding-left:18px;">';
+        $gaps = '<div class="aio-gaps"><strong>' . h($w('Κενά τεκμηρίωσης:', 'Evidence gaps:')) . '</strong><ul style="margin:4px 0 0; padding-left:18px;">';
         foreach ($assessment['payload']['data_gaps'] as $g) {
             $gaps .= '<li>' . h($g) . '</li>';
         }

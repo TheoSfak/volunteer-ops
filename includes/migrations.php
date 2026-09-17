@@ -6763,6 +6763,36 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 152,
+            'description' => 'Add mission_team_ai_debriefs - the per-team, per-language one-page debrief handed to a participating team after an exercise, primarily foreign guest teams who cannot open the admin-only report pages at all. Deliberately its own table rather than a team_id column on mission_ai_assessments: that table is keyed UNIQUE on mission_id alone, and a nullable team_id would let MySQL store unlimited duplicate mission-wide rows (NULL never equals NULL in a unique index), quietly breaking the feature that already works. A real foreign key to mission_teams with ON DELETE CASCADE also means a deleted team cannot leave a debrief behind describing a crew that no longer exists. Payload shape differs from the mission-wide one too (no command section, no peer comparison), so the two are not the same record wearing a flag.',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_team_ai_debriefs (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    team_id INT UNSIGNED NOT NULL,
+                    lang CHAR(2) NOT NULL DEFAULT 'el' COMMENT 'Language the assessment was written in',
+                    payload JSON NOT NULL COMMENT 'Validated debrief, pseudonymised exactly as the provider returned it',
+                    pseudonym_map JSON NULL COMMENT 'MEMBER-n => real name. Server-side only; never sent anywhere',
+                    provider VARCHAR(32) NOT NULL,
+                    model VARCHAR(64) NOT NULL,
+                    prompt_version SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+                    digest_hash CHAR(64) NULL,
+                    dropped_claims SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+                    duration_ms INT UNSIGNED NULL,
+                    tokens_prompt INT UNSIGNED NULL,
+                    tokens_completion INT UNSIGNED NULL,
+                    generated_by INT UNSIGNED NULL,
+                    generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE CASCADE,
+                    FOREIGN KEY (generated_by) REFERENCES users(id) ON DELETE SET NULL,
+                    UNIQUE KEY uk_team_debrief (mission_id, team_id, lang),
+                    INDEX idx_team_debrief_team (team_id, lang)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
