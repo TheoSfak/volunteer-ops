@@ -309,7 +309,14 @@ function generateMissionAiAssessment(int $missionId, array $mission, array $scor
     $result = aiChat([
         ['role' => 'system', 'content' => aiObserverSystemPrompt()],
         ['role' => 'user',   'content' => aiObserverUserPrompt($built['digest'], $built['refs'])],
-    ], ['json' => true, 'temperature' => 0.6, 'max_tokens' => 4000, 'timeout' => 150]);
+        // 16000 rather than a figure sized to the finished report. The
+        // assessment itself runs 1.5-3k tokens, but it is Greek (two to three
+        // times the tokens of the same text in English) and current models
+        // spend part of the SAME budget on internal reasoning before writing a
+        // word — on the first real run this truncated mid-JSON after thirty
+        // seconds of work. Overshooting costs nothing: the models bill for
+        // tokens produced, not for the ceiling.
+    ], ['json' => true, 'temperature' => 0.6, 'max_tokens' => 16000, 'timeout' => 180]);
 
     if (!$result['ok']) {
         return ['ok' => false, 'error' => $result['error'], 'assessment' => null];

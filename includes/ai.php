@@ -148,7 +148,12 @@ function aiChat(array $messages, array $opts = []): array {
 
     $wantJson    = !empty($opts['json']);
     $temperature = isset($opts['temperature']) ? (float) $opts['temperature'] : 0.55;
-    $maxTokens   = isset($opts['max_tokens']) ? (int) $opts['max_tokens'] : 4000;
+    // 8000, not 4000. Two things make a tight budget bite harder here than the
+    // raw length of the answer suggests: Greek costs roughly two to three times
+    // the tokens of the same text in English, and current Gemini and DeepSeek
+    // models spend part of this same budget on internal reasoning the reader
+    // never sees. A budget that merely fits the finished text will truncate.
+    $maxTokens   = isset($opts['max_tokens']) ? (int) $opts['max_tokens'] : 8000;
     $timeout     = isset($opts['timeout']) ? (int) $opts['timeout'] : 120;
 
     $body = [
@@ -222,7 +227,29 @@ function aiChat(array $messages, array $opts = []): array {
     if ($wantJson) {
         $json = aiDecodeJsonLoose($content);
         if ($json === null) {
-            return $fail('Η απάντηση του παρόχου δεν ήταν έγκυρο JSON.');
+            // "Δεν ήταν έγκυρο JSON" on its own is the same dead end the bare
+            // HTTP 404 was: it names the symptom and hides every fact needed to
+            // act. By far the most common cause is the answer being cut off
+            // mid-object when the output budget runs out — and on a thinking
+            // model the budget is spent on reasoning the reader never sees, so
+            // a report that looks short can still have exhausted it.
+            $finish    = (string) ($decoded['choices'][0]['finish_reason'] ?? '');
+            $completed = (int) ($decoded['usage']['completion_tokens'] ?? 0);
+            $reasoning = (int) ($decoded['usage']['completion_tokens_details']['reasoning_tokens'] ?? 0);
+            $chars     = mb_strlen($content, 'UTF-8');
+            $tail      = mb_substr(trim(preg_replace('/\s+/u', ' ', $content) ?? $content), -180, 180, 'UTF-8');
+
+            $budget = 'Όριο εξόδου ' . $maxTokens . ' tokens· ο πάροχος ανέφερε ' . $completed
+                    . ($reasoning > 0 ? " (εκ των οποίων {$reasoning} σε εσωτερική σκέψη)" : '')
+                    . ', κείμενο ' . $chars . ' χαρακτήρων.';
+
+            if (in_array(strtolower($finish), ['length', 'max_tokens'], true)) {
+                return $fail('Η απάντηση κόπηκε στη μέση: το μοντέλο εξάντλησε το όριο εξόδου πριν κλείσει το JSON. '
+                           . $budget . ' Τέλος απάντησης: …' . $tail);
+            }
+            return $fail('Η απάντηση του παρόχου δεν ήταν έγκυρο JSON (finish_reason: '
+                       . ($finish !== '' ? $finish : 'δεν αναφέρθηκε') . '). ' . $budget
+                       . ' Τέλος απάντησης: …' . $tail);
         }
     }
 
@@ -235,6 +262,9 @@ function aiChat(array $messages, array $opts = []): array {
             'prompt'     => (int) ($decoded['usage']['prompt_tokens'] ?? 0),
             'completion' => (int) ($decoded['usage']['completion_tokens'] ?? 0),
             'total'      => (int) ($decoded['usage']['total_tokens'] ?? 0),
+            // Counted inside completion_tokens, not beside it — so this is the
+            // number that explains a budget disappearing into nothing visible.
+            'reasoning'  => (int) ($decoded['usage']['completion_tokens_details']['reasoning_tokens'] ?? 0),
         ],
         'ms'       => $ms,
         'model'    => $cfg['model'],
