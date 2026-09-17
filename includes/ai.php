@@ -38,6 +38,12 @@ function aiProviders(): array {
             'base_url'      => 'https://api.deepseek.com/v1',
             'default_model' => 'deepseek-flash',
             'models'        => ['deepseek-flash', 'deepseek-v4-pro'],
+            // Whether this provider honours OpenAI's reasoning_effort
+            // parameter. Declared per provider rather than sent blindly: an
+            // unknown parameter is usually ignored, but a provider that
+            // rejects it would fail every call with a 400, and the failover
+            // chain would then walk straight into the same wall.
+            'reasoning_effort' => false,
             'key_url'       => 'https://platform.deepseek.com/api_keys',
             'key_hint'      => 'Με χρέωση, αλλά πολύ φθηνό: μια πλήρης ανάλυση αποστολής κοστίζει κλάσματα του λεπτού.',
             // Where the provider processes and stores the request. Shown in
@@ -59,6 +65,7 @@ function aiProviders(): array {
             // lists what a given key can actually call.
             'default_model' => 'gemini-3.6-flash',
             'models'        => ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro'],
+            'reasoning_effort' => true,
             'key_url'       => 'https://aistudio.google.com/apikey',
             'key_hint'      => 'Διαθέτει δωρεάν επίπεδο με ημερήσιο όριο αιτημάτων — αρκετό για εκθέσεις αποστολών.',
             'jurisdiction'  => 'ΗΠΑ / Google',
@@ -106,6 +113,7 @@ function aiProviderConfig(string $provider): array {
         'base_url'       => rtrim($baseUrl, '/'),
         'model'          => $model,
         'api_key'        => trim((string) getSetting('ai_api_key_' . $provider, '')),
+        'reasoning_effort' => !empty($meta['reasoning_effort']),
     ];
 }
 
@@ -306,6 +314,16 @@ function aiChatOnce(array $messages, array $opts, array $cfg): array {
         $body['response_format'] = ['type' => 'json_object'];
     }
 
+    // Current models spend part of the OUTPUT budget on reasoning nobody
+    // reads, and the accounting is invisible until something truncates. On a
+    // real translation run Gemini burned 10.956 of 12.000 tokens thinking and
+    // ran out mid-JSON at item 53 of 60 — for a task with nothing to reason
+    // about. Callers doing mechanical work turn it off; the observer leaves it
+    // alone, where the thinking is the point.
+    if (!empty($opts['reasoning_effort']) && !empty($cfg['reasoning_effort'])) {
+        $body['reasoning_effort'] = (string) $opts['reasoning_effort'];
+    }
+
     $started = microtime(true);
     $ch = curl_init($cfg['base_url'] . '/chat/completions');
     curl_setopt_array($ch, [
@@ -337,6 +355,16 @@ function aiChatOnce(array $messages, array $opts, array $cfg): array {
 
     if ($httpCode !== 200) {
         $detail = aiExtractProviderError($decoded, (string) $raw);
+
+        // reasoning_effort is declared per provider, but a provider can accept
+        // the parameter and reject a particular VALUE, or drop support for a
+        // given model. Retry once without it rather than failing the whole
+        // request over an optimisation: the call then costs more tokens, which
+        // is strictly better than not happening.
+        if ($httpCode === 400 && isset($body['reasoning_effort']) && stripos($detail, 'reasoning') !== false) {
+            unset($opts['reasoning_effort']);
+            return aiChatOnce($messages, $opts, $cfg);
+        }
 
         // Everything here is retryable on ANOTHER provider, including the
         // failures that look like configuration mistakes. A revoked key or a

@@ -86,7 +86,13 @@ function aiIsTranslatableLanguage(string $lang): bool {
 // from there instead of starting over. The per-request cap is what keeps a
 // first translation from running long enough to hit that timeout in the first
 // place — a very large report simply takes two page loads, and says so.
-const AI_TRANSLATE_CHUNK = 60;
+// 40, not 60, and the budget is generous relative to what the answer needs.
+// A 60-item chunk produced roughly 1.400 tokens of JSON — comfortably inside
+// 12.000 — and still truncated, because the model had spent 10.956 of that
+// budget on reasoning before writing anything. Reasoning is switched off for
+// this call, which is the actual fix; the smaller chunk and larger ceiling are
+// the margin for a provider that cannot switch it off.
+const AI_TRANSLATE_CHUNK = 40;
 const AI_TRANSLATE_MAX_CHUNKS_PER_REQUEST = 4;
 
 /**
@@ -211,7 +217,15 @@ function aiTranslateCached(array $strings, string $lang, array $protectedTerms =
             ['role' => 'system', 'content' => aiTranslateSystemPrompt($language, $protectedTerms)],
             ['role' => 'user',   'content' => "Μετάφρασε τις τιμές του παρακάτω json αντικειμένου. Επίστρεψε αντικείμενο με ΑΚΡΙΒΩΣ τα ίδια κλειδιά (t0, t1, …) και μεταφρασμένες τιμές:\n\n"
                                             . json_encode($numbered, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)],
-        ], ['json' => true, 'temperature' => 0.2, 'max_tokens' => 12000, 'timeout' => 120]);
+        ], [
+            'json'             => true,
+            'temperature'      => 0.2,
+            'max_tokens'       => 16000,
+            'timeout'          => 120,
+            // Translation has nothing to reason about. Leaving this on cost
+            // 91% of the output budget and returned a truncated page.
+            'reasoning_effort' => 'none',
+        ]);
 
         if (!$result['ok'] || !is_array($result['json'])) {
             error_log('[ai-translate] chunk failed: ' . ($result['error'] ?? 'unknown'));

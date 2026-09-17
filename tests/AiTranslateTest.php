@@ -105,6 +105,35 @@ final class AiTranslateTest extends TestCase
         $this->assertSame([], $map);
     }
 
+    // ─── output budget ───────────────────────────────────────────────────
+
+    /**
+     * A real run truncated mid-JSON at item 53 of 60. The answer itself was
+     * only about 1.400 tokens; the model had spent 10.956 of a 12.000 budget
+     * on reasoning before writing a character, for a task with nothing to
+     * reason about.
+     *
+     * Reasoning is switched off for translation, which is the actual fix. This
+     * guards the margin behind it: raising the chunk size without raising the
+     * ceiling would quietly bring the truncation back on any provider that
+     * ignores the setting, and it would look like the translator is broken
+     * rather than mis-budgeted.
+     */
+    public function testAChunkStillFitsEvenIfTheProviderIgnoresReasoningEffort(): void
+    {
+        $tokensPerItem   = 1400 / 60;   // measured on the run that truncated
+        $observedThinking = 10956;      // measured on the same run
+        $budget           = 16000;      // aiTranslateCached()'s max_tokens
+
+        $needed = (int) ceil(AI_TRANSLATE_CHUNK * $tokensPerItem);
+
+        $this->assertLessThan(
+            $budget - $observedThinking,
+            $needed,
+            'A chunk must fit the output budget even when the model spends the observed amount on reasoning'
+        );
+    }
+
     // ─── reading the provider's reply ────────────────────────────────────
 
     /**
