@@ -147,6 +147,107 @@ final class AiLiveTest extends TestCase
         $this->assertNull(aiLiveRelativeTo(null, null, 35.3387, 25.1442));
     }
 
+    // ── A citation says which record, not which id ─────────────────────────
+
+    public function testACitationQuotesTheRecordsOwnWords(): void
+    {
+        // "Εντολή ORD-138" is unusable at a coordination desk that has to act
+        // on the answer. The order's own wording identifies it on sight.
+        $out = aiLiveQuoteForLabel('Κάντε παύση 15 λεπτών σε ασφαλές σημείο.', 'Εντολή');
+        $this->assertSame('«Κάντε παύση 15 λεπτών σε ασφαλές σημείο.»', $out);
+    }
+
+    public function testALongQuoteIsCutAndVisiblyMarkedAsCut(): void
+    {
+        $long = str_repeat('α', 200);
+        $out = aiLiveQuoteForLabel($long, 'Εντολή');
+
+        $this->assertStringEndsWith('…»', $out);
+        // The cut must be visible: a silently truncated order reads as a
+        // shorter order, which is a different order.
+        $this->assertLessThan(mb_strlen($long, 'UTF-8'), mb_strlen($out, 'UTF-8'));
+    }
+
+    public function testAnOrderWithNoTextOfItsOwnFallsBackToItsKind(): void
+    {
+        // A photo or location request carries no wording — the kind IS the
+        // description, and an empty pair of quotes would say nothing.
+        $this->assertSame('Αίτημα φωτογραφίας', aiLiveQuoteForLabel('', aiLiveOrderTypeWord('photo')));
+        $this->assertSame('Αίτημα φωτογραφίας', aiLiveQuoteForLabel('   ', aiLiveOrderTypeWord('photo')));
+        $this->assertSame('Αίτημα φωτογραφίας', aiLiveQuoteForLabel(null, aiLiveOrderTypeWord('photo')));
+        // An unknown type still produces a word, never a raw enum value.
+        $this->assertSame('Εντολή', aiLiveOrderTypeWord('something_added_later'));
+    }
+
+    // ── Ref codes never reach the coordinator's eyes ───────────────────────
+
+    public function testARefCodeInTheProseBecomesTheRecordItPointsAt(): void
+    {
+        // The prompt forbids this; a prompt is not a guarantee. Replacing
+        // rather than deleting is the point — deleting would leave "Δες το ."
+        $refs = ['ORD-138' => 'Εντολή 20:14 — «Κάντε παύση 15 λεπτών»'];
+        $out  = aiLiveNameRefsInText('Η εντολή ORD-138 δεν έχει κλείσει.', $refs);
+
+        $this->assertStringNotContainsString('ORD-138', $out);
+        $this->assertStringContainsString('Κάντε παύση 15 λεπτών', $out);
+    }
+
+    public function testTheLongestMatchingRefWinsSoTeamTenIsNotReadAsTeamOne(): void
+    {
+        $refs = ['TEAM-1' => 'Ομάδα ΑΛΦΑ 1', 'TEAM-10' => 'Ομάδα ΙΩΤΑ 10'];
+        $out  = aiLiveNameRefsInText('Στείλε την TEAM-10 και όχι την TEAM-1.', $refs);
+
+        $this->assertStringContainsString('ΙΩΤΑ 10', $out);
+        $this->assertStringContainsString('ΑΛΦΑ 1', $out);
+        // The bug this pins: TEAM-1 eating the front of TEAM-10 and leaving
+        // a stray "0" glued to the label.
+        $this->assertStringNotContainsString('ΑΛΦΑ 10', $out);
+        $this->assertStringNotContainsString('TEAM-', $out);
+    }
+
+    public function testTheSubstitutionDoesNotRepeatAWordTheSentenceAlreadySaid(): void
+    {
+        // "Η εντολή ORD-150" + a label starting "Εντολή" was substituting to
+        // "Η εντολή Εντολή 17:51". The label's first word is dropped when the
+        // text has already said it.
+        $refs = ['ORD-150' => 'Εντολή 17:51 «Φωτογραφία του σημείου»'];
+        $out  = aiLiveNameRefsInText('Η εντολή ORD-150 δεν έχει κλείσει.', $refs);
+
+        $this->assertSame('Η εντολή 17:51 «Φωτογραφία του σημείου» δεν έχει κλείσει.', $out);
+    }
+
+    public function testAWordThatIsNotTheLabelsOwnIsKept(): void
+    {
+        // "η TEAM-107" must become "η Ομάδα ΑΛΦΑ 1" — the article is not the
+        // label's first word, so nothing is dropped.
+        $refs = ['TEAM-107' => 'Ομάδα ΑΛΦΑ 1'];
+        $this->assertSame(
+            'Στείλε την Ομάδα ΑΛΦΑ 1 βόρεια.',
+            aiLiveNameRefsInText('Στείλε την TEAM-107 βόρεια.', $refs)
+        );
+
+        // And a code opening a sentence, with no preceding word at all.
+        $this->assertSame(
+            'Ομάδα ΑΛΦΑ 1 δεν απάντησε.',
+            aiLiveNameRefsInText('TEAM-107 δεν απάντησε.', $refs)
+        );
+    }
+
+    public function testAnUnknownCodeIsLeftAloneRatherThanGuessedAt(): void
+    {
+        // A ref that resolves to nothing is already reported to the reader as
+        // an invented citation; rewriting it here would hide that.
+        $out = aiLiveNameRefsInText('Δες το ORD-999.', ['ORD-138' => 'Εντολή 20:14']);
+        $this->assertSame('Δες το ORD-999.', $out);
+    }
+
+    public function testTextWithNoRefsAndAnEmptyRefTableAreBothLeftUntouched(): void
+    {
+        $this->assertSame('Όλα ήρεμα.', aiLiveNameRefsInText('Όλα ήρεμα.', ['ORD-1' => 'Εντολή']));
+        $this->assertSame('Όλα ήρεμα.', aiLiveNameRefsInText('Όλα ήρεμα.', []));
+        $this->assertSame('', aiLiveNameRefsInText('', ['ORD-1' => 'Εντολή']));
+    }
+
     // ── People in free text ────────────────────────────────────────────────
 
     public function testANameInFreeTextResolvesToThatPersonsOwnPseudonym(): void
