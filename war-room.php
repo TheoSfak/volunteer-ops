@@ -2633,6 +2633,15 @@ include __DIR__ . '/includes/header.php';
     }
     .assistant-draft-msg { font-size: .75rem; flex: 1 1 100%; }
 
+    /* The one action under an answer. Separated by a rule rather than by
+       space alone: it is the only thing in the transcript that changes
+       something on the page, and it must not read as part of the sentence
+       above it. */
+    .assistant-answer-actions {
+        margin-top: .5rem; padding-top: .5rem;
+        border-top: 1px solid rgba(148,163,184,.35);
+    }
+
     /* «Εξήγησέ μου», inside a row. Quiet until hovered: it must not compete
        with the finding it belongs to. */
     .assistant-explain {
@@ -2849,6 +2858,27 @@ include __DIR__ . '/includes/header.php';
                         <i class="bi bi-check2-all me-1"></i><?= t('assistant.mark_seen') ?>
                     </button>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<?php /* Ready-made orders. Deliberately NOT inside the assistant's AI gate:
+         these are ten fixed sentences written by hand, they involve no
+         provider, and an organisation with no AI key configured needs them
+         more than one that has. Filled in by JS from the same t() table the
+         rest of this page reads, so a third language costs no markup here.
+         Body is empty for the same reason and rendered on first open. */ ?>
+<div class="modal fade" id="orderPresetsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h5 class="modal-title"><i class="bi bi-lightning-charge-fill me-1"></i><?= t('presets.title') ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="<?= t('common.close') ?>"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted"><?= t('presets.hint') ?></p>
+                <div id="orderPresetsList"></div>
             </div>
         </div>
     </div>
@@ -13358,6 +13388,55 @@ function assistantRenderAnswer(slot, res) {
         notice.textContent = res.notice;
         slot.appendChild(notice);
     }
+
+    // «Σύνταξη εντολής» — the one bridge from an answer to an action, and it
+    // carries nothing but text. The assistant still creates no order, picks
+    // no recipient and submits no form: this copies the words into the
+    // composer the coordinator would have typed into anyway and takes them
+    // to it. Everything that decides WHO hears it, and whether it is sent at
+    // all, stays on that form, with that person.
+    //
+    // Absent when there is no order field to fill — with nobody on shift the
+    // card renders a "nobody active" line and no textarea, and a button that
+    // silently does nothing is worse than no button.
+    const orderField = document.querySelector('textarea[name="task_text"]');
+    if (orderField && res.answer) {
+        const actions = document.createElement('div');
+        actions.className = 'assistant-answer-actions';
+        const useBtn = document.createElement('button');
+        useBtn.type = 'button';
+        useBtn.className = 'btn btn-sm btn-outline-warning';
+        useBtn.innerHTML = `<i class="bi bi-clipboard-check me-1"></i>${escapeHtml(t('assistant.use_in_order'))}`;
+        useBtn.addEventListener('click', () => {
+            orderField.value = res.answer;
+            // Confirmation goes where the coordinator is about to be looking
+            // — the strip under the order field — not here in a transcript
+            // they are leaving. The strip is the same one the presets and the
+            // AI drafting write to, so there is only ever one such line.
+            const msg = orderField.nextElementSibling?.querySelector('.assistant-draft-msg');
+            if (msg) {
+                msg.className = 'assistant-draft-msg text-muted';
+                msg.textContent = t('assistant.use_in_order_done');
+            }
+            const modalEl = document.getElementById('assistantModal');
+            modalEl.addEventListener('hidden.bs.modal', () => {
+                assistantGoto('requestTaskCard');
+                // After assistantGoto's own scroll timeout, so the field is
+                // on screen before the caret lands in it.
+                setTimeout(() => orderField.focus(), 300);
+            }, {once: true});
+            bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+        });
+        actions.appendChild(useBtn);
+        // Says what the button WILL do, before it is pressed. A line reading
+        // "nothing was sent" under an unpressed button reads as a report on
+        // something that already happened.
+        const note = document.createElement('div');
+        note.className = 'small text-muted mt-1';
+        note.textContent = t('assistant.use_in_order_hint');
+        actions.appendChild(note);
+        slot.appendChild(actions);
+    }
     assistantScrollToLatest();
 }
 
@@ -13594,6 +13673,103 @@ document.querySelectorAll('textarea[data-ai-draft]').forEach(field => {
     });
 });
 <?php endif; ?>
+
+// ── Ready-made orders ──────────────────────────────────────────────────────
+//
+// Outside the AI gate above on purpose: ten fixed sentences, no provider, and
+// the organisation without a key is the one that needs them most. Grouped
+// rather than listed flat — at 3am the coordinator is scanning for a kind of
+// order ("stop them", "bring them back"), not reading ten sentences in order.
+const ORDER_PRESET_GROUPS = [
+    {group: 'contact',  items: [
+        {key: 'position', icon: 'bi-geo-alt-fill'},
+        {key: 'gps',      icon: 'bi-broadcast-pin'},
+    ]},
+    {group: 'movement', items: [
+        {key: 'move',     icon: 'bi-signpost-2-fill'},
+        {key: 'hold',     icon: 'bi-pause-circle-fill'},
+        {key: 'rtb',      icon: 'bi-house-down-fill'},
+    ]},
+    {group: 'search',   items: [
+        {key: 'sector',   icon: 'bi-grid-3x3'},
+        {key: 'poi',      icon: 'bi-pin-map-fill'},
+    ]},
+    {group: 'welfare',  items: [
+        {key: 'rest',     icon: 'bi-cup-hot-fill'},
+        {key: 'supplies', icon: 'bi-box-seam'},
+    ]},
+    {group: 'safety',   items: [
+        {key: 'hazard',   icon: 'bi-cone-striped'},
+    ]},
+];
+
+// Which field the next pick lands in. The modal is shared by all three
+// composers, so it is told who opened it rather than guessing — a preset
+// chosen from the broadcast box must not go into the order box.
+let orderPresetTarget = null;
+
+function renderOrderPresets() {
+    const list = document.getElementById('orderPresetsList');
+    if (!list || list.dataset.built === '1') return;
+    list.innerHTML = ORDER_PRESET_GROUPS.map(g => {
+        const buttons = g.items.map(item => {
+            const text = t('presets.' + item.key + '.text');
+            return `<button type="button" class="list-group-item list-group-item-action py-2 order-preset"
+                            data-preset-text="${escapeHtml(text)}">
+                        <span class="fw-semibold d-block"><i class="bi ${item.icon} me-2"></i>${escapeHtml(t('presets.' + item.key + '.label'))}</span>
+                        <span class="small text-muted">${escapeHtml(text)}</span>
+                    </button>`;
+        }).join('');
+        return `<div class="small text-uppercase text-muted fw-semibold mt-3 mb-1">${escapeHtml(t('presets.group.' + g.group))}</div>
+                <div class="list-group list-group-flush">${buttons}</div>`;
+    }).join('');
+    list.dataset.built = '1';
+}
+
+document.getElementById('orderPresetsList')?.addEventListener('click', e => {
+    const btn = e.target.closest('.order-preset');
+    if (!btn || !orderPresetTarget) return;
+    const {field, say} = orderPresetTarget;
+    field.value = btn.dataset.presetText;
+    say(t('presets.inserted'), 'text-muted');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('orderPresetsModal')).hide();
+    // After the modal is gone, or the focus lands on a field behind a
+    // backdrop that is still fading and the keyboard opens on nothing.
+    setTimeout(() => field.focus(), 200);
+});
+
+document.querySelectorAll('textarea[data-ai-draft="order"], textarea[data-ai-draft="speak"]').forEach(field => {
+    // The AI block above has already put a bar under this field when there is
+    // a provider configured. Reuse it rather than stacking a second strip:
+    // the row is the same row of decisions either way — pick or phrase, then
+    // choose who, then send.
+    let bar = field.nextElementSibling;
+    if (!bar || !bar.classList.contains('assistant-draft-bar')) {
+        bar = document.createElement('div');
+        bar.className = 'assistant-draft-bar mb-2';
+        bar.innerHTML = '<span class="assistant-draft-msg"></span>';
+        field.insertAdjacentElement('afterend', bar);
+    }
+    const msg = bar.querySelector('.assistant-draft-msg');
+    const say = (text, cls) => {
+        msg.className = 'assistant-draft-msg ' + (cls || '');
+        msg.textContent = text || '';
+    };
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-sm btn-outline-secondary';
+    btn.innerHTML = `<i class="bi bi-lightning-charge me-1"></i>${escapeHtml(t('presets.btn'))}`;
+    // First in the bar: picking a ready-made sentence comes BEFORE phrasing
+    // one, and a coordinator who used a preset often has nothing to phrase.
+    bar.insertAdjacentElement('afterbegin', btn);
+
+    btn.addEventListener('click', () => {
+        orderPresetTarget = {field, say};
+        renderOrderPresets();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('orderPresetsModal')).show();
+    });
+});
 
 renderAssistant(assistantData);
 <?php endif; ?>
