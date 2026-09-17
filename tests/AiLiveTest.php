@@ -291,6 +291,76 @@ final class AiLiveTest extends TestCase
         }
     }
 
+    // ── Order drafting: what reaches a field with a send button under it ───
+
+    public function testADraftIsCappedNoMatterWhatTheModelReturns(): void
+    {
+        // The prompt asks for brevity; this enforces it. A model that ignored
+        // the instruction would otherwise drop a page of prose into a textarea
+        // whose send button is directly underneath it.
+        $out = aiDraftValidate(['text' => str_repeat('Πολύ μακρύ κείμενο. ', 200)]);
+
+        $this->assertLessThanOrEqual(AI_DRAFT_MAX_CHARS, mb_strlen($out['text'], 'UTF-8'));
+        $this->assertNotSame('', $out['text']);
+    }
+
+    public function testADraftIsFlattenedAndUnquotedBeforeItReachesTheField(): void
+    {
+        // Models wrap the whole thing in quotes despite being told not to, and
+        // those quotes would be sent to the field verbatim. Newlines read
+        // badly in a three-row textarea and worse when spoken aloud.
+        $out = aiDraftValidate(['text' => "\"ΑΛΦΑ 1: κινηθείτε βόρεια\nκαι αναφέρετε άφιξη.\""]);
+
+        $this->assertStringNotContainsString("\n", $out['text']);
+        $this->assertStringStartsWith('ΑΛΦΑ', $out['text']);
+        $this->assertStringEndsNotWith('"', $out['text']);
+    }
+
+    public function testTheNoteToTheCoordinatorIsSeparateFromTheMessage(): void
+    {
+        // "There is no team by that name" is advice to the sender. It must
+        // never end up inside the text that goes to the field.
+        $out = aiDraftValidate([
+            'text' => 'ΑΛΦΑ 1: κινηθείτε βόρεια.',
+            'note' => 'Δεν υπάρχει ομάδα ΔΕΛΤΑ σε αυτή την αποστολή.',
+        ]);
+
+        $this->assertSame('ΑΛΦΑ 1: κινηθείτε βόρεια.', $out['text']);
+        $this->assertStringNotContainsString('ΔΕΛΤΑ', $out['text']);
+        $this->assertStringContainsString('ΔΕΛΤΑ', $out['note']);
+    }
+
+    public function testJunkFromTheProviderProducesNoDraftRatherThanABadOne(): void
+    {
+        // An empty text is refused by the caller; a half-parsed one would be
+        // sent to people in the field.
+        foreach ([null, 'plain string', 42, ['text' => 123], ['text' => '   ']] as $junk) {
+            $out = aiDraftValidate($junk);
+            $this->assertSame('', $out['text']);
+            $this->assertNull($out['note']);
+        }
+    }
+
+    public function testEveryDraftKindHasItsOwnWordingAndTheSameLimits(): void
+    {
+        // A spoken announcement and a written order are read by different
+        // machinery — one by eyes in sunlight, one aloud by a phone — so the
+        // prompts differ. What must NOT differ is the cap the validator
+        // enforces, which is why the prompt interpolates the same constant.
+        $prompts = [];
+        foreach (AI_DRAFT_KINDS as $kind) {
+            $p = aiDraftSystemPrompt($kind);
+            $this->assertStringContainsString((string) AI_DRAFT_MAX_CHARS, $p, "cap missing from {$kind}");
+            // The line that does the actual work of this feature.
+            $this->assertStringContainsString('ΜΗΝ ΓΡΑΨΕΙΣ ΚΑΤΙ ΛΑΘΟΣ', $p);
+            $this->assertStringContainsString('Δεν προσθέτεις παραλήπτες', $p);
+            $prompts[$kind] = $p;
+        }
+        $this->assertStringContainsString('ΦΩΝΗΤΙΚΗ', $prompts['speak']);
+        $this->assertNotSame($prompts['order'], $prompts['speak']);
+        $this->assertNotSame($prompts['order'], $prompts['broadcast']);
+    }
+
     // ── The ref vocabulary shared with the panel ───────────────────────────
 
     public function testThePanelAndTheDigestNameTheSameRecordTheSameWay(): void

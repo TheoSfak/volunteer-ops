@@ -2625,6 +2625,14 @@ include __DIR__ . '/includes/header.php';
     }
     .assistant-thinking { font-size: .82rem; color: #64748b; font-style: italic; }
 
+    /* The drafting strip under an order's text field. Wraps rather than
+       squeezing: the message can be a whole sentence and the buttons must not
+       shrink to nothing beside it on a phone. */
+    .assistant-draft-bar {
+        display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
+    }
+    .assistant-draft-msg { font-size: .75rem; flex: 1 1 100%; }
+
     /* «Εξήγησέ μου», inside a row. Quiet until hovered: it must not compete
        with the finding it belongs to. */
     .assistant-explain {
@@ -3617,7 +3625,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                             <form method="post">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="request_task">
-                                <textarea name="task_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="<?= t('request.task.placeholder') ?>" required></textarea>
+                                <textarea name="task_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="<?= t('request.task.placeholder') ?>" data-ai-draft="order" required></textarea>
                                 <button type="submit" name="request_scope" value="all" class="btn btn-warning w-100 fw-semibold mb-3">
                                     <i class="bi bi-broadcast me-1"></i><?= t('common.request_all_active', ['count' => count($activeParticipants)]) ?>
                                 </button>
@@ -3654,7 +3662,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                             <form method="post">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="request_speak">
-                                <textarea name="speak_text" id="speakText" class="form-control mb-2" rows="3" maxlength="500" placeholder="<?= t('request.speak.placeholder') ?>" required></textarea>
+                                <textarea name="speak_text" id="speakText" class="form-control mb-2" rows="3" maxlength="500" placeholder="<?= t('request.speak.placeholder') ?>" data-ai-draft="speak" required></textarea>
                                 <?php // Speaks the draft on THIS machine before anyone is woken by
                                       // it. It is also the tap that satisfies the browser's own
                                       // "no speech without user interaction" rule, which is why it
@@ -4136,7 +4144,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <form method="post" enctype="multipart/form-data">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="global_message">
-                    <textarea name="global_message_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="<?= t('global_message.placeholder') ?>"></textarea>
+                    <textarea name="global_message_text" class="form-control mb-2" rows="3" maxlength="500" placeholder="<?= t('global_message.placeholder') ?>" data-ai-draft="broadcast"></textarea>
                     <div class="mb-2">
                         <label class="form-label small mb-1"><?= t('global_message.photo_label') ?></label>
                         <input type="file" name="global_message_photo" accept="image/*" class="form-control form-control-sm">
@@ -13510,6 +13518,81 @@ document.getElementById('assistantAskClear')?.addEventListener('click', () => {
 if (typeof map !== 'undefined' && map) {
     document.getElementById('assistantFocusNote')?.classList.remove('d-none');
 }
+<?php endif; ?>
+
+// ── Order drafting ─────────────────────────────────────────────────────────
+<?php if (aiIsConfigured()): ?>
+// Attaches itself to every textarea carrying data-ai-draft, so the three
+// free-text messages an Action Room can send share one mechanism and a fourth
+// one added later gets it by adding the attribute.
+//
+// The drafted text lands in the field the coordinator was already typing into
+// and NOTHING is submitted. The type and the recipients are untouched — they
+// are chosen on the same form, by the same person, as they always were.
+document.querySelectorAll('textarea[data-ai-draft]').forEach(field => {
+    const kind = field.dataset.aiDraft;
+
+    const bar = document.createElement('div');
+    bar.className = 'assistant-draft-bar mb-2';
+    bar.innerHTML =
+        `<button type="button" class="btn btn-sm btn-outline-primary assistant-draft-go">
+            <i class="bi bi-stars me-1"></i>${escapeHtml(t('draft.btn'))}
+         </button>
+         <button type="button" class="btn btn-sm btn-link assistant-draft-undo d-none">${escapeHtml(t('draft.undo'))}</button>
+         <span class="assistant-draft-msg"></span>`;
+    // After the field, before the send buttons: the order of the controls is
+    // the order of the decisions — write, phrase, choose who, send.
+    field.insertAdjacentElement('afterend', bar);
+
+    const go   = bar.querySelector('.assistant-draft-go');
+    const undo = bar.querySelector('.assistant-draft-undo');
+    const msg  = bar.querySelector('.assistant-draft-msg');
+    let original = null;
+
+    const say = (text, cls) => {
+        msg.className = 'assistant-draft-msg ' + (cls || '');
+        msg.textContent = text || '';
+    };
+
+    go.addEventListener('click', () => {
+        const rough = field.value.trim();
+        if (!rough) { say(t('draft.empty'), 'text-danger'); field.focus(); return; }
+
+        go.disabled = true;
+        say(t('draft.working'), 'text-muted');
+
+        const body = new FormData();
+        body.append('csrf_token', csrfToken);
+        body.append('mission_id', '<?= $missionId ?>');
+        body.append('action', 'draft');
+        body.append('kind', kind);
+        body.append('rough', rough);
+
+        fetch('mission-assistant.php', {method: 'POST', body}).then(r => r.json()).then(res => {
+            if (!res || !res.ok) { say((res && res.error) || t('draft.failed'), 'text-danger'); return; }
+            // Kept so one press puts back exactly what they wrote. A draft
+            // that overwrites a coordinator's own wording with no way back is
+            // a draft they will stop pressing.
+            original = rough;
+            field.value = res.text;
+            undo.classList.remove('d-none');
+            // res.note is addressed to the coordinator, never to the field —
+            // e.g. "there is no team by that name on this mission".
+            say(res.note ? (t('draft.done') + ' ' + res.note) : t('draft.done'), 'text-muted');
+            field.focus();
+        }).catch(() => say(t('draft.failed'), 'text-danger'))
+          .finally(() => { go.disabled = false; });
+    });
+
+    undo.addEventListener('click', () => {
+        if (original === null) return;
+        field.value = original;
+        original = null;
+        undo.classList.add('d-none');
+        say('');
+        field.focus();
+    });
+});
 <?php endif; ?>
 
 renderAssistant(assistantData);

@@ -2,7 +2,7 @@
 /**
  * VolunteerOps - Action Room assistant endpoint
  *
- * Two actions, POST only, AJAX, command staff only:
+ * Four actions, POST only, AJAX, command staff only:
  *
  *   seen - advance this coordinator's «Το είδα» checkpoint. The «Τι μου
  *          ξέφυγε» panel's CONTENTS never come through here: they ride the
@@ -17,6 +17,15 @@
  *          endpoint and NEVER on the 5s poll: an AI call holds a connection
  *          for tens of seconds, and this app has already been taken down once
  *          by connection exhaustion during a live exercise.
+ *
+ *   handover - the shift-handover brief. Same digest, its own prompt and its
+ *          own fixed shape. Produced and shown; never sent to anyone.
+ *
+ *   draft - turns the coordinator's rough note into the wording of an order.
+ *          RETURNS TEXT AND NOTHING ELSE: it creates no order, resolves no
+ *          recipient and submits no form. The request_task / request_speak /
+ *          global_message handlers in war-room.php stay the only things in
+ *          this app that can send anything to anybody.
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -141,6 +150,40 @@ if ($action === 'handover') {
 
     echo json_encode(
         generateShiftHandover($missionId, $mission, $missionShiftIds),
+        JSON_UNESCAPED_UNICODE
+    );
+    exit;
+}
+
+if ($action === 'draft') {
+    require_once __DIR__ . '/includes/ai-live.php';
+
+    $wait = aiLiveRateLimit($missionId);
+    if ($wait !== null) {
+        echo json_encode(['ok' => false, 'error' => t('assistant.rate_limited', ['n' => (int) ceil($wait / 60)])]);
+        exit;
+    }
+    session_write_close();
+
+    $mission = dbFetchOne("SELECT * FROM missions WHERE id = ?", [$missionId]);
+    $missionShiftIds = array_column(
+        dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$missionId]),
+        'id'
+    );
+
+    // Returns TEXT and nothing else. No order is created here and no recipient
+    // is resolved - the existing request_task / request_speak / global_message
+    // handlers in war-room.php remain the only things that can send anything,
+    // and they are reached the way they always were: by the coordinator
+    // pressing their own send button on a form they filled in themselves.
+    echo json_encode(
+        draftMissionMessage(
+            $missionId,
+            $mission,
+            $missionShiftIds,
+            (string) post('kind'),
+            (string) post('rough')
+        ),
         JSON_UNESCAPED_UNICODE
     );
     exit;
