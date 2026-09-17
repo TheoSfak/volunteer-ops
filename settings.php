@@ -628,8 +628,16 @@ if (isPost()) {
             'qr_checkin_enabled',
             'openweathermap_api_key', 'weather_map_compass_enabled', 'exposure_urgency_enabled',
             'search_rings_enabled',
-            'ai_enabled', 'ai_provider', 'ai_base_url', 'ai_model', 'ai_api_key_deepseek', 'ai_api_key_gemini',
+            'ai_enabled', 'ai_provider',
         ];
+        // Key, model and base URL are stored per provider, and the provider
+        // list is meant to grow — so the field list is derived from
+        // aiProviders() rather than spelled out and forgotten about.
+        foreach (array_keys(aiProviders()) as $aiKey) {
+            $fieldsToUpdate[] = 'ai_api_key_' . $aiKey;
+            $fieldsToUpdate[] = 'ai_model_' . $aiKey;
+            $fieldsToUpdate[] = 'ai_base_url_' . $aiKey;
+        }
 
         foreach ($fieldsToUpdate as $field) {
             $value = isset($_POST[$field]) ? $_POST[$field] : '';
@@ -639,7 +647,10 @@ if (isPost()) {
             }
 
             // Trim the API key to avoid whitespace issues from copy-paste
-            if (in_array($field, ['openweathermap_api_key', 'ai_api_key_deepseek', 'ai_api_key_gemini', 'ai_base_url', 'ai_model'], true)) {
+            $isAiKey   = str_starts_with($field, 'ai_api_key_');
+            $isAiModel = str_starts_with($field, 'ai_model_');
+            $isAiUrl   = str_starts_with($field, 'ai_base_url_');
+            if ($field === 'openweathermap_api_key' || $isAiKey || $isAiModel || $isAiUrl) {
                 $value = trim($value);
             }
 
@@ -654,7 +665,7 @@ if (isPost()) {
             // Only http(s), and never a bare path. The base URL is where an
             // API key is sent, so a malformed or non-http value must fall
             // back to the provider's own default rather than be stored.
-            if ($field === 'ai_base_url' && $value !== '' && !preg_match('#^https?://#i', $value)) {
+            if ($isAiUrl && $value !== '' && !preg_match('#^https?://#i', $value)) {
                 $value = '';
             }
 
@@ -740,8 +751,7 @@ if (isPost()) {
             // admin comparing the two flips the dropdown back and forth, and a
             // single field would make them re-paste a key every time — which
             // is exactly the moment a key gets pasted into the wrong provider.
-            if (in_array($field, ['ai_api_key_deepseek', 'ai_api_key_gemini'], true)
-                && $value === '' && !empty($settings[$field] ?? '')) {
+            if ($isAiKey && $value === '' && !empty($settings[$field] ?? '')) {
                 continue;
             }
             
@@ -1908,7 +1918,10 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
             $aiProviders    = aiProviders();
             $aiProviderKey  = $settings['ai_provider'] ?? 'gemini';
             if (!isset($aiProviders[$aiProviderKey])) $aiProviderKey = 'gemini';
-            $aiHasAnyKey    = !empty($settings['ai_api_key_deepseek'] ?? '') || !empty($settings['ai_api_key_gemini'] ?? '');
+            $aiHasAnyKey    = false;
+            foreach (array_keys($aiProviders) as $pkCheck) {
+                if (!empty($settings['ai_api_key_' . $pkCheck] ?? '')) { $aiHasAnyKey = true; break; }
+            }
             ?>
             <div class="card mb-4">
                 <div class="card-header">
@@ -1941,7 +1954,7 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                           // keys off the VIEWPORT, so a side-by-side pair ends up
                           // about 165px wide even on a large desktop. ?>
                     <div class="mb-3">
-                        <label class="form-label" for="aiProvider">Πάροχος</label>
+                        <label class="form-label" for="aiProvider">Κύριος πάροχος</label>
                         <select class="form-select" name="ai_provider" id="aiProvider">
                             <?php foreach ($aiProviders as $pk => $pm): ?>
                             <option value="<?= h($pk) ?>" <?= $pk === $aiProviderKey ? 'selected' : '' ?>><?= h($pm['label']) ?></option>
@@ -1949,24 +1962,40 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         </select>
                         <div class="form-text" id="aiProviderHint"></div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label" for="aiModel">Μοντέλο</label>
-                        <input type="text" class="form-control" name="ai_model" id="aiModel"
-                               list="aiModelList" autocomplete="off"
-                               value="<?= h($settings['ai_model'] ?? '') ?>">
-                        <datalist id="aiModelList"></datalist>
-                        <div class="form-text">Κενό = το προεπιλεγμένο του παρόχου. Αν το όνομα είναι λάθος, ο «Έλεγχος σύνδεσης» το λέει καθαρά.</div>
-                    </div>
 
-                    <hr>
+                    <?php
+                    // The failover order, shown rather than described: an admin
+                    // needs to know at a glance which provider a busy primary
+                    // will hand the work to.
+                    $aiChain = [];
+                    foreach (array_merge([$aiProviderKey], array_keys($aiProviders)) as $ck) {
+                        if (isset($aiChain[$ck]) || empty($settings['ai_api_key_' . $ck] ?? '')) continue;
+                        $aiChain[$ck] = $aiProviders[$ck]['label'];
+                    }
+                    ?>
+                    <div class="alert <?= count($aiChain) > 1 ? 'alert-success' : 'alert-secondary' ?> py-2 px-3 small">
+                        <i class="bi bi-arrow-repeat me-1"></i>
+                        <?php if (count($aiChain) > 1): ?>
+                        <strong>Αυτόματη εναλλαγή ενεργή.</strong> Σειρά: <?= h(implode(' → ', $aiChain)) ?>.
+                        Αν ο πρώτος είναι υπερφορτωμένος (HTTP 503), σε υπέρβαση ορίου ή δεν απαντά, το αίτημα
+                        πηγαίνει αυτόματα στον επόμενο. Η έκθεση καταγράφει ποιος την έγραψε τελικά.
+                        <?php else: ?>
+                        <strong>Χωρίς εφεδρεία.</strong> Με key σε έναν μόνο πάροχο, μια υπερφόρτωση (HTTP 503)
+                        σημαίνει ότι η ανάλυση δεν μπορεί να παραχθεί εκείνη τη στιγμή. Προσθέστε key και σε δεύτερο
+                        πάροχο για αυτόματη εναλλαγή.
+                        <?php endif; ?>
+                    </div>
 
                     <?php foreach ($aiProviders as $pk => $pm):
                         $stored = !empty($settings['ai_api_key_' . $pk] ?? ''); ?>
-                    <div class="mb-3">
-                        <label class="form-label" for="aiKey_<?= h($pk) ?>">
-                            API Key — <?= h($pm['label']) ?>
-                            <?php if ($pk === $aiProviderKey): ?><span class="badge bg-primary ms-1">σε χρήση</span><?php endif; ?>
-                        </label>
+                    <hr>
+                    <div class="fw-bold mb-2">
+                        <?= h($pm['label']) ?>
+                        <?php if ($pk === $aiProviderKey): ?><span class="badge bg-primary ms-1">κύριος</span>
+                        <?php elseif ($stored): ?><span class="badge bg-success-subtle text-success-emphasis ms-1">εφεδρεία</span><?php endif; ?>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1" for="aiKey_<?= h($pk) ?>">API Key</label>
                         <div class="input-group">
                             <input type="password" class="form-control" id="aiKey_<?= h($pk) ?>"
                                    name="ai_api_key_<?= h($pk) ?>" autocomplete="new-password" value=""
@@ -1982,19 +2011,30 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             Επεξεργασία δεδομένων: <?= h($pm['jurisdiction']) ?>.
                         </div>
                     </div>
-                    <?php endforeach; ?>
-
-                    <div class="mb-3">
-                        <label class="form-label" for="aiBaseUrl">Base URL <span class="text-muted fw-normal">(για προχωρημένους)</span></label>
-                        <input type="text" class="form-control" name="ai_base_url" id="aiBaseUrl"
-                               autocomplete="off" value="<?= h($settings['ai_base_url'] ?? '') ?>">
-                        <div class="form-text">Κενό = το προεπιλεγμένο του παρόχου. Αλλάξτε το μόνο για proxy ή εναλλακτικό endpoint συμβατό με OpenAI.</div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1" for="aiModel_<?= h($pk) ?>">Μοντέλο</label>
+                        <input type="text" class="form-control form-control-sm" id="aiModel_<?= h($pk) ?>"
+                               name="ai_model_<?= h($pk) ?>" list="aiModels_<?= h($pk) ?>" autocomplete="off"
+                               placeholder="<?= h($pm['default_model']) ?>"
+                               value="<?= h($settings['ai_model_' . $pk] ?? '') ?>">
+                        <datalist id="aiModels_<?= h($pk) ?>">
+                            <?php foreach ($pm['models'] as $mName): ?><option value="<?= h($mName) ?>"><?php endforeach; ?>
+                        </datalist>
                     </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1" for="aiBaseUrl_<?= h($pk) ?>">Base URL <span class="text-muted fw-normal">(προχωρημένο)</span></label>
+                        <input type="text" class="form-control form-control-sm" id="aiBaseUrl_<?= h($pk) ?>"
+                               name="ai_base_url_<?= h($pk) ?>" autocomplete="off"
+                               placeholder="<?= h($pm['base_url']) ?>"
+                               value="<?= h($settings['ai_base_url_' . $pk] ?? '') ?>">
+                    </div>
+                    <?php endforeach; ?>
+                    <hr>
 
                     <?php if ($aiHasAnyKey): ?>
                     <div class="d-flex align-items-center gap-2 flex-wrap">
                         <div class="alert alert-secondary py-1 px-2 mb-0 small flex-grow-1">
-                            <i class="bi bi-info-circle me-1"></i>Αποθηκεύστε πρώτα τις αλλαγές, μετά κάντε έλεγχο.
+                            <i class="bi bi-info-circle me-1"></i>Αποθηκεύστε πρώτα, μετά έλεγχος. Ελέγχεται <strong>μόνο ο κύριος πάροχος</strong> — χωρίς εναλλαγή, αλλιώς ο έλεγχος θα περνούσε επειδή απάντησε άλλος.
                         </div>
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="btnTestAiKey">
                             <i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης
@@ -3981,34 +4021,19 @@ document.getElementById('btnTestWeatherKey') && document.getElementById('btnTest
 // the server falls back to the provider's own default when either is blank.
 (function () {
     var meta = <?= json_encode(array_map(fn($p) => [
-        'label'   => $p['label'],
-        'base'    => $p['base_url'],
-        'model'   => $p['default_model'],
-        'models'  => $p['models'],
-        'hint'    => $p['key_hint'] . ' Επεξεργασία: ' . $p['jurisdiction'] . '.',
+        'hint' => $p['key_hint'] . ' Επεξεργασία: ' . $p['jurisdiction'] . '.',
     ], aiProviders()), JSON_UNESCAPED_UNICODE) ?>;
 
     var sel  = document.getElementById('aiProvider');
-    var list = document.getElementById('aiModelList');
-    var model = document.getElementById('aiModel');
-    var base = document.getElementById('aiBaseUrl');
     var hint = document.getElementById('aiProviderHint');
     if (!sel) return;
 
+    // Model names and base URLs are per-provider fields with their own static
+    // placeholders and datalists now, so the only thing that follows the
+    // dropdown is the note about where that provider processes data.
     function apply() {
         var m = meta[sel.value];
-        if (!m) return;
-        if (hint) hint.textContent = m.hint;
-        if (base) base.placeholder = m.base;
-        if (model) model.placeholder = m.model;
-        if (list) {
-            list.innerHTML = '';
-            m.models.forEach(function (name) {
-                var o = document.createElement('option');
-                o.value = name;
-                list.appendChild(o);
-            });
-        }
+        if (m && hint) hint.textContent = m.hint;
     }
     sel.addEventListener('change', apply);
     apply();

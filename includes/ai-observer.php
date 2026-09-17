@@ -389,7 +389,31 @@ function generateMissionAiAssessment(int $missionId, array $mission, array $scor
         ]
     );
 
-    return ['ok' => true, 'error' => null, 'assessment' => loadMissionAiAssessment($missionId)];
+    return [
+        'ok'         => true,
+        'error'      => null,
+        'notice'     => aiFallbackNotice($result),
+        'assessment' => loadMissionAiAssessment($missionId),
+    ];
+}
+
+/**
+ * A sentence naming the provider that actually wrote the report when the
+ * chosen one could not, or null when the primary served it.
+ *
+ * Not cosmetic. A coordinator needs to know their main provider is struggling,
+ * and an assessment that silently came from a different model is a different
+ * document — the stored row already records which one, and this says it out
+ * loud at the moment it happens.
+ */
+function aiFallbackNotice(array $result): ?string {
+    if (empty($result['fell_back']) || empty($result['attempts'])) {
+        return null;
+    }
+    $failed = array_map(fn($a) => $a['provider_label'], $result['attempts']);
+    $used   = aiProviders()[$result['provider']]['label'] ?? $result['provider'];
+    return 'Ο πάροχος ' . implode(' και ', array_unique($failed)) . ' δεν ήταν διαθέσιμος, οπότε η ανάλυση γράφτηκε από '
+         . $used . ' (' . $result['model'] . ').';
 }
 
 /**
@@ -613,7 +637,12 @@ function generateTeamAiDebrief(int $missionId, array $mission, array $score, arr
         ]
     );
 
-    return ['ok' => true, 'error' => null, 'debrief' => loadTeamAiDebrief($missionId, $teamId, $lang)];
+    return [
+        'ok'      => true,
+        'error'   => null,
+        'notice'  => aiFallbackNotice($result),
+        'debrief' => loadTeamAiDebrief($missionId, $teamId, $lang),
+    ];
 }
 
 function loadTeamAiDebrief(int $missionId, int $teamId, string $lang): ?array {

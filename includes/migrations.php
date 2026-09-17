@@ -6793,6 +6793,29 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 153,
+            'description' => 'Move the AI model and base URL from single shared settings to per-provider ones (ai_model_gemini, ai_base_url_deepseek, ...), matching how the API keys have always been stored. Required by automatic provider failover: with one shared ai_model, the moment Gemini returned 503 and the call moved to DeepSeek it would have asked DeepSeek for "gemini-3.6-flash" and failed instantly, for a reason that looks like a bug rather than a fallback. Copies the existing values onto whichever provider is currently selected so a working installation keeps working, and leaves the old keys in place rather than deleting them - they are two rows, and a rollback to the previous release should not lose an admin their model name.',
+            'up' => function () {
+                $provider = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'ai_provider'");
+                if (!$provider) {
+                    return; // never configured; per-provider defaults apply
+                }
+                foreach (['ai_model' => 'ai_model_', 'ai_base_url' => 'ai_base_url_'] as $old => $prefix) {
+                    $value = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = ?", [$old]);
+                    if ($value === null || trim((string) $value) === '') {
+                        continue;
+                    }
+                    dbExecute(
+                        "INSERT INTO settings (setting_key, setting_value, created_at, updated_at)
+                         VALUES (?, ?, NOW(), NOW())
+                         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()",
+                        [$prefix . $provider, $value]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

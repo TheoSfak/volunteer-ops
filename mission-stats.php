@@ -1166,7 +1166,19 @@ if (mapEl) {
         })
             .then(function (r) { return r.json(); })
             .then(function (data) {
-                if (data.ok) { done(); return; }
+                if (data.ok) {
+                    // A fallback notice must survive the reload that follows —
+                    // it is the only signal that the primary provider is
+                    // struggling, and reloading it away unread would hide
+                    // exactly the thing worth knowing.
+                    if (data.notice) {
+                        say(true, data.message);
+                        setTimeout(done, 6000);
+                    } else {
+                        done();
+                    }
+                    return;
+                }
                 say(false, data.message);
                 btn.disabled = false;
                 btn.innerHTML = original;

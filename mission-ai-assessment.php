@@ -102,7 +102,10 @@ if ($teamId > 0) {
     if (!$result['ok']) {
         $respond(false, $result['error'] ?? 'Η δημιουργία απέτυχε.');
     }
-    $respond(true, 'Το φύλλο απολογισμού ετοιμάστηκε.', [
+    $respond(true, trim('Το φύλλο απολογισμού ετοιμάστηκε. ' . ($result['notice'] ?? '')), [
+        // Its own field as well as inside the message, so the page can decide
+        // to pause on a fallback instead of reloading it away unread.
+        'notice'       => $result['notice'] ?? null,
         'generated_at' => $result['debrief']['generated_at'] ?? null,
         'open_url'     => 'mission-team-debrief-print.php?mission_id=' . $missionId . '&team_id=' . $teamId . '&lang=' . $lang,
     ]);
@@ -114,6 +117,7 @@ if (!$result['ok']) {
     $respond(false, $result['error'] ?? 'Η ανάλυση απέτυχε.');
 }
 
-$respond(true, 'Η ανάλυση ολοκληρώθηκε.', [
+$respond(true, trim('Η ανάλυση ολοκληρώθηκε. ' . ($result['notice'] ?? '')), [
+    'notice'       => $result['notice'] ?? null,
     'generated_at' => $result['assessment']['generated_at'] ?? null,
 ]);

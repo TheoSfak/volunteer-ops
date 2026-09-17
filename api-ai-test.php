@@ -37,7 +37,10 @@ if ($cfg['api_key'] === '') {
 $result = aiChat([
     ['role' => 'system', 'content' => 'Απαντάς μόνο στα ελληνικά, με μία σύντομη πρόταση.'],
     ['role' => 'user',   'content' => 'Γράψε μία πρόταση που επιβεβαιώνει ότι η σύνδεση λειτουργεί.'],
-], ['temperature' => 0.2, 'max_tokens' => 60, 'timeout' => 30, 'ignore_master_switch' => true]);
+    // no_failover: this endpoint exists to prove the SELECTED provider works.
+    // A test that quietly passed because a different provider answered would
+    // be worse than no test at all.
+], ['temperature' => 0.2, 'max_tokens' => 60, 'timeout' => 30, 'ignore_master_switch' => true, 'no_failover' => true]);
 
 if (!$result['ok']) {
     // A failed test is usually a retired model name, and the provider's own
