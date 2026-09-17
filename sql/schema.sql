@@ -2672,4 +2672,31 @@ CREATE TABLE IF NOT EXISTS `mission_restricted_area_breaches` (
     INDEX `idx_breach_open_lookup` (`restricted_area_id`, `user_id`, `exited_at`, `resolved_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- AI OBSERVER ASSESSMENTS (the expert assessment an admin generates on a
+-- finished mission report). One row per mission, replaced on regenerate: a
+-- report that rewrote itself on every view would be useless as a record.
+-- `payload` is stored PSEUDONYMISED, exactly as the provider returned it --
+-- every person in it is ΜΕΛΟΣ-n. `pseudonym_map` is the key that puts real
+-- names back at render time and never leaves this database.
+-- Nothing in this table ever feeds a score, an alert or a state change.
+CREATE TABLE IF NOT EXISTS `mission_ai_assessments` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `payload` JSON NOT NULL COMMENT 'Validated assessment, pseudonymised exactly as the provider returned it',
+    `pseudonym_map` JSON NULL COMMENT 'MELOS-n => real name. Server-side only; never sent anywhere',
+    `provider` VARCHAR(32) NOT NULL,
+    `model` VARCHAR(64) NOT NULL,
+    `prompt_version` SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+    `digest_hash` CHAR(64) NULL COMMENT 'SHA-256 of the digest sent, so a re-run on unchanged data is recognisable',
+    `dropped_claims` SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Findings deleted for citing evidence that did not resolve',
+    `duration_ms` INT UNSIGNED NULL,
+    `tokens_prompt` INT UNSIGNED NULL,
+    `tokens_completion` INT UNSIGNED NULL,
+    `generated_by` INT UNSIGNED NULL,
+    `generated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`generated_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    UNIQUE KEY `uk_ai_assessment_mission` (`mission_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

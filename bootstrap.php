@@ -21,6 +21,10 @@ require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/includes/permissions.php';
 require_once __DIR__ . '/includes/email.php';
 require_once __DIR__ . '/includes/livekit.php';
+// Provider client + config only. The heavier observer/digest layer
+// (includes/ai-observer.php) is required by the three pages that use it, not
+// on every request.
+require_once __DIR__ . '/includes/ai.php';
 require_once __DIR__ . '/includes/webpush.php';
 require_once __DIR__ . '/includes/telegram.php';
 require_once __DIR__ . '/includes/newsletter-functions.php';

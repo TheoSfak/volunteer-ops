@@ -628,18 +628,34 @@ if (isPost()) {
             'qr_checkin_enabled',
             'openweathermap_api_key', 'weather_map_compass_enabled', 'exposure_urgency_enabled',
             'search_rings_enabled',
+            'ai_enabled', 'ai_provider', 'ai_base_url', 'ai_model', 'ai_api_key_deepseek', 'ai_api_key_gemini',
         ];
 
         foreach ($fieldsToUpdate as $field) {
             $value = isset($_POST[$field]) ? $_POST[$field] : '';
 
-            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'vitals_enabled'])) {
+            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'vitals_enabled', 'ai_enabled'])) {
                 $value = isset($_POST[$field]) ? '1' : '0';
             }
 
             // Trim the API key to avoid whitespace issues from copy-paste
-            if ($field === 'openweathermap_api_key') {
+            if (in_array($field, ['openweathermap_api_key', 'ai_api_key_deepseek', 'ai_api_key_gemini', 'ai_base_url', 'ai_model'], true)) {
                 $value = trim($value);
+            }
+
+            // Same allowlist-or-fall-back shape as war_room_ticker_position:
+            // this key selects which stored API key is used and which
+            // endpoint is called, so a crafted POST must not be able to name
+            // a provider aiProviders() has never heard of.
+            if ($field === 'ai_provider' && !array_key_exists($value, aiProviders())) {
+                $value = 'gemini';
+            }
+
+            // Only http(s), and never a bare path. The base URL is where an
+            // API key is sent, so a malformed or non-http value must fall
+            // back to the provider's own default rather than be stored.
+            if ($field === 'ai_base_url' && $value !== '' && !preg_match('#^https?://#i', $value)) {
+                $value = '';
             }
 
             // Clamp to the range this same form's number input already
@@ -717,6 +733,15 @@ if (isPost()) {
 
             // Don't overwrite API key if form was submitted empty (acts like a "keep existing" field)
             if ($field === 'openweathermap_api_key' && empty($value) && !empty($settings['openweathermap_api_key'] ?? '')) {
+                continue;
+            }
+            // Same "keep existing" behaviour for both AI keys. They are stored
+            // per provider rather than in one shared field on purpose: an
+            // admin comparing the two flips the dropdown back and forth, and a
+            // single field would make them re-paste a key every time — which
+            // is exactly the moment a key gets pasted into the wrong provider.
+            if (in_array($field, ['ai_api_key_deepseek', 'ai_api_key_gemini'], true)
+                && $value === '' && !empty($settings[$field] ?? '')) {
                 continue;
             }
             
@@ -1875,6 +1900,112 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         </label>
                         <div class="form-text">Μόνο σε αποστολές τύπου «Αγνοούμενο άτομο». Ενδεικτικός υπολογισμός από ηλικία, θερμοκρασία και άνεμο — <strong>όχι κλινική πρόγνωση</strong>. Προτείνεται έλεγχος πριν την ενεργοποίηση σε πραγματική επιχείρηση.</div>
                     </div>
+                </div>
+            </div>
+
+            <!-- AI Settings -->
+            <?php
+            $aiProviders    = aiProviders();
+            $aiProviderKey  = $settings['ai_provider'] ?? 'gemini';
+            if (!isset($aiProviders[$aiProviderKey])) $aiProviderKey = 'gemini';
+            $aiHasAnyKey    = !empty($settings['ai_api_key_deepseek'] ?? '') || !empty($settings['ai_api_key_gemini'] ?? '');
+            ?>
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-stars me-1"></i>Ρυθμίσεις Τεχνητής Νοημοσύνης</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="ai_enabled" id="aiEnabled"
+                               <?= ($settings['ai_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="aiEnabled">
+                            <strong>Ανάλυση Εμπειρογνώμονα στις Εκθέσεις Αποστολών</strong>
+                        </label>
+                        <div class="form-text">
+                            Προσθέτει στην «Αξιολόγηση Παρατηρητή» μια αξιολόγηση των ομάδων, της αποστολής και του
+                            συντονιστικού, γραμμένη από μοντέλο με βάση τα μετρημένα δεδομένα. Παράγεται μόνο με κουμπί
+                            από διαχειριστή και αποθηκεύεται — δεν τρέχει ποτέ μόνη της και δεν επηρεάζει καμία βαθμολογία.
+                        </div>
+                    </div>
+
+                    <div class="alert alert-warning py-2 px-3 small">
+                        <i class="bi bi-shield-lock me-1"></i>
+                        <strong>Τι στέλνεται:</strong> μόνο αριθμοί, κωδικά ονόματα ομάδων και ψευδώνυμα προσώπων
+                        (ΜΕΛΟΣ-1, ΜΕΛΟΣ-2…). Ονόματα εθελοντών, τηλέφωνα, στοιχεία περιστατικών και συντεταγμένες
+                        δεν φεύγουν ποτέ από τον server — ο έλεγχος είναι αυτόματος και μπλοκάρει την αποστολή αν
+                        εντοπίσει οτιδήποτε τέτοιο.
+                    </div>
+
+                    <?php // Full width, not a two-column row: this card lives in the
+                          // settings page's narrow right-hand column, and col-md-*
+                          // keys off the VIEWPORT, so a side-by-side pair ends up
+                          // about 165px wide even on a large desktop. ?>
+                    <div class="mb-3">
+                        <label class="form-label" for="aiProvider">Πάροχος</label>
+                        <select class="form-select" name="ai_provider" id="aiProvider">
+                            <?php foreach ($aiProviders as $pk => $pm): ?>
+                            <option value="<?= h($pk) ?>" <?= $pk === $aiProviderKey ? 'selected' : '' ?>><?= h($pm['label']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-text" id="aiProviderHint"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="aiModel">Μοντέλο</label>
+                        <input type="text" class="form-control" name="ai_model" id="aiModel"
+                               list="aiModelList" autocomplete="off"
+                               value="<?= h($settings['ai_model'] ?? '') ?>">
+                        <datalist id="aiModelList"></datalist>
+                        <div class="form-text">Κενό = το προεπιλεγμένο του παρόχου. Αν το όνομα είναι λάθος, ο «Έλεγχος σύνδεσης» το λέει καθαρά.</div>
+                    </div>
+
+                    <hr>
+
+                    <?php foreach ($aiProviders as $pk => $pm):
+                        $stored = !empty($settings['ai_api_key_' . $pk] ?? ''); ?>
+                    <div class="mb-3">
+                        <label class="form-label" for="aiKey_<?= h($pk) ?>">
+                            API Key — <?= h($pm['label']) ?>
+                            <?php if ($pk === $aiProviderKey): ?><span class="badge bg-primary ms-1">σε χρήση</span><?php endif; ?>
+                        </label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="aiKey_<?= h($pk) ?>"
+                                   name="ai_api_key_<?= h($pk) ?>" autocomplete="new-password" value=""
+                                   placeholder="<?= $stored ? 'Αποθηκευμένο — αφήστε κενό για να παραμείνει' : 'Εισάγετε το API key σας' ?>">
+                            <button type="button" class="btn btn-outline-secondary" onclick="toggleKeyVisibility('aiKey_<?= h($pk) ?>')" tabindex="-1">
+                                <i class="bi bi-eye" id="eye-aiKey_<?= h($pk) ?>"></i>
+                            </button>
+                        </div>
+                        <div class="form-text">
+                            <?php if ($stored): ?><i class="bi bi-check-circle text-success me-1"></i>Έχει οριστεί key. <?php endif; ?>
+                            <?= h($pm['key_hint']) ?>
+                            <a href="<?= h($pm['key_url']) ?>" target="_blank" rel="noopener noreferrer">Λήψη key</a>.
+                            Επεξεργασία δεδομένων: <?= h($pm['jurisdiction']) ?>.
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+
+                    <div class="mb-3">
+                        <label class="form-label" for="aiBaseUrl">Base URL <span class="text-muted fw-normal">(για προχωρημένους)</span></label>
+                        <input type="text" class="form-control" name="ai_base_url" id="aiBaseUrl"
+                               autocomplete="off" value="<?= h($settings['ai_base_url'] ?? '') ?>">
+                        <div class="form-text">Κενό = το προεπιλεγμένο του παρόχου. Αλλάξτε το μόνο για proxy ή εναλλακτικό endpoint συμβατό με OpenAI.</div>
+                    </div>
+
+                    <?php if ($aiHasAnyKey): ?>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <div class="alert alert-secondary py-1 px-2 mb-0 small flex-grow-1">
+                            <i class="bi bi-info-circle me-1"></i>Αποθηκεύστε πρώτα τις αλλαγές, μετά κάντε έλεγχο.
+                        </div>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnTestAiKey">
+                            <i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης
+                        </button>
+                    </div>
+                    <div id="aiTestResult" class="mt-2" style="display:none;"></div>
+                    <?php else: ?>
+                    <div class="alert alert-secondary py-1 px-2 mb-0 small">
+                        <i class="bi bi-info-circle me-1"></i>Χωρίς API key η ανάλυση δεν εμφανίζεται πουθενά στην εφαρμογή.
+                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -3843,6 +3974,83 @@ document.getElementById('btnTestWeatherKey') && document.getElementById('btnTest
 </script>
 <?php endif; ?>
 
+<script>
+// Provider metadata mirrored from aiProviders() so the model datalist, the
+// base-URL placeholder and the hint line follow the dropdown without a page
+// reload. The values are suggestions only — both fields stay free text, and
+// the server falls back to the provider's own default when either is blank.
+(function () {
+    var meta = <?= json_encode(array_map(fn($p) => [
+        'label'   => $p['label'],
+        'base'    => $p['base_url'],
+        'model'   => $p['default_model'],
+        'models'  => $p['models'],
+        'hint'    => $p['key_hint'] . ' Επεξεργασία: ' . $p['jurisdiction'] . '.',
+    ], aiProviders()), JSON_UNESCAPED_UNICODE) ?>;
+
+    var sel  = document.getElementById('aiProvider');
+    var list = document.getElementById('aiModelList');
+    var model = document.getElementById('aiModel');
+    var base = document.getElementById('aiBaseUrl');
+    var hint = document.getElementById('aiProviderHint');
+    if (!sel) return;
+
+    function apply() {
+        var m = meta[sel.value];
+        if (!m) return;
+        if (hint) hint.textContent = m.hint;
+        if (base) base.placeholder = m.base;
+        if (model) model.placeholder = m.model;
+        if (list) {
+            list.innerHTML = '';
+            m.models.forEach(function (name) {
+                var o = document.createElement('option');
+                o.value = name;
+                list.appendChild(o);
+            });
+        }
+    }
+    sel.addEventListener('change', apply);
+    apply();
+
+    var btn = document.getElementById('btnTestAiKey');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+        var result = document.getElementById('aiTestResult');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Έλεγχος...';
+        result.style.display = 'none';
+
+        fetch('api-ai-test.php', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest'},
+            body: 'csrf_token=' + encodeURIComponent('<?= csrfToken() ?>')
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                result.style.display = '';
+                // textContent, not innerHTML: on success this message quotes
+                // the model's own reply verbatim, and on failure the
+                // provider's error text. Neither is ours to trust as markup.
+                var box = document.createElement('div');
+                box.className = 'alert py-1 px-2 small mb-0 ' + (data.ok ? 'alert-success' : 'alert-danger');
+                var icon = document.createElement('i');
+                icon.className = 'me-1 bi ' + (data.ok ? 'bi-check-circle' : 'bi-exclamation-triangle');
+                box.appendChild(icon);
+                box.appendChild(document.createTextNode(data.message || ''));
+                result.replaceChildren(box);
+            })
+            .catch(function () {
+                result.style.display = '';
+                result.innerHTML = '<div class="alert alert-danger py-1 px-2 small mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Αποτυχία επικοινωνίας</div>';
+            })
+            .finally(function () {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης';
+            });
+    });
+})();
+</script>
 
     </div>
 </div>

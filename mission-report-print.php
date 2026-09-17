@@ -113,6 +113,17 @@ $observerNarrative = generateMissionObserverNarrative($score, $mission['title'])
 $teamComparisonNarrative = generateTeamComparisonNarrative($score['teams'], $score['forgotten_orders']);
 $commandNarrative = generateCommandNarrative($score['command']);
 
+// ── AI observer assessment ──────────────────────────────────────────────────
+// Strictly read-only on this page: the printed report shows whatever an admin
+// generated on mission-stats.php, and never generates anything itself. A
+// document that rewrote its own conclusions each time it was printed would be
+// worthless as a record.
+require_once __DIR__ . '/includes/ai-observer-render.php';
+$aiAssessment  = loadMissionAiAssessment($missionId);
+$aiTeamsHtml   = $aiAssessment ? renderAiObserverSection($aiAssessment['payload']['teams'], 'Αξιολόγηση Πεδίου & Αποστολής') : '';
+$aiCommandHtml = $aiAssessment ? renderAiObserverSection($aiAssessment['payload']['command'], 'Αξιολόγηση Συντονιστικού') : '';
+$aiMetaHtml    = $aiAssessment ? renderAiObserverMeta($aiAssessment) : '';
+
 // Per-order-type breakdown (ack vs fulfill, forgotten-aware) — shared with
 // mission-stats.php via computeMissionOrderTypeBreakdown() so the two pages
 // can't drift on the averaging formula; both pass the same raw, unfiltered
@@ -467,6 +478,16 @@ $printDate = date('d/m/Y H:i');
         .screen-notice button:hover { background: #e0e8f5; }
         .screen-notice .hint { font-size: 8pt; opacity: .8; }
 
+        /* Shared with mission-stats.php via aiObserverStyles(), then sized down
+           for print. Emitted after .observer-note so its own `p { margin: 0 }`
+           doesn't collapse the assessment's paragraphs. */
+<?= aiObserverStyles() ?>
+        .aio-wrap { font-size: 9pt; page-break-inside: avoid; }
+        .aio-title { font-size: 9.5pt; }
+        .aio-verdict { font-size: 9.5pt; }
+        .aio-trail { font-weight: 700; font-size: 7.5pt; letter-spacing: .03em; text-transform: uppercase; color: #6b665c; margin: 14px 0 6px; }
+        .aio-meta { font-size: 7pt; }
+
         @media print {
             .screen-notice { display: none !important; }
             body { padding: 0; background: #fff; }
@@ -551,6 +572,11 @@ $printDate = date('d/m/Y H:i');
     <?php endif; ?>
     <div class="observer-note">
         <h6>🔭 Αξιολόγηση Παρατηρητή</h6>
+        <?php if ($aiTeamsHtml !== ''): ?>
+        <?= $aiTeamsHtml ?>
+        <?= $aiMetaHtml ?>
+        <div class="aio-trail">Αναλυτική τεκμηρίωση μετρήσεων</div>
+        <?php endif; ?>
         <p><?= nl2br(h($observerNarrative)) ?></p>
         <?php if (!empty($teamComparisonNarrative)): ?>
         <p style="margin-top:8px;"><?= nl2br(h($teamComparisonNarrative)) ?></p>
@@ -640,9 +666,23 @@ $printDate = date('d/m/Y H:i');
     </table>
     <div class="pr-chart-wrap" style="margin-top:10px;"><canvas id="commandSeverityChart"></canvas></div>
     <?php endif; ?>
+    <?php endif; ?>
+    <?php // Outside the availability branch on purpose — see the same note in
+          // mission-stats.php: with no shortage reports there is no command
+          // score, but the assessment can still judge the coordination centre. ?>
+    <?php if ($aiCommandHtml !== '' || $score['command']['available']): ?>
     <div class="observer-note">
         <h6>🔭 Αξιολόγηση Παρατηρητή — Διοίκηση</h6>
+        <?php if ($aiCommandHtml !== ''): ?>
+        <?= $aiCommandHtml ?>
+        <?php if ($aiTeamsHtml === '') echo $aiMetaHtml; ?>
+        <?php if ($score['command']['available']): ?>
+        <div class="aio-trail">Αναλυτική τεκμηρίωση μετρήσεων</div>
+        <?php endif; ?>
+        <?php endif; ?>
+        <?php if ($score['command']['available']): ?>
         <p><?= nl2br(h($commandNarrative)) ?></p>
+        <?php endif; ?>
     </div>
     <?php endif; ?>
 </div>

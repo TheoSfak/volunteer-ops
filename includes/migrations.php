@@ -6737,6 +6737,32 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 151,
+            'description' => 'Add mission_ai_assessments - the stored expert assessment an admin generates on a finished mission report. One row per mission, replaced on regenerate: a report that rewrites itself on every view is useless as a record, because two people reading the same mission would read different words. payload holds the validated, PSEUDONYMISED assessment exactly as it came back (every person is MELOS-n); pseudonym_map is the server-side key that puts real names back at render time and never leaves this database. provider/model/prompt_version/digest_hash exist so an old assessment can be read knowing what produced it, and so a prompt change is visible as staleness rather than silently changing history. Nothing here ever feeds a score, an alert or a state change - it is stored beside the computed result, never instead of it.',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_ai_assessments (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    payload JSON NOT NULL COMMENT 'Validated assessment, pseudonymised exactly as the provider returned it',
+                    pseudonym_map JSON NULL COMMENT 'MELOS-n => real name. Server-side only; never sent anywhere',
+                    provider VARCHAR(32) NOT NULL,
+                    model VARCHAR(64) NOT NULL,
+                    prompt_version SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+                    digest_hash CHAR(64) NULL COMMENT 'SHA-256 of the digest sent, so a re-run on unchanged data is recognisable',
+                    dropped_claims SMALLINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Findings deleted for citing evidence that did not resolve',
+                    duration_ms INT UNSIGNED NULL,
+                    tokens_prompt INT UNSIGNED NULL,
+                    tokens_completion INT UNSIGNED NULL,
+                    generated_by INT UNSIGNED NULL,
+                    generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (generated_by) REFERENCES users(id) ON DELETE SET NULL,
+                    UNIQUE KEY uk_ai_assessment_mission (mission_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

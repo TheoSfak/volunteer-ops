@@ -159,6 +159,19 @@ $teamComparisonNarrative = generateTeamComparisonNarrative($score['teams'], $sco
 $commandNarrative = generateCommandNarrative($score['command']);
 $scoreTierHex = ['good' => '#0ca30c', 'warning' => '#a56600', 'critical' => '#d03b3b'];
 
+// ── AI observer assessment ──────────────────────────────────────────────────
+// Read-only here: loaded if an admin has generated one, never generated on
+// view. The deterministic narratives above stay exactly where they were — the
+// assessment is printed before them and they remain underneath as the
+// measurement trail, so switching the feature off loses nothing.
+require_once __DIR__ . '/includes/ai-observer-render.php';
+$aiConfigured  = aiIsConfigured();
+$aiCanGenerate = $aiConfigured && ($canManageMissions || $isResponsible);
+$aiAssessment  = loadMissionAiAssessment($missionId);
+$aiTeamsHtml   = $aiAssessment ? renderAiObserverSection($aiAssessment['payload']['teams'], 'Αξιολόγηση Πεδίου & Αποστολής') : '';
+$aiCommandHtml = $aiAssessment ? renderAiObserverSection($aiAssessment['payload']['command'], 'Αξιολόγηση Συντονιστικού') : '';
+$aiMetaHtml    = $aiAssessment ? renderAiObserverMeta($aiAssessment) : '';
+
 // ── Team roster — mirrors war-room.php's team query (leader/members), extended
 //    with a fan-out-safe pre-aggregated hours subquery (a volunteer can hold
 //    >1 shift row per mission, so hours are summed per-volunteer before the
@@ -334,6 +347,13 @@ include __DIR__ . '/includes/header.php';
     .command-severity-table { width: 100%; font-size: .85rem; margin-top: 10px; }
     .command-severity-table th { text-align: left; color: #898781; font-weight: 600; font-size: .75rem; text-transform: uppercase; padding: 4px 8px; border-bottom: 2px solid #eee; }
     .command-severity-table td { padding: 6px 8px; border-bottom: 1px solid #f2f2f0; }
+
+    /* Shared with mission-report-print.php via aiObserverStyles(). Emitted
+       after .observer-note so its own `p { margin: 0 }` doesn't collapse the
+       assessment's paragraphs — equal specificity, so source order decides. */
+<?= aiObserverStyles() ?>
+    .aio-actions { margin-top: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .aio-trail { font-weight: 700; font-size: .78rem; letter-spacing: .03em; text-transform: uppercase; color: #6b665c; margin: 18px 0 8px; }
 </style>
 
 <div class="container-fluid py-4">
@@ -412,9 +432,28 @@ include __DIR__ . '/includes/header.php';
 
     <div class="observer-note">
         <h6><i class="bi bi-binoculars-fill"></i>Αξιολόγηση Παρατηρητή</h6>
+        <?php if ($aiTeamsHtml !== ''): ?>
+        <?= $aiTeamsHtml ?>
+        <?= $aiMetaHtml ?>
+        <div class="aio-trail">Αναλυτική τεκμηρίωση μετρήσεων</div>
+        <?php endif; ?>
         <p><?= nl2br(h($observerNarrative)) ?></p>
         <?php if (!empty($teamComparisonNarrative)): ?>
         <p class="mt-2"><?= nl2br(h($teamComparisonNarrative)) ?></p>
+        <?php endif; ?>
+        <?php if ($aiCanGenerate): ?>
+        <div class="aio-actions">
+            <button type="button" class="btn btn-sm btn-outline-primary" id="btnAiObserver">
+                <i class="bi bi-stars me-1"></i><?= $aiAssessment ? 'Επαναδημιουργία ανάλυσης' : 'Δημιουργία ανάλυσης εμπειρογνώμονα' ?>
+            </button>
+            <?php if ($aiAssessment): ?>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiObserverDelete">
+                <i class="bi bi-trash3 me-1"></i>Διαγραφή
+            </button>
+            <?php endif; ?>
+            <span class="text-muted small">Αξιολογεί ομάδες, αποστολή και συντονιστικό. Διαρκεί συνήθως 10–40 δευτερόλεπτα.</span>
+        </div>
+        <div id="aiObserverResult" class="mt-2" style="display:none;"></div>
         <?php endif; ?>
     </div>
 
@@ -527,9 +566,23 @@ include __DIR__ . '/includes/header.php';
     </table>
     <div class="mstats-chart-wrap mt-3"><canvas id="commandSeverityChart"></canvas></div>
     <?php endif; ?>
+    <?php endif; ?>
+    <?php // Deliberately outside the availability branch above: with zero shortage
+          // reports there is no command SCORE, but the assessment can still judge
+          // the coordination centre on order flow, unanswered traffic and pace. ?>
+    <?php if ($aiCommandHtml !== '' || $score['command']['available']): ?>
     <div class="observer-note mt-3">
         <h6><i class="bi bi-binoculars-fill"></i>Αξιολόγηση Παρατηρητή — Διοίκηση</h6>
+        <?php if ($aiCommandHtml !== ''): ?>
+        <?= $aiCommandHtml ?>
+        <?php if ($aiTeamsHtml === '') echo $aiMetaHtml; ?>
+        <?php if ($score['command']['available']): ?>
+        <div class="aio-trail">Αναλυτική τεκμηρίωση μετρήσεων</div>
+        <?php endif; ?>
+        <?php endif; ?>
+        <?php if ($score['command']['available']): ?>
         <p><?= nl2br(h($commandNarrative)) ?></p>
+        <?php endif; ?>
     </div>
     <?php endif; ?>
 </div>
@@ -1056,5 +1109,69 @@ if (mapEl) {
     else if (bounds.length === 1) map.setView(bounds[0], 14);
 }
 </script>
+
+<?php if ($aiCanGenerate): ?>
+<script>
+// Generate / delete the AI observer assessment. Both reload on success rather
+// than patching the DOM: the assessment lands in two separate cards and the
+// button labels change with it, and a reload is the only version of that which
+// cannot drift out of sync with what the server actually stored.
+(function () {
+    var result = document.getElementById('aiObserverResult');
+
+    function say(ok, message) {
+        result.style.display = '';
+        var box = document.createElement('div');
+        box.className = 'alert py-2 px-3 small mb-0 ' + (ok ? 'alert-success' : 'alert-danger');
+        // textContent: this can carry a provider's own error string.
+        box.textContent = message || '';
+        result.replaceChildren(box);
+    }
+
+    function post(body, btn, busyLabel, done) {
+        var original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + busyLabel;
+        result.style.display = 'none';
+
+        fetch('mission-ai-assessment.php', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest'},
+            body: body
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (data.ok) { done(); return; }
+                say(false, data.message);
+                btn.disabled = false;
+                btn.innerHTML = original;
+            })
+            .catch(function () {
+                say(false, 'Αποτυχία επικοινωνίας με τον server.');
+                btn.disabled = false;
+                btn.innerHTML = original;
+            });
+    }
+
+    var token = encodeURIComponent('<?= csrfToken() ?>');
+    var base  = 'csrf_token=' + token + '&mission_id=<?= (int) $missionId ?>';
+
+    var btn = document.getElementById('btnAiObserver');
+    if (btn) {
+        btn.addEventListener('click', function () {
+            post(base, btn, 'Ανάλυση σε εξέλιξη…', function () { window.location.reload(); });
+        });
+    }
+
+    var del = document.getElementById('btnAiObserverDelete');
+    if (del) {
+        del.addEventListener('click', function () {
+            if (!confirm('Διαγραφή της αποθηκευμένης ανάλυσης;')) return;
+            post(base + '&action=delete', del, 'Διαγραφή…', function () { window.location.reload(); });
+        });
+    }
+})();
+</script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
