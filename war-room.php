@@ -6581,6 +6581,28 @@ let areasRenderedSig = null;
 function renderAreaLayer(items) {
     if (!areaLayer) return;
 
+    // Memoized the way every other render function on this page already is
+    // (renderDispatches, renderSectorsList, renderPins, renderRouteLayer and
+    // a dozen more). This one and renderSectorLayer below were the only two
+    // that declared the signature variable and never used it, which on a
+    // mission where nothing is changing meant tearing down and rebuilding
+    // every polygon on the map twenty times a minute for no reason.
+    //
+    // items alone is the whole signature here: everything else this draws
+    // from is fixed for the page's lifetime -- the t() strings, and
+    // AREA_UNIT_PREFERENCE, which is a const that only moves on a settings
+    // save and a reload. Returning early also leaves an open popup genuinely
+    // open rather than destroying and reopening it, which is strictly better
+    // than what the reopen dance below can manage.
+    //
+    // Skipping applyPolygonLabelTiers() on this path is safe and deliberate:
+    // a label's tier depends on its text, its shape's bounds and the zoom.
+    // The first two cannot have moved if the signature matched, and the zoom
+    // has its own zoomend handler that re-tiers every group.
+    const sig = JSON.stringify(items);
+    if (sig === areasRenderedSig) return;
+    areasRenderedSig = sig;
+
     // Same reopen-across-rerender dance as renderSectorLayer below.
     let openAreaId = null;
     areaLayer.eachLayer(layer => { if (layer.areaId !== undefined && layer.isPopupOpen && layer.isPopupOpen()) openAreaId = layer.areaId; });
@@ -6972,6 +6994,35 @@ function renderSectorLayer(items) {
         openBuildingLayer = null;
         openBuildingId = null;
     }
+
+    // Memoized like renderAreaLayer above -- see there for why it matters on
+    // a 5-second poll. It sits BELOW the two validity checks on purpose, so
+    // the open ids in the signature are the normalised ones that actually
+    // decide what gets drawn. Three things ride along with `items`, and each
+    // one is load-bearing rather than defensive:
+    //
+    //   coverageModeActive + sectorCoverageById -- entering or leaving
+    //   Verified Coverage calls this with the SAME sectors and only the
+    //   on-map badges change, so an items-only signature would make that
+    //   button do nothing at all. renderSectorsList records the same trap
+    //   one layer up, including the race where a concurrent coverage-unaware
+    //   poll tick can mask the badge-bearing render behind a stale sig.
+    //
+    //   openSectorId + openBuildingId -- the open one is deliberately left
+    //   untouched above, which means it is allowed to be stale. Without these
+    //   a sector whose data changed while its popup was open would stay stale
+    //   FOREVER once that popup closed, because the rebuild it needs would be
+    //   skipped by a signature that already matched. With them, closing the
+    //   popup changes the signature and the next tick repairs it -- the same
+    //   five-second latency this had before being memoized at all.
+    //
+    // `teams` is deliberately absent despite feeding the team <select> in
+    // every manage popup: every path that creates, renames or deletes a team
+    // ends in location.reload(), so it cannot change under a live page.
+    const sig = JSON.stringify(items) + '|' + coverageModeActive + '|' + JSON.stringify(sectorCoverageById)
+        + '|' + openSectorId + '|' + openBuildingId;
+    if (sig === sectorsRenderedSig) return;
+    sectorsRenderedSig = sig;
 
     sectorLayer.eachLayer(layer => { if (layer !== openSectorLayer) sectorLayer.removeLayer(layer); });
     sectorBuildingLayer.eachLayer(layer => { if (layer !== openBuildingLayer) sectorBuildingLayer.removeLayer(layer); });
