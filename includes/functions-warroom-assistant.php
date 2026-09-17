@@ -121,6 +121,34 @@ function assistantWindowStart(?int $checkpointTs, int $nowTs): int {
 }
 
 /**
+ * The citable id for one record, e.g. INC-17.
+ *
+ * SHARED ON PURPOSE with includes/ai-live.php, which builds the same ids when
+ * it assembles the AI digest. The «Εξήγησέ μου» button takes the ref off a row
+ * of the deterministic panel and hands it to the model as part of a question,
+ * so the two vocabularies have to be the same string — and two files each
+ * concatenating 'INC-' . $id would agree right up until one of them changed,
+ * silently, with the only symptom being an assistant that says it cannot find
+ * a record the coordinator is looking straight at.
+ *
+ * Lives here rather than in ai-live.php because this file is loaded by
+ * bootstrap.php on every request while that one is pulled in on demand.
+ */
+function assistantRecordRef(string $kind, int $id): string {
+    $prefixes = [
+        'sos'      => 'SOS',
+        'shortage' => 'SHORT',
+        'incident' => 'INC',
+        'order'    => 'ORD',
+        'poi'      => 'POI',
+        'team'     => 'TEAM',
+        'sector'   => 'SECT',
+        'zone'     => 'ZONE',
+    ];
+    return ($prefixes[$kind] ?? strtoupper($kind)) . '-' . $id;
+}
+
+/**
  * Severity ladder. Kept as a function rather than a constant lookup so an
  * unknown value sorts last instead of throwing — this drives a sort, and a
  * sort that fatals takes the whole poll down with it.
@@ -466,6 +494,7 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
     foreach ($raw['sos'] ?? [] as $row) {
         $pending[] = [
             'kind'   => 'sos',
+            'ref'    => assistantRecordRef('sos', (int) $row['id']),
             'sev'    => empty($row['ack_ts']) ? 'critical' : 'high',
             'icon'   => 'bi-exclamation-octagon-fill',
             'title'  => empty($row['ack_ts'])
@@ -494,6 +523,7 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
         }
         $pending[] = [
             'kind'   => 'shortage',
+            'ref'    => assistantRecordRef('shortage', (int) $row['id']),
             'sev'    => $sev,
             'icon'   => 'bi-box-seam',
             'title'  => $title,
@@ -526,6 +556,7 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
         }
         $pending[] = [
             'kind'   => 'incident',
+            'ref'    => assistantRecordRef('incident', (int) $row['id']),
             'sev'    => $sev,
             'icon'   => 'bi-bandaid',
             'title'  => $title,
@@ -546,6 +577,7 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
         $missing = (int) $row['total'] - (int) $row['acked'];
         $pending[] = [
             'kind'   => 'order',
+            'ref'    => assistantRecordRef('order', (int) $row['id']),
             'sev'    => $ageMin >= ASSISTANT_ORDER_LATE_MINUTES ? 'high' : 'warn',
             'icon'   => 'bi-send-check',
             'title'  => assistantPlural(
@@ -671,6 +703,7 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
         }
         $pending[] = [
             'kind'   => 'poi',
+            'ref'    => assistantRecordRef('poi', (int) $row['id']),
             'sev'    => 'info',
             'icon'   => 'bi-pin-map',
             'title'  => (int) $row['photos'] === 0

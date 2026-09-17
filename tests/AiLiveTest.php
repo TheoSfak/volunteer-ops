@@ -220,6 +220,103 @@ final class AiLiveTest extends TestCase
         $this->assertTrue($out['answerable']);
     }
 
+    // ── The shift handover ─────────────────────────────────────────────────
+
+    public function testAHandoverLineWithNoEvidenceIsDeleted(): void
+    {
+        // Deliberately the OPPOSITE of a chat answer, which is kept and marked.
+        // A chat reply is read in context with the question still on screen; a
+        // handover line is read hours later by somebody who was not here, as a
+        // statement of fact about an operation they are now responsible for.
+        // There is nothing for them to weigh it against.
+        $out = aiHandoverValidate([
+            'situation' => 'Τρεις ομάδες στο πεδίο.',
+            'open' => [
+                ['text' => 'Τεκμηριωμένο.', 'evidence' => ['SHORT-42']],
+                ['text' => 'Ακούγεται σωστό αλλά δεν δείχνει πουθενά.', 'evidence' => []],
+                ['text' => 'Παραπέμπει σε ανύπαρκτη εγγραφή.', 'evidence' => ['TEAM-9999']],
+            ],
+        ], ['SHORT-42' => 'Έλλειψη']);
+
+        $this->assertCount(1, $out['open']);
+        $this->assertSame('Τεκμηριωμένο.', $out['open'][0]['text']);
+        $this->assertSame(2, $out['dropped']);
+        $this->assertSame('Τρεις ομάδες στο πεδίο.', $out['situation']);
+    }
+
+    public function testAHandoverKeepsItsThreeSectionsSeparate(): void
+    {
+        // The fixed skeleton is the point of a handover — the person receiving
+        // it reads the same order every time, tired, at 4am.
+        $out = aiHandoverValidate([
+            'situation' => 'Κατάσταση.',
+            'open'    => [['text' => 'Α', 'evidence' => ['R1']]],
+            'ongoing' => [['text' => 'Β', 'evidence' => ['R1']]],
+            'watch'   => [['text' => 'Γ', 'evidence' => ['R1']]],
+        ], ['R1' => 'x']);
+
+        $this->assertSame('Α', $out['open'][0]['text']);
+        $this->assertSame('Β', $out['ongoing'][0]['text']);
+        $this->assertSame('Γ', $out['watch'][0]['text']);
+    }
+
+    public function testAnEmptySectionIsAValidHandoverAnswer(): void
+    {
+        // "Nothing open" is useful information for the next coordinator, and
+        // the prompt says so — the validator must not treat it as a failure.
+        $out = aiHandoverValidate(['situation' => 'Ήσυχη βάρδια.', 'open' => [], 'ongoing' => [], 'watch' => []], []);
+
+        $this->assertSame('Ήσυχη βάρδια.', $out['situation']);
+        $this->assertSame([], $out['open']);
+        $this->assertSame(0, $out['dropped']);
+    }
+
+    public function testAHandoverIsCappedSoItStaysReadableStandingUp(): void
+    {
+        $lines = [];
+        for ($i = 0; $i < 20; $i++) {
+            $lines[] = ['text' => 'Γραμμή ' . $i, 'evidence' => ['R1']];
+        }
+        $out = aiHandoverValidate(['open' => $lines], ['R1' => 'x']);
+
+        $this->assertCount(8, $out['open']);
+    }
+
+    public function testJunkFromTheProviderDoesNotFatalTheHandover(): void
+    {
+        foreach ([null, 'text', 7, ['open' => 'not a list']] as $junk) {
+            $out = aiHandoverValidate($junk, ['R1' => 'x']);
+            $this->assertSame('', $out['situation']);
+            $this->assertSame([], $out['open']);
+        }
+    }
+
+    // ── The ref vocabulary shared with the panel ───────────────────────────
+
+    public function testThePanelAndTheDigestNameTheSameRecordTheSameWay(): void
+    {
+        // «Εξήγησέ μου» lifts a ref off a row of the deterministic panel and
+        // hands it to the model, which only knows the ids the digest built. If
+        // the two ever disagreed the symptom would be an assistant insisting
+        // it cannot find a record the coordinator is looking straight at — so
+        // both go through this one function, and these are its ids.
+        $this->assertSame('INC-17',   assistantRecordRef('incident', 17));
+        $this->assertSame('SHORT-42', assistantRecordRef('shortage', 42));
+        $this->assertSame('ORD-100',  assistantRecordRef('order', 100));
+        $this->assertSame('SOS-3',    assistantRecordRef('sos', 3));
+        $this->assertSame('POI-7',    assistantRecordRef('poi', 7));
+        $this->assertSame('TEAM-39',  assistantRecordRef('team', 39));
+        $this->assertSame('SECT-5',   assistantRecordRef('sector', 5));
+        $this->assertSame('ZONE-2',   assistantRecordRef('zone', 2));
+    }
+
+    public function testAnUnknownKindStillProducesAUsableRef(): void
+    {
+        // A new record type must not produce an empty prefix that collides
+        // with every other one.
+        $this->assertSame('WIDGET-1', assistantRecordRef('widget', 1));
+    }
+
     // ── Throttle ───────────────────────────────────────────────────────────
 
     public function testTheThrottleAllowsABurstThenHoldsTheLine(): void

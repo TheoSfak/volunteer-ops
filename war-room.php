@@ -2625,6 +2625,34 @@ include __DIR__ . '/includes/header.php';
     }
     .assistant-thinking { font-size: .82rem; color: #64748b; font-style: italic; }
 
+    /* «Εξήγησέ μου», inside a row. Quiet until hovered: it must not compete
+       with the finding it belongs to. */
+    .assistant-explain {
+        flex: 0 0 auto; align-self: flex-start;
+        border: none; background: transparent; color: #94a3b8;
+        padding: 0 .1rem; line-height: 1.3; font-size: .95rem;
+    }
+    .assistant-item:hover .assistant-explain { color: #0369a1; }
+
+    /* The handover brief. Reads as a document inside the transcript, because
+       that is what it is — the same skeleton in the same order every time. */
+    .assistant-handover { background: rgba(23,37,84,.05); white-space: normal; }
+    .assistant-handover-top {
+        display: flex; justify-content: space-between; align-items: baseline;
+        gap: .5rem; flex-wrap: wrap; margin-bottom: .35rem;
+    }
+    .assistant-handover-at { font-size: .74rem; color: #64748b; }
+    .assistant-handover-sit { margin-bottom: .5rem; }
+    .assistant-handover-section { margin-top: .5rem; }
+    .assistant-handover-h {
+        font-size: .68rem; font-weight: 700; letter-spacing: .06em;
+        text-transform: uppercase; color: #64748b;
+    }
+    .assistant-handover-section ul { margin: .15rem 0 0; padding-left: 1.1rem; }
+    .assistant-handover-section li { margin-bottom: .25rem; }
+    .assistant-handover-section .assistant-cites { display: block; margin-top: .1rem; }
+    .assistant-handover-empty { color: #94a3b8; list-style: none; margin-left: -1.1rem; }
+
     /* Two pulses on the card the assistant just sent you to. Without it a
        smooth scroll into a dense console leaves you looking for which of nine
        cards was meant. */
@@ -2775,6 +2803,14 @@ include __DIR__ . '/includes/header.php';
                            autocomplete="off">
                     <button type="button" id="assistantAskBtn" class="btn btn-primary">
                         <i class="bi bi-send"></i>
+                    </button>
+                    <?php /* Beside the question box because it IS a question,
+                             just one asked often enough to deserve a key of
+                             its own — the coordinator at the end of a shift
+                             should not have to remember how to phrase it. */ ?>
+                    <button type="button" id="assistantHandoverBtn" class="btn btn-outline-secondary"
+                            title="<?= t('assistant.handover_btn') ?>">
+                        <i class="bi bi-clipboard2-check"></i>
                     </button>
                 </div>
                 <div class="d-flex justify-content-between align-items-center mt-1">
@@ -13006,6 +13042,9 @@ setInterval(renderPollStaleness, 5000);
 // and arrives already decided, so the badge and the list cannot drift apart.
 let assistantData = <?= json_encode($assistantPanel, JSON_UNESCAPED_UNICODE) ?>;
 let assistantHeroOnScreen = true;
+// Whether there is a provider to ask at all. The deterministic panel works
+// without one, so every AI affordance has to be able to disappear on its own.
+const ASSISTANT_CAN_ASK = <?= aiIsConfigured() ? 'true' : 'false' ?>;
 
 // Relative time is computed HERE, from the absolute epoch the server sent, and
 // deliberately never server-side: a pre-computed "πριν 7′" would change that
@@ -13041,6 +13080,13 @@ function assistantItemHtml(item) {
     // on the row, which squeezed the title into three lines and truncated the
     // detail — and the detail is what tells two otherwise identical incidents
     // apart. On a desktop row it reads the same as before.
+    // «Εξήγησέ μου» only where there is a record to explain, and only when
+    // there is a provider to ask. It is not a new mechanism: it fills in the
+    // question the coordinator would otherwise have to phrase, naming the ref
+    // that this row and the AI digest both already use for that record.
+    const explain = (item.ref && ASSISTANT_CAN_ASK)
+        ? `<button type="button" class="assistant-explain" data-ref="${escapeHtml(item.ref)}" title="${escapeHtml(t('assistant.explain'))}"><i class="bi bi-question-circle"></i></button>`
+        : '';
     return `<div class="assistant-item" data-sev="${escapeHtml(item.sev)}" data-target="${escapeHtml(item.target || '')}" data-ts="${Number(item.ts)}">
         <div class="assistant-icon"><i class="bi ${escapeHtml(item.icon)}"></i></div>
         <div class="assistant-text">
@@ -13050,6 +13096,7 @@ function assistantItemHtml(item) {
                 <span class="assistant-age" title="${escapeHtml(assistantClock(item.ts))}">${escapeHtml(assistantAgo(item.ts))}</span>
             </div>
         </div>
+        ${explain}
     </div>`;
 }
 
@@ -13173,6 +13220,17 @@ function assistantGoto(target) {
 }
 
 document.getElementById('assistantBody')?.addEventListener('click', e => {
+    // «Εξήγησέ μου» sits inside the row, so it has to be handled before the
+    // row's own jump-to-card — otherwise asking about a finding would close
+    // the panel and scroll away from the answer being written.
+    const explainBtn = e.target.closest('.assistant-explain');
+    if (explainBtn) {
+        e.stopPropagation();
+        if (typeof assistantAsk === 'function') {
+            assistantAsk(t('assistant.explain_question', {ref: explainBtn.dataset.ref}));
+        }
+        return;
+    }
     const row = e.target.closest('.assistant-item');
     if (!row || !row.dataset.target) return;
     const target = row.dataset.target;
@@ -13288,10 +13346,12 @@ function assistantRenderAnswer(slot, res) {
     assistantScrollToLatest();
 }
 
-function assistantAsk() {
+function assistantAsk(presetQuestion) {
     if (assistantAsking) return;
     const input = document.getElementById('assistantAskInput');
-    const question = input.value.trim();
+    // A preset comes from «Εξήγησέ μου», which is the same question path with
+    // the wording filled in — not a second endpoint and not a second prompt.
+    const question = (presetQuestion || input.value).trim();
     if (!question) return;
 
     assistantAsking = true;
@@ -13330,7 +13390,105 @@ function assistantAsk() {
     });
 }
 
-document.getElementById('assistantAskBtn')?.addEventListener('click', assistantAsk);
+document.getElementById('assistantAskBtn')?.addEventListener('click', () => assistantAsk());
+
+// ── Shift handover ─────────────────────────────────────────────────────────
+function assistantRenderHandover(slot, res) {
+    if (!res || !res.ok) {
+        slot.className = 'assistant-a assistant-a-error';
+        slot.textContent = (res && res.error) || t('assistant.ask_failed');
+        assistantScrollToLatest();
+        return;
+    }
+
+    const section = (title, lines) => {
+        const body = lines.length
+            ? lines.map(l => `<li>${escapeHtml(l.text)}`
+                + (l.citations.length
+                    ? `<span class="assistant-cites">${l.citations.map(c => `<span class="assistant-cite">${escapeHtml(c.label)}</span>`).join('')}</span>`
+                    : '')
+                + `</li>`).join('')
+            : `<li class="assistant-handover-empty">${escapeHtml(t('assistant.handover_empty'))}</li>`;
+        return `<div class="assistant-handover-section">
+            <div class="assistant-handover-h">${escapeHtml(title)}</div>
+            <ul>${body}</ul>
+        </div>`;
+    };
+
+    slot.className = 'assistant-a assistant-handover';
+    slot.innerHTML =
+        `<div class="assistant-handover-top">
+            <strong>${escapeHtml(t('assistant.handover_title'))}</strong>
+            <span class="assistant-handover-at">${escapeHtml(t('assistant.handover_at', {time: res.at}))}</span>
+        </div>`
+        + (res.situation ? `<div class="assistant-handover-sit">${escapeHtml(res.situation)}</div>` : '')
+        + section(t('assistant.handover_open'), res.open)
+        + section(t('assistant.handover_ongoing'), res.ongoing)
+        + section(t('assistant.handover_watch'), res.watch);
+
+    // A handover is written to be handed on. Without this the coordinator
+    // retypes it into the chat, which is where it was always going anyway.
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'btn btn-sm btn-outline-secondary mt-2';
+    copy.innerHTML = '<i class="bi bi-clipboard me-1"></i>' + escapeHtml(t('assistant.handover_copy'));
+    copy.addEventListener('click', () => {
+        const plain = [
+            t('assistant.handover_title') + ' — ' + t('assistant.handover_at', {time: res.at}),
+            '',
+            res.situation,
+            '',
+            ...[['handover_open', res.open], ['handover_ongoing', res.ongoing], ['handover_watch', res.watch]]
+                .flatMap(([key, lines]) => [
+                    t('assistant.' + key).toUpperCase() + ':',
+                    ...(lines.length ? lines.map(l => '- ' + l.text) : ['- ' + t('assistant.handover_empty')]),
+                    ''
+                ])
+        ].join('\n');
+        navigator.clipboard?.writeText(plain).then(() => {
+            copy.innerHTML = '<i class="bi bi-check2 me-1"></i>' + escapeHtml(t('assistant.handover_copied'));
+        }).catch(() => {});
+    });
+    slot.appendChild(copy);
+
+    if (res.dropped > 0) {
+        const dropped = document.createElement('div');
+        dropped.className = 'assistant-warn';
+        dropped.textContent = t('assistant.handover_dropped', {n: res.dropped});
+        slot.appendChild(dropped);
+    }
+    if (res.notice) {
+        const notice = document.createElement('div');
+        notice.className = 'assistant-warn';
+        notice.textContent = res.notice;
+        slot.appendChild(notice);
+    }
+    assistantScrollToLatest();
+}
+
+document.getElementById('assistantHandoverBtn')?.addEventListener('click', function () {
+    if (assistantAsking) return;
+    assistantAsking = true;
+    this.disabled = true;
+    document.getElementById('assistantAskBtn').disabled = true;
+
+    const slot = assistantAppendQuestion(t('assistant.handover_btn'));
+    slot.textContent = t('assistant.handover_working');
+
+    const body = new FormData();
+    body.append('csrf_token', csrfToken);
+    body.append('mission_id', '<?= $missionId ?>');
+    body.append('action', 'handover');
+
+    fetch('mission-assistant.php', {method: 'POST', body}).then(r => r.json())
+        .then(res => assistantRenderHandover(slot, res))
+        .catch(() => assistantRenderHandover(slot, {ok: false, error: t('assistant.ask_failed')}))
+        .finally(() => {
+            assistantAsking = false;
+            this.disabled = false;
+            document.getElementById('assistantAskBtn').disabled = false;
+        });
+});
 document.getElementById('assistantAskInput')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); assistantAsk(); }
 });

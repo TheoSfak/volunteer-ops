@@ -121,4 +121,29 @@ if ($action === 'ask') {
     exit;
 }
 
+if ($action === 'handover') {
+    require_once __DIR__ . '/includes/ai-live.php';
+
+    // Same budget as a question: a handover is one provider call, and a
+    // coordinator producing them in a loop is the same runaway to guard against.
+    $wait = aiLiveRateLimit($missionId);
+    if ($wait !== null) {
+        echo json_encode(['ok' => false, 'error' => t('assistant.rate_limited', ['n' => (int) ceil($wait / 60)])]);
+        exit;
+    }
+    session_write_close();
+
+    $mission = dbFetchOne("SELECT * FROM missions WHERE id = ?", [$missionId]);
+    $missionShiftIds = array_column(
+        dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$missionId]),
+        'id'
+    );
+
+    echo json_encode(
+        generateShiftHandover($missionId, $mission, $missionShiftIds),
+        JSON_UNESCAPED_UNICODE
+    );
+    exit;
+}
+
 echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
