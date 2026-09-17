@@ -76,6 +76,77 @@ final class AiLiveTest extends TestCase
         $this->assertSame('Β', aiLiveCompassLabel(-1.0));
     }
 
+    // ── A position field is never empty ────────────────────────────────────
+
+    public function testAPositionFieldNeverComesBackAsNull(): void
+    {
+        // The digest reaches the model as pretty-printed JSON, so a
+        // `"θεση": null` was read back verbatim and reported to a coordinator
+        // as the literal word "null" — while the person's pin sat on the map.
+        // Every one of the three causes now has its own sentence.
+        $noFix = aiLivePositionText(null, null, 35.31, 25.10, AI_LIVE_POS_NO_FIX);
+        $this->assertSame(AI_LIVE_POS_NO_FIX, $noFix);
+
+        $noBase = aiLivePositionText(35.3387, 25.1442, null, null);
+        $this->assertSame(AI_LIVE_POS_NO_BASE, $noBase);
+
+        $noPlace = aiLivePositionText(null, null, 35.31, 25.10);
+        $this->assertSame(AI_LIVE_POS_NONE, $noPlace);
+
+        // And none of them is the string "null" in any casing, which is the
+        // thing the coordinator must never be shown.
+        foreach ([$noFix, $noBase, $noPlace] as $text) {
+            $this->assertNotSame('', $text);
+            $this->assertStringNotContainsStringIgnoringCase('null', $text);
+        }
+    }
+
+    public function testAKnownPositionStillReadsAsDistanceFromTheBase(): void
+    {
+        $out = aiLivePositionText(35.3387, 25.1442, 35.3100, 25.1000);
+        $this->assertStringContainsString('από τη βάση', $out);
+        $this->assertDoesNotMatchRegularExpression('/\d+\.\d{3,}/', $out);
+    }
+
+    // ── Distance from the point the coordinator is looking at ──────────────
+
+    public function testDistanceIsMeasuredFromAnArbitraryPointNotOnlyTheBase(): void
+    {
+        // Two polar positions read from one origin are not something a model
+        // can combine: it has an eight-point bearing, not a vector. So the
+        // server measures from the focus point and hands over the answer.
+        // ~11 km due north of the reference point, read FROM that point.
+        $out = aiLiveRelativeTo(35.4387, 25.1442, 35.3387, 25.1442);
+
+        $this->assertIsString($out);
+        $this->assertStringContainsString('χλμ', $out);
+        $this->assertStringContainsString('Β', $out);
+        // Bare: this one is not measured from the base and must not claim to be.
+        $this->assertStringNotContainsString('βάση', $out);
+        $this->assertDoesNotMatchRegularExpression('/\d+\.\d{3,}/', $out);
+    }
+
+    public function testTheDirectionIsFromTheReferencePointToTheRecord(): void
+    {
+        // Read as "the record is X, in this direction, FROM the focus point".
+        // Getting this backwards would send a team the wrong way, so it is
+        // pinned in both directions rather than assumed.
+        $southOfRef = aiLiveRelativeTo(35.2500, 24.8100, 35.2600, 24.8100);
+        $northOfRef = aiLiveRelativeTo(35.2600, 24.8100, 35.2500, 24.8100);
+
+        $this->assertStringContainsString('Ν', $southOfRef);
+        $this->assertStringContainsString('Β', $northOfRef);
+    }
+
+    public function testNoFocusPointMeansNoDistanceRatherThanAWrongOne(): void
+    {
+        // The tabbed volunteer layout may have no map, so no point is sent.
+        // The caller omits the field on null; it must never fall back to the
+        // base and silently answer a different question.
+        $this->assertNull(aiLiveRelativeTo(35.3387, 25.1442, null, null));
+        $this->assertNull(aiLiveRelativeTo(null, null, 35.3387, 25.1442));
+    }
+
     // ── People in free text ────────────────────────────────────────────────
 
     public function testANameInFreeTextResolvesToThatPersonsOwnPseudonym(): void

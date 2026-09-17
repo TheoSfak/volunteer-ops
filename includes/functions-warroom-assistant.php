@@ -143,6 +143,7 @@ function assistantRecordRef(string $kind, int $id): string {
         'poi'      => 'POI',
         'team'     => 'TEAM',
         'sector'   => 'SECT',
+        'person'   => 'CREW',
         'zone'     => 'ZONE',
     ];
     return ($prefixes[$kind] ?? strtoupper($kind)) . '-' . $id;

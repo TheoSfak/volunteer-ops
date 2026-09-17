@@ -95,6 +95,18 @@ const AI_LIVE_FOCUS_WEATHER_MIN_KM = 5.0;
 const AI_LIVE_RATE_MAX     = 20;
 const AI_LIVE_RATE_WINDOW  = 600;
 
+/**
+ * People listed individually in the digest, freshest fix first.
+ *
+ * A cap rather than everyone: each row is ~150 bytes of prompt, the digest is
+ * ~9KB on a three-team mission, and a 200-volunteer earthquake deployment
+ * would otherwise turn one question into a very expensive one. Sixty covers
+ * every operation this app has actually run, and the note tells the model how
+ * many were left out so it never reports the list as the whole roster —
+ * δυναμη_τωρα keeps the true counts either way.
+ */
+const AI_LIVE_CREW_CAP = 60;
+
 // ─── Geometry, in words rather than numbers ──────────────────────────────────
 
 /**
@@ -120,6 +132,35 @@ function aiLiveCompassLabel(float $bearing): string {
 }
 
 /**
+ * "2,4 χλμ ΒΑ" — distance and bearing from an ARBITRARY reference point.
+ *
+ * Split out of aiLiveRelativePosition() so the base is no longer the only
+ * thing a position can be measured against. Two polar positions read from the
+ * same origin are not something a model can usefully combine: it has an
+ * eight-point bearing, not a vector, and the prompt forbids it from inventing
+ * arithmetic anyway. So when the coordinator is looking at a point on the map
+ * we measure from THAT point here, on the server, and hand over the answer.
+ *
+ * Returns null when either end is unknown, and the caller must then say
+ * nothing rather than guess: an invented position in a live search is worse
+ * than a missing one.
+ */
+function aiLiveRelativeTo(?float $lat, ?float $lng, ?float $refLat, ?float $refLng): ?string {
+    if ($lat === null || $lng === null || $refLat === null || $refLng === null) {
+        return null;
+    }
+    $metres  = gpsDistanceMeters($refLat, $refLng, $lat, $lng);
+    $bearing = aiLiveCompassLabel(aiLiveBearingDegrees($refLat, $refLng, $lat, $lng));
+    // One decimal on kilometres, whole metres below a kilometre. Both are far
+    // from the five decimal places the leak gate treats as a coordinate, and
+    // both are the precision a radio call would actually use.
+    $distance = $metres < 1000
+        ? round($metres) . ' μ'
+        : round($metres / 1000, 1) . ' χλμ';
+    return $distance . ' ' . $bearing;
+}
+
+/**
  * "2,4 χλμ ΒΑ από τη βάση" — the ONLY form a position is ever allowed to take
  * on its way out of this server.
  *
@@ -128,18 +169,39 @@ function aiLiveCompassLabel(float $bearing): string {
  * than a missing one.
  */
 function aiLiveRelativePosition(?float $lat, ?float $lng, ?float $baseLat, ?float $baseLng): ?string {
-    if ($lat === null || $lng === null || $baseLat === null || $baseLng === null) {
-        return null;
+    $relative = aiLiveRelativeTo($lat, $lng, $baseLat, $baseLng);
+    return $relative === null ? null : $relative . ' από τη βάση';
+}
+
+/**
+ * What a "θεση" field says when there is no position to give. NEVER null.
+ *
+ * The digest reaches the model as pretty-printed JSON, so a `"θεση": null`
+ * is read by the model exactly as written and comes back out at the
+ * coordinator as the literal word "null" — which says nothing about WHICH of
+ * the three quite different situations it is in: nobody has sent a fix, the
+ * record never had a position of its own, or the mission has no base point
+ * to measure anything from. Each of those has its own sentence here, and the
+ * one about the base is a thing the coordinator can go and fix.
+ */
+const AI_LIVE_POS_NO_BASE = 'Άγνωστη — η αποστολή δεν έχει καταχωρημένο σημείο βάσης';
+const AI_LIVE_POS_NO_FIX  = 'Δεν έχει σταλεί στίγμα';
+const AI_LIVE_POS_NONE    = 'Χωρίς καταγεγραμμένη θέση';
+
+function aiLivePositionText(
+    ?float $lat,
+    ?float $lng,
+    ?float $baseLat,
+    ?float $baseLng,
+    string $noFix = AI_LIVE_POS_NONE
+): string {
+    if ($lat === null || $lng === null) {
+        return $noFix;
     }
-    $metres  = gpsDistanceMeters($baseLat, $baseLng, $lat, $lng);
-    $bearing = aiLiveCompassLabel(aiLiveBearingDegrees($baseLat, $baseLng, $lat, $lng));
-    // One decimal on kilometres, whole metres below a kilometre. Both are far
-    // from the five decimal places the leak gate treats as a coordinate, and
-    // both are the precision a radio call would actually use.
-    $distance = $metres < 1000
-        ? round($metres) . ' μ'
-        : round($metres / 1000, 1) . ' χλμ';
-    return $distance . ' ' . $bearing . ' από τη βάση';
+    if ($baseLat === null || $baseLng === null) {
+        return AI_LIVE_POS_NO_BASE;
+    }
+    return (string) aiLiveRelativePosition($lat, $lng, $baseLat, $baseLng);
 }
 
 // ─── The coordinator's own question ──────────────────────────────────────────
@@ -220,6 +282,11 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     // allocation would leave every such mention as an anonymous [όνομα].
     // And ordering by name keeps ΜΕΛΟΣ-3 the same person across two builds
     // of the same mission, which a map allocated in encounter order would not.
+    // participation_requests is in this UNION for a reason worth keeping: a
+    // volunteer who is on a shift but on no team, who has said nothing in
+    // chat and reported nothing, appears in NONE of the other six — and they
+    // are precisely the person the coordinator asks about, because their pin
+    // is on the map and the assistant used to have no record of them at all.
     foreach (dbFetchAll(
         "SELECT DISTINCT u.name
            FROM users u
@@ -231,9 +298,13 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
           UNION SELECT reporter_id FROM mission_shortage_reports WHERE mission_id = ?
           UNION SELECT reporter_id FROM mission_incidents WHERE mission_id = ?
           UNION SELECT created_by  FROM mission_orders WHERE mission_id = ?
+          UNION SELECT pr.volunteer_id FROM participation_requests pr
+                  JOIN shifts sh ON sh.id = pr.shift_id
+                 WHERE sh.mission_id = ? AND pr.status = ?
           )
           ORDER BY u.name",
-        array_fill(0, 7, $missionId)
+        [$missionId, $missionId, $missionId, $missionId, $missionId, $missionId, $missionId,
+         $missionId, PARTICIPATION_APPROVED]
     ) as $row) {
         $pseudo($row['name']);
     }
@@ -264,7 +335,7 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     $endTs   = strtotime((string) $mission['end_datetime']);
 
     $digest = [
-        'σημειωση' => 'Ζωντανη εικονα αποστολης σε εξελιξη. Ολα τα ονοματα προσωπων ειναι ψευδωνυμα. Τα κωδικα ονοματα ομαδων ειναι πραγματικα. Οι θεσεις δινονται ΜΟΝΟ ως αποσταση και κατευθυνση απο τη βαση — δεν υπαρχουν συντεταγμενες πουθενα σε αυτα τα δεδομενα.',
+        'σημειωση' => 'Ζωντανη εικονα αποστολης σε εξελιξη. Ολα τα ονοματα προσωπων ειναι ψευδωνυμα. Τα κωδικα ονοματα ομαδων ειναι πραγματικα. Οι θεσεις δινονται ΜΟΝΟ ως αποσταση και κατευθυνση απο σημειο αναφορας — δεν υπαρχουν συντεταγμενες πουθενα σε αυτα τα δεδομενα. Το πεδιο "θεση" ειναι παντα ανθρωπινη φραση, ποτε κενο: αν λεει οτι δεν εχει σταλει στιγμα ή οτι λειπει το σημειο βασης, αυτο ΕΙΝΑΙ η απαντηση και το μεταφερεις οπως ειναι.',
         'τωρα' => [
             'ωρα'                 => date('H:i'),
             'ημερομηνια'          => date('Y-m-d'),
@@ -308,9 +379,25 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     }
 
     // ── the point the coordinator is looking at ──────────────────────────
+    //
+    // Hoisted out of the block below because everything that has a position
+    // is also measured against it further down. Null when the client sent no
+    // point — the tabbed volunteer layout may have no map at all — and every
+    // use below is guarded on that, so a missing focus simply means the
+    // "distance from here" fields are absent rather than wrong.
+    $focusLat = null;
+    $focusLng = null;
+    // The closure returns null, not a sentence, when there is nothing to
+    // measure: unlike "θεση" this field is OPTIONAL, and a row that is silent
+    // about the focus point is better than forty rows each carrying the same
+    // apology. The fields that must never be null are the ones a question is
+    // actually about.
+    $fromFocus = function (?float $lat, ?float $lng) use (&$focusLat, &$focusLng): ?string {
+        return aiLiveRelativeTo($lat, $lng, $focusLat, $focusLng);
+    };
     if ($focusPoint && isset($focusPoint['lat'], $focusPoint['lng'])) {
-        $fLat = (float) $focusPoint['lat'];
-        $fLng = (float) $focusPoint['lng'];
+        $fLat = $focusLat = (float) $focusPoint['lat'];
+        $fLng = $focusLng = (float) $focusPoint['lng'];
         $where = aiLiveRelativePosition($fLat, $fLng, $baseLat, $baseLng);
         $km = ($baseLat !== null && $baseLng !== null)
             ? gpsDistanceMeters($baseLat, $baseLng, $fLat, $fLng) / 1000
@@ -318,8 +405,9 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
 
         $focus = [
             'ref'        => 'FOCUS',
-            'τι_ειναι'   => 'Το σημειο του χαρτη που κοιταζει ο συντονιστης αυτη τη στιγμη.',
-            'θεση'       => $where ?? 'Άγνωστη απόσταση από τη βάση (η αποστολή δεν έχει καταχωρημένο σημείο βάσης).',
+            'τι_ειναι'   => 'Το σημειο του χαρτη που κοιταζει ο συντονιστης αυτη τη στιγμη. Οταν η ερωτηση λεει «εκει που κοιταω», «αυτο το σημειο» ή «εκει», εννοει ΑΥΤΟ.',
+            'θεση'       => $where ?? AI_LIVE_POS_NO_BASE,
+            'σημειωση'   => 'Οπου υπαρχει πεδιο "αποσταση_απο_σημειο_εστιασης", ειναι υπολογισμενη απο τον server και διαβαζεται ετσι: «η εγγραφη βρισκεται τοσο μακρια, προς αυτη την κατευθυνση, ΑΠΟ το σημειο εστιασης». Χρησιμοποιησε την αυτουσια· μην προσπαθησεις να βγαλεις μονος σου αποσταση συνδυαζοντας δυο θεσεις.',
         ];
 
         // Only worth its own network call when it is genuinely somewhere else
@@ -367,21 +455,27 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         );
         $label = teamLabel($row['codename'], $row['team_number']);
         $refs[$ref] = 'Ομάδα ' . ($label !== '' ? $label : '#' . (int) $row['id']);
-        $teams[] = [
+        $teamLat = $pos && $pos['lat'] !== null ? (float) $pos['lat'] : null;
+        $teamLng = $pos && $pos['lng'] !== null ? (float) $pos['lng'] : null;
+        $entry = [
             'ref'                 => $ref,
             'ομαδα'               => $label !== '' ? $label : ('#' . (int) $row['id']),
             'μελη'                => (int) $row['members'],
             'επικεφαλης'          => $pseudo($row['leader_name']),
-            'θεση'                => $pos ? aiLiveRelativePosition(
-                                        $pos['lat'] === null ? null : (float) $pos['lat'],
-                                        $pos['lng'] === null ? null : (float) $pos['lng'],
-                                        $baseLat, $baseLng
-                                     ) : null,
+            // The team's position is the freshest fix from ANY member, so it
+            // must not be read as the leader's own — «θεσεις_προσωπικου»
+            // below is where a question about one named person is answered.
+            'θεση'                => aiLivePositionText($teamLat, $teamLng, $baseLat, $baseLng, AI_LIVE_POS_NO_FIX),
             'λεπτα_απο_τελευταιο_στιγμα' => $pos ? $ageMin($pos['ts']) : null,
         ];
+        if (($d = $fromFocus($teamLat, $teamLng)) !== null) {
+            $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
+        }
+        $teams[] = $entry;
     }
     if ($teams) {
         $digest['ομαδες'] = $teams;
+        $digest['σημειωση_ομαδων'] = 'Η "θεση" καθε ομαδας ειναι το πιο προσφατο στιγμα ΟΠΟΙΟΥΔΗΠΟΤΕ μελους της, οχι του επικεφαλης. Για το που βρισκεται ενα συγκεκριμενο προσωπο, δες το "θεσεις_προσωπικου".';
     }
 
     // ── orders ───────────────────────────────────────────────────────────
@@ -464,20 +558,22 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     ) as $row) {
         $ref = assistantRecordRef('incident', (int) $row['id']);
         $refs[$ref] = 'Περιστατικό ' . date('H:i', (int) $row['ts']);
-        $incidents[] = [
+        $iLat = $row['lat'] === null ? null : (float) $row['lat'];
+        $iLng = $row['lng'] === null ? null : (float) $row['lng'];
+        $entry = [
             'ref'         => $ref,
             'ειδος'       => $row['incident_type'],
             'σοβαροτητα'  => $row['severity'],
             'ομαδα'       => teamLabel($row['codename'], $row['team_number']) ?: null,
-            'θεση'        => aiLiveRelativePosition(
-                                 $row['lat'] === null ? null : (float) $row['lat'],
-                                 $row['lng'] === null ? null : (float) $row['lng'],
-                                 $baseLat, $baseLng
-                             ),
+            'θεση'        => aiLivePositionText($iLat, $iLng, $baseLat, $baseLng),
             'λεπτα_πριν'  => $ageMin($row['ts']),
             'ειδωθηκε'    => $row['ack_ts'] !== null,
             'κλειστο'     => $row['res_ts'] !== null,
         ];
+        if (($d = $fromFocus($iLat, $iLng)) !== null) {
+            $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
+        }
+        $incidents[] = $entry;
     }
     if ($incidents) {
         $digest['περιστατικα'] = $incidents;
@@ -499,19 +595,21 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     ) as $row) {
         $ref = assistantRecordRef('sos', (int) $row['id']);
         $refs[$ref] = 'SOS ' . date('H:i', (int) $row['ts']);
-        $sos[] = [
+        $sLat = $row['lat'] === null ? null : (float) $row['lat'];
+        $sLng = $row['lng'] === null ? null : (float) $row['lng'];
+        $entry = [
             'ref'        => $ref,
             'απο'        => $pseudo($row['who']),
             'ομαδα'      => teamLabel($row['codename'], $row['team_number']) ?: null,
-            'θεση'       => aiLiveRelativePosition(
-                                $row['lat'] === null ? null : (float) $row['lat'],
-                                $row['lng'] === null ? null : (float) $row['lng'],
-                                $baseLat, $baseLng
-                            ),
+            'θεση'       => aiLivePositionText($sLat, $sLng, $baseLat, $baseLng),
             'λεπτα_πριν' => $ageMin($row['ts']),
             'ειδωθηκε'   => $row['ack_ts'] !== null,
             'κλειστο'    => $row['res_ts'] !== null,
         ];
+        if (($d = $fromFocus($sLat, $sLng)) !== null) {
+            $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
+        }
+        $sos[] = $entry;
     }
     if ($sos) {
         $digest['σηματα_sos'] = $sos;
@@ -560,13 +658,19 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     foreach ($poiRows as $row) {
         $ref = assistantRecordRef('poi', (int) $row['id']);
         $refs[$ref] = 'Σημείο ενδιαφέροντος ' . date('H:i', (int) $row['ts']);
-        $poi[] = [
+        $pLat = $row['lat'] === null ? null : (float) $row['lat'];
+        $pLng = $row['lng'] === null ? null : (float) $row['lng'];
+        $entry = [
             'ref'         => $ref,
-            'θεση'        => aiLiveRelativePosition((float) $row['lat'], (float) $row['lng'], $baseLat, $baseLng),
+            'θεση'        => aiLivePositionText($pLat, $pLng, $baseLat, $baseLng),
             'αρχεια'      => (int) $row['files'],
             'λεπτα_πριν'  => $ageMin($row['ts']),
             'ελεγχθηκε'   => $row['checked_at'] !== null,
         ];
+        if (($d = $fromFocus($pLat, $pLng)) !== null) {
+            $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
+        }
+        $poi[] = $entry;
     }
     if ($poi) {
         $digest['σημεια_ενδιαφεροντος'] = $poi;
@@ -593,25 +697,95 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         $digest['επικινδυνες_ζωνες'] = $zones;
     }
 
-    // ── the roster right now ─────────────────────────────────────────────
+    // ── the roster right now, and WHERE EACH PERSON IS ───────────────────
+    //
+    // The per-person positions are the whole reason this query carries a name
+    // and a fix rather than just a timestamp. Until they existed, the only
+    // position anywhere in this digest was a team's — so a volunteer on no
+    // team, or a team whose members had not pinged, had no position at all,
+    // and the answer to "πού είναι ο Χ;" was the literal word "null" while
+    // the coordinator was looking at that person's pin on the map. The Action
+    // Room's own map has never cared about team membership (see $loadPins in
+    // war-room.php); this now matches it.
     $staleAfter = warRoomPingStaleThresholdSeconds();
-    $onDuty = dbFetchAll(
-        "SELECT pr.volunteer_id, UNIX_TIMESTAMP(lp.created_at) AS last_ping_ts
+    $onDutyRows = dbFetchAll(
+        "SELECT pr.volunteer_id, u.name AS who,
+                UNIX_TIMESTAMP(lp.created_at) AS last_ping_ts, lp.lat, lp.lng,
+                mt.codename, mt.team_number
          FROM participation_requests pr
          JOIN shifts s ON s.id = pr.shift_id
+         JOIN users u ON u.id = pr.volunteer_id
          LEFT JOIN (SELECT user_id, shift_id, MAX(id) AS max_id
                       FROM volunteer_pings WHERE shift_id IN ({$shiftPlaceholders}) GROUP BY user_id, shift_id) l
                 ON l.user_id = pr.volunteer_id AND l.shift_id = pr.shift_id
          LEFT JOIN volunteer_pings lp ON lp.id = l.max_id
+         LEFT JOIN mission_team_members mtm
+                ON mtm.user_id = pr.volunteer_id AND mtm.mission_id = ?
+         LEFT JOIN mission_teams mt ON mt.id = mtm.team_id AND mt.mission_id = ?
          WHERE s.mission_id = ? AND pr.status = ? AND s.start_time <= NOW() AND s.end_time > NOW()",
-        array_merge($shiftBinds, [$missionId, PARTICIPATION_APPROVED])
+        array_merge($shiftBinds, [$missionId, $missionId, $missionId, PARTICIPATION_APPROVED])
     );
+    // mtm.mission_id on that join is load-bearing — mission_team_members is
+    // UNIQUE on (mission_id, user_id), so joining on user_id alone multiplies
+    // every row by the number of PREVIOUS missions the person has been on.
+    // The same missing condition once put eight copies of one volunteer in
+    // the «Τι μου ξέφυγε» panel, each labelled "no team".
+    //
+    // One row per PERSON, keeping their freshest fix: a volunteer holding two
+    // overlapping approved shifts on a long operation returns a row per
+    // shift, and both the counts below and the list would otherwise see two
+    // people — one of them apparently silent on the shift that is ending.
+    $onDuty = [];
+    foreach ($onDutyRows as $row) {
+        $id = (int) $row['volunteer_id'];
+        $seen = $onDuty[$id] ?? null;
+        if ($seen === null
+            || ($row['last_ping_ts'] !== null
+                && ($seen['last_ping_ts'] === null || (int) $row['last_ping_ts'] > (int) $seen['last_ping_ts']))) {
+            $onDuty[$id] = $row;
+        }
+    }
     $silent = 0;
     $noPing = 0;
-    foreach ($onDuty as $row) {
-        if ($row['last_ping_ts'] === null) { $noPing++; continue; }
-        if (($now - (int) $row['last_ping_ts']) >= $staleAfter) { $silent++; }
+    $crew = [];
+    foreach ($onDuty as $id => $row) {
+        $lastTs = $row['last_ping_ts'] === null ? null : (int) $row['last_ping_ts'];
+        if ($lastTs === null) {
+            $noPing++;
+        } elseif (($now - $lastTs) >= $staleAfter) {
+            $silent++;
+        }
+
+        $ref = assistantRecordRef('person', $id);
+        $name = $pseudo($row['who']);
+        $refs[$ref] = 'Στη βάρδια: ' . ($name ?? ('#' . $id));
+        $cLat = $row['lat'] === null ? null : (float) $row['lat'];
+        $cLng = $row['lng'] === null ? null : (float) $row['lng'];
+        $entry = [
+            'ref'        => $ref,
+            'ονομα'      => $name,
+            'ομαδα'      => teamLabel($row['codename'], $row['team_number']) ?: 'Χωρίς ομάδα',
+            'θεση'       => aiLivePositionText($cLat, $cLng, $baseLat, $baseLng, AI_LIVE_POS_NO_FIX),
+            'λεπτα_απο_τελευταιο_στιγμα' => $lastTs === null ? null : $ageMin($lastTs),
+            'σιωπηλος'   => $lastTs !== null && ($now - $lastTs) >= $staleAfter,
+        ];
+        if (($d = $fromFocus($cLat, $cLng)) !== null) {
+            $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
+        }
+        $crew[] = $entry;
     }
+    // Freshest first, so the cap below — if a very large operation ever hits
+    // it — drops the stalest rows rather than an arbitrary slice. usort keeps
+    // "never pinged" last, where it belongs in a list about where people are.
+    usort($crew, function ($a, $b) {
+        $am = $a['λεπτα_απο_τελευταιο_στιγμα'];
+        $bm = $b['λεπτα_απο_τελευταιο_στιγμα'];
+        if ($am === $bm) return 0;
+        if ($am === null) return 1;
+        if ($bm === null) return -1;
+        return $am <=> $bm;
+    });
+
     $refs['ROSTER'] = 'Η δύναμη σε βάρδια τώρα';
     $digest['δυναμη_τωρα'] = [
         'ref'                    => 'ROSTER',
@@ -620,6 +794,13 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         'σιωπηλοι'               => $silent,
         'οριο_σιωπης_λεπτα'      => (int) round($staleAfter / 60),
     ];
+    if ($crew) {
+        $digest['θεσεις_προσωπικου'] = array_slice($crew, 0, AI_LIVE_CREW_CAP);
+        $digest['σημειωση_προσωπικου'] = 'Καθε ατομο που ειναι σε βαρδια τωρα, με το ΔΙΚΟ του τελευταιο στιγμα. Εδω απανταται το «που ειναι ο Χ». Ενα ατομο μπορει να ειναι σε βαρδια χωρις ομαδα — αυτο ειναι φυσιολογικο, οχι σφαλμα.'
+            . (count($crew) > AI_LIVE_CREW_CAP
+                ? ' Εμφανιζονται τα ' . AI_LIVE_CREW_CAP . ' πιο προσφατα στιγματα απο ' . count($crew) . ' ατομα συνολικα.'
+                : '');
+    }
 
     // ── chat: the largest untrusted surface in this digest ───────────────
     $chatRows = dbFetchAll(
@@ -677,7 +858,10 @@ function aiLiveSystemPrompt(): string {
 ΟΡΙΑ ΠΟΥ ΔΕΝ ΠΑΡΑΒΙΑΖΕΙΣ
 - Απαντάς ΜΟΝΟ από τα δεδομένα που σου δίνονται. Αν η απάντηση δεν υπάρχει μέσα τους, το λες καθαρά και λες τι θα χρειαζόταν. Μια ειλικρινής άγνοια είναι σωστή απάντηση· μια εικασία που ακούγεται σίγουρη μπορεί να στείλει ομάδα σε λάθος μέρος.
 - Μην υπολογίζεις δικά σου νούμερα και μη στρογγυλοποιείς προς την πλευρά που βολεύει.
-- Οι θέσεις δίνονται ως απόσταση και κατεύθυνση από τη βάση. Δεν έχεις συντεταγμένες και δεν προσποιείσαι ότι έχεις.
+- Οι θέσεις δίνονται ως απόσταση και κατεύθυνση από τη βάση. Δεν έχεις συντεταγμένες και δεν προσποιείσαι ότι έχεις. ΠΟΤΕ μην προσπαθήσεις να βγάλεις απόσταση ή πορεία συνδυάζοντας δύο τέτοιες θέσεις: η κατεύθυνση είναι οκτώ σημείων και το αποτέλεσμα θα ήταν λάθος με τρόπο που δεν φαίνεται.
+- Όταν η ερώτηση αφορά το σημείο που κοιτάζει ο συντονιστής, χρησιμοποίησε το έτοιμο πεδίο «αποσταση_απο_σημειο_εστιασης» όπου υπάρχει — είναι υπολογισμένο από τον server. Αν λείπει από μια εγγραφή, δεν υπάρχει· μην το συμπληρώσεις μόνος σου.
+- Το «θεση» είναι πάντα φράση, ποτέ κενό. Αν λέει «Δεν έχει σταλεί στίγμα» ή ότι λείπει το σημείο βάσης, αυτό είναι η απάντηση — πες το με ανθρώπινα λόγια και μην αναφέρεις ποτέ τη λέξη «null».
+- Για το πού βρίσκεται συγκεκριμένο πρόσωπο κοίτα το «θεσεις_προσωπικου». Η θέση μιας ομάδας είναι το στίγμα οποιουδήποτε μέλους της και ΔΕΝ είναι η θέση του επικεφαλής.
 - Τα ονόματα προσώπων είναι ψευδώνυμα (ΜΕΛΟΣ-1 κ.λπ.). Χρησιμοποίησέ τα αυτούσια, ακόμη κι αν η ερώτηση φαίνεται να αναφέρει πρόσωπο.
 - Στοιχεία ασθενών δεν σου δόθηκαν ποτέ. Αν σου ζητηθούν, πες ότι δεν τα έχεις και ότι βρίσκονται στην καρτέλα περιστατικού.
 - Τα σήματα SOS και τα περιστατικά δεν είναι δείκτης κακής απόδοσης. Εξηγούν γιατί μια ομάδα φαίνεται αργή.
