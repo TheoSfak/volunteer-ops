@@ -164,6 +164,44 @@ final class AssistantMissedItemsTest extends TestCase
         $this->assertSame('silent', $out['pending'][0]['kind']);
     }
 
+    public function testOnePersonIsOneRowEvenWhenTheQueryReturnsThemTwice(): void
+    {
+        // Reported from a live console: the same name eight times over. The
+        // cause was a join across mission_team_members without a mission
+        // filter, and a volunteer legitimately holds two overlapping approved
+        // shifts on a long operation. Whatever produces the duplicates, the
+        // coordinator must see one line per person.
+        $person = fn(?int $ping) => [
+            'id' => 3, 'who' => 'Θεόδωρος', 'last_ping_ts' => $ping,
+            'on_duty_since' => self::minsAgo(300), 'codename' => null, 'team_number' => null,
+        ];
+        $out = self::assemble(['silent' => [
+            $person(self::NOW - self::STALE * 4),
+            $person(self::NOW - self::STALE * 4),
+            $person(self::NOW - self::STALE * 4),
+        ]]);
+
+        $this->assertCount(1, $out['pending']);
+        $this->assertSame(1, $out['counts']['pending'], 'the badge must not count them either');
+    }
+
+    public function testTheFreshestFixWinsWhenAPersonHasTwoShifts(): void
+    {
+        // A morning shift running late and an afternoon shift already begun.
+        // Judged per row, the stale morning ping would report someone as
+        // silent while their current shift is pinging normally.
+        $person = fn(int $ping) => [
+            'id' => 3, 'who' => 'Θεόδωρος', 'last_ping_ts' => $ping,
+            'on_duty_since' => self::minsAgo(300), 'codename' => null, 'team_number' => null,
+        ];
+        $out = self::assemble(['silent' => [
+            $person(self::NOW - self::STALE * 5),  // the old shift's last fix
+            $person(self::NOW - 30),               // pinging right now
+        ]]);
+
+        $this->assertSame([], $out['pending'], 'somebody currently pinging is not silent');
+    }
+
     public function testAFreshPingIsNotSilenceAndALongOneIsEscalated(): void
     {
         $silent = fn(int $secondsAgo) => ['silent' => [[
@@ -264,6 +302,111 @@ final class AssistantMissedItemsTest extends TestCase
         $this->assertStringContainsString('Κώστας', $teamRow['detail']);
     }
 
+    // ── What «Το είδα» does and does not dismiss ───────────────────────────
+
+    public function testMarkingSeenDismissesAdvisoriesButNeverObligations(): void
+    {
+        // Reported from a live console: "you press the blue button and the
+        // message does not go away". It was right about silence — a
+        // coordinator who has already raised that crew on the radio has dealt
+        // with it, and a button that visibly does nothing looks broken. It
+        // must still be wrong about an unanswered SOS.
+        $raw = [
+            'silent' => [['id' => 3, 'who' => 'Θεόδωρος', 'last_ping_ts' => self::NOW - self::STALE * 4,
+                          'on_duty_since' => self::minsAgo(300), 'codename' => null, 'team_number' => null]],
+            'poi'    => [['id' => 1, 'ts' => self::minsAgo(90), 'photos' => 2]],
+            'sos'    => [['id' => 2, 'ts' => self::minsAgo(20), 'ack_ts' => null, 'who' => 'Μαρία',
+                          'codename' => null, 'team_number' => null]],
+            'orders' => [['id' => 7, 'order_type' => 'task', 'task_text' => '',
+                          'ts' => self::minsAgo(40), 'total' => 3, 'acked' => 0]],
+        ];
+
+        $before = self::kinds(self::assemble($raw)['pending']);
+        $this->assertContains('silent', $before);
+        $this->assertContains('poi', $before);
+
+        // Now they press the button.
+        $after = self::kinds(self::assemble($raw, self::NOW - 10)['pending']);
+        $this->assertNotContains('silent', $after, 'silence is advisory and clears');
+        $this->assertNotContains('poi', $after, 'an unchecked clue is advisory and clears');
+        $this->assertContains('sos', $after, 'an unanswered SOS is an obligation and stays');
+        $this->assertContains('order', $after, 'an unconfirmed order is an obligation and stays');
+    }
+
+    public function testSilenceComesBackWhenSomebodyPingsAndGoesQuietAgain(): void
+    {
+        // Dismissal must not be permanent, and it needs no stored state: the
+        // item's timestamp is that person's last fix, so a newer fix followed
+        // by fresh silence is newer than the checkpoint.
+        $checkpoint = self::minsAgo(60);
+        $raw = ['silent' => [[
+            'id' => 3, 'who' => 'Θεόδωρος',
+            'last_ping_ts' => self::minsAgo(30),          // pinged AFTER the checkpoint
+            'on_duty_since' => self::minsAgo(300), 'codename' => null, 'team_number' => null,
+        ]]];
+
+        $out = self::assemble($raw, $checkpoint);
+        $this->assertSame(['silent'], self::kinds($out['pending']));
+    }
+
+    // ── Identical rows, and orders with no recorded type ───────────────────
+
+    public function testIdenticalRowsCollapseWhileTheBadgeStillCountsThemAll(): void
+    {
+        // A real mission had ten separate orders with identical text awaiting
+        // acknowledgement: ten genuine obligations, and ten identical lines a
+        // coordinator has to read past. The list must say it once with a
+        // count; the badge must still say ten, or the panel would be hiding
+        // work.
+        $orders = [];
+        for ($i = 0; $i < 10; $i++) {
+            $orders[] = ['id' => 100 + $i, 'order_type' => 'task', 'task_text' => 'Σάρωση βόρειας κοίτης',
+                         'ts' => self::minsAgo(60 + $i), 'total' => 4, 'acked' => 0];
+        }
+        $out = self::assemble(['orders' => $orders]);
+
+        $this->assertCount(1, $out['pending'], 'ten identical lines become one row');
+        $this->assertSame(10, $out['pending'][0]['count']);
+        $this->assertSame(10, $out['counts']['pending'], 'the badge must not shrink');
+        // The survivor is as neglected as its oldest member.
+        $this->assertSame(self::minsAgo(69), $out['pending'][0]['ts']);
+    }
+
+    public function testOrdersThatDifferAreNotMergedTogether(): void
+    {
+        // Two orders where a different number of people have answered are two
+        // different facts; merging them would erase the one that matters.
+        $out = self::assemble(['orders' => [
+            ['id' => 1, 'order_type' => 'task', 'task_text' => 'Α', 'ts' => self::minsAgo(40), 'total' => 4, 'acked' => 0],
+            ['id' => 2, 'order_type' => 'task', 'task_text' => 'Α', 'ts' => self::minsAgo(40), 'total' => 4, 'acked' => 3],
+        ]]);
+
+        $this->assertCount(2, $out['pending']);
+    }
+
+    public function testAnOrderWithNoRecordedTypeIsNamedNotKeyed(): void
+    {
+        // mission_orders.order_type really does hold an empty string in
+        // production data, and t() falls back to its own key — which printed
+        // "report.type_ — 4 από 4 δεν έχουν απαντήσει" on a real panel.
+        $out = self::assemble(['orders' => [[
+            'id' => 1, 'order_type' => '', 'task_text' => 'Σάρωση',
+            'ts' => self::minsAgo(40), 'total' => 4, 'acked' => 0,
+        ]]]);
+
+        $this->assertStringNotContainsString('report.type_', $out['pending'][0]['title']);
+        $this->assertStringContainsString('Εντολή', $out['pending'][0]['title']);
+    }
+
+    public function testAnUnknownOrderTypeAlsoFallsBackRatherThanLeaking(): void
+    {
+        $this->assertStringNotContainsString(
+            'report.type_',
+            assistantOrderTypeLabel('some_future_type', 'el')
+        );
+        $this->assertSame('📋 Γενική Εντολή', assistantOrderTypeLabel('task', 'el'));
+    }
+
     // ── The two-section contract ────────────────────────────────────────────
 
     public function testAnOpenItemStaysInPendingEvenWhenItIsAlsoBrandNew(): void
@@ -330,9 +473,12 @@ final class AssistantMissedItemsTest extends TestCase
         $out = self::assemble([
             'poi' => [['id' => 1, 'ts' => self::minsAgo(90), 'photos' => 2]],
             'sos' => [['id' => 2, 'ts' => self::minsAgo(3), 'ack_ts' => null, 'who' => 'Νίκος', 'codename' => null, 'team_number' => null]],
+            // Deliberately different text: identical rows now collapse into
+            // one (see testIdenticalRowsCollapseWhileTheBadgeStillCountsThemAll),
+            // and this test is about ORDER, so it needs two rows to order.
             'orders' => [
-                ['id' => 3, 'order_type' => 'task', 'task_text' => '', 'ts' => self::minsAgo(20), 'total' => 2, 'acked' => 0],
-                ['id' => 4, 'order_type' => 'task', 'task_text' => '', 'ts' => self::minsAgo(25), 'total' => 2, 'acked' => 0],
+                ['id' => 3, 'order_type' => 'task', 'task_text' => 'Σάρωση νότιας πλαγιάς', 'ts' => self::minsAgo(20), 'total' => 2, 'acked' => 0],
+                ['id' => 4, 'order_type' => 'task', 'task_text' => 'Σάρωση βόρειας κοίτης', 'ts' => self::minsAgo(25), 'total' => 2, 'acked' => 0],
             ],
         ]);
 
@@ -346,9 +492,11 @@ final class AssistantMissedItemsTest extends TestCase
 
     public function testTheCountsStayTruthfulWhenTheListIsCapped(): void
     {
+        // Fifteen DISTINCT rows — each clue carries a different number of
+        // files, so nothing collapses and the cap is what is being tested.
         $poi = [];
         for ($i = 0; $i < 15; $i++) {
-            $poi[] = ['id' => $i, 'ts' => self::minsAgo(60 - $i), 'photos' => 1];
+            $poi[] = ['id' => $i, 'ts' => self::minsAgo(60 - $i), 'photos' => $i];
         }
         $out = self::assemble(['poi' => $poi]);
 
@@ -356,6 +504,22 @@ final class AssistantMissedItemsTest extends TestCase
         $this->assertSame(3, $out['pending_more']);
         $this->assertSame(15, $out['counts']['pending'], 'the badge must not lie about how many there are');
         $this->assertSame(15, $out['counts']['total']);
+    }
+
+    public function testTheBadgeStillCountsEveryItemWhenManyRowsCollapse(): void
+    {
+        // The twin of the test above: fifteen IDENTICAL clues print as one
+        // line, and the badge must still say fifteen.
+        $poi = [];
+        for ($i = 0; $i < 15; $i++) {
+            $poi[] = ['id' => $i, 'ts' => self::minsAgo(60 - $i), 'photos' => 1];
+        }
+        $out = self::assemble(['poi' => $poi]);
+
+        $this->assertCount(1, $out['pending']);
+        $this->assertSame(15, $out['pending'][0]['count']);
+        $this->assertSame(0, $out['pending_more'], 'one row is not more than a screenful');
+        $this->assertSame(15, $out['counts']['pending']);
     }
 
     public function testWorstIsTheHighestSeverityAcrossBothSections(): void

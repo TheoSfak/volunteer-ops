@@ -260,6 +260,18 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
     );
 
     // ── People on duty who have gone quiet ──────────────────────────────────
+    //
+    // mtm.mission_id IS LOAD-BEARING. mission_team_members is UNIQUE on
+    // (mission_id, user_id), so a volunteer who has been on teams in eight
+    // previous missions has eight rows in that table — and joining on user_id
+    // alone multiplied this whole result by that count. The panel showed the
+    // same person as eight identical "gone quiet" lines, every one of them
+    // labelled "Χωρίς ομάδα" because mission_teams was then filtered back to
+    // this mission and matched nothing. Two bugs from one missing condition.
+    //
+    // The viewer is excluded: a coordinator sitting at the command post will
+    // never send a GPS fix, and "you have gone quiet" is not information they
+    // can act on. It was the single loudest row on a real screen.
     $raw['silent'] = dbFetchAll(
         "SELECT pr.volunteer_id AS id, u.name AS who,
                 UNIX_TIMESTAMP(lp.created_at) AS last_ping_ts,
@@ -274,11 +286,12 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
                      GROUP BY user_id, shift_id) l
                 ON l.user_id = pr.volunteer_id AND l.shift_id = pr.shift_id
          LEFT JOIN volunteer_pings lp ON lp.id = l.max_id
-         LEFT JOIN mission_team_members mtm ON mtm.user_id = pr.volunteer_id
+         LEFT JOIN mission_team_members mtm
+                ON mtm.user_id = pr.volunteer_id AND mtm.mission_id = ?
          LEFT JOIN mission_teams mt ON mt.id = mtm.team_id AND mt.mission_id = ?
-         WHERE s.mission_id = ? AND pr.status = ?
+         WHERE s.mission_id = ? AND pr.status = ? AND pr.volunteer_id <> ?
            AND s.start_time <= NOW() AND s.end_time > NOW()",
-        array_merge($shiftBinds, [$missionId, $missionId, PARTICIPATION_APPROVED])
+        array_merge($shiftBinds, [$missionId, $missionId, $missionId, PARTICIPATION_APPROVED, $userId])
     );
 
     // ── Clues nobody has ruled in or out ────────────────────────────────────
@@ -320,6 +333,64 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
     );
 
     return $raw;
+}
+
+/**
+ * Collapses rows that say exactly the same thing into one, carrying a count.
+ *
+ * THE PANEL IS A BRIEFING, NOT A LOG. A real mission had ten separate orders
+ * with identical text awaiting acknowledgement — ten genuine obligations, and
+ * ten identical lines that a coordinator has to read past to reach anything
+ * else. One line saying "×10" carries the same information in a tenth of the
+ * space, and nothing is hidden: the badge still counts all ten, because it is
+ * computed before this runs.
+ *
+ * Only exactly-equal rows merge (same kind, title AND detail), so two orders
+ * that differ in how many people have answered stay apart — the difference
+ * between them is the thing worth seeing.
+ *
+ * The survivor keeps the OLDEST timestamp and the HIGHEST severity of the
+ * group: the group is as urgent as its worst member and as neglected as its
+ * oldest, and rounding either the other way would understate it.
+ */
+function assistantCollapseIdentical(array $items): array {
+    $out = [];
+    foreach ($items as $item) {
+        $key = $item['kind'] . "\0" . $item['title'] . "\0" . ($item['detail'] ?? '');
+        if (!isset($out[$key])) {
+            $item['count'] = 1;
+            $out[$key] = $item;
+            continue;
+        }
+        $out[$key]['count']++;
+        $out[$key]['ts'] = min($out[$key]['ts'], $item['ts']);
+        if (assistantSeverityRank($item['sev']) > assistantSeverityRank($out[$key]['sev'])) {
+            $out[$key]['sev'] = $item['sev'];
+        }
+        $out[$key]['is_new'] = $out[$key]['is_new'] || $item['is_new'];
+    }
+    return array_values($out);
+}
+
+/**
+ * A readable name for an order's type, never a raw translation key.
+ *
+ * `mission_orders.order_type` really does hold an empty string in production
+ * data — 15 rows in the local database alone — and `t('report.type_')` then
+ * returns its own key, because t() falls back to the key so a missing
+ * translation is visibly wrong rather than blank. That fallback is right in
+ * general and wrong here: it printed "report.type_ — 4 από 4 δεν έχουν
+ * απαντήσει" on a real panel. An order whose type was never recorded is still
+ * an order, so it is named as one.
+ */
+function assistantOrderTypeLabel(?string $type, string $lang): string {
+    $type = trim((string) $type);
+    if ($type === '') {
+        return t('assistant.order_generic', [], $lang);
+    }
+    $key   = 'report.type_' . $type;
+    $label = t($key, [], $lang);
+    return $label === $key ? t('assistant.order_generic', [], $lang) : $label;
 }
 
 /**
@@ -482,7 +553,7 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
                 'assistant.order_unacked_many',
                 $missing,
                 [
-                    'type'  => t('report.type_' . $row['order_type'], [], $lang),
+                    'type'  => assistantOrderTypeLabel($row['order_type'], $lang),
                     'total' => (int) $row['total'],
                 ],
                 $lang
@@ -518,7 +589,25 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
     // pings every 30s and one that pings every 5 minutes both get a sensible
     // answer without a second knob to configure.
     $staleAfter = $pingStaleSeconds ?? warRoomPingStaleThresholdSeconds();
+    // One row per person, keeping their FRESHEST fix. A volunteer legitimately
+    // holds two overlapping approved shifts on a long operation — a morning
+    // one running late and the afternoon one already begun — and the query
+    // returns a row per shift. Judged per row, the earlier shift's stale ping
+    // would report someone as silent while their current shift is pinging
+    // normally, and the same name would appear twice. Deduped here rather
+    // than in SQL so the fix holds whatever else joins into that query later.
+    $silentByPerson = [];
     foreach ($raw['silent'] ?? [] as $row) {
+        $id = (int) ($row['id'] ?? 0);
+        $seen = $silentByPerson[$id] ?? null;
+        if ($seen === null
+            || ($row['last_ping_ts'] !== null
+                && ($seen['last_ping_ts'] === null || (int) $row['last_ping_ts'] > (int) $seen['last_ping_ts']))) {
+            $silentByPerson[$id] = $row;
+        }
+    }
+
+    foreach ($silentByPerson as $row) {
         $lastPing = $row['last_ping_ts'] === null ? null : (int) $row['last_ping_ts'];
         $onDutyMin = $row['on_duty_since'] === null ? 0 : (int) floor(($nowTs - (int) $row['on_duty_since']) / 60);
 
@@ -541,6 +630,24 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
             $title = t('assistant.silent', ['name' => $row['who']], $lang);
             $ts = $lastPing;
         }
+        // «Το είδα» DOES dismiss this one, unlike everything above it.
+        //
+        // The original rule was that nothing in ΕΚΚΡΕΜΟΥΝ clears by being
+        // read. That is right for a command obligation — an unanswered SOS or
+        // an order nobody confirmed does not stop needing an answer because
+        // somebody looked at it. It is wrong for an advisory: a coordinator
+        // who has already raised the silent crew on the radio pressed the
+        // button, watched the list not change, and reasonably concluded the
+        // button was broken.
+        //
+        // Dismissal is not permanent and needs no new state. The item's ts is
+        // that person's last fix, so the moment they ping again and go quiet
+        // afresh the item is newer than the checkpoint and comes straight
+        // back. Silence that has genuinely continued is silence you already
+        // know about.
+        if ($checkpointTs !== null && $ts <= $checkpointTs) {
+            continue;
+        }
         $pending[] = [
             'kind'   => 'silent',
             'sev'    => $sev,
@@ -555,6 +662,13 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
 
     // ── Unchecked clues ─────────────────────────────────────────────────────
     foreach ($raw['poi'] ?? [] as $row) {
+        // Advisory, so «Το είδα» dismisses it — same reasoning as the silence
+        // block above. A clue photographed before the coordinator last caught
+        // up is one they have seen; the next one carries a newer timestamp and
+        // appears on its own.
+        if ($checkpointTs !== null && (int) $row['ts'] <= $checkpointTs) {
+            continue;
+        }
         $pending[] = [
             'kind'   => 'poi',
             'sev'    => 'info',
@@ -681,17 +795,27 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
         }
     }
 
+    // Counted BEFORE collapsing: the badge must say how many things are
+    // outstanding, not how many lines they print on.
+    $pendingTotal = count($pending);
+    $newTotal     = count($new);
+
+    $pendingRows = assistantCollapseIdentical($pending);
+    $newRows     = assistantCollapseIdentical($new);
+
     return [
         'since_ts'     => $sinceTs,
         'is_first'     => $checkpointTs === null,
-        'pending'      => array_slice($pending, 0, ASSISTANT_SECTION_CAP),
-        'new'          => array_slice($new, 0, ASSISTANT_SECTION_CAP),
-        'pending_more' => max(0, count($pending) - ASSISTANT_SECTION_CAP),
-        'new_more'     => max(0, count($new) - ASSISTANT_SECTION_CAP),
+        'pending'      => array_slice($pendingRows, 0, ASSISTANT_SECTION_CAP),
+        'new'          => array_slice($newRows, 0, ASSISTANT_SECTION_CAP),
+        // Rows beyond the cap, not items — these two drive a "+N ακόμη" line
+        // under a list of rows, while counts below drive the badge.
+        'pending_more' => max(0, count($pendingRows) - ASSISTANT_SECTION_CAP),
+        'new_more'     => max(0, count($newRows) - ASSISTANT_SECTION_CAP),
         'counts'       => [
-            'pending' => count($pending),
-            'new'     => count($new),
-            'total'   => count($pending) + count($new),
+            'pending' => $pendingTotal,
+            'new'     => $newTotal,
+            'total'   => $pendingTotal + $newTotal,
             'worst'   => $worst,
         ],
     ];

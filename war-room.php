@@ -2542,6 +2542,11 @@ include __DIR__ . '/includes/header.php';
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .assistant-item .assistant-age { font-size: .75rem; color: #64748b; white-space: nowrap; }
+    .assistant-count {
+        display: inline-block; margin-left: .35rem; padding: 0 .3rem;
+        border-radius: 3px; background: rgba(100,116,139,.25); color: #334155;
+        font-size: .72rem; font-weight: 700;
+    }
     .assistant-new-tag {
         font-size: .62rem; font-weight: 700; letter-spacing: .04em;
         background: #0ea5e9; color: #fff; border-radius: 3px; padding: 0 4px; margin-left: .35rem;
@@ -12990,10 +12995,14 @@ function assistantClock(ts) {
 function assistantItemHtml(item) {
     const tag = item.is_new ? `<span class="assistant-new-tag">${t('assistant.new_badge')}</span>` : '';
     const detail = item.detail ? `<div class="assistant-detail">${escapeHtml(item.detail)}</div>` : '';
+    // Identical rows arrive merged with a count (see assistantCollapseIdentical).
+    // Ten lines saying the same thing are one fact, and the badge still counts
+    // all ten — this only stops the list repeating itself.
+    const many = (item.count > 1) ? `<span class="assistant-count">×${item.count}</span>` : '';
     return `<div class="assistant-item" data-sev="${escapeHtml(item.sev)}" data-target="${escapeHtml(item.target || '')}" data-ts="${Number(item.ts)}">
         <div class="assistant-icon"><i class="bi ${escapeHtml(item.icon)}"></i></div>
         <div class="assistant-text">
-            <div class="assistant-title">${escapeHtml(item.title)}${tag}</div>
+            <div class="assistant-title">${escapeHtml(item.title)}${many}${tag}</div>
             ${detail}
         </div>
         <div class="assistant-age" title="${escapeHtml(assistantClock(item.ts))}">${escapeHtml(assistantAgo(item.ts))}</div>
