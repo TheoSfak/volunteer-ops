@@ -206,11 +206,13 @@ function aiIsConfigured(): bool {
  * answered would be worse than no test at all.
  */
 function aiChat(array $messages, array $opts = []): array {
-    // ignore_master_switch exists for exactly one caller: the Settings
-    // connection test. An admin has to be able to prove a key works BEFORE
-    // switching the feature on for everyone; requiring the switch first would
-    // mean enabling an untested integration and finding out from a user.
-    if (getSetting('ai_enabled', '0') !== '1' && empty($opts['ignore_master_switch'])) {
+    // The Settings connection test does not come through here — it calls
+    // aiChatOnce() with an explicit config, which is also how it tests a
+    // provider that has not been saved yet. That is deliberate: an admin has
+    // to be able to prove a key works BEFORE switching the feature on for
+    // everyone, rather than enabling an untested integration and finding out
+    // from a user.
+    if (getSetting('ai_enabled', '0') !== '1') {
         $cfg = aiConfig();
         return ['ok' => false, 'content' => '', 'json' => null, 'error' => 'Η τεχνητή νοημοσύνη είναι απενεργοποιημένη στις Ρυθμίσεις.',
                 'usage' => [], 'ms' => 0, 'model' => $cfg['model'], 'provider' => $cfg['provider'], 'attempts' => []];
@@ -470,8 +472,10 @@ function aiExtractProviderError($decoded, string $raw): string {
  *
  * Returns ['ok' => bool, 'models' => string[], 'error' => ?string].
  */
-function aiListModels(): array {
-    $cfg = aiConfig();
+function aiListModels(?array $cfg = null): array {
+    // Accepts an explicit config so the Settings test can ask the provider
+    // currently CHOSEN IN THE FORM, which is not necessarily the saved one.
+    $cfg = $cfg ?? aiConfig();
     if ($cfg['api_key'] === '' || !function_exists('curl_init')) {
         return ['ok' => false, 'models' => [], 'error' => 'Δεν έχει οριστεί API key.'];
     }

@@ -1986,13 +1986,26 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <?php endif; ?>
                     </div>
 
+                    <?php
+                    // Fallback blocks start open only when one of them already
+                    // holds a key: an admin who has configured failover must
+                    // see it on arrival, while one who has not is not shown
+                    // fields for providers they are not using.
+                    $aiFallbackConfigured = false;
+                    foreach ($aiProviders as $pkF => $pmF) {
+                        if ($pkF !== $aiProviderKey && !empty($settings['ai_api_key_' . $pkF] ?? '')) {
+                            $aiFallbackConfigured = true;
+                        }
+                    }
+                    ?>
                     <?php foreach ($aiProviders as $pk => $pm):
                         $stored = !empty($settings['ai_api_key_' . $pk] ?? ''); ?>
+                    <div class="ai-provider-block" data-ai-provider="<?= h($pk) ?>">
                     <hr>
                     <div class="fw-bold mb-2">
                         <?= h($pm['label']) ?>
-                        <?php if ($pk === $aiProviderKey): ?><span class="badge bg-primary ms-1">κύριος</span>
-                        <?php elseif ($stored): ?><span class="badge bg-success-subtle text-success-emphasis ms-1">εφεδρεία</span><?php endif; ?>
+                        <span class="badge bg-primary ms-1" data-ai-badge="primary" hidden>κύριος</span>
+                        <span class="badge bg-success-subtle text-success-emphasis ms-1" data-ai-badge="fallback" hidden>εφεδρεία</span>
                     </div>
                     <div class="mb-2">
                         <label class="form-label small mb-1" for="aiKey_<?= h($pk) ?>">API Key</label>
@@ -2028,24 +2041,36 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                                placeholder="<?= h($pm['base_url']) ?>"
                                value="<?= h($settings['ai_base_url_' . $pk] ?? '') ?>">
                     </div>
+                    </div>
                     <?php endforeach; ?>
+
+                    <?php // Hidden blocks keep submitting their stored values, and an
+                          // untouched key field posts empty which the save handler
+                          // reads as "keep existing" — so collapsing a provider can
+                          // never erase its configuration. ?>
+                    <button type="button" class="btn btn-sm btn-outline-secondary w-100 mb-2" id="aiToggleFallbacks"
+                            aria-expanded="<?= $aiFallbackConfigured ? 'true' : 'false' ?>">
+                        <i class="bi bi-chevron-down me-1"></i><span>Εφεδρικοί πάροχοι</span>
+                    </button>
                     <hr>
 
-                    <?php if ($aiHasAnyKey): ?>
+                    <?php if (!$aiHasAnyKey): ?>
+                    <div class="alert alert-secondary py-1 px-2 mb-2 small">
+                        <i class="bi bi-info-circle me-1"></i>Χωρίς API key η ανάλυση δεν εμφανίζεται πουθενά στην εφαρμογή.
+                    </div>
+                    <?php endif; ?>
+                    <?php // Always available, even before a first save: the endpoint takes
+                          // the provider and key shown on screen, so a freshly pasted key
+                          // can be proven before it is stored. ?>
                     <div class="d-flex align-items-center gap-2 flex-wrap">
                         <div class="alert alert-secondary py-1 px-2 mb-0 small flex-grow-1">
-                            <i class="bi bi-info-circle me-1"></i>Αποθηκεύστε πρώτα, μετά έλεγχος. Ελέγχεται <strong>μόνο ο κύριος πάροχος</strong> — χωρίς εναλλαγή, αλλιώς ο έλεγχος θα περνούσε επειδή απάντησε άλλος.
+                            <i class="bi bi-info-circle me-1"></i>Ελέγχεται ο πάροχος που είναι <strong>επιλεγμένος τώρα</strong>, με τα πεδία που βλέπετε — χωρίς αποθήκευση και χωρίς εναλλαγή σε άλλον.
                         </div>
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="btnTestAiKey">
                             <i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης
                         </button>
                     </div>
                     <div id="aiTestResult" class="mt-2" style="display:none;"></div>
-                    <?php else: ?>
-                    <div class="alert alert-secondary py-1 px-2 mb-0 small">
-                        <i class="bi bi-info-circle me-1"></i>Χωρίς API key η ανάλυση δεν εμφανίζεται πουθενά στην εφαρμογή.
-                    </div>
-                    <?php endif; ?>
                 </div>
             </div>
 
@@ -4028,14 +4053,47 @@ document.getElementById('btnTestWeatherKey') && document.getElementById('btnTest
     var hint = document.getElementById('aiProviderHint');
     if (!sel) return;
 
-    // Model names and base URLs are per-provider fields with their own static
-    // placeholders and datalists now, so the only thing that follows the
-    // dropdown is the note about where that provider processes data.
+    var blocks  = Array.prototype.slice.call(document.querySelectorAll('[data-ai-provider]'));
+    var toggle  = document.getElementById('aiToggleFallbacks');
+    var showAll = toggle ? toggle.getAttribute('aria-expanded') === 'true' : false;
+
+    // The fields follow the dropdown immediately, without a save: picking
+    // DeepSeek and still being shown Gemini's key field is how an admin ends
+    // up pasting a key into the wrong provider.
     function apply() {
-        var m = meta[sel.value];
+        var chosen = sel.value;
+        var m = meta[chosen];
         if (m && hint) hint.textContent = m.hint;
+
+        var hidden = 0;
+        blocks.forEach(function (block) {
+            var isPrimary = block.getAttribute('data-ai-provider') === chosen;
+            block.hidden = !isPrimary && !showAll;
+            if (!isPrimary && !showAll) hidden++;
+
+            var pb = block.querySelector('[data-ai-badge="primary"]');
+            var fb = block.querySelector('[data-ai-badge="fallback"]');
+            if (pb) pb.hidden = !isPrimary;
+            if (fb) fb.hidden = isPrimary;
+        });
+
+        if (toggle) {
+            toggle.querySelector('span').textContent = showAll
+                ? 'Απόκρυψη εφεδρικών παρόχων'
+                : 'Εφεδρικοί πάροχοι' + (hidden ? ' (' + hidden + ')' : '');
+            toggle.querySelector('i').className = 'bi me-1 ' + (showAll ? 'bi-chevron-up' : 'bi-chevron-down');
+            toggle.hidden = blocks.length < 2;
+        }
     }
+
     sel.addEventListener('change', apply);
+    if (toggle) {
+        toggle.addEventListener('click', function () {
+            showAll = !showAll;
+            toggle.setAttribute('aria-expanded', showAll ? 'true' : 'false');
+            apply();
+        });
+    }
     apply();
 
     var btn = document.getElementById('btnTestAiKey');
@@ -4046,10 +4104,27 @@ document.getElementById('btnTestWeatherKey') && document.getElementById('btnTest
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Έλεγχος...';
         result.style.display = 'none';
 
+        // Post what is on screen, not what is saved. Reading the stored
+        // settings meant an admin who picked DeepSeek and pressed this was
+        // told "connected to Google Gemini" and reasonably concluded the
+        // feature was broken. An untouched key field posts empty, which the
+        // endpoint reads as "use the stored key" — so a stored key needs no
+        // re-typing and a freshly pasted one needs no save.
+        var chosen = sel.value;
+        var val = function (id) {
+            var el = document.getElementById(id + '_' + chosen);
+            return el ? el.value : '';
+        };
+        var body = 'csrf_token=' + encodeURIComponent('<?= csrfToken() ?>')
+                 + '&provider=' + encodeURIComponent(chosen)
+                 + '&api_key=' + encodeURIComponent(val('aiKey'))
+                 + '&model=' + encodeURIComponent(val('aiModel'))
+                 + '&base_url=' + encodeURIComponent(val('aiBaseUrl'));
+
         fetch('api-ai-test.php', {
             method: 'POST',
             headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest'},
-            body: 'csrf_token=' + encodeURIComponent('<?= csrfToken() ?>')
+            body: body
         })
             .then(function (r) { return r.json(); })
             .then(function (data) {

@@ -1,53 +1,82 @@
 <?php
 /**
- * AJAX endpoint — test the stored AI provider settings end to end.
+ * AJAX endpoint — test one AI provider end to end.
  * POST only, system admin required.
  * Returns JSON: { ok: bool, message: string }
  *
+ * TESTS WHAT IS ON SCREEN, NOT WHAT IS SAVED. The earlier version read the
+ * stored settings, so an admin who picked DeepSeek in the dropdown and pressed
+ * the button was told "connected to Google Gemini" — the saved provider — and
+ * reasonably concluded the feature was broken. A test button that answers about
+ * something other than what the operator is looking at is worse than no button,
+ * so the form posts its own provider, key, model and base URL and those are
+ * what get called.
+ *
  * Deliberately a real (tiny) chat completion rather than a model list or a
- * ping: key, base URL and model name each fail differently, and only an
- * actual completion proves all three together. The provider's own error text
- * is passed through by aiChat(), because for the two mistakes that actually
- * happen — wrong key, retired model name — their message names the problem
- * exactly and a generic "failed" would send an admin guessing.
+ * ping: key, base URL and model each fail differently, and only an actual
+ * completion proves all three together. The provider's own error text is passed
+ * through, because for the two mistakes that actually happen — wrong key,
+ * retired model name — their message names the problem exactly.
+ *
+ * No failover: this endpoint exists to prove ONE provider works. A test that
+ * quietly passed because a different provider answered would be worse than no
+ * test at all.
  */
 require_once __DIR__ . '/bootstrap.php';
 requireRole([ROLE_SYSTEM_ADMIN]);
 
 header('Content-Type: application/json; charset=utf-8');
 
+$fail = function (string $message): void {
+    echo json_encode(['ok' => false, 'message' => $message], JSON_UNESCAPED_UNICODE);
+    exit;
+};
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    echo json_encode(['ok' => false, 'message' => 'Μη έγκυρη μέθοδος'], JSON_UNESCAPED_UNICODE);
-    exit;
+    $fail('Μη έγκυρη μέθοδος');
 }
-
 if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string) $_POST['csrf_token'])) {
-    echo json_encode(['ok' => false, 'message' => 'Μη έγκυρο αίτημα'], JSON_UNESCAPED_UNICODE);
-    exit;
+    $fail('Μη έγκυρο αίτημα');
 }
 
-$cfg = aiConfig();
+$providers = aiProviders();
+$provider  = (string) post('provider', '');
+if (!isset($providers[$provider])) {
+    $provider = aiPrimaryProvider();
+}
+
+// Start from what is stored for that provider, then let the form override.
+// An untouched key field posts empty and keeps the stored key, exactly as
+// saving does — so an admin can test a stored key without re-typing it, and
+// test a freshly pasted one without saving it first.
+$cfg = aiProviderConfig($provider);
+
+$typedKey = trim((string) post('api_key', ''));
+if ($typedKey !== '')      $cfg['api_key'] = $typedKey;
+
+$typedModel = trim((string) post('model', ''));
+if ($typedModel !== '')    $cfg['model'] = $typedModel;
+
+$typedBase = trim((string) post('base_url', ''));
+if ($typedBase !== '' && preg_match('#^https?://#i', $typedBase)) {
+    $cfg['base_url'] = rtrim($typedBase, '/');
+}
+
 if ($cfg['api_key'] === '') {
-    echo json_encode(['ok' => false, 'message' => 'Δεν έχει οριστεί API key για τον πάροχο «' . $cfg['provider_label'] . '».'], JSON_UNESCAPED_UNICODE);
-    exit;
+    $fail('Δεν έχει οριστεί API key για τον πάροχο «' . $cfg['provider_label'] . '».');
 }
 
-// The master switch gates the feature, not the test — an admin has to be able
-// to verify a key BEFORE turning anything on for everyone.
-$result = aiChat([
+$result = aiChatOnce([
     ['role' => 'system', 'content' => 'Απαντάς μόνο στα ελληνικά, με μία σύντομη πρόταση.'],
     ['role' => 'user',   'content' => 'Γράψε μία πρόταση που επιβεβαιώνει ότι η σύνδεση λειτουργεί.'],
-    // no_failover: this endpoint exists to prove the SELECTED provider works.
-    // A test that quietly passed because a different provider answered would
-    // be worse than no test at all.
-], ['temperature' => 0.2, 'max_tokens' => 60, 'timeout' => 30, 'ignore_master_switch' => true, 'no_failover' => true]);
+], ['temperature' => 0.2, 'max_tokens' => 60, 'timeout' => 30], $cfg);
 
 if (!$result['ok']) {
     // A failed test is usually a retired model name, and the provider's own
     // 404 does not say what to use instead. Ask the key what it can actually
     // call, so the answer arrives with the fix in it.
     $message = $result['error'];
-    $listing = aiListModels();
+    $listing = aiListModels($cfg);
     if ($listing['ok'] && $listing['models']) {
         $usable = aiChatModelsFromList($listing['models']);
         $message .= ' — Μοντέλα συνομιλίας διαθέσιμα για αυτό το key (νεότερα πρώτα): '
@@ -55,8 +84,7 @@ if (!$result['ok']) {
                   . (count($usable) > 30 ? ' …' : '')
                   . '. Αντιγράψτε ένα στο πεδίο «Μοντέλο» και αποθηκεύστε.';
     }
-    echo json_encode(['ok' => false, 'message' => $message], JSON_UNESCAPED_UNICODE);
-    exit;
+    $fail($message);
 }
 
 $reply   = trim(preg_replace('/\s+/u', ' ', $result['content']) ?? '');
