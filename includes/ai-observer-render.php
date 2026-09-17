@@ -94,33 +94,37 @@ function renderAiObserverSection(array $section, string $heading): string {
 }
 
 /**
- * The provenance line printed once under the assessment.
+ * The stamp printed once under the assessment: which model, when.
  *
- * Says who asked for it, what wrote it and when, and — the part that matters
- * for a report going to an oversight authority — that the numbers are the
- * application's and not the model's.
+ * Deliberately two facts and nothing else. This used to be a four-sentence
+ * declaration — who requested it, that the numbers come from the application,
+ * that the model interprets rather than scores, that none of it affects the
+ * mission score. Every one of those was true and none of them earned the
+ * space: the "Ανάλυση AI" badge beside the heading already marks the block as
+ * machine-written, and a disclaimer nobody reads twice is just weight on the
+ * page. Model and timestamp stay because without them a reader cannot tell a
+ * fresh assessment from last season's, which is the one thing that decides
+ * whether to regenerate.
+ *
+ * The data-gaps list is NOT boilerplate and stays above it — it is the model
+ * naming what it could not judge, which is content.
  */
 function renderAiObserverMeta(array $assessment): string {
-    $bits = [];
-    $bits[] = 'Συντάχθηκε από μοντέλο ' . h($assessment['model']) . ' (' . h($assessment['provider_label']) . ')';
+    $bits = [h($assessment['model'])];
     if (!empty($assessment['generated_at'])) {
-        $bits[] = 'στις ' . h(formatDateTime($assessment['generated_at']));
+        $bits[] = h(formatDateTime($assessment['generated_at']));
     }
-    if (!empty($assessment['generated_by_name'])) {
-        $bits[] = 'κατόπιν αιτήματος του χρήστη ' . h($assessment['generated_by_name']);
-    }
+    $out = '<div class="aio-meta">' . implode(' · ', $bits);
 
-    $out  = '<div class="aio-meta">' . implode(' ', $bits) . '. ';
-    $out .= 'Τα αριθμητικά δεδομένα υπολογίζονται από την εφαρμογή· το μοντέλο τα ερμηνεύει και δεν παράγει βαθμολογία. '
-          . 'Η ανάλυση δεν επηρεάζει τη βαθμολογία της αποστολής.';
-
+    // Both of these are exceptions, not decoration: they appear only when
+    // something is actually wrong with what the reader is looking at.
     if (!empty($assessment['dropped_claims'])) {
         $n = (int) $assessment['dropped_claims'];
-        $out .= ' ' . $n . ($n === 1 ? ' ισχυρισμός απορρίφθηκε' : ' ισχυρισμοί απορρίφθηκαν')
-              . ' αυτόματα, επειδή δεν παρέπεμπε σε καταγεγραμμένο δεδομένο.';
+        $out .= ' · ' . $n . ($n === 1 ? ' ισχυρισμός αφαιρέθηκε' : ' ισχυρισμοί αφαιρέθηκαν')
+              . ' ως ατεκμηρίωτ' . ($n === 1 ? 'ος' : 'οι');
     }
     if (!empty($assessment['is_stale'])) {
-        $out .= ' Η ανάλυση προέρχεται από παλαιότερη έκδοση οδηγιών — επαναδημιουργήστε την για ενημερωμένη κρίση.';
+        $out .= ' · παλαιότερη έκδοση οδηγιών — αξίζει επαναδημιουργία';
     }
     $out .= '</div>';
 
