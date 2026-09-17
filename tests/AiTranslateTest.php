@@ -64,6 +64,41 @@ final class AiTranslateTest extends TestCase
         }
     }
 
+    /**
+     * The first list was assembled by eye and silently omitted Maltese and
+     * Irish — both official EU languages. A Maltese crew at a joint exercise
+     * would have opened a menu advertised as European and not found their own
+     * language in it. Pinned against the official 24 so the next addition is
+     * checked against the list rather than against intuition.
+     */
+    public function testEveryOfficialEuLanguageIsOffered(): void
+    {
+        $official = [
+            'bg' => 'Bulgarian', 'hr' => 'Croatian', 'cs' => 'Czech',    'da' => 'Danish',
+            'nl' => 'Dutch',     'en' => 'English',  'et' => 'Estonian', 'fi' => 'Finnish',
+            'fr' => 'French',    'de' => 'German',   'el' => 'Greek',    'hu' => 'Hungarian',
+            'ga' => 'Irish',     'it' => 'Italian',  'lv' => 'Latvian',  'lt' => 'Lithuanian',
+            'mt' => 'Maltese',   'pl' => 'Polish',   'pt' => 'Portuguese', 'ro' => 'Romanian',
+            'sk' => 'Slovak',    'sl' => 'Slovenian','es' => 'Spanish',  'sv' => 'Swedish',
+        ];
+        $offered = aiTranslationLanguages();
+
+        foreach ($official as $code => $name) {
+            $this->assertArrayHasKey($code, $offered, "{$name} is an official EU language and must be offered");
+        }
+    }
+
+    public function testEveryLanguageIsNamedInItsOwnTongue(): void
+    {
+        // Endonyms: a reader finds their own language faster than a Greek
+        // transliteration of it.
+        $offered = aiTranslationLanguages();
+        $this->assertSame('Malti', $offered['mt']);
+        $this->assertSame('Gaeilge', $offered['ga']);
+        $this->assertSame('Deutsch', $offered['de']);
+        $this->assertSame('Ελληνικά', $offered['el']);
+    }
+
     public function testOnlyEuropeanTargetsAreAcceptedAndGreekIsNotOne(): void
     {
         $this->assertTrue(aiIsTranslatableLanguage('en'));

@@ -35,10 +35,19 @@ require_once __DIR__ . '/ai-context.php';
  *
  * Endonyms, not Greek names for them: the person being handed this report
  * reads their own language's name faster than a transliteration of it.
+ *
+ * THE BASELINE IS ALL 24 OFFICIAL EU LANGUAGES, then the European languages
+ * outside the Union that a Greek team is most likely to work beside. That rule
+ * is written down because the first version was assembled by eye and quietly
+ * dropped Maltese and Irish — both official, both easy to forget, and a
+ * Maltese crew at a joint exercise would have found their own language missing
+ * from a menu advertised as European. If a language is added later, check the
+ * list against the official 24 rather than against intuition.
  */
 function aiTranslationLanguages(): array {
     return [
         'el' => 'Ελληνικά',
+        // ── EU official languages ────────────────────────────────────────
         'en' => 'English',
         'de' => 'Deutsch',
         'fr' => 'Français',
@@ -57,12 +66,17 @@ function aiTranslationLanguages(): array {
         'sv' => 'Svenska',
         'da' => 'Dansk',
         'fi' => 'Suomi',
-        'no' => 'Norsk',
         'et' => 'Eesti',
         'lv' => 'Latviešu',
         'lt' => 'Lietuvių',
+        'mt' => 'Malti',
+        'ga' => 'Gaeilge',
+        // ── other European ───────────────────────────────────────────────
+        'no' => 'Norsk',
+        'is' => 'Íslenska',
         'sq' => 'Shqip',
         'sr' => 'Srpski',
+        'bs' => 'Bosanski',
         'mk' => 'Македонски',
         'tr' => 'Türkçe',
         'uk' => 'Українська',
