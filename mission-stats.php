@@ -1264,7 +1264,10 @@ if ($trActive) {
     if (!$tr['complete']) {
         echo '<div class="alert alert-warning small">Η μετάφραση δεν ολοκληρώθηκε σε αυτή τη φόρτωση ('
            . (int) $tr['translated'] . ' από ' . (int) $tr['total'] . ' τμήματα). '
-           . 'Ό,τι μεταφράστηκε αποθηκεύτηκε — ανανεώστε για να συνεχίσει.</div>';
+           . (!empty($tr['problem'])
+                ? '<strong>Αιτία:</strong> ' . h($tr['problem'])
+                : 'Ό,τι μεταφράστηκε αποθηκεύτηκε — ανανεώστε για να συνεχίσει.')
+           . '</div>';
     }
     echo $tr['html'];
 }

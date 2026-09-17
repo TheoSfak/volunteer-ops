@@ -139,7 +139,8 @@ function aiTranslationSkip(string $text, array $protectedFolded): bool {
  * from the result was not translated and the caller must leave the original in
  * place rather than render a blank.
  */
-function aiTranslateCached(array $strings, string $lang, array $protectedTerms = [], array $forbiddenNames = []): array {
+function aiTranslateCached(array $strings, string $lang, array $protectedTerms = [], array $forbiddenNames = [], ?string &$problem = null): array {
+    $problem = null;
     $strings = array_values(array_unique(array_filter($strings, fn($s) => trim($s) !== '')));
     if (!$strings || !aiIsTranslatableLanguage($lang)) {
         return [];
@@ -172,7 +173,11 @@ function aiTranslateCached(array $strings, string $lang, array $protectedTerms =
     }
 
     $missing = array_values(array_filter($strings, fn($s) => !isset($out[$s])));
-    if (!$missing || !aiIsConfigured()) {
+    if (!$missing) {
+        return $out;
+    }
+    if (!aiIsConfigured()) {
+        $problem = 'Η τεχνητή νοημοσύνη δεν είναι ρυθμισμένη.';
         return $out;
     }
 
@@ -188,30 +193,47 @@ function aiTranslateCached(array $strings, string $lang, array $protectedTerms =
         $leaks = aiScanDigestForLeaks($chunk, $forbiddenNames);
         if ($leaks) {
             error_log('[ai-translate] leak check failed: ' . implode(' | ', $leaks));
+            $problem = 'Ο έλεγχος προσωπικών δεδομένων σταμάτησε τη μετάφραση: ' . $leaks[0];
             break;
         }
 
+        // String keys with a letter prefix, NOT "0"/"1". PHP turns numeric
+        // string keys back into integers, so json_encode emitted a JSON ARRAY
+        // while the prompt asked for an object with the same keys — the model
+        // was being given one shape and asked for another, which is exactly
+        // the kind of mismatch that produces a reply nothing can read.
         $numbered = [];
         foreach ($chunk as $i => $s) {
-            $numbered[(string) $i] = $s;
+            $numbered['t' . $i] = $s;
         }
 
         $result = aiChat([
             ['role' => 'system', 'content' => aiTranslateSystemPrompt($language, $protectedTerms)],
-            ['role' => 'user',   'content' => "Μετάφρασε τις παρακάτω τιμές. Απάντησε με json αντικείμενο με τα ΙΔΙΑ κλειδιά:\n\n"
+            ['role' => 'user',   'content' => "Μετάφρασε τις τιμές του παρακάτω json αντικειμένου. Επίστρεψε αντικείμενο με ΑΚΡΙΒΩΣ τα ίδια κλειδιά (t0, t1, …) και μεταφρασμένες τιμές:\n\n"
                                             . json_encode($numbered, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)],
         ], ['json' => true, 'temperature' => 0.2, 'max_tokens' => 12000, 'timeout' => 120]);
 
         if (!$result['ok'] || !is_array($result['json'])) {
             error_log('[ai-translate] chunk failed: ' . ($result['error'] ?? 'unknown'));
+            $problem = $result['error'] ?? 'Ο πάροχος δεν επέστρεψε έγκυρη απάντηση.';
             break; // leave the rest for the next page load; what is cached stays cached
         }
 
-        foreach ($numbered as $i => $source) {
-            $translated = $result['json'][$i] ?? null;
+        $reply = aiTranslateNormaliseReply($result['json'], count($chunk));
+        if (!$reply) {
+            error_log('[ai-translate] unreadable reply shape: ' . substr(json_encode($result['json'], JSON_UNESCAPED_UNICODE) ?: '', 0, 400));
+            $problem = 'Ο πάροχος απάντησε σε μορφή που δεν αναγνωρίζεται (μοντέλο: ' . $result['model'] . ').';
+            break;
+        }
+
+        $matched = 0;
+        foreach (array_keys($numbered) as $pos => $key) {
+            $source     = $numbered[$key];
+            $translated = $reply[$key] ?? $reply[(string) $pos] ?? $reply[$pos] ?? null;
             if (!is_string($translated)) continue;
             $translated = trim($translated);
             if ($translated === '') continue;
+            $matched++;
 
             $out[$source] = $translated;
             dbExecute(
@@ -222,9 +244,58 @@ function aiTranslateCached(array $strings, string $lang, array $protectedTerms =
                 [hash('sha256', $source), $lang, $source, $translated, $result['provider'], $result['model']]
             );
         }
+
+        // A reply that parsed but matched nothing is a dead end, not a
+        // partial success: repeating it for three more chunks would burn two
+        // more minutes producing the same nothing.
+        if ($matched === 0) {
+            $problem = 'Ο πάροχος απάντησε αλλά καμία τιμή δεν αντιστοιχήθηκε (μοντέλο: ' . $result['model'] . ').';
+            break;
+        }
     }
 
     return $out;
+}
+
+/**
+ * Coax a usable key => translation map out of whatever shape came back.
+ *
+ * Providers answer this request in at least four ways: the object that was
+ * asked for, a bare array in the original order, an object wrapped in a single
+ * container key ("translations", "result"), or an object whose values are
+ * themselves objects. Failing on anything but the first would mean a page that
+ * silently stays in Greek, which is what actually happened.
+ *
+ * Returns null when nothing usable can be recovered, so the caller can say so
+ * instead of guessing.
+ */
+function aiTranslateNormaliseReply(array $json, int $expected): ?array {
+    $flatten = function (array $a): ?array {
+        $out = [];
+        foreach ($a as $k => $v) {
+            if (is_string($v)) {
+                $out[(string) $k] = $v;
+            } elseif (is_array($v) && count($v) === 1 && is_string(reset($v))) {
+                // {"t0": {"text": "..."}} — take the single string inside.
+                $out[(string) $k] = (string) reset($v);
+            }
+        }
+        return $out ?: null;
+    };
+
+    // Unwrap a container BEFORE flattening, or a wrapper holding exactly one
+    // entry — {"translations": {"t0": "…"}} — is mistaken for a single nested
+    // value and comes back keyed "translations". The two are told apart by the
+    // key: ours always look like t0/t1 or a bare index, so anything else at
+    // the top of a one-key object is a container.
+    if (count($json) === 1) {
+        $key   = (string) array_key_first($json);
+        $inner = $json[array_key_first($json)];
+        if (is_array($inner) && !preg_match('/^t?\d+$/', $key)) {
+            return $flatten($inner);
+        }
+    }
+    return $flatten($json);
 }
 
 function aiTranslateSystemPrompt(string $language, array $protectedTerms): string {
@@ -260,7 +331,7 @@ function aiTranslateSystemPrompt(string $language, array $protectedTerms): strin
  * source language is a far better failure than a blank one.
  */
 function aiTranslateHtmlDocument(string $html, string $lang, ?int $missionId = null, bool $fragment = false): array {
-    $unchanged = ['html' => $html, 'translated' => 0, 'total' => 0, 'complete' => true];
+    $unchanged = ['html' => $html, 'translated' => 0, 'total' => 0, 'complete' => true, 'problem' => null];
     if (!aiIsTranslatableLanguage($lang) || trim($html) === '') {
         return $unchanged;
     }
@@ -309,7 +380,8 @@ function aiTranslateHtmlDocument(string $html, string $lang, ?int $missionId = n
         $pseudonymised[] = aiPseudonymiseText($text, $names, $map);
     }
 
-    $translations = aiTranslateCached($pseudonymised, $lang, $protect, $names);
+    $problem = null;
+    $translations = aiTranslateCached($pseudonymised, $lang, $protect, $names, $problem);
 
     // Longest token first, or ΜΕΛΟΣ-1 matches inside ΜΕΛΟΣ-12.
     $keys = array_keys($map);
@@ -364,6 +436,7 @@ function aiTranslateHtmlDocument(string $html, string $lang, ?int $missionId = n
         'translated' => $done,
         'total'      => count($nodes),
         'complete'   => $done >= count($nodes),
+        'problem'    => $problem,
     ];
 }
 

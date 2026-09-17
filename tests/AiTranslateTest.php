@@ -105,6 +105,77 @@ final class AiTranslateTest extends TestCase
         $this->assertSame([], $map);
     }
 
+    // ─── reading the provider's reply ────────────────────────────────────
+
+    /**
+     * A page that came back untranslated after forty seconds of waiting, with
+     * no explanation anywhere the operator could see. The request was built
+     * with keys "0", "1", … — which PHP turns back into integers, so
+     * json_encode emitted a JSON ARRAY while the prompt asked for an object
+     * with the same keys. The model was handed one shape and asked for
+     * another, and whatever it chose to return, nothing read it.
+     *
+     * The keys are now "t0", "t1", …, and the reader accepts every shape a
+     * provider actually uses rather than only the one that was requested.
+     */
+    public function testTheShapeTheRequestAsksForIsRead(): void
+    {
+        $this->assertSame(
+            ['t0' => 'Key Figures', 't1' => 'Observer'],
+            aiTranslateNormaliseReply(['t0' => 'Key Figures', 't1' => 'Observer'], 2)
+        );
+    }
+
+    public function testABareArrayInOriginalOrderIsRead(): void
+    {
+        $this->assertSame(
+            ['0' => 'Key Figures', '1' => 'Observer'],
+            aiTranslateNormaliseReply(['Key Figures', 'Observer'], 2)
+        );
+    }
+
+    public function testAPayloadWrappedInASingleContainerKeyIsRead(): void
+    {
+        $this->assertSame(
+            ['t0' => 'Key Figures'],
+            aiTranslateNormaliseReply(['translations' => ['t0' => 'Key Figures']], 1)
+        );
+    }
+
+    public function testValuesThatAreThemselvesObjectsAreUnwrapped(): void
+    {
+        $this->assertSame(
+            ['t0' => 'Key Figures'],
+            aiTranslateNormaliseReply(['t0' => ['text' => 'Key Figures']], 1)
+        );
+    }
+
+    /**
+     * Returning null is the point: an unreadable reply must be REPORTED, not
+     * absorbed. Silently returning an empty map is what produced a Greek page
+     * and no reason for it.
+     */
+    public function testAnUnreadableReplyIsRejectedRatherThanAbsorbed(): void
+    {
+        $this->assertNull(aiTranslateNormaliseReply(['ok' => true], 2));
+        $this->assertNull(aiTranslateNormaliseReply([], 2));
+    }
+
+    /**
+     * PHP's own trap, and the reason the keys carry a letter: an array keyed
+     * "0","1" is a list, and json_encode writes it as an array.
+     */
+    public function testNumericStringKeysWouldHaveSerialisedAsAnArray(): void
+    {
+        $numeric = [];
+        foreach (['a', 'b'] as $i => $s) { $numeric[(string) $i] = $s; }
+        $this->assertSame('["a","b"]', json_encode($numeric));
+
+        $prefixed = [];
+        foreach (['a', 'b'] as $i => $s) { $prefixed['t' . $i] = $s; }
+        $this->assertSame('{"t0":"a","t1":"b"}', json_encode($prefixed));
+    }
+
     // ─── the document walk ───────────────────────────────────────────────
 
     public function testGreekIsNeverTouchedAndTheDocumentComesBackWhole(): void

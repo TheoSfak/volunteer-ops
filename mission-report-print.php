@@ -1210,9 +1210,15 @@ if ($trActive) {
     // so where the reader will see it, rather than leaving them wondering why
     // half the page is Greek.
     if (!$tr['complete']) {
+        // The reason has to reach the page. Leaving it in error_log meant a
+        // reader waited forty seconds, got Greek back, and had nothing at all
+        // to act on — which is how this looked the first time it failed.
         $banner = '<div class="tr-banner"><strong>Η μετάφραση δεν ολοκληρώθηκε σε αυτή τη φόρτωση</strong> ('
-                . (int) $tr['translated'] . ' από ' . (int) $tr['total'] . ' τμήματα). '
-                . 'Ό,τι μεταφράστηκε αποθηκεύτηκε — ανανεώστε τη σελίδα για να συνεχίσει από εκεί που έμεινε.</div>';
+                . (int) $tr['translated'] . ' από ' . (int) $tr['total'] . ' τμήματα).';
+        $banner .= !empty($tr['problem'])
+            ? ' <strong>Αιτία:</strong> ' . h($tr['problem'])
+            : ' Ό,τι μεταφράστηκε αποθηκεύτηκε — ανανεώστε τη σελίδα για να συνεχίσει από εκεί που έμεινε.';
+        $banner .= '</div>';
         $tr['html'] = preg_replace('/(<div class="pr-hero">)/', $banner . '$1', $tr['html'], 1);
     }
     echo $tr['html'];
