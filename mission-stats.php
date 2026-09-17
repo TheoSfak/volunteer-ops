@@ -165,6 +165,7 @@ $scoreTierHex = ['good' => '#0ca30c', 'warning' => '#a56600', 'critical' => '#d0
 // assessment is printed before them and they remain underneath as the
 // measurement trail, so switching the feature off loses nothing.
 require_once __DIR__ . '/includes/ai-observer-render.php';
+require_once __DIR__ . '/includes/ai-translate.php';
 $aiConfigured  = aiIsConfigured();
 $aiCanGenerate = $aiConfigured && ($canManageMissions || $isResponsible);
 $aiAssessment  = loadMissionAiAssessment($missionId);
@@ -173,6 +174,17 @@ $aiCommandHtml = $aiAssessment ? renderAiObserverSection($aiAssessment['payload'
 $aiMetaHtml    = $aiAssessment ? renderAiObserverMeta($aiAssessment) : '';
 // Per-team debrief sheets, one query for the whole leaderboard.
 $aiTeamDebriefs = $aiConfigured ? missionTeamDebriefIndex($missionId) : [];
+
+// ── translation ─────────────────────────────────────────────────────────────
+// Only the report body is buffered and translated, not the app chrome around
+// it: the sidebar and top bar belong to the administrator running the page,
+// and translating their own menu into Romanian would be both confusing and a
+// waste of a provider call on strings that are not part of the report.
+$trLang   = (string) get('lang', 'el');
+$trActive = $aiConfigured && aiIsTranslatableLanguage($trLang);
+if ($trActive) {
+    @set_time_limit(300);
+}
 
 // ── Team roster — mirrors war-room.php's team query (leader/members), extended
 //    with a fan-out-safe pre-aggregated hours subquery (a volunteer can hold
@@ -364,6 +376,7 @@ include __DIR__ . '/includes/header.php';
 </style>
 
 <div class="container-fluid py-4">
+<?php if ($trActive) ob_start(); ?>
 
 <div class="mstats-hero p-4 mb-4 shadow-sm">
     <div class="d-flex flex-wrap justify-content-between gap-3 align-items-start">
@@ -373,6 +386,17 @@ include __DIR__ . '/includes/header.php';
             <div class="small opacity-75"><i class="bi bi-geo-alt me-1"></i><?= h($mission['location']) ?> · <?= formatDateTime($mission['start_datetime']) ?> έως <?= formatDateTime($mission['end_datetime']) ?></div>
         </div>
         <div class="text-end">
+            <?php if ($aiConfigured): ?>
+            <div class="mb-2">
+                <select class="form-select form-select-sm d-inline-block w-auto"
+                        onchange="location.href='mission-stats.php?id=<?= (int) $missionId ?>&lang=' + encodeURIComponent(this.value);"
+                        title="Γλώσσα αναφοράς">
+                    <?php foreach (aiTranslationLanguages() as $code => $label): ?>
+                    <option value="<?= h($code) ?>" <?= $code === $trLang ? 'selected' : '' ?>><?= h($label) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
             <span class="badge fs-6 bg-light text-dark mb-2"><?= h(STATUS_LABELS[$mission['status']] ?? $mission['status']) ?></span>
             <?php if ($debrief): ?>
             <div class="mstats-stars">
@@ -1232,4 +1256,17 @@ if (mapEl) {
 </script>
 <?php endif; ?>
 
+<?php
+if ($trActive) {
+    // fragment: loadHTML() wraps what it is given in html/body, and returning
+    // that wrapper here would nest a second document inside the page chrome.
+    $tr = aiTranslateHtmlDocument(ob_get_clean(), $trLang, $missionId, true);
+    if (!$tr['complete']) {
+        echo '<div class="alert alert-warning small">Η μετάφραση δεν ολοκληρώθηκε σε αυτή τη φόρτωση ('
+           . (int) $tr['translated'] . ' από ' . (int) $tr['total'] . ' τμήματα). '
+           . 'Ό,τι μεταφράστηκε αποθηκεύτηκε — ανανεώστε για να συνεχίσει.</div>';
+    }
+    echo $tr['html'];
+}
+?>
 <?php include __DIR__ . '/includes/footer.php'; ?>

@@ -119,6 +119,7 @@ $commandNarrative = generateCommandNarrative($score['command']);
 // document that rewrote its own conclusions each time it was printed would be
 // worthless as a record.
 require_once __DIR__ . '/includes/ai-observer-render.php';
+require_once __DIR__ . '/includes/ai-translate.php';
 $aiAssessment  = loadMissionAiAssessment($missionId);
 $aiTeamsHtml   = $aiAssessment ? renderAiObserverSection($aiAssessment['payload']['teams'], 'Αξιολόγηση Πεδίου & Αποστολής') : '';
 $aiCommandHtml = $aiAssessment ? renderAiObserverSection($aiAssessment['payload']['command'], 'Αξιολόγηση Συντονιστικού') : '';
@@ -342,6 +343,22 @@ $orgName = getSetting('org_name', 'VolunteerOps');
 $appLogo = getSetting('app_logo', '');
 $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLogo);
 $printDate = date('d/m/Y H:i');
+
+// ── translation ─────────────────────────────────────────────────────────────
+// The page renders in Greek as it always has, and is translated afterwards as
+// a finished document. Buffering from here means the whole report — including
+// the observer narratives and every runtime-generated sentence — goes through
+// one pass, without a single string in the body below having to change.
+$trLang      = (string) get('lang', 'el');
+$trAvailable = aiIsConfigured();
+$trActive    = $trAvailable && aiIsTranslatableLanguage($trLang);
+if ($trActive) {
+    // A first translation is several provider calls; later ones are database
+    // reads. aiTranslateCached() caps the calls per request so this cannot run
+    // away, but the default 30s limit would still cut the first one short.
+    @set_time_limit(300);
+    ob_start();
+}
 ?><!DOCTYPE html>
 <html lang="el">
 <head>
@@ -477,6 +494,9 @@ $printDate = date('d/m/Y H:i');
         .screen-notice button { background: #fff; color: #17375e; border: none; padding: 4px 14px; border-radius: 4px; cursor: pointer; font-size: 9pt; font-weight: bold; }
         .screen-notice button:hover { background: #e0e8f5; }
         .screen-notice .hint { font-size: 8pt; opacity: .8; }
+        .screen-notice .tr-select { border: 0; border-radius: 6px; padding: 4px 8px; font-weight: 600; font-family: inherit; font-size: 9pt; cursor: pointer; }
+        .tr-banner { background: #fff6e5; border: 1px solid #f3d9a4; color: #7a5b16; border-radius: 10px; padding: 10px 14px; margin-top: 36px; font-size: 9pt; }
+        .tr-banner + .pr-hero { margin-top: 12px; }
 
         /* Shared with mission-stats.php via aiObserverStyles(), then sized down
            for print. Emitted after .observer-note so its own `p { margin: 0 }`
@@ -502,6 +522,16 @@ $printDate = date('d/m/Y H:i');
     <span>Προεπισκόπηση Εκτύπωσης &mdash; Αναφορά Αποστολής</span>
     <button onclick="window.print()">&#128438; Εκτύπωση / PDF</button>
     <button onclick="window.close()">&#10005; Κλείσιμο</button>
+    <?php if ($trAvailable): ?>
+    <?php // Navigates rather than posting: the translated page IS the
+          // deliverable, so the URL has to be the thing you can bookmark,
+          // reload and print. ?>
+    <select class="tr-select" onchange="location.href='mission-report-print.php?mission_id=<?= (int) $missionId ?>&lang=' + encodeURIComponent(this.value);">
+        <?php foreach (aiTranslationLanguages() as $code => $label): ?>
+        <option value="<?= h($code) ?>" <?= $code === $trLang ? 'selected' : '' ?>><?= h($label) ?></option>
+        <?php endforeach; ?>
+    </select>
+    <?php endif; ?>
     <span class="hint">Η εκτύπωση ξεκινά αυτόματα μόλις φορτώσουν τα γραφήματα &amp; ο χάρτης</span>
 </div>
 
@@ -1171,3 +1201,20 @@ window.addEventListener('beforeprint', function () {
 <?php require __DIR__ . '/includes/inactivity-timeout.php'; ?>
 </body>
 </html>
+<?php
+if ($trActive) {
+    $tr = aiTranslateHtmlDocument(ob_get_clean(), $trLang, $missionId);
+
+    // An incomplete pass is not a failure — every chunk that finished is now
+    // cached, so reloading continues from there instead of starting over. Say
+    // so where the reader will see it, rather than leaving them wondering why
+    // half the page is Greek.
+    if (!$tr['complete']) {
+        $banner = '<div class="tr-banner"><strong>Η μετάφραση δεν ολοκληρώθηκε σε αυτή τη φόρτωση</strong> ('
+                . (int) $tr['translated'] . ' από ' . (int) $tr['total'] . ' τμήματα). '
+                . 'Ό,τι μεταφράστηκε αποθηκεύτηκε — ανανεώστε τη σελίδα για να συνεχίσει από εκεί που έμεινε.</div>';
+        $tr['html'] = preg_replace('/(<div class="pr-hero">)/', $banner . '$1', $tr['html'], 1);
+    }
+    echo $tr['html'];
+}
+?>

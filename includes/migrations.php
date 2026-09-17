@@ -6816,6 +6816,26 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 154,
+            'description' => 'Add ai_translation_cache - machine translations of report text, keyed by a hash of the PSEUDONYMISED source plus the target language. Pseudonymised is the load-bearing word: a sentence naming a volunteer is cached as the ΜΕΛΟΣ-n form, so the same sentence pattern from a different mission is a cache hit and no real name is ever stored in, or retrieved from, a translation row. Translating a report page costs one provider call the first time a language is used and nothing at all afterwards, across every mission, because labels and headings are identical everywhere. source_text is kept alongside the hash so a bad translation can be found and deleted by reading the table rather than by guessing at hashes.',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS ai_translation_cache (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    source_hash CHAR(64) NOT NULL COMMENT 'SHA-256 of the pseudonymised source text',
+                    lang VARCHAR(5) NOT NULL,
+                    source_text TEXT NOT NULL COMMENT 'Pseudonymised source, kept so a bad row can be found by reading it',
+                    translated_text TEXT NOT NULL,
+                    provider VARCHAR(32) NULL,
+                    model VARCHAR(64) NULL,
+                    used_at TIMESTAMP NULL COMMENT 'Last time this row was served, for pruning',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_translation (source_hash, lang),
+                    INDEX idx_translation_lang (lang, used_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

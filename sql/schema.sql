@@ -2730,4 +2730,25 @@ CREATE TABLE IF NOT EXISTS `mission_team_ai_debriefs` (
     INDEX `idx_team_debrief_team` (`team_id`, `lang`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- MACHINE TRANSLATION CACHE for report pages. Keyed by a hash of the
+-- PSEUDONYMISED source plus the target language -- pseudonymised is the
+-- load-bearing word: a sentence naming a volunteer is cached in its ΜΕΛΟΣ-n
+-- form, so the same sentence from another mission is a cache hit and no real
+-- name is ever written to, or read from, a translation row.
+-- Labels and headings are identical across every mission, so a language costs
+-- one provider call the first time it is used and nothing afterwards.
+CREATE TABLE IF NOT EXISTS `ai_translation_cache` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `source_hash` CHAR(64) NOT NULL COMMENT 'SHA-256 of the pseudonymised source text',
+    `lang` VARCHAR(5) NOT NULL,
+    `source_text` TEXT NOT NULL COMMENT 'Pseudonymised source, kept so a bad row can be found by reading it',
+    `translated_text` TEXT NOT NULL,
+    `provider` VARCHAR(32) NULL,
+    `model` VARCHAR(64) NULL,
+    `used_at` TIMESTAMP NULL COMMENT 'Last time this row was served, for pruning',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uk_translation` (`source_hash`, `lang`),
+    INDEX `idx_translation_lang` (`lang`, `used_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
