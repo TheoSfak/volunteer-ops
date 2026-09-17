@@ -2537,11 +2537,29 @@ include __DIR__ . '/includes/header.php';
     .assistant-item .assistant-icon { font-size: 1.05rem; line-height: 1.4; opacity: .85; }
     .assistant-item .assistant-text { flex: 1 1 auto; min-width: 0; }
     .assistant-item .assistant-title { font-weight: 600; font-size: .92rem; }
+    .assistant-item .assistant-meta {
+        display: flex; align-items: baseline; gap: .5rem; min-width: 0;
+    }
     .assistant-item .assistant-detail {
+        flex: 1 1 auto; min-width: 0;
         font-size: .8rem; color: #64748b;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .assistant-item .assistant-age { font-size: .75rem; color: #64748b; white-space: nowrap; }
+    .assistant-item .assistant-age {
+        flex: 0 0 auto; font-size: .75rem; color: #64748b; white-space: nowrap;
+    }
+    /* On a phone the detail carries the reporter, the team AND the severity,
+       which is exactly what tells two identical-looking incidents apart — and
+       on one line it was truncated on every single row. Two lines, and the age
+       drops underneath rather than competing for the same line. */
+    @media (max-width: 576px) {
+        .assistant-item .assistant-meta { flex-wrap: wrap; }
+        .assistant-item .assistant-detail {
+            flex: 1 1 100%;
+            white-space: normal;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+        }
+    }
     .assistant-count {
         display: inline-block; margin-left: .35rem; padding: 0 .3rem;
         border-radius: 3px; background: rgba(100,116,139,.25); color: #334155;
@@ -2569,6 +2587,17 @@ include __DIR__ . '/includes/header.php';
        scrolls away is one the coordinator has to hunt for mid-question. */
     .assistant-ask-bar {
         padding: .6rem 1rem; border-top: 1px solid rgba(100,116,139,.2);
+    }
+    /* iOS Safari ZOOMS THE WHOLE PAGE when a focused input's font is under
+       16px, and .form-control-sm is 14px. Tapping the question box would have
+       zoomed the Action Room out from under a coordinator mid-operation, and
+       nothing brings it back but a pinch. 16px exactly, on the input only. */
+    @media (max-width: 576px) {
+        #assistantAskInput { font-size: 16px; }
+        /* Input bar plus footer were 27% of a phone screen before the keyboard
+           even opened, and the keyboard takes half of what is left. */
+        .assistant-ask-bar { padding: .45rem .75rem; }
+        #assistantModal .modal-footer { padding: .4rem .75rem; row-gap: .35rem; }
     }
     .assistant-focus-note { font-size: .72rem; color: #0ea5e9; }
     .assistant-turn { margin-bottom: .7rem; }
@@ -2759,8 +2788,16 @@ include __DIR__ . '/includes/header.php';
             </div>
             <?php endif; ?>
             <div class="modal-footer d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <div class="small text-muted flex-grow-1" style="min-width:220px;">
+                <?php /* Two wordings, not one clamped: on a phone the full
+                         sentence ran to four lines and took a fifth of the
+                         screen permanently, and a sentence cut mid-clause
+                         explains less than a shorter one written on purpose.
+                         The long form stays wherever there is room for it. */ ?>
+                <div class="small text-muted flex-grow-1 d-none d-sm-block" style="min-width:220px;">
                     <?= t('assistant.mark_seen_hint') ?>
+                </div>
+                <div class="small text-muted flex-grow-1 d-sm-none" title="<?= t('assistant.mark_seen_hint') ?>">
+                    <?= t('assistant.mark_seen_hint_short') ?>
                 </div>
                 <div class="d-flex align-items-center gap-2">
                     <span id="assistantSeenMsg" class="small text-success"></span>
@@ -12994,18 +13031,25 @@ function assistantClock(ts) {
 
 function assistantItemHtml(item) {
     const tag = item.is_new ? `<span class="assistant-new-tag">${t('assistant.new_badge')}</span>` : '';
-    const detail = item.detail ? `<div class="assistant-detail">${escapeHtml(item.detail)}</div>` : '';
+    const detail = item.detail ? `<span class="assistant-detail">${escapeHtml(item.detail)}</span>` : '';
     // Identical rows arrive merged with a count (see assistantCollapseIdentical).
     // Ten lines saying the same thing are one fact, and the badge still counts
     // all ten — this only stops the list repeating itself.
     const many = (item.count > 1) ? `<span class="assistant-count">×${item.count}</span>` : '';
+    // The age sits WITH the detail, not in a column of its own. On a phone a
+    // third column cost a quarter of the width for the least important value
+    // on the row, which squeezed the title into three lines and truncated the
+    // detail — and the detail is what tells two otherwise identical incidents
+    // apart. On a desktop row it reads the same as before.
     return `<div class="assistant-item" data-sev="${escapeHtml(item.sev)}" data-target="${escapeHtml(item.target || '')}" data-ts="${Number(item.ts)}">
         <div class="assistant-icon"><i class="bi ${escapeHtml(item.icon)}"></i></div>
         <div class="assistant-text">
             <div class="assistant-title">${escapeHtml(item.title)}${many}${tag}</div>
-            ${detail}
+            <div class="assistant-meta">
+                ${detail}
+                <span class="assistant-age" title="${escapeHtml(assistantClock(item.ts))}">${escapeHtml(assistantAgo(item.ts))}</span>
+            </div>
         </div>
-        <div class="assistant-age" title="${escapeHtml(assistantClock(item.ts))}">${escapeHtml(assistantAgo(item.ts))}</div>
     </div>`;
 }
 
