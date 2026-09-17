@@ -2642,6 +2642,32 @@ include __DIR__ . '/includes/header.php';
         border-top: 1px solid rgba(148,163,184,.35);
     }
 
+    /* The ready-made questions, opening upward out of the ask bar. Capped and
+       scrollable because twenty of them are taller than a phone: without the
+       cap the panel pushes the question box itself off the bottom of the
+       screen, which is the one control it exists to help you use. */
+    .assistant-qp {
+        max-height: 44vh; overflow-y: auto;
+        border: 1px solid rgba(148,163,184,.35); border-radius: 6px;
+        padding: .5rem .6rem; margin-bottom: .5rem;
+        background: rgba(148,163,184,.06);
+    }
+    .assistant-qp-group {
+        font-size: .68rem; letter-spacing: .04em; text-transform: uppercase;
+        color: #64748b; font-weight: 600; margin: .6rem 0 .25rem;
+    }
+    .assistant-qp-group:first-child { margin-top: 0; }
+    .assistant-qp-item {
+        display: block; width: 100%; text-align: start;
+        border: none; background: transparent; border-radius: 5px;
+        padding: .3rem .4rem; line-height: 1.3;
+    }
+    .assistant-qp-item:hover, .assistant-qp-item:focus-visible {
+        background: rgba(2,132,199,.10);
+    }
+    .assistant-qp-item .qp-label { font-size: .8rem; font-weight: 600; color: #0f172a; }
+    .assistant-qp-item .qp-q { font-size: .72rem; color: #64748b; display: block; }
+
     /* «Εξήγησέ μου», inside a row. Quiet until hovered: it must not compete
        with the finding it belongs to. */
     .assistant-explain {
@@ -2814,7 +2840,30 @@ include __DIR__ . '/includes/header.php';
             </div>
             <?php if (aiIsConfigured()): ?>
             <div class="assistant-ask-bar">
+                <?php /* Twenty questions worth asking, in a panel that opens
+                         INSIDE this modal rather than in a second one. A modal
+                         on top of a modal leaves Bootstrap's backdrop behind
+                         when the first is still fading, and the page ends up
+                         dimmed with no way out. Empty here and filled by JS
+                         on first open: twenty rows of markup that most
+                         sessions never expand do not belong in every page
+                         load, and the strings all come from t() anyway. */ ?>
+                <div class="collapse" id="assistantQuestionPresets">
+                    <div class="assistant-qp">
+                        <div class="small text-muted mb-2"><?= t('qp.hint') ?></div>
+                        <div id="assistantQuestionPresetsList"></div>
+                    </div>
+                </div>
                 <div class="input-group input-group-sm">
+                    <?php /* First in the group, before the box: someone who
+                             does not know what to ask is helped by seeing the
+                             questions, not by an empty field. */ ?>
+                    <button type="button" id="assistantPresetsBtn" class="btn btn-outline-secondary"
+                            data-bs-toggle="collapse" data-bs-target="#assistantQuestionPresets"
+                            aria-expanded="false" aria-controls="assistantQuestionPresets"
+                            title="<?= t('qp.btn') ?>">
+                        <i class="bi bi-list-ul"></i>
+                    </button>
                     <input type="text" id="assistantAskInput" class="form-control"
                            maxlength="500" placeholder="<?= t('assistant.ask_placeholder') ?>"
                            autocomplete="off">
@@ -13485,6 +13534,61 @@ function assistantAsk(presetQuestion) {
 }
 
 document.getElementById('assistantAskBtn')?.addEventListener('click', () => assistantAsk());
+
+// ── Ready-made questions ───────────────────────────────────────────────────
+//
+// Twenty questions that are worth an AI call, and deliberately only those.
+// Nothing here re-lists what «Τι μου ξέφυγε» already answers exactly and for
+// free — unanswered SOS, open shortages, who has gone quiet, unchecked clues.
+// Every one of these needs judgement, or needs reading ACROSS sections that no
+// single SELECT spans: the chat against the orders, a person's own fix against
+// their team's, the weather against what the teams are being asked to do.
+//
+// They run through assistantAsk(), the same path as «Εξήγησέ μου» — one
+// endpoint, one prompt, one rate limit. A preset is a question typed for you,
+// not a second kind of AI.
+const ASSISTANT_QUESTION_GROUPS = [
+    {group: 'picture', keys: ['overview', 'urgent', 'blindspot']},
+    {group: 'search',  keys: ['coverage', 'nearest', 'clues', 'reposition']},
+    {group: 'crew',    keys: ['relief', 'isolated', 'reinforce', 'pace']},
+    {group: 'flow',    keys: ['orders', 'field', 'unsaid']},
+    {group: 'risk',    keys: ['weather', 'safety', 'incidents']},
+    {group: 'time',    keys: ['supplies', 'clock', 'brief']},
+];
+
+const assistantPresetsPanel = document.getElementById('assistantQuestionPresets');
+
+function renderAssistantQuestionPresets() {
+    const list = document.getElementById('assistantQuestionPresetsList');
+    if (!list || list.dataset.built === '1') return;
+    list.innerHTML = ASSISTANT_QUESTION_GROUPS.map(g =>
+        `<div class="assistant-qp-group">${escapeHtml(t('qp.group.' + g.group))}</div>`
+        + g.keys.map(k => {
+            const q = t('qp.' + k + '.q');
+            return `<button type="button" class="assistant-qp-item" data-question="${escapeHtml(q)}">
+                        <span class="qp-label">${escapeHtml(t('qp.' + k + '.label'))}</span>
+                        <span class="qp-q">${escapeHtml(q)}</span>
+                    </button>`;
+        }).join('')
+    ).join('');
+    list.dataset.built = '1';
+}
+
+// Built when the panel starts opening rather than on page load, and on
+// show.bs.collapse rather than shown: the rows must exist before the height
+// animation measures them, or the panel animates to the wrong height and
+// settles with a scrollbar it does not need.
+assistantPresetsPanel?.addEventListener('show.bs.collapse', renderAssistantQuestionPresets);
+
+document.getElementById('assistantQuestionPresetsList')?.addEventListener('click', e => {
+    const btn = e.target.closest('.assistant-qp-item');
+    if (!btn) return;
+    // Collapse first. The answer is written to the bottom of the transcript
+    // and assistantAsk() scrolls there; leaving a 44vh panel open would put
+    // the reply behind it on a phone.
+    bootstrap.Collapse.getOrCreateInstance(assistantPresetsPanel).hide();
+    assistantAsk(btn.dataset.question);
+});
 
 // ── Shift handover ─────────────────────────────────────────────────────────
 function assistantRenderHandover(slot, res) {
