@@ -13331,6 +13331,13 @@ function assistantRenderAnswer(slot, res) {
         slot.appendChild(warn);
     }
 
+    if (res.dropped > 0) {
+        const invented = document.createElement('div');
+        invented.className = 'assistant-warn';
+        invented.textContent = t('assistant.invented_refs', {n: res.dropped});
+        slot.appendChild(invented);
+    }
+
     if (res.answerable === false && res.missing) {
         const missing = document.createElement('div');
         missing.className = 'assistant-warn';

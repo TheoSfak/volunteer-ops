@@ -901,6 +901,12 @@ function askMissionAiLive(
         'missing'    => $missing,
         'answerable' => $validated['answerable'],
         'citations'  => $citations,
+        // How many refs the model named that do not exist. Silently dropping
+        // them leaves the reader seeing only FEWER citations, which looks like
+        // a modest answer rather than an invented one — and a model that is
+        // confabulating its evidence is confabulating the prose beside it. The
+        // handover already says this; a question had no way to.
+        'dropped'    => $validated['dropped'],
         'provider'   => $result['provider'],
         'model'      => $result['model'],
         'ms'         => $result['ms'],
