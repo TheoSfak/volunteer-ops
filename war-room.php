@@ -3698,8 +3698,15 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
              both the tabbed and full views, content degrades gracefully via
              renderNearbyTeams() when there's no data yet. -->
         <div class="card shadow-sm mb-4 border-primary" data-card-id="nearbyTeamsCard">
-            <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-compass me-1"></i><?= t('nearby.panel_title') ?></h5></div>
-            <div class="card-body">
+            <?php // Closed by default: this is reference material, not something
+                  // anyone is waiting on. The explicit "collapsed" class matters —
+                  // Bootstrap only ADDS it when you close a card yourself, so a
+                  // card that starts closed without it renders an up-chevron over
+                  // a shut body. ?>
+            <div class="card-header bg-primary text-white wr-collapsible-header collapsed" data-bs-toggle="collapse" data-bs-target="#nearbyTeamsCollapse" role="button" aria-expanded="false" aria-controls="nearbyTeamsCollapse">
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-compass me-1"></i><?= t('nearby.panel_title') ?></span><i class="bi bi-chevron-down wr-collapsible-chevron"></i></h5>
+            </div>
+            <div class="card-body collapse" id="nearbyTeamsCollapse">
                 <div id="nearbyTeamsList"></div>
             </div>
         </div>
@@ -4245,7 +4252,18 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 
 <div class="card shadow-sm mb-4" data-card-id="chatCard">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0"><i class="bi bi-chat-dots me-1"></i><?= t('chat.panel_title') ?></h5>
+        <?php // The toggle is on the HEADING, not the whole header: the export
+              // dropdown sits in the same row, and a header-wide toggle would
+              // collapse the card out from under anyone reaching for it.
+              //
+              // The badge is what makes closing this card safe. A collapsed chat
+              // still receives messages, and without a count on the header they
+              // would arrive into a hidden box with nothing on screen to say so —
+              // which is a worse failure than the clutter the card was closed to
+              // avoid. ?>
+        <h5 class="mb-0 wr-collapsible-header collapsed" data-bs-toggle="collapse" data-bs-target="#chatCollapse" role="button" aria-expanded="false" aria-controls="chatCollapse">
+            <i class="bi bi-chat-dots me-1"></i><?= t('chat.panel_title') ?><span class="chat-tab-badge d-none" id="chatCardUnread" data-count="0"></span><i class="bi bi-chevron-down wr-collapsible-chevron ms-1"></i>
+        </h5>
         <div class="dropdown">
             <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
                 <i class="bi bi-file-earmark-excel me-1"></i><?= t('chat.export_btn') ?>
@@ -4258,7 +4276,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
             </ul>
         </div>
     </div>
-    <div class="card-body">
+    <div class="card-body collapse" id="chatCollapse">
         <ul class="nav nav-pills mb-3 flex-wrap" id="chatRoomTabs">
             <?php /* The label gets its own span so the unread badge can live
                      inside the button without becoming part of the room name -
@@ -12988,6 +13006,61 @@ document.querySelectorAll('.team-form').forEach(form => {
     function bumpRoomUnread(teamId, n) {
         roomUnread[teamId] = (roomUnread[teamId] || 0) + n;
         renderRoomBadge(teamId);
+        bumpChatCardUnread(n);
+    }
+
+    // ── The card's own unread count, for when the card is shut ─────────────
+    // The per-room pills below carry counts for rooms the viewer is not
+    // looking at. This one answers a different question — "is there anything
+    // in here at all?" — and only exists because the card now starts closed.
+    // It counts arrivals in EVERY room, including the open one, since a
+    // collapsed card means the open room is not being read either.
+    const chatCollapseEl = document.getElementById('chatCollapse');
+    const chatCardBadge  = document.getElementById('chatCardUnread');
+    let chatCardUnread = 0;
+    function chatCardIsOpen() {
+        return !chatCollapseEl || chatCollapseEl.classList.contains('show');
+    }
+    function renderChatCardBadge() {
+        if (!chatCardBadge) return;
+        if (chatCardUnread > 0) {
+            // Capped and worded exactly like the per-room pills above, using
+            // the same two strings — a second phrasing for the same fact is a
+            // second thing to translate and to keep in step.
+            chatCardBadge.textContent = chatCardUnread > 9 ? '9+' : String(chatCardUnread);
+            chatCardBadge.dataset.count = String(chatCardUnread);
+            chatCardBadge.setAttribute('aria-label', chatCardUnread + ' ' + t(chatCardUnread === 1 ? 'tabs.unread_chat_one' : 'tabs.unread_chat'));
+            chatCardBadge.classList.remove('d-none');
+        } else {
+            chatCardBadge.textContent = '';
+            chatCardBadge.dataset.count = '0';
+            chatCardBadge.removeAttribute('aria-label');
+            chatCardBadge.classList.add('d-none');
+        }
+    }
+    function bumpChatCardUnread(n) {
+        if (chatCardIsOpen()) return;
+        chatCardUnread += n;
+        renderChatCardBadge();
+    }
+
+    if (chatCollapseEl) {
+        let chatCollapseRevealed = false;
+        chatCollapseEl.addEventListener('shown.bs.collapse', () => {
+            chatCardUnread = 0;
+            renderChatCardBadge();
+            // A message list rendered inside a closed card has scrollHeight 0,
+            // so loadRoom()'s own scroll-to-bottom did nothing and the reader
+            // opens on the OLDEST message with every newer one below the fold —
+            // exactly backwards mid-incident. Same failure the volunteer tab
+            // panes already had to correct; fixed here for the card itself.
+            // First open only: after that, where the reader scrolled to is
+            // theirs to keep.
+            if (!chatCollapseRevealed && chatMessagesEl) {
+                chatCollapseRevealed = true;
+                chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+            }
+        });
     }
     function clearRoomUnread(teamId) {
         roomUnread[teamId] = 0;
@@ -13068,6 +13141,9 @@ document.querySelectorAll('.team-form').forEach(form => {
                 data.messages.forEach(renderMessage);
                 lastIdByRoom[teamId] = data.messages[data.messages.length - 1].id;
                 if (nearBottom) chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+                // No per-room badge fires for the open room — nothing else
+                // would report these while the card is shut.
+                bumpChatCardUnread(data.messages.length);
             })
             .catch(() => {})
             .finally(() => { clearTimeout(roomKiller); roomPollInFlight = false; });
