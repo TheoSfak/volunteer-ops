@@ -121,6 +121,31 @@ final class MissionTargetDistanceTest extends TestCase
         $this->assertCount(MISSION_TARGET_CAP, missionTargetsForTeam($many, 40));
     }
 
+    // ── Telling two sectors with the same name apart ───────────────────────
+
+    public function testARingAreaIsNamedByWhatItMeansNotByItsIndex(): void
+    {
+        // 0/1/2/3 are the 25th/50th/75th/95th percentile distances from the
+        // last seen point (LPB_RING_TABLE). «Ζώνη 95%» tells a coordinator
+        // where in the search plan a sector sits; «δακτύλιος 3» does not.
+        $this->assertSame('Ζώνη 25%', aiLiveSectorAreaWords(null, 0));
+        $this->assertSame('Ζώνη 75%', aiLiveSectorAreaWords('Ζώνη 75% — Τομείς', 2));
+        $this->assertSame('Ζώνη 95%', aiLiveSectorAreaWords(null, 3));
+
+        // A hand-drawn area keeps its own name, minus the boilerplate the
+        // ring tool appends to every one it makes.
+        $this->assertSame('Τομέας Βόρειας Κοίτης', aiLiveSectorAreaWords('Τομέας Βόρειας Κοίτης', null));
+        $this->assertSame('Ζώνη 50%', aiLiveSectorAreaWords('Ζώνη 50% — Τομείς', null));
+
+        // Nothing useful to say: the caller then leaves the name unqualified
+        // rather than appending an empty bracket.
+        $this->assertSame('', aiLiveSectorAreaWords(null, null));
+        $this->assertSame('', aiLiveSectorAreaWords('   ', null));
+
+        // An index outside the table is not invented into a percentage.
+        $this->assertSame('', aiLiveSectorAreaWords(null, 9));
+    }
+
     // ── A building has to stand in the sector it is filed under ────────────
 
     public function testABuildingOnTheBoundaryIsAcceptedAndOneAcrossTheRidgeIsNot(): void

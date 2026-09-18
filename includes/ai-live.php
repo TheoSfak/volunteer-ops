@@ -244,6 +244,38 @@ function aiLiveQuestionNames(string $question, string $realName): int {
 }
 
 /**
+ * What to call the area a sector belongs to, when a sector name needs
+ * qualifying.
+ *
+ * A ring area gets its LPB band, because that is what the ring MEANS — 0, 1, 2
+ * and 3 are the 25th, 50th, 75th and 95th percentile distances from the last
+ * seen point, so «Ζώνη 95%» tells a coordinator where in the search plan a
+ * sector sits and «δακτύλιος 3» does not. A hand-drawn area gets its own name.
+ *
+ * Returns '' when there is nothing useful to say, and the caller then leaves
+ * the sector name unqualified rather than appending an empty bracket.
+ */
+function aiLiveSectorAreaWords(?string $areaLabel, $ringIndex): string {
+    if ($ringIndex !== null && $ringIndex !== '') {
+        $pct = AI_LIVE_RING_PERCENTILES[(int) $ringIndex] ?? null;
+        if ($pct !== null) return 'Ζώνη ' . $pct . '%';
+    }
+    $label = trim((string) $areaLabel);
+    // Ring areas are named «Ζώνη 75% — Τομείς» by the tool that makes them;
+    // the trailing half is boilerplate on every one of them.
+    $label = trim(preg_replace('/\s*[—-]\s*Τομε[ίι]ς\s*$/u', '', $label) ?? $label);
+    return mb_substr($label, 0, 40, 'UTF-8');
+}
+
+/**
+ * LPB ring index to the percentile it represents.
+ *
+ * Mirrors LPB_RING_TABLE's own ordering (includes/lpb-rings.php): the radius
+ * within which that share of comparable past cases were eventually found.
+ */
+const AI_LIVE_RING_PERCENTILES = [0 => 25, 1 => 50, 2 => 75, 3 => 95];
+
+/**
  * An age in the unit somebody would actually say it in.
  *
  * "43339 λεπτά" is a number nobody reads as a month — it reads as a typo, and
@@ -1311,9 +1343,11 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     // incidents, SOS and clues underneath all want to say WHICH sector they
     // fell in, and that answer has to exist before they are built.
     $sectorRows = dbFetchAll(
-        "SELECT s.id, s.label, s.status, s.acknowledged_at, s.geo, t.codename, t.team_number
+        "SELECT s.id, s.label, s.status, s.acknowledged_at, s.geo, t.codename, t.team_number,
+                a.label AS area_label, a.ring_index
          FROM mission_search_sectors s
          LEFT JOIN mission_teams t ON t.id = s.team_id
+         LEFT JOIN mission_search_areas a ON a.id = s.area_id
          WHERE s.mission_id = ?
          ORDER BY s.id LIMIT 60",
         [$missionId]
@@ -1354,6 +1388,7 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     // here and reused for the clue/incident/SOS lookups further down.
     $sectorGeos = [];
     $sectorLabels = [];
+    $sectorAreas  = [];
     foreach ($sectorRows as $row) {
         $id = (int) $row['id'];
         // Redacted HERE, once, because this map is the single source every
@@ -1370,9 +1405,30 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         // gateway bugs fixed in v3.267.0, and the same rule applies: over-match
         // when redacting, be precise when blocking.
         $sectorLabels[$id] = $row['label'] !== '' ? $red($row['label'], 80) : ('#' . $id);
+        $sectorAreas[$id]  = aiLiveSectorAreaWords($row['area_label'] ?? null, $row['ring_index']);
         $geo = json_decode((string) ($row['geo'] ?? ''), true);
         if (is_array($geo) && count($geo) >= 3) {
             $sectorGeos[$id] = $geo;
+        }
+    }
+
+    // SECTOR NAMES ARE NOT UNIQUE, and until now nothing said so.
+    //
+    // Every area gets its own Α, Β, Γ…, so a mission with a 75% ring and a 95%
+    // ring has two sectors called «Τομέας Α» and two called «Τομέας Β». The
+    // assistant was handed both under the same name with nothing to tell them
+    // apart — so "which sector is that building in" was not a question it
+    // could get right, and it confidently named the wrong one. Reported from
+    // the field exactly that way, and the digest was at fault, not the model:
+    // the rows themselves were correct.
+    //
+    // Qualified only where the bare name repeats. Adding «(Ζώνη 95%)» to every
+    // sector in a mission that has one area is noise, and noise is what stops
+    // the qualifier being read on the missions that need it.
+    $labelCounts = array_count_values($sectorLabels);
+    foreach ($sectorLabels as $id => $label) {
+        if (($labelCounts[$label] ?? 0) > 1 && ($sectorAreas[$id] ?? '') !== '') {
+            $sectorLabels[$id] = $label . ' (' . $red($sectorAreas[$id], 40) . ')';
         }
     }
     $neighbours = aiLiveSectorNeighbours($sectorRows);
@@ -1479,6 +1535,12 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
             // every other mention of it cannot disagree — and so there is one
             // place, not two, where the redaction has to be remembered.
             'τομεας'       => $sectorLabels[$id],
+            // The band of the search plan this sector sits in. On a
+            // missing-person search that is not decoration: the rings are the
+            // 25/50/75/95th percentile distances from the last seen point, so
+            // it is what says whether a sector is in the ground most cases are
+            // found in or the ground almost none are.
+            'ζωνη'         => ($sectorAreas[$id] ?? '') !== '' ? $red($sectorAreas[$id], 40) : null,
             'κατασταση'    => $row['status'],
             'ομαδα'        => teamLabel($row['codename'], $row['team_number']) ?: null,
             'παραληφθηκε'  => $row['acknowledged_at'] !== null,
@@ -2145,6 +2207,8 @@ function aiLiveSystemPrompt(): string {
 - Η ευθεία γραμμή και η απόσταση διαδρομής ΔΕΝ είναι το ίδιο πράγμα. Στο βουνό η διαδρομή είναι συχνά τριπλάσια από την ευθεία, γιατί ο δρόμος κάνει τον γύρο. Λέγε πάντα ποιο από τα δύο αναφέρεις, με τα ίδια λόγια που τα λέει το πεδίο.
 - Το πεδίο δίνει ΚΑΙ ΤΟΥΣ ΔΥΟ χρόνους όπου υπάρχουν: «με τα πόδια» και «με αμάξι». Ανάφερε και τους δύο όταν ρωτιέται απόσταση ή χρόνος άφιξης — ο συντονιστής επιλέγει ανάμεσά τους και η επιλογή είναι η απόφαση που παίρνει. Αν λείπει ο ένας, πες ποιος λείπει και γιατί, μην παρουσιάσεις τον άλλον σαν να είναι όλη η απάντηση.
 - Δεν βλέπεις χάρτη, αλλά οι σχέσεις είναι υπολογισμένες για σένα: το «γειτονικοι» κάθε τομέα λέει ποιοι ακουμπάνε, και το «τομεας» σε περιστατικά, SOS και σημεία ενδιαφέροντος λέει σε ποιο έδαφος έπεσαν. Χρησιμοποίησέ τα αυτούσια — μην συμπεραίνεις γειτνίαση από ονόματα ή αριθμούς τομέων.
+- Το όνομα ενός τομέα ΔΕΝ είναι μοναδικό από μόνο του: κάθε περιοχή φτιάχνει τους δικούς της Α, Β, Γ. Όπου το όνομα επαναλαμβάνεται, φέρει τη ζώνη του σε παρένθεση — «Τομέας Α (Ζώνη 75%)» και «Τομέας Α (Ζώνη 95%)» είναι ΔΙΑΦΟΡΕΤΙΚΟΙ τομείς. Χρησιμοποίησε το όνομα ΑΥΤΟΥΣΙΟ, μαζί με την παρένθεση, και μην ενώσεις ποτέ δύο τομείς επειδή μοιάζουν τα ονόματά τους.
+- Η «ζωνη» σε αναζήτηση αγνοουμένου είναι στατιστική: η Ζώνη 25% είναι η απόσταση μέσα στην οποία βρέθηκε το 25% αντίστοιχων περιστατικών από το σημείο τελευταίας εμφάνισης, και ούτω καθεξής ως το 95%. Έρευνα στη Ζώνη 95% ενώ η 75% δεν έχει ολοκληρωθεί αξίζει να επισημανθεί.
 - Τα «κτιρια» ενός τομέα είναι κτίρια που ο συντονιστής όρισε για έλεγχο, με το όνομα που τους έδωσε. Το «οροφοι_προς_ελεγχο» είναι όσοι όροφοι ΧΡΕΙΑΖΟΝΤΑΙ έλεγχο (όχι όσοι έχει το κτίριο), το «ελεγμενοι» πόσοι έγιναν, και το «απομενουν» ποιοι λείπουν ονομαστικά. Απάντησε με το όνομα του κτιρίου, όπως το ρωτάει ο συντονιστής. Ένας τομέας με ανέλεγκτους ορόφους ΔΕΝ είναι ολοκληρωμένος, όσο κι αν λέει η κατάστασή του — ένα κτίριο είναι το ένα πράγμα που μια ομάδα μπορεί να προσπεράσει και να δηλώσει τον τομέα σαρωμένο.
 - Αν ένα κτίριο έχει «προσοχη», το σημείο του δεν πέφτει μέσα στον τομέα όπου είναι καταχωρημένο. Πες το στον συντονιστή όταν αφορά την ερώτηση: η ομάδα που καθαρίζει εκείνον τον τομέα δεν θα περάσει από εκεί.
 - Τα ονόματα προσώπων είναι ψευδώνυμα (ΜΕΛΟΣ-1 κ.λπ.). Χρησιμοποίησέ τα αυτούσια, ακόμη κι αν η ερώτηση φαίνεται να αναφέρει πρόσωπο.
