@@ -87,6 +87,58 @@ final class AiPlacesTest extends TestCase
         $this->assertSame([], $map);
     }
 
+    public function testAFullGreekStreetNameIsSimplifiedUntilTheMapAnswers(): void
+    {
+        // Measured against the live service: «Αντωνίου Καστρινάκη 65» returns
+        // nothing in every form — with the city, without the number, on the
+        // structured endpoint — while «Καστρινάκη 65» returns the street at
+        // once. OpenStreetMap holds these streets under a different
+        // patronymic, so the surname is the only part both sides agree on.
+        //
+        // The coordinator types the address as they know it; the ladder does
+        // the simplifying, which is the part they should not have to know.
+        $this->assertSame(
+            ['Αντωνίου Καστρινάκη 65', 'Καστρινάκη 65', 'Καστρινάκη'],
+            aiPlaceQueryLadder('Αντωνίου Καστρινάκη 65')
+        );
+        $this->assertSame(
+            ['Λεωφόρος Κνωσού 120', 'Κνωσού 120', 'Κνωσού'],
+            aiPlaceQueryLadder('Λεωφόρος Κνωσού 120')
+        );
+        // Two words and a number: one step down, then the street alone.
+        $this->assertSame(['Πλαστήρα 14', 'Πλαστήρα'], aiPlaceQueryLadder('Πλαστήρα 14'));
+    }
+
+    public function testOnlyThingsThatLookLikeAddressesAreLaddered(): void
+    {
+        // «Παγκρήτιο Στάδιο» laddered would end at «Στάδιο», which matches any
+        // stadium in Greece — and every extra rung is a second of a
+        // coordinator's time mid-operation. A house number is what says this
+        // is an address.
+        $this->assertSame(['Παγκρήτιο Στάδιο'], aiPlaceQueryLadder('Παγκρήτιο Στάδιο'));
+        $this->assertSame(['Μονή Βροντησίου'], aiPlaceQueryLadder('Μονή Βροντησίου'));
+        $this->assertSame(['Ζαρός'], aiPlaceQueryLadder('Ζαρός'));
+        $this->assertSame([], aiPlaceQueryLadder('   '));
+    }
+
+    public function testTheLadderNeverEndsOnACommonNoun(): void
+    {
+        // «Οδός Παραλίας 12» must not fall back to «Παραλίας»… and must never
+        // reach a bare «παραλία», which resolves to an arbitrary one of
+        // hundreds.
+        $ladder = aiPlaceQueryLadder('Λεωφόρος Παραλία 12');
+        $this->assertNotContains('παραλία', $ladder);
+        $this->assertNotContains('Παραλία', $ladder);
+    }
+
+    public function testTheLadderIsCappedSoAnAddressCannotCostTenLookups(): void
+    {
+        // Each rung is a lookup a second apart, in the middle of an operation.
+        $long = aiPlaceQueryLadder('Στρατηγού Νικολάου Γεωργίου Παπαδοπούλου Πλαστήρα 14');
+        $this->assertLessThanOrEqual(AI_PLACES_LADDER_MAX, count($long));
+        $this->assertSame('Στρατηγού Νικολάου Γεωργίου Παπαδοπούλου Πλαστήρα 14', $long[0]);
+    }
+
     public function testAHouseNumberThatWasNotFoundIsSaidOutLoud(): void
     {
         // Measured against the real service: «Καστρινάκη 65 Ηράκλειο» resolves

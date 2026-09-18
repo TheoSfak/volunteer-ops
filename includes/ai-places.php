@@ -174,6 +174,71 @@ function aiPlaceIsTooVague(string $name): bool {
 }
 
 /**
+ * The forms of a street address to try, in order, until one answers.
+ *
+ * WHY THIS LADDER EXISTS, measured against the live service:
+ *
+ *   «Αντωνίου Καστρινάκη 65»           → nothing
+ *   «Αντωνίου Καστρινάκη 65 Ηράκλειο»  → nothing
+ *   «Αντωνίου Καστρινάκη»              → nothing
+ *   «Καστρινάκη 65»                    → the street, found
+ *
+ * OpenStreetMap holds that street as «Καστρινάκη Εμμ.» — a different
+ * patronymic from the one a coordinator writes — so the full name matches
+ * nothing at all while the distinctive surname matches immediately. Adding the
+ * city makes it worse rather than better: «Κνωσού Ηράκλειο» returns nothing
+ * where «Κνωσού» returns a result.
+ *
+ * So the leading words come off one at a time and the surname is tried last.
+ * The coordinator types the address as they know it; the ladder does the
+ * simplifying, which is the part they should not have to know about.
+ *
+ * ONLY FOR THINGS THAT LOOK LIKE ADDRESSES — a house number present. Laddering
+ * «Παγκρήτιο Στάδιο» would end at «Στάδιο», which matches any stadium in
+ * Greece, and one extra lookup per place is a second of a coordinator's time.
+ */
+function aiPlaceQueryLadder(string $name): array {
+    $name = trim(preg_replace('/\s+/u', ' ', $name) ?? $name);
+    if ($name === '') return [];
+
+    $ladder = [$name];
+    if (!preg_match('/(?<!\d)\d{1,4}(?!\d)/u', $name)) {
+        return $ladder; // not an address; one attempt is the whole ladder
+    }
+
+    $parts  = preg_split('/\s+/u', $name, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $number = null;
+    $words  = [];
+    foreach ($parts as $p) {
+        if ($number === null && preg_match('/^\d{1,4}$/u', $p)) { $number = $p; continue; }
+        $words[] = $p;
+    }
+
+    // Drop leading words one at a time: «Αντωνίου Καστρινάκη 65» → «Καστρινάκη
+    // 65». The last word is the distinctive one and the only one OSM reliably
+    // agrees with us about.
+    while (count($words) > 1) {
+        array_shift($words);
+        $ladder[] = trim(implode(' ', $words) . ($number !== null ? ' ' . $number : ''));
+    }
+    // Finally the street with no number at all.
+    if ($words && !aiPlaceIsTooVague($words[0])) {
+        $ladder[] = $words[0];
+    }
+
+    return array_slice(array_values(array_unique($ladder)), 0, AI_PLACES_LADDER_MAX);
+}
+
+/**
+ * How many forms of one address are tried.
+ *
+ * Each is a lookup a second apart, so this is seconds of a coordinator's time
+ * in the middle of an operation. Three covers «given name + surname + number»,
+ * which is the shape Greek addresses actually take.
+ */
+const AI_PLACES_LADDER_MAX = 3;
+
+/**
  * One name into one point, preferring results near the mission.
  *
  * Returns ['ζητηθηκε' => what was asked for, 'βρεθηκε_ως' => what the service
@@ -182,6 +247,36 @@ function aiPlaceIsTooVague(string $name): bool {
  * able to show both.
  */
 function aiGeocodePlaceNearMission(string $name, ?float $nearLat, ?float $nearLng): ?array {
+    $first = true;
+    foreach (aiPlaceQueryLadder($name) as $variant) {
+        if (!$first) usleep(1100000); // Nominatim asks for ≤1 request a second
+        $first = false;
+        $hit = aiGeocodeOnce($variant, $nearLat, $nearLng);
+        if ($hit === null) continue;
+        // What was ASKED stays what the coordinator typed; the variant that
+        // actually answered is reported beside it, because «βρέθηκε ψάχνοντας
+        // "Καστρινάκη 65"» is how they know a leading name was dropped.
+        $hit['ζητηθηκε'] = $name;
+        if ($variant !== $name) {
+            $hit['βρεθηκε_ψαχνοντας'] = $variant;
+            // A LOOSENED MATCH CAN LAND SOMEWHERE ELSE ENTIRELY. Measured:
+            // «Λεωφόρος Κνωσού 120» laddered down to «Κνωσού» and returned a
+            // village in Αρκαλοχώρι, twenty kilometres from the avenue in
+            // Heraklion that was meant. The same ladder found the right street
+            // for «Αντωνίου Καστρινάκη 65», so it earns its place — but every
+            // result it produces is a guess that worked, not the address, and
+            // the coordinator is the one who can tell the difference.
+            $hit['προσοχη_απλοποιηση'] = 'Η διεύθυνση ΔΕΝ βρέθηκε όπως δόθηκε· βρέθηκε αφού '
+                . 'απλοποιήθηκε σε «' . $variant . '». Μπορεί να είναι ΑΛΛΟΣ δρόμος ή άλλο μέρος '
+                . 'με παρόμοιο όνομα. Πες το ρητά στον συντονιστή για να το επιβεβαιώσει.';
+        }
+        return $hit;
+    }
+    return null;
+}
+
+/** A single lookup. The ladder above decides what to ask. */
+function aiGeocodeOnce(string $name, ?float $nearLat, ?float $nearLng): ?array {
     if (!function_exists('curl_init')) return null;
 
     $params = [
