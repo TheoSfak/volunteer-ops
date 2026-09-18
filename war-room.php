@@ -11732,6 +11732,91 @@ function playWarRoomAlertSound() {
 const SPEECH_SUPPORTED = typeof window.speechSynthesis !== 'undefined'
                       && typeof window.SpeechSynthesisUtterance !== 'undefined';
 
+// ── Speech diagnostics (?speechdebug=1) ────────────────────────────────────
+//
+// Two rounds of this were guessed at from a laptop that cannot reproduce the
+// fault, because the engine that cuts the message is on somebody else's phone
+// and reports nothing to anybody. This panel puts the facts on the screen of
+// the device that HAS the problem: which voice was chosen, whether it is local
+// or fetched, how many pieces went out, how each one ended, and how long it
+// actually spoke for. A cut at ten seconds and a piece that never started are
+// different faults with different fixes, and they look identical from here.
+//
+// Off unless asked for: it is a URL away, costs nothing on every other load,
+// and there is no setting to find or to leave switched on by accident.
+const SPEECH_DEBUG = (function () {
+    try { return new URLSearchParams(location.search).has('speechdebug'); }
+    catch (e) { return false; }
+})();
+let speechDebugBox = null;
+
+function speechDebugLog(kind, data) {
+    if (!SPEECH_DEBUG) return;
+    if (!speechDebugBox) {
+        speechDebugBox = document.createElement('div');
+        speechDebugBox.style.cssText = 'position:fixed;left:6px;right:6px;bottom:6px;z-index:20000;'
+            + 'max-height:42vh;overflow:auto;background:rgba(15,23,42,.94);color:#e2e8f0;'
+            + 'font:11px/1.45 ui-monospace,Consolas,monospace;padding:6px 8px;border-radius:8px;'
+            + '-webkit-overflow-scrolling:touch;overscroll-behavior:contain;';
+        const head = document.createElement('div');
+        head.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:4px;';
+        const title = document.createElement('strong');
+        title.textContent = 'speech';
+        title.style.color = '#38bdf8';
+        const ua = document.createElement('span');
+        ua.style.cssText = 'flex:1 1 auto;opacity:.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+        ua.textContent = (navigator.userAgentData && navigator.userAgentData.mobile ? 'mobile ' : '')
+            + (navigator.userAgent || '').slice(0, 70);
+        const copy = document.createElement('button');
+        copy.type = 'button';
+        copy.textContent = 'copy';
+        copy.style.cssText = 'background:#0ea5e9;color:#fff;border:0;border-radius:4px;padding:2px 8px;font:inherit;';
+        // Read out loud in a moving vehicle is not the place to transcribe a
+        // log by hand; one tap puts it on the clipboard to paste back.
+        copy.addEventListener('click', () => {
+            const text = [...speechDebugBox.querySelectorAll('div[data-line]')]
+                .map(d => d.textContent).join('\n');
+            try {
+                navigator.clipboard.writeText(ua.textContent + '\n' + text);
+                copy.textContent = 'copied';
+                setTimeout(() => { copy.textContent = 'copy'; }, 1500);
+            } catch (e) { copy.textContent = 'select it'; }
+        });
+        head.appendChild(title); head.appendChild(ua); head.appendChild(copy);
+        speechDebugBox.appendChild(head);
+        document.body.appendChild(speechDebugBox);
+    }
+    const line = document.createElement('div');
+    line.setAttribute('data-line', '1');
+    const bits = [];
+    for (const k in data) {
+        if (Object.prototype.hasOwnProperty.call(data, k)) bits.push(k + '=' + data[k]);
+    }
+    line.textContent = new Date().toLocaleTimeString() + ' ' + kind + ' ' + bits.join(' ');
+    if (kind === 'stop' || kind === 'error') line.style.color = '#fca5a5';
+    if (kind === 'speak') line.style.color = '#38bdf8';
+    speechDebugBox.appendChild(line);
+    speechDebugBox.scrollTop = speechDebugBox.scrollHeight;
+}
+
+// A second-by-second sample of what the engine says about itself, but only
+// while something is being said and only when the panel is on. `paused` is the
+// one that settles the Android question: a message that goes quiet while the
+// engine still reports speaking-and-paused was stopped by our own nudge.
+if (SPEECH_DEBUG && SPEECH_SUPPORTED) {
+    let wasSpeaking = false, lastPaused = null;
+    setInterval(() => {
+        const s = window.speechSynthesis;
+        if (s.speaking !== wasSpeaking) {
+            wasSpeaking = s.speaking;
+            speechDebugLog('engine', {speaking: s.speaking, pending: s.pending, paused: s.paused});
+        } else if (s.speaking && s.paused !== lastPaused) {
+            speechDebugLog('engine', {paused: s.paused});
+        }
+        lastPaused = s.paused;
+    }, 1000);
+}
+
 // Greek + Greek Extended. A single Greek letter decides it: operational text
 // mixes freely ("ΑΛΦΑ team στο σημείο 3"), and it is the Greek words that are
 // destroyed by an English voice, not the reverse.
@@ -11775,8 +11860,27 @@ let speechKeepAlive = null;
 function stopSpeechKeepAlive() {
     if (speechKeepAlive) { clearInterval(speechKeepAlive); speechKeepAlive = null; }
 }
+
+// Whether the nudge may be used here at all. On Chrome for Android pause()
+// does not pause — it stops, and resume() does not bring the voice back — so
+// on a phone the workaround IS the bug, silencing the message about ten
+// seconds in. Inline fallback rather than a bare `true`, because this file and
+// war-room-utils.js are cached separately and defaulting to "safe" on a stale
+// phone would leave exactly the fault this is here to remove.
+function speechKeepAliveAllowed() {
+    const ua = navigator.userAgent || '';
+    const mobile = navigator.userAgentData ? navigator.userAgentData.mobile : undefined;
+    if (typeof speechKeepAliveIsSafe === 'function') {
+        return speechKeepAliveIsSafe({userAgent: ua, uaDataMobile: mobile});
+    }
+    return mobile === true ? false : !/Android|iPhone|iPad|iPod|Mobile|Silk|Kindle/i.test(ua);
+}
 function startSpeechKeepAlive() {
     stopSpeechKeepAlive();
+    // Nothing is lost by skipping it on a phone: announcements are already cut
+    // into pieces short enough that no single one reaches the fifteen seconds
+    // this was protecting against.
+    if (!speechKeepAliveAllowed()) { speechDebugLog('keepalive', {skipped: 'mobile'}); return; }
     speechKeepAlive = setInterval(() => {
         const synth = window.speechSynthesis;
         if (!synth.speaking) { stopSpeechKeepAlive(); return; }
@@ -11837,52 +11941,97 @@ function speakAnnouncement(text, localOnly) {
         // to say so. One long utterance is the behaviour this replaced — worse
         // than pieces, immeasurably better than nothing.
         const pieces = typeof speechChunks === 'function' ? speechChunks(text) : [text];
-        const last = pieces.length - 1;
         let retried = false;
 
-        pieces.forEach((piece, i) => {
+        speechDebugLog('speak', {
+            chars: text.length, pieces: pieces.length, lang,
+            voice: voice ? voice.name : '(engine default)',
+            local: voice ? voice.localService : null,
+            keepAlive: speechKeepAliveAllowed(),
+        });
+
+        // CHAINED, not queued all at once. Queueing every piece up front trusts
+        // the engine to hold a queue, and an Android engine that drops whatever
+        // follows the first utterance stops the message dead with no event to
+        // notice it by — which is what a phone in the field reported after
+        // chunking alone failed to fix it. Speaking the next piece only once
+        // the previous one has actually finished never depends on that queue.
+        const sayFrom = (index) => {
+            if (generation !== speechGeneration || index >= pieces.length) return;
+            const piece = pieces[index];
+            const startedAt = Date.now();
+            let moved = false;
+            let watchdog = null;
+
+            const advance = (why) => {
+                if (moved || generation !== speechGeneration) return;
+                moved = true;
+                if (watchdog) clearTimeout(watchdog);
+                speechDebugLog('piece', {n: (index + 1) + '/' + pieces.length,
+                    chars: piece.length, why: why, ms: Date.now() - startedAt});
+                if (index + 1 < pieces.length) sayFrom(index + 1);
+                else stopSpeechKeepAlive();
+            };
+            const halt = (why) => {
+                if (moved) return;
+                moved = true;
+                if (watchdog) clearTimeout(watchdog);
+                speechDebugLog('stop', {n: (index + 1) + '/' + pieces.length,
+                    why: why, ms: Date.now() - startedAt});
+                stopSpeechKeepAlive();
+            };
+
             const utterance = new SpeechSynthesisUtterance(piece);
             utterance.lang = lang;
             // Slightly under default. One pass, outdoors, often through a pocket.
             utterance.rate = 0.95;
             utterance.volume = 1;
             if (voice) utterance.voice = voice;
-            // Only the final piece ends the message; the keep-alive has to
-            // outlive every piece before it.
-            if (i === last) {
-                utterance.onend = () => { if (generation === speechGeneration) stopSpeechKeepAlive(); };
-            }
+            utterance.onend = () => advance('end');
             utterance.onerror = (ev) => {
                 // Superseded: whatever happened to this one, the page has
                 // already moved on to a newer announcement. Say nothing, touch
                 // nothing.
                 if (generation !== speechGeneration) return;
                 const err = (ev && ev.error) || '';
-                if (err === 'not-allowed') {
-                    stopSpeechKeepAlive();
-                    markAnnouncementBlocked();
+                if (err === 'not-allowed') { halt('not-allowed'); markAnnouncementBlocked(); return; }
+                // Something outside stopped us while we were still the current
+                // message. Advancing here would restart a message somebody has
+                // just silenced.
+                if (err === 'canceled' || err === 'interrupted') { halt(err); return; }
+                if (!localOnly && !retried && SPEECH_RETRYABLE_ERRORS.indexOf(err) !== -1) {
+                    // An "Online (Natural)" voice that could not be fetched.
+                    // The offline one is worse to listen to and infinitely
+                    // better than silence — and this is the failure that
+                    // actually happens in the field, where the network is the
+                    // thing that is missing.
+                    //
+                    // Resumed from THIS piece, not from the beginning: the
+                    // pieces before it have been heard, and hearing the opening
+                    // of an order twice is its own kind of confusion. Once per
+                    // message — a second failure is the engine, not the voice.
+                    retried = true;
+                    halt('retry-local');
+                    speakAnnouncement(pieces.slice(index).join(' '), true);
                     return;
                 }
-                if (localOnly || retried || SPEECH_RETRYABLE_ERRORS.indexOf(err) === -1) {
-                    if (i === last) stopSpeechKeepAlive();
-                    return;
-                }
-                // An "Online (Natural)" voice that could not be fetched. The
-                // offline one is worse to listen to and infinitely better than
-                // silence — and this is the failure that actually happens in
-                // the field, where the network is the thing that is missing.
-                //
-                // Resumed from THIS piece, not from the beginning: the pieces
-                // before it have already been heard, and hearing the opening
-                // of an order twice is its own kind of confusion. Once per
-                // message — a second failure is the engine, not the voice.
-                retried = true;
-                stopSpeechKeepAlive();
-                speakAnnouncement(pieces.slice(i).join(' '), true);
+                // This voice failed on this piece. Do not drag the rest of the
+                // message down with it.
+                advance('error:' + (err || '?'));
             };
-            synth.speak(utterance);
-        });
 
+            // An engine that never delivers onend must not take the remainder
+            // of the message with it. Generous enough that it cannot fire over
+            // a piece still being spoken.
+            const wait = typeof speechPieceTimeoutMs === 'function'
+                ? speechPieceTimeoutMs(piece)
+                : piece.length * 140 + 4000;
+            watchdog = setTimeout(() => advance('timeout'), wait);
+
+            synth.speak(utterance);
+        };
+
+        sayFrom(0);
         startSpeechKeepAlive();
         return true;
     } catch (e) {

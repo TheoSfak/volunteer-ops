@@ -60,6 +60,8 @@ const {
     shouldSkipPhotoCompression,
     speechChunks,
     SPEECH_CHUNK_CHARS,
+    speechKeepAliveIsSafe,
+    speechPieceTimeoutMs,
     polygonBoundsSizeMeters,
     formatBoundsSize,
 } = require('../../assets/js/war-room-utils.js');
@@ -1123,4 +1125,46 @@ test('speechChunks returns nothing for nothing', () => {
     assert.deepEqual(speechChunks('   '), []);
     assert.deepEqual(speechChunks(null), []);
     assert.deepEqual(speechChunks(undefined), []);
+});
+
+test('the pause/resume nudge is refused on phones and allowed on desktops', () => {
+    // On Chrome for Android pause() does not pause, it stops, and resume()
+    // does not bring the voice back — so there the workaround IS the fault,
+    // silencing a message about ten seconds in. Reported from the field as
+    // "fine on the laptop, cut short on the phone".
+    const android = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+                  + '(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
+    const iphone  = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 '
+                  + '(KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+    const windows = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                  + '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
+    assert.equal(speechKeepAliveIsSafe({userAgent: android}), false);
+    assert.equal(speechKeepAliveIsSafe({userAgent: iphone}), false);
+    assert.equal(speechKeepAliveIsSafe({userAgent: windows}), true);
+
+    // The browser's own answer wins over the string, which a desktop-mode
+    // toggle rewrites to look like a laptop.
+    assert.equal(speechKeepAliveIsSafe({userAgent: windows, uaDataMobile: true}), false);
+    assert.equal(speechKeepAliveIsSafe({userAgent: android, uaDataMobile: false}), true);
+
+    // Nothing known at all is treated as a desktop: that is where the nudge
+    // was needed, and where it is harmless.
+    assert.equal(speechKeepAliveIsSafe({}), true);
+});
+
+test('the watchdog waits longer than the words could possibly take', () => {
+    // It exists for an engine that never delivers onend. Firing early would
+    // talk over a piece still being spoken, which is worse than the silence it
+    // is trying to prevent — so it is roughly double the real duration.
+    // Measured on the real engine: 284 Greek characters take about 19 seconds.
+    const realMsPerChar = 19000 / 284;
+    for (const chars of [20, 90, 170]) {
+        const allowed = speechPieceTimeoutMs('x'.repeat(chars));
+        assert.ok(allowed > chars * realMsPerChar * 1.5,
+            `${chars} chars: watchdog ${allowed}ms is too close to the real ${Math.round(chars * realMsPerChar)}ms`);
+    }
+    // Even an empty string gets a floor rather than firing immediately.
+    assert.ok(speechPieceTimeoutMs('') >= 4000);
+    assert.ok(speechPieceTimeoutMs(null) >= 4000);
 });

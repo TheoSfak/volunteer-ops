@@ -891,6 +891,40 @@ function speechChunks(text) {
     return out;
 }
 
+/**
+ * Whether the pause()/resume() nudge may be used on this device.
+ *
+ * That nudge exists to work around DESKTOP Chrome stopping a long utterance
+ * after about fifteen seconds. On Chrome for Android pause() does not pause:
+ * it stops, and resume() does not bring the voice back — so the very code that
+ * keeps a desktop talking is what silences a phone, roughly ten seconds in.
+ * That is the exact shape of the failure reported from the field: fine on a
+ * laptop, cut short on a mobile.
+ *
+ * Nothing is lost by skipping it there, because announcements are already
+ * broken into pieces short enough that no single one reaches the fifteen
+ * seconds the nudge was protecting against.
+ */
+function speechKeepAliveIsSafe({ userAgent, uaDataMobile }) {
+    // The browser's own answer first where it exists; it is not spoofable by
+    // a desktop-mode toggle the way the string is.
+    if (uaDataMobile === true) return false;
+    if (uaDataMobile === false) return true;
+    return !/Android|iPhone|iPad|iPod|Mobile|Silk|Kindle/i.test(userAgent || '');
+}
+
+/**
+ * How long a piece is given to finish before the chain moves on without it.
+ *
+ * Some engines simply never deliver onend, and a chain waiting for one stops
+ * the message dead halfway with nothing on screen to say why. Generous on
+ * purpose — advancing early talks over the piece still playing, which is worse
+ * than a pause — so this is roughly double the time the words actually take.
+ */
+function speechPieceTimeoutMs(piece) {
+    return Math.round(String(piece || '').length * 140) + 4000;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         shareablePayload,
@@ -931,5 +965,7 @@ if (typeof module !== 'undefined' && module.exports) {
         shouldSkipPhotoCompression,
         speechChunks,
         SPEECH_CHUNK_CHARS,
+        speechKeepAliveIsSafe,
+        speechPieceTimeoutMs,
     };
 }
