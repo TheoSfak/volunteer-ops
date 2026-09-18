@@ -628,7 +628,7 @@ if (isPost()) {
             'qr_checkin_enabled',
             'openweathermap_api_key', 'weather_map_compass_enabled', 'exposure_urgency_enabled',
             'search_rings_enabled',
-            'ai_enabled', 'ai_provider',
+            'ai_enabled', 'ai_provider', 'ai_playbook',
         ];
         // Key, model and base URL are stored per provider, and the provider
         // list is meant to grow — so the field list is derived from
@@ -2098,6 +2098,37 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         </button>
                     </div>
                     <div id="aiTestResult" class="mt-2" style="display:none;"></div>
+                    <hr>
+
+                    <?php /* The organisation's own doctrine, in its own words,
+                             injected into every operational prompt. Without it
+                             the assistant is a generic twenty-year rescuer: it
+                             gives correct advice that is not THIS org's advice.
+                             With it, "rotate the team" becomes "rotate at 90
+                             minutes, which is your rule".
+
+                             Capped rather than unlimited, and the cap is
+                             enforced server-side too: this text is prepended to
+                             every question, every handover and every drafted
+                             order, so a page of it is paid for on every call. */ ?>
+                    <div class="mb-2">
+                        <label class="form-label" for="aiPlaybook">
+                            <i class="bi bi-journal-text me-1"></i>Εγχειρίδιο οργανισμού
+                            <span class="text-muted fw-normal">(προαιρετικό)</span>
+                        </label>
+                        <textarea class="form-control form-control-sm" id="aiPlaybook" name="ai_playbook"
+                                  rows="6" maxlength="<?= AI_PLAYBOOK_CAP ?>"
+                                  placeholder="π.χ. Εναλλαγή ομάδων κάθε 90 λεπτά. Διακοπή έρευνας μόνο με απόφαση του επικεφαλής βάρδιας. Στα φαράγγια ο ασύρματος χάνεται — ραντεβού επικοινωνίας κάθε 30′. Λέμε «σημείο συνάντησης», όχι «RV»."><?= h($settings['ai_playbook'] ?? '') ?></textarea>
+                        <div class="form-text">
+                            Πώς δουλεύει <strong>ο δικός σας</strong> οργανισμός: κανόνες εναλλαγής, ποιος αποφασίζει τι,
+                            τοπικοί κίνδυνοι, ορολογία που χρησιμοποιείτε. Μπαίνει σε κάθε απάντηση του βοηθού στο Action Room,
+                            στην παράδοση βάρδιας και στη διατύπωση εντολών.
+                            <strong>Δεν υπερισχύει των ορίων ασφαλείας</strong> — ο βοηθός εξακολουθεί να μη στέλνει εντολές
+                            και να μη δίνει ιατρικές οδηγίες.
+                            Μην γράφετε ονόματα ή τηλέφωνα εδώ: το κείμενο φεύγει στον πάροχο AI αυτούσιο.
+                            Έως <?= AI_PLAYBOOK_CAP ?> χαρακτήρες.
+                        </div>
+                    </div>
                 </div>
             </div>
 

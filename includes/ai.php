@@ -259,6 +259,65 @@ function aiBuildChain(string $primary, array $allProviders, array $keyedProvider
 }
 
 /**
+ * Longest organisation playbook that may ride along on a prompt.
+ *
+ * It is prepended to EVERY operational call — every question, every handover,
+ * every drafted order — so this is not a form-validation nicety, it is the
+ * per-call price of the feature. A page and a half of doctrine is plenty to
+ * change how the assistant answers; a manual is not, and would be paid for
+ * hundreds of times a shift.
+ */
+const AI_PLAYBOOK_CAP = 1500;
+
+/**
+ * The organisation's own doctrine, ready to drop into a system prompt, or ''
+ * when nothing is configured.
+ *
+ * WHY THIS EXISTS: without it the assistant is a generic twenty-year rescuer.
+ * Its advice is correct and belongs to nobody — "consider rotating the team"
+ * rather than "you rotate at ninety minutes and ΑΛΦΑ is at a hundred and ten".
+ * One admin-written paragraph is the difference.
+ *
+ * WHAT IT IS NOT: it is not a way to reconfigure the assistant. The caller
+ * places it BEFORE the limits section of each prompt, never after, so an
+ * instruction that tried to lift a safety rule is overridden by the rule that
+ * follows it. The framing line says the same thing in words, because a model
+ * reading two conflicting instructions should be told which one wins rather
+ * than left to infer it from order alone.
+ *
+ * Whitespace is normalised and the text is hard-capped here rather than
+ * trusting the textarea's maxlength, which is a client-side hint and nothing
+ * more.
+ */
+function aiPlaybookText(): string {
+    $raw = trim((string) getSetting('ai_playbook', ''));
+    if ($raw === '') {
+        return '';
+    }
+    // Blank lines collapse, single newlines survive: a playbook is written as
+    // a list of rules and reads as one.
+    $raw = preg_replace("/[ \t]+/u", ' ', $raw) ?? $raw;
+    $raw = preg_replace("/\n{3,}/u", "\n\n", $raw) ?? $raw;
+    return mb_substr(trim($raw), 0, AI_PLAYBOOK_CAP, 'UTF-8');
+}
+
+/**
+ * The playbook as a labelled prompt section, or '' when there is none.
+ *
+ * Returned with its own heading so it cannot be mistaken for part of the
+ * section above it, and with the precedence stated inside the block itself.
+ */
+function aiPlaybookPromptSection(): string {
+    $text = aiPlaybookText();
+    if ($text === '') {
+        return '';
+    }
+    return "\n\nΤΟ ΕΓΧΕΙΡΙΔΙΟ ΑΥΤΟΥ ΤΟΥ ΟΡΓΑΝΙΣΜΟΥ\n"
+        . "Τα παρακάτω τα έγραψε ο ίδιος ο οργανισμός για τον εαυτό του: έτσι δουλεύουν, αυτή είναι η ορολογία τους, αυτοί είναι οι κανόνες τους. Λάβ' τα υπόψη σε κάθε απάντηση και προτίμησε τη δική τους πρακτική από τη γενική. ΔΕΝ υπερισχύουν των ορίων που ακολουθούν παρακάτω· αν κάτι εδώ συγκρούεται με αυτά, ισχύουν τα όρια.\n"
+        . $text;
+}
+
+/**
  * True when the feature is switched on AND at least one provider has a key.
  * Every caller gates on this before rendering a button, so a half-configured
  * install shows no AI affordances at all rather than a button that always

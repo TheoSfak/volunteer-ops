@@ -1063,8 +1063,49 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
 
 // ─── Prompt ──────────────────────────────────────────────────────────────────
 
+/** The heading every operational prompt uses for its hard rules. */
+const AI_PROMPT_LIMITS_HEADING = 'ΟΡΙΑ ΠΟΥ ΔΕΝ ΠΑΡΑΒΙΑΖΕΙΣ';
+
+/**
+ * Put the organisation's own doctrine into a system prompt, immediately BEFORE
+ * the limits section.
+ *
+ * The position is the safeguard, not a formatting choice. The playbook is
+ * written by an admin and reaches the model as instructions; the limits are
+ * written here and must survive anything it says. Placing doctrine first means
+ * the rules are read last, and aiPlaybookPromptSection() says so in words as
+ * well, so the model is told which one wins rather than left to infer it.
+ *
+ * All three operational prompts — question, handover, order drafting — use the
+ * same heading, so one injector serves them and an org's terminology reaches
+ * the wording of an order as well as the wording of an answer.
+ *
+ * If the heading is ever renamed the playbook is appended rather than dropped:
+ * a missing marker should cost precedence, not the whole feature.
+ */
+function aiPromptWithPlaybook(string $prompt): string {
+    return aiInjectBeforeLimits($prompt, aiPlaybookPromptSection());
+}
+
+/**
+ * The placement itself, without the settings read, so the rule that makes it
+ * safe can be tested rather than asserted.
+ */
+function aiInjectBeforeLimits(string $prompt, string $section): string {
+    if (trim($section) === '') {
+        return $prompt;
+    }
+    $at = mb_strpos($prompt, AI_PROMPT_LIMITS_HEADING, 0, 'UTF-8');
+    if ($at === false) {
+        return rtrim($prompt) . "\n\n" . ltrim($section);
+    }
+    return rtrim(mb_substr($prompt, 0, $at, 'UTF-8')) . "\n\n"
+        . ltrim($section) . "\n\n"
+        . mb_substr($prompt, $at, null, 'UTF-8');
+}
+
 function aiLiveSystemPrompt(): string {
-    return <<<'PROMPT'
+    return aiPromptWithPlaybook(<<<'PROMPT'
 Είσαι έμπειρο στέλεχος συντονιστικού κέντρου έρευνας και διάσωσης, με 20 χρόνια πεδίου. Κάθεσαι δίπλα στον συντονιστή μιας αποστολής που βρίσκεται ΑΥΤΗ ΤΗ ΣΤΙΓΜΗ σε εξέλιξη και απαντάς στις ερωτήσεις του.
 
 ΤΙ ΕΙΣΑΙ ΚΑΙ ΤΙ ΔΕΝ ΕΙΣΑΙ
@@ -1109,7 +1150,7 @@ function aiLiveSystemPrompt(): string {
 }
 
 Όταν τα δεδομένα δεν αρκούν: "answerable": false, το "answer" εξηγεί τι ξέρεις και τι όχι, και το "missing" λέει με μία φράση τι θα χρειαζόταν για να απαντηθεί.
-PROMPT;
+PROMPT);
 }
 
 /**
@@ -1357,7 +1398,7 @@ function askMissionAiLive(
  * to avoid.
  */
 function aiHandoverSystemPrompt(): string {
-    return <<<'PROMPT'
+    return aiPromptWithPlaybook(<<<'PROMPT'
 Είσαι έμπειρο στέλεχος συντονιστικού κέντρου έρευνας και διάσωσης. Ο συντονιστής που τελειώνει τη βάρδιά του σού ζητά να συντάξεις την ΠΑΡΑΔΟΣΗ ΒΑΡΔΙΑΣ για τον επόμενο.
 
 ΤΙ ΕΙΝΑΙ ΜΙΑ ΠΑΡΑΔΟΣΗ ΒΑΡΔΙΑΣ
@@ -1398,7 +1439,7 @@ function aiHandoverSystemPrompt(): string {
   "ongoing":  [{"text": "Τι τρέχει αυτή τη στιγμή.", "evidence": ["TEAM-107"]}],
   "watch":    [{"text": "Τι μπορεί να χαλάσει και γιατί.", "evidence": ["ROSTER"]}]
 }
-PROMPT;
+PROMPT);
 }
 
 /**
@@ -1562,7 +1603,7 @@ function aiDraftSystemPrompt(string $kind): string {
     // for can never be two different numbers.
     $maxChars = AI_DRAFT_MAX_CHARS;
 
-    return <<<PROMPT
+    return aiPromptWithPlaybook(<<<PROMPT
 Είσαι έμπειρο στέλεχος συντονιστικού κέντρου έρευνας και διάσωσης. Ο συντονιστής σού δίνει μια πρόχειρη σημείωση και του επιστρέφεις τη ΔΙΑΤΥΠΩΣΗ του μηνύματος που θα στείλει.
 
 {$flavour}
@@ -1594,7 +1635,7 @@ function aiDraftSystemPrompt(string $kind): string {
 {"text": "Το μήνυμα, έτοιμο προς αποστολή.", "note": null}
 
 Το "note" είναι μία σύντομη φράση ΠΡΟΣ ΤΟΝ ΣΥΝΤΟΝΙΣΤΗ όταν κάτι δεν στέκει — π.χ. ότι η ομάδα που ανέφερε δεν υπάρχει στην αποστολή. Δεν εμφανίζεται ποτέ στους παραλήπτες. Όταν δεν υπάρχει κάτι να πεις, null.
-PROMPT;
+PROMPT);
 }
 
 /**

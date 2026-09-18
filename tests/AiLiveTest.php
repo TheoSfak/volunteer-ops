@@ -248,6 +248,46 @@ final class AiLiveTest extends TestCase
         $this->assertSame('', aiLiveNameRefsInText('', ['ORD-1' => 'Εντολή']));
     }
 
+    // ── The organisation's own doctrine ────────────────────────────────────
+
+    private const PROMPT = "Είσαι στέλεχος.\n\nΠΩΣ ΑΠΑΝΤΑΣ\n- Σύντομα.\n\nΟΡΙΑ ΠΟΥ ΔΕΝ ΠΑΡΑΒΙΑΖΕΙΣ\n- Δεν στέλνεις εντολές.\n";
+
+    public function testTheLimitsAreAlwaysReadAfterTheOrganisationsPlaybook(): void
+    {
+        // The position IS the safeguard. The playbook is written by an admin
+        // and reaches the model as instructions; the limits are written here
+        // and must survive anything it says, so they go last.
+        $out = aiInjectBeforeLimits(self::PROMPT, "\n\nΤΟ ΕΓΧΕΙΡΙΔΙΟ\nΕναλλαγή κάθε 90 λεπτά.");
+
+        $doctrineAt = mb_strpos($out, 'Εναλλαγή κάθε 90 λεπτά');
+        $limitsAt   = mb_strpos($out, AI_PROMPT_LIMITS_HEADING);
+
+        $this->assertIsInt($doctrineAt);
+        $this->assertIsInt($limitsAt);
+        $this->assertLessThan($limitsAt, $doctrineAt);
+        // And the rule it must not be able to lift is still there, intact.
+        $this->assertStringContainsString('Δεν στέλνεις εντολές.', $out);
+    }
+
+    public function testNoPlaybookLeavesThePromptExactlyAsItWas(): void
+    {
+        // An org with nothing configured must pay nothing — not a heading, not
+        // a blank line, not a byte.
+        $this->assertSame(self::PROMPT, aiInjectBeforeLimits(self::PROMPT, ''));
+        $this->assertSame(self::PROMPT, aiInjectBeforeLimits(self::PROMPT, "   \n  "));
+    }
+
+    public function testARenamedLimitsHeadingCostsPrecedenceNotTheWholeFeature(): void
+    {
+        // If the marker is ever edited away, appending is the safe failure:
+        // the org's doctrine still reaches the model, it just no longer
+        // precedes rules that are no longer findable either way.
+        $out = aiInjectBeforeLimits("Είσαι στέλεχος.\n\nΚΑΝΟΝΕΣ\n- Κάτι.", "\n\nΤΟ ΕΓΧΕΙΡΙΔΙΟ\nΕναλλαγή κάθε 90 λεπτά.");
+
+        $this->assertStringContainsString('Εναλλαγή κάθε 90 λεπτά', $out);
+        $this->assertStringContainsString('Είσαι στέλεχος.', $out);
+    }
+
     // ── People in free text ────────────────────────────────────────────────
 
     public function testANameInFreeTextResolvesToThatPersonsOwnPseudonym(): void
