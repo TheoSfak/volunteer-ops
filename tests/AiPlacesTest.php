@@ -56,6 +56,56 @@ final class AiPlacesTest extends TestCase
         $this->assertSame('Ζαρός', aiPlaceShortName('Ζαρός'));
     }
 
+    public function testGreekStreetsAreNamedAfterPeopleAndMustSurviveTheJourney(): void
+    {
+        // «Αντωνίου Καστρινάκη», «Νικολάου Πλαστήρα» — and those same surnames
+        // belong to volunteers on the mission, so they sit on the forbidden
+        // list. Running the question through the ordinary redactor turned
+        // «από Αντωνίου Καστρινάκη 65» into «από [όνομα] Καστρινάκη 65» and the
+        // geocoder never saw the street at all.
+        //
+        // Masked, not erased: a token goes to the model and the real word comes
+        // back before the map service is asked.
+        $names = ['Αντωνίου', 'Νικολάου', 'Γιώργος'];
+
+        foreach ([
+            'πόσο απέχει η ΑΛΦΑ από Αντωνίου Καστρινάκη 65',
+            'στείλε ομάδα στην Νικολάου Πλαστήρα 14 Ηράκλειο',
+            'τι κάνει ο Γιώργος;',
+        ] as $question) {
+            [$masked, $map] = aiPlacesMaskNames($question, $names);
+
+            // Nothing a provider sees is a real name…
+            $this->assertSame([], aiScanDigestForLeaks(['q' => $masked], $names), $question);
+            // …and the street comes back exactly as it was typed.
+            $this->assertSame($question, aiPlacesUnmaskNames($masked, $map), $question);
+        }
+
+        // A question naming nobody is left completely alone.
+        [$plain, $map] = aiPlacesMaskNames('απόσταση από το Παγκρήτιο Στάδιο', $names);
+        $this->assertSame('απόσταση από το Παγκρήτιο Στάδιο', $plain);
+        $this->assertSame([], $map);
+    }
+
+    public function testAHouseNumberThatWasNotFoundIsSaidOutLoud(): void
+    {
+        // Measured against the real service: «Καστρινάκη 65 Ηράκλειο» resolves
+        // to the street «Καστρινάκη Εμμ.» and «Πλαστήρα 14 Ηράκλειο» to
+        // «Νικολάου Πλαστήρα» — the number is dropped. A city street runs a
+        // kilometre or two, so a distance to it is a distance to somewhere
+        // along it. Unsaid, that is a wrong number with a confident face.
+        $note = aiPlaceMissingHouseNumber('Καστρινάκη 65 Ηράκλειο', 'Καστρινάκη Εμμ., 1η Κοινότητα Ηρακλείου');
+        $this->assertNotNull($note);
+        $this->assertStringContainsString('65', $note);
+        $this->assertStringContainsString('ΔΡΟΜΟΣ', $note);
+
+        // The number IS in the match: nothing to warn about.
+        $this->assertNull(aiPlaceMissingHouseNumber('Κνωσού 120', 'Λεωφόρος Κνωσού 120, Ηράκλειο'));
+        // No number asked for: nothing to warn about.
+        $this->assertNull(aiPlaceMissingHouseNumber('Παγκρήτιο Στάδιο', 'Παγκρήτιο Στάδιο, Ηράκλειο'));
+        $this->assertNull(aiPlaceMissingHouseNumber('Ζαρός', 'Ζαρός, Δήμος Φαιστού'));
+    }
+
     public function testTheExtractionPromptForbidsTheThingsThatLookLikePlaces(): void
     {
         // Team codenames, pseudonyms and sector labels all read like proper

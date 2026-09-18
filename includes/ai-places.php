@@ -62,7 +62,9 @@ function aiPlacesExtractionPrompt(): string {
     return <<<'PROMPT'
 Διαβάζεις ΜΙΑ ερώτηση συντονιστή έρευνας και διάσωσης και βγάζεις ΜΟΝΟ τα ονόματα τόπων που αναφέρει.
 
-ΤΙ ΕΙΝΑΙ ΤΟΠΟΣ: πόλη, χωριό, οικισμός, βουνό, φαράγγι, μοναστήρι, στάδιο, νοσοκομείο, λιμάνι, παραλία με όνομα, δρόμος με όνομα — οτιδήποτε θα έβρισκε κανείς σε χάρτη.
+ΤΙ ΕΙΝΑΙ ΤΟΠΟΣ: πόλη, χωριό, οικισμός, βουνό, φαράγγι, μοναστήρι, στάδιο, νοσοκομείο, λιμάνι, παραλία με όνομα, ΔΙΕΥΘΥΝΣΗ ΜΕ ΟΔΟ ΚΑΙ ΑΡΙΘΜΟ — οτιδήποτε θα έβρισκε κανείς σε χάρτη.
+
+Οι ελληνικές οδοί έχουν ονόματα ανθρώπων («Αντωνίου Καστρινάκη 65», «Νικολάου Πλαστήρα 14»). Αυτό ΕΙΝΑΙ τόπος, όχι πρόσωπο — κράτησέ το ολόκληρο, μαζί με τον αριθμό. Αν η διεύθυνση δεν λέει πόλη, πρόσθεσε την πόλη μόνο αν την ανέφερε ο συντονιστής αλλού στην ερώτηση.
 
 ΤΙ ΔΕΝ ΕΙΝΑΙ ΤΟΠΟΣ:
 - κωδικά ονόματα ομάδων (ΑΛΦΑ, ΒΗΤΑ, ΓΑΜΑ, Alpha 1, Bravo 2)
@@ -109,6 +111,52 @@ function aiPlacesFromQuestion(string $safeQuestion): array {
         if (count($out) >= AI_PLACES_MAX) break;
     }
     return $out;
+}
+
+/**
+ * Hide the people in a question without destroying the streets.
+ *
+ * GREEK STREETS ARE NAMED AFTER PEOPLE. «Αντωνίου Καστρινάκη», «Νικολάου
+ * Πλαστήρα», «Κωνσταντίνου Παλαιολόγου» — and those same surnames belong to
+ * volunteers on the mission, so they sit on the forbidden list. Running the
+ * question through the ordinary redactor turned «από Αντωνίου Καστρινάκη 65»
+ * into «από [όνομα] Καστρινάκη 65», and the geocoder never saw the street at
+ * all.
+ *
+ * So the names are MASKED rather than erased: a token goes out to the model,
+ * and whatever comes back is put straight again before it reaches the map
+ * service. The provider still never sees a volunteer's name; the geocoder gets
+ * the street exactly as the coordinator typed it.
+ *
+ * That split is the point. The redaction protects names from an AI provider —
+ * a street name is not a person, and the map service is not the provider. This
+ * app has always sent addresses to Nominatim unredacted (geocode-address.php).
+ *
+ * Returns [maskedQuestion, map] where map is token => original.
+ */
+function aiPlacesMaskNames(string $question, array $names): array {
+    $map = [];
+    $i = 0;
+    foreach ($names as $token) {
+        if (mb_strlen($token, 'UTF-8') < 4) continue;
+        $pattern = '/(?<!\p{L})' . aiNameTokenPattern($token) . '/iu';
+        $question = preg_replace_callback($pattern, function ($m) use (&$map, &$i, $token) {
+            // One token per distinct surface form, so «Αντωνίου» and «Αντώνιος»
+            // come back as what was actually written rather than as each
+            // other.
+            $key = array_search($m[0], $map, true);
+            if ($key !== false) return $key;
+            $key = 'ΤΟΠΟΣ-' . (++$i);
+            $map[$key] = $m[0];
+            return $key;
+        }, $question) ?? $question;
+    }
+    return [$question, $map];
+}
+
+/** Put the masked words back, so the geocoder sees the real street. */
+function aiPlacesUnmaskNames(string $text, array $map): string {
+    return $map ? strtr($text, $map) : $text;
 }
 
 /**
@@ -192,6 +240,29 @@ function aiPlaceShortName(string $displayName): string {
 }
 
 /**
+ * A warning when a house number was asked for and a street came back.
+ *
+ * MEASURED, not assumed: «Καστρινάκη 65 Ηράκλειο» resolves to the street
+ * «Καστρινάκη Εμμ.» and «Πλαστήρα 14 Ηράκλειο» to «Νικολάου Πλαστήρα» — the
+ * number is simply dropped. Greek house numbers are thinly mapped in
+ * OpenStreetMap, and the fuller the address the likelier nothing is found at
+ * all: «Αντωνίου Καστρινάκη 65» returns NOTHING while «Καστρινάκη 65
+ * Ηράκλειο» returns the street.
+ *
+ * A city street runs a kilometre or two, so a distance measured to it is a
+ * distance to somewhere along it. Unsaid, that is a wrong number with a
+ * confident face; said, it is a useful one.
+ *
+ * Returns null when no number was asked for, or when the match contains it.
+ */
+function aiPlaceMissingHouseNumber(string $asked, string $found): ?string {
+    if (!preg_match('/(?<!\d)\d{1,4}(?!\d)/u', $asked, $m)) return null;
+    if (mb_strpos($found, $m[0]) !== false) return null;
+    return 'Ο αριθμός ' . $m[0] . ' ΔΕΝ βρέθηκε — το σημείο ειναι ο ΔΡΟΜΟΣ, που μπορει να εχει '
+         . 'μηκος ενος ή δυο χιλιομετρων. Πες το μαζι με την αποσταση.';
+}
+
+/**
  * Everything the question named, resolved to points.
  *
  * Nominatim asks for no more than one request a second and this is a free
@@ -199,10 +270,15 @@ function aiPlaceShortName(string $displayName): string {
  * is one extra second on a question that mentions two places, and none on the
  * overwhelming majority that mention one or none.
  */
-function aiResolveQuestionPlaces(string $safeQuestion, ?float $nearLat, ?float $nearLng): array {
+function aiResolveQuestionPlaces(string $question, array $forbiddenNames, ?float $nearLat, ?float $nearLng): array {
+    // Masked on the way to the model, put straight on the way back — see
+    // aiPlacesMaskNames() for why erasing them instead loses the street.
+    [$masked, $map] = aiPlacesMaskNames($question, $forbiddenNames);
+
     $resolved = [];
     $first = true;
-    foreach (aiPlacesFromQuestion($safeQuestion) as $name) {
+    foreach (aiPlacesFromQuestion($masked) as $maskedName) {
+        $name = aiPlacesUnmaskNames($maskedName, $map);
         if (aiPlaceIsTooVague($name)) {
             $resolved[] = ['ζητηθηκε' => $name, 'ασαφες' => true];
             continue;
@@ -210,7 +286,14 @@ function aiResolveQuestionPlaces(string $safeQuestion, ?float $nearLat, ?float $
         if (!$first) usleep(1100000);
         $first = false;
         $hit = aiGeocodePlaceNearMission($name, $nearLat, $nearLng);
-        $resolved[] = $hit ?? ['ζητηθηκε' => $name, 'δεν_βρεθηκε' => true];
+        if ($hit === null) {
+            $resolved[] = ['ζητηθηκε' => $name, 'δεν_βρεθηκε' => true];
+            continue;
+        }
+        if (($note = aiPlaceMissingHouseNumber($name, $hit['βρεθηκε_ως'])) !== null) {
+            $hit['χωρις_αριθμο'] = $note;
+        }
+        $resolved[] = $hit;
     }
     return $resolved;
 }
