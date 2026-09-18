@@ -70,6 +70,10 @@ require_once __DIR__ . '/weather.php';
 // page load needs them, and route-distance.php makes outbound calls.
 require_once __DIR__ . '/mission-targets.php';
 require_once __DIR__ . '/route-distance.php';
+// LPB_RING_TABLE lives here and is NOT loaded by bootstrap.php — war-room.php
+// requires it for itself, and this file is reached from mission-assistant.php,
+// which does not. Same reason weather.php is pulled in above.
+require_once __DIR__ . '/lpb-rings.php';
 
 const AI_LIVE_PROMPT_VERSION = 1;
 
@@ -274,6 +278,15 @@ function aiLiveSectorAreaWords(?string $areaLabel, $ringIndex): string {
  * within which that share of comparable past cases were eventually found.
  */
 const AI_LIVE_RING_PERCENTILES = [0 => 25, 1 => 50, 2 => 75, 3 => 95];
+
+/**
+ * How much of each missing-person free-text field travels.
+ *
+ * Longer than the general AI_LIVE_TEXT_CAP because these are the fields the
+ * search is actually run on — a clothing description cut in half loses the
+ * trousers, and the witness account's useful half is usually the end of it.
+ */
+const AI_LIVE_SUBJECT_TEXT_CAP = 400;
 
 /**
  * An age in the unit somebody would actually say it in.
@@ -985,7 +998,25 @@ function aiLivePseudonymiseText(?string $text, array $map, array $forbiddenNames
     foreach ($map as $token => $realName) {
         foreach (preg_split('/[\s\-\.]+/u', (string) $realName, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $part) {
             if (mb_strlen($part, 'UTF-8') < 4) continue;
-            $text = preg_replace('/' . aiNameTokenPattern($part) . '/iu', $token, $text) ?? $text;
+            // (?<!\p{L}) — A NAME BEGINS A WORD, and without this it was being
+            // matched in the MIDDLE of ordinary ones. A mission with a
+            // volunteer called Νίκος turned «κανονικό ρυθμό» into
+            // «κανοΜΕΛΟΣ-9 ρυθμό» in every piece of free text that reached the
+            // model: chat lines, order text, incident titles, witness
+            // accounts. Same stem that broke the leak gate in v3.267.0
+            // («νικο» lives inside γενικό, τεχνικό, μηχανικό), and the gate
+            // was anchored then while this was deliberately left open on the
+            // reasoning that over-matching a redactor costs one extra redacted
+            // word.
+            //
+            // It does not. It MANGLES the word — the fact is destroyed and
+            // what replaces it reads as somebody being named there, which in a
+            // witness account is evidence turned into a person who was never
+            // mentioned. The gate carries the same anchor, so nothing newly
+            // slips past into a block; what is given up is a name glued to a
+            // preceding letter, which is a typo, against words Greek uses
+            // constantly.
+            $text = preg_replace('/(?<!\p{L})' . aiNameTokenPattern($part) . '/iu', $token, $text) ?? $text;
         }
     }
     // Whatever is left that looks like a person, a phone, an id or a coordinate.
@@ -1514,6 +1545,115 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     }
     if ($sos) {
         $digest['σηματα_sos'] = $sos;
+    }
+
+    // ── the missing person, and the rings around the last seen point ─────
+    //
+    // On the mission type this whole app exists for, the assistant knew
+    // neither WHO it was looking for nor by WHAT METHOD. An audit found the
+    // entire mission_missing_persons record absent from the digest and
+    // ring_index appearing nowhere in this file at all — so "what was he
+    // wearing", "which way was he heading", "how much of the 75% ring is
+    // covered" had no answers, and the sector list read as a flat set of
+    // polygons rather than a search plan.
+    //
+    // HIS NAME IS NOT HERE, deliberately. A team searches for a build and a
+    // jacket, never for a name — the description is the operational data, the
+    // name is a third party's identity, and he consented to nothing. It is on
+    // the forbidden list instead (aiMissionForbiddenNames), so a mention
+    // buried in the witness accounts is redacted rather than shipped.
+    $person = null;
+    try {
+        $person = loadMissingPersonForMission($missionId);
+    } catch (Throwable $e) {
+        error_log('[ai-live] missing person lookup failed for mission ' . $missionId . ': ' . $e->getMessage());
+    }
+    if ($person) {
+        $refs['SUBJECT'] = 'Ο αγνοούμενος';
+        $subject = ['ref' => 'SUBJECT'];
+        if ($person['age'] !== null && $person['age'] !== '') {
+            $subject['ηλικια'] = (int) $person['age'];
+        }
+        $category = trim((string) ($person['subject_category'] ?? ''));
+        if ($category !== '') {
+            $subject['κατηγορια'] = lpbCategoryLabel($category);
+        }
+        foreach ([
+            'περιγραφη'          => 'description',
+            'ρουχισμος'          => 'clothing_description',
+            'οχημα'              => 'vehicle',
+            'συνθηκες'           => 'disappearance_circumstances',
+            'πιθανη_κατευθυνση'  => 'likely_direction',
+            'μαρτυριες'          => 'witness_accounts',
+            'σημειο_τελευταιας_εμφανισης' => 'last_seen_label',
+        ] as $field => $column) {
+            $value = $red($person[$column] ?? null, AI_LIVE_SUBJECT_TEXT_CAP);
+            if ($value !== '') $subject[$field] = $value;
+        }
+        $seenTs = $person['last_seen_at'] ? strtotime((string) $person['last_seen_at']) : null;
+        if ($seenTs) {
+            // How long he has been gone is the number every other judgement
+            // hangs off — how far he can have walked, what the exposure risk
+            // is, whether the rings still fit.
+            $subject['αγνοειται_για'] = aiLiveAgeWords((int) floor(($now - $seenTs) / 60));
+        }
+        $seenLat = $person['last_seen_lat'] !== null ? (float) $person['last_seen_lat'] : null;
+        $seenLng = $person['last_seen_lng'] !== null ? (float) $person['last_seen_lng'] : null;
+        if ($seenLat !== null && $seenLng !== null) {
+            // As words, like every other position in here. Never coordinates.
+            $subject['θεση_τελευταιας_εμφανισης'] =
+                aiLivePositionText($seenLat, $seenLng, $baseLat, $baseLng, AI_LIVE_POS_NONE);
+            if (($d = $fromFocus($seenLat, $seenLng)) !== null) {
+                $subject['αποσταση_απο_σημειο_εστιασης'] = $d;
+            }
+        }
+        $digest['αγνοουμενος'] = $subject;
+        $digest['σημειωση_αγνοουμενου'] = 'Το ονομα του ΔΕΝ σου δινεται και δεν το χρειαζεσαι: η ομαδα ψαχνει περιγραφη και ρουχισμο. Αν σου ζητηθει ονομα, πες οτι δεν το εχεις και οτι βρισκεται στην καρτελα της αποστολης.';
+
+        // The rings. Only where the subject category has a table entry and a
+        // last seen point exists — without both there is nothing to draw and
+        // nothing to say.
+        $radii = ($category !== '' && defined('LPB_RING_TABLE')) ? (LPB_RING_TABLE[$category] ?? null) : null;
+        if ($radii && $seenLat !== null && $seenLng !== null && getSetting('search_rings_enabled', '0') === '1') {
+            // Sector counts per ring, from rows already in hand.
+            $perRing = [];
+            foreach ($sectorRows as $sr) {
+                if ($sr['ring_index'] === null) continue;
+                $ri = (int) $sr['ring_index'];
+                $perRing[$ri]['total'] = ($perRing[$ri]['total'] ?? 0) + 1;
+                if (($sr['status'] ?? '') === 'completed') {
+                    $perRing[$ri]['done'] = ($perRing[$ri]['done'] ?? 0) + 1;
+                }
+            }
+            // Verified coverage is a grid sweep over every ping in the ring's
+            // bounding box — by far the most expensive thing in this digest,
+            // and it is allowed to fail without taking the rings with it.
+            $coverage = [];
+            try {
+                $coverage = computeMissionRingCoverage($missionId);
+            } catch (Throwable $e) {
+                error_log('[ai-live] ring coverage failed for mission ' . $missionId . ': ' . $e->getMessage());
+            }
+
+            $rings = [];
+            foreach (AI_LIVE_RING_PERCENTILES as $i => $pct) {
+                if (!isset($radii[$i])) continue;
+                $ring = [
+                    'ζωνη'   => 'Ζώνη ' . $pct . '%',
+                    'ακτινα' => aiLiveMetresWords((float) $radii[$i]) . ' από το σημείο τελευταίας εμφάνισης',
+                    'τομεις' => (int) ($perRing[$i]['total'] ?? 0),
+                    'ολοκληρωμενοι_τομεις' => (int) ($perRing[$i]['done'] ?? 0),
+                ];
+                if (isset($coverage[$i]['percent'])) {
+                    $ring['επαληθευμενη_καλυψη'] = (int) $coverage[$i]['percent'] . '%';
+                }
+                $rings[] = $ring;
+            }
+            if ($rings) {
+                $digest['ζωνες_ερευνας'] = $rings;
+                $digest['σημειωση_ζωνων'] = 'Στατιστικες ζωνες αναζητησης γυρω απο το σημειο τελευταιας εμφανισης: στη "Ζωνη 25%" βρεθηκε το 25% αντιστοιχων περιστατικων του παρελθοντος, κ.ο.κ. ως το 95%. Οι εσωτερικες ζωνες ερευνωνται ΠΡΩΤΕΣ — εκει ειναι η μεγαλυτερη πιθανοτητα. Ερευνα στη Ζωνη 95% ενω η 75% δεν εχει ολοκληρωθει αξιζει να επισημανθει. Η "επαληθευμενη_καλυψη" ειναι ποσο της ζωνης εχουν ΟΝΤΩΣ περπατησει στιγματα, οχι ποσοι τομεις δηλωθηκαν. Οι αριθμοι των ζωνων ειναι ενδεικτικοι για σχεδιασμο, οχι βεβαιοτητα.';
+            }
+        }
     }
 
     // ── sectors ──────────────────────────────────────────────────────────

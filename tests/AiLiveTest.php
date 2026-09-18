@@ -683,6 +683,56 @@ final class AiLiveTest extends TestCase
         $this->assertSame([], aiScanDigestForLeaks(['τομεας' => $label], $names));
     }
 
+    public function testANameIsRedactedAtAWordStartAndNotInsideOrdinaryWords(): void
+    {
+        // «νικο» is the stem of Νίκος and it lives inside κανονικό, γενικό,
+        // τεχνικό and μηχανικό. Unanchored, the redactor matched there and an
+        // organisation with a volunteer called Νίκος had «κανονικό ρυθμό» come
+        // out as «κανο[όνομα] ρυθμό» in every report and every assistant
+        // answer — the fact destroyed, and the replacement reading as somebody
+        // named in a place where nobody was. Found in a witness account, where
+        // "walking at a normal pace" is evidence.
+        //
+        // Same stem that broke the leak GATE in v3.267.0; the gate was
+        // anchored then and this was deliberately left open. Seen in real text
+        // that reasoning did not hold.
+        // aiMissionForbiddenNames() hands back individual tokens, not
+        // whole names; a fixture of full names would exercise nothing.
+        $names = ['Νίκος', 'Δασκαλάκης'];
+
+        $kept = aiRedactText('να ανηφορίζει με κανονικό ρυθμό', $names);
+        $this->assertSame('να ανηφορίζει με κανονικό ρυθμό', $kept);
+
+        foreach (['γενικό', 'τεχνικό', 'μηχανικό', 'ιστορικό'] as $word) {
+            $this->assertStringContainsString($word, aiRedactText("ένα $word θέμα", $names), $word);
+        }
+
+        // And the name itself is still caught, inflected and after any
+        // ordinary preceding word.
+        foreach (['Ο Νίκος ήρθε', 'του Νίκου το σακίδιο', 'είδα τον Δασκαλάκη'] as $sentence) {
+            $out = aiRedactText($sentence, $names);
+            $this->assertStringContainsString('[όνομα]', $out, $sentence);
+        }
+    }
+
+    public function testTheMissingPersonsNameIsOnTheForbiddenListShape(): void
+    {
+        // The subject of a search is not a user of this app and consented to
+        // nothing. Their DESCRIPTION is the operational data and has to reach
+        // the assistant; their NAME is not needed for any of it, and it sits
+        // inside the circumstances and witness accounts as a matter of course.
+        //
+        // Bracketed halves are stripped first, the same way patient names are:
+        // a coordinator writes «Νικόλαος Βαρδάκης (πεζοπόρος)» and the common
+        // noun inside the brackets must not become a forbidden word.
+        $names = ['Νικόλαος', 'Βαρδάκης'];
+        $out = aiRedactText('Ο Νικόλαος ξεκίνησε μόνος από τη Μονή', $names);
+
+        $this->assertStringNotContainsString('Νικόλα', $out);
+        $this->assertStringContainsString('[όνομα]', $out);
+        $this->assertSame([], aiScanDigestForLeaks(['x' => $out], $names));
+    }
+
     // ── What a citation is allowed to be ───────────────────────────────────
 
     public function testACitationThatDoesNotResolveIsDroppedAndCounted(): void

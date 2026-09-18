@@ -143,7 +143,23 @@ function aiRedactText(?string $text, array $names = [], int $cap = AI_TEXT_CAP_S
 
     foreach ($names as $token) {
         if (mb_strlen($token, 'UTF-8') < 4) continue; // too short to be safely distinctive
-        $t = preg_replace('/' . aiNameTokenPattern($token) . '/iu', '[όνομα]', $t) ?? $t;
+        // (?<!\p{L}) — A NAME BEGINS A WORD. Without it this matched in the
+        // MIDDLE of ordinary ones: an organisation with a volunteer called
+        // Νίκος had «κανονικό ρυθμό» come out as «κανο[όνομα] ρυθμό» in every
+        // report and every assistant answer, because «νικο» lives inside
+        // κανονικό, γενικό, τεχνικό and μηχανικό.
+        //
+        // This anchor was added to the leak GATE in v3.267.0 and deliberately
+        // withheld here, on the reasoning that over-matching a redactor costs
+        // only an extra redacted word. Seen in real text it does not — it
+        // mangles the word, so the fact is destroyed AND the replacement reads
+        // as somebody having been named in a place where nobody was. In a
+        // witness account that is evidence turned into a person.
+        //
+        // What is given up is a name glued to a preceding letter, which is a
+        // typo; the gate carries the same anchor, so nothing newly slips
+        // through into a block either.
+        $t = preg_replace('/(?<!\p{L})' . aiNameTokenPattern($token) . '/iu', '[όνομα]', $t) ?? $t;
     }
 
     $t = preg_replace('/[\w.+-]+@[\w-]+\.[\w.]{2,}/u', '[email]', $t) ?? $t;
@@ -210,6 +226,20 @@ function aiMissionForbiddenNames(int $missionId): array {
         // either a mission participant (already covered by the query above)
         // or someone this list never reached in the first place.
         $names[] = preg_replace('/\([^)]*\)/u', ' ', (string) $row['patient_name']) ?? $row['patient_name'];
+    }
+
+    // The missing person's own name. They are the subject of the search, not a
+    // user of this app, and they consented to nothing — so while their
+    // DESCRIPTION is the operational data a search runs on and has to reach the
+    // assistant, their name is not needed for any of it: a team searches for a
+    // build and a jacket, never for a name.
+    //
+    // It was absent from this list until v3.294.0, which mattered the moment
+    // anything started sending missing-person free text: the name sits inside
+    // «disappearance_circumstances» and «witness_accounts» as a matter of
+    // course, and nothing here would have caught it on the way out.
+    foreach (dbFetchAll("SELECT full_name FROM mission_missing_persons WHERE mission_id = ? AND full_name IS NOT NULL", [$missionId]) as $row) {
+        $names[] = preg_replace('/\([^)]*\)/u', ' ', (string) $row['full_name']) ?? $row['full_name'];
     }
 
     $codenames = [];
