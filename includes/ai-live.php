@@ -74,6 +74,10 @@ require_once __DIR__ . '/route-distance.php';
 // requires it for itself, and this file is reached from mission-assistant.php,
 // which does not. Same reason weather.php is pulled in above.
 require_once __DIR__ . '/lpb-rings.php';
+// Pulling a place name out of the question and turning it into a point. Lives
+// apart because it runs BEFORE the digest is built — the distances it produces
+// have to be in the digest, not discovered after the answer is written.
+require_once __DIR__ . '/ai-places.php';
 
 const AI_LIVE_PROMPT_VERSION = 1;
 
@@ -157,6 +161,14 @@ const AI_LIVE_CREW_CAP = 60;
  * turn the digest into a distance table.
  */
 const AI_LIVE_SECTOR_NEAREST = 3;
+
+/**
+ * Teams that get a routed distance to a place the question named.
+ *
+ * Nearest first, because "who do I send" is the question behind almost
+ * every one of these. The rest keep the straight line, which is free.
+ */
+const AI_LIVE_PLACE_ROUTED_TEAMS = 3;
 
 /**
  * Heart-rate episodes carried in the digest, clinical ones first.
@@ -1047,7 +1059,7 @@ function aiLivePseudonymiseText(?string $text, array $map, array $forbiddenNames
  * The text is never sent anywhere from here; it is matched against real names
  * locally and then forgotten.
  */
-function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftIds, ?array $focusPoint = null, string $askedAbout = ''): array {
+function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftIds, ?array $focusPoint = null, string $askedAbout = '', array $places = []): array {
     $names = aiMissionForbiddenNames($missionId);
     $now   = time();
 
@@ -1245,6 +1257,9 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     }
 
     $teams = [];
+    // [placeIndex][teamRef] => leg, filled in the loop below and read by the
+    // places section further down.
+    $placeLegs = [];
     foreach ($teamRows as $row) {
         $ref = assistantRecordRef('team', (int) $row['id']);
         // Latest position of anyone on this team, as the team's position. A
@@ -1288,6 +1303,18 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         }
         if (($moveWords = aiLiveMovementWords($best)) !== null) {
             $entry['κινηση'] = $moveWords;
+        }
+        // Distance to any place the question named. Straight line only here —
+        // there are a handful of teams, the arithmetic is free, and the routed
+        // figures are fetched once per place below rather than once per team.
+        foreach ($places as $pi => $place) {
+            if (!isset($place['lat'], $place['lng']) || $teamLat === null || $teamLng === null) continue;
+            $placeLegs[$pi][$ref] = [
+                'metres'  => gpsDistanceMeters($teamLat, $teamLng, $place['lat'], $place['lng']),
+                'bearing' => aiLiveCompassLabel(aiLiveBearingDegrees($teamLat, $teamLng, $place['lat'], $place['lng'])),
+                'from'    => [$teamLat, $teamLng],
+                'ομαδα'   => $entry['ομαδα'],
+            ];
         }
         $teams[] = $entry;
     }
@@ -1545,6 +1572,69 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     }
     if ($sos) {
         $digest['σηματα_sos'] = $sos;
+    }
+
+    // ── places the question named ────────────────────────────────────────
+    //
+    // Resolved before this function ran (ai-places.php) because a point has to
+    // exist before anything can be measured to it. WHAT THE GEOCODER ACTUALLY
+    // FOUND travels with every one of them, because it is confidently wrong
+    // often enough to matter: «κέντρο Ηρακλείου» came back as an entertainment
+    // venue 23 km away when this was measured against the real service. Naming
+    // the match, and its distance from the mission, is what lets a coordinator
+    // catch that before acting on the number beside it.
+    if ($places) {
+        $placeRows = [];
+        foreach ($places as $pi => $place) {
+            if (!empty($place['ασαφες'])) {
+                $placeRows[] = [
+                    'ζητηθηκε' => $red($place['ζητηθηκε'], 80),
+                    'προβλημα' => 'Πολύ γενικό όνομα για να βρεθεί συγκεκριμένο σημείο — υπάρχουν δεκάδες. Ζήτα από τον συντονιστή να το πει πιο συγκεκριμένα.',
+                ];
+                continue;
+            }
+            if (!empty($place['δεν_βρεθηκε']) || !isset($place['lat'])) {
+                $placeRows[] = [
+                    'ζητηθηκε' => $red($place['ζητηθηκε'], 80),
+                    'προβλημα' => 'Δεν βρέθηκε στον χάρτη. ΜΗΝ υπολογίσεις απόσταση και μην μαντέψεις πού είναι.',
+                ];
+                continue;
+            }
+
+            $row = [
+                'ζητηθηκε'   => $red($place['ζητηθηκε'], 80),
+                // The geocoder's own words, not ours. If they name somewhere
+                // else, the coordinator needs to read exactly that.
+                'βρεθηκε_ως' => $red($place['βρεθηκε_ως'], 120),
+                'θεση'       => aiLivePositionText($place['lat'], $place['lng'], $baseLat, $baseLng, AI_LIVE_POS_NONE),
+            ];
+
+            $legs = $placeLegs[$pi] ?? [];
+            if ($legs) {
+                // Nearest team first: "who do I send" is the question behind
+                // almost every one of these.
+                uasort($legs, fn($a, $b) => $a['metres'] <=> $b['metres']);
+                $routed = [];
+                try {
+                    $routed = routeDistanceBatch(array_map(
+                        fn($l) => [$l['from'][0], $l['from'][1], $place['lat'], $place['lng']],
+                        array_slice($legs, 0, AI_LIVE_PLACE_ROUTED_TEAMS, true)
+                    ));
+                } catch (Throwable $e) {
+                    error_log('[ai-live] place routing failed: ' . $e->getMessage());
+                }
+                $row['αποσταση_ανα_ομαδα'] = [];
+                foreach ($legs as $tref => $leg) {
+                    $row['αποσταση_ανα_ομαδα'][] = $leg['ομαδα'] . ': '
+                        . aiLiveDistanceToTargetWords($leg['metres'], $leg['bearing'], $routed[$tref] ?? null, isset($routed[$tref]));
+                }
+            }
+            $placeRows[] = $row;
+        }
+        if ($placeRows) {
+            $digest['τοποθεσιες_απο_ερωτηση'] = $placeRows;
+            $digest['σημειωση_τοποθεσιων'] = 'Τοπωνυμια που ανεφερε ο ιδιος ο συντονιστης, περασμενα απο γεωκωδικοποιητη χαρτη. ΠΑΝΤΑ ανεφερε το "βρεθηκε_ως" μαζι με την αποσταση: ο γεωκωδικοποιητης κανει λαθη με σιγουρια, και ο συντονιστης ειναι ο μονος που μπορει να δει οτι μετρηθηκε λαθος σημειο. Αν υπαρχει "προβλημα", ΜΗΝ δωσεις αποσταση.';
+        }
     }
 
     // ── the missing person, and the rings around the last seen point ─────
@@ -2347,6 +2437,7 @@ function aiLiveSystemPrompt(): string {
 - Η ευθεία γραμμή και η απόσταση διαδρομής ΔΕΝ είναι το ίδιο πράγμα. Στο βουνό η διαδρομή είναι συχνά τριπλάσια από την ευθεία, γιατί ο δρόμος κάνει τον γύρο. Λέγε πάντα ποιο από τα δύο αναφέρεις, με τα ίδια λόγια που τα λέει το πεδίο.
 - Το πεδίο δίνει ΚΑΙ ΤΟΥΣ ΔΥΟ χρόνους όπου υπάρχουν: «με τα πόδια» και «με αμάξι». Ανάφερε και τους δύο όταν ρωτιέται απόσταση ή χρόνος άφιξης — ο συντονιστής επιλέγει ανάμεσά τους και η επιλογή είναι η απόφαση που παίρνει. Αν λείπει ο ένας, πες ποιος λείπει και γιατί, μην παρουσιάσεις τον άλλον σαν να είναι όλη η απάντηση.
 - Δεν βλέπεις χάρτη, αλλά οι σχέσεις είναι υπολογισμένες για σένα: το «γειτονικοι» κάθε τομέα λέει ποιοι ακουμπάνε, και το «τομεας» σε περιστατικά, SOS και σημεία ενδιαφέροντος λέει σε ποιο έδαφος έπεσαν. Χρησιμοποίησέ τα αυτούσια — μην συμπεραίνεις γειτνίαση από ονόματα ή αριθμούς τομέων.
+- Αν ο συντονιστής ανέφερε τοπωνύμιο (στάδιο, νοσοκομείο, χωριό, μοναστήρι), θα το βρεις έτοιμο στο «τοποθεσιες_απο_ερωτηση» με τις αποστάσεις κάθε ομάδας από αυτό. ΑΝΑΦΕΡΕ ΠΑΝΤΑ ΤΟ «βρεθηκε_ως» μαζί με το νούμερο — ο γεωκωδικοποιητής κάνει λάθη με σιγουριά, και ο συντονιστής είναι ο μόνος που μπορεί να δει ότι μετρήθηκε λάθος σημείο. Αν η εγγραφή έχει «προβλημα», πες το πρόβλημα και ΜΗΝ δώσεις απόσταση.
 - Το όνομα ενός τομέα ΔΕΝ είναι μοναδικό από μόνο του: κάθε περιοχή φτιάχνει τους δικούς της Α, Β, Γ. Όπου το όνομα επαναλαμβάνεται, φέρει τη ζώνη του σε παρένθεση — «Τομέας Α (Ζώνη 75%)» και «Τομέας Α (Ζώνη 95%)» είναι ΔΙΑΦΟΡΕΤΙΚΟΙ τομείς. Χρησιμοποίησε το όνομα ΑΥΤΟΥΣΙΟ, μαζί με την παρένθεση, και μην ενώσεις ποτέ δύο τομείς επειδή μοιάζουν τα ονόματά τους.
 - Η «ζωνη» σε αναζήτηση αγνοουμένου είναι στατιστική: η Ζώνη 25% είναι η απόσταση μέσα στην οποία βρέθηκε το 25% αντίστοιχων περιστατικών από το σημείο τελευταίας εμφάνισης, και ούτω καθεξής ως το 95%. Έρευνα στη Ζώνη 95% ενώ η 75% δεν έχει ολοκληρωθεί αξίζει να επισημανθεί.
 - Τα «κτιρια» ενός τομέα είναι κτίρια που ο συντονιστής όρισε για έλεγχο, με το όνομα που τους έδωσε. Το «οροφοι_προς_ελεγχο» είναι όσοι όροφοι ΧΡΕΙΑΖΟΝΤΑΙ έλεγχο (όχι όσοι έχει το κτίριο), το «ελεγμενοι» πόσοι έγιναν, και το «απομενουν» ποιοι λείπουν ονομαστικά. Απάντησε με το όνομα του κτιρίου, όπως το ρωτάει ο συντονιστής. Ένας τομέας με ανέλεγκτους ορόφους ΔΕΝ είναι ολοκληρωμένος, όσο κι αν λέει η κατάστασή του — ένα κτίριο είναι το ένα πράγμα που μια ομάδα μπορεί να προσπεράσει και να δηλώσει τον τομέα σαρωμένο.
@@ -2680,9 +2771,30 @@ function askMissionAiLive(
     }
     $question = mb_substr($question, 0, AI_LIVE_QUESTION_CAP, 'UTF-8');
 
+    // Places the question names, resolved BEFORE the digest is built —
+    // a point has to exist before anything can be measured to it, and once
+    // the answering model has replied it is far too late to geocode.
+    //
+    // The question is scrubbed first: this is a second outbound call and a
+    // coordinator types «πόσο απέχει ο Γιώργος από το στάδιο» without
+    // thinking about it. The names are needed a few lines below anyway.
+    $names  = aiMissionForbiddenNames($missionId);
+    $places = [];
+    try {
+        $places = aiResolveQuestionPlaces(
+            aiRedactText($question, $names, AI_LIVE_QUESTION_CAP),
+            isset($mission['latitude'])  ? (float) $mission['latitude']  : null,
+            isset($mission['longitude']) ? (float) $mission['longitude'] : null
+        );
+    } catch (Throwable $e) {
+        // A geocoder or a small model call failing must cost the place
+        // distances, never the answer.
+        error_log('[ai-live] place resolution failed: ' . $e->getMessage());
+    }
+
     // The raw question goes in for ONE purpose: whoever it names gets one of
     // the eight routed legs. It is not sent anywhere from in there.
-    $built = buildLiveAiDigest($missionId, $mission, $missionShiftIds, $focusPoint, $question);
+    $built = buildLiveAiDigest($missionId, $mission, $missionShiftIds, $focusPoint, $question, $places);
 
     // The memory, folded into the digest the model reads. Counters are taken
     // AFTER the digest is built, because the digest is what defines "how many
@@ -2694,8 +2806,6 @@ function askMissionAiLive(
         $built['refs']['SINCE'] = 'Από την προηγούμενη ερώτησή σας';
         $built['digest']['απο_την_τελευταια_ερωτηση'] = $changes;
     }
-    $names = aiMissionForbiddenNames($missionId);
-
     // The question and the history go through the same gateway as the data.
     $safeQuestion = aiLivePseudonymiseText($question, $built['map'], $names, AI_LIVE_QUESTION_CAP);
     $safeHistory  = [];
