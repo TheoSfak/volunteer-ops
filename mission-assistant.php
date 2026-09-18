@@ -83,6 +83,19 @@ if ($action === 'ask') {
         exit;
     }
 
+    // What this coordinator's last question left behind: a handful of counters
+    // and a timestamp, so the answer can open with what has MOVED rather than
+    // repeating what still holds. Read here, before the lock is released, and
+    // written back at the very end.
+    //
+    // In the session rather than a table on purpose. It is per-coordinator by
+    // nature ("since YOU asked"), it is worthless once the shift ends, and the
+    // rule this whole feature lives under is that an AI answer never becomes
+    // part of the operational record. Counters are facts the mission's own
+    // tables already hold; none of the model's words are kept.
+    $snapshotKey = 'ai_live_snapshot_' . $missionId;
+    $snapshot = $_SESSION[$snapshotKey] ?? null;
+
     // The provider call can take a minute. PHP's default session handler holds
     // an exclusive lock on this session's file for the whole request, so
     // without this every other request from the same browser - the 5s poll
@@ -123,10 +136,35 @@ if ($action === 'ask') {
         }
     }
 
-    echo json_encode(
-        askMissionAiLive($missionId, $mission, $missionShiftIds, (string) post('question'), $focusPoint, $history),
-        JSON_UNESCAPED_UNICODE
+    $result = askMissionAiLive(
+        $missionId, $mission, $missionShiftIds, (string) post('question'), $focusPoint, $history, $snapshot
     );
+
+    // Re-open only to store it, long after the provider has answered — the
+    // lock is held for the length of one array write, not for the length of
+    // the call, which is the whole reason it was released above. Only on a
+    // real answer: a coordinator who got an error has not seen anything, and
+    // advancing the mark would hide whatever moved while they were failing to
+    // get one.
+    //
+    // cache_limiter '' and the headers_sent() guard are both load-bearing. A
+    // second session_start() re-sends Cache-Control/Expires — which this app
+    // has been bitten by before on a JSON response — and warns three times
+    // over if anything has already been output. display_errors is ON in
+    // production, so those warnings would be printed INSIDE the JSON and
+    // break a response the coordinator has already paid a provider call for.
+    // If output has somehow begun, the memory simply does not advance, which
+    // costs one comparison and nothing else.
+    if (!empty($result['ok']) && isset($result['snapshot']) && !headers_sent()) {
+        session_start(['cache_limiter' => '']);
+        $_SESSION[$snapshotKey] = $result['snapshot'];
+        session_write_close();
+    }
+    // Never shipped to the client: it is bookkeeping, and the browser has no
+    // use for it that would not also let it lie about what it has been told.
+    unset($result['snapshot']);
+
+    echo json_encode($result, JSON_UNESCAPED_UNICODE);
     exit;
 }
 

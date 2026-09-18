@@ -314,6 +314,15 @@ function aiLiveOrderTypeWord(string $type): string {
 const AI_LIVE_TREND_MINUTES = 30;
 
 /**
+ * Below this gap between two questions there is nothing to compare.
+ *
+ * A follow-up asked in the same breath — "και η άλλη ομάδα;" — is one question
+ * in two parts, and telling a coordinator that nothing has changed in the
+ * ninety seconds since their last sentence is noise dressed as insight.
+ */
+const AI_LIVE_MEMORY_MIN_MINUTES = 3;
+
+/**
  * One position sample per this many seconds when measuring how far somebody
  * walked.
  *
@@ -543,6 +552,113 @@ function aiLiveSectorRate(int $missionId, int $minutes = AI_LIVE_TREND_MINUTES):
         'συνολο'        => (int) $row['total'],
         'τελευταια_' . $minutes . 'λ'   => (int) $row['recent'],
         'προηγουμενα_' . $minutes . 'λ' => (int) $row['previous'],
+    ];
+}
+
+// ─── What has changed since this coordinator last asked ──────────────────────
+
+/**
+ * A handful of integers describing the whole operation, taken from the digest
+ * that was just built.
+ *
+ * NOT the answer, and not a word of it. The architecture rule this feature
+ * lives under is that an AI answer is never stored, and nothing here breaks
+ * it: what is kept is how many shortages were open and how many people were
+ * silent — facts about the mission, which the mission's own tables already
+ * hold — so that the NEXT question can be told what moved. Counting a thing
+ * twice is not a record of what was said about it.
+ */
+function aiLiveCounters(array $digest): array {
+    $count = fn($key) => isset($digest[$key]) && is_array($digest[$key]) ? count($digest[$key]) : 0;
+    $openIn = function (string $key, callable $isOpen) use ($digest): int {
+        $n = 0;
+        foreach ((array) ($digest[$key] ?? []) as $row) {
+            if (is_array($row) && $isOpen($row)) $n++;
+        }
+        return $n;
+    };
+
+    return [
+        'ελλειψεις'        => $count('ελλειψεις'),
+        'ελλειψεις_ανοιχτες' => $openIn('ελλειψεις', fn($r) => ($r['κατασταση'] ?? '') === 'ανοιχτη'),
+        'περιστατικα'      => $count('περιστατικα'),
+        'περιστατικα_ανοιχτα' => $openIn('περιστατικα', fn($r) => empty($r['κλειστο'])),
+        'sos'              => $count('σηματα_sos'),
+        'sos_ανοιχτα'      => $openIn('σηματα_sos', fn($r) => empty($r['κλειστο'])),
+        'εντολες'          => $count('εντολες'),
+        'εντολες_ανεκτελεστες' => $openIn('εντολες', fn($r) => (int) ($r['ολοκληρωσαν'] ?? 0) < (int) ($r['παραληπτες'] ?? 0)),
+        'σημεια'           => $count('σημεια_ενδιαφεροντος'),
+        'σημεια_ανελεγκτα' => $openIn('σημεια_ενδιαφεροντος', fn($r) => empty($r['ελεγχθηκε'])),
+        'τομεις_ολοκληρωμενοι' => $openIn('τομεις_ερευνας', fn($r) => ($r['κατασταση'] ?? '') === 'completed'),
+        'σε_βαρδια'        => (int) ($digest['δυναμη_τωρα']['σε_βαρδια'] ?? 0),
+        'σιωπηλοι'         => (int) ($digest['δυναμη_τωρα']['σιωπηλοι'] ?? 0),
+        'χωρις_στιγμα'     => (int) ($digest['δυναμη_τωρα']['χωρις_κανενα_στιγμα'] ?? 0),
+    ];
+}
+
+/** How each counter reads to a human when it moves. */
+const AI_LIVE_COUNTER_WORDS = [
+    'ελλειψεις'            => 'νέες ελλείψεις',
+    'ελλειψεις_ανοιχτες'   => 'ανοιχτές ελλείψεις',
+    'περιστατικα'          => 'νέα περιστατικά',
+    'περιστατικα_ανοιχτα'  => 'ανοιχτά περιστατικά',
+    'sos'                  => 'νέα SOS',
+    'sos_ανοιχτα'          => 'ανοιχτά SOS',
+    'εντολες'              => 'νέες εντολές',
+    'εντολες_ανεκτελεστες' => 'ανεκτέλεστες εντολές',
+    'σημεια'               => 'νέα σημεία ενδιαφέροντος',
+    'σημεια_ανελεγκτα'     => 'ανέλεγκτα σημεία',
+    'τομεις_ολοκληρωμενοι' => 'ολοκληρωμένοι τομείς',
+    'σε_βαρδια'            => 'άτομα σε βάρδια',
+    'σιωπηλοι'             => 'σιωπηλοί',
+    'χωρις_στιγμα'         => 'χωρίς κανένα στίγμα',
+];
+
+/**
+ * The difference between now and the snapshot taken when this coordinator last
+ * asked something, or null when there is nothing to compare against.
+ *
+ * This is the whole point of the memory: without it every answer is written as
+ * though the operation began one second ago, and a coordinator who asks the
+ * same question twenty minutes apart gets the same paragraph twice with no
+ * indication that nothing has moved — or, worse, no indication that something
+ * has.
+ *
+ * Deliberately reports NO CHANGE explicitly rather than omitting itself. "You
+ * asked 18 minutes ago and nothing has moved since" is an operational fact and
+ * frequently the most useful sentence on the screen.
+ */
+function aiLiveChangesSince(?array $snapshot, array $now, int $nowTs): ?array {
+    if (!is_array($snapshot) || !isset($snapshot['ts'], $snapshot['counters']) || !is_array($snapshot['counters'])) {
+        return null;
+    }
+    $minutes = (int) floor(($nowTs - (int) $snapshot['ts']) / 60);
+    // A follow-up in the same breath ("και η άλλη ομάδα;") is one question in
+    // two parts, not two moments to compare.
+    if ($minutes < AI_LIVE_MEMORY_MIN_MINUTES) {
+        return null;
+    }
+
+    $moved = [];
+    foreach ($now as $key => $value) {
+        $before = $snapshot['counters'][$key] ?? null;
+        if ($before === null || !is_int($before) || $before === $value) {
+            continue;
+        }
+        $delta = $value - $before;
+        $moved[AI_LIVE_COUNTER_WORDS[$key] ?? $key] = ($delta > 0 ? '+' : '') . $delta
+            . ' (' . $before . ' → ' . $value . ')';
+    }
+
+    return [
+        'ref'              => 'SINCE',
+        'τι_ειναι'         => 'Τι άλλαξε από την προηγούμενη ερώτηση ΑΥΤΟΥ του συντονιστή, πριν ' . $minutes . ' λεπτά.',
+        'λεπτα_πριν'       => $minutes,
+        'μεταβολες'        => $moved ?: null,
+        'καμια_μεταβολη'   => !$moved,
+        'οδηγια'           => $moved
+            ? 'Αν η ερώτηση μοιάζει με την προηγούμενη, ξεκίνα από αυτό που ΑΛΛΑΞΕ αντί να επαναλάβεις όσα ισχύουν ακόμη.'
+            : 'Τίποτα δεν κουνήθηκε σε αυτό το διάστημα. Πες το ρητά — «δεν έχει αλλάξει τίποτα από τότε που ρώτησες» — αντί να ξαναγράψεις την ίδια εικόνα σαν να είναι καινούργια.',
     ];
 }
 
@@ -1427,6 +1543,7 @@ function aiLiveSystemPrompt(): string {
 - Συγκεκριμένα νούμερα και ώρες από τα δεδομένα. «Η ΑΕΤΟΣ δεν έχει στείλει στίγμα 47 λεπτά» και όχι «κάποιες ομάδες καθυστερούν».
 - Όπου υπάρχει ΚΑΤΕΥΘΥΝΣΗ, προτίμησέ την από το σύνολο. Το «4 ελλείψεις» δεν λέει τίποτα· το «3 στο μισάωρο έναντι 1 πριν» λέει. Τα πεδία «κινηση» και η ενότητα «ρυθμος» υπάρχουν γι' αυτό — είναι ήδη υπολογισμένα, μην τα ξαναβγάλεις μόνος σου.
 - Μια ομάδα που δεν έχει κινηθεί δεν είναι απαραίτητα σταματημένη: μπορεί να ερευνά επί τόπου, να ανεβαίνει αργά ή να έχει χάσει σήμα. Πες τι δείχνουν τα δεδομένα και ρώτα, μην αποφανθείς.
+- Αν υπάρχει η ενότητα «απο_την_τελευταια_ερωτηση», ο συντονιστής σε έχει ήδη ρωτήσει πριν από λίγο. Ξεκίνα από αυτό που ΑΛΛΑΞΕ και μην του ξαναδιηγηθείς όσα ισχύουν ακόμη. Αν δεν άλλαξε τίποτα, πες το ευθέως — «από τότε που ρώτησες δεν έχει αλλάξει τίποτα» — και μετά απάντησε σύντομα. Είναι χρήσιμη πληροφορία, όχι αποτυχία.
 - Αν η ερώτηση ζητά κρίση, δώσε κρίση. Μη μεταφράζεις τα νούμερα σε πρόταση και μην το λες ανάλυση.
 - Ελληνικά, επιχειρησιακή ορολογία — εκτός αν η ερώτηση είναι γραμμένη σε άλλη γλώσσα, οπότε απαντάς σε εκείνη.
 
@@ -1580,7 +1697,8 @@ function askMissionAiLive(
     array $missionShiftIds,
     string $question,
     ?array $focusPoint,
-    array $history
+    array $history,
+    ?array $snapshot = null
 ): array {
     $fail = fn(string $msg) => ['ok' => false, 'error' => $msg];
 
@@ -1595,6 +1713,17 @@ function askMissionAiLive(
     $question = mb_substr($question, 0, AI_LIVE_QUESTION_CAP, 'UTF-8');
 
     $built = buildLiveAiDigest($missionId, $mission, $missionShiftIds, $focusPoint);
+
+    // The memory, folded into the digest the model reads. Counters are taken
+    // AFTER the digest is built, because the digest is what defines "how many
+    // are open" — recomputing the same thing from the tables would be a second
+    // definition of the same words, free to drift from the first.
+    $counters = aiLiveCounters($built['digest']);
+    $changes = aiLiveChangesSince($snapshot, $counters, time());
+    if ($changes !== null) {
+        $built['refs']['SINCE'] = 'Από την προηγούμενη ερώτησή σας';
+        $built['digest']['απο_την_τελευταια_ερωτηση'] = $changes;
+    }
     $names = aiMissionForbiddenNames($missionId);
 
     // The question and the history go through the same gateway as the data.
@@ -1675,6 +1804,10 @@ function askMissionAiLive(
 
     return [
         'ok'         => true,
+        // Handed back for the caller to store: this function cannot write it
+        // itself, because mission-assistant.php has deliberately released the
+        // session lock before calling — see the comment there.
+        'snapshot'   => ['ts' => time(), 'counters' => $counters],
         'answer'     => $answer,
         'missing'    => $missing,
         'answerable' => $validated['answerable'],

@@ -248,6 +248,103 @@ final class AiLiveTest extends TestCase
         $this->assertSame('', aiLiveNameRefsInText('', ['ORD-1' => 'Εντολή']));
     }
 
+    // ── Remembering what the last answer was answering ─────────────────────
+
+    private const COUNTERS = ['ελλειψεις' => 4, 'ελλειψεις_ανοιχτες' => 2, 'σιωπηλοι' => 1];
+
+    public function testTheFirstQuestionOfAShiftHasNothingToCompareAgainst(): void
+    {
+        // No snapshot, a malformed one, or one missing its parts must all
+        // produce silence rather than a section full of nulls.
+        $this->assertNull(aiLiveChangesSince(null, self::COUNTERS, time()));
+        $this->assertNull(aiLiveChangesSince([], self::COUNTERS, time()));
+        $this->assertNull(aiLiveChangesSince(['ts' => time()], self::COUNTERS, time()));
+        $this->assertNull(aiLiveChangesSince(['counters' => []], self::COUNTERS, time()));
+    }
+
+    public function testAFollowUpInTheSameBreathIsNotTwoMomentsToCompare(): void
+    {
+        // "και η άλλη ομάδα;" is one question in two parts. Telling someone
+        // nothing has changed in ninety seconds is noise dressed as insight.
+        $now = time();
+        $snapshot = ['ts' => $now - 90, 'counters' => self::COUNTERS];
+
+        $this->assertNull(aiLiveChangesSince($snapshot, self::COUNTERS, $now));
+    }
+
+    public function testOnlyTheCountersThatMovedAreReported(): void
+    {
+        $now = time();
+        $snapshot = ['ts' => $now - 1200, 'counters' => self::COUNTERS];
+        $changed  = ['ελλειψεις' => 6, 'ελλειψεις_ανοιχτες' => 2, 'σιωπηλοι' => 3];
+
+        $out = aiLiveChangesSince($snapshot, $changed, $now);
+
+        $this->assertSame(20, $out['λεπτα_πριν']);
+        $this->assertFalse($out['καμια_μεταβολη']);
+        // Two moved, one did not — and the one that did not must not appear,
+        // or "what changed" becomes "here is everything again".
+        $this->assertCount(2, $out['μεταβολες']);
+        $this->assertArrayNotHasKey('ανοιχτές ελλείψεις', $out['μεταβολες']);
+        // Direction and both ends, so the model cannot describe a rise as a fall.
+        $this->assertStringContainsString('+2', $out['μεταβολες']['νέες ελλείψεις']);
+        $this->assertStringContainsString('4 → 6', $out['μεταβολες']['νέες ελλείψεις']);
+    }
+
+    public function testNothingHavingChangedIsItselfReportedRatherThanOmitted(): void
+    {
+        // "You asked eighteen minutes ago and nothing has moved" is an
+        // operational fact, and often the most useful sentence on screen.
+        $now = time();
+        $out = aiLiveChangesSince(['ts' => $now - 1080, 'counters' => self::COUNTERS], self::COUNTERS, $now);
+
+        $this->assertNotNull($out);
+        $this->assertTrue($out['καμια_μεταβολη']);
+        $this->assertNull($out['μεταβολες']);
+        $this->assertStringContainsString('Τίποτα δεν κουνήθηκε', $out['οδηγια']);
+    }
+
+    public function testACounterThatDidNotExistBeforeIsNotReportedAsAChange(): void
+    {
+        // A section absent from the older digest (a feature switched on
+        // mid-shift, a first sector drawn) would otherwise read as a jump
+        // from nothing, which is a different claim from "it appeared".
+        $now = time();
+        $out = aiLiveChangesSince(
+            ['ts' => $now - 1200, 'counters' => ['ελλειψεις' => 4]],
+            ['ελλειψεις' => 4, 'τομεις_ολοκληρωμενοι' => 3],
+            $now
+        );
+
+        $this->assertTrue($out['καμια_μεταβολη']);
+    }
+
+    public function testCountersDescribeTheMissionAndNeverTheAnswer(): void
+    {
+        // The rule the whole feature lives under: an AI answer is never
+        // stored. What is kept must be integers about the operation, which
+        // the mission's own tables already hold.
+        $counters = aiLiveCounters([
+            'ελλειψεις' => [['κατασταση' => 'ανοιχτη'], ['κατασταση' => 'λυθηκε']],
+            'σηματα_sos' => [['κλειστο' => false]],
+            'δυναμη_τωρα' => ['σε_βαρδια' => 7, 'σιωπηλοι' => 2, 'χωρις_κανενα_στιγμα' => 1],
+        ]);
+
+        foreach ($counters as $key => $value) {
+            $this->assertIsInt($value, $key);
+        }
+        $this->assertSame(2, $counters['ελλειψεις']);
+        $this->assertSame(1, $counters['ελλειψεις_ανοιχτες']);
+        $this->assertSame(1, $counters['sos_ανοιχτα']);
+        $this->assertSame(7, $counters['σε_βαρδια']);
+        // An empty digest must still produce a complete, all-zero shape, or
+        // the first comparison after a quiet start would see every key appear
+        // at once and call it change.
+        foreach (aiLiveCounters([]) as $key => $value) {
+            $this->assertSame(0, $value, $key);
+        }
+    }
+
     // ── Movement: a level is not a derivative ──────────────────────────────
 
     public function testSomeoneWhoHasNotMovedIsCalledStationaryRatherThanGivenAFigure(): void
