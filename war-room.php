@@ -2668,6 +2668,11 @@ include __DIR__ . '/includes/header.php';
     .assistant-qp-item .qp-label { font-size: .8rem; font-weight: 600; color: #0f172a; }
     .assistant-qp-item .qp-q { font-size: .72rem; color: #64748b; display: block; }
 
+    /* Dictation feedback. Its own line above the bar rather than beside the
+       controls: "Ακούω…" appearing next to four buttons on a phone pushes the
+       input itself off the row. */
+    .assistant-voice-msg { font-size: .74rem; min-height: 1.05em; line-height: 1.05em; }
+
     /* «Εξήγησέ μου», inside a row. Quiet until hovered: it must not compete
        with the finding it belongs to. */
     .assistant-explain {
@@ -2867,6 +2872,13 @@ include __DIR__ . '/includes/header.php';
                     <input type="text" id="assistantAskInput" class="form-control"
                            maxlength="500" placeholder="<?= t('assistant.ask_placeholder') ?>"
                            autocomplete="off">
+                    <?php /* Hidden until the JS finds a speech engine: Firefox
+                             has none, and a microphone that does nothing is
+                             worse than no microphone. */ ?>
+                    <button type="button" id="assistantMicBtn" class="btn btn-outline-secondary d-none"
+                            title="<?= t('voice.btn') ?>" aria-label="<?= t('voice.btn') ?>">
+                        <i class="bi bi-mic"></i>
+                    </button>
                     <button type="button" id="assistantAskBtn" class="btn btn-primary">
                         <i class="bi bi-send"></i>
                     </button>
@@ -2879,9 +2891,16 @@ include __DIR__ . '/includes/header.php';
                         <i class="bi bi-clipboard2-check"></i>
                     </button>
                 </div>
+                <div id="assistantVoiceMsg" class="assistant-voice-msg"></div>
                 <div class="d-flex justify-content-between align-items-center mt-1">
                     <span id="assistantFocusNote" class="assistant-focus-note d-none">
                         <i class="bi bi-geo-alt me-1"></i><?= t('assistant.focus_on') ?>
+                    </span>
+                    <?php /* Revealed only when a speech engine is found, for the
+                             same reason the button is: an explanation of a
+                             feature nobody has is clutter. */ ?>
+                    <span id="assistantVoiceNote" class="assistant-focus-note d-none">
+                        <i class="bi bi-mic me-1"></i><?= t('voice.note') ?>
                     </span>
                     <button type="button" id="assistantAskClear" class="btn btn-link btn-sm p-0 ms-auto d-none">
                         <?= t('assistant.ask_clear') ?>
@@ -13580,6 +13599,117 @@ function assistantAsk(presetQuestion) {
 }
 
 document.getElementById('assistantAskBtn')?.addEventListener('click', () => assistantAsk());
+
+// ── Dictating a question ───────────────────────────────────────────────────
+//
+// A coordinator holding a radio in one hand and a map in the other does not
+// type. This is the same path as every other question — it fills the same
+// box and calls the same assistantAsk() — so there is no second endpoint, no
+// second prompt and no second rate limit.
+//
+// Recognition is the BROWSER'S, not ours: no audio reaches this server, and
+// in Chrome it reaches Google's speech service the same way any dictation on
+// that machine does. The note under the box says so, because everything else
+// in this feature is explicit about what leaves the building.
+(function () {
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const micBtn = document.getElementById('assistantMicBtn');
+    const input  = document.getElementById('assistantAskInput');
+    if (!Recognition || !micBtn || !input) return;
+
+    micBtn.classList.remove('d-none');
+    const note = document.getElementById('assistantVoiceNote');
+    if (note) note.classList.remove('d-none');
+
+    let recognition = null;
+    let listening = false;
+    let heard = '';
+
+    const say = (text, cls) => {
+        const box = document.getElementById('assistantVoiceMsg');
+        if (!box) return;
+        box.className = 'assistant-voice-msg ' + (cls || 'text-muted');
+        box.textContent = text || '';
+        if (text) setTimeout(() => { if (box.textContent === text) box.textContent = ''; }, 5000);
+    };
+
+    function setListening(on) {
+        listening = on;
+        micBtn.classList.toggle('btn-danger', on);
+        micBtn.classList.toggle('btn-outline-secondary', !on);
+        micBtn.querySelector('i').className = on ? 'bi bi-mic-fill' : 'bi bi-mic';
+        micBtn.title = on ? t('voice.stop') : t('voice.btn');
+    }
+
+    function stop() {
+        if (recognition) {
+            try { recognition.stop(); } catch (e) { /* already stopping */ }
+        }
+        setListening(false);
+    }
+
+    micBtn.addEventListener('click', () => {
+        if (listening) { stop(); return; }
+        // Asking while an answer is still being written would queue a second
+        // call behind it and hit the rate limit twice as fast.
+        if (typeof assistantAsking !== 'undefined' && assistantAsking) return;
+
+        heard = '';
+        recognition = new Recognition();
+        // The viewer's own language, not the mission's: they are the one
+        // speaking. jsLocale is already resolved for date formatting.
+        recognition.lang = jsLocale;
+        recognition.interimResults = true;
+        recognition.continuous = false;
+        recognition.maxAlternatives = 1;
+
+        recognition.addEventListener('result', e => {
+            let interim = '';
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                const text = e.results[i][0].transcript;
+                if (e.results[i].isFinal) heard += text; else interim += text;
+            }
+            // Shown while speaking so the coordinator can see it is hearing
+            // them, and can stop early if it is hearing them wrongly.
+            input.value = (heard + interim).trim();
+        });
+
+        recognition.addEventListener('error', e => {
+            setListening(false);
+            say(e.error === 'not-allowed' || e.error === 'service-not-allowed'
+                ? t('voice.denied') : t('voice.failed'), 'text-danger');
+        });
+
+        recognition.addEventListener('end', () => {
+            setListening(false);
+            const question = heard.trim();
+            if (!question) { say(t('voice.nothing')); return; }
+            input.value = question;
+            // Sent without a second press: the whole point is hands that are
+            // busy. What was heard appears as the question in the transcript,
+            // so a misrecognition is visible rather than silent — which is
+            // the check that makes auto-sending safe enough.
+            //
+            // One word is not a question, and is usually a cough or a name
+            // called across the room. It is left in the box to be finished.
+            if (question.split(/\s+/).length < 2) { input.focus(); return; }
+            assistantAsk(question);
+        });
+
+        try {
+            recognition.start();
+            setListening(true);
+            say(t('voice.listening'));
+        } catch (e) {
+            setListening(false);
+            say(t('voice.failed'), 'text-danger');
+        }
+    });
+
+    // A modal that closes with the microphone still open would keep listening
+    // to a room nobody is asking anything in.
+    document.getElementById('assistantModal')?.addEventListener('hidden.bs.modal', stop);
+})();
 
 // ── Ready-made questions ───────────────────────────────────────────────────
 //
