@@ -13507,6 +13507,18 @@ function assistantRenderAnswer(slot, res) {
         slot.appendChild(invented);
     }
 
+    // Figures stated in the answer that are nowhere in the data behind it. A
+    // citation proves the record exists; this asks whether the number beside
+    // it does. Shown rather than acted on: a model saying "πάνω από 40 λεπτά"
+    // about a 47-minute gap is right and its 40 is not in the digest, so this
+    // is a prompt to check, never a verdict.
+    if (res.unsupported && res.unsupported.length) {
+        const nums = document.createElement('div');
+        nums.className = 'assistant-warn';
+        nums.textContent = t('assistant.unsupported_numbers', {n: res.unsupported.join(', ')});
+        slot.appendChild(nums);
+    }
+
     if (res.answerable === false && res.missing) {
         const missing = document.createElement('div');
         missing.className = 'assistant-warn';

@@ -1614,6 +1614,92 @@ function aiLiveUserPrompt(array $digest, array $refs, string $question, array $h
     return $out . "ΕΡΩΤΗΣΗ ΤΟΥ ΣΥΝΤΟΝΙΣΤΗ:\n{$question}\n\nΑπάντησε μόνο με το αντικείμενο json.";
 }
 
+// ─── Numbers the data does not contain ───────────────────────────────────────
+
+/**
+ * Below this, a number in an answer is not worth checking.
+ *
+ * Ones and twos and fives are counting words — "3 ομάδες", "2 από τις 4" — and
+ * they appear somewhere in any digest by accident, so flagging them would be
+ * noise while catching nothing. The numbers that matter operationally, and the
+ * ones a model invents when it wants to sound precise, are the specific ones:
+ * 47 λεπτά, 168 bpm, 3,5 χλμ.
+ */
+const AI_LIVE_NUMBER_CHECK_FROM = 10;
+
+/** At most this many are reported; past it the answer's problem is not a list. */
+const AI_LIVE_NUMBER_CHECK_CAP = 6;
+
+/**
+ * Every number in a piece of text, normalised so two spellings of the same
+ * figure compare equal.
+ *
+ * Greek writes a half "16,5" and the digest, built by json_encode, writes it
+ * "16.5" — the same quantity in two alphabets. Thousands separators go the
+ * same way: a model writing "35.597" about a digest holding "35597" is not
+ * making anything up.
+ */
+function aiLiveNumericTokens(string $text): array {
+    $out = [];
+    // Times are stripped first. "20:14" is two numbers to a regex and one
+    // clock reading to a human, and its halves would then be hunted for
+    // separately and not found.
+    $text = preg_replace('/\b\d{1,2}:\d{2}(:\d{2})?\b/u', ' ', $text) ?? $text;
+
+    if (!preg_match_all('/\d[\d.,]*/u', $text, $m)) {
+        return $out;
+    }
+    foreach ($m[0] as $raw) {
+        $token = rtrim($raw, '.,');
+        if ($token === '') continue;
+        // A comma between digits is a decimal point in Greek and a thousands
+        // separator in English; a dot is the reverse. Normalise both away and
+        // compare on the quantity.
+        $plain = str_replace(',', '.', $token);
+        $parts = explode('.', $plain);
+        if (count($parts) > 1) {
+            $last = array_pop($parts);
+            // Three trailing digits is a thousands group, not a decimal.
+            $plain = mb_strlen($last, 'UTF-8') === 3
+                ? implode('', $parts) . $last
+                : implode('', $parts) . '.' . $last;
+        }
+        if (!is_numeric($plain)) continue;
+        $value = (float) $plain;
+        // Trailing zeros must not make 3.50 and 3.5 look like different
+        // figures, and 1200.0 must match the digest's 1200.
+        $out[] = rtrim(rtrim(number_format($value, 4, '.', ''), '0'), '.');
+    }
+    return array_values(array_unique($out));
+}
+
+/**
+ * The figures an answer states that are nowhere in the data it was given.
+ *
+ * The evidence gate already checks that a citation points at a record that
+ * exists. It does not check that the CLAIM beside it survives contact with
+ * that record — an answer can cite a real team and state a number about it
+ * that appears nowhere, which is the failure mode that actually sends someone
+ * to the wrong place.
+ *
+ * Reported, never deleted, and never used to reject the answer: the same rule
+ * the unevidenced-answer warning already works under. Some legitimate answers
+ * will trip it — a model that says "πάνω από 40 λεπτά" about a 47-minute gap
+ * is right and its 40 is not in the digest — so this is a flag for a human to
+ * check, and it is worded that way.
+ */
+function aiLiveUnsupportedNumbers(string $answer, string $haystack): array {
+    $known = array_flip(aiLiveNumericTokens($haystack));
+    $out = [];
+    foreach (aiLiveNumericTokens($answer) as $token) {
+        if (isset($known[$token])) continue;
+        if ((float) $token < AI_LIVE_NUMBER_CHECK_FROM) continue;
+        $out[] = $token;
+        if (count($out) >= AI_LIVE_NUMBER_CHECK_CAP) break;
+    }
+    return $out;
+}
+
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 /**
@@ -1818,6 +1904,14 @@ function askMissionAiLive(
         // confabulating its evidence is confabulating the prose beside it. The
         // handover already says this; a question had no way to.
         'dropped'    => $validated['dropped'],
+        // Figures the answer states that appear nowhere in the data it was
+        // given. The evidence gate proves a citation points at a real record;
+        // this asks whether the CLAIM beside it survives that record, which is
+        // the failure that actually sends somebody to the wrong place.
+        'unsupported' => aiLiveUnsupportedNumbers(
+            $validated['answer'],
+            json_encode($built['digest'], JSON_UNESCAPED_UNICODE)
+        ),
         'provider'   => $result['provider'],
         'model'      => $result['model'],
         'ms'         => $result['ms'],

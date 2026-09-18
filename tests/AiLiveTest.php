@@ -248,6 +248,56 @@ final class AiLiveTest extends TestCase
         $this->assertSame('', aiLiveNameRefsInText('', ['ORD-1' => 'Εντολή']));
     }
 
+    // ── Figures the data does not contain ──────────────────────────────────
+
+    public function testAFabricatedFigureIsCaught(): void
+    {
+        // The failure the evidence gate cannot see: a real record cited, and a
+        // number beside it that exists nowhere. That is what sends somebody to
+        // the wrong place.
+        $digest = '{"ομαδες":[{"ομαδα":"ΑΛΦΑ 1","λεπτα_απο_τελευταιο_στιγμα":12}]}';
+        $out = aiLiveUnsupportedNumbers('Η ΑΛΦΑ 1 δεν έχει στείλει στίγμα 47 λεπτά.', $digest);
+
+        $this->assertSame(['47'], $out);
+    }
+
+    public function testAFigureThatIsInTheDataIsNotFlagged(): void
+    {
+        $digest = '{"ομαδες":[{"λεπτα_απο_τελευταιο_στιγμα":47,"θεση":"3.5 χλμ Δ από τη βάση"}]}';
+        $this->assertSame([], aiLiveUnsupportedNumbers('47 λεπτά, 3,5 χλμ μακριά.', $digest));
+    }
+
+    public function testGreekAndEnglishSpellingsOfOneFigureCompareEqual(): void
+    {
+        // The digest is json_encode'd, so it writes 16.5; Greek prose writes
+        // 16,5. Flagging that would make the warning meaningless within a day.
+        $this->assertSame([], aiLiveUnsupportedNumbers('16,5 χλμ', '{"x":"16.5 χλμ"}'));
+        // And a thousands separator is not a decimal point.
+        $this->assertSame([], aiLiveUnsupportedNumbers('35.597 στρέμματα', '{"x":35597}'));
+        // Trailing zeros are the same quantity.
+        $this->assertSame([], aiLiveUnsupportedNumbers('3,50 χλμ', '{"x":"3.5 χλμ"}'));
+    }
+
+    public function testCountingWordsAreNotHuntedFor(): void
+    {
+        // "3 ομάδες", "2 από τις 4" — small numbers land in any digest by
+        // accident, so checking them is noise that catches nothing.
+        $this->assertSame([], aiLiveUnsupportedNumbers('Οι 3 ομάδες, οι 2 από τις 4.', '{}'));
+    }
+
+    public function testAClockReadingIsOneFigureAndNotTwo(): void
+    {
+        // "20:14" is two numbers to a regex and one time to a human; split, its
+        // halves would be hunted for separately and not found.
+        $this->assertSame([], aiLiveUnsupportedNumbers('Η εντολή στις 20:14 εκκρεμεί.', '{}'));
+    }
+
+    public function testTheReportIsCappedBecauseALongListIsNotTheProblem(): void
+    {
+        $answer = '11 22 33 44 55 66 77 88 99 111 222 333';
+        $this->assertCount(AI_LIVE_NUMBER_CHECK_CAP, aiLiveUnsupportedNumbers($answer, '{}'));
+    }
+
     // ── Remembering what the last answer was answering ─────────────────────
 
     private const COUNTERS = ['ελλειψεις' => 4, 'ελλειψεις_ανοιχτες' => 2, 'σιωπηλοι' => 1];
