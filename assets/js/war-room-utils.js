@@ -418,6 +418,41 @@ function polygonAreaSquareMeters(geo) {
     return Math.abs(twiceArea) / 2;
 }
 
+// The drawn shape's extent on the ground, as width x height in metres.
+//
+// Shown beside the area because an area alone cannot be sanity-checked. "500
+// τ.μ." looks like a number; "22 × 23 μ" is something an admin can hold
+// against a building they know, and a two-pixel over-draw at the zoom a
+// composer usually opens at more than doubles a house-sized figure without
+// looking any different on screen.
+//
+// A bounding box, not the polygon's own diameter: crude for an L-shape, and
+// exactly right for the question being asked, which is "is this thing about
+// fifteen metres across or about twenty-three".
+function polygonBoundsSizeMeters(geo) {
+    if (!Array.isArray(geo) || geo.length < 2) return null;
+    const lats = geo.map(pt => Number(pt[0]));
+    const lngs = geo.map(pt => Number(pt[1]));
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+    if (!isFinite(minLat) || !isFinite(minLng)) return null;
+    const centerLat = (minLat + maxLat) / 2;
+    return {
+        w: (maxLng - minLng) * metersPerDegreeLng(centerLat),
+        h: (maxLat - minLat) * metersPerDegreeLat(centerLat),
+    };
+}
+
+// "22 × 23 μ", or "1,4 × 0,9 χλμ" once metres stop being readable. Rounded to
+// whole metres below a kilometre: a tenth of a metre is below what anyone can
+// click, and printing it would suggest a precision the gesture does not have.
+function formatBoundsSize(size) {
+    if (!size || !isFinite(size.w) || !isFinite(size.h) || size.w <= 0 || size.h <= 0) return '';
+    const km = Math.max(size.w, size.h) >= 1000;
+    const num = v => km ? formatAreaNumber(v / 1000, 1) : formatAreaNumber(Math.round(v), 0);
+    return num(size.w) + ' × ' + num(size.h) + ' ' + (km ? t('common.unit_km') : t('common.unit_m'));
+}
+
 function gridCellsForPolygon(geo, sizeM) {
     const size = Math.max(GRID_SECTOR_SIZE_MIN_M, Math.min(GRID_SECTOR_SIZE_MAX_M, sizeM));
 
@@ -808,6 +843,8 @@ if (typeof module !== 'undefined' && module.exports) {
         metersPerDegreeLng,
         gridCellsForPolygon,
         polygonAreaSquareMeters,
+        polygonBoundsSizeMeters,
+        formatBoundsSize,
         pointAtRingPos,
         splitRingAtCutPositions,
         weightedWedgePolygonPoints,

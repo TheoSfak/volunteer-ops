@@ -5796,15 +5796,32 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
 // mapFullscreenToggle's own convention), so it stays self-explanatory now
 // that there are three stops instead of two.
 const MAP_BASE_LAYER_CYCLE = ['street', 'topo', 'satellite'];
+// Every layer may be zoomed past the depth its tiles actually reach, with
+// Leaflet upscaling the deepest real tile — the trick OpenTopoMap has used
+// here since v3.186.0, now applied to all three.
+//
+// It is not cosmetic. The zoom ceiling is the drawing precision: at zoom 16 a
+// 230 τ.μ. building is EIGHT PIXELS across, and a two-pixel slip on each edge
+// reports it as 527 τ.μ. — which is how a house someone knows to be 230 came
+// back as 500. One extra pixel of blur beats a shape that cannot be traced.
+const MAP_MAX_ZOOM = 21;
 function addMapBaseLayers(targetMap, toggleBtnId) {
     const layers = {
-        street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap'}),
+        street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap',
+            maxNativeZoom: 19,
+            maxZoom: MAP_MAX_ZOOM,
+        }),
         topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenTopoMap (CC-BY-SA)',
             maxNativeZoom: 17,
-            maxZoom: 19,
+            maxZoom: MAP_MAX_ZOOM,
         }),
-        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {attribution: 'Tiles © Esri'}),
+        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles © Esri',
+            maxNativeZoom: 19,
+            maxZoom: MAP_MAX_ZOOM,
+        }),
     };
     const nextBtnState = {
         street:    {icon: 'bi-triangle',        title: 'map.btn_topo_view'},
@@ -15586,7 +15603,15 @@ document.querySelectorAll('.team-form').forEach(form => {
     function updateSizeReadout() {
         const m2 = drawPoints.length >= 3 ? polygonAreaSquareMeters(drawPoints) : 0;
         const text = formatAreaSquareMeters(m2);
-        sizeReadout.textContent = text ? t('sector.area_size', {size: text}) : '';
+        // The extent goes beside the area because an area alone cannot be
+        // checked against anything. "500 τ.μ." looks like a number; "22 × 23 μ"
+        // is something an admin can hold against a building they know, and a
+        // two-pixel over-draw at a composer's usual zoom more than doubles a
+        // house-sized figure without looking any different on screen.
+        const dims = formatBoundsSize(polygonBoundsSizeMeters(drawPoints));
+        sizeReadout.textContent = text
+            ? t('sector.area_size', {size: text}) + (dims ? ' · ' + dims : '')
+            : '';
         sizeReadout.classList.toggle('d-none', !text);
     }
 
@@ -15800,7 +15825,15 @@ document.querySelectorAll('.team-form').forEach(form => {
     function updateSizeReadout() {
         const m2 = drawPoints.length >= 3 ? polygonAreaSquareMeters(drawPoints) : 0;
         const text = formatAreaSquareMeters(m2);
-        sizeReadout.textContent = text ? t('sector.area_size', {size: text}) : '';
+        // The extent goes beside the area because an area alone cannot be
+        // checked against anything. "500 τ.μ." looks like a number; "22 × 23 μ"
+        // is something an admin can hold against a building they know, and a
+        // two-pixel over-draw at a composer's usual zoom more than doubles a
+        // house-sized figure without looking any different on screen.
+        const dims = formatBoundsSize(polygonBoundsSizeMeters(drawPoints));
+        sizeReadout.textContent = text
+            ? t('sector.area_size', {size: text}) + (dims ? ' · ' + dims : '')
+            : '';
         sizeReadout.classList.toggle('d-none', !text);
     }
 

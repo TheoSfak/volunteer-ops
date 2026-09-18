@@ -58,6 +58,8 @@ const {
     isUnshareableVideoContainer,
     MP4_RECORDER_MIME_CANDIDATES,
     shouldSkipPhotoCompression,
+    polygonBoundsSizeMeters,
+    formatBoundsSize,
 } = require('../../assets/js/war-room-utils.js');
 
 // Local-only Haversine, not exported by war-room-utils.js — this file has no
@@ -992,4 +994,61 @@ test('metres per degree match published WGS84 values', () => {
     // 35°N is Crete, where this app is actually used.
     assert.ok(Math.abs(metersPerDegreeLat(35) - 110940.6) < 1, metersPerDegreeLat(35));
     assert.ok(Math.abs(metersPerDegreeLng(35) - 91288.2) < 1, metersPerDegreeLng(35));
+});
+
+// ── The drawn shape's extent ──────────────────────────────────────────────
+//
+// These exist because of a real report: a house the owner knows to be 230 τ.μ.
+// came back as 500. The area arithmetic was exact — checked against the
+// spherical-excess formula on shapes from 40 τ.μ. to 160.000 στρ. — and the
+// gap was drawing precision. At zoom 16 that house is EIGHT PIXELS across, so
+// a two-pixel slip per edge reports 527 τ.μ. and looks no different.
+//
+// An area cannot be sanity-checked on its own. An extent can.
+
+test('the extent of a drawn shape is its real size on the ground', () => {
+    const lat0 = 35.3387, lng0 = 25.1442;
+    const mLat = metersPerDegreeLat(lat0), mLng = metersPerDegreeLng(lat0);
+    const rect = (w, h) => [
+        [lat0, lng0], [lat0, lng0 + w / mLng],
+        [lat0 + h / mLat, lng0 + w / mLng], [lat0 + h / mLat, lng0],
+    ];
+
+    const house = polygonBoundsSizeMeters(rect(15.17, 15.17));
+    assert.ok(Math.abs(house.w - 15.17) < 0.1, house.w);
+    assert.ok(Math.abs(house.h - 15.17) < 0.1, house.h);
+
+    // Not square: width and height must not be interchangeable, or the
+    // readout would hide the shape being twice as long as it should be.
+    const oblong = polygonBoundsSizeMeters(rect(11.5, 20));
+    assert.ok(Math.abs(oblong.w - 11.5) < 0.1, oblong.w);
+    assert.ok(Math.abs(oblong.h - 20) < 0.1, oblong.h);
+});
+
+test('an over-drawn house reads as visibly the wrong size', () => {
+    const lat0 = 35.3387, lng0 = 25.1442;
+    const mLat = metersPerDegreeLat(lat0), mLng = metersPerDegreeLng(lat0);
+    const square = s => [
+        [lat0, lng0], [lat0, lng0 + s / mLng],
+        [lat0 + s / mLat, lng0 + s / mLng], [lat0 + s / mLat, lng0],
+    ];
+
+    // 230 τ.μ. and 500 τ.μ. are 15 m and 22 m per side. The areas look like
+    // two numbers; the extents look like two different buildings.
+    assert.equal(formatBoundsSize(polygonBoundsSizeMeters(square(Math.sqrt(230)))), '15 × 15 μ.');
+    assert.equal(formatBoundsSize(polygonBoundsSizeMeters(square(Math.sqrt(500)))), '22 × 22 μ.');
+});
+
+test('the extent switches to kilometres only when metres stop being readable', () => {
+    assert.equal(formatBoundsSize({w: 900, h: 400}), '900 × 400 μ.');
+    assert.equal(formatBoundsSize({w: 1400, h: 900}), '1,4 × 0,9 χλμ.');
+});
+
+test('a shape with no extent says nothing rather than zero', () => {
+    // A single vertex, or none, is not a shape — and "0 × 0 μ" beside a blank
+    // area would read as a measurement.
+    assert.equal(polygonBoundsSizeMeters(null), null);
+    assert.equal(polygonBoundsSizeMeters([[35, 25]]), null);
+    assert.equal(formatBoundsSize(null), '');
+    assert.equal(formatBoundsSize({w: 0, h: 0}), '');
 });
