@@ -248,6 +248,96 @@ final class AiLiveTest extends TestCase
         $this->assertSame('', aiLiveNameRefsInText('', ['ORD-1' => 'Εντολή']));
     }
 
+    // ── Geometry, without a single coordinate leaving ──────────────────────
+
+    /** Three 500 m squares in a row plus one far away, as stored sector rows. */
+    private function sectorRow(int $id, string $label, float $lat, float $lng): array
+    {
+        $dy = 500 / 110944.7;
+        $dx = 500 / 91038.0;
+        return ['id' => $id, 'label' => $label, 'geo' => json_encode([
+            [$lat, $lng], [$lat, $lng + $dx], [$lat + $dy, $lng + $dx], [$lat + $dy, $lng],
+        ])];
+    }
+
+    private function threeInARow(): array
+    {
+        $lat = 35.2247; $lng = 24.8225; $dx = 500 / 91038.0;
+        return [
+            $this->sectorRow(1, 'Α1', $lat, $lng),
+            $this->sectorRow(2, 'Β2', $lat, $lng + $dx),
+            $this->sectorRow(3, 'Γ3', $lat, $lng + 2 * $dx),
+            $this->sectorRow(4, 'ΜΑΚΡΙΑ', $lat + 0.05, $lng + 0.05),
+        ];
+    }
+
+    public function testAdjacencyIsComputedFromTheGroundAndNotFromLabels(): void
+    {
+        // "Which unsearched sector is next to the one that found something" is
+        // unanswerable from a list of labels and statuses — there is no notion
+        // of next-to in it. The model cannot derive it and must not guess it,
+        // so the server does.
+        $n = aiLiveSectorNeighbours($this->threeInARow());
+
+        $this->assertEqualsCanonicalizing([1, 3], $n[2], 'the middle one touches both');
+        $this->assertSame([2], $n[1], 'an end one touches only its neighbour');
+        $this->assertSame([2], $n[3]);
+        // Α1 and Γ3 are 500 m apart with Β2 between them: adjacent to the same
+        // sector is not adjacent to each other.
+        $this->assertNotContains(3, $n[1]);
+        $this->assertSame([], $n[4], 'a distant sector is nobody\'s neighbour');
+    }
+
+    public function testASectorWithNoUsableGeometryIsSimplyAbsent(): void
+    {
+        // A malformed or empty ring must not become a neighbour of everything,
+        // and must not throw on a page a coordinator is waiting for.
+        $rows = array_merge($this->threeInARow(), [
+            ['id' => 9, 'label' => 'ΧΑΛΑΣΜΕΝΟ', 'geo' => 'not json'],
+            ['id' => 10, 'label' => 'ΔΥΟ ΣΗΜΕΙΑ', 'geo' => json_encode([[35.2, 24.8], [35.3, 24.9]])],
+        ]);
+        $n = aiLiveSectorNeighbours($rows);
+
+        $this->assertArrayNotHasKey(9, $n);
+        $this->assertArrayNotHasKey(10, $n);
+        $this->assertSame([2], $n[1], 'the good ones are unaffected');
+    }
+
+    public function testAPointIsPlacedInTheSectorItFellIn(): void
+    {
+        $geos = [];
+        $labels = [];
+        foreach ($this->threeInARow() as $row) {
+            $geos[$row['id']] = json_decode($row['geo'], true);
+            $labels[$row['id']] = $row['label'];
+        }
+        $lat = 35.2247; $lng = 24.8225; $dx = 500 / 91038.0; $dy = 500 / 110944.7;
+
+        $inside = aiLiveSectorForPoint($lat + $dy / 2, $lng + $dx * 1.5, $geos, $labels);
+        $this->assertStringContainsString('μέσα στον τομέα Β2', $inside);
+    }
+
+    public function testAPointOutsideEverySectorSaysHowFarFromTheNearest(): void
+    {
+        $geos = [];
+        $labels = [];
+        foreach ($this->threeInARow() as $row) {
+            $geos[$row['id']] = json_decode($row['geo'], true);
+            $labels[$row['id']] = $row['label'];
+        }
+        $lat = 35.2247; $lng = 24.8225; $dx = 500 / 91038.0; $dy = 500 / 110944.7;
+
+        $out = aiLiveSectorForPoint($lat - $dy * 0.4, $lng + $dx * 2.5, $geos, $labels);
+        $this->assertStringContainsString('εκτός τομέων', $out);
+        $this->assertStringContainsString('Γ3', $out);
+
+        // Far enough away and the sentence stops being worth saying.
+        $this->assertNull(aiLiveSectorForPoint($lat + 0.5, $lng + 0.5, $geos, $labels));
+        // And with no sectors at all there is nothing to place anything in.
+        $this->assertNull(aiLiveSectorForPoint($lat, $lng, [], []));
+        $this->assertNull(aiLiveSectorForPoint(null, null, $geos, $labels));
+    }
+
     // ── Figures the data does not contain ──────────────────────────────────
 
     public function testAFabricatedFigureIsCaught(): void

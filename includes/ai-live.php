@@ -301,6 +301,104 @@ function aiLiveOrderTypeWord(string $type): string {
     ][$type] ?? 'Εντολή';
 }
 
+// ─── Where things are in relation to each other ──────────────────────────────
+
+/**
+ * Two sectors whose edges come within this are neighbours.
+ *
+ * Not zero: sectors are drawn by hand or cut from a grid, and two that a
+ * coordinator would call adjacent routinely miss each other by a few metres
+ * of clicking. Not large either — at a few hundred metres everything on a
+ * mountain is everybody's neighbour and the word stops meaning anything.
+ */
+const AI_LIVE_ADJACENT_METRES = 80;
+
+/** Neighbours listed per sector. Past this the answer is "all of them". */
+const AI_LIVE_NEIGHBOUR_CAP = 4;
+
+/**
+ * Sectors, with their geometry turned into relationships.
+ *
+ * NO COORDINATE LEAVES. This is the same bargain the positions already make:
+ * the polygon stays here and what travels is what it MEANS — which sector a
+ * clue fell in, which unsearched sector touches the one that found something,
+ * how far a team is from the edge of the ground it has been given.
+ *
+ * Without it "ποιος ανερεύνητος τομέας γειτονεύει με το τελευταίο εύρημα" is
+ * unanswerable, because a list of labels and statuses contains no notion of
+ * next-to. The model cannot derive it and must not guess it, so the server
+ * computes it.
+ *
+ * $rows each need id, label, status, geo (a JSON ring of [lat,lng]).
+ */
+function aiLiveSectorNeighbours(array $rows): array {
+    $geos = [];
+    foreach ($rows as $row) {
+        $geo = json_decode((string) ($row['geo'] ?? ''), true);
+        if (is_array($geo) && count($geo) >= 3) {
+            $geos[(int) $row['id']] = $geo;
+        }
+    }
+
+    $out = [];
+    foreach ($geos as $id => $geo) {
+        $near = [];
+        foreach ($geos as $otherId => $otherGeo) {
+            if ($otherId === $id) continue;
+            // Nearest approach between the two rings, measured from each
+            // vertex of one to the whole of the other. Vertex-to-edge rather
+            // than vertex-to-vertex: two sectors sharing a long straight
+            // border may have no vertices near each other at all.
+            $best = INF;
+            foreach ($geo as $pt) {
+                $d = pointToPolygonDistanceMeters((float) $pt[0], (float) $pt[1], $otherGeo);
+                if ($d < $best) $best = $d;
+                if ($best <= 0.0) break;
+            }
+            if ($best <= AI_LIVE_ADJACENT_METRES) {
+                $near[$otherId] = $best;
+            }
+        }
+        asort($near);
+        $out[$id] = array_slice(array_keys($near), 0, AI_LIVE_NEIGHBOUR_CAP);
+    }
+    return $out;
+}
+
+/**
+ * Which sector a point falls in, or the nearest one and how far outside it is.
+ *
+ * Returns null when there are no sectors, or when the point is further from
+ * every one of them than AI_LIVE_NEAR_SECTOR_METRES — at which distance
+ * "near sector Β3" is not a useful thing to have said.
+ */
+const AI_LIVE_NEAR_SECTOR_METRES = 1500;
+
+function aiLiveSectorForPoint(?float $lat, ?float $lng, array $sectorGeos, array $labels): ?string {
+    if ($lat === null || $lng === null || !$sectorGeos) {
+        return null;
+    }
+    $bestId = null;
+    $bestDistance = INF;
+    foreach ($sectorGeos as $id => $geo) {
+        if (pointInPolygon($lat, $lng, $geo)) {
+            return 'μέσα στον τομέα ' . ($labels[$id] ?? ('#' . $id));
+        }
+        $d = pointToPolygonDistanceMeters($lat, $lng, $geo);
+        if ($d < $bestDistance) {
+            $bestDistance = $d;
+            $bestId = $id;
+        }
+    }
+    if ($bestId === null || $bestDistance > AI_LIVE_NEAR_SECTOR_METRES) {
+        return null;
+    }
+    $distance = $bestDistance < 1000
+        ? round($bestDistance) . ' μ'
+        : round($bestDistance / 1000, 1) . ' χλμ';
+    return 'εκτός τομέων, ' . $distance . ' από τον ' . ($labels[$bestId] ?? ('#' . $bestId));
+}
+
 // ─── Derivatives: what has been CHANGING, not just what is ───────────────────
 
 /**
@@ -1036,6 +1134,33 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         $digest['ελλειψεις'] = $shortages;
     }
 
+    // ── sector geometry, resolved before anything that refers to it ──────
+    //
+    // Fetched here rather than beside the sector section below because the
+    // incidents, SOS and clues underneath all want to say WHICH sector they
+    // fell in, and that answer has to exist before they are built.
+    $sectorRows = dbFetchAll(
+        "SELECT s.id, s.label, s.status, s.acknowledged_at, s.geo, t.codename, t.team_number
+         FROM mission_search_sectors s
+         LEFT JOIN mission_teams t ON t.id = s.team_id
+         WHERE s.mission_id = ?
+         ORDER BY s.id LIMIT 60",
+        [$missionId]
+    );
+    // The polygons never leave; what leaves is what they mean. Resolved once
+    // here and reused for the clue/incident/SOS lookups further down.
+    $sectorGeos = [];
+    $sectorLabels = [];
+    foreach ($sectorRows as $row) {
+        $id = (int) $row['id'];
+        $sectorLabels[$id] = $row['label'] !== '' ? $row['label'] : ('#' . $id);
+        $geo = json_decode((string) ($row['geo'] ?? ''), true);
+        if (is_array($geo) && count($geo) >= 3) {
+            $sectorGeos[$id] = $geo;
+        }
+    }
+    $neighbours = aiLiveSectorNeighbours($sectorRows);
+
     // ── incidents: counts, types and timing ONLY ─────────────────────────
     // No patient name, age, gender, phone or notes reach this array. That is
     // Article 9 health data and it has no business leaving the building; the
@@ -1068,6 +1193,9 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         ];
         if (($d = $fromFocus($iLat, $iLng)) !== null) {
             $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
+        }
+        if (($sec = aiLiveSectorForPoint($iLat, $iLng, $sectorGeos, $sectorLabels)) !== null) {
+            $entry['τομεας'] = $sec;
         }
         $incidents[] = $entry;
     }
@@ -1107,6 +1235,9 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         if (($d = $fromFocus($sLat, $sLng)) !== null) {
             $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
         }
+        if (($sec = aiLiveSectorForPoint($sLat, $sLng, $sectorGeos, $sectorLabels)) !== null) {
+            $entry['τομεας'] = $sec;
+        }
         $sos[] = $entry;
     }
     if ($sos) {
@@ -1119,26 +1250,34 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     // browser and never persisted. Coverage status and who owns the sector are
     // what an operational question is about anyway.
     $sectors = [];
-    foreach (dbFetchAll(
-        "SELECT s.id, s.label, s.status, s.acknowledged_at, t.codename, t.team_number
-         FROM mission_search_sectors s
-         LEFT JOIN mission_teams t ON t.id = s.team_id
-         WHERE s.mission_id = ?
-         ORDER BY s.id LIMIT 60",
-        [$missionId]
-    ) as $row) {
-        $ref = assistantRecordRef('sector', (int) $row['id']);
-        $refs[$ref] = 'Τομέας ' . ($row['label'] !== '' ? $row['label'] : '#' . (int) $row['id']);
-        $sectors[] = [
+    foreach ($sectorRows as $row) {
+        $id = (int) $row['id'];
+        $ref = assistantRecordRef('sector', $id);
+        $refs[$ref] = 'Τομέας ' . $sectorLabels[$id];
+        $entry = [
             'ref'          => $ref,
             'τομεας'       => $row['label'],
             'κατασταση'    => $row['status'],
             'ομαδα'        => teamLabel($row['codename'], $row['team_number']) ?: null,
             'παραληφθηκε'  => $row['acknowledged_at'] !== null,
         ];
+        if (!empty($neighbours[$id])) {
+            $entry['γειτονικοι'] = array_values(array_map(
+                fn($n) => $sectorLabels[$n] ?? ('#' . $n),
+                $neighbours[$id]
+            ));
+        }
+        if (isset($sectorGeos[$id])) {
+            $centroidLat = 0.0; $centroidLng = 0.0; $n = count($sectorGeos[$id]);
+            foreach ($sectorGeos[$id] as $pt) { $centroidLat += (float) $pt[0]; $centroidLng += (float) $pt[1]; }
+            $entry['θεση'] = aiLivePositionText($centroidLat / $n, $centroidLng / $n, $baseLat, $baseLng);
+        }
+        $sectors[] = $entry;
     }
     if ($sectors) {
         $digest['τομεις_ερευνας'] = $sectors;
+        $digest['σημειωση_τομεων'] = 'Το "γειτονικοι" ειναι υπολογισμενο απο τον server: τομεις που ακουμπανε ή απεχουν λιγοτερο απο '
+            . AI_LIVE_ADJACENT_METRES . ' μετρα. Χρησιμοποιησέ το για ερωτησεις τυπου «ποιος ανερευνητος τομεας ειναι διπλα σε αυτον που βρηκε κατι». Η "θεση" ενος τομεα ειναι το κεντρο του.';
     }
 
     // ── points of interest ───────────────────────────────────────────────
@@ -1170,6 +1309,11 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         ];
         if (($d = $fromFocus($pLat, $pLng)) !== null) {
             $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
+        }
+        // The join the whole geometry section exists for: a clue is only
+        // actionable once you know which ground it belongs to.
+        if (($sec = aiLiveSectorForPoint($pLat, $pLng, $sectorGeos, $sectorLabels)) !== null) {
+            $entry['τομεας'] = $sec;
         }
         $poi[] = $entry;
     }
@@ -1554,6 +1698,7 @@ function aiLiveSystemPrompt(): string {
 - Όταν η ερώτηση αφορά το σημείο που κοιτάζει ο συντονιστής, χρησιμοποίησε το έτοιμο πεδίο «αποσταση_απο_σημειο_εστιασης» όπου υπάρχει — είναι υπολογισμένο από τον server. Αν λείπει από μια εγγραφή, δεν υπάρχει· μην το συμπληρώσεις μόνος σου.
 - Το «θεση» είναι πάντα φράση, ποτέ κενό. Αν λέει «Δεν έχει σταλεί στίγμα» ή ότι λείπει το σημείο βάσης, αυτό είναι η απάντηση — πες το με ανθρώπινα λόγια και μην αναφέρεις ποτέ τη λέξη «null».
 - Για το πού βρίσκεται συγκεκριμένο πρόσωπο κοίτα το «θεσεις_προσωπικου». Η θέση μιας ομάδας είναι το στίγμα οποιουδήποτε μέλους της και ΔΕΝ είναι η θέση του επικεφαλής.
+- Δεν βλέπεις χάρτη, αλλά οι σχέσεις είναι υπολογισμένες για σένα: το «γειτονικοι» κάθε τομέα λέει ποιοι ακουμπάνε, και το «τομεας» σε περιστατικά, SOS και σημεία ενδιαφέροντος λέει σε ποιο έδαφος έπεσαν. Χρησιμοποίησέ τα αυτούσια — μην συμπεραίνεις γειτνίαση από ονόματα ή αριθμούς τομέων.
 - Τα ονόματα προσώπων είναι ψευδώνυμα (ΜΕΛΟΣ-1 κ.λπ.). Χρησιμοποίησέ τα αυτούσια, ακόμη κι αν η ερώτηση φαίνεται να αναφέρει πρόσωπο.
 - Στοιχεία ασθενών δεν σου δόθηκαν ποτέ. Αν σου ζητηθούν, πες ότι δεν τα έχεις και ότι βρίσκονται στην καρτέλα περιστατικού.
 - Οι καρδιακοί παλμοί (αν υπάρχουν στα δεδομένα) αφορούν ΤΟΥΣ ΔΙΚΟΥΣ ΜΑΣ και είναι ευαίσθητα δεδομένα υγείας. Δεν κάνεις διάγνωση, δεν προτείνεις θεραπεία, δεν εικάζεις για παθήσεις. Λες τι δείχνουν τα νούμερα και ποια επιχειρησιακή ενέργεια αξίζει — αντικατάσταση, ανάπαυση, έλεγχος. Για όποιον δεν φοράει αισθητήρα δεν ξέρεις τίποτα και δεν λες ότι είναι καλά.
