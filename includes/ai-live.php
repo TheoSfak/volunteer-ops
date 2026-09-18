@@ -301,6 +301,251 @@ function aiLiveOrderTypeWord(string $type): string {
     ][$type] ?? 'Εντολή';
 }
 
+// ─── Derivatives: what has been CHANGING, not just what is ───────────────────
+
+/**
+ * How far back the movement and tempo comparisons look.
+ *
+ * Half an hour is the shortest window in which "this team has not moved" is a
+ * statement about the operation rather than about a rest stop, and the
+ * shortest in which a change of tempo is visible at all on a mission that
+ * produces a handful of records an hour.
+ */
+const AI_LIVE_TREND_MINUTES = 30;
+
+/**
+ * One position sample per this many seconds when measuring how far somebody
+ * walked.
+ *
+ * Summing every ping would read ~360 rows per person per half hour — 14.000
+ * rows on a forty-person mission — to answer a question that does not need
+ * that resolution. Six points give a path length accurate enough to tell
+ * "searching a slope" from "sitting in the vehicle", at one sixtieth of the
+ * cost.
+ */
+const AI_LIVE_MOVE_SAMPLE_SECONDS = 300;
+
+/**
+ * Below this much movement over the whole window, somebody is stationary.
+ *
+ * Generous on purpose: GPS drift alone produces tens of metres per sample
+ * while a phone sits still on a rock, and six samples of drift add up.
+ */
+const AI_LIVE_STATIONARY_METRES = 120;
+
+/**
+ * Close enough to the starting point to say "back where they began" rather
+ * than quoting a distance. "απέχει μόλις 0 μ" is a sentence no human writes.
+ */
+const AI_LIVE_SAME_SPOT_METRES = 50;
+
+/**
+ * How far each person has moved recently, keyed by user id.
+ *
+ * Returns both numbers because they answer different questions and disagree
+ * in the case that matters. A team sweeping a slope walks two kilometres and
+ * ends up ninety metres from where it started: the path says they are
+ * working, the straight line says they are not. Reporting only the straight
+ * line would call a working team stuck, and only the path would miss a
+ * volunteer pacing beside a vehicle.
+ *
+ * One query. The inner GROUP BY rides idx_pings_shift_time (shift_id,
+ * created_at) for the range and returns at most seven rows per person, which
+ * the primary-key join then resolves to coordinates.
+ */
+function aiLiveMovementByUser(array $shiftBinds, int $minutes = AI_LIVE_TREND_MINUTES): array {
+    if (!$shiftBinds) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($shiftBinds), '?'));
+    try {
+        $rows = dbFetchAll(
+            "SELECT s.user_id, p.lat, p.lng, UNIX_TIMESTAMP(p.created_at) AS ts
+             FROM (SELECT user_id,
+                          FLOOR(UNIX_TIMESTAMP(created_at) / ?) AS bucket,
+                          MIN(id) AS pid
+                     FROM volunteer_pings
+                    WHERE shift_id IN ({$placeholders})
+                      AND created_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE)
+                    GROUP BY user_id, bucket) s
+             JOIN volunteer_pings p ON p.id = s.pid
+             ORDER BY s.user_id, s.bucket",
+            array_merge([AI_LIVE_MOVE_SAMPLE_SECONDS], $shiftBinds, [$minutes])
+        );
+    } catch (Exception $e) {
+        error_log('[ai-live] movement query failed: ' . $e->getMessage());
+        return [];
+    }
+
+    $byUser = [];
+    foreach ($rows as $row) {
+        $byUser[(int) $row['user_id']][] = [
+            'lat' => (float) $row['lat'],
+            'lng' => (float) $row['lng'],
+            'ts'  => (int) $row['ts'],
+        ];
+    }
+
+    $out = [];
+    foreach ($byUser as $userId => $points) {
+        // A single sample says nothing about movement — not "did not move",
+        // which is what a zero here would be read as.
+        if (count($points) < 2) {
+            continue;
+        }
+        $path = 0.0;
+        for ($i = 1; $i < count($points); $i++) {
+            $path += gpsDistanceMeters(
+                $points[$i - 1]['lat'], $points[$i - 1]['lng'],
+                $points[$i]['lat'], $points[$i]['lng']
+            );
+        }
+        $first = $points[0];
+        $last  = $points[count($points) - 1];
+        $out[$userId] = [
+            'path'     => (int) round($path),
+            'straight' => (int) round(gpsDistanceMeters($first['lat'], $first['lng'], $last['lat'], $last['lng'])),
+            'minutes'  => (int) max(1, round(($last['ts'] - $first['ts']) / 60)),
+        ];
+    }
+    return $out;
+}
+
+/** A movement reading as a phrase, or null when there is nothing to say. */
+function aiLiveMovementWords(?array $move): ?string {
+    if ($move === null) {
+        return null;
+    }
+    $dist = fn(int $m) => $m < 1000 ? $m . ' μ' : round($m / 1000, 1) . ' χλμ';
+    if ($move['path'] < AI_LIVE_STATIONARY_METRES) {
+        return 'Σχεδόν ακίνητος τα τελευταία ' . $move['minutes'] . ' λεπτά';
+    }
+    $words = 'Διένυσε ' . $dist($move['path']) . ' σε ' . $move['minutes'] . ' λεπτά';
+    // Worth saying only when the two numbers disagree enough to change the
+    // reading: a lot of walking that went nowhere is a sweep, not a transit.
+    if ($move['straight'] < $move['path'] / 3) {
+        $words .= $move['straight'] < AI_LIVE_SAME_SPOT_METRES
+            ? ', και βρίσκεται ξανά εκεί που ξεκίνησε (κινείται εντός περιοχής)'
+            : ', αλλά απέχει μόλις ' . $dist($move['straight']) . ' από εκεί που ξεκίνησε (κινείται εντός περιοχής)';
+    }
+    return $words;
+}
+
+/**
+ * Is the operation speeding up or slowing down?
+ *
+ * Every count in this digest is cumulative, and a cumulative number cannot be
+ * acted on: "four shortages" is a different situation at hour one and hour
+ * six. These are the same events split into the last window and the one
+ * before it, which is the smallest thing that turns a total into a direction.
+ *
+ * Rates, not per-occurrence — the same rule the mission observer works under.
+ */
+function aiLiveTempo(int $missionId, int $minutes = AI_LIVE_TREND_MINUTES): array {
+    $sources = [
+        'ελλειψεις'    => ['mission_shortage_reports', 'created_at'],
+        'περιστατικα'  => ['mission_incidents', 'created_at'],
+        'σηματα_sos'   => ['mission_sos_alerts', 'created_at'],
+        'εντολες'      => ['mission_orders', 'created_at'],
+        'σημεια_ενδιαφεροντος' => ['mission_points_of_interest', 'created_at'],
+    ];
+
+    $out = [];
+    foreach ($sources as $label => [$table, $column]) {
+        try {
+            $row = dbFetchOne(
+                "SELECT
+                    SUM({$column} >= DATE_SUB(NOW(), INTERVAL ? MINUTE)) AS recent,
+                    SUM({$column} <  DATE_SUB(NOW(), INTERVAL ? MINUTE)
+                        AND {$column} >= DATE_SUB(NOW(), INTERVAL ? MINUTE)) AS previous
+                 FROM {$table} WHERE mission_id = ?",
+                [$minutes, $minutes, $minutes * 2, $missionId]
+            );
+        } catch (Exception $e) {
+            continue;
+        }
+        $recent   = (int) ($row['recent'] ?? 0);
+        $previous = (int) ($row['previous'] ?? 0);
+        // Silence on both sides is not a trend, and a row saying "0 then 0"
+        // is noise in a section meant to show movement.
+        if ($recent === 0 && $previous === 0) {
+            continue;
+        }
+        $out[$label] = [
+            'τελευταια_' . $minutes . 'λ' => $recent,
+            'προηγουμενα_' . $minutes . 'λ' => $previous,
+        ];
+    }
+    return $out;
+}
+
+/**
+ * How long orders are taking to be acknowledged now, against earlier.
+ *
+ * The single most useful number about whether the field is still with you:
+ * acknowledgement latency climbing is what a tired, overstretched or
+ * out-of-signal crew looks like in the data, long before anyone reports it.
+ */
+function aiLiveOrderLatency(int $missionId): ?array {
+    try {
+        $rows = dbFetchAll(
+            "SELECT o.id,
+                    MIN(TIMESTAMPDIFF(MINUTE, o.created_at, r.acknowledged_at)) AS mins
+               FROM mission_orders o
+               JOIN mission_order_recipients r ON r.order_id = o.id
+              WHERE o.mission_id = ? AND r.acknowledged_at IS NOT NULL
+              GROUP BY o.id, o.created_at
+              ORDER BY o.created_at DESC
+              LIMIT 20",
+            [$missionId]
+        );
+    } catch (Exception $e) {
+        return null;
+    }
+    if (count($rows) < 4) {
+        return null; // too few to compare halves without inventing a trend
+    }
+    $mins  = array_map(fn($r) => max(0, (int) $r['mins']), $rows);
+    $half  = (int) floor(count($mins) / 2);
+    $avg   = fn(array $a) => (int) round(array_sum($a) / max(1, count($a)));
+    return [
+        'προσφατες'  => $avg(array_slice($mins, 0, $half)),
+        'παλαιοτερες' => $avg(array_slice($mins, $half)),
+        'πληθος'     => count($mins),
+    ];
+}
+
+/**
+ * Sectors finished in the last window against the one before it — the search's
+ * own rate of progress, and the number a coordinator uses to answer "will we
+ * finish this area before dark".
+ */
+function aiLiveSectorRate(int $missionId, int $minutes = AI_LIVE_TREND_MINUTES): ?array {
+    try {
+        $row = dbFetchOne(
+            "SELECT
+                SUM(status = 'completed') AS done,
+                COUNT(*) AS total,
+                SUM(status = 'completed' AND status_updated_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE)) AS recent,
+                SUM(status = 'completed' AND status_updated_at <  DATE_SUB(NOW(), INTERVAL ? MINUTE)
+                    AND status_updated_at >= DATE_SUB(NOW(), INTERVAL ? MINUTE)) AS previous
+             FROM mission_search_sectors WHERE mission_id = ?",
+            [$minutes, $minutes, $minutes * 2, $missionId]
+        );
+    } catch (Exception $e) {
+        return null;
+    }
+    if (!$row || (int) $row['total'] === 0) {
+        return null;
+    }
+    return [
+        'ολοκληρωμενοι' => (int) $row['done'],
+        'συνολο'        => (int) $row['total'],
+        'τελευταια_' . $minutes . 'λ'   => (int) $row['recent'],
+        'προηγουμενα_' . $minutes . 'λ' => (int) $row['previous'],
+    ];
+}
+
 // ─── The coordinator's own question ──────────────────────────────────────────
 
 /**
@@ -421,6 +666,11 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     $shiftBinds = $missionShiftIds ?: [0];
     $shiftPlaceholders = implode(',', array_fill(0, count($shiftBinds), '?'));
 
+    // One query for everyone's recent movement, read twice below: once per
+    // team and once per person. Resolved here rather than inside either loop,
+    // which would have made it one query per team.
+    $movement = aiLiveMovementByUser($shiftBinds);
+
     $refs = ['MISSION' => 'Η αποστολή'];
 
     // ── the mission and the clock ────────────────────────────────────────
@@ -536,6 +786,16 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
          ORDER BY t.team_number, t.id",
         [$missionId]
     );
+    // Every team's roster in one read. Inside the loop this was one query per
+    // team, which is the shape that put this page in trouble before.
+    $teamMemberIds = [];
+    foreach (dbFetchAll(
+        "SELECT team_id, user_id FROM mission_team_members WHERE mission_id = ?",
+        [$missionId]
+    ) as $memberRow) {
+        $teamMemberIds[(int) $memberRow['team_id']][] = (int) $memberRow['user_id'];
+    }
+
     $teams = [];
     foreach ($teamRows as $row) {
         $ref = assistantRecordRef('team', (int) $row['id']);
@@ -568,11 +828,24 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         if (($d = $fromFocus($teamLat, $teamLng)) !== null) {
             $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
         }
+        // The most-moving member, not an average: the question behind "is this
+        // team stuck" is whether ANYONE on it is moving, and an average lets
+        // three people sitting still hide one who is working — or the reverse.
+        $best = null;
+        foreach ($teamMemberIds[(int) $row['id']] ?? [] as $memberId) {
+            $m = $movement[$memberId] ?? null;
+            if ($m !== null && ($best === null || $m['path'] > $best['path'])) {
+                $best = $m;
+            }
+        }
+        if (($moveWords = aiLiveMovementWords($best)) !== null) {
+            $entry['κινηση'] = $moveWords;
+        }
         $teams[] = $entry;
     }
     if ($teams) {
         $digest['ομαδες'] = $teams;
-        $digest['σημειωση_ομαδων'] = 'Η "θεση" καθε ομαδας ειναι το πιο προσφατο στιγμα ΟΠΟΙΟΥΔΗΠΟΤΕ μελους της, οχι του επικεφαλης. Για το που βρισκεται ενα συγκεκριμενο προσωπο, δες το "θεσεις_προσωπικου".';
+        $digest['σημειωση_ομαδων'] = 'Η "θεση" καθε ομαδας ειναι το πιο προσφατο στιγμα ΟΠΟΙΟΥΔΗΠΟΤΕ μελους της, οχι του επικεφαλης. Για το που βρισκεται ενα συγκεκριμενο προσωπο, δες το "θεσεις_προσωπικου". Η "κινηση" αφορα το μελος που κινηθηκε ΠΕΡΙΣΣΟΤΕΡΟ — αν λειπει, κανενα μελος δεν εστειλε αρκετα στιγματα για να μετρηθει, που ΔΕΝ σημαινει οτι στεκονται.';
     }
 
     // ── orders ───────────────────────────────────────────────────────────
@@ -884,6 +1157,9 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         if (($d = $fromFocus($cLat, $cLng)) !== null) {
             $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
         }
+        if (($moveWords = aiLiveMovementWords($movement[$id] ?? null)) !== null) {
+            $entry['κινηση'] = $moveWords;
+        }
         $crew[] = $entry;
     }
     // Freshest first, so the cap below — if a very large operation ever hits
@@ -912,6 +1188,40 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
             . (count($crew) > AI_LIVE_CREW_CAP
                 ? ' Εμφανιζονται τα ' . AI_LIVE_CREW_CAP . ' πιο προσφατα στιγματα απο ' . count($crew) . ' ατομα συνολικα.'
                 : '');
+    }
+
+    // ── which way things are going ───────────────────────────────────────
+    //
+    // Everything above this point is a level: how many, where, how long ago.
+    // A level cannot be acted on by itself — four shortages is a different
+    // situation at hour one and at hour six — and the coordinator's real
+    // questions are almost all derivatives: is it getting worse, are they
+    // still moving, are we going to finish this area before dark.
+    //
+    // Cheap because each of these is one query and none of them is on the
+    // 5-second poll; the assistant is asked a question a few times a shift.
+    $tempo = aiLiveTempo($missionId);
+    $latency = aiLiveOrderLatency($missionId);
+    $sectorRate = aiLiveSectorRate($missionId);
+    if ($tempo || $latency || $sectorRate) {
+        $trend = [
+            'ref'      => 'TREND',
+            'τι_ειναι' => 'Συγκριση των τελευταιων ' . AI_LIVE_TREND_MINUTES
+                . ' λεπτων με τα προηγουμενα ' . AI_LIVE_TREND_MINUTES
+                . '. Δειχνει ΚΑΤΕΥΘΥΝΣΗ, οχι συνολα — τα συνολα ειναι στις παραπανω ενοτητες.',
+        ];
+        if ($tempo) {
+            $trend['νεες_εγγραφες'] = $tempo;
+        }
+        if ($latency) {
+            $trend['λεπτα_μεχρι_επιβεβαιωση_εντολης'] = $latency;
+        }
+        if ($sectorRate) {
+            $trend['τομεις'] = $sectorRate;
+        }
+        $trend['προσοχη'] = 'Μικρα νουμερα κανουν θορυβο: 1 εναντι 0 ΔΕΝ ειναι διπλασιασμος. Μιλα για τασεις μονο οταν η διαφορα ειναι πραγματικη, και αν δεν ειναι, πες οτι ο ρυθμος ειναι σταθερος.';
+        $refs['TREND'] = 'Ρυθμός των τελευταίων ' . AI_LIVE_TREND_MINUTES . ' λεπτών';
+        $digest['ρυθμος'] = $trend;
     }
 
     // ── heart rate ───────────────────────────────────────────────────────
@@ -1115,6 +1425,8 @@ function aiLiveSystemPrompt(): string {
 - Σύντομα. Ο άνθρωπος που διαβάζει έχει δευτερόλεπτα, όχι λεπτά. 2 έως 5 προτάσεις για τις περισσότερες ερωτήσεις.
 - Πρώτα η απάντηση, μετά η τεκμηρίωση. Ποτέ προλογικές φράσεις, ποτέ «με βάση τα δεδομένα που μου δώσατε».
 - Συγκεκριμένα νούμερα και ώρες από τα δεδομένα. «Η ΑΕΤΟΣ δεν έχει στείλει στίγμα 47 λεπτά» και όχι «κάποιες ομάδες καθυστερούν».
+- Όπου υπάρχει ΚΑΤΕΥΘΥΝΣΗ, προτίμησέ την από το σύνολο. Το «4 ελλείψεις» δεν λέει τίποτα· το «3 στο μισάωρο έναντι 1 πριν» λέει. Τα πεδία «κινηση» και η ενότητα «ρυθμος» υπάρχουν γι' αυτό — είναι ήδη υπολογισμένα, μην τα ξαναβγάλεις μόνος σου.
+- Μια ομάδα που δεν έχει κινηθεί δεν είναι απαραίτητα σταματημένη: μπορεί να ερευνά επί τόπου, να ανεβαίνει αργά ή να έχει χάσει σήμα. Πες τι δείχνουν τα δεδομένα και ρώτα, μην αποφανθείς.
 - Αν η ερώτηση ζητά κρίση, δώσε κρίση. Μη μεταφράζεις τα νούμερα σε πρόταση και μην το λες ανάλυση.
 - Ελληνικά, επιχειρησιακή ορολογία — εκτός αν η ερώτηση είναι γραμμένη σε άλλη γλώσσα, οπότε απαντάς σε εκείνη.
 

@@ -248,6 +248,57 @@ final class AiLiveTest extends TestCase
         $this->assertSame('', aiLiveNameRefsInText('', ['ORD-1' => 'Εντολή']));
     }
 
+    // ── Movement: a level is not a derivative ──────────────────────────────
+
+    public function testSomeoneWhoHasNotMovedIsCalledStationaryRatherThanGivenAFigure(): void
+    {
+        // GPS drift alone produces tens of metres while a phone sits on a
+        // rock, so the threshold is generous and the phrase is qualitative.
+        $out = aiLiveMovementWords(['path' => 40, 'straight' => 15, 'minutes' => 30]);
+
+        $this->assertStringContainsString('ακίνητος', $out);
+        $this->assertStringContainsString('30', $out);
+    }
+
+    public function testAWalkerGetsTheDistanceTheyActuallyCovered(): void
+    {
+        $out = aiLiveMovementWords(['path' => 1800, 'straight' => 1750, 'minutes' => 30]);
+
+        $this->assertStringContainsString('1.8 χλμ', $out);
+        $this->assertStringNotContainsString('ακίνητος', $out);
+        // Path and straight line agree, so there is nothing to explain.
+        $this->assertStringNotContainsString('εντός περιοχής', $out);
+    }
+
+    public function testATeamSweepingASlopeIsNotReportedAsStuck(): void
+    {
+        // The case the two numbers exist for: two kilometres walked, ninety
+        // metres from the start. Straight-line distance alone would call a
+        // working team stationary and send someone to chase them.
+        $out = aiLiveMovementWords(['path' => 2400, 'straight' => 90, 'minutes' => 30]);
+
+        $this->assertStringNotContainsString('ακίνητος', $out);
+        $this->assertStringContainsString('2.4 χλμ', $out);
+        $this->assertStringContainsString('εντός περιοχής', $out);
+    }
+
+    public function testReturningExactlyToTheStartIsSaidInWordsNotAsZeroMetres(): void
+    {
+        // "απέχει μόλις 0 μ" is a sentence no human writes.
+        $out = aiLiveMovementWords(['path' => 2400, 'straight' => 0, 'minutes' => 30]);
+
+        $this->assertStringNotContainsString('0 μ', $out);
+        $this->assertStringContainsString('ξεκίνησε', $out);
+    }
+
+    public function testNoMovementDataMeansNoClaimAtAll(): void
+    {
+        // Fewer than two samples must produce silence, never a zero — a zero
+        // here reads as "did not move", which is a different statement from
+        // "we do not know".
+        $this->assertNull(aiLiveMovementWords(null));
+    }
+
     // ── The organisation's own doctrine ────────────────────────────────────
 
     private const PROMPT = "Είσαι στέλεχος.\n\nΠΩΣ ΑΠΑΝΤΑΣ\n- Σύντομα.\n\nΟΡΙΑ ΠΟΥ ΔΕΝ ΠΑΡΑΒΙΑΖΕΙΣ\n- Δεν στέλνεις εντολές.\n";
