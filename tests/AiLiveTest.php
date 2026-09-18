@@ -743,6 +743,50 @@ final class AiLiveTest extends TestCase
         $this->assertSame('Η ΑΛΦΑ σταμάτησε. Στείλε τη ΒΗΤΑ. Ενημέρωσε τη βάση.', $spoken);
     }
 
+    public function testThreeOrdinaryGreekSentencesSurviveWhole(): void
+    {
+        // The v3.287.0 field report: the summary stopped without finishing.
+        // Three ordinary Greek sentences measure 285-340 characters, so a
+        // model obeying "two or three sentences" overshot a 320 ceiling by a
+        // few characters routinely — and the cut, falling back to the last
+        // sentence that ENDED, deleted the whole third one. The third sentence
+        // is where the prompt puts the action to take.
+        $summary = 'Η ομάδα ΑΛΦΑ δεν έχει στείλει στίγμα σαράντα επτά λεπτά και είναι η μόνη '
+                 . 'ομάδα που βρίσκεται στον βόρειο τομέα αυτή τη στιγμή. Η ΒΗΤΑ βρίσκεται '
+                 . 'ενάμισι χιλιόμετρο νότια και μπορεί να την καλύψει χωρίς να αφήσει το δικό '
+                 . 'της έδαφος ακάλυπτο. Ζήτησε επικοινωνία από την ΑΛΦΑ πριν μετακινήσεις '
+                 . 'οποιαδήποτε άλλη ομάδα στο βουνό.';
+
+        $this->assertGreaterThan(AI_LIVE_SPOKEN_TARGET, mb_strlen($summary, 'UTF-8'),
+            'the fixture must actually overshoot what the prompt asks for, or it proves nothing');
+
+        $spoken = aiLiveSpeakableText($summary);
+
+        $this->assertSame($summary, $spoken, 'nothing may be dropped from a summary this size');
+        $this->assertStringContainsString('Ζήτησε επικοινωνία', $spoken, 'the action must survive');
+    }
+
+    public function testThePromptTargetIsBelowTheCeilingItIsValidatedAgainst(): void
+    {
+        // Deliberately two numbers, which is the OPPOSITE of the rule the
+        // drafting prompt follows. There the cap is what gets SENT to the
+        // field. Here it only ever truncates, and truncation costs meaning
+        // rather than politeness — so the model aims at the target and the
+        // ceiling exists only to stop a runaway paragraph.
+        $this->assertLessThan(AI_LIVE_SPOKEN_CAP, AI_LIVE_SPOKEN_TARGET,
+            'the prompt must aim below the ceiling or overshoot deletes a sentence');
+        // Enough headroom for a whole extra Greek sentence, not a rounding nudge.
+        $this->assertGreaterThanOrEqual(80, AI_LIVE_SPOKEN_CAP - AI_LIVE_SPOKEN_TARGET);
+    }
+
+    public function testARunawayParagraphIsStillStopped(): void
+    {
+        $out = aiLiveSpeakableText(str_repeat('Η ομάδα ΑΛΦΑ κινείται βόρεια. ', 40));
+
+        $this->assertLessThanOrEqual(AI_LIVE_SPOKEN_CAP, mb_strlen($out, 'UTF-8'));
+        $this->assertStringEndsWith('.', $out);
+    }
+
     public function testTheBulletsSurviveValidationLongEnoughToBeStripped(): void
     {
         // Found by a wire test, not by the unit test above it: validation used

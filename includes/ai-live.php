@@ -81,7 +81,7 @@ const AI_LIVE_QUESTION_CAP = 500;
 const AI_LIVE_HISTORY_TURNS = 4;
 
 /**
- * Longest summary that gets read aloud, in characters.
+ * The length the PROMPT asks the model to write to, in characters.
  *
  * Two or three sentences. This is HEARD once and cannot be re-read: a
  * coordinator listening while watching the map has no way to go back a clause,
@@ -90,7 +90,29 @@ const AI_LIVE_HISTORY_TURNS = 4;
  * as long as anyone stands still for something they can already read beside
  * them.
  */
-const AI_LIVE_SPOKEN_CAP = 320;
+const AI_LIVE_SPOKEN_TARGET = 320;
+
+/**
+ * The length the VALIDATOR allows. DELIBERATELY NOT THE TARGET.
+ *
+ * Shipped as one number in v3.287.0 and reported from the field the same day:
+ * the summary stopped without finishing. Three ordinary Greek sentences
+ * measure 285 to 340 characters, so a model obeying "two or three sentences"
+ * overshot 320 by a few characters perfectly often — and the cut, which falls
+ * back to the last sentence that ENDED, then deleted the whole third sentence.
+ * The third sentence is the one the prompt reserves for the action to take.
+ * Three characters over the line silently cost the listener the only part that
+ * told them what to do.
+ *
+ * So the two numbers are different ON PURPOSE, which is the opposite of the
+ * rule the drafting prompt follows. There the cap is what gets SENT and a
+ * mismatch would mean a message cut in the field; here the cap only ever
+ * truncates, and truncation destroys meaning rather than trimming politeness.
+ * The prompt aims at 320, the ceiling stops a model that decides to deliver a
+ * paragraph — about 28 seconds of Greek, long enough that it should never fire
+ * on a summary written as asked.
+ */
+const AI_LIVE_SPOKEN_CAP = 420;
 
 /**
  * Below this, a separate forecast for the point on the map is theatre.
@@ -1608,7 +1630,7 @@ function aiLiveSystemPrompt(): string {
     // exactly the reason the drafting prompt's is: the length the prompt asks
     // for and the length the validator enforces must not be able to drift
     // apart into two different numbers.
-    $spokenCap = AI_LIVE_SPOKEN_CAP;
+    $spokenCap = AI_LIVE_SPOKEN_TARGET;
 
     return aiPromptWithPlaybook(<<<PROMPT
 Είσαι έμπειρο στέλεχος συντονιστικού κέντρου έρευνας και διάσωσης, με 20 χρόνια πεδίου. Κάθεσαι δίπλα στον συντονιστή μιας αποστολής που βρίσκεται ΑΥΤΗ ΤΗ ΣΤΙΓΜΗ σε εξέλιξη και απαντάς στις ερωτήσεις του.
@@ -1654,6 +1676,7 @@ function aiLiveSystemPrompt(): string {
 - ΔΕΝ είναι η απάντηση με λιγότερα λόγια. Είναι το συμπέρασμα και η μία ενέργεια που προκύπτει από αυτό. Ό,τι δεν αλλάζει απόφαση μένει έξω.
 - Ακούγεται μία φορά και δεν ξαναδιαβάζεται. Χωρίς λίστες, χωρίς παρενθέσεις, χωρίς αριθμούς στη σειρά, χωρίς συντομογραφίες («χιλιόμετρα» και όχι «χλμ», «λεπτά» και όχι «λ.»), χωρίς σύμβολα, χωρίς markdown, χωρίς κωδικούς refs.
 - Ολοκληρωμένες προτάσεις, με τελεία στο τέλος. Περίληψη που κόβεται στη μέση ακούγεται σαν χαμένη σύνδεση και ο συντονιστής περιμένει τη συνέχεια αντί να ενεργήσει.
+- Αν δεν χωράνε τρεις προτάσεις μέσα στο όριο, γράψε δύο. Η τελευταία πρόταση — αυτή που λέει τι να κάνει ο συντονιστής — δεν θυσιάζεται ποτέ για να χωρέσει μια λεπτομέρεια πριν από αυτήν.
 - Στη γλώσσα της απάντησης.
 - Αν η απάντηση δηλώνει άγνοια, το ίδιο δηλώνει και η περίληψη. Υπάρχει άνθρωπος που θα ακούσει ΜΟΝΟ αυτήν· μια περίληψη που ακούγεται σίγουρη πάνω από μια απάντηση που δεν ξέρει είναι χειρότερη από καμία περίληψη.
 

@@ -828,6 +828,69 @@ function isPointerOnlyComputer({ hasNativeBridge, uaDataMobile, userAgent, maxTo
     return hasFinePointer === true;
 }
 
+/**
+ * How long a single spoken utterance is allowed to be, in characters.
+ *
+ * Roughly eleven seconds of Greek at the rate announcements use, which keeps
+ * every piece well under the fifteen seconds at which Chrome stops speaking a
+ * single utterance.
+ */
+const SPEECH_CHUNK_CHARS = 170;
+
+/**
+ * Break text into sentence-sized pieces to be queued as separate utterances.
+ *
+ * A long utterance gets cut three different ways and none of them announce
+ * themselves: Chrome stops after about fifteen seconds, some Android engines
+ * truncate anything long outright, and a remote voice that loses the network
+ * mid-sentence takes the whole remainder with it. In every case the listener
+ * simply hears a message that stops, and takes what they heard for the whole
+ * of it — which in an operation means acting on half an instruction. Short
+ * pieces queued in order survive all three: the engine's own queue does the
+ * sequencing, and no single piece is long enough to be cut.
+ *
+ * Breaks at a sentence end first, then at a comma, then at a space. Never
+ * inside a word, which is heard as a stutter rather than as a pause.
+ *
+ * Deliberately no lookbehind regex: Safari before 16.4 throws a SyntaxError
+ * while PARSING one, which would take down the whole script it sits in rather
+ * than just this function.
+ */
+function speechChunks(text) {
+    // «;» is the Greek question mark — U+003B as typed and U+037E as some
+    // tokenisers emit it — and «·» its semicolon. Both end a thought.
+    const SENTENCE_ENDS = '.!;\u037E\u00b7';
+    let rest = String(text == null ? '' : text).trim();
+    const out = [];
+
+    while (rest.length > SPEECH_CHUNK_CHARS) {
+        const head = rest.slice(0, SPEECH_CHUNK_CHARS);
+        let cut = -1;
+
+        for (let i = head.length - 1; i > 0; i--) {
+            if (SENTENCE_ENDS.indexOf(head[i]) !== -1 && /\s/.test(head[i + 1] || ' ')) {
+                cut = i + 1;
+                break;
+            }
+        }
+        // A sentence end in the first third is not worth obeying: it leaves a
+        // piece so short that the pause after it sounds like the end of the
+        // message.
+        if (cut < SPEECH_CHUNK_CHARS / 3) {
+            const comma = head.lastIndexOf(',');
+            cut = comma > SPEECH_CHUNK_CHARS / 3 ? comma + 1 : head.lastIndexOf(' ');
+        }
+        if (cut <= 0) cut = SPEECH_CHUNK_CHARS;
+
+        const piece = rest.slice(0, cut).trim();
+        if (piece) out.push(piece);
+        rest = rest.slice(cut).trim();
+    }
+
+    if (rest) out.push(rest);
+    return out;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         shareablePayload,
@@ -866,5 +929,7 @@ if (typeof module !== 'undefined' && module.exports) {
         MP4_RECORDER_MIME_CANDIDATES,
         WEBM_RECORDER_MIME_CANDIDATES,
         shouldSkipPhotoCompression,
+        speechChunks,
+        SPEECH_CHUNK_CHARS,
     };
 }

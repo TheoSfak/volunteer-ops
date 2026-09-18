@@ -58,6 +58,8 @@ const {
     isUnshareableVideoContainer,
     MP4_RECORDER_MIME_CANDIDATES,
     shouldSkipPhotoCompression,
+    speechChunks,
+    SPEECH_CHUNK_CHARS,
     polygonBoundsSizeMeters,
     formatBoundsSize,
 } = require('../../assets/js/war-room-utils.js');
@@ -1051,4 +1053,74 @@ test('a shape with no extent says nothing rather than zero', () => {
     assert.equal(polygonBoundsSizeMeters([[35, 25]]), null);
     assert.equal(formatBoundsSize(null), '');
     assert.equal(formatBoundsSize({w: 0, h: 0}), '');
+});
+
+// ── Spoken announcements, cut into pieces an engine will not truncate ───────
+
+test('speechChunks keeps a short message in one piece', () => {
+    const short = 'Η ΑΛΦΑ σιωπά σαράντα επτά λεπτά. Ζήτησέ της επικοινωνία τώρα.';
+    assert.deepEqual(speechChunks(short), [short]);
+});
+
+test('speechChunks breaks a long message at sentence ends', () => {
+    // Every piece must be short enough that no engine cuts it, and each must
+    // end where a thought ends — a piece ending mid-clause is heard as the
+    // message stopping.
+    const long = 'Η ομάδα ΑΛΦΑ δεν έχει στείλει στίγμα σαράντα επτά λεπτά και είναι η μόνη '
+               + 'ομάδα που βρίσκεται στον βόρειο τομέα αυτή τη στιγμή. Η ΒΗΤΑ βρίσκεται '
+               + 'ενάμισι χιλιόμετρο νότια και μπορεί να την καλύψει χωρίς να αφήσει το δικό '
+               + 'της έδαφος ακάλυπτο. Ζήτησε επικοινωνία από την ΑΛΦΑ πριν μετακινήσεις '
+               + 'οποιαδήποτε άλλη ομάδα στο βουνό.';
+    const pieces = speechChunks(long);
+
+    assert.ok(pieces.length > 1, 'a 320-character message must not go out as one utterance');
+    for (const p of pieces) {
+        assert.ok(p.length <= SPEECH_CHUNK_CHARS, `piece too long: ${p.length}`);
+    }
+    // Nothing added, nothing lost: the pieces rejoin into the original.
+    assert.equal(pieces.join(' ').replace(/\s+/g, ' '), long.replace(/\s+/g, ' '));
+    assert.ok(/[.!;\u037E\u00b7]$/.test(pieces[0]), 'the first piece must end on a sentence');
+});
+
+test('speechChunks never cuts inside a word', () => {
+    // A cut mid-word is heard as a stutter, which reads as a fault rather than
+    // as a pause.
+    const noPunctuation = 'ομάδα '.repeat(80).trim();
+    const pieces = speechChunks(noPunctuation);
+
+    assert.ok(pieces.length > 1);
+    for (const p of pieces) {
+        assert.ok(p.length <= SPEECH_CHUNK_CHARS);
+        assert.equal(p, p.trim());
+        assert.ok(!/^\S*[^ο]/.test(p.split(' ')[0]) || p.split(' ')[0] === 'ομάδα',
+            `piece starts mid-word: ${p.split(' ')[0]}`);
+    }
+    assert.equal(pieces.join(' '), noPunctuation);
+});
+
+test('speechChunks falls back to a comma when no sentence ends in range', () => {
+    const oneLongSentence = 'Η ομάδα ΑΛΦΑ κινείται βόρεια, η ΒΗΤΑ παραμένει στη βάση, '
+        + 'η ΓΑΜΑ ανεβαίνει προς το καταφύγιο, η ΔΕΛΤΑ περιμένει εντολή, '
+        + 'και η ΕΨΙΛΟΝ δεν έχει ακόμη ξεκινήσει από το σημείο συγκέντρωσης.';
+    const pieces = speechChunks(oneLongSentence);
+
+    assert.ok(pieces.length > 1);
+    assert.ok(pieces[0].endsWith(','), `expected a comma break, got: ${pieces[0].slice(-20)}`);
+});
+
+test('speechChunks handles the Greek question mark in both code points', () => {
+    const ascii = 'Πού είναι η ΑΛΦΑ; '.repeat(12).trim();
+    const greek = 'Πού είναι η ΑΛΦΑ\u037E '.repeat(12).trim();
+    for (const text of [ascii, greek]) {
+        const pieces = speechChunks(text);
+        assert.ok(pieces.length > 1);
+        assert.ok(/[;\u037E]$/.test(pieces[0]), `did not break on the question mark: ${pieces[0].slice(-10)}`);
+    }
+});
+
+test('speechChunks returns nothing for nothing', () => {
+    assert.deepEqual(speechChunks(''), []);
+    assert.deepEqual(speechChunks('   '), []);
+    assert.deepEqual(speechChunks(null), []);
+    assert.deepEqual(speechChunks(undefined), []);
 });

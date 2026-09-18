@@ -11823,31 +11823,66 @@ function speakAnnouncement(text, localOnly) {
         synth.cancel();
         const generation = ++speechGeneration;
         const lang = announcementLang(text);
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = lang;
-        // Slightly under default. One pass, outdoors, often through a pocket.
-        utterance.rate = 0.95;
-        utterance.volume = 1;
         const voice = pickAnnouncementVoice(lang, localOnly);
-        if (voice) utterance.voice = voice;
-        utterance.onend = () => { if (generation === speechGeneration) stopSpeechKeepAlive(); };
-        utterance.onerror = (ev) => {
-            // Superseded: whatever happened to this one, the page has already
-            // moved on to a newer announcement. Say nothing, touch nothing.
-            if (generation !== speechGeneration) return;
-            stopSpeechKeepAlive();
-            const err = (ev && ev.error) || '';
-            if (err === 'not-allowed') {
-                markAnnouncementBlocked();
-            } else if (!localOnly && SPEECH_RETRYABLE_ERRORS.indexOf(err) !== -1) {
+
+        // Queued in sentence-sized pieces rather than sent as one long
+        // utterance — see speechChunks() in war-room-utils.js for the three
+        // separate ways a long one gets cut without saying so. The engine's
+        // own queue keeps them in order, and cancel() clears the whole queue,
+        // so superseding still works exactly as it did.
+        // Guarded because speechChunks() lives in war-room-utils.js, a
+        // separately cached file: during a rollout a browser can hold the old
+        // copy of it beside a new page, and an unguarded call would throw into
+        // the catch below and leave the device silent with nothing on screen
+        // to say so. One long utterance is the behaviour this replaced — worse
+        // than pieces, immeasurably better than nothing.
+        const pieces = typeof speechChunks === 'function' ? speechChunks(text) : [text];
+        const last = pieces.length - 1;
+        let retried = false;
+
+        pieces.forEach((piece, i) => {
+            const utterance = new SpeechSynthesisUtterance(piece);
+            utterance.lang = lang;
+            // Slightly under default. One pass, outdoors, often through a pocket.
+            utterance.rate = 0.95;
+            utterance.volume = 1;
+            if (voice) utterance.voice = voice;
+            // Only the final piece ends the message; the keep-alive has to
+            // outlive every piece before it.
+            if (i === last) {
+                utterance.onend = () => { if (generation === speechGeneration) stopSpeechKeepAlive(); };
+            }
+            utterance.onerror = (ev) => {
+                // Superseded: whatever happened to this one, the page has
+                // already moved on to a newer announcement. Say nothing, touch
+                // nothing.
+                if (generation !== speechGeneration) return;
+                const err = (ev && ev.error) || '';
+                if (err === 'not-allowed') {
+                    stopSpeechKeepAlive();
+                    markAnnouncementBlocked();
+                    return;
+                }
+                if (localOnly || retried || SPEECH_RETRYABLE_ERRORS.indexOf(err) === -1) {
+                    if (i === last) stopSpeechKeepAlive();
+                    return;
+                }
                 // An "Online (Natural)" voice that could not be fetched. The
                 // offline one is worse to listen to and infinitely better than
                 // silence — and this is the failure that actually happens in
                 // the field, where the network is the thing that is missing.
-                speakAnnouncement(text, true);
-            }
-        };
-        synth.speak(utterance);
+                //
+                // Resumed from THIS piece, not from the beginning: the pieces
+                // before it have already been heard, and hearing the opening
+                // of an order twice is its own kind of confusion. Once per
+                // message — a second failure is the engine, not the voice.
+                retried = true;
+                stopSpeechKeepAlive();
+                speakAnnouncement(pieces.slice(i).join(' '), true);
+            };
+            synth.speak(utterance);
+        });
+
         startSpeechKeepAlive();
         return true;
     } catch (e) {
