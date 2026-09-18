@@ -147,6 +147,14 @@ const AI_LIVE_RATE_WINDOW  = 600;
 const AI_LIVE_CREW_CAP = 60;
 
 /**
+ * People named as nearest to a sector.
+ *
+ * Three is enough to choose between and short enough that ten sectors do not
+ * turn the digest into a distance table.
+ */
+const AI_LIVE_SECTOR_NEAREST = 3;
+
+/**
  * Heart-rate episodes carried in the digest, clinical ones first.
  *
  * Strain fires for nearly everyone on a real callout — a ten-person drill
@@ -236,6 +244,19 @@ function aiLiveQuestionNames(string $question, string $realName): int {
 }
 
 /**
+ * An age in the unit somebody would actually say it in.
+ *
+ * "43339 λεπτά" is a number nobody reads as a month — it reads as a typo, and
+ * a coordinator skims past the one caveat that mattered. Minutes up to an hour
+ * and a half, then hours, then days.
+ */
+function aiLiveAgeWords(int $minutes): string {
+    if ($minutes < 90)   return $minutes . ' λεπτά';
+    if ($minutes < 2880) return round($minutes / 60) . ' ώρες';
+    return round($minutes / 1440) . ' ημέρες';
+}
+
+/**
  * A distance as a radio call would say it.
  *
  * One decimal on kilometres, whole metres below one. Both are far from the
@@ -267,9 +288,26 @@ function aiLiveDistanceToTargetWords(
     float $straightMetres,
     string $bearing,
     ?array $routed,
-    bool $routingAttempted = false
+    bool $routingAttempted = false,
+    ?int $fixAgeMinutes = null
 ): string {
-    $words   = aiLiveMetresWords($straightMetres) . ' σε ευθεία ' . $bearing;
+    $words = aiLiveMetresWords($straightMetres) . ' σε ευθεία ' . $bearing;
+
+    // THE AGE RIDES INSIDE THE DISTANCE, not beside it in another field.
+    //
+    // Reported from the field: with a stale fix the assistant reported no
+    // distance at all. The figure was in the digest the whole time — the model
+    // saw «σιωπηλος: true» two fields away and declined to state a distance
+    // from a position it judged unreliable. Defensible caution, useless
+    // answer: the last known position IS the operational fact, and "he was
+    // 1,5 km out as of forty minutes ago" is something a coordinator can act
+    // on where "I cannot say" is not.
+    //
+    // Welding the caveat to the number means it cannot be reported without the
+    // caveat, and the caveat cannot be used as a reason to report nothing.
+    if ($fixAgeMinutes !== null) {
+        $words .= ' [θέση πριν ' . aiLiveAgeWords($fixAgeMinutes) . ' — η τελευταία γνωστή]';
+    }
     $walking = $routed['walking'] ?? null;
     $driving = $routed['driving'] ?? null;
 
@@ -358,9 +396,11 @@ const AI_LIVE_ROUTE_NO_WALK_MARK = '(χωρίς πεζή διαδρομή)';
 /** Whether any row in the list carries the missing-walking-route mark. */
 function aiLiveAnyMissingWalk(array $rows): bool {
     foreach ($rows as $row) {
-        if (isset($row['αποσταση_απο_στοχο'])
-            && mb_strpos($row['αποσταση_απο_στοχο'], AI_LIVE_ROUTE_NO_WALK_MARK) !== false) {
-            return true;
+        foreach ($row['στοχοι'] ?? [] as $goal) {
+            if (isset($goal['αποσταση'])
+                && mb_strpos($goal['αποσταση'], AI_LIVE_ROUTE_NO_WALK_MARK) !== false) {
+                return true;
+            }
         }
     }
     return false;
@@ -1393,10 +1433,13 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     // the square metres the coordinator sees while drawing are computed in the
     // browser and never persisted. Coverage status and who owns the sector are
     // what an operational question is about anyway.
-    $sectors = [];
+    $sectors       = [];
+    $sectorMids    = [];
+    $sectorRefToId = [];
     foreach ($sectorRows as $row) {
         $id = (int) $row['id'];
         $ref = assistantRecordRef('sector', $id);
+        $sectorRefToId[$ref] = $id;
         $refs[$ref] = 'Τομέας ' . $sectorLabels[$id];
         $entry = [
             'ref'          => $ref,
@@ -1415,9 +1458,23 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
             ));
         }
         if (isset($sectorGeos[$id])) {
-            $centroidLat = 0.0; $centroidLng = 0.0; $n = count($sectorGeos[$id]);
-            foreach ($sectorGeos[$id] as $pt) { $centroidLat += (float) $pt[0]; $centroidLng += (float) $pt[1]; }
-            $entry['θεση'] = aiLivePositionText($centroidLat / $n, $centroidLng / $n, $baseLat, $baseLng);
+            // polygonCentroid() rather than the mean of the vertices this used
+            // to take: on a concave sector drawn round a gorge the mean can
+            // land outside the sector entirely, and "the middle of Τομέας Γ"
+            // then names ground on the wrong side of a ridge. Same middle the
+            // assigned-target distance measures to, so the two cannot disagree
+            // about where a sector is.
+            $mid = polygonCentroid($sectorGeos[$id]);
+            if ($mid !== null) {
+                $entry['θεση'] = aiLivePositionText($mid['lat'], $mid['lng'], $baseLat, $baseLng);
+                if (($d = $fromFocus($mid['lat'], $mid['lng'])) !== null) {
+                    $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
+                }
+                // Kept for the second pass below, which is where the roster
+                // exists: who is near this sector is answered after the crew
+                // is known, not here.
+                $sectorMids[$id] = $mid;
+            }
         }
         $sectors[] = $entry;
     }
@@ -1569,6 +1626,12 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         $refs[$ref] = 'Στη βάρδια: ' . ($name ?? ('#' . $id));
         $cLat = $row['lat'] === null ? null : (float) $row['lat'];
         $cLng = $row['lng'] === null ? null : (float) $row['lng'];
+        // Non-null ONLY when the fix is past the silence threshold. A fresh
+        // position needs no apology, and attaching an age to every distance
+        // would bury the one case that matters.
+        $staleFixAge = ($lastTs !== null && ($now - $lastTs) >= $staleAfter)
+            ? (int) floor(($now - $lastTs) / 60)
+            : null;
         $entry = [
             'ref'        => $ref,
             'ονομα'      => $name,
@@ -1589,20 +1652,28 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         // number. A distance of nothing reads as "they are there", which about
         // somebody who has never pinged would send the coordinator past the
         // one person they most need to chase.
-        $target = missionTargetForTeam($targets, $row['team_id'] === null ? null : (int) $row['team_id']);
-        if ($target !== null) {
+        // EVERY place they were sent, not just the latest. A team holds a
+        // sector and a rendezvous point at the same time and both are real;
+        // reporting one made the other invisible, which is how "it works for a
+        // point and not for a sector" happened.
+        $personTargets = missionTargetsForTeam($targets, $row['team_id'] === null ? null : (int) $row['team_id']);
+        $goals = [];
+        foreach ($personTargets as $n => $target) {
             // THROUGH $red, like every other piece of free text in here. The
             // label of a sector, a route or a dispatch point is typed by a
             // coordinator at three in the morning, and «Σημείο Βαρδάκη» is
             // exactly the kind of thing that gets typed — a real name walking
             // into the provider through a field nobody thought of as text.
-            $entry['στοχος'] = $red($target['label'])
-                . ($target['detail'] !== null ? ' (' . $target['detail'] . ')' : '');
+            $goal = ['τι' => $red($target['label'])
+                . ($target['detail'] !== null ? ' (' . $target['detail'] . ')' : '')];
             if ($cLat !== null && $cLng !== null) {
                 $metres  = gpsDistanceMeters($cLat, $cLng, $target['lat'], $target['lng']);
                 $bearing = aiLiveCompassLabel(aiLiveBearingDegrees($cLat, $cLng, $target['lat'], $target['lng']));
-                $entry['αποσταση_απο_στοχο'] = aiLiveDistanceToTargetWords($metres, $bearing, null);
-                if ($metres >= ROUTE_DISTANCE_MIN_METRES) {
+                $goal['αποσταση'] = aiLiveDistanceToTargetWords($metres, $bearing, null, false, $staleFixAge);
+                // Only the newest target earns an outbound call. The others
+                // keep the straight line, which is free — eight legs across a
+                // whole roster does not survive being multiplied by three.
+                if ($n === 0 && $metres >= ROUTE_DISTANCE_MIN_METRES) {
                     $legs[count($crew)] = [
                         'metres'  => $metres,
                         'bearing' => $bearing,
@@ -1611,9 +1682,14 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
                         // exist, because the coordinator types "ο Πάνος" and
                         // not "ΜΕΛΟΣ-7".
                         'asked'   => aiLiveQuestionNames($askedAbout, (string) $row['who']),
+                        'stale_age' => $staleFixAge,
                     ];
                 }
             }
+            $goals[] = $goal;
+        }
+        if ($goals) {
+            $entry['στοχοι'] = $goals;
         }
 
         $crew[] = $entry;
@@ -1641,9 +1717,11 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         try {
             $routed = routeDistanceBatch(array_map(fn($l) => $l['leg'], $legs));
             foreach ($legs as $index => $leg) {
-                if (!isset($crew[$index])) continue;
-                $crew[$index]['αποσταση_απο_στοχο'] = aiLiveDistanceToTargetWords(
-                    $leg['metres'], $leg['bearing'], $routed[$index] ?? null, true
+                // The routed figure replaces the straight-line-only wording on
+                // the FIRST target, which is the one it was fetched for.
+                if (!isset($crew[$index]['στοχοι'][0]['αποσταση'])) continue;
+                $crew[$index]['στοχοι'][0]['αποσταση'] = aiLiveDistanceToTargetWords(
+                    $leg['metres'], $leg['bearing'], $routed[$index] ?? null, true, $leg['stale_age']
                 );
             }
         } catch (Throwable $e) {
@@ -1683,6 +1761,51 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
             . (aiLiveAnyMissingWalk($digest['θεσεις_προσωπικου'])
                 ? ' ' . AI_LIVE_ROUTE_NO_WALK_NOTE
                 : '');
+    }
+
+    // WHO IS NEAR EACH SECTOR. A second pass, because the sectors are built
+    // before the roster exists and the roster is what this needs.
+    //
+    // Without it a question about a sector nobody has been assigned to —
+    // «πόσο απέχει ο Χ από τον Τομέα Γ», «ποιον στέλνω εκεί» — had no answer
+    // at all: the sector carried only its bearing from base, the person
+    // carried theirs, and the prompt rightly forbids combining two such
+    // positions into a distance. That is the shape of "it works for a point
+    // and not for a sector". Straight-line arithmetic over the roster, so it
+    // costs nothing and covers EVERY sector, assigned or not.
+    if (!empty($digest['τομεις_ερευνας']) && $sectorMids) {
+        $fixes = [];
+        foreach ($onDuty as $prow) {
+            if ($prow['lat'] === null || $prow['lng'] === null) continue;
+            $fixes[] = [(float) $prow['lat'], (float) $prow['lng'], $pseudo($prow['who'])];
+        }
+        if ($fixes) {
+            foreach ($digest['τομεις_ερευνας'] as $i => $sectorEntry) {
+                // By the ref the row already carries, resolved through the map
+                // built alongside it. Parsing the id back out of "SECT-81"
+                // would be a second definition of that ref's format, free to
+                // disagree with assistantRecordRef() the moment it changes.
+                $sid = $sectorRefToId[$sectorEntry['ref'] ?? ''] ?? null;
+                if ($sid === null || !isset($sectorMids[$sid])) continue;
+                $mid  = $sectorMids[$sid];
+                $near = [];
+                foreach ($fixes as [$pLat, $pLng, $who]) {
+                    $near[] = [
+                        'who'     => $who,
+                        'metres'  => gpsDistanceMeters($pLat, $pLng, $mid['lat'], $mid['lng']),
+                        'bearing' => aiLiveCompassLabel(aiLiveBearingDegrees($pLat, $pLng, $mid['lat'], $mid['lng'])),
+                    ];
+                }
+                usort($near, fn($a, $b) => $a['metres'] <=> $b['metres']);
+                $digest['τομεις_ερευνας'][$i]['πλησιεστεροι'] = array_map(
+                    fn($p) => $p['who'] . ': ' . aiLiveMetresWords($p['metres'])
+                        . ' σε ευθεία, ο τομέας ' . $p['bearing'] . ' από αυτόν',
+                    array_slice($near, 0, AI_LIVE_SECTOR_NEAREST)
+                );
+            }
+            $digest['σημειωση_τομεων'] = ($digest['σημειωση_τομεων'] ?? '')
+                . ' Το "πλησιεστεροι" ειναι η αποσταση ΑΠΟ ΤΟ ΣΤΙΓΜΑ καθε ατομου ΣΤΟ ΜΕΣΟ του τομεα, υπολογισμενη απο τον server σε ευθεια γραμμη. Χρησιμοποιησέ την αυτουσια για «ποσο απεχει ο Χ απο τον τομεα» και «ποιον στελνω εκει».';
+        }
     }
 
     // ── which way things are going ───────────────────────────────────────
@@ -1939,7 +2062,10 @@ function aiLiveSystemPrompt(): string {
 - Όταν η ερώτηση αφορά το σημείο που κοιτάζει ο συντονιστής, χρησιμοποίησε το έτοιμο πεδίο «αποσταση_απο_σημειο_εστιασης» όπου υπάρχει — είναι υπολογισμένο από τον server. Αν λείπει από μια εγγραφή, δεν υπάρχει· μην το συμπληρώσεις μόνος σου.
 - Το «θεση» είναι πάντα φράση, ποτέ κενό. Αν λέει «Δεν έχει σταλεί στίγμα» ή ότι λείπει το σημείο βάσης, αυτό είναι η απάντηση — πες το με ανθρώπινα λόγια και μην αναφέρεις ποτέ τη λέξη «null».
 - Για το πού βρίσκεται συγκεκριμένο πρόσωπο κοίτα το «θεσεις_προσωπικου». Η θέση μιας ομάδας είναι το στίγμα οποιουδήποτε μέλους της και ΔΕΝ είναι η θέση του επικεφαλής.
-- Για το πόσο απέχει κάποιος από εκεί που τον έστειλαν, χρησιμοποίησε τα έτοιμα «στοχος» και «αποσταση_απο_στοχο». Είναι υπολογισμένα από τον server από τις πραγματικές συντεταγμένες. ΠΟΤΕ μην τα υπολογίσεις μόνος σου και ποτέ μην τα συμπληρώσεις όταν λείπουν: αν λείπουν, ή δεν του έχει ανατεθεί σημείο ή δεν έχει σταλεί στίγμα — και αυτό ακριβώς είναι η απάντηση.
+- Για το πόσο απέχει κάποιος από εκεί που τον έστειλαν, χρησιμοποίησε το έτοιμο «στοχοι»: λίστα με ΟΛΑ τα σημεία, τους τομείς και τις πορείες που του έχουν ανατεθεί, το πιο πρόσφατο πρώτο, με «τι» και «αποσταση» το καθένα. Μια ομάδα μπορεί κάλλιστα να έχει ΚΑΙ τομέα ΚΑΙ σημείο συνάντησης — ανάφερε αυτό που ταιριάζει στην ερώτηση, και αν η ερώτηση δεν ξεχωρίζει, ανάφερε το πιο πρόσφατο και πες ότι υπάρχει και άλλο.
+- Για το πόσο απέχει κάποιος από ΟΠΟΙΟΝΔΗΠΟΤΕ τομέα, ακόμη κι αν δεν του έχει ανατεθεί, κοίτα το «πλησιεστεροι» του ίδιου του τομέα στο «τομεις_ερευνας». Είναι η απόσταση από το στίγμα του κάθε ατόμου στο ΜΕΣΟ του τομέα, υπολογισμένη από τον server.
+- Όλα αυτά είναι υπολογισμένα από τις πραγματικές συντεταγμένες. ΠΟΤΕ μην τα υπολογίσεις μόνος σου και ποτέ μην τα συμπληρώσεις όταν λείπουν: αν λείπουν, ή δεν του έχει ανατεθεί τίποτα ή δεν έχει σταλεί στίγμα — και αυτό ακριβώς είναι η απάντηση.
+- ΠΑΛΙΟ ΣΤΙΓΜΑ ΔΕΝ ΣΗΜΑΙΝΕΙ ΟΤΙ ΚΡΥΒΕΙΣ ΤΗΝ ΑΠΟΣΤΑΣΗ. Αν κάποιος είναι σιωπηλός, η απόσταση υπολογίζεται από την τελευταία γνωστή του θέση και το πεδίο το γράφει μέσα του, με την ηλικία της. Δώσε το νούμερο ΚΑΙ την ηλικία μαζί — «ήταν 1,5 χλμ έξω πριν σαράντα λεπτά» είναι κάτι που ο συντονιστής μπορεί να χρησιμοποιήσει· ένα «δεν μπορώ να πω» δεν είναι.
 - Η ευθεία γραμμή και η απόσταση διαδρομής ΔΕΝ είναι το ίδιο πράγμα. Στο βουνό η διαδρομή είναι συχνά τριπλάσια από την ευθεία, γιατί ο δρόμος κάνει τον γύρο. Λέγε πάντα ποιο από τα δύο αναφέρεις, με τα ίδια λόγια που τα λέει το πεδίο.
 - Το πεδίο δίνει ΚΑΙ ΤΟΥΣ ΔΥΟ χρόνους όπου υπάρχουν: «με τα πόδια» και «με αμάξι». Ανάφερε και τους δύο όταν ρωτιέται απόσταση ή χρόνος άφιξης — ο συντονιστής επιλέγει ανάμεσά τους και η επιλογή είναι η απόφαση που παίρνει. Αν λείπει ο ένας, πες ποιος λείπει και γιατί, μην παρουσιάσεις τον άλλον σαν να είναι όλη η απάντηση.
 - Δεν βλέπεις χάρτη, αλλά οι σχέσεις είναι υπολογισμένες για σένα: το «γειτονικοι» κάθε τομέα λέει ποιοι ακουμπάνε, και το «τομεας» σε περιστατικά, SOS και σημεία ενδιαφέροντος λέει σε ποιο έδαφος έπεσαν. Χρησιμοποίησέ τα αυτούσια — μην συμπεραίνεις γειτνίαση από ονόματα ή αριθμούς τομέων.

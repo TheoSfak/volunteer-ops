@@ -81,21 +81,44 @@ final class MissionTargetDistanceTest extends TestCase
         $this->assertNull(missionTargetPointFromGeo('[]'));
     }
 
-    public function testATeamTargetBeatsTheMissionWideOne(): void
+    public function testEveryPlaceSomebodyWasSentIsReportedNotJustTheLatest(): void
     {
+        // Reported from the field as "it works for a point and not for a
+        // sector". A team legitimately holds a sector AND a rendezvous point
+        // at once; keeping only the newest threw one away silently, and since
+        // dispatch points were read first, a tie on the second-granularity
+        // timestamp handed it to the point as well. The coordinator had just
+        // assigned a sector and the assistant went on measuring to a point
+        // sent minutes earlier.
         $targets = [
-            0  => ['kind' => 'point',  'label' => 'Όλοι', 'lat' => 1.0, 'lng' => 1.0, 'ts' => 10, 'detail' => null],
-            40 => ['kind' => 'sector', 'label' => 'Τομέας Α', 'lat' => 2.0, 'lng' => 2.0, 'ts' => 5, 'detail' => null],
+            0  => [['kind' => 'point',  'label' => 'Όλοι',     'lat' => 1.0, 'lng' => 1.0, 'ts' => 10, 'detail' => null]],
+            40 => [['kind' => 'sector', 'label' => 'Τομέας Α', 'lat' => 2.0, 'lng' => 2.0, 'ts' => 5,  'detail' => null],
+                   ['kind' => 'point',  'label' => 'Ραντεβού', 'lat' => 3.0, 'lng' => 3.0, 'ts' => 5,  'detail' => null]],
         ];
 
-        // Even though the mission-wide one is NEWER: a team that was given its
-        // own ground is not also being sent to the general point.
-        $this->assertSame('Τομέας Α', missionTargetForTeam($targets, 40)['label']);
-        // Somebody on no team, and somebody on a team with nothing of its own,
-        // both fall back to the mission-wide target.
-        $this->assertSame('Όλοι', missionTargetForTeam($targets, null)['label']);
-        $this->assertSame('Όλοι', missionTargetForTeam($targets, 99)['label']);
-        $this->assertNull(missionTargetForTeam([], 40));
+        $forTeam = missionTargetsForTeam($targets, 40);
+        $this->assertSame(['Τομέας Α', 'Ραντεβού', 'Όλοι'], array_column($forTeam, 'label'));
+
+        // Team assignments come before the mission-wide one even when the
+        // mission-wide one is newer: an instruction to YOUR team is more yours
+        // than a broadcast. But the broadcast is still reported, which is the
+        // part that used to be missing.
+        $this->assertSame('Τομέας Α', $forTeam[0]['label']);
+
+        // Somebody on no team, and on a team with nothing of its own, still
+        // get what was addressed to everybody.
+        $this->assertSame(['Όλοι'], array_column(missionTargetsForTeam($targets, null), 'label'));
+        $this->assertSame(['Όλοι'], array_column(missionTargetsForTeam($targets, 99), 'label'));
+        $this->assertSame([], missionTargetsForTeam([], 40));
+    }
+
+    public function testTheListOfTargetsIsCappedSoItStaysAnOrderNotATable(): void
+    {
+        $many = [40 => []];
+        foreach (range(1, 8) as $i) {
+            $many[40][] = ['kind' => 'point', 'label' => 'Σημείο ' . $i, 'lat' => 1.0, 'lng' => 1.0, 'ts' => $i, 'detail' => null];
+        }
+        $this->assertCount(MISSION_TARGET_CAP, missionTargetsForTeam($many, 40));
     }
 
     // ── How the distance is said ───────────────────────────────────────────
@@ -158,8 +181,8 @@ final class MissionTargetDistanceTest extends TestCase
         // Eight copies of the same sentence is a paragraph of the digest spent
         // saying one thing, and it reads as eight separate problems rather
         // than one fact about the terrain.
-        $marked = ['αποσταση_απο_στοχο' => '1.5 χλμ σε ευθεία ΒΑ — με αμάξι 2.4 χλμ ' . AI_LIVE_ROUTE_NO_WALK_MARK];
-        $plain  = ['αποσταση_απο_στοχο' => '1.5 χλμ σε ευθεία ΒΑ — με αμάξι 2.4 χλμ, 6 λεπτά'];
+        $marked = ['στοχοι' => [['τι' => 'Τομέας Α', 'αποσταση' => '1.5 χλμ σε ευθεία ΒΑ — με αμάξι 2.4 χλμ ' . AI_LIVE_ROUTE_NO_WALK_MARK]]];
+        $plain  = ['στοχοι' => [['τι' => 'Τομέας Β', 'αποσταση' => '1.5 χλμ σε ευθεία ΒΑ — με αμάξι 2.4 χλμ, 6 λεπτά']]];
 
         $this->assertTrue(aiLiveAnyMissingWalk([$plain, $marked]));
         $this->assertFalse(aiLiveAnyMissingWalk([$plain, $plain]));
@@ -179,6 +202,43 @@ final class MissionTargetDistanceTest extends TestCase
         // And when nothing was asked for, nothing is claimed.
         $notAttempted = aiLiveDistanceToTargetWords(1500, 'ΒΑ', null, false);
         $this->assertSame('1.5 χλμ σε ευθεία ΒΑ', $notAttempted);
+    }
+
+    public function testAStaleFixStillGetsItsDistanceWithTheAgeWeldedOn(): void
+    {
+        // Reported from the field: with a stale fix the assistant reported no
+        // distance at all. The figure was in the digest the whole time — the
+        // model saw «σιωπηλος: true» two fields away and declined to state a
+        // distance from a position it judged unreliable. Defensible caution,
+        // useless answer: "he was 1,5 km out forty minutes ago" is something a
+        // coordinator can act on; "I cannot say" is not.
+        //
+        // Welding the caveat to the number means it cannot be reported without
+        // the caveat, and the caveat cannot be used as a reason to report
+        // nothing.
+        $stale = aiLiveDistanceToTargetWords(1500, 'ΒΑ', [
+            'walking' => null,
+            'driving' => ['meters' => 2400, 'minutes' => 6],
+        ], true, 40);
+
+        $this->assertStringContainsString('1.5 χλμ σε ευθεία ΒΑ', $stale, 'the distance is still stated');
+        $this->assertStringContainsString('40 λεπτά', $stale, 'and its age travels with it');
+        $this->assertStringContainsString('με αμάξι 2.4 χλμ', $stale, 'as does the routed figure');
+
+        // A fresh fix needs no apology; attaching an age to every distance
+        // would bury the one case that matters.
+        $fresh = aiLiveDistanceToTargetWords(1500, 'ΒΑ', null, false, null);
+        $this->assertSame('1.5 χλμ σε ευθεία ΒΑ', $fresh);
+    }
+
+    public function testAnAgeIsSaidInAUnitSomebodyWouldActuallyUse(): void
+    {
+        // "43339 λεπτά" reads as a typo, not as a month, and a coordinator
+        // skims past the one caveat that mattered.
+        $this->assertSame('40 λεπτά', aiLiveAgeWords(40));
+        $this->assertSame('89 λεπτά', aiLiveAgeWords(89));
+        $this->assertSame('2 ώρες', aiLiveAgeWords(90));
+        $this->assertSame('30 ημέρες', aiLiveAgeWords(43339));
     }
 
     public function testARouterThatWentRoundTheMountainIsFlaggedNotJustStated(): void

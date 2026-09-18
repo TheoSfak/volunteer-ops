@@ -96,10 +96,18 @@ function missionAssignedTargets(int $missionId): array {
     //
     // A completed sector is not somewhere anybody is still being sent, and
     // reporting a distance to it would put a finished job back on the board.
+    //
+    // team_id IS NOT NULL is load-bearing and unlike the dispatch points
+    // above. A point drawn with no team IS addressed to everyone — that is
+    // what "send to all" means. A sector with no team is simply ground that
+    // has been drawn and not yet given to anybody. Counting those as
+    // everyone's assignment meant a mission with seven unassigned sectors
+    // collapsed them to whichever one happened to sort first and told every
+    // teamless volunteer that was where they had been sent. It was not.
     $rows = dbFetchAll(
         "SELECT id, team_id, label, geo, status, UNIX_TIMESTAMP(created_at) AS ts
          FROM mission_search_sectors
-         WHERE mission_id = ? AND status <> 'completed'",
+         WHERE mission_id = ? AND status <> 'completed' AND team_id IS NOT NULL",
         [$missionId]
     );
     foreach ($rows as $row) {
@@ -147,27 +155,46 @@ function missionAssignedTargets(int $missionId): array {
         ];
     }
 
-    // Newest per team.
+    // ALL of them per team, newest first — not just the newest one.
+    //
+    // A team legitimately holds a sector AND a rendezvous point at the same
+    // time; both are places it was sent. Keeping only the newest threw one
+    // away silently, and since dispatch points were read first, a tie on the
+    // second-granularity timestamp handed it to the point as well. Reported
+    // from the field as "it works for a point and not for a sector": the
+    // coordinator had assigned a sector, and the assistant went on measuring
+    // to a rendezvous point sent minutes earlier.
     $targets = [];
     foreach ($candidates as $c) {
         $team = $c['team_id'];
-        if (!isset($targets[$team]) || $c['ts'] > $targets[$team]['ts']) {
-            unset($c['team_id']);
-            $targets[$team] = $c;
-        }
+        unset($c['team_id']);
+        $targets[$team][] = $c;
     }
+    foreach ($targets as &$list) {
+        usort($list, fn($a, $b) => $b['ts'] <=> $a['ts']);
+    }
+    unset($list);
 
     return $targets;
 }
 
+/** How many of a team's targets are reported. Past this it is a list, not an order. */
+const MISSION_TARGET_CAP = 3;
+
 /**
- * The target that applies to one person.
+ * Every place one person was sent, newest first.
  *
- * Their team's own, if it has one; otherwise the mission-wide target. Returns
- * null when neither exists — which is the normal state early in an operation
- * and must read as "nothing was assigned", never as a distance of zero.
+ * Their team's own assignments, then anything addressed to the whole mission.
+ * Team-first rather than strictly newest, because an instruction given to your
+ * team is more yours than one broadcast to everybody — but the broadcast one is
+ * still reported, which is the part that used to be missing.
+ *
+ * Returns an empty array when nothing was assigned, which is the normal state
+ * early in an operation and must read as "nothing yet", never as a distance of
+ * zero.
  */
-function missionTargetForTeam(array $targets, ?int $teamId): ?array {
-    if ($teamId !== null && isset($targets[$teamId])) return $targets[$teamId];
-    return $targets[0] ?? null;
+function missionTargetsForTeam(array $targets, ?int $teamId): array {
+    $own    = ($teamId !== null && isset($targets[$teamId])) ? $targets[$teamId] : [];
+    $shared = $targets[0] ?? [];
+    return array_slice(array_merge($own, $shared), 0, MISSION_TARGET_CAP);
 }
