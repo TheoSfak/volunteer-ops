@@ -2582,6 +2582,24 @@ include __DIR__ . '/includes/header.php';
     }
     .assistant-ask-divider::after {
         content: ''; flex: 1 1 auto; height: 1px; background: rgba(100,116,139,.3);
+        order: 1;
+    }
+    /* Sized to the line it sits on rather than to Bootstrap's idea of a small
+       button: at btn-sm's own height it would have made this divider half as
+       tall again, which is the whole cost it was moved here to avoid. The
+       divider uppercases its text and a button does not inherit out of that
+       by itself. */
+    #assistantSpeakBtn {
+        order: 2; flex: 0 0 auto; position: relative;
+        padding: .08rem .4rem; font-size: .7rem; line-height: 1.3;
+        text-transform: none; letter-spacing: 0;
+    }
+    /* The tap target, which is not the same thing as the button. Icon-only on
+       a phone the box is 26x19, and this is pressed by somebody wearing gloves
+       in the dark: the overlay brings the reachable area to roughly 46x43
+       without putting a single pixel back into the divider's height. */
+    #assistantSpeakBtn::after {
+        content: ''; position: absolute; inset: -12px -10px;
     }
     /* Outside .modal-body on purpose: the body scrolls, and an input that
        scrolls away is one the coordinator has to hunt for mid-question. */
@@ -2593,6 +2611,11 @@ include __DIR__ . '/includes/header.php';
        zoomed the Action Room out from under a coordinator mid-operation, and
        nothing brings it back but a pinch. 16px exactly, on the input only. */
     @media (max-width: 576px) {
+        /* Icon only. The speaker fills in and turns colour when it is on, so
+           the word beside it says nothing the button has not already said —
+           and with the label the row wrapped to a fourth line, pushing this
+           bar to 22% of a phone screen before the keyboard had even opened. */
+        .assistant-speak-label { display: none; }
         #assistantAskInput { font-size: 16px; }
         /* Input bar plus footer were 27% of a phone screen before the keyboard
            even opened, and the keyboard takes half of what is left. */
@@ -2833,6 +2856,25 @@ include __DIR__ . '/includes/header.php';
                          without ever pushing the box you type in off-screen. */ ?>
                 <div class="assistant-ask-divider">
                     <span><i class="bi bi-stars me-1"></i><?= t('assistant.ask_heading') ?></span>
+                    <?php if (aiIsConfigured()): ?>
+                    <?php /* On this line because it is the only one in the
+                             panel with horizontal room to spare at 375px. In
+                             the ask bar below it cost 49 measured pixels — 6%
+                             of a phone screen — on a strip that was cut down
+                             to size on purpose, and this is a preference set
+                             once rather than a control used per answer.
+                             Introducing the chat is also what this line is
+                             for, and how its answers arrive is part of that.
+
+                             Hidden until the JS finds a speech engine, the
+                             same rule as the microphone: a speaker that cannot
+                             speak is worse than no speaker at all. */ ?>
+                    <button type="button" id="assistantSpeakBtn"
+                            class="btn btn-sm btn-outline-secondary d-none"
+                            aria-pressed="false" title="<?= t('assistant.speak_title_off') ?>">
+                        <i class="bi bi-volume-up"></i><span class="assistant-speak-label ms-1"><?= t('assistant.speak_btn') ?></span>
+                    </button>
+                    <?php endif; ?>
                 </div>
                 <div id="assistantAskIntro" class="small text-muted mb-2">
                     <?php if (aiIsConfigured()): ?>
@@ -13542,10 +13584,44 @@ function assistantRenderAnswer(slot, res) {
     // Absent when there is no order field to fill — with nobody on shift the
     // card renders a "nobody active" line and no textarea, and a button that
     // silently does nothing is worse than no button.
+    // One strip under the answer for everything that acts ON the answer,
+    // created only when something goes in it: with no order field and the
+    // speaker off there is nothing to put there, and an empty ruled strip
+    // under every reply is a line the eye crosses for nothing.
+    let actionStrip = null;
+    const actionsRow = () => {
+        if (!actionStrip) {
+            actionStrip = document.createElement('div');
+            actionStrip.className = 'assistant-answer-actions';
+            slot.appendChild(actionStrip);
+        }
+        return actionStrip;
+    };
+
+    // Read aloud, when the coordinator asked to be read to. Never res.answer:
+    // that is four or five sentences dense with figures, which are exactly
+    // right on a screen where they can be checked against the citations beside
+    // them and unmemorable through a phone speaker — and long enough that the
+    // map has moved on by the time it finishes. res.spoken is written by the
+    // same call, for the ear, and says the conclusion and the action.
+    //
+    // The replay button appears only with the speaker on: it is for the line
+    // that was talked over, and on a phone an extra button under every answer
+    // costs more than it gives to somebody who never turned the sound on.
+    if (res.spoken && assistantVoiceOn) {
+        speakAnnouncement(res.spoken);
+        const replay = document.createElement('button');
+        replay.type = 'button';
+        replay.className = 'btn btn-sm btn-outline-info me-2 wr-speak-btn';
+        replay.innerHTML = `<i class="bi bi-volume-up me-1"></i>${escapeHtml(t('assistant.speak_replay'))}`;
+        replay.title = res.spoken;
+        replay.addEventListener('click', () => speakAnnouncement(res.spoken));
+        actionsRow().appendChild(replay);
+    }
+
     const orderField = document.querySelector('textarea[name="task_text"]');
     if (orderField && res.answer) {
-        const actions = document.createElement('div');
-        actions.className = 'assistant-answer-actions';
+        const actions = actionsRow();
         const useBtn = document.createElement('button');
         useBtn.type = 'button';
         useBtn.className = 'btn btn-sm btn-outline-warning';
@@ -13578,7 +13654,6 @@ function assistantRenderAnswer(slot, res) {
         note.className = 'small text-muted mt-1';
         note.textContent = t('assistant.use_in_order_hint');
         actions.appendChild(note);
-        slot.appendChild(actions);
     }
     assistantScrollToLatest();
 }
@@ -13593,6 +13668,10 @@ function assistantAsk(presetQuestion) {
 
     assistantAsking = true;
     input.value = '';
+    // A new question supersedes the last answer, including out loud. Without
+    // this the previous summary keeps playing over the wait for the new one,
+    // which is the worst possible moment to be listening to a stale one.
+    assistantVoiceStop();
     document.getElementById('assistantAskBtn').disabled = true;
     const slot = assistantAppendQuestion(question);
 
@@ -13629,6 +13708,89 @@ function assistantAsk(presetQuestion) {
 
 document.getElementById('assistantAskBtn')?.addEventListener('click', () => assistantAsk());
 
+// ── Answers read aloud ─────────────────────────────────────────────────────
+//
+// A coordinator watching the map with a radio in one hand cannot also read
+// four sentences of prose. With this on, an answer arrives twice: written in
+// full on screen, where every figure can be checked against the citations
+// beside it, and spoken as a two-or-three sentence summary that carries the
+// conclusion and the action.
+//
+// The spoken line is NOT the written answer read out — see the prompt and
+// assistantRenderAnswer for why. It is produced by the same call, at no extra
+// cost and no extra wait.
+//
+// The engine is the browser's own, the same one that reads the field's spoken
+// announcements: no audio is fetched, none is recorded, and nothing about the
+// answer leaves this machine to be spoken.
+let assistantVoiceOn = false;
+
+function assistantVoiceStop() {
+    if (!SPEECH_SUPPORTED) return;
+    // The generation moves BEFORE the cancel, never after. cancel() delivers
+    // an error event to the utterance it stops, and an utterance that still
+    // believes it is the current one treats that as a failure worth retrying —
+    // which would restart, out loud, the very line being silenced.
+    speechGeneration++;
+    stopSpeechKeepAlive();
+    try { window.speechSynthesis.cancel(); } catch (e) { /* engine already gone */ }
+}
+
+// Shared with the dictation below, which wrote it first: one transient line
+// under the ask bar, so two features that both have something brief to say
+// cannot end up saying it in two different places.
+function assistantSayVoiceMsg(text, cls) {
+    const box = document.getElementById('assistantVoiceMsg');
+    if (!box) return;
+    box.className = 'assistant-voice-msg ' + (cls || 'text-muted');
+    box.textContent = text || '';
+    if (text) setTimeout(() => { if (box.textContent === text) box.textContent = ''; }, 5000);
+}
+
+(function () {
+    const btn = document.getElementById('assistantSpeakBtn');
+    if (!btn || !SPEECH_SUPPORTED) return;
+    btn.classList.remove('d-none');
+
+    // Per browser and per device, and nowhere near the server: whether you
+    // want to be spoken to is a fact about the room you are sitting in, not
+    // about your account — the same coordinator wants it on at the command
+    // post and off in a briefing. Both accessors are wrapped because a private
+    // window throws on the read as readily as on the write.
+    const STORE_KEY = 'vo_assistant_voice';
+    let saved = false;
+    try { saved = localStorage.getItem(STORE_KEY) === '1'; } catch (e) { /* no storage */ }
+
+    function apply(on, fromClick) {
+        assistantVoiceOn = on;
+        btn.classList.toggle('btn-info', on);
+        btn.classList.toggle('btn-outline-secondary', !on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.querySelector('i').className = on ? 'bi bi-volume-up-fill' : 'bi bi-volume-up';
+        btn.title = on ? t('assistant.speak_title_on') : t('assistant.speak_title_off');
+        if (!on) assistantVoiceStop();
+        // Said once, on the press that turns it on, because somebody who hears
+        // three sentences after reading five will otherwise report the voice
+        // as broken. Not a permanent line: it answers a question that is only
+        // asked the first time.
+        if (on && fromClick) assistantSayVoiceMsg(t('assistant.speak_note'));
+        try { localStorage.setItem(STORE_KEY, on ? '1' : '0'); } catch (e) { /* no storage */ }
+    }
+
+    apply(saved, false);
+    // This press is also the user gesture browsers require before they will
+    // speak at all, which is why an answer here never meets the blocked-speech
+    // case the field's announcements have to recover from.
+    btn.addEventListener('click', () => apply(!assistantVoiceOn, true));
+
+    // A popup closed with the speaker still running leaves a phone talking to
+    // a room whose coordinator has already moved on to something else. An
+    // answer that arrives AFTER it is closed still speaks, deliberately:
+    // closing the panel to watch the map while it thinks is the whole reason
+    // somebody turns this on.
+    document.getElementById('assistantModal')?.addEventListener('hidden.bs.modal', assistantVoiceStop);
+})();
+
 // ── Dictating a question ───────────────────────────────────────────────────
 //
 // A coordinator holding a radio in one hand and a map in the other does not
@@ -13654,13 +13816,7 @@ document.getElementById('assistantAskBtn')?.addEventListener('click', () => assi
     let listening = false;
     let heard = '';
 
-    const say = (text, cls) => {
-        const box = document.getElementById('assistantVoiceMsg');
-        if (!box) return;
-        box.className = 'assistant-voice-msg ' + (cls || 'text-muted');
-        box.textContent = text || '';
-        if (text) setTimeout(() => { if (box.textContent === text) box.textContent = ''; }, 5000);
-    };
+    const say = assistantSayVoiceMsg;
 
     function setListening(on) {
         listening = on;
@@ -13682,6 +13838,11 @@ document.getElementById('assistantAskBtn')?.addEventListener('click', () => assi
         // Asking while an answer is still being written would queue a second
         // call behind it and hit the rate limit twice as fast.
         if (typeof assistantAsking !== 'undefined' && assistantAsking) return;
+
+        // Silence the previous answer before opening the microphone, or the
+        // recogniser hears the device reading it out and submits that as the
+        // question.
+        assistantVoiceStop();
 
         heard = '';
         recognition = new Recognition();

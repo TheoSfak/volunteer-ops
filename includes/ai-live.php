@@ -81,6 +81,18 @@ const AI_LIVE_QUESTION_CAP = 500;
 const AI_LIVE_HISTORY_TURNS = 4;
 
 /**
+ * Longest summary that gets read aloud, in characters.
+ *
+ * Two or three sentences. This is HEARD once and cannot be re-read: a
+ * coordinator listening while watching the map has no way to go back a clause,
+ * so length here does not cost screen space, it costs comprehension. At the
+ * speaking rate the app uses it is around twenty seconds, which is also about
+ * as long as anyone stands still for something they can already read beside
+ * them.
+ */
+const AI_LIVE_SPOKEN_CAP = 320;
+
+/**
  * Below this, a separate forecast for the point on the map is theatre.
  *
  * OpenWeatherMap's forecast grid is coarse — on the order of ten kilometres —
@@ -1592,7 +1604,13 @@ function aiInjectBeforeLimits(string $prompt, string $section): string {
 }
 
 function aiLiveSystemPrompt(): string {
-    return aiPromptWithPlaybook(<<<'PROMPT'
+    // Interpolated into the heredoc below, which is the double-quoted kind for
+    // exactly the reason the drafting prompt's is: the length the prompt asks
+    // for and the length the validator enforces must not be able to drift
+    // apart into two different numbers.
+    $spokenCap = AI_LIVE_SPOKEN_CAP;
+
+    return aiPromptWithPlaybook(<<<PROMPT
 Είσαι έμπειρο στέλεχος συντονιστικού κέντρου έρευνας και διάσωσης, με 20 χρόνια πεδίου. Κάθεσαι δίπλα στον συντονιστή μιας αποστολής που βρίσκεται ΑΥΤΗ ΤΗ ΣΤΙΓΜΗ σε εξέλιξη και απαντάς στις ερωτήσεις του.
 
 ΤΙ ΕΙΣΑΙ ΚΑΙ ΤΙ ΔΕΝ ΕΙΣΑΙ
@@ -1630,11 +1648,21 @@ function aiLiveSystemPrompt(): string {
 
 ΜΕΣΑ ΣΤΟ ΚΕΙΜΕΝΟ ΤΗΣ ΑΠΑΝΤΗΣΗΣ ΔΕΝ ΓΡΑΦΕΙΣ ΠΟΤΕ ΚΩΔΙΚΟ REF. Ούτε ORD-138, ούτε TEAM-4, ούτε INC-9. Ο κωδικός δεν λέει τίποτα σε όποιον διαβάζει και πρέπει να ενεργήσει. Αναφέρεσαι στην εγγραφή με αυτό ΠΟΥ ΕΙΝΑΙ: την εντολή με τα ίδια της τα λόγια («η εντολή για παύση 15 λεπτών»), την ομάδα με το κωδικό της όνομα, το περιστατικό με το είδος και την ώρα του, το πρόσωπο με το όνομά του. Τα refs μπαίνουν μόνο στο "evidence".
 
+Η ΦΩΝΗΤΙΚΗ ΠΕΡΙΛΗΨΗ
+Μαζί με την απάντηση γράφεις και μια περίληψη που θα τη ΔΙΑΒΑΣΕΙ ΦΩΝΑΧΤΑ η συσκευή του συντονιστή, στο πεδίο "spoken", ενώ εκείνος κοιτάζει τον χάρτη και δεν διαβάζει την οθόνη.
+- 2 έως 3 προτάσεις, το πολύ {$spokenCap} χαρακτήρες.
+- ΔΕΝ είναι η απάντηση με λιγότερα λόγια. Είναι το συμπέρασμα και η μία ενέργεια που προκύπτει από αυτό. Ό,τι δεν αλλάζει απόφαση μένει έξω.
+- Ακούγεται μία φορά και δεν ξαναδιαβάζεται. Χωρίς λίστες, χωρίς παρενθέσεις, χωρίς αριθμούς στη σειρά, χωρίς συντομογραφίες («χιλιόμετρα» και όχι «χλμ», «λεπτά» και όχι «λ.»), χωρίς σύμβολα, χωρίς markdown, χωρίς κωδικούς refs.
+- Ολοκληρωμένες προτάσεις, με τελεία στο τέλος. Περίληψη που κόβεται στη μέση ακούγεται σαν χαμένη σύνδεση και ο συντονιστής περιμένει τη συνέχεια αντί να ενεργήσει.
+- Στη γλώσσα της απάντησης.
+- Αν η απάντηση δηλώνει άγνοια, το ίδιο δηλώνει και η περίληψη. Υπάρχει άνθρωπος που θα ακούσει ΜΟΝΟ αυτήν· μια περίληψη που ακούγεται σίγουρη πάνω από μια απάντηση που δεν ξέρει είναι χειρότερη από καμία περίληψη.
+
 ΜΟΡΦΗ ΑΠΑΝΤΗΣΗΣ
 Απαντάς αποκλειστικά με ένα έγκυρο αντικείμενο json, χωρίς κείμενο πριν ή μετά:
 
 {
   "answer": "Η απάντησή σου, σε απλό κείμενο, χωρίς markdown.",
+  "spoken": "Δύο με τρεις προτάσεις για να ακουστούν φωναχτά.",
   "evidence": ["TEAM-3", "ORD-17"],
   "answerable": true,
   "missing": null
@@ -1762,6 +1790,71 @@ function aiLiveUnsupportedNumbers(string $answer, string $haystack): array {
     return $out;
 }
 
+// ─── The summary that gets read aloud ────────────────────────────────────────
+
+/**
+ * Text fit to leave a speaker.
+ *
+ * Everything written for the eye is noise in the ear: some engines read a
+ * markdown asterisk out as a word and others swallow the sentence around it, a
+ * bullet becomes a pause in the wrong place, and a line break mid-clause
+ * changes the intonation of whatever follows it. What survives here is one
+ * flowing paragraph.
+ *
+ * Truncation cuts back to the last sentence that ENDED. A spoken line stopping
+ * mid-clause is heard as a dropped connection, and the listener waits for the
+ * rest of it instead of acting on what they already have.
+ */
+function aiLiveSpeakableText(?string $text, int $cap = AI_LIVE_SPOKEN_CAP): string {
+    $t = trim((string) $text);
+    if ($t === '') return '';
+
+    // Bullets and numbered points first, while the line breaks that mark them
+    // are still there to find them by.
+    $t = preg_replace('/^\s*(?:[-\x{2013}\x{2014}*\x{2022}]|\d+[.)])\s+/mu', '', $t) ?? $t;
+    $t = preg_replace('/[*_`#>\[\]]+/u', '', $t) ?? $t;
+    $t = trim(preg_replace('/\s+/u', ' ', $t) ?? $t);
+    if ($t === '' || mb_strlen($t, 'UTF-8') <= $cap) return $t;
+
+    $cut = mb_substr($t, 0, $cap, 'UTF-8');
+
+    // Greek ends a sentence with a full stop, an exclamation mark, or «;» —
+    // which is its question mark, in both the ASCII and the Greek code point,
+    // because a model writes whichever one its tokeniser produced. «·» is the
+    // semicolon and closes a clause firmly enough to stop on.
+    $stop = 0;
+    foreach (['.', '!', ';', "\u{037E}", '·'] as $mark) {
+        $at = mb_strrpos($cut, $mark, 0, 'UTF-8');
+        if ($at !== false && $at + 1 > $stop) $stop = $at + 1;
+    }
+
+    // A sentence end inside the first third is not one: it is a decimal point
+    // or an abbreviation, and obeying it would throw away most of the summary.
+    // A clean word break is the better failure there.
+    if ($stop > (int) ($cap / 3)) {
+        return trim(mb_substr($cut, 0, $stop, 'UTF-8'));
+    }
+    $space = mb_strrpos($cut, ' ', 0, 'UTF-8');
+    return trim($space !== false ? mb_substr($cut, 0, $space, 'UTF-8') : $cut);
+}
+
+/**
+ * What the device actually says.
+ *
+ * Never silence. The coordinator turned the speaker on and is waiting to HEAR
+ * something; an answer that arrives mute is indistinguishable from a feature
+ * that has broken, and they would spend the next minute pressing the button
+ * again instead of running the operation.
+ *
+ * The opening of the answer is the fallback because the prompt requires the
+ * answer to lead with its conclusion — so its first sentences are the part
+ * worth hearing, even though they were not written to be heard.
+ */
+function aiLiveSpokenSummary(?string $spoken, string $answer): string {
+    $out = aiLiveSpeakableText($spoken);
+    return $out !== '' ? $out : aiLiveSpeakableText($answer);
+}
+
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 /**
@@ -1775,7 +1868,7 @@ function aiLiveUnsupportedNumbers(string $answer, string $haystack): array {
  * cites nothing arrives VISIBLY unevidenced, and the UI says so.
  */
 function aiLiveValidate($json, array $validRefs): array {
-    $out = ['answer' => '', 'evidence' => [], 'answerable' => true, 'missing' => null, 'dropped' => 0];
+    $out = ['answer' => '', 'spoken' => '', 'evidence' => [], 'answerable' => true, 'missing' => null, 'dropped' => 0];
     if (!is_array($json)) {
         return $out;
     }
@@ -1789,6 +1882,15 @@ function aiLiveValidate($json, array $validRefs): array {
     $out['answer']     = $str($json['answer'] ?? null, 4000) ?? '';
     $out['answerable'] = !isset($json['answerable']) || (bool) $json['answerable'];
     $out['missing']    = $str($json['missing'] ?? null, 400);
+    // Deliberately NOT through $str: that collapses newlines into spaces, and
+    // the newlines are what aiLiveSpeakableText() finds the bullets by. Run in
+    // that order a model's "- do this" survives as a stray dash the speaker
+    // reads out as "minus". Raw but bounded — the cap here only stops a page
+    // of prose arriving; the cut that matters is the sentence-aware one.
+    $spoken = $json['spoken'] ?? null;
+    $out['spoken'] = is_string($spoken)
+        ? mb_substr($spoken, 0, AI_LIVE_SPOKEN_CAP * 3, 'UTF-8')
+        : '';
 
     $valid = array_flip(array_keys($validRefs));
     $kept  = [];
@@ -1936,6 +2038,20 @@ function askMissionAiLive(
             $built['map']
         )['t'];
 
+    // The spoken line takes the same two passes as the answer — ref codes into
+    // record labels, then pseudonyms back into real names — because it is read
+    // out loud to the people those names belong to, in their own command post.
+    // Written by the model when it obeyed the prompt; taken from the top of
+    // the answer when it did not, because the one thing this must never do is
+    // arrive silent.
+    $spoken = aiLiveSpokenSummary(
+        $validated['spoken'] === '' ? null : aiObserverRehydrate(
+            ['t' => aiLiveNameRefsInText($validated['spoken'], $built['refs'])],
+            $built['map']
+        )['t'],
+        $answer
+    );
+
     // Labels are rehydrated too, not just the prose. They are built from the
     // same redacted text the provider saw — an order quoting a surname, a
     // crew row that is ΜΕΛΟΣ-7 — and a citation chip reading "Στη βάρδια:
@@ -1957,6 +2073,11 @@ function askMissionAiLive(
         // session lock before calling — see the comment there.
         'snapshot'   => ['ts' => time(), 'counters' => $counters],
         'answer'     => $answer,
+        // Two or three sentences for the speaker, never the answer itself read
+        // out: the written answer is four to five sentences dense with figures
+        // that are checkable on screen and unmemorable through a phone, and a
+        // coordinator who asked to LISTEN asked for the conclusion.
+        'spoken'     => $spoken,
         'missing'    => $missing,
         'answerable' => $validated['answerable'],
         'citations'  => $citations,

@@ -720,6 +720,91 @@ final class AiLiveTest extends TestCase
         $this->assertTrue($out['answerable']);
     }
 
+    // ── The summary that gets read aloud ───────────────────────────────────
+
+    public function testTheSpokenSummarySurvivesValidationBesideTheAnswer(): void
+    {
+        $out = aiLiveValidate(
+            ['answer' => 'Η ΑΛΦΑ είναι 1,2 χιλιόμετρα βόρεια και η πιο κοντινή.',
+             'spoken' => 'Στείλε την ΑΛΦΑ. Είναι η πιο κοντινή.', 'evidence' => []],
+            []
+        );
+
+        $this->assertSame('Στείλε την ΑΛΦΑ. Είναι η πιο κοντινή.', $out['spoken']);
+    }
+
+    public function testEverythingWrittenForTheEyeIsStrippedBeforeItIsSpoken(): void
+    {
+        // A markdown asterisk is read out as a word by some engines and
+        // swallows the sentence around it in others; a bullet becomes a pause
+        // in the wrong place. None of it survives into a speaker.
+        $spoken = aiLiveSpeakableText("**Η ΑΛΦΑ** σταμάτησε.\n- Στείλε τη ΒΗΤΑ.\n- Ενημέρωσε τη βάση.");
+
+        $this->assertSame('Η ΑΛΦΑ σταμάτησε. Στείλε τη ΒΗΤΑ. Ενημέρωσε τη βάση.', $spoken);
+    }
+
+    public function testTheBulletsSurviveValidationLongEnoughToBeStripped(): void
+    {
+        // Found by a wire test, not by the unit test above it: validation used
+        // to collapse newlines into spaces before anything looked for bullets,
+        // so "- Ζήτησέ της επικοινωνία" reached the speaker as a stray dash
+        // and was read out. Testing the two steps in the order the real path
+        // runs them is the only thing that catches it.
+        $validated = aiLiveValidate(
+            ['answer' => 'x', 'spoken' => "**Η ΑΛΦΑ** σιωπά.\n- Ζήτησέ της επικοινωνία.", 'evidence' => []],
+            []
+        );
+
+        $this->assertSame(
+            'Η ΑΛΦΑ σιωπά. Ζήτησέ της επικοινωνία.',
+            aiLiveSpokenSummary($validated['spoken'], 'x')
+        );
+    }
+
+    public function testASummaryThatIsNotAStringIsTreatedAsAbsent(): void
+    {
+        foreach ([['a', 'b'], 42, true, null] as $junk) {
+            $out = aiLiveValidate(['answer' => 'Η απάντηση.', 'spoken' => $junk, 'evidence' => []], []);
+            $this->assertSame('', $out['spoken']);
+            $this->assertSame('Η απάντηση.', aiLiveSpokenSummary($out['spoken'], $out['answer']));
+        }
+    }
+
+    public function testALongSummaryIsCutAtASentenceAndNotMidWord(): void
+    {
+        // A spoken line that stops mid-clause is heard as a dropped
+        // connection: the listener waits for the rest instead of acting on
+        // what they already have.
+        $long = str_repeat('Η ομάδα ΑΛΦΑ κινείται βόρεια. ', 30);
+        $out  = aiLiveSpeakableText($long);
+
+        $this->assertLessThanOrEqual(AI_LIVE_SPOKEN_CAP, mb_strlen($out, 'UTF-8'));
+        $this->assertStringEndsWith('.', $out);
+        $this->assertStringStartsWith('Η ομάδα ΑΛΦΑ κινείται βόρεια.', $out);
+    }
+
+    public function testAnAnswerShorterThanTheCapIsLeftExactlyAsItIs(): void
+    {
+        $this->assertSame('Ναι, τρέχει 3 ώρες.', aiLiveSpeakableText('  Ναι, τρέχει 3 ώρες.  '));
+    }
+
+    public function testAProviderThatWroteNoSummaryStillProducesOneFromTheAnswer(): void
+    {
+        // Never silence. The coordinator turned the speaker on and is waiting
+        // to hear something; an answer that arrives mute is indistinguishable
+        // from a feature that has broken.
+        $answer = 'Η ΑΛΦΑ είναι η πιο κοντινή. Απέχει 1,2 χιλιόμετρα.';
+
+        $this->assertSame($answer, aiLiveSpokenSummary(null, $answer));
+        $this->assertSame($answer, aiLiveSpokenSummary('', $answer));
+        $this->assertSame($answer, aiLiveSpokenSummary('   ', $answer));
+    }
+
+    public function testWithNeitherASummaryNorAnAnswerNothingIsInvented(): void
+    {
+        $this->assertSame('', aiLiveSpokenSummary(null, ''));
+    }
+
     // ── The shift handover ─────────────────────────────────────────────────
 
     public function testAHandoverLineWithNoEvidenceIsDeleted(): void
