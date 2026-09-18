@@ -90,6 +90,7 @@ const ASSISTANT_TARGETS = [
     'order'     => 'reportModal',
     'breach'    => 'restrictedAreasCard',
     'silent'    => 'participantsCard',
+    'stalled'   => 'teamsCard',
     'poi'       => 'poiListCard',
     'chat'      => 'chatCard',
     'media'     => 'mediaCard',
@@ -118,6 +119,104 @@ function assistantWindowStart(?int $checkpointTs, int $nowTs): int {
     }
     $raw = $nowTs - ASSISTANT_DEFAULT_LOOKBACK_MINUTES * 60;
     return (int) (floor($raw / ASSISTANT_WINDOW_QUANTUM_SECONDS) * ASSISTANT_WINDOW_QUANTUM_SECONDS);
+}
+
+/**
+ * How long a team may stay in one place before the stillness, rather than the
+ * work, is the thing to look at.
+ *
+ * Longer than the AI's own movement window on purpose. Thirty minutes of not
+ * moving is a rest, a briefing, or a slope being searched properly; three
+ * quarters of an hour is a question. The panel raises questions, so it uses
+ * the longer figure.
+ */
+const ASSISTANT_STALLED_MINUTES = 45;
+
+/**
+ * Below this much ground covered in the whole window, a team has not moved.
+ * The same figure the assistant's own wording uses, kept as one number so the
+ * panel and the answer cannot disagree about what "stationary" means.
+ */
+const ASSISTANT_STALLED_METRES = 120;
+
+/**
+ * The start of the stalled-team window, snapped to the same five-minute grid
+ * as everything else on this panel.
+ *
+ * THIS SNAP IS WHY THE FEATURE IS AFFORDABLE. The panel rides the Action
+ * Room's 5-second poll, whose payload is md5-hashed so that an unchanged
+ * operation costs nothing to re-poll. A window that slid with the clock would
+ * change the movement figures on every single tick, the hash would never
+ * match, and 51KB would go out to every open tab twelve times a minute — the
+ * exact failure this app has already been taken down by once.
+ */
+function assistantStalledWindowStart(int $nowTs): int {
+    $raw = $nowTs - ASSISTANT_STALLED_MINUTES * 60;
+    return (int) (floor($raw / ASSISTANT_WINDOW_QUANTUM_SECONDS) * ASSISTANT_WINDOW_QUANTUM_SECONDS);
+}
+
+/**
+ * Teams that have not moved for three quarters of an hour, one row each.
+ *
+ * A team, not a person: one volunteer standing still is a volunteer standing
+ * still, while a whole team that has not moved is either searching one spot
+ * very thoroughly or waiting for something nobody told the command post
+ * about. So the reading is that of the team's MOST-moving member — the
+ * question behind "are they stuck" is whether ANYONE is moving.
+ *
+ * Only teams whose members are actually reporting: a team with no fixes in
+ * the window is silent, which the panel already says, and calling them
+ * stationary as well would be two findings about one absence of data.
+ */
+function assistantStalledTeams(int $missionId, array $shiftBinds, int $nowTs): array {
+    $since = assistantStalledWindowStart($nowTs);
+    $movement = volunteerMovementByUser($shiftBinds, $since);
+    if (!$movement) {
+        return [];
+    }
+
+    $members = dbFetchAll(
+        "SELECT m.team_id, m.user_id, t.codename, t.team_number
+           FROM mission_team_members m
+           JOIN mission_teams t ON t.id = m.team_id
+          WHERE m.mission_id = ?",
+        [$missionId]
+    );
+
+    $byTeam = [];
+    foreach ($members as $row) {
+        $move = $movement[(int) $row['user_id']] ?? null;
+        if ($move === null) {
+            continue;
+        }
+        $teamId = (int) $row['team_id'];
+        if (!isset($byTeam[$teamId])) {
+            $byTeam[$teamId] = [
+                'label'   => teamLabel($row['codename'], $row['team_number']),
+                'best'    => 0,
+                'members' => 0,
+            ];
+        }
+        $byTeam[$teamId]['members']++;
+        $byTeam[$teamId]['best'] = max($byTeam[$teamId]['best'], (int) $move['path']);
+    }
+
+    $out = [];
+    foreach ($byTeam as $teamId => $team) {
+        if ($team['best'] >= ASSISTANT_STALLED_METRES) {
+            continue;
+        }
+        $out[] = [
+            'team_id' => $teamId,
+            'label'   => $team['label'] !== '' ? $team['label'] : ('#' . $teamId),
+            'metres'  => $team['best'],
+            'members' => $team['members'],
+            // The quantised window start, not "now": this is the item's
+            // timestamp, and a sliding one would make it new on every tick.
+            'ts'      => $since,
+        ];
+    }
+    return $out;
 }
 
 /**
@@ -322,6 +421,11 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
            AND s.start_time <= NOW() AND s.end_time > NOW()",
         array_merge($shiftBinds, [$missionId, $missionId, $missionId, PARTICIPATION_APPROVED, $userId])
     );
+
+    // ── Teams that have stopped moving ──────────────────────────────────────
+    // Its own window, longer than the panel's and snapped to the same grid —
+    // see assistantStalledWindowStart() for why the snap is load-bearing.
+    $raw['stalled'] = assistantStalledTeams($missionId, $shiftBinds, $nowTs);
 
     // ── Clues nobody has ruled in or out ────────────────────────────────────
     $raw['poi'] = dbFetchAll(
@@ -690,6 +794,39 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
             'ts'     => $ts,
             'is_new' => false,
             'target' => ASSISTANT_TARGETS['silent'],
+        ];
+    }
+
+    // ── Teams that have stopped moving ──────────────────────────────────────
+    //
+    // Beside the silence findings because it answers the neighbouring
+    // question. Silence is "we cannot see them"; this is "we can see them and
+    // they are not going anywhere", which has entirely different causes and
+    // an entirely different response.
+    foreach ($raw['stalled'] ?? [] as $row) {
+        // «Το είδα» clears it, like the other advisories: a coordinator who
+        // has raised the team on the radio and been told they are searching a
+        // scree slope should not keep being told. It comes back on its own
+        // once the window moves past the checkpoint and they still have not
+        // moved.
+        if ($checkpointTs !== null && (int) $row['ts'] <= $checkpointTs) {
+            continue;
+        }
+        $pending[] = [
+            'kind'   => 'stalled',
+            'sev'    => 'warn',
+            'icon'   => 'bi-pause-circle',
+            'title'  => t('assistant.stalled', [
+                'team'    => $row['label'],
+                'minutes' => ASSISTANT_STALLED_MINUTES,
+            ], $lang),
+            'detail' => t('assistant.stalled_detail', [
+                'metres'  => (int) $row['metres'],
+                'members' => (int) $row['members'],
+            ], $lang),
+            'ts'     => (int) $row['ts'],
+            'is_new' => false,
+            'target' => ASSISTANT_TARGETS['stalled'],
         ];
     }
 

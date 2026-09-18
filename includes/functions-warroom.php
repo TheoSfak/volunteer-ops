@@ -2931,6 +2931,98 @@ function gpsBearingDegrees(float $lat1, float $lng1, float $lat2, float $lng2): 
 }
 
 /**
+ * One position sample per this many seconds when measuring how far somebody
+ * walked.
+ *
+ * Summing every ping would read ~360 rows per person per half hour — 14.000
+ * rows on a forty-person mission — to answer a question that does not need
+ * that resolution. Six points give a path length accurate enough to tell
+ * "searching a slope" from "sitting in the vehicle", at one sixtieth of the
+ * cost.
+ */
+const VITALS_MOVE_SAMPLE_SECONDS = 300;
+
+/**
+ * How far each person has moved recently, keyed by user id.
+ *
+ * Returns both numbers because they answer different questions and disagree
+ * in the case that matters. A team sweeping a slope walks two kilometres and
+ * ends up ninety metres from where it started: the path says they are
+ * working, the straight line says they are not. Reporting only the straight
+ * line would call a working team stuck, and only the path would miss a
+ * volunteer pacing beside a vehicle.
+ *
+ * One query. The inner GROUP BY rides idx_pings_shift_time (shift_id,
+ * created_at) for the range and returns at most seven rows per person, which
+ * the primary-key join then resolves to coordinates.
+ *
+ * $sinceTs is ABSOLUTE rather than "minutes ago" because one of its two
+ * callers is the Action Room's 5-second poll, whose payload is md5-hashed to
+ * avoid re-sending 51KB to every open tab. A window that slides with NOW()
+ * changes the answer on every tick, the hash never matches, and the whole
+ * payload goes out twelve times a minute to everybody. The poll passes a
+ * quantised boundary; the assistant, answering one question on demand, passes
+ * whatever it likes.
+ */
+function volunteerMovementByUser(array $shiftBinds, int $sinceTs): array {
+    if (!$shiftBinds) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($shiftBinds), '?'));
+    try {
+        $rows = dbFetchAll(
+            "SELECT s.user_id, p.lat, p.lng, UNIX_TIMESTAMP(p.created_at) AS ts
+             FROM (SELECT user_id,
+                          FLOOR(UNIX_TIMESTAMP(created_at) / ?) AS bucket,
+                          MIN(id) AS pid
+                     FROM volunteer_pings
+                    WHERE shift_id IN ({$placeholders})
+                      AND created_at >= FROM_UNIXTIME(?)
+                    GROUP BY user_id, bucket) s
+             JOIN volunteer_pings p ON p.id = s.pid
+             ORDER BY s.user_id, s.bucket",
+            array_merge([VITALS_MOVE_SAMPLE_SECONDS], $shiftBinds, [$sinceTs])
+        );
+    } catch (Exception $e) {
+        error_log('[movement] query failed: ' . $e->getMessage());
+        return [];
+    }
+
+    $byUser = [];
+    foreach ($rows as $row) {
+        $byUser[(int) $row['user_id']][] = [
+            'lat' => (float) $row['lat'],
+            'lng' => (float) $row['lng'],
+            'ts'  => (int) $row['ts'],
+        ];
+    }
+
+    $out = [];
+    foreach ($byUser as $userId => $points) {
+        // A single sample says nothing about movement — not "did not move",
+        // which is what a zero here would be read as.
+        if (count($points) < 2) {
+            continue;
+        }
+        $path = 0.0;
+        for ($i = 1; $i < count($points); $i++) {
+            $path += gpsDistanceMeters(
+                $points[$i - 1]['lat'], $points[$i - 1]['lng'],
+                $points[$i]['lat'], $points[$i]['lng']
+            );
+        }
+        $first = $points[0];
+        $last  = $points[count($points) - 1];
+        $out[$userId] = [
+            'path'     => (int) round($path),
+            'straight' => (int) round(gpsDistanceMeters($first['lat'], $first['lng'], $last['lat'], $last['lng'])),
+            'minutes'  => (int) max(1, round(($last['ts'] - $first['ts']) / 60)),
+        ];
+    }
+    return $out;
+}
+
+/**
  * Standard ray-casting point-in-polygon test (odd-number-of-crossings rule).
  * $geo is a ring of [lat, lng] pairs, same shape as every other polygon
  * stored in this app (mission_search_areas.geo etc.) — not GeoJSON's
