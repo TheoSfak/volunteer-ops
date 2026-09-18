@@ -747,7 +747,9 @@ if ($action === 'clear_ring_generated') {
 
 if ($action === 'create_building') {
     $sectorId = (int) post('sector_id');
-    $sector = dbFetchOne("SELECT id FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
+    // geo and label come along because the containment check below needs the
+    // polygon, and the refusal has to be able to name the sector it refused.
+    $sector = dbFetchOne("SELECT id, label, geo FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
     if (!$sector) {
         echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
@@ -774,6 +776,29 @@ if ($action === 'create_building') {
     if ($floorCount < 0 || $floorCount > 50) {
         echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
         exit;
+    }
+
+    // DOES IT ACTUALLY STAND IN THIS SECTOR? The sector_id arrived in the POST
+    // and was taken on trust, so a building could be filed under one sector
+    // while standing in another — or nowhere near any of them. Nothing noticed,
+    // and the cost is a team clearing their sector without ever walking past a
+    // building on their list, or walking to one that belongs to the crew on the
+    // far side of the ridge.
+    //
+    // A tolerance rather than a hard edge: a building on the boundary, or
+    // dropped from a GPS fix taken beside it, is legitimately a few metres out
+    // and refusing that would block somebody recording a real building during
+    // an operation. Past the tolerance it is not a rounding matter.
+    $sectorGeo = json_decode((string) ($sector['geo'] ?? ''), true);
+    if (is_array($sectorGeo) && count($sectorGeo) >= 3) {
+        $outBy = pointToPolygonDistanceMeters((float) $lat, (float) $lng, $sectorGeo);
+        if ($outBy > SECTOR_BUILDING_TOLERANCE_METRES) {
+            echo json_encode(['ok' => false, 'error' => t('sector.building_outside', [
+                'sector' => $sector['label'],
+                'metres' => (int) round($outBy),
+            ])]);
+            exit;
+        }
     }
 
     $buildingId = dbInsert(

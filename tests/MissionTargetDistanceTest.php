@@ -121,6 +121,43 @@ final class MissionTargetDistanceTest extends TestCase
         $this->assertCount(MISSION_TARGET_CAP, missionTargetsForTeam($many, 40));
     }
 
+    // ── A building has to stand in the sector it is filed under ────────────
+
+    public function testABuildingOnTheBoundaryIsAcceptedAndOneAcrossTheRidgeIsNot(): void
+    {
+        // The sector_id arrives in the POST and used to be taken on trust, so
+        // a building could be filed under one sector while standing in
+        // another — or nowhere near any of them. Nothing noticed, and the cost
+        // is a team clearing their sector without ever walking past a building
+        // on their list.
+        //
+        // A tolerance rather than a hard edge: a building ON the boundary, or
+        // dropped from a GPS fix taken beside it, is legitimately a few metres
+        // out, and refusing that would block somebody recording a real
+        // building during an operation.
+        $sector = [[35.100, 24.900], [35.100, 24.910], [35.110, 24.910], [35.110, 24.900]];
+
+        // Inside: no distance at all.
+        $this->assertSame(0.0, pointToPolygonDistanceMeters(35.105, 24.905, $sector));
+
+        // A stride outside the edge — a doorway, a GPS fix from the pavement.
+        $justOut = pointToPolygonDistanceMeters(35.1001, 24.8999, $sector);
+        $this->assertLessThan(SECTOR_BUILDING_TOLERANCE_METRES, $justOut);
+
+        // The next valley. Not a rounding matter.
+        $farOut = pointToPolygonDistanceMeters(35.150, 24.950, $sector);
+        $this->assertGreaterThan(SECTOR_BUILDING_TOLERANCE_METRES, $farOut);
+    }
+
+    public function testTheToleranceIsSmallEnoughToStillCatchAWrongSector(): void
+    {
+        // Generous enough for a doorway, tight enough that a building in the
+        // sector next door cannot hide inside it. Sectors in this app are
+        // hundreds of metres across.
+        $this->assertGreaterThanOrEqual(10.0, SECTOR_BUILDING_TOLERANCE_METRES);
+        $this->assertLessThanOrEqual(50.0, SECTOR_BUILDING_TOLERANCE_METRES);
+    }
+
     // ── How the distance is said ───────────────────────────────────────────
 
     public function testTheStraightLineIsAlwaysThereAndAlwaysSaysSo(): void

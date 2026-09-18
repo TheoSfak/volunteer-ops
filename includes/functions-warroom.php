@@ -3147,6 +3147,17 @@ function polygonCentroid(array $geo): ?array {
  * comment already accepts. Used for the Field Mode restricted-area
  * proximity card (no map there to just look at the polygon directly).
  */
+/**
+ * How far outside its sector a building may stand and still be filed there.
+ *
+ * A building ON the boundary, or dropped from a GPS fix taken beside it, is
+ * legitimately a few metres out; refusing that would block somebody recording
+ * a real building mid-operation. Past this it is not a rounding matter — it is
+ * a building on the wrong side of a line, and the team clearing that sector
+ * will never walk past it.
+ */
+const SECTOR_BUILDING_TOLERANCE_METRES = 30.0;
+
 function pointToPolygonDistanceMeters(float $lat, float $lng, array $geo): float {
     if (pointInPolygon($lat, $lng, $geo)) {
         return 0.0;

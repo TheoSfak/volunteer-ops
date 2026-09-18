@@ -1318,6 +1318,38 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
          ORDER BY s.id LIMIT 60",
         [$missionId]
     );
+    // Buildings and their floors, in two queries for the whole mission rather
+    // than two per sector — the same N+1 discipline the Action Room's own
+    // building loader follows.
+    $buildingsBySector = [];
+    $buildingFloors    = [];
+    if ($sectorRows) {
+        $sectorIdList = array_column($sectorRows, 'id');
+        $sph = implode(',', array_fill(0, count($sectorIdList), '?'));
+        foreach (dbFetchAll(
+            "SELECT id, sector_id, label, lat, lng FROM mission_sector_buildings
+             WHERE sector_id IN ($sph) ORDER BY id",
+            $sectorIdList
+        ) as $b) {
+            $buildingsBySector[(int) $b['sector_id']][] = $b;
+        }
+        $buildingIdList = [];
+        foreach ($buildingsBySector as $list) {
+            foreach ($list as $b) $buildingIdList[] = (int) $b['id'];
+        }
+        if ($buildingIdList) {
+            $bph = implode(',', array_fill(0, count($buildingIdList), '?'));
+            foreach (dbFetchAll(
+                "SELECT building_id, floor_number, is_required, checked_at
+                 FROM mission_sector_building_floors
+                 WHERE building_id IN ($bph) ORDER BY building_id, floor_number",
+                $buildingIdList
+            ) as $f) {
+                $buildingFloors[(int) $f['building_id']][] = $f;
+            }
+        }
+    }
+
     // The polygons never leave; what leaves is what they mean. Resolved once
     // here and reused for the clue/incident/SOS lookups further down.
     $sectorGeos = [];
@@ -1475,6 +1507,50 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
                 // is known, not here.
                 $sectorMids[$id] = $mid;
             }
+        }
+
+        // BUILDINGS INSIDE THIS SECTOR, by the name the coordinator gave them.
+        //
+        // A building is the one thing in a sector that a team can walk straight
+        // past and still report the sector as searched — so "have they done the
+        // school yet", "which floors are left", "how much of Τομέας Γ is
+        // actually buildings" all need it named and counted, not just drawn on
+        // a map.
+        //
+        // Floor 0 is the ground floor and always exists; is_required is how an
+        // admin narrows a tower block to the storeys that matter, so the
+        // denominator is the REQUIRED floors and never the floor count.
+        $built = [];
+        foreach ($buildingsBySector[$id] ?? [] as $b) {
+            $floors   = $buildingFloors[(int) $b['id']] ?? [];
+            $required = array_filter($floors, fn($f) => !empty($f['is_required']));
+            $done     = array_filter($required, fn($f) => $f['checked_at'] !== null);
+            $left     = array_values(array_map(
+                fn($f) => (int) $f['floor_number'] === 0 ? 'ισόγειο' : ((int) $f['floor_number'] . 'ος'),
+                array_filter($required, fn($f) => $f['checked_at'] === null)
+            ));
+
+            $entryB = [
+                // Redacted like every other label typed by a human: «το σπίτι
+                // του Βαρδάκη» is exactly what gets written on a building.
+                'κτιριο'   => $red((string) $b['label'], 80),
+                'οροφοι_προς_ελεγχο' => count($required),
+                'ελεγμενοι'          => count($done),
+            ];
+            if ($left) {
+                $entryB['απομενουν'] = array_slice($left, 0, 12);
+            }
+            // Does it actually stand in this sector? Buildings created before
+            // the containment check existed were filed on trust, so an old one
+            // can sit anywhere. Said plainly, because a team clearing this
+            // sector will never walk past it.
+            if (!pointInPolygon((float) $b['lat'], (float) $b['lng'], $sectorGeos[$id])) {
+                $entryB['προσοχη'] = 'Το σημείο του κτιριου ΔΕΝ πεφτει μεσα σε αυτον τον τομεα — καταχωρηθηκε πριν μπει ο ελεγχος. Η ομαδα που καθαριζει τον τομεα δεν θα περασει απο εκει.';
+            }
+            $built[] = $entryB;
+        }
+        if ($built) {
+            $entry['κτιρια'] = $built;
         }
         $sectors[] = $entry;
     }
@@ -2069,6 +2145,8 @@ function aiLiveSystemPrompt(): string {
 - Η ευθεία γραμμή και η απόσταση διαδρομής ΔΕΝ είναι το ίδιο πράγμα. Στο βουνό η διαδρομή είναι συχνά τριπλάσια από την ευθεία, γιατί ο δρόμος κάνει τον γύρο. Λέγε πάντα ποιο από τα δύο αναφέρεις, με τα ίδια λόγια που τα λέει το πεδίο.
 - Το πεδίο δίνει ΚΑΙ ΤΟΥΣ ΔΥΟ χρόνους όπου υπάρχουν: «με τα πόδια» και «με αμάξι». Ανάφερε και τους δύο όταν ρωτιέται απόσταση ή χρόνος άφιξης — ο συντονιστής επιλέγει ανάμεσά τους και η επιλογή είναι η απόφαση που παίρνει. Αν λείπει ο ένας, πες ποιος λείπει και γιατί, μην παρουσιάσεις τον άλλον σαν να είναι όλη η απάντηση.
 - Δεν βλέπεις χάρτη, αλλά οι σχέσεις είναι υπολογισμένες για σένα: το «γειτονικοι» κάθε τομέα λέει ποιοι ακουμπάνε, και το «τομεας» σε περιστατικά, SOS και σημεία ενδιαφέροντος λέει σε ποιο έδαφος έπεσαν. Χρησιμοποίησέ τα αυτούσια — μην συμπεραίνεις γειτνίαση από ονόματα ή αριθμούς τομέων.
+- Τα «κτιρια» ενός τομέα είναι κτίρια που ο συντονιστής όρισε για έλεγχο, με το όνομα που τους έδωσε. Το «οροφοι_προς_ελεγχο» είναι όσοι όροφοι ΧΡΕΙΑΖΟΝΤΑΙ έλεγχο (όχι όσοι έχει το κτίριο), το «ελεγμενοι» πόσοι έγιναν, και το «απομενουν» ποιοι λείπουν ονομαστικά. Απάντησε με το όνομα του κτιρίου, όπως το ρωτάει ο συντονιστής. Ένας τομέας με ανέλεγκτους ορόφους ΔΕΝ είναι ολοκληρωμένος, όσο κι αν λέει η κατάστασή του — ένα κτίριο είναι το ένα πράγμα που μια ομάδα μπορεί να προσπεράσει και να δηλώσει τον τομέα σαρωμένο.
+- Αν ένα κτίριο έχει «προσοχη», το σημείο του δεν πέφτει μέσα στον τομέα όπου είναι καταχωρημένο. Πες το στον συντονιστή όταν αφορά την ερώτηση: η ομάδα που καθαρίζει εκείνον τον τομέα δεν θα περάσει από εκεί.
 - Τα ονόματα προσώπων είναι ψευδώνυμα (ΜΕΛΟΣ-1 κ.λπ.). Χρησιμοποίησέ τα αυτούσια, ακόμη κι αν η ερώτηση φαίνεται να αναφέρει πρόσωπο.
 - Στοιχεία ασθενών δεν σου δόθηκαν ποτέ. Αν σου ζητηθούν, πες ότι δεν τα έχεις και ότι βρίσκονται στην καρτέλα περιστατικού.
 - Οι καρδιακοί παλμοί (αν υπάρχουν στα δεδομένα) αφορούν ΤΟΥΣ ΔΙΚΟΥΣ ΜΑΣ και είναι ευαίσθητα δεδομένα υγείας. Δεν κάνεις διάγνωση, δεν προτείνεις θεραπεία, δεν εικάζεις για παθήσεις. Λες τι δείχνουν τα νούμερα και ποια επιχειρησιακή ενέργεια αξίζει — αντικατάσταση, ανάπαυση, έλεγχος. Για όποιον δεν φοράει αισθητήρα δεν ξέρεις τίποτα και δεν λες ότι είναι καλά.
