@@ -270,8 +270,50 @@ function routeDistanceErrorText(string $provider, string $body): string {
 function routeDistanceBatch(array $legs): array {
     if (!$legs || !routeDistanceAvailable()) return [];
 
-    $provider = routeDistanceProvider();
     $legs = array_slice($legs, 0, ROUTE_DISTANCE_MAX_LEGS, true);
+
+    // BOTH MODES, NOT ONE. A coordinator deciding who goes needs the two
+    // numbers side by side: on foot is who can actually get there in this
+    // terrain, by vehicle is who arrives first when a road happens to go the
+    // right way. Reporting only one makes the other invisible, and the choice
+    // between them is the decision being made.
+    //
+    // The two come from different routers because neither does both: the free
+    // OSRM demo serves the driving profile only, and walking needs the Google
+    // key. So an install with no key gets driving alone — which is stated as
+    // driving, never passed off as the whole answer.
+    $walking = [];
+    $google  = routeDistanceProvider();
+    if ($google['name'] === 'google') {
+        // Google WALK FINDS NOTHING IN THE MOUNTAINS and says so by answering
+        // 200 with an empty list rather than by failing, so this legitimately
+        // comes back empty for a crew on a ridge. Reported from a live
+        // mission: the settings button walked Heraklion to Knossos perfectly
+        // well, because a city has a pedestrian network, while Psiloritis has
+        // none mapped — and the figure then vanished with nothing to say why.
+        $walking = routeDistanceRunBatch($google, $legs);
+    }
+    $driving = routeDistanceRunBatch(routeDistanceProviderFor(''), $legs);
+
+    $out = [];
+    foreach ($legs as $key => $_) {
+        $w = $walking[$key] ?? null;
+        $d = $driving[$key] ?? null;
+        if ($w === null && $d === null) continue;
+        // Whether a walking route was ASKED FOR matters as much as whether one
+        // came back. With no Google key none is ever requested, and saying "no
+        // walking time available" on every row would be reporting the absence
+        // of something nobody looked for.
+        $out[$key] = ['walking' => $w, 'driving' => $d, 'walk_tried' => $google['name'] === 'google'];
+    }
+    return $out;
+}
+
+/**
+ * One parallel pass against one provider. Returns only the legs it answered.
+ */
+function routeDistanceRunBatch(array $provider, array $legs): array {
+    if (!$legs) return [];
 
     $multi   = curl_multi_init();
     $handles = [];

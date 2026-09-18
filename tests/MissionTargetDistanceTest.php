@@ -108,17 +108,77 @@ final class MissionTargetDistanceTest extends TestCase
         $this->assertSame('3.4 χλμ σε ευθεία Ν', aiLiveDistanceToTargetWords(3400, 'Ν', null));
     }
 
-    public function testARoutedFigureIsLabelledByHowItWasTravelled(): void
+    public function testBothWaysOfGettingThereAreNamed(): void
     {
-        // "8,4 χλμ driving" and "8,4 χλμ walking" are different facts about
-        // the same two points, and which router answered decides which it is.
-        $driving = aiLiveDistanceToTargetWords(3000, 'Β', ['meters' => 4300, 'minutes' => 12, 'mode' => 'driving']);
-        $this->assertStringContainsString('4.3 χλμ οδικώς', $driving);
-        $this->assertStringContainsString('12 λεπτά', $driving);
-        $this->assertStringContainsString('3 χλμ σε ευθεία Β', $driving);
+        // The coordinator is CHOOSING between them: on foot is what is true in
+        // this terrain, by vehicle is what is faster when a road happens to go
+        // the right way. Reporting one makes the other invisible, and the
+        // choice is the decision being made.
+        $both = aiLiveDistanceToTargetWords(3000, 'Β', [
+            'walking' => ['meters' => 3600, 'minutes' => 47],
+            'driving' => ['meters' => 4300, 'minutes' => 12],
+        ], true);
 
-        $walking = aiLiveDistanceToTargetWords(3000, 'Β', ['meters' => 3600, 'minutes' => 47, 'mode' => 'walking']);
-        $this->assertStringContainsString('3.6 χλμ με τα πόδια', $walking);
+        $this->assertStringContainsString('3 χλμ σε ευθεία Β', $both);
+        $this->assertStringContainsString('με τα πόδια 3.6 χλμ, 47 λεπτά', $both);
+        $this->assertStringContainsString('με αμάξι 4.3 χλμ, 12 λεπτά', $both);
+        // On foot first: it is the one that holds in this terrain.
+        $this->assertLessThan(mb_strpos($both, 'με αμάξι'), mb_strpos($both, 'με τα πόδια'));
+    }
+
+    public function testAMissingWalkingTimeIsExplainedRatherThanLeftAsAGap(): void
+    {
+        // Google WALK finds nothing on a mountain because the paths are not
+        // mapped — which is NOT the same as walking being impossible, and the
+        // difference decides whether somebody is sent on foot. Reported from a
+        // live mission as "the Google key must not be working".
+        $tried = aiLiveDistanceToTargetWords(1500, 'ΒΑ', [
+            'walking' => null,
+            'driving' => ['meters' => 2400, 'minutes' => 6],
+            'walk_tried' => true,
+        ], true);
+
+        $this->assertStringContainsString('με αμάξι 2.4 χλμ, 6 λεπτά', $tried);
+        $this->assertStringNotContainsString('με τα πόδια', $tried);
+        $this->assertStringContainsString(AI_LIVE_ROUTE_NO_WALK_MARK, $tried, 'the absence must be marked');
+
+        // With no Google key none is ever requested, so saying "no walking
+        // time" on every row would be reporting the absence of something
+        // nobody looked for — eight copies of a non-problem.
+        $notTried = aiLiveDistanceToTargetWords(1500, 'ΒΑ', [
+            'walking' => null,
+            'driving' => ['meters' => 2400, 'minutes' => 6],
+            'walk_tried' => false,
+        ], true);
+        $this->assertStringNotContainsString(AI_LIVE_ROUTE_NO_WALK_MARK, $notTried);
+    }
+
+    public function testTheExplanationIsGivenOncePerSectionNotOncePerPerson(): void
+    {
+        // Eight copies of the same sentence is a paragraph of the digest spent
+        // saying one thing, and it reads as eight separate problems rather
+        // than one fact about the terrain.
+        $marked = ['αποσταση_απο_στοχο' => '1.5 χλμ σε ευθεία ΒΑ — με αμάξι 2.4 χλμ ' . AI_LIVE_ROUTE_NO_WALK_MARK];
+        $plain  = ['αποσταση_απο_στοχο' => '1.5 χλμ σε ευθεία ΒΑ — με αμάξι 2.4 χλμ, 6 λεπτά'];
+
+        $this->assertTrue(aiLiveAnyMissingWalk([$plain, $marked]));
+        $this->assertFalse(aiLiveAnyMissingWalk([$plain, $plain]));
+        $this->assertFalse(aiLiveAnyMissingWalk([]));
+        // A row with no distance at all must not trip it.
+        $this->assertFalse(aiLiveAnyMissingWalk([['ονομα' => 'ΜΕΛΟΣ-1']]));
+    }
+
+    public function testARouteThatWasLookedForAndNotFoundSaysSo(): void
+    {
+        // The exact complaint from the field: a bare straight line, with no
+        // way to tell whether a routed figure had even been attempted. A
+        // coordinator with a paid key reasonably concluded it was broken.
+        $attempted = aiLiveDistanceToTargetWords(1500, 'ΒΑ', null, true);
+        $this->assertStringContainsString('δεν βρέθηκε διαδρομή', $attempted);
+
+        // And when nothing was asked for, nothing is claimed.
+        $notAttempted = aiLiveDistanceToTargetWords(1500, 'ΒΑ', null, false);
+        $this->assertSame('1.5 χλμ σε ευθεία ΒΑ', $notAttempted);
     }
 
     public function testARouterThatWentRoundTheMountainIsFlaggedNotJustStated(): void
@@ -128,15 +188,29 @@ final class MissionTargetDistanceTest extends TestCase
         // ends to asphalt and went round the whole massif. Stated flatly, that
         // is the kind of number that sends a vehicle on a two-hour drive to
         // reach people an hour's walk away.
-        $absurd = aiLiveDistanceToTargetWords(6200, 'ΝΑ', ['meters' => 70000, 'minutes' => 139, 'mode' => 'driving']);
-        $this->assertStringContainsString('70 χλμ οδικώς', $absurd, 'the real figure is kept');
+        $absurd = aiLiveDistanceToTargetWords(6200, 'ΝΑ', [
+            'walking' => null,
+            'driving' => ['meters' => 70000, 'minutes' => 139],
+        ], true);
+        $this->assertStringContainsString('με αμάξι 70 χλμ', $absurd, 'the real figure is kept');
         $this->assertStringContainsString('ΠΡΟΣΟΧΗ', $absurd, 'and is labelled for what it is');
 
         // A genuine road detour round a valley runs two to three times the
         // straight line and must NOT be flagged, or the warning becomes noise
         // that gets ignored on the one occasion it matters.
-        $ordinary = aiLiveDistanceToTargetWords(5800, 'ΝΑ', ['meters' => 18700, 'minutes' => 126, 'mode' => 'driving']);
+        $ordinary = aiLiveDistanceToTargetWords(5800, 'ΝΑ', [
+            'walking' => null,
+            'driving' => ['meters' => 18700, 'minutes' => 126],
+        ], true);
         $this->assertStringNotContainsString('ΠΡΟΣΟΧΗ', $ordinary);
+
+        // The warning belongs to the DRIVING figure. On foot the long way
+        // round is not what anybody would do anyway.
+        $walkFine = aiLiveDistanceToTargetWords(6200, 'ΝΑ', [
+            'walking' => ['meters' => 7100, 'minutes' => 95],
+            'driving' => null,
+        ], true);
+        $this->assertStringNotContainsString('ΠΡΟΣΟΧΗ', $walkFine);
     }
 
     public function testShortLegsAreNeverFlaggedBecauseTheyAreAllDetour(): void
@@ -151,9 +225,13 @@ final class MissionTargetDistanceTest extends TestCase
 
     public function testAMissingDurationIsLeftOutRatherThanPrintedAsZero(): void
     {
-        $words = aiLiveDistanceToTargetWords(3000, 'Β', ['meters' => 4300, 'minutes' => 0, 'mode' => 'driving']);
+        $words = aiLiveDistanceToTargetWords(3000, 'Β', [
+            'walking' => ['meters' => 3600, 'minutes' => 0],
+            'driving' => ['meters' => 4300, 'minutes' => 0],
+        ], true);
         $this->assertStringNotContainsString('0 λεπτά', $words);
-        $this->assertStringContainsString('4.3 χλμ οδικώς', $words);
+        $this->assertStringContainsString('με τα πόδια 3.6 χλμ', $words);
+        $this->assertStringContainsString('με αμάξι 4.3 χλμ', $words);
     }
 
     // ── Which router is in use ─────────────────────────────────────────────

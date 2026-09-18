@@ -204,6 +204,38 @@ function aiLiveRelativeTo(?float $lat, ?float $lng, ?float $refLat, ?float $refL
 }
 
 /**
+ * Whether the coordinator's question looks like it is about this person.
+ *
+ * Used for ONE thing: deciding whose routed distance is worth one of the eight
+ * outbound calls a digest is allowed. Never for access, never for redaction,
+ * and the question text never leaves this machine on account of it.
+ *
+ * Folded and stemmed the same way the leak gate matches names, so «ο Πάνος»,
+ * «του Πάνου» and «τον Πάνο» all find Πάνος. Over-matching here costs one
+ * wasted call; under-matching costs the coordinator the exact number they
+ * asked for, so the loose end is the right one to leave.
+ */
+function aiLiveQuestionNames(string $question, string $realName): int {
+    $question = trim($question);
+    $realName = trim($realName);
+    if ($question === '' || $realName === '') return 0;
+
+    $folded = aiFoldGreek($question);
+    foreach (preg_split('/\s+/u', $realName) ?: [] as $token) {
+        $token = trim($token, " \t\n\r\0\x0B.,;:()[]«»\"'");
+        // Short tokens are initials and particles, and matching on them would
+        // pick whoever happens to share three letters with the question.
+        if (mb_strlen($token, 'UTF-8') < 4) continue;
+        $stem = aiNameStem($token);
+        if ($stem === '') continue;
+        if (preg_match('/(?<!\p{L})' . preg_quote($stem, '/') . '/u', $folded)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/**
  * A distance as a radio call would say it.
  *
  * One decimal on kilometres, whole metres below one. Both are far from the
@@ -231,18 +263,50 @@ function aiLiveMetresWords(float $metres): string {
  * a router being down, rate-limiting or simply absent must degrade this line,
  * never remove it.
  */
-function aiLiveDistanceToTargetWords(float $straightMetres, string $bearing, ?array $routed): string {
-    $words = aiLiveMetresWords($straightMetres) . ' σε ευθεία ' . $bearing;
-    if ($routed === null) {
-        return $words;
+function aiLiveDistanceToTargetWords(
+    float $straightMetres,
+    string $bearing,
+    ?array $routed,
+    bool $routingAttempted = false
+): string {
+    $words   = aiLiveMetresWords($straightMetres) . ' σε ευθεία ' . $bearing;
+    $walking = $routed['walking'] ?? null;
+    $driving = $routed['driving'] ?? null;
+
+    if ($walking === null && $driving === null) {
+        // Three states, not two. "No routed figure" used to look identical
+        // whether one had been asked for or not, so a coordinator who had
+        // configured a paid router saw a bare straight line and reasonably
+        // concluded the key was not working — reported from a live mission,
+        // where the real answer was that no road or path exists between the
+        // two points at all. That IS information, and operationally it is the
+        // opposite of silence: it means nobody is driving there.
+        return $routingAttempted ? $words . ' ' . AI_LIVE_ROUTE_NONE_NOTE : $words;
     }
-    $how = ($routed['mode'] ?? '') === 'walking' ? 'με τα πόδια' : 'οδικώς';
-    $words .= ' — ' . aiLiveMetresWords((float) $routed['meters']) . ' ' . $how;
-    if (!empty($routed['minutes'])) {
-        $words .= ', ' . (int) $routed['minutes'] . ' λεπτά';
+
+    // ON FOOT FIRST. It is the one that is true in this terrain, and by
+    // vehicle is the one that is faster when a road happens to go the right
+    // way — the coordinator is choosing between them, so both are named.
+    if ($walking !== null) {
+        $words .= ' — με τα πόδια ' . aiLiveMetresWords((float) $walking['meters']);
+        if (!empty($walking['minutes'])) $words .= ', ' . (int) $walking['minutes'] . ' λεπτά';
     }
-    if (aiLiveRouteIsDetour($straightMetres, (float) $routed['meters'])) {
-        $words .= ' ' . AI_LIVE_ROUTE_DETOUR_NOTE;
+    if ($driving !== null) {
+        $words .= ' — με αμάξι ' . aiLiveMetresWords((float) $driving['meters']);
+        if (!empty($driving['minutes'])) $words .= ', ' . (int) $driving['minutes'] . ' λεπτά';
+        // The detour warning belongs to the DRIVING figure: it is the road
+        // that goes round the mountain, and on foot the long way round is not
+        // what anybody would do anyway.
+        if (aiLiveRouteIsDetour($straightMetres, (float) $driving['meters'])) {
+            $words .= ' ' . AI_LIVE_ROUTE_DETOUR_NOTE;
+        }
+    }
+    if ($walking === null && !empty($routed['walk_tried'])) {
+        // Marked rather than explained, and only when one was actually looked
+        // for. The explanation goes once into the section note below: eight
+        // copies of the same sentence is a paragraph of the digest spent
+        // saying one thing, and it reads as eight separate problems.
+        $words .= ' ' . AI_LIVE_ROUTE_NO_WALK_MARK;
     }
     return $words;
 }
@@ -270,6 +334,41 @@ const AI_LIVE_ROUTE_DETOUR_MIN_METRES = 1000.0;
 
 const AI_LIVE_ROUTE_DETOUR_NOTE =
     '(ΠΡΟΣΟΧΗ: ο δρομολογητής κάνει πολύ μεγάλο γύρο από δρόμο — εκτός δρόμου το χρήσιμο νούμερο είναι η ευθεία)';
+
+/**
+ * Said when a route WAS looked for and none exists.
+ *
+ * Distinct from saying nothing, which is what used to happen and what made a
+ * working Google key look broken. Operationally this is the more important of
+ * the two facts: it means no vehicle is getting there and whoever goes, walks.
+ */
+const AI_LIVE_ROUTE_NONE_NOTE =
+    '(δεν βρέθηκε διαδρομή σε δρόμο ή μονοπάτι — μόνο εκτός χάρτη, με τα πόδια)';
+
+/**
+ * Said when the driving figure came back but the walking one did not.
+ *
+ * On a mountain that means the paths are not mapped, NOT that walking is
+ * impossible — and the difference is exactly what decides whether a
+ * coordinator sends somebody on foot. Left as an absence it reads as the
+ * second thing.
+ */
+const AI_LIVE_ROUTE_NO_WALK_MARK = '(χωρίς πεζή διαδρομή)';
+
+/** Whether any row in the list carries the missing-walking-route mark. */
+function aiLiveAnyMissingWalk(array $rows): bool {
+    foreach ($rows as $row) {
+        if (isset($row['αποσταση_απο_στοχο'])
+            && mb_strpos($row['αποσταση_απο_στοχο'], AI_LIVE_ROUTE_NO_WALK_MARK) !== false) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** The explanation behind that mark, said ONCE for the whole section. */
+const AI_LIVE_ROUTE_NO_WALK_NOTE =
+    'Οπου γραφει "(χωρις πεζη διαδρομη)", ζητηθηκε χρονος πεζοποριας και δεν βρεθηκε: στο βουνο τα μονοπατια συχνα δεν ειναι καταγεγραμμενα στον χαρτη. ΔΕΝ σημαινει οτι δεν γινεται με τα ποδια — σημαινει οτι ο οδηγος ειναι η ευθεια αποσταση.';
 
 function aiLiveRouteIsDetour(float $straightMetres, float $routedMetres): bool {
     if ($straightMetres < AI_LIVE_ROUTE_DETOUR_MIN_METRES) return false;
@@ -836,7 +935,16 @@ function aiLivePseudonymiseText(?string $text, array $map, array $forbiddenNames
  * strings ('15/09 17:43') and this needs ages in minutes and nothing
  * pre-formatted. It runs once per question, never on the 5s poll.
  */
-function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftIds, ?array $focusPoint = null): array {
+/**
+ * $askedAbout is the coordinator's RAW question, used for one thing only:
+ * deciding whose routed distance is worth an outbound call. Only eight legs
+ * are routed per digest, and picking them by distance alone meant that asking
+ * "πόσο απέχει ο Πάνος" could route eight other people and not Πάνος — the
+ * coordinator then gets a straight line and concludes the router is broken.
+ * The text is never sent anywhere from here; it is matched against real names
+ * locally and then forgotten.
+ */
+function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftIds, ?array $focusPoint = null, string $askedAbout = ''): array {
     $names = aiMissionForbiddenNames($missionId);
     $now   = time();
 
@@ -1499,6 +1607,10 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
                         'metres'  => $metres,
                         'bearing' => $bearing,
                         'leg'     => [$cLat, $cLng, $target['lat'], $target['lng']],
+                        // Matched against the REAL name, before pseudonyms
+                        // exist, because the coordinator types "ο Πάνος" and
+                        // not "ΜΕΛΟΣ-7".
+                        'asked'   => aiLiveQuestionNames($askedAbout, (string) $row['who']),
                     ];
                 }
             }
@@ -1509,19 +1621,29 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
 
     // The routed figure, for the few it is worth an outbound call on.
     //
-    // FARTHEST FIRST. Everyone already has the straight line for free; the
-    // routed distance earns its call where the answer is "how long until they
-    // get there", and that question is never about the person standing two
-    // hundred metres away. Deterministic, so two identical digests route the
-    // same eight legs.
+    // ANYONE THE QUESTION NAMES FIRST, then farthest first. Distance alone was
+    // the whole rule at first, and it meant that asking "πόσο απέχει ο Πάνος"
+    // could spend all eight calls on other people — the coordinator gets a
+    // bare straight line back and concludes the router is broken. Everyone
+    // still has the straight line for free; among the rest, the routed number
+    // earns its call where the question is "how long until they get there",
+    // which is never about the person two hundred metres away. Deterministic,
+    // so the same digest routes the same legs.
     if ($legs && routeDistanceAvailable()) {
-        uasort($legs, fn($a, $b) => $b['metres'] <=> $a['metres']);
+        uasort($legs, function ($a, $b) {
+            if ($a['asked'] !== $b['asked']) return $b['asked'] <=> $a['asked'];
+            return $b['metres'] <=> $a['metres'];
+        });
+        // Cut HERE rather than inside routeDistanceBatch(), so that what was
+        // attempted is known: a leg that was tried and found nothing has to
+        // say so, and a leg nobody asked about must not.
+        $legs = array_slice($legs, 0, ROUTE_DISTANCE_MAX_LEGS, true);
         try {
             $routed = routeDistanceBatch(array_map(fn($l) => $l['leg'], $legs));
-            foreach ($routed as $index => $result) {
-                if (!isset($crew[$index], $legs[$index])) continue;
+            foreach ($legs as $index => $leg) {
+                if (!isset($crew[$index])) continue;
                 $crew[$index]['αποσταση_απο_στοχο'] = aiLiveDistanceToTargetWords(
-                    $legs[$index]['metres'], $legs[$index]['bearing'], $result
+                    $leg['metres'], $leg['bearing'], $routed[$index] ?? null, true
                 );
             }
         } catch (Throwable $e) {
@@ -1555,6 +1677,11 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         $digest['σημειωση_προσωπικου'] = 'Καθε ατομο που ειναι σε βαρδια τωρα, με το ΔΙΚΟ του τελευταιο στιγμα. Εδω απανταται το «που ειναι ο Χ». Ενα ατομο μπορει να ειναι σε βαρδια χωρις ομαδα — αυτο ειναι φυσιολογικο, οχι σφαλμα.'
             . (count($crew) > AI_LIVE_CREW_CAP
                 ? ' Εμφανιζονται τα ' . AI_LIVE_CREW_CAP . ' πιο προσφατα στιγματα απο ' . count($crew) . ' ατομα συνολικα.'
+                : '')
+            // Once, and only when something in the list actually carries the
+            // mark — an explanation of a thing nobody can see is noise.
+            . (aiLiveAnyMissingWalk($digest['θεσεις_προσωπικου'])
+                ? ' ' . AI_LIVE_ROUTE_NO_WALK_NOTE
                 : '');
     }
 
@@ -1814,6 +1941,7 @@ function aiLiveSystemPrompt(): string {
 - Για το πού βρίσκεται συγκεκριμένο πρόσωπο κοίτα το «θεσεις_προσωπικου». Η θέση μιας ομάδας είναι το στίγμα οποιουδήποτε μέλους της και ΔΕΝ είναι η θέση του επικεφαλής.
 - Για το πόσο απέχει κάποιος από εκεί που τον έστειλαν, χρησιμοποίησε τα έτοιμα «στοχος» και «αποσταση_απο_στοχο». Είναι υπολογισμένα από τον server από τις πραγματικές συντεταγμένες. ΠΟΤΕ μην τα υπολογίσεις μόνος σου και ποτέ μην τα συμπληρώσεις όταν λείπουν: αν λείπουν, ή δεν του έχει ανατεθεί σημείο ή δεν έχει σταλεί στίγμα — και αυτό ακριβώς είναι η απάντηση.
 - Η ευθεία γραμμή και η απόσταση διαδρομής ΔΕΝ είναι το ίδιο πράγμα. Στο βουνό η διαδρομή είναι συχνά τριπλάσια από την ευθεία, γιατί ο δρόμος κάνει τον γύρο. Λέγε πάντα ποιο από τα δύο αναφέρεις, με τα ίδια λόγια που τα λέει το πεδίο.
+- Το πεδίο δίνει ΚΑΙ ΤΟΥΣ ΔΥΟ χρόνους όπου υπάρχουν: «με τα πόδια» και «με αμάξι». Ανάφερε και τους δύο όταν ρωτιέται απόσταση ή χρόνος άφιξης — ο συντονιστής επιλέγει ανάμεσά τους και η επιλογή είναι η απόφαση που παίρνει. Αν λείπει ο ένας, πες ποιος λείπει και γιατί, μην παρουσιάσεις τον άλλον σαν να είναι όλη η απάντηση.
 - Δεν βλέπεις χάρτη, αλλά οι σχέσεις είναι υπολογισμένες για σένα: το «γειτονικοι» κάθε τομέα λέει ποιοι ακουμπάνε, και το «τομεας» σε περιστατικά, SOS και σημεία ενδιαφέροντος λέει σε ποιο έδαφος έπεσαν. Χρησιμοποίησέ τα αυτούσια — μην συμπεραίνεις γειτνίαση από ονόματα ή αριθμούς τομέων.
 - Τα ονόματα προσώπων είναι ψευδώνυμα (ΜΕΛΟΣ-1 κ.λπ.). Χρησιμοποίησέ τα αυτούσια, ακόμη κι αν η ερώτηση φαίνεται να αναφέρει πρόσωπο.
 - Στοιχεία ασθενών δεν σου δόθηκαν ποτέ. Αν σου ζητηθούν, πες ότι δεν τα έχεις και ότι βρίσκονται στην καρτέλα περιστατικού.
@@ -2144,7 +2272,9 @@ function askMissionAiLive(
     }
     $question = mb_substr($question, 0, AI_LIVE_QUESTION_CAP, 'UTF-8');
 
-    $built = buildLiveAiDigest($missionId, $mission, $missionShiftIds, $focusPoint);
+    // The raw question goes in for ONE purpose: whoever it names gets one of
+    // the eight routed legs. It is not sent anywhere from in there.
+    $built = buildLiveAiDigest($missionId, $mission, $missionShiftIds, $focusPoint, $question);
 
     // The memory, folded into the digest the model reads. Counters are taken
     // AFTER the digest is built, because the digest is what defines "how many
