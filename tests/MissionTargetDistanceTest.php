@@ -187,6 +187,40 @@ final class MissionTargetDistanceTest extends TestCase
         $this->assertSame(['origin', 'destination', 'travelMode'], array_keys($body));
     }
 
+    public function testTheProvidersOwnComplaintReachesTheAdminIntact(): void
+    {
+        // The sentence that names the actual problem is Google's, not ours —
+        // a key restricted to the wrong referrer, the Routes API never enabled
+        // on the project, billing not set up. Whoever pressed the button is
+        // the person who can go and fix it, so it is passed through rather
+        // than replaced with something reassuring. Verified against the real
+        // API with a deliberately invalid key, which answers exactly this.
+        $real = '{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}';
+        $this->assertSame(
+            'INVALID_ARGUMENT: API key not valid. Please pass a valid API key.',
+            routeDistanceErrorText('google', $real)
+        );
+
+        $denied = '{"error":{"code":403,"message":"Routes API has not been used in project 123 before.","status":"PERMISSION_DENIED"}}';
+        $this->assertStringContainsString('PERMISSION_DENIED', routeDistanceErrorText('google', $denied));
+        $this->assertStringContainsString('has not been used', routeDistanceErrorText('google', $denied));
+
+        $this->assertStringContainsString('NoRoute', routeDistanceErrorText('osrm', '{"code":"NoRoute","message":"no route found"}'));
+    }
+
+    public function testAPageOfHtmlFromSomethingInTheWayIsNotDumpedOnTheAdmin(): void
+    {
+        // A proxy, a captive portal or a 502 page answers with markup, and
+        // pasting it into a Bootstrap alert would fill the settings page with
+        // somebody else's website.
+        $html = '<html><head><title>502</title></head><body><h1>Bad Gateway</h1>' . str_repeat('x', 500) . '</body></html>';
+        $text = routeDistanceErrorText('google', $html);
+
+        $this->assertStringNotContainsString('<', $text);
+        $this->assertLessThanOrEqual(200, mb_strlen($text));
+        $this->assertStringContainsString('Bad Gateway', $text);
+    }
+
     public function testEachRoutersAnswerIsReadCorrectlyAndRubbishIsRefused(): void
     {
         $osrm = routeDistanceParse('osrm', '{"code":"Ok","routes":[{"distance":4321.6,"duration":780}]}');

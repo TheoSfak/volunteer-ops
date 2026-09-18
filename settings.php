@@ -1944,6 +1944,20 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             — χρεώνεται στον δικό σας λογαριασμό.
                         </div>
                     </div>
+                    <?php /* Always shown, unlike the weather one, which appears
+                             only once a key exists. "Does this work" is a fair
+                             question for the free router too — and the answer
+                             with no key is the one an organisation that never
+                             intends to pay actually needs. It tests the key
+                             currently IN THE FIELD, so a wrong paste is caught
+                             before it is saved rather than after. */ ?>
+                    <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnTestRouteKey">
+                            <i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης
+                        </button>
+                        <span class="small text-muted">Δοκιμαστική διαδρομή Ηράκλειο → Κνωσός</span>
+                    </div>
+                    <div id="routeTestResult" class="mb-2" style="display:none;"></div>
                     <?php /* Which router is in use is not a detail an admin
                              should have to infer from whether a field is
                              empty: the two give materially different numbers
@@ -2532,6 +2546,50 @@ $menuStateOptions = [
 })();
 </script>
 <?php endif; ?>
+
+<script>
+// Routing provider check. Sends whatever is in the key field RIGHT NOW, unsaved
+// included, so a mistyped key is caught before it is stored rather than after
+// an operation has already asked a question with it.
+document.getElementById('btnTestRouteKey') && document.getElementById('btnTestRouteKey').addEventListener('click', function() {
+    var btn = this;
+    var result = document.getElementById('routeTestResult');
+    var keyField = document.getElementById('googleMapsApiKey');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Έλεγχος...';
+    result.style.display = 'none';
+
+    fetch('api-route-test.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest'},
+        body: 'csrf_token=' + encodeURIComponent('<?= csrfToken() ?>')
+            + '&api_key=' + encodeURIComponent(keyField ? keyField.value.trim() : '')
+    })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            result.style.display = '';
+            // The provider's own words, escaped: it is the sentence that names
+            // the actual problem, and it arrives from an external service.
+            var msg = document.createElement('div');
+            msg.className = 'alert py-1 px-2 small mb-0 ' + (data.ok ? 'alert-success' : 'alert-danger');
+            var icon = document.createElement('i');
+            icon.className = 'bi me-1 ' + (data.ok ? 'bi-check-circle' : 'bi-exclamation-triangle');
+            msg.appendChild(icon);
+            msg.appendChild(document.createTextNode(data.message || ''));
+            result.innerHTML = '';
+            result.appendChild(msg);
+        })
+        .catch(function() {
+            result.style.display = '';
+            result.innerHTML = '<div class="alert alert-danger py-1 px-2 small mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Αποτυχία επικοινωνίας</div>';
+        })
+        .finally(function() {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης';
+        });
+});
+
+</script>
 
 <!-- SMTP Settings Tab -->
 <?php if ($activeTab === 'smtp'): ?>

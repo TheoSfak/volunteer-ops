@@ -169,6 +169,93 @@ function routeDistanceParse(string $provider, ?string $body): ?array {
 }
 
 /**
+ * Two points on a real road, for the settings page's connection test.
+ *
+ * Heraklion centre to Knossos: about five kilometres, unambiguously connected
+ * by asphalt, so a failure here is the key or the network and never "there is
+ * no route". The same city the weather test uses, for the same reason.
+ */
+const ROUTE_DISTANCE_PROBE_LEG = [35.3387, 25.1442, 35.2980, 25.1630];
+
+/**
+ * One real routing call, with the provider's own error kept.
+ *
+ * Separate from routeDistanceBatch() precisely because that one SWALLOWS
+ * failures — it has a straight line to fall back on and a coordinator who
+ * cannot act on "HTTP 403". An admin checking a key can act on it, and
+ * "PERMISSION_DENIED: Routes API has not been used in project…" is the
+ * difference between five seconds and an afternoon.
+ *
+ * Returns ['ok' => bool, 'message' => string, 'provider' => string].
+ */
+function routeDistanceProbe(?string $apiKey = null): array {
+    if (!routeDistanceAvailable()) {
+        return ['ok' => false, 'provider' => 'none',
+                'message' => 'Η επέκταση cURL δεν είναι διαθέσιμη στον server'];
+    }
+
+    $provider = routeDistanceProviderFor((string) ($apiKey ?? getSetting('google_maps_api_key', '')));
+    [$fromLat, $fromLng, $toLat, $toLng] = ROUTE_DISTANCE_PROBE_LEG;
+
+    $ch = routeDistanceHandle($provider, $fromLat, $fromLng, $toLat, $toLng);
+    $body  = curl_exec($ch);
+    $code  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
+    curl_close($ch);
+
+    if ($body === false || $error !== '') {
+        return ['ok' => false, 'provider' => $provider['name'],
+                'message' => 'Σφάλμα δικτύου: ' . ($error !== '' ? $error : 'άγνωστο σφάλμα')];
+    }
+
+    if ($code !== 200) {
+        return ['ok' => false, 'provider' => $provider['name'],
+                'message' => 'HTTP ' . $code . ' — ' . routeDistanceErrorText($provider['name'], (string) $body)];
+    }
+
+    $parsed = routeDistanceParse($provider['name'], (string) $body);
+    if ($parsed === null) {
+        return ['ok' => false, 'provider' => $provider['name'],
+                'message' => 'Η απάντηση δεν περιείχε διαδρομή — ' . routeDistanceErrorText($provider['name'], (string) $body)];
+    }
+
+    $how = $provider['mode'] === 'walking' ? 'με τα πόδια' : 'οδικώς';
+    $km  = round($parsed['meters'] / 1000, 1);
+    return [
+        'ok'       => true,
+        'provider' => $provider['name'],
+        'message'  => ($provider['name'] === 'google' ? 'Google Routes' : 'OSRM')
+            . ': Ηράκλειο → Κνωσός ' . $km . ' χλμ ' . $how
+            . ($parsed['minutes'] ? ', ' . $parsed['minutes'] . ' λεπτά' : ''),
+    ];
+}
+
+/**
+ * The provider's own complaint, in as few words as it can be said.
+ *
+ * Google buries the useful sentence inside error.message and it is the one
+ * that names the actual problem — a key restricted to the wrong referrer, the
+ * Routes API never enabled on the project, billing not set up. Passed through
+ * rather than replaced with something reassuring: whoever pressed the button
+ * is the person who can go and fix it.
+ */
+function routeDistanceErrorText(string $provider, string $body): string {
+    $data = json_decode($body, true);
+    if ($provider === 'google' && is_array($data)) {
+        $status  = (string) ($data['error']['status'] ?? '');
+        $message = (string) ($data['error']['message'] ?? '');
+        if ($message !== '') {
+            return trim($status !== '' ? $status . ': ' . $message : $message);
+        }
+    }
+    if (is_array($data) && isset($data['code'])) {
+        return trim((string) $data['code'] . ' ' . (string) ($data['message'] ?? ''));
+    }
+    // Never the raw body: it can be a page of HTML from something in the way.
+    return mb_substr(trim(strip_tags($body)), 0, 200);
+}
+
+/**
  * Route several legs at once.
  *
  * In parallel, deliberately. Eight legs run one after another at a five second
