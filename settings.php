@@ -627,6 +627,7 @@ if (isPost()) {
             'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled',
             'qr_checkin_enabled',
             'openweathermap_api_key', 'weather_map_compass_enabled', 'exposure_urgency_enabled',
+            'google_maps_api_key',
             'search_rings_enabled',
             'ai_enabled', 'ai_provider', 'ai_playbook',
         ];
@@ -650,7 +651,8 @@ if (isPost()) {
             $isAiKey   = str_starts_with($field, 'ai_api_key_');
             $isAiModel = str_starts_with($field, 'ai_model_');
             $isAiUrl   = str_starts_with($field, 'ai_base_url_');
-            if ($field === 'openweathermap_api_key' || $isAiKey || $isAiModel || $isAiUrl) {
+            if ($field === 'openweathermap_api_key' || $field === 'google_maps_api_key'
+                || $isAiKey || $isAiModel || $isAiUrl) {
                 $value = trim($value);
             }
 
@@ -1909,6 +1911,63 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             <strong>Ένδειξη Επείγοντος λόγω Έκθεσης</strong>
                         </label>
                         <div class="form-text">Μόνο σε αποστολές τύπου «Αγνοούμενο άτομο». Ενδεικτικός υπολογισμός από ηλικία, θερμοκρασία και άνεμο — <strong>όχι κλινική πρόγνωση</strong>. Προτείνεται έλεγχος πριν την ενεργοποίηση σε πραγματική επιχείρηση.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Route distance -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-signpost-split me-1"></i>Αποστάσεις Διαδρομής</h5>
+                </div>
+                <div class="card-body">
+                    <p class="small text-muted mb-3">
+                        Ο βοηθός του Action Room υπολογίζει πόσο απέχει κάθε άτομο από το σημείο,
+                        τον τομέα ή την πορεία που του ανατέθηκε. Η <strong>ευθεία γραμμή</strong>
+                        υπολογίζεται πάντα τοπικά και δεν χρειάζεται καμία ρύθμιση. Το πεδίο εδώ
+                        αφορά μόνο την <strong>απόσταση διαδρομής</strong>.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label" for="googleMapsApiKey">Google Routes API Key <span class="text-muted">(προαιρετικό)</span></label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="googleMapsApiKey"
+                                   name="google_maps_api_key"
+                                   autocomplete="new-password"
+                                   value="<?= h($settings['google_maps_api_key'] ?? '') ?>"
+                                   placeholder="Χωρίς κλειδί χρησιμοποιείται το OSRM">
+                            <button type="button" class="btn btn-outline-secondary" onclick="toggleKeyVisibility('googleMapsApiKey')" tabindex="-1">
+                                <i class="bi bi-eye" id="eye-googleMapsApiKey"></i>
+                            </button>
+                        </div>
+                        <div class="form-text">
+                            <a href="https://console.cloud.google.com/apis/library/routes.googleapis.com" target="_blank" rel="noopener noreferrer">Routes API στο Google Cloud</a>
+                            — χρεώνεται στον δικό σας λογαριασμό.
+                        </div>
+                    </div>
+                    <?php /* Which router is in use is not a detail an admin
+                             should have to infer from whether a field is
+                             empty: the two give materially different numbers
+                             — a walking route up a monopati and a driving
+                             route round the mountain are not the same answer
+                             to "how far". */ ?>
+                    <?php if (!empty($settings['google_maps_api_key'] ?? '')): ?>
+                    <div class="alert alert-success py-2 px-2 mb-0 small">
+                        <i class="bi bi-check-circle me-1"></i>
+                        Σε χρήση: <strong>Google Routes</strong> με <strong>πεζοπορία</strong>.
+                    </div>
+                    <?php else: ?>
+                    <div class="alert alert-secondary py-2 px-2 mb-0 small">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Σε χρήση: <strong>OSRM</strong> (δωρεάν, χωρίς κλειδί) — υπολογίζει
+                        <strong>οδικώς</strong> και κολλάει τη θέση στον κοντινότερο δρόμο, που
+                        στο βουνό μπορεί να απέχει. Η ευθεία γραμμή δίπλα του παραμένει πάντα
+                        το τίμιο νούμερο.
+                    </div>
+                    <?php endif; ?>
+                    <div class="alert alert-warning py-2 px-2 mt-3 mb-0 small">
+                        <i class="bi bi-shield-lock me-1"></i>
+                        Στον δρομολογητή στέλνονται <strong>μόνο δύο ζεύγη συντεταγμένων</strong> —
+                        κανένα όνομα, καμία ομάδα, κανένα αναγνωριστικό.
                     </div>
                 </div>
             </div>

@@ -663,6 +663,26 @@ final class AiLiveTest extends TestCase
         $this->assertNotEmpty(aiScanDigestForLeaks(['x' => '(Νίκος)'], ['Νίκος']));
     }
 
+    public function testASectorNamedAfterAPersonIsRedactedRatherThanBlocking(): void
+    {
+        // A sector name is free text a coordinator types at three in the
+        // morning, and «Τομέας Βαρδάκη» is exactly what gets typed. It used to
+        // reach the provider raw, where the leak gate caught it and blocked
+        // the WHOLE QUESTION — so an organisation that named one sector after
+        // a person had an assistant that answered nothing at all, with an
+        // error that reads like a fault in the AI.
+        //
+        // Same rule as the two gateway bugs before it: over-match when
+        // redacting, be precise when blocking.
+        $map = [];
+        $names = ['Βαρδάκης'];
+        $label = aiLivePseudonymiseText('Τομέας Βαρδάκη', $map, $names, 80);
+
+        $this->assertStringNotContainsString('Βαρδάκ', $label, 'the name must not survive into the digest');
+        $this->assertStringContainsString('Τομέας', $label, 'the rest of the label must survive');
+        $this->assertSame([], aiScanDigestForLeaks(['τομεας' => $label], $names));
+    }
+
     // ── What a citation is allowed to be ───────────────────────────────────
 
     public function testACitationThatDoesNotResolveIsDroppedAndCounted(): void

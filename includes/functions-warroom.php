@@ -3050,6 +3050,95 @@ function pointInPolygon(float $lat, float $lng, array $geo): bool {
 }
 
 /**
+ * A point in the middle of a polygon — and guaranteed to be INSIDE it.
+ *
+ * The obvious answer is the area-weighted centroid, and for the rectangles and
+ * pie slices the sector tool draws it is the right one. But a sector traced
+ * around the shape of a gorge is concave, and the centroid of a concave shape
+ * can sit outside it: the middle of a horseshoe is not in the horseshoe. Sent
+ * a team as "the middle of your sector", such a point is on the wrong side of
+ * a ridge from every part of the ground they were asked to search.
+ *
+ * So the centroid is tested, and when it falls outside, the midpoint of the
+ * widest span of polygon along the centroid's own latitude is used instead —
+ * cheap, always inside, and still recognisably "the middle" on a map.
+ *
+ * $geo is a ring of [lat, lng] pairs, the same shape pointInPolygon() takes.
+ * Returns ['lat' => float, 'lng' => float] or null for anything that is not a
+ * polygon.
+ */
+function polygonCentroid(array $geo): ?array {
+    $ring = [];
+    foreach ($geo as $p) {
+        if (!is_array($p) || !isset($p[0], $p[1]) || !is_numeric($p[0]) || !is_numeric($p[1])) continue;
+        $ring[] = [(float) $p[0], (float) $p[1]];
+    }
+    $n = count($ring);
+    if ($n < 3) {
+        // Two points is a line and one is a point: their middle is still a
+        // perfectly good answer, and refusing would lose a real target.
+        if ($n === 2) return ['lat' => ($ring[0][0] + $ring[1][0]) / 2, 'lng' => ($ring[0][1] + $ring[1][1]) / 2];
+        if ($n === 1) return ['lat' => $ring[0][0], 'lng' => $ring[0][1]];
+        return null;
+    }
+
+    // Standard area-weighted centroid, flat-Cartesian on lat/lng — the same
+    // tradeoff pointInPolygon() already accepts at mission scale.
+    $twiceArea = 0.0;
+    $lat = 0.0;
+    $lng = 0.0;
+    for ($i = 0, $j = $n - 1; $i < $n; $j = $i++) {
+        $cross = $ring[$j][1] * $ring[$i][0] - $ring[$i][1] * $ring[$j][0];
+        $twiceArea += $cross;
+        $lat += ($ring[$j][0] + $ring[$i][0]) * $cross;
+        $lng += ($ring[$j][1] + $ring[$i][1]) * $cross;
+    }
+
+    if (abs($twiceArea) > 1e-12) {
+        $cLat = $lat / (3 * $twiceArea);
+        $cLng = $lng / (3 * $twiceArea);
+        if (pointInPolygon($cLat, $cLng, $ring)) {
+            return ['lat' => $cLat, 'lng' => $cLng];
+        }
+    } else {
+        // Degenerate ring (every vertex collinear): fall through to the mean,
+        // which for a line is its middle.
+        $cLat = array_sum(array_column($ring, 0)) / $n;
+        $cLng = array_sum(array_column($ring, 1)) / $n;
+        return ['lat' => $cLat, 'lng' => $cLng];
+    }
+
+    // Concave, and the centroid escaped. Cut the polygon with the horizontal
+    // line through it and take the middle of the widest piece that is actually
+    // polygon.
+    $xs = [];
+    for ($i = 0, $j = $n - 1; $i < $n; $j = $i++) {
+        $latI = $ring[$i][0];
+        $latJ = $ring[$j][0];
+        if (($latI > $cLat) === ($latJ > $cLat)) continue;
+        $xs[] = ($ring[$j][1] - $ring[$i][1]) * ($cLat - $latI) / ($latJ - $latI) + $ring[$i][1];
+    }
+    sort($xs);
+    $bestMid = null;
+    $bestSpan = -1.0;
+    // Crossings pair up: inside, outside, inside… so every other gap is solid.
+    for ($i = 0; $i + 1 < count($xs); $i += 2) {
+        $span = $xs[$i + 1] - $xs[$i];
+        if ($span > $bestSpan) {
+            $bestSpan = $span;
+            $bestMid = ($xs[$i] + $xs[$i + 1]) / 2;
+        }
+    }
+    if ($bestMid !== null) {
+        return ['lat' => $cLat, 'lng' => $bestMid];
+    }
+
+    // Nothing worked, which should not happen for a real ring. The first
+    // vertex is on the polygon and is better than no target at all.
+    return ['lat' => $ring[0][0], 'lng' => $ring[0][1]];
+}
+
+/**
  * Distance in meters from a point to the nearest edge of a polygon (0 if
  * the point is already inside — see pointInPolygon() above). Projects to a
  * local flat X/Y in meters centered on the query point itself, then takes

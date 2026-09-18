@@ -65,6 +65,11 @@ require_once __DIR__ . '/ai-observer.php';
 // appear in a digest, silently, and "the assistant does not know about the
 // weather" is not a symptom anybody would trace back to a missing include.
 require_once __DIR__ . '/weather.php';
+// Where each team was told to go, and how far that is by road or path. Both
+// are on-demand for the same reason weather.php is: nothing else in a normal
+// page load needs them, and route-distance.php makes outbound calls.
+require_once __DIR__ . '/mission-targets.php';
+require_once __DIR__ . '/route-distance.php';
 
 const AI_LIVE_PROMPT_VERSION = 1;
 
@@ -195,13 +200,80 @@ function aiLiveRelativeTo(?float $lat, ?float $lng, ?float $refLat, ?float $refL
     }
     $metres  = gpsDistanceMeters($refLat, $refLng, $lat, $lng);
     $bearing = aiLiveCompassLabel(aiLiveBearingDegrees($refLat, $refLng, $lat, $lng));
-    // One decimal on kilometres, whole metres below a kilometre. Both are far
-    // from the five decimal places the leak gate treats as a coordinate, and
-    // both are the precision a radio call would actually use.
-    $distance = $metres < 1000
+    return aiLiveMetresWords($metres) . ' ' . $bearing;
+}
+
+/**
+ * A distance as a radio call would say it.
+ *
+ * One decimal on kilometres, whole metres below one. Both are far from the
+ * five decimal places the leak gate treats as a coordinate, and both are the
+ * precision somebody would actually read out.
+ */
+function aiLiveMetresWords(float $metres): string {
+    return $metres < 1000
         ? round($metres) . ' μ'
         : round($metres / 1000, 1) . ' χλμ';
-    return $distance . ' ' . $bearing;
+}
+
+/**
+ * How far somebody is from where they were sent, in words.
+ *
+ * ALWAYS leads with the straight line, and says that is what it is. In
+ * mountain search that is the number a team on foot actually faces, it never
+ * fails, and it is the only one that is true when there is no road within
+ * kilometres. The routed figure follows when a router answered — that is the
+ * one a coordinator can hold against a clock, and it is labelled by mode
+ * because "8,4 χλμ driving" and "8,4 χλμ walking" are different facts about
+ * the same two points.
+ *
+ * $routed is a row from routeDistanceBatch(), or null when nothing came back:
+ * a router being down, rate-limiting or simply absent must degrade this line,
+ * never remove it.
+ */
+function aiLiveDistanceToTargetWords(float $straightMetres, string $bearing, ?array $routed): string {
+    $words = aiLiveMetresWords($straightMetres) . ' σε ευθεία ' . $bearing;
+    if ($routed === null) {
+        return $words;
+    }
+    $how = ($routed['mode'] ?? '') === 'walking' ? 'με τα πόδια' : 'οδικώς';
+    $words .= ' — ' . aiLiveMetresWords((float) $routed['meters']) . ' ' . $how;
+    if (!empty($routed['minutes'])) {
+        $words .= ', ' . (int) $routed['minutes'] . ' λεπτά';
+    }
+    if (aiLiveRouteIsDetour($straightMetres, (float) $routed['meters'])) {
+        $words .= ' ' . AI_LIVE_ROUTE_DETOUR_NOTE;
+    }
+    return $words;
+}
+
+/**
+ * Past this ratio the routed number is about roads, not about the people.
+ *
+ * Measured on a real Psiloritis mission: a crew 6,2 km from their sector in a
+ * straight line came back as 70 km by road, because the router snapped both
+ * ends to the nearest asphalt and went round the whole mountain. Eleven times
+ * the real separation, stated flatly, is the kind of figure a coordinator acts
+ * on — and it would send a vehicle on a two-hour drive to reach people who are
+ * an hour's walk away.
+ *
+ * So the number is kept, because it IS the driving distance and sometimes that
+ * is exactly the question, and it is labelled for what it is. Four times is
+ * the threshold: a genuine road detour around a valley runs two to three, and
+ * anything past four is the router leaving the terrain the team is standing
+ * on.
+ */
+const AI_LIVE_ROUTE_DETOUR_RATIO = 4.0;
+
+/** Below this the ratio means nothing — short legs are all detour. */
+const AI_LIVE_ROUTE_DETOUR_MIN_METRES = 1000.0;
+
+const AI_LIVE_ROUTE_DETOUR_NOTE =
+    '(ΠΡΟΣΟΧΗ: ο δρομολογητής κάνει πολύ μεγάλο γύρο από δρόμο — εκτός δρόμου το χρήσιμο νούμερο είναι η ευθεία)';
+
+function aiLiveRouteIsDetour(float $straightMetres, float $routedMetres): bool {
+    if ($straightMetres < AI_LIVE_ROUTE_DETOUR_MIN_METRES) return false;
+    return $routedMetres > $straightMetres * AI_LIVE_ROUTE_DETOUR_RATIO;
 }
 
 /**
@@ -1104,7 +1176,20 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     $sectorLabels = [];
     foreach ($sectorRows as $row) {
         $id = (int) $row['id'];
-        $sectorLabels[$id] = $row['label'] !== '' ? $row['label'] : ('#' . $id);
+        // Redacted HERE, once, because this map is the single source every
+        // other mention of a sector reads from: its own row, the «γειτονικοι»
+        // list of the sectors beside it, the ref label, and the «τομεας» field
+        // stamped on incidents, SOS signals and clues.
+        //
+        // A sector name is free text a coordinator types at three in the
+        // morning, and «Τομέας Βαρδάκη» is exactly what gets typed. Until now
+        // it went to the provider raw — which the leak gate then caught, and
+        // BLOCKED THE WHOLE QUESTION. So an organisation that named one sector
+        // after a person had an assistant that answered nothing at all, with
+        // an error that reads like a fault in the AI. Same shape as the two
+        // gateway bugs fixed in v3.267.0, and the same rule applies: over-match
+        // when redacting, be precise when blocking.
+        $sectorLabels[$id] = $row['label'] !== '' ? $red($row['label'], 80) : ('#' . $id);
         $geo = json_decode((string) ($row['geo'] ?? ''), true);
         if (is_array($geo) && count($geo) >= 3) {
             $sectorGeos[$id] = $geo;
@@ -1207,7 +1292,10 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         $refs[$ref] = 'Τομέας ' . $sectorLabels[$id];
         $entry = [
             'ref'          => $ref,
-            'τομεας'       => $row['label'],
+            // From the map rather than the row, so the sector's own name and
+            // every other mention of it cannot disagree — and so there is one
+            // place, not two, where the redaction has to be remembered.
+            'τομεας'       => $sectorLabels[$id],
             'κατασταση'    => $row['status'],
             'ομαδα'        => teamLabel($row['codename'], $row['team_number']) ?: null,
             'παραληφθηκε'  => $row['acknowledged_at'] !== null,
@@ -1307,7 +1395,7 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     $onDutyRows = dbFetchAll(
         "SELECT pr.volunteer_id, u.name AS who,
                 UNIX_TIMESTAMP(lp.created_at) AS last_ping_ts, lp.lat, lp.lng,
-                mt.codename, mt.team_number
+                mtm.team_id, mt.codename, mt.team_number
          FROM participation_requests pr
          JOIN shifts s ON s.id = pr.shift_id
          JOIN users u ON u.id = pr.volunteer_id
@@ -1343,6 +1431,22 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     }
     $silent = 0;
     $noPing = 0;
+    // Where each team was told to go. One query set for the whole mission,
+    // resolved to a single point per team however the coordinator drew it —
+    // see mission-targets.php for why a route resolves to waypoint 1 and an
+    // area to a middle that is guaranteed to be inside it.
+    $targets = [];
+    try {
+        $targets = missionAssignedTargets($missionId);
+    } catch (Throwable $e) {
+        // A digest without target distances is a smaller loss than a digest
+        // that does not build at all.
+        error_log('[ai-live] targets failed for mission ' . $missionId . ': ' . $e->getMessage());
+    }
+    // Legs to route once the whole roster is known, so the eight that get an
+    // outbound call are chosen across everybody rather than by who came first.
+    $legs = [];
+
     $crew = [];
     foreach ($onDuty as $id => $row) {
         $lastTs = $row['last_ping_ts'] === null ? null : (int) $row['last_ping_ts'];
@@ -1371,7 +1475,60 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
         if (($moveWords = aiLiveMovementWords($movement[$id] ?? null)) !== null) {
             $entry['κινηση'] = $moveWords;
         }
+
+        // How far they are from where they were sent. Both fields are ABSENT
+        // when there is no target or no fix — never zero, never "unknown" as a
+        // number. A distance of nothing reads as "they are there", which about
+        // somebody who has never pinged would send the coordinator past the
+        // one person they most need to chase.
+        $target = missionTargetForTeam($targets, $row['team_id'] === null ? null : (int) $row['team_id']);
+        if ($target !== null) {
+            // THROUGH $red, like every other piece of free text in here. The
+            // label of a sector, a route or a dispatch point is typed by a
+            // coordinator at three in the morning, and «Σημείο Βαρδάκη» is
+            // exactly the kind of thing that gets typed — a real name walking
+            // into the provider through a field nobody thought of as text.
+            $entry['στοχος'] = $red($target['label'])
+                . ($target['detail'] !== null ? ' (' . $target['detail'] . ')' : '');
+            if ($cLat !== null && $cLng !== null) {
+                $metres  = gpsDistanceMeters($cLat, $cLng, $target['lat'], $target['lng']);
+                $bearing = aiLiveCompassLabel(aiLiveBearingDegrees($cLat, $cLng, $target['lat'], $target['lng']));
+                $entry['αποσταση_απο_στοχο'] = aiLiveDistanceToTargetWords($metres, $bearing, null);
+                if ($metres >= ROUTE_DISTANCE_MIN_METRES) {
+                    $legs[count($crew)] = [
+                        'metres'  => $metres,
+                        'bearing' => $bearing,
+                        'leg'     => [$cLat, $cLng, $target['lat'], $target['lng']],
+                    ];
+                }
+            }
+        }
+
         $crew[] = $entry;
+    }
+
+    // The routed figure, for the few it is worth an outbound call on.
+    //
+    // FARTHEST FIRST. Everyone already has the straight line for free; the
+    // routed distance earns its call where the answer is "how long until they
+    // get there", and that question is never about the person standing two
+    // hundred metres away. Deterministic, so two identical digests route the
+    // same eight legs.
+    if ($legs && routeDistanceAvailable()) {
+        uasort($legs, fn($a, $b) => $b['metres'] <=> $a['metres']);
+        try {
+            $routed = routeDistanceBatch(array_map(fn($l) => $l['leg'], $legs));
+            foreach ($routed as $index => $result) {
+                if (!isset($crew[$index], $legs[$index])) continue;
+                $crew[$index]['αποσταση_απο_στοχο'] = aiLiveDistanceToTargetWords(
+                    $legs[$index]['metres'], $legs[$index]['bearing'], $result
+                );
+            }
+        } catch (Throwable $e) {
+            // The straight line is already in every entry. A router that fails
+            // must cost the extra number, not the section.
+            error_log('[ai-live] routing failed for mission ' . $missionId . ': ' . $e->getMessage());
+        }
     }
     // Freshest first, so the cap below — if a very large operation ever hits
     // it — drops the stalest rows rather than an arbitrary slice. usort keeps
@@ -1655,6 +1812,8 @@ function aiLiveSystemPrompt(): string {
 - Όταν η ερώτηση αφορά το σημείο που κοιτάζει ο συντονιστής, χρησιμοποίησε το έτοιμο πεδίο «αποσταση_απο_σημειο_εστιασης» όπου υπάρχει — είναι υπολογισμένο από τον server. Αν λείπει από μια εγγραφή, δεν υπάρχει· μην το συμπληρώσεις μόνος σου.
 - Το «θεση» είναι πάντα φράση, ποτέ κενό. Αν λέει «Δεν έχει σταλεί στίγμα» ή ότι λείπει το σημείο βάσης, αυτό είναι η απάντηση — πες το με ανθρώπινα λόγια και μην αναφέρεις ποτέ τη λέξη «null».
 - Για το πού βρίσκεται συγκεκριμένο πρόσωπο κοίτα το «θεσεις_προσωπικου». Η θέση μιας ομάδας είναι το στίγμα οποιουδήποτε μέλους της και ΔΕΝ είναι η θέση του επικεφαλής.
+- Για το πόσο απέχει κάποιος από εκεί που τον έστειλαν, χρησιμοποίησε τα έτοιμα «στοχος» και «αποσταση_απο_στοχο». Είναι υπολογισμένα από τον server από τις πραγματικές συντεταγμένες. ΠΟΤΕ μην τα υπολογίσεις μόνος σου και ποτέ μην τα συμπληρώσεις όταν λείπουν: αν λείπουν, ή δεν του έχει ανατεθεί σημείο ή δεν έχει σταλεί στίγμα — και αυτό ακριβώς είναι η απάντηση.
+- Η ευθεία γραμμή και η απόσταση διαδρομής ΔΕΝ είναι το ίδιο πράγμα. Στο βουνό η διαδρομή είναι συχνά τριπλάσια από την ευθεία, γιατί ο δρόμος κάνει τον γύρο. Λέγε πάντα ποιο από τα δύο αναφέρεις, με τα ίδια λόγια που τα λέει το πεδίο.
 - Δεν βλέπεις χάρτη, αλλά οι σχέσεις είναι υπολογισμένες για σένα: το «γειτονικοι» κάθε τομέα λέει ποιοι ακουμπάνε, και το «τομεας» σε περιστατικά, SOS και σημεία ενδιαφέροντος λέει σε ποιο έδαφος έπεσαν. Χρησιμοποίησέ τα αυτούσια — μην συμπεραίνεις γειτνίαση από ονόματα ή αριθμούς τομέων.
 - Τα ονόματα προσώπων είναι ψευδώνυμα (ΜΕΛΟΣ-1 κ.λπ.). Χρησιμοποίησέ τα αυτούσια, ακόμη κι αν η ερώτηση φαίνεται να αναφέρει πρόσωπο.
 - Στοιχεία ασθενών δεν σου δόθηκαν ποτέ. Αν σου ζητηθούν, πες ότι δεν τα έχεις και ότι βρίσκονται στην καρτέλα περιστατικού.
