@@ -1,0 +1,253 @@
+{
+    "README": "Shared fixture for the one point a team is navigated to for a whole shape. polygonCentroid() (includes/functions-warroom.php) and polygonNavPoint() (assets/js/war-room-utils.js) are the same algorithm written twice - the server measures target distances with it, the client builds the «Πλοήγηση» link for a sector or a search area with it. If the two disagree, the coordinator is measuring one spot while the team walks to another. Both are asserted against this file, by tests/NavPointFixtureTest.php and tests/js/nav-point.test.js. Coordinates are compared at 1e-6 degrees (about 11cm), far inside GPS error. inside=true means the point must be within the shape itself - that is the whole reason this is not a plain centroid. Regenerate only after the behavioural tests in tests/MissionTargetDistanceTest.php still pass; this file records what the algorithm does, it does not define what it should do.",
+    "cases": [
+        {
+            "name": "a plain rectangular sector",
+            "geo": [
+                [
+                    35.33,
+                    24.8
+                ],
+                [
+                    35.33,
+                    24.81
+                ],
+                [
+                    35.34,
+                    24.81
+                ],
+                [
+                    35.34,
+                    24.8
+                ]
+            ],
+            "expect": {
+                "lat": 35.335000003,
+                "lng": 24.805000002,
+                "inside": true
+            }
+        },
+        {
+            "name": "a horseshoe sector traced around a gorge",
+            "geo": [
+                [
+                    35.3,
+                    24.7
+                ],
+                [
+                    35.3,
+                    24.72
+                ],
+                [
+                    35.304,
+                    24.72
+                ],
+                [
+                    35.304,
+                    24.704
+                ],
+                [
+                    35.316,
+                    24.704
+                ],
+                [
+                    35.316,
+                    24.72
+                ],
+                [
+                    35.32,
+                    24.72
+                ],
+                [
+                    35.32,
+                    24.7
+                ]
+            ],
+            "expect": {
+                "lat": 35.310000004,
+                "lng": 24.702,
+                "inside": true
+            }
+        },
+        {
+            "name": "an L-shaped search area around a headland",
+            "geo": [
+                [
+                    35.2,
+                    24.6
+                ],
+                [
+                    35.2,
+                    24.63
+                ],
+                [
+                    35.21,
+                    24.63
+                ],
+                [
+                    35.21,
+                    24.61
+                ],
+                [
+                    35.23,
+                    24.61
+                ],
+                [
+                    35.23,
+                    24.6
+                ]
+            ],
+            "expect": {
+                "lat": 35.211,
+                "lng": 24.605,
+                "inside": true
+            }
+        },
+        {
+            "name": "a triangular wedge sector",
+            "geo": [
+                [
+                    35.4,
+                    25.1
+                ],
+                [
+                    35.42,
+                    25.13
+                ],
+                [
+                    35.39,
+                    25.14
+                ]
+            ],
+            "expect": {
+                "lat": 35.403333333,
+                "lng": 25.123333333,
+                "inside": true
+            }
+        },
+        {
+            "name": "a many-vertex ring disc",
+            "geo": [
+                [
+                    35.36,
+                    25
+                ],
+                [
+                    35.359135,
+                    25.004881
+                ],
+                [
+                    35.356691,
+                    25.008918
+                ],
+                [
+                    35.35309,
+                    25.011413
+                ],
+                [
+                    35.348955,
+                    25.011934
+                ],
+                [
+                    35.345,
+                    25.010392
+                ],
+                [
+                    35.34191,
+                    25.007053
+                ],
+                [
+                    35.340219,
+                    25.002495
+                ],
+                [
+                    35.340219,
+                    24.997505
+                ],
+                [
+                    35.34191,
+                    24.992947
+                ],
+                [
+                    35.345,
+                    24.989608
+                ],
+                [
+                    35.348955,
+                    24.988066
+                ],
+                [
+                    35.35309,
+                    24.988587
+                ],
+                [
+                    35.356691,
+                    24.991082
+                ],
+                [
+                    35.359135,
+                    24.995119
+                ]
+            ],
+            "expect": {
+                "lat": 35.350000138,
+                "lng": 24.999999998,
+                "inside": true
+            }
+        },
+        {
+            "name": "a two-point degenerate shape",
+            "geo": [
+                [
+                    35.1,
+                    24.5
+                ],
+                [
+                    35.12,
+                    24.54
+                ]
+            ],
+            "expect": {
+                "lat": 35.11,
+                "lng": 24.52,
+                "inside": null
+            }
+        },
+        {
+            "name": "a single point",
+            "geo": [
+                [
+                    35.1234,
+                    24.5678
+                ]
+            ],
+            "expect": {
+                "lat": 35.1234,
+                "lng": 24.5678,
+                "inside": null
+            }
+        },
+        {
+            "name": "every vertex on one line",
+            "geo": [
+                [
+                    35.1,
+                    24.5
+                ],
+                [
+                    35.11,
+                    24.5
+                ],
+                [
+                    35.12,
+                    24.5
+                ]
+            ],
+            "expect": {
+                "lat": 35.11,
+                "lng": 24.5,
+                "inside": false
+            }
+        }
+    ]
+}

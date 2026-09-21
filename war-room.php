@@ -6372,17 +6372,45 @@ function renderDispatches(items) {
 // location permission). A polygon has no single point, so route to its
 // centroid instead. Shared by the map popup and by "Οι Εντολές μου", so the
 // two can never disagree about where "there" is.
-function dispatchDirectionsUrl(item) {
-    let lat, lng;
-    if (item.type === 'point') {
-        lat = item.geo.lat;
-        lng = item.geo.lng;
-    } else {
-        const sum = item.geo.reduce((acc, pt) => [acc[0] + pt[0], acc[1] + pt[1]], [0, 0]);
-        lat = sum[0] / item.geo.length;
-        lng = sum[1] / item.geo.length;
-    }
+function navigationUrl(lat, lng) {
     return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+}
+
+// The one point a whole shape is navigated to. polygonNavPoint()
+// (war-room-utils.js) is the JS twin of the server's polygonCentroid(), pinned
+// to it by tests/fixtures/nav-point-cases.json — so the distance the
+// coordinator is shown and the place the team is actually sent are the same
+// spot, and neither is in the notch of a horseshoe.
+//
+// This used to be a plain mean of the vertices, which is right for a rectangle
+// and wrong for every shape traced around a gorge, a bay or a headland: the
+// middle of a horseshoe is not in the horseshoe, and a team routed there is on
+// the wrong side of a ridge from all the ground they were given.
+function polygonNavigationUrl(geo) {
+    const mid = (typeof polygonNavPoint === 'function') ? polygonNavPoint(geo) : null;
+    return mid ? navigationUrl(mid.lat, mid.lng) : null;
+}
+
+// Every «Πλοήγηση» button on this page, so they cannot drift apart in label,
+// icon or behaviour. Returns '' for a target with no coordinates rather than a
+// dead button — an incident logged without GPS is a real case.
+function navigationBtnHtml(lat, lng, opts) {
+    if (lat === null || lat === undefined || lng === null || lng === undefined) return '';
+    const o = opts || {};
+    const cls = o.block ? 'btn btn-sm btn-outline-success w-100 mt-1' : 'btn btn-sm btn-outline-primary mt-1';
+    return `<a href="${navigationUrl(lat, lng)}" target="_blank" rel="noopener" class="${cls}"><i class="bi bi-signpost-2-fill me-1"></i>${t('map.navigate_btn')}</a>`;
+}
+
+// Same, for a shape. Kept separate so a caller cannot accidentally pass a
+// polygon where a coordinate was expected and get a silent NaN destination.
+function polygonNavigationBtnHtml(geo, opts) {
+    const mid = (typeof polygonNavPoint === 'function') ? polygonNavPoint(geo) : null;
+    return mid ? navigationBtnHtml(mid.lat, mid.lng, opts) : '';
+}
+
+function dispatchDirectionsUrl(item) {
+    if (item.type === 'point') return navigationUrl(item.geo.lat, item.geo.lng);
+    return polygonNavigationUrl(item.geo) || navigationUrl(item.geo[0][0], item.geo[0][1]);
 }
 // "Ελήφθη" (receive) and "Άφιξη" (ack) for a dispatch point/area, from either
 // of the two places that now offer them: the map popup and the orders card.
@@ -7249,7 +7277,10 @@ function renderAreaLayer(items) {
                 ${divideOrClearBtn}
                 <button type="button" class="btn btn-sm btn-outline-danger mt-1 area-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
             </div>` : '';
-        const popupHtml = `<strong>${escapeHtml(item.label)}</strong>${rollup}${sizeLine}${manageHtml}`;
+        // Same reasoning as the sector popup below: an area is ground somebody
+        // has to reach before any of it can be searched.
+        const popupHtml = `<strong>${escapeHtml(item.label)}</strong>${rollup}${sizeLine}`
+            + polygonNavigationBtnHtml(item.geo, {block: true}) + manageHtml;
 
         const layer = L.polygon(item.geo, {pane: 'areaPane', color: '#dc3545', weight: 4, dashArray: '10,6', fillColor: '#dc3545', fillOpacity: 0.06}).addTo(areaLayer).bindPopup(popupHtml);
         const areaLabelMarker = L.marker(areaLabelAnchor(item.geo), {icon: L.divIcon({className: '', iconSize: [0, 0]}), interactive: false});
@@ -7557,7 +7588,7 @@ function addSectorBuildingMarker(b, item) {
     // pin popup (renderPinMarker above) — no origin means Google Maps routes
     // from the device's current location, so this works without ever asking
     // this page for geolocation permission.
-    const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${b.lat},${b.lng}&travelmode=driving`;
+    const navUrl = navigationUrl(b.lat, b.lng);
     const navBtn = `<br><a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-1">${t('map.navigate_btn')}</a>`;
     const bPopupHtml = `<strong>${escapeHtml(b.label)}</strong>${sectorFloorChecklistHtml(b, canActOnBuildings)}${navBtn}${delBuildingBtn}`;
     const bLayer = L.marker([b.lat, b.lng], {icon}).addTo(sectorBuildingLayer).bindPopup(bPopupHtml);
@@ -7680,9 +7711,15 @@ function renderSectorLayer(items) {
                     <button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
                 </div>` : '';
             const sizeLine = `<div class="small text-muted mt-1">${t('sector.area_size', {size: formatAreaSquareMeters(polygonAreaSquareMeters(item.geo))})}</div>`;
+            // A sector is an assignment — "go and search this ground" — so it
+            // needs the same way of getting there that a dispatch point has
+            // always had. Until now only a BUILDING inside a sector carried
+            // one, which meant a team told to search Sector B3 had to find the
+            // polygon on the map by eye.
+            const navBtn = polygonNavigationBtnHtml(item.geo, {block: true});
             const popupHtml = `<strong>${escapeHtml(item.label)}</strong><br>` +
                 `<span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span> ${escapeHtml(item.team_label)}${sectorCoverageBadgeHtml(item)}` +
-                sizeLine + buildingsSummary + completePrompt + ackBtn + selfReportBtn + manageHtml;
+                sizeLine + buildingsSummary + completePrompt + navBtn + ackBtn + selfReportBtn + manageHtml;
 
             const layer = L.polygon(item.geo, {pane: 'sectorPane', color, fillColor: color, fillOpacity: 0.35, weight: 2}).addTo(sectorLayer).bindPopup(popupHtml);
             // Same sectorCoverageBadgeHtml() as the popup above (so the
@@ -7971,7 +8008,13 @@ map.on('click', e => {
         }, 0);
     }
 });
-if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup('<strong>' + t('map.mission_point_label') + '</strong><br><?= h(addslashes($mission['title'])) ?>');
+// The mission's own point is the base/RV, i.e. where «Επιστροφή στη Βάση»
+// sends everyone — so it gets directions like any other destination. The
+// briefing sheet (briefing-view.php) has always offered them here; the live
+// map was the one place that did not.
+if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup(
+    '<strong>' + t('map.mission_point_label') + '</strong><br><?= h(addslashes($mission['title'])) ?><br>'
+    + navigationBtnHtml(missionLocation.lat, missionLocation.lng));
 
 function updateMissingPersonLocationPreview() {
     // Guards every lookup, not just the first — none of these ids exist in
@@ -8173,7 +8216,7 @@ function renderMySectors(items) {
                 <strong>${escapeHtml(item.label)}</strong>
                 <span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span>
             </div>
-            ${buildingsHtml}${completePrompt}${ackBtn}${advanceBtn}
+            ${buildingsHtml}${completePrompt}${polygonNavigationBtnHtml(item.geo, {block: true})}${ackBtn}${advanceBtn}
         </div>`;
     }).join('');
 
@@ -8480,7 +8523,7 @@ function buildPinMarker(pin, interactive = true) {
         ? `<br><span class="${pin.continuous_field_minutes >= WR_CRITICAL_SHIFT_MINUTES ? 'text-danger' : 'text-warning'} small">⏱ ${t('fatigue.pin_line', fatigueHm(pin.continuous_field_minutes))}</span>`
         : '';
     const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
-    const navUrl = `https://www.google.com/maps/dir/?api=1&destination=${pin.lat},${pin.lng}&travelmode=driving`;
+    const navUrl = navigationUrl(pin.lat, pin.lng);
     // Always rendered for an admin regardless of battery level, so there's
     // something to notice/hover even on a healthy pin — deliberately NOT
     // the native disabled attribute, which would swallow the click
@@ -9533,9 +9576,16 @@ function myOrderEntriesFromSectors(items) {
             const actionHtml = sector.can_acknowledge
                 ? `<button type="button" class="btn btn-sm btn-warning w-100 my-sector-ack-btn" data-id="${sector.id}">${t('banner.ack_btn')}</button>`
                 : `<button type="button" class="btn btn-sm btn-outline-primary w-100 my-open-card-btn" data-card="mySectorsCard">${t('mytasks.open_card_btn')}</button>`;
+            // The same complaint the dispatch row's directions button fixed:
+            // a volunteer should not have to find their assignment on the map
+            // before they can start moving toward it.
             return {
                 outstanding: true,
-                html: myOrderRow(escapeHtml(t('mytasks.sector_label', {label: sector.label})), escapeHtml(sector.status_label), actionHtml)
+                html: myOrderRow(
+                    escapeHtml(t('mytasks.sector_label', {label: sector.label})),
+                    escapeHtml(sector.status_label),
+                    actionHtml + polygonNavigationBtnHtml(sector.geo, {block: true})
+                )
             };
         });
 }
@@ -10080,7 +10130,7 @@ function triggerWaypointUpload(waypointId, mediaType, statusEl) {
 }
 
 function routeWaypointDirectionsUrl(wp) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${wp.lat},${wp.lng}&travelmode=driving`;
+    return navigationUrl(wp.lat, wp.lng);
 }
 
 function routeDwellCountdownHtml(wp) {
@@ -10460,6 +10510,7 @@ function renderMissionIncidents(items) {
             ${details ? `<div class="small mt-1">${escapeHtml(details)}</div>` : ''}
             ${r.notes ? `<div class="small fst-italic mt-1">"${escapeHtml(r.notes)}"</div>` : ''}
             <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.home_team_name, r.home_team_color_bg, r.home_team_color_fg, r.guest_country_code)}${k9BadgeHtml(r.user_id, true)}${captainBadgeHtml(r.user_id, true)} (${escapeHtml(r.team_label)}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
+            ${navigationBtnHtml(r.lat, r.lng, {block: true})}
             ${canManageIncidents ? `<div class="mt-1 d-flex gap-1">${r.acknowledged_at
                 ? `<select class="form-select form-select-sm incident-outcome-select" data-incident-id="${r.id}"><option value="">${t('incident.outcome_label')}…</option>${outcomeOptions}</select>
                    <input type="text" class="form-control form-control-sm incident-outcome-location-input d-none" data-incident-id="${r.id}" maxlength="255" placeholder="${t('incident.outcome_location_placeholder')}">
@@ -10520,9 +10571,12 @@ function renderIncidentLayer(items) {
         });
         const who = r.is_unknown_patient ? t('incident.unknown_patient_label') : (r.patient_name || '—');
         const details = [r.estimated_age, r.gender_label, r.phone].filter(Boolean).join(' · ');
+        // A casualty is the one pin on this map where minutes matter most, and
+        // it was the one with no way to start driving to it.
         const popupHtml = `<strong>${r.severity_label} — ${r.type_label}</strong><br>${escapeHtml(who)}` +
             (details ? `<br><span class="small">${escapeHtml(details)}</span>` : '') +
-            `<br><span class="small text-muted">${escapeHtml(r.team_label)} · ${r.created_at}</span>`;
+            `<br><span class="small text-muted">${escapeHtml(r.team_label)} · ${r.created_at}</span>` +
+            '<br>' + navigationBtnHtml(r.lat, r.lng);
         return L.marker([r.lat, r.lng], {icon}).bindPopup(popupHtml);
     });
     sharedMarkerCluster.addLayers(currentIncidentMarkers);
@@ -10563,6 +10617,7 @@ function renderPointsOfInterest(items) {
             ${notesHtml}
             <div class="small mt-1">${reportedBy}</div>
             <div class="text-muted" style="font-size:.75rem;">${p.created_at}${p.checked_at ? t('poi.checked_at_prefix', {time: p.checked_at, name: escapeHtml(p.checked_by_name || '')}) : ''}</div>
+            ${navigationBtnHtml(p.lat, p.lng, {block: true})}
             ${canManageIncidents && !p.checked_at ? `<button type="button" class="btn btn-sm btn-primary w-100 mt-1 poi-check-btn" data-poi-id="${p.id}">${t('poi.check_btn')}</button>` : ''}
         </div>
     `;
@@ -10616,8 +10671,11 @@ function renderPoiLayer(items) {
         const notesHtml = (p.photos || []).filter(photo => photo.note)
             .map(photo => `<br><span class="small fst-italic">"${escapeHtml(photo.note)}"</span>`)
             .join('');
+        // A clue somebody has to go and rule in or out is a place, and the
+        // whole point of the pin is that a second team goes back to it.
         const popupHtml = `<strong>${t('poi.popup_title')}</strong><br>${reportedBy}${notesHtml}<br><span class="small text-muted">${p.created_at}</span>` +
-            (p.checked_at ? `<br><span class="small text-success">${t('poi.checked_at_prefix', {time: p.checked_at, name: escapeHtml(p.checked_by_name || '')})}</span>` : '');
+            (p.checked_at ? `<br><span class="small text-success">${t('poi.checked_at_prefix', {time: p.checked_at, name: escapeHtml(p.checked_by_name || '')})}</span>` : '') +
+            '<br>' + navigationBtnHtml(p.lat, p.lng);
         return L.marker([p.lat, p.lng], {icon}).bindPopup(popupHtml);
     });
     sharedMarkerCluster.addLayers(currentPoiMarkers);
@@ -10659,7 +10717,10 @@ function renderMissingPersonMarker(item) {
         : '';
     const popupHtml = `${photoHtml}<strong>${escapeHtml(item.full_name)}</strong>` +
         (item.last_seen_label ? `<br>${escapeHtml(item.last_seen_label)}` : '') +
-        (item.last_seen_at ? `<br><span class="small text-muted">${t('missing_person.last_seen_at_prefix', {time: item.last_seen_at})}</span>` : '');
+        (item.last_seen_at ? `<br><span class="small text-muted">${t('missing_person.last_seen_at_prefix', {time: item.last_seen_at})}</span>` : '') +
+        // The last-known point is where a search starts from, so it is a place
+        // teams are genuinely sent to, not just a marker to look at.
+        '<br>' + navigationBtnHtml(item.last_seen_lat, item.last_seen_lng);
     L.marker([item.last_seen_lat, item.last_seen_lng], {icon}).addTo(missingPersonLayer).bindPopup(popupHtml);
 }
 
@@ -11057,6 +11118,7 @@ function renderSosAlerts(items) {
         <div class="border border-danger rounded p-2 mb-2">
             <div><strong>🆘 ${a.team_label}</strong> — ${guestNameHtml(a.user_name, a.is_external, a.home_team_name, a.home_team_color_bg, a.home_team_color_fg, a.guest_country_code)}${k9BadgeHtml(a.user_id, true)}${captainBadgeHtml(a.user_id, true)}</div>
             <div class="text-muted" style="font-size:.75rem;">${a.created_at}${a.lat !== null ? ` · <a href="#" class="sos-locate-link" data-lat="${a.lat}" data-lng="${a.lng}">${t('sos.view_on_map')}</a>` : t('sos.no_gps')}${a.acknowledged_at ? t('sos.ack_at_prefix', {time: a.acknowledged_at}) : ''}</div>
+            ${navigationBtnHtml(a.lat, a.lng, {block: true})}
             <div class="mt-1">${a.acknowledged_at
                 ? `<button type="button" class="btn btn-sm btn-success w-100 sos-resolve-btn" data-alert-id="${a.id}">${t('shortage.resolve_btn')}</button>`
                 : `<button type="button" class="btn btn-sm btn-warning w-100 sos-ack-btn" data-alert-id="${a.id}">${t('banner.ack_btn')}</button>`}</div>

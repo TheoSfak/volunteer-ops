@@ -278,6 +278,78 @@ function pointInPolygon(lat, lng, geo) {
     return inside;
 }
 
+// One point a team can actually be sent to for a whole shape — the JS twin of
+// polygonCentroid() in includes/functions-warroom.php, pinned to it by
+// tests/fixtures/nav-point-cases.json so the two can never drift.
+//
+// A polygon has no single coordinate, but "Πλοήγηση" on a sector or a search
+// area has to hand Google Maps exactly one. The plain area-weighted centroid
+// is the obvious answer and it is wrong for a real search shape: the middle of
+// a horseshoe is not in the horseshoe, and a sector traced around a gorge or a
+// bay is exactly that. A team routed to such a point is sent to the wrong side
+// of a ridge from every part of the ground they were given.
+//
+// So: take the centroid, and if it landed outside, cut the shape with the
+// horizontal line through it and aim at the middle of the widest piece that is
+// genuinely inside.
+function polygonNavPoint(geo) {
+    const ring = [];
+    for (const p of (geo || [])) {
+        if (!Array.isArray(p) || p.length < 2) continue;
+        const lat = Number(p[0]), lng = Number(p[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        ring.push([lat, lng]);
+    }
+    const n = ring.length;
+    if (n < 3) {
+        // Two points is a line and one is a point: their middle is still a
+        // perfectly good answer, and refusing would lose a real target.
+        if (n === 2) return {lat: (ring[0][0] + ring[1][0]) / 2, lng: (ring[0][1] + ring[1][1]) / 2};
+        if (n === 1) return {lat: ring[0][0], lng: ring[0][1]};
+        return null;
+    }
+
+    let twiceArea = 0, latAcc = 0, lngAcc = 0;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+        const cross = ring[j][1] * ring[i][0] - ring[i][1] * ring[j][0];
+        twiceArea += cross;
+        latAcc += (ring[j][0] + ring[i][0]) * cross;
+        lngAcc += (ring[j][1] + ring[i][1]) * cross;
+    }
+
+    let cLat, cLng;
+    if (Math.abs(twiceArea) > 1e-12) {
+        cLat = latAcc / (3 * twiceArea);
+        cLng = lngAcc / (3 * twiceArea);
+        if (pointInPolygon(cLat, cLng, ring)) return {lat: cLat, lng: cLng};
+    } else {
+        // Degenerate ring (every vertex collinear): the mean, which for a
+        // line is its middle.
+        let sLat = 0, sLng = 0;
+        for (const p of ring) { sLat += p[0]; sLng += p[1]; }
+        return {lat: sLat / n, lng: sLng / n};
+    }
+
+    const xs = [];
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+        const latI = ring[i][0], latJ = ring[j][0];
+        if ((latI > cLat) === (latJ > cLat)) continue;
+        xs.push((ring[j][1] - ring[i][1]) * (cLat - latI) / (latJ - latI) + ring[i][1]);
+    }
+    xs.sort((a, b) => a - b);
+    let bestMid = null, bestSpan = -1;
+    // Crossings pair up: inside, outside, inside… so every other gap is solid.
+    for (let i = 0; i + 1 < xs.length; i += 2) {
+        const span = xs[i + 1] - xs[i];
+        if (span > bestSpan) { bestSpan = span; bestMid = (xs[i] + xs[i + 1]) / 2; }
+    }
+    if (bestMid !== null) return {lat: cLat, lng: bestMid};
+
+    // Nothing worked, which should not happen for a real ring. The first
+    // vertex is on the polygon and is better than no target at all.
+    return {lat: ring[0][0], lng: ring[0][1]};
+}
+
 // Metres per degree of latitude, and per degree of longitude at that
 // latitude, on the WGS84 ellipsoid — the same reference frame the GPS in
 // every phone reports against, so these are the numbers that make a figure
@@ -939,6 +1011,7 @@ if (typeof module !== 'undefined' && module.exports) {
         metersPerDegreeLat,
         metersPerDegreeLng,
         gridCellsForPolygon,
+        polygonNavPoint,
         polygonAreaSquareMeters,
         polygonBoundsSizeMeters,
         formatBoundsSize,
