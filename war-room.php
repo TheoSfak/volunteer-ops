@@ -17199,7 +17199,15 @@ document.addEventListener('click', function (e) {
         action: 'stop',
         stream_id: btn.dataset.streamId
     });
-    fetch('mission-live.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+    // Same class of bug as the volunteer side's post(): an expired session
+    // answers with the HTML login page, and r.json() then throws where the
+    // only handler re-enables the button — command presses stop, nothing
+    // happens, and nothing says why. checkSessionAlive raises the banner.
+    fetch('mission-live.php', {method: 'POST', body: data}).then(r => {
+        if (!checkSessionAlive(r)) { btn.disabled = false; return null; }
+        return r.json();
+    }).then(result => {
+        if (!result) return;
         if (result.ok) {
             // The server is the authority on whether the feed is gone, so on
             // success we reflect "ended" immediately instead of waiting for
@@ -17303,7 +17311,11 @@ setInterval(function () {
     function dbg(msg) {
         const line = new Date().toTimeString().slice(0, 8) + ' ' + msg;
         dbgBuf.push(line);
-        if (dbgBuf.length > 140) dbgBuf.shift();
+        // Drop the seventh line, never the first: the opening lines are the
+        // device identity (UA, secure context, SDK, codecs), written once at
+        // load, and a plain shift() would quietly eat exactly the part of a
+        // field report that says WHICH phone this was.
+        if (dbgBuf.length > 140) dbgBuf.splice(6, 1);
         if (!LIVE_DEBUG) return;
         if (!dbgBox) {
             const host = document.querySelector('[data-card-id="myLiveCard"] .card-body')
@@ -17329,6 +17341,7 @@ setInterval(function () {
     // list and any CSP violation, the tail carries the stats that say what
     // actually happened.
     let liveReported = false;
+    const LIVE_REPORT_STASH = 'vopsLiveReport';
     function liveReport(reason) {
         if (liveReported) return;
         liveReported = true;
@@ -17337,38 +17350,89 @@ setInterval(function () {
             const detail = all.length <= 3500
                 ? all
                 : all.slice(0, 900) + ' ...CUT... ' + all.slice(-2500);
-            fetch('mobile-debug-log.php', {
-                method: 'POST',
-                body: new URLSearchParams({csrf_token: csrfToken, source: 'live', event: reason, detail})
-            }).catch(() => {});
+            liveReportSend(reason, detail);
         } catch (e) { /* a diagnostic must never break the thing it watches */ }
     }
 
-    if (LIVE_DEBUG) {
-        // The single most useful line this panel can print. A CSP refusal is
-        // invisible everywhere else: no exception, no failed request, just
-        // media that never arrives.
-        document.addEventListener('securitypolicyviolation', e => {
-            dbg('CSP BLOCKED ' + e.violatedDirective + ' <- ' + (e.blockedURI || '(inline)'));
-        });
-        dbg('debug on · ' + navigator.userAgent);
-        dbg('secure=' + window.isSecureContext +
-            ' sdk=' + (window.LivekitClient ? 'loaded 2.22.3' : 'MISSING — CDN blocked?') +
-            ' gUM=' + !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
-        // A home-screen icon on iOS is not the same environment as Safari:
-        // camera capture inside a standalone web app has its own long history
-        // of handing back black frames. Worth ruling in or out before blaming
-        // anything in this file.
-        dbg('standalone=' + ((window.navigator.standalone === true) ||
-                (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)) +
-            ' nativeApp=' + !!window.VopsNative);
-        // Settles the codec question without going live at all: a codec this
-        // device cannot SEND never appears in this list.
-        try {
-            const caps = RTCRtpSender.getCapabilities('video');
-            dbg('can send: ' + [...new Set(caps.codecs.map(c => c.mimeType.split('/')[1]))].join(', '));
-        } catch (e) { dbg('codec capabilities unavailable'); }
+    // The report is session-authenticated, so the likeliest cause of a failed
+    // start — an expired session — was also swallowing the report about it:
+    // the POST followed the redirect to the login page, and .catch(() => {})
+    // never fired because a 200 HTML page is not a network error. The one
+    // failure we most need to read was the one guaranteed never to arrive.
+    // So the send now checks its own answer, and keeps the payload in
+    // localStorage when it did not land; the next Action Room load with a
+    // working session flushes it.
+    function liveReportLanded(r) {
+        const ctype = r.headers.get('content-type') || '';
+        return r.ok && !r.redirected && ctype.includes('json');
     }
+
+    function liveReportSend(reason, detail) {
+        fetch('mobile-debug-log.php', {
+            method: 'POST',
+            body: new URLSearchParams({csrf_token: csrfToken, source: 'live', event: reason, detail})
+        }).then(r => { if (!liveReportLanded(r)) liveReportStash(reason, detail); })
+          .catch(() => liveReportStash(reason, detail));
+    }
+
+    function liveReportStash(reason, detail) {
+        try {
+            localStorage.setItem(LIVE_REPORT_STASH, JSON.stringify({reason: reason, detail: detail, at: Date.now()}));
+        } catch (e) { /* private mode, full quota — nothing to do about it */ }
+    }
+
+    function liveReportFlush() {
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(LIVE_REPORT_STASH) || 'null'); } catch (e) { saved = null; }
+        if (!saved || !saved.reason) return;
+        const drop = () => { try { localStorage.removeItem(LIVE_REPORT_STASH); } catch (e) {} };
+        // A week-old report describes a phone nobody is holding any more.
+        if (Date.now() - (saved.at || 0) > 7 * 86400000) { drop(); return; }
+        // Marked as late and stamped with when it actually happened, so it is
+        // never mistaken for a failure of the session reading it.
+        fetch('mobile-debug-log.php', {
+            method: 'POST',
+            body: new URLSearchParams({
+                csrf_token: csrfToken, source: 'live',
+                event: 'late: ' + saved.reason,
+                detail: '(failed at ' + new Date(saved.at || 0).toISOString().slice(0, 16).replace('T', ' ') + ') ' + saved.detail
+            })
+        }).then(r => { if (liveReportLanded(r)) drop(); }).catch(() => {});
+    }
+    // Well after load: a stashed report is never urgent, and it must not
+    // compete with the page the volunteer is waiting for.
+    setTimeout(liveReportFlush, 8000);
+
+    // Written on EVERY load, not only under ?livedebug=1. These lines cost
+    // nothing until something fails — dbg() keeps them in a 140-line buffer
+    // that leaves the phone only on a broken attempt — and they are the exact
+    // lines that were missing when a report came back as "an Android, I don't
+    // know which version or make". The panel stays behind the flag; the
+    // evidence does not.
+    //
+    // The CSP listener in particular: a refusal is invisible everywhere else.
+    // No exception, no failed request, just media that never arrives.
+    document.addEventListener('securitypolicyviolation', e => {
+        dbg('CSP BLOCKED ' + e.violatedDirective + ' <- ' + (e.blockedURI || '(inline)'));
+    });
+    dbg('UA ' + navigator.userAgent);
+    dbg('secure=' + window.isSecureContext +
+        ' sdk=' + (window.LivekitClient ? 'loaded 2.22.3' : 'MISSING — CDN blocked?') +
+        ' gUM=' + !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+    // A home-screen icon on iOS is not the same environment as Safari:
+    // camera capture inside a standalone web app has its own long history
+    // of handing back black frames. Worth ruling in or out before blaming
+    // anything in this file.
+    dbg('standalone=' + ((window.navigator.standalone === true) ||
+            (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)) +
+        ' nativeApp=' + !!window.VopsNative);
+    // Settles the codec question without going live at all: a codec this
+    // device cannot SEND never appears in this list.
+    try {
+        const caps = RTCRtpSender.getCapabilities('video');
+        dbg('can send: ' + [...new Set(caps.codecs.map(c => c.mimeType.split('/')[1]))].join(', '));
+    } catch (e) { dbg('codec capabilities unavailable'); }
+    if (LIVE_DEBUG) dbg('debug panel on');
 
     // ── Playback, the WebKit way ────────────────────────────────────────────
     // Chrome starts a <video> the moment a MediaStream is attached and keeps it
@@ -17421,11 +17485,55 @@ setInterval(function () {
         });
     });
 
+    // ── Every answer from the server, classified before it is trusted ──────
+    // A bare r.json() was this feature's worst failure mode. It throws a raw
+    // browser exception the instant the answer is not JSON, and the catch in
+    // startPublishing() pasted that exception straight onto the volunteer's
+    // screen: "…is not valid JSON", at the exact moment they tapped to go on
+    // air. It reads as a camera fault and it is nothing of the kind — this
+    // POST happens BEFORE any capture starts. Reported from the field on an
+    // Android that had worked on every other handset, which is the tell: the
+    // cause is the answer, not the device.
+    //
+    // An answer stops being JSON for three server-side reasons, all of them
+    // silent until now: the session expired (302 → the HTML login page), the
+    // database refused another connection (this app's own 503), or a PHP
+    // warning printed ahead of the JSON (display_errors is on in production).
+    // Only the first two get the page-wide banner, because checkSessionAlive
+    // would otherwise tell someone hitting a 500 to log in again, which is
+    // advice that cannot work.
+    function liveError(kind, detail) {
+        const e = new Error(detail || kind);
+        e.liveKind = kind;
+        return e;
+    }
+
     function post(action, extra) {
         const data = new URLSearchParams(Object.assign(
             {csrf_token: csrfToken, mission_id: MISSION_ID, action: action}, extra || {}
         ));
-        return fetch('mission-live.php', {method: 'POST', body: data}).then(r => r.json());
+        return fetch('mission-live.php', {method: 'POST', body: data}).then(r => {
+            if (r.redirected || r.status === 503) {
+                // The Action Room's own classifier, so the red "session
+                // expired" bar (or the amber "server busy" one) appears here
+                // exactly as it already does for the GPS ping.
+                checkSessionAlive(r);
+                const kind = r.status === 503 ? 'busy' : 'session';
+                dbg('post ' + action + ' -> ' + kind + ' (status ' + r.status +
+                    (r.redirected ? ', redirected to ' + r.url : '') + ')');
+                throw liveError(kind, 'HTTP ' + r.status);
+            }
+            // Read the body as text first: JSON.parse's failure can then say
+            // WHAT arrived, which r.json() throws away. That body is the whole
+            // diagnosis when a stray warning is what broke it.
+            return r.text().then(text => {
+                try { return JSON.parse(text); }
+                catch (err) {
+                    dbg('post ' + action + ' -> not JSON (status ' + r.status + '): ' + text.slice(0, 200));
+                    throw liveError('server', 'HTTP ' + r.status);
+                }
+            });
+        });
     }
 
     // ── Publisher (volunteer) ───────────────────────────────────────────────
@@ -17749,9 +17857,30 @@ setInterval(function () {
                 });
             }
         } catch (e) {
-            const denied = e && (e.name === 'NotAllowedError' || e.name === 'NotFoundError' || /permission|denied/i.test(e.message || ''));
+            // The full exception goes to the log, always and in English —
+            // nowhere else does the buffer record WHY the start failed, so a
+            // report without this line describes everything except the cause.
+            dbg('start failed: ' + (e && e.name ? e.name : '?') + ': ' + (e && e.message ? e.message : e));
+            // Server answers are already classified by post(); everything left
+            // is a real capture or LiveKit failure. The kind is checked FIRST
+            // on purpose: server error text says "denied" often enough that the
+            // pattern test below would count it as a refused camera prompt and
+            // send the volunteer into their permission settings for nothing.
+            const kind = e && e.liveKind;
+            const denied = !kind && e && (e.name === 'NotAllowedError' || e.name === 'NotFoundError' || /permission|denied/i.test(e.message || ''));
             if (denied) { pubCamFailures += 1; }
-            let msg = denied ? t('mylive.camera_error') : (t('mylive.connect_error') + ' ' + (e && e.message ? e.message : ''));
+            // A retry button helps for anything that may pass on a second
+            // attempt; it cannot help a dead session, where the only way
+            // forward is the reload button on the banner.
+            let msg, actionable = denied;
+            if (kind === 'session')     { msg = t('mylive.session_error'); actionable = false; }
+            else if (kind === 'busy')   { msg = t('mylive.busy_error');    actionable = true;  }
+            else if (kind === 'server') { msg = t('mylive.server_error');  actionable = true;  }
+            else if (denied)            { msg = t('mylive.camera_error'); }
+            // No raw exception text on the volunteer's screen. It is English,
+            // it is technical, and in the one field report this produced it
+            // actively pointed at the wrong component.
+            else                        { msg = t('mylive.connect_error'); }
             if (denied && pubCamFailures >= 2) { msg = t('mylive.permissions_hint'); }
             // Release the row server-side. We accepted the request and then
             // failed to actually go on air, so leaving it 'live' would show
@@ -17770,8 +17899,8 @@ setInterval(function () {
             // A start that never got on air at all: the buffer holds the
             // connect/publish sequence that led here, which is the part no
             // screenshot ever captured.
-            liveReport('start-failed: ' + (denied ? 'permission' : (e && e.name ? e.name : 'error')));
-            pubErr(msg, denied);
+            liveReport('start-failed: ' + (kind || (denied ? 'permission' : (e && e.name ? e.name : 'error'))));
+            pubErr(msg, actionable);
         } finally {
             if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-camera-video-fill me-1"></i>' + t('mylive.start'); }
         }
