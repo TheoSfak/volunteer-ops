@@ -201,10 +201,11 @@ if ($action === 'upload') {
         $poiNote = mb_substr($poiNote, 0, 500);
     }
 
+    // Creates the directory when missing and drops the deny-all .htaccess
+    // beside these files. The gate deciding who may see a field photo lives in
+    // mission-photo-view.php, and a file Apache serves directly never reaches it.
     $destDir = __DIR__ . '/uploads/mission-photos/';
-    if (!is_dir($destDir)) {
-        mkdir($destDir, 0755, true);
-    }
+    ensurePrivateUploadDir($destDir);
     $storedName = 'mphoto_' . $missionId . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
     if (!move_uploaded_file($file['tmp_name'], $destDir . $storedName)) {
         echo json_encode(['ok' => false, 'error' => t('photo.save_failed')]);

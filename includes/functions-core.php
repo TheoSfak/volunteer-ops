@@ -736,3 +736,44 @@ function csvSafeCell($value): string {
 function fputcsvSafe($handle, array $row, string $separator = ',', string $enclosure = '"', string $escape = '') {
     return fputcsv($handle, array_map('csvSafeCell', $row), $separator, $enclosure, $escape);
 }
+
+/**
+ * Creates an upload directory if it is missing and, just as importantly, makes
+ * sure Apache will refuse to serve anything out of it directly.
+ *
+ * Every gated file under uploads/ has its gate in PHP - mission-photo-view.php,
+ * mission-voice-play.php, volunteer-doc-download.php. Apache knows nothing about
+ * any of it: handed a URL it recognises, it serves the bytes and the gate never
+ * runs. The stored names carry a timestamp plus four random bytes, but obscurity
+ * is not the access control these files deserve, and the names are not secret
+ * either - they appear in audit log payloads.
+ *
+ * Written from PHP rather than committed to the repo because uploads/ is
+ * gitignored, so a committed .htaccess would never reach a deployment.
+ *
+ * Both syntaxes are emitted: the app runs on Apache 2.4 (mod_authz_core), but
+ * the existing uploads/.htaccess is 2.2-style, so mod_access_compat is in play
+ * on at least some hosts and the fallback costs four lines. A child .htaccess
+ * overrides the parent per-extension rules - verified against uploads/.htaccess,
+ * which explicitly allows jpe?g|png|gif|webp from all.
+ *
+ * PHP reads these files straight off disk, so every gated endpoint is unaffected;
+ * only Apache is. Both filesystem calls are silenced on purpose: this runs on the
+ * photo-serving path, display_errors is on in production, and a warning printed
+ * into an image stream corrupts the image it is attached to.
+ */
+function ensurePrivateUploadDir(string $dir): void {
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+    // Deliberately not nested inside the branch above. On every existing
+    // deployment the directory is already there, so a guard written only when
+    // the directory is created would never be written at all.
+    $guard = rtrim($dir, "/\\") . DIRECTORY_SEPARATOR . '.htaccess';
+    if (!is_file($guard)) {
+        @file_put_contents(
+            $guard,
+            "Require all denied\n<IfModule !mod_authz_core.c>\n    Order Deny,Allow\n    Deny from all\n</IfModule>\n"
+        );
+    }
+}

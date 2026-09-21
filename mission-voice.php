@@ -143,24 +143,15 @@ if ($action === 'send') {
     if ($lng !== null && ($lng < -180 || $lng > 180)) { $lng = null; }
     if ($lat === 0.0 && $lng === 0.0) { $lat = null; $lng = null; }
 
-    $destDir = __DIR__ . '/uploads/mission-voice/';
-    if (!is_dir($destDir)) {
-        mkdir($destDir, 0755, true);
-    }
-    // Written from here rather than shipped in the repo because uploads/ is
-    // gitignored, so a committed file would never reach a deployment.
-    //
     // These clips are people's voices, recorded under stress, and the
     // permission gate that decides who may hear one lives in
     // mission-voice-play.php. A file Apache will serve directly is a file that
     // never reaches that gate — the stored name is unguessable, but obscurity
-    // is not the access control this deserves. (uploads/mission-photos/ has no
-    // such rule and IS directly fetchable; that is pre-existing and deliberately
-    // not changed here, where it would silently break every gallery URL.)
-    $guard = $destDir . '.htaccess';
-    if (!is_file($guard)) {
-        file_put_contents($guard, "Require all denied\n<IfModule !mod_authz_core.c>\n    Order Deny,Allow\n    Deny from all\n</IfModule>\n");
-    }
+    // is not the access control this deserves. mission-photos/ now gets exactly
+    // the same treatment, so the note that used to stand here saying it did not
+    // is gone with it.
+    $destDir = __DIR__ . '/uploads/mission-voice/';
+    ensurePrivateUploadDir($destDir);
     $storedName = 'mvoice_' . $missionId . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
     if (!move_uploaded_file($file['tmp_name'], $destDir . $storedName)) {
         echo json_encode(['ok' => false, 'error' => t('voice.save_failed')]);

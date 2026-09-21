@@ -82,6 +82,14 @@ if (!$canManageWarRoom && !$isApprovedParticipant) {
     exit(t('common.no_access'));
 }
 
+// Writes the deny-all .htaccess beside these files if it is not there yet.
+// Done here as well as on upload because the directory already exists on every
+// existing deployment: waiting for the next photo to be taken would leave the
+// folder publicly fetchable until then, whereas this closes it the first time
+// anyone opens a photo. Two stat() calls on a request that is about to read and
+// stream a ~90KB file, and it writes nothing once the guard is in place.
+ensurePrivateUploadDir(__DIR__ . '/uploads/mission-photos/');
+
 /**
  * Cache validators for access-gated but immutable media. Called only after
  * every permission gate above has passed, so nothing here can confirm the
