@@ -13626,9 +13626,44 @@ function updateAssistantFab() {
     fab.classList.toggle('d-none', assistantHeroOnScreen || n === 0);
 }
 
+// An order nobody has answered was, until now, worth exactly one silent digit
+// on a button. Acknowledging an order sounded a loud alert; failing to
+// acknowledge one made no sound anywhere, produced no ticker row and sent no
+// push — so the coordinator learned about the answers and never about the
+// silences. That is the wrong way round, and it is what this fixes.
+//
+// Two signals, both driven by counts.overdue (orders/dispatch points/sectors
+// past ASSISTANT_ORDER_LATE_MINUTES with nobody having confirmed):
+//
+//   · a persistent ticker row, the same mechanism the SOS and hazard-zone
+//     status rows already use. It is visible without opening anything and it
+//     removes itself the moment the count returns to zero, because
+//     upsertPersistentBannerRow() hides a row given empty text.
+//
+//   · the standard alert sound, ONCE when the count rises — never on every
+//     five-second poll, and never on the way back down. A number that only
+//     grows when a new order has actually gone unanswered is a number worth
+//     one beep; the same beep repeated twelve times a minute is what makes
+//     people mute a console.
+let assistantOverdueLastCount = 0;
+function updateAssistantOverdueAlarm(data) {
+    const n = (data && data.counts && data.counts.overdue) ? data.counts.overdue : 0;
+    const mins = (data && data.overdue_after_minutes) ? data.overdue_after_minutes : 30;
+
+    upsertPersistentBannerRow(
+        'orders-overdue',
+        n === 0 ? '' : t(n === 1 ? 'assistant.overdue_ticker_one' : 'assistant.overdue_ticker_many', {n: n, mins: mins}),
+        '⏳'
+    );
+
+    if (n > assistantOverdueLastCount) playWarRoomAlertSound();
+    assistantOverdueLastCount = n;
+}
+
 function renderAssistant(data) {
     if (!data) return;
     assistantData = data;
+    updateAssistantOverdueAlarm(data);
     const n = data.counts.total;
     // A list holding nothing worse than 'info' still deserves a number, but a
     // red one would make red stop meaning anything on the day it matters.

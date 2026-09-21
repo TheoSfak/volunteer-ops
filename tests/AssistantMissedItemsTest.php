@@ -566,4 +566,138 @@ final class AssistantMissedItemsTest extends TestCase
 
         $this->assertSame('high', $out['pending'][0]['sev']);
     }
+
+    // ── Dispatch points and sectors ─────────────────────────────────────────
+    //
+    // Both are orders to go somewhere, and neither is a mission_orders row — a
+    // dispatch keeps its own receipt table, a sector its own acknowledged_at —
+    // so the unacknowledged-orders query could never see either. That made the
+    // two most common "go there" orders in the Action Room the ones this panel
+    // was blind to.
+
+    public function testADispatchPointNobodyConfirmedIsRaised(): void
+    {
+        $out = self::assemble(['dispatch' => [[
+            'id' => 5, 'label' => 'Γέφυρα Ζαρού', 'type' => 'point',
+            'ts' => self::minsAgo(12), 'codename' => 'Αετός', 'team_number' => 1,
+        ]]]);
+
+        $this->assertCount(1, $out['pending']);
+        $this->assertSame('dispatch', $out['pending'][0]['kind']);
+        $this->assertSame('warn', $out['pending'][0]['sev']);
+        $this->assertStringContainsString('Γέφυρα Ζαρού', $out['pending'][0]['detail']);
+    }
+
+    public function testADispatchAreaSaysAreaRatherThanPoint(): void
+    {
+        $point = self::assemble(['dispatch' => [[
+            'id' => 5, 'label' => '', 'type' => 'point',
+            'ts' => self::minsAgo(12), 'codename' => 'Αετός', 'team_number' => 1,
+        ]]]);
+        $area = self::assemble(['dispatch' => [[
+            'id' => 6, 'label' => '', 'type' => 'polygon',
+            'ts' => self::minsAgo(12), 'codename' => 'Αετός', 'team_number' => 1,
+        ]]]);
+
+        $this->assertNotSame($point['pending'][0]['title'], $area['pending'][0]['title']);
+    }
+
+    public function testADispatchRowOffersNoExplainButtonBecauseTheAiCannotResolveIt(): void
+    {
+        // The AI digest never reads mission_dispatch_points, so a ref here
+        // would be a citation pointing at nothing. war-room.php hides
+        // «Εξήγησέ μου» exactly when a row has no ref.
+        $out = self::assemble(['dispatch' => [[
+            'id' => 5, 'label' => 'Γέφυρα', 'type' => 'point',
+            'ts' => self::minsAgo(12), 'codename' => 'Αετός', 'team_number' => 1,
+        ]]]);
+
+        $this->assertArrayNotHasKey('ref', $out['pending'][0]);
+    }
+
+    public function testASectorAssignedAndNeverAcknowledgedIsRaisedWithAResolvableRef(): void
+    {
+        $out = self::assemble(['sector' => [[
+            'id' => 9, 'label' => 'Τομέας Β3', 'ts' => self::minsAgo(12),
+            'codename' => 'Αετός', 'team_number' => 1,
+        ]]]);
+
+        $this->assertSame('sector', $out['pending'][0]['kind']);
+        // aiLiveBuildDigest() really does query mission_search_sectors, so this
+        // one earns its citation.
+        $this->assertSame('SECT-9', $out['pending'][0]['ref']);
+    }
+
+    public function testBothEscalateOnTheSameClockAsAnOrder(): void
+    {
+        $fresh = self::assemble([
+            'dispatch' => [['id' => 5, 'label' => '', 'type' => 'point', 'ts' => self::minsAgo(29), 'codename' => 'Α', 'team_number' => 1]],
+            'sector'   => [['id' => 9, 'label' => 'Β3', 'ts' => self::minsAgo(29), 'codename' => 'Α', 'team_number' => 1]],
+        ]);
+        $late = self::assemble([
+            'dispatch' => [['id' => 5, 'label' => '', 'type' => 'point', 'ts' => self::minsAgo(31), 'codename' => 'Α', 'team_number' => 1]],
+            'sector'   => [['id' => 9, 'label' => 'Β3', 'ts' => self::minsAgo(31), 'codename' => 'Α', 'team_number' => 1]],
+        ]);
+
+        $this->assertSame(['warn', 'warn'], array_column($fresh['pending'], 'sev'));
+        $this->assertSame(['high', 'high'], array_column($late['pending'], 'sev'));
+    }
+
+    // ── The overdue alarm ───────────────────────────────────────────────────
+    //
+    // counts.overdue is the one number on this panel that sounds an alert
+    // instead of tinting a badge, so what does and does not feed it matters
+    // more than the rest.
+
+    public function testNothingIsOverdueUntilSomethingIsActuallyLate(): void
+    {
+        $out = self::assemble([
+            'orders' => [['id' => 1, 'order_type' => 'task', 'task_text' => '', 'ts' => self::minsAgo(20), 'total' => 3, 'acked' => 0]],
+        ]);
+
+        $this->assertSame('warn', $out['pending'][0]['sev']);
+        $this->assertSame(0, $out['counts']['overdue']);
+    }
+
+    public function testAnOrderADispatchAndASectorAllCountTowardTheAlarm(): void
+    {
+        $out = self::assemble([
+            'orders'   => [['id' => 1, 'order_type' => 'task', 'task_text' => '', 'ts' => self::minsAgo(40), 'total' => 3, 'acked' => 0]],
+            'dispatch' => [['id' => 5, 'label' => '', 'type' => 'point', 'ts' => self::minsAgo(40), 'codename' => 'Α', 'team_number' => 1]],
+            'sector'   => [['id' => 9, 'label' => 'Β3', 'ts' => self::minsAgo(40), 'codename' => 'Α', 'team_number' => 1]],
+        ]);
+
+        $this->assertSame(3, $out['counts']['overdue']);
+        $this->assertSame(ASSISTANT_ORDER_LATE_MINUTES, $out['overdue_after_minutes']);
+    }
+
+    public function testAnOpenIncidentIsUrgentButDoesNotSoundTheOverdueAlarm(): void
+    {
+        // The alarm means "you asked someone something and they have not
+        // answered". An incident is urgent for a different reason, and folding
+        // it in would make this fire almost continuously — which is how a
+        // console ends up muted.
+        $out = self::assemble(['incidents' => [[
+            'id' => 3, 'severity' => 'critical', 'incident_type' => 'trauma',
+            'ts' => self::minsAgo(120), 'ack_ts' => null, 'who' => 'Νίκος',
+            'codename' => 'Αετός', 'team_number' => 1,
+        ]]]);
+
+        $this->assertNotEmpty($out['pending']);
+        $this->assertSame(0, $out['counts']['overdue']);
+    }
+
+    public function testTheAlarmCountsItemsNotTheRowsTheyCollapseInto(): void
+    {
+        // Ten identical late orders collapse to one printed row; the alarm has
+        // to say ten, or a coordinator reading "1" acts on a tenth of it.
+        $orders = [];
+        for ($i = 1; $i <= 10; $i++) {
+            $orders[] = ['id' => $i, 'order_type' => 'task', 'task_text' => 'Ίδιο κείμενο', 'ts' => self::minsAgo(45), 'total' => 2, 'acked' => 0];
+        }
+        $out = self::assemble(['orders' => $orders]);
+
+        $this->assertCount(1, $out['pending'], 'identical rows still collapse for display');
+        $this->assertSame(10, $out['counts']['overdue']);
+    }
 }

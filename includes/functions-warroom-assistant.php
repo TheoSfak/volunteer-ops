@@ -88,6 +88,8 @@ const ASSISTANT_TARGETS = [
     'shortage'  => 'shortageListCard',
     'incident'  => 'incidentsListCard',
     'order'     => 'reportModal',
+    'dispatch'  => 'dispatchCard',
+    'sector'    => 'sectorsListCard',
     'breach'    => 'restrictedAreasCard',
     'silent'    => 'participantsCard',
     'stalled'   => 'teamsCard',
@@ -371,6 +373,50 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
          GROUP BY o.id, o.order_type, o.task_text, o.created_at
          HAVING acked < total
          ORDER BY o.created_at ASC",
+        [$missionId, $orderCutoffSql]
+    );
+
+    // ── Dispatch points nobody has confirmed ────────────────────────────────
+    //
+    // A dispatch is an order to go somewhere, but it is NOT a mission_orders
+    // row — it has its own receipt/arrival tables — so the orders query above
+    // could never see it. That made the single most common "go there" order in
+    // the Action Room the one the panel was blind to.
+    //
+    // ZERO receipts, not "fewer receipts than team members". The honest
+    // denominator would be the team's approved members who are on shift right
+    // now, which is a three-way join per dispatch inside a query that runs on
+    // the 5s poll — and the actionable fact is anyway "nobody on that team has
+    // confirmed this", not "four of six". See this file's COST note.
+    $raw['dispatch'] = dbFetchAll(
+        "SELECT d.id, d.label, d.type, UNIX_TIMESTAMP(d.created_at) AS ts, {$teamLabelExpr}
+         FROM mission_dispatch_points d
+         LEFT JOIN mission_teams mt ON mt.id = d.team_id
+         LEFT JOIN mission_dispatch_receipts r ON r.dispatch_id = d.id
+         WHERE d.mission_id = ? AND d.created_at <= ? AND r.id IS NULL
+         ORDER BY d.created_at ASC",
+        [$missionId, $orderCutoffSql]
+    );
+
+    // ── Sectors assigned to a team that never acknowledged them ─────────────
+    //
+    // Same blind spot, same reason: a sector assignment lives in
+    // mission_search_sectors with its own acknowledged_at, so it was invisible
+    // to a query that only reads mission_order_recipients. A sector sitting in
+    // 'assigned' is a team that has not said it is going.
+    //
+    // The clock is status_updated_at, not created_at: sectors are usually
+    // drawn (or generated as a grid) long before anyone is assigned to them,
+    // and dating the wait from creation would report a brand-new assignment as
+    // hours overdue.
+    $raw['sector'] = dbFetchAll(
+        "SELECT s.id, s.label, UNIX_TIMESTAMP(COALESCE(s.status_updated_at, s.created_at)) AS ts, {$teamLabelExpr}
+         FROM mission_search_sectors s
+         LEFT JOIN mission_teams mt ON mt.id = s.team_id
+         WHERE s.mission_id = ? AND s.status = 'assigned' AND s.acknowledged_at IS NULL
+           AND s.team_id IS NOT NULL
+           AND COALESCE(s.status_updated_at, s.created_at) <= ?
+         ORDER BY COALESCE(s.status_updated_at, s.created_at) ASC",
         [$missionId, $orderCutoffSql]
     );
 
@@ -704,6 +750,54 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
         ];
     }
 
+    // ── Dispatch points nobody confirmed ────────────────────────────────────
+    foreach ($raw['dispatch'] ?? [] as $row) {
+        $ageMin = (int) floor(($nowTs - (int) $row['ts']) / 60);
+        $label  = trim((string) ($row['label'] ?? ''));
+        $pending[] = [
+            'kind'   => 'dispatch',
+            // Deliberately NO ref, which is what hides «Εξήγησέ μου» on this
+            // row. A ref is a promise that the AI digest can resolve the code
+            // to a real record, and aiLiveBuildDigest() never reads
+            // mission_dispatch_points at all — so DISP-12 would be a citation
+            // pointing at nothing. Sector rows below DO carry one, because
+            // that digest really does query mission_search_sectors.
+            'sev'    => $ageMin >= ASSISTANT_ORDER_LATE_MINUTES ? 'high' : 'warn',
+            'icon'   => 'bi-geo-alt-fill',
+            // A dispatch with no team is not addressed to a team called
+            // "Χωρίς ομάδα" — loadMissionDispatchesForUser() shows a
+            // team_id IS NULL dispatch to EVERYONE on the mission. Naming a
+            // team there would invent one, so that case gets its own wording.
+            'title'  => ($row['codename'] === null && $row['team_number'] === null)
+                ? t($row['type'] === 'polygon' ? 'assistant.dispatch_area_unconfirmed_anyone' : 'assistant.dispatch_point_unconfirmed_anyone', [], $lang)
+                : t(
+                    $row['type'] === 'polygon' ? 'assistant.dispatch_area_unconfirmed' : 'assistant.dispatch_point_unconfirmed',
+                    ['team' => assistantTeamLabel($row, $lang)],
+                    $lang
+                ),
+            'detail' => $label !== '' ? mb_substr($label, 0, 90, 'UTF-8') : '',
+            'ts'     => (int) $row['ts'],
+            'is_new' => false, // an order you sent is never news to you
+            'target' => ASSISTANT_TARGETS['dispatch'],
+        ];
+    }
+
+    // ── Sectors assigned but never acknowledged ─────────────────────────────
+    foreach ($raw['sector'] ?? [] as $row) {
+        $ageMin = (int) floor(($nowTs - (int) $row['ts']) / 60);
+        $pending[] = [
+            'kind'   => 'sector',
+            'ref'    => assistantRecordRef('sector', (int) $row['id']),
+            'sev'    => $ageMin >= ASSISTANT_ORDER_LATE_MINUTES ? 'high' : 'warn',
+            'icon'   => 'bi-grid-3x3',
+            'title'  => t('assistant.sector_unacked', ['team' => assistantTeamLabel($row, $lang)], $lang),
+            'detail' => mb_substr((string) $row['label'], 0, 90, 'UTF-8'),
+            'ts'     => (int) $row['ts'],
+            'is_new' => false,
+            'target' => ASSISTANT_TARGETS['sector'],
+        ];
+    }
+
     // ── Hazard-zone breaches ────────────────────────────────────────────────
     foreach ($raw['breaches'] ?? [] as $row) {
         $stillInside = empty($row['exited_ts']);
@@ -971,6 +1065,25 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
     $pendingTotal = count($pending);
     $newTotal     = count($new);
 
+    // Orders somebody was told to act on and has not answered, past the point
+    // where waiting is still reasonable. This is the ONE number on this panel
+    // that earns an alert of its own rather than a quiet badge — see the
+    // ticker row in war-room.php. Counted here, not derived in the browser,
+    // because the rows the browser receives are capped and collapsed and would
+    // undercount on a busy mission.
+    //
+    // Deliberately only these three kinds. An open incident or a quiet
+    // volunteer is also urgent, but neither is a question the coordinator
+    // asked and is still waiting on an answer to, which is what this alarm
+    // means. Widening it would make it fire almost continuously and therefore
+    // mean nothing.
+    $overdue = 0;
+    foreach ($pending as $item) {
+        if ($item['sev'] === 'high' && in_array($item['kind'], ['order', 'dispatch', 'sector'], true)) {
+            $overdue++;
+        }
+    }
+
     $pendingRows = assistantCollapseIdentical($pending);
     $newRows     = assistantCollapseIdentical($new);
 
@@ -988,7 +1101,12 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
             'new'     => $newTotal,
             'total'   => $pendingTotal + $newTotal,
             'worst'   => $worst,
+            'overdue' => $overdue,
         ],
+        // Shipped so the ticker can name the threshold it is reporting against
+        // instead of hardcoding "30" in a translation string that would then
+        // lie the day the constant moves.
+        'overdue_after_minutes' => ASSISTANT_ORDER_LATE_MINUTES,
     ];
 }
 
