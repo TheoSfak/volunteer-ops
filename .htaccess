@@ -12,10 +12,27 @@
     Deny from all
 </Files>
 
-# Private uploads must be served only through authenticated PHP endpoints
+# Private uploads must be served only through authenticated PHP endpoints:
+# volunteer-doc-download.php, subscription-receipt.php, mission-photo-view.php,
+# mission-voice-play.php. Each of those reads the file off disk with PHP, so
+# denying Apache here costs them nothing - it only removes the URL that skipped
+# their permission checks entirely.
+#
+# subscription-receipts was the one that mattered most and was missing: unlike
+# the others the stored name is not random at all, it is the owner's
+# transliterated surname (see subscriptions.php), so the files were not merely
+# reachable, they were enumerable by anyone who knew a volunteer's name.
+#
+# mission-photos and mission-voice also write their own deny-all .htaccess from
+# PHP (ensurePrivateUploadDir), which this does not replace: uploads/ is
+# gitignored so that file cannot ship, and it is what protects a host with no
+# mod_rewrite, where everything in this block is a no-op.
+#
+# Do NOT add logos, avatars, backgrounds, bug_reports or missing-persons - the
+# app fetches those as direct <img src> and denying them breaks real pages.
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    RewriteRule ^uploads/(volunteer-docs|training/materials)/ - [F,L]
+    RewriteRule ^uploads/(volunteer-docs|training/materials|subscription-receipts|mission-photos|mission-voice)/ - [F,L]
 
     # Apache strips the Authorization header from $_SERVER by default (it's
     # reserved for Apache's own Basic Auth) — mobile-ping-location.php and

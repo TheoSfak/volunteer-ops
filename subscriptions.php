@@ -93,6 +93,13 @@ function storeSubscriptionReceipt(int $userId, string $volunteerName): ?array {
     if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
         throw new RuntimeException('Δεν ήταν δυνατή η δημιουργία του φακέλου αποδείξεων.');
     }
+    // The root .htaccess is the real guard, but it lives inside an
+    // <IfModule mod_rewrite.c> and does nothing without mod_rewrite. This
+    // writes the deny-all file into the folder itself, which needs no modules.
+    // Deliberately after the throw above, not folded into it:
+    // ensurePrivateUploadDir() silences its own failures, and this call site
+    // reports them to the user on purpose.
+    ensurePrivateUploadDir($dir);
     $nameParts = preg_split('/\s+/', trim($volunteerName));
     $surname = end($nameParts) ?: 'receipt-' . $userId;
     $greekToLatin = [

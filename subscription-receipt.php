@@ -5,6 +5,11 @@ $subscription = dbFetchOne("SELECT * FROM volunteer_subscriptions WHERE id = ?",
 if (!$subscription || ((int)getCurrentUserId() !== (int)$subscription['user_id'] && !hasPagePermission('subscriptions_manage'))) {
     http_response_code(403); exit('Δεν έχετε δικαίωμα πρόσβασης.');
 }
+// Same guard as the upload path, here so a site that has not taken a new
+// receipt since deploying still closes the folder the first time anyone opens
+// one. Writes are silenced inside: this streams a file below and display_errors
+// is on in production, where a warning would land inside the PDF or JPEG.
+ensurePrivateUploadDir(__DIR__ . '/uploads/subscription-receipts/');
 $path = __DIR__ . '/uploads/subscription-receipts/' . basename((string)$subscription['receipt_stored_name']);
 if (!$subscription['receipt_stored_name'] || !is_file($path)) { http_response_code(404); exit('Η απόδειξη δεν βρέθηκε.'); }
 $mime = (new finfo(FILEINFO_MIME_TYPE))->file($path) ?: 'application/octet-stream';
