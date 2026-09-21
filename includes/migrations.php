@@ -6859,6 +6859,35 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 157,
+            'description' => 'Add mission_voice_messages - the Action Room push-to-talk emergency channel: a volunteer holds one button, speaks, releases, and the clip lands in front of command staff with a siren. Its own table rather than a media_type on mission_photos, for three reasons that are all operational rather than tidy: an emergency call must never be filed into the field photo gallery where it would scroll away among 30 thumbnails; it needs an acknowledgement lifecycle of its own (acknowledged_at/by, exactly like an SOS alert or a shortage report) because the whole point is closing the loop back to the person who called; and it carries a duration plus a GPS fix that no photo row has a use for. Deliberately NOT coupled to mission_sos_alerts: a voice call does not put the volunteer into needs_help and does not open an SOS ticket somebody then has to resolve - the two are independent channels, so that SOS itself never depends on microphone permission being granted.',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_voice_messages (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    user_id INT UNSIGNED NOT NULL,
+                    pr_id INT UNSIGNED NULL COMMENT 'The shift participation this was sent during, when there is one',
+                    team_id INT UNSIGNED NULL,
+                    stored_name VARCHAR(255) NOT NULL,
+                    mime_type VARCHAR(100) NOT NULL,
+                    file_size INT UNSIGNED NOT NULL,
+                    duration_ms INT UNSIGNED NULL COMMENT 'Measured on the device while recording; NULL when the browser would not report it',
+                    lat DECIMAL(10,7) NULL,
+                    lng DECIMAL(10,7) NULL,
+                    acknowledged_at TIMESTAMP NULL,
+                    acknowledged_by INT UNSIGNED NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (pr_id) REFERENCES participation_requests(id) ON DELETE SET NULL,
+                    FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL,
+                    FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL,
+                    INDEX idx_voice_mission (mission_id, acknowledged_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

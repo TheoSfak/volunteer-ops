@@ -1485,6 +1485,9 @@ if (get('ajax') === '1') {
     $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
     $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
     $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
+    // Command staff only, same as $sosAlerts: a volunteer's tab must not
+    // carry other people's voice messages, and has nothing to do with them.
+    $voiceMessages = $canManageWarRoom ? loadUnacknowledgedVoiceMessagesForMission($missionId) : [];
     $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
     $missingPerson = ($isMissingPersonMission && ($canManageWarRoom || $isApprovedParticipant)) ? loadMissingPersonForMission($missionId) : null;
     // Both gated behind their own Settings toggle (default off) — see the
@@ -1556,6 +1559,7 @@ if (get('ajax') === '1') {
         'shortageReports' => $shortageReports,
         'incidents' => $incidents,
         'sosAlerts' => $sosAlerts,
+        'voiceMessages' => $voiceMessages,
         'pointsOfInterest' => $pointsOfInterest,
         'missingPerson' => $missingPerson,
         'weather' => $weather,
@@ -1679,6 +1683,7 @@ $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
 $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
+$voiceMessages = $canManageWarRoom ? loadUnacknowledgedVoiceMessagesForMission($missionId) : [];
 $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
 $missingPerson = ($isMissingPersonMission && ($canManageWarRoom || $isApprovedParticipant)) ? loadMissingPersonForMission($missionId) : null;
 $missionVisitorTags = $canManageWarRoom ? dbFetchAll("SELECT id, label, color, icon FROM mission_visitor_tags WHERE is_active = 1 ORDER BY sort_order") : [];
@@ -3274,6 +3279,22 @@ include __DIR__ . '/includes/header.php';
         <div id="offlineQueueFailures"></div>
         <?php endif; ?>
 
+        <?php if ($isApprovedParticipant): ?>
+        <div class="card shadow-sm mb-4 border-danger" data-card-id="voiceSendCard">
+            <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="bi bi-mic-fill me-1"></i><?= t('voice.card_title') ?></h5></div>
+            <div class="card-body">
+                <button type="button" id="voiceHoldBtn" class="btn btn-danger w-100 d-flex flex-column align-items-center justify-content-center gap-1"
+                        style="height:118px; font-size:1.05rem; touch-action:none; user-select:none; -webkit-user-select:none;">
+                    <i class="bi bi-mic-fill" id="voiceHoldIcon" style="font-size:2rem;"></i>
+                    <span id="voiceHoldLabel" class="fw-semibold"><?= t('voice.hold_btn') ?></span>
+                    <span id="voiceHoldTimer" class="fw-bold d-none" style="font-size:1.6rem; font-variant-numeric:tabular-nums;">0.0s</span>
+                </button>
+                <div id="voiceWave" class="d-none align-items-end justify-content-center gap-1 mt-2" style="height:26px;"></div>
+                <div class="small text-muted mt-2" id="voiceHoldStatus"><?= t('voice.hold_hint') ?></div>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <div class="card shadow-sm mb-4 border-primary" data-card-id="myLocationCard">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-geo-alt-fill me-1"></i><?= t('myping.panel_title') ?></h5></div>
             <div class="card-body">
@@ -4283,6 +4304,13 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="bi bi-sos me-1"></i><?= t('sos.panel_title') ?></h5></div>
             <div class="card-body">
                 <div id="sosAlertsList"><p class="text-muted mb-0"><?= t('sos.empty') ?></p></div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4 border-danger" data-card-id="voiceMessagesCard">
+            <div class="card-header bg-danger text-white"><h5 class="mb-0"><i class="bi bi-mic-fill me-1"></i><?= t('voice.staff_card_title') ?></h5></div>
+            <div class="card-body">
+                <div id="voiceMessagesList"><p class="text-muted mb-0"><?= t('voice.staff_empty') ?></p></div>
             </div>
         </div>
         <?php endif; ?>
@@ -5301,6 +5329,7 @@ let missionIncidents = <?= json_encode($incidents) ?>;
 // the server already strips patient name/phone/notes from their copy of the data.
 const canManageIncidents = <?= json_encode($canManageWarRoom) ?>;
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
+let voiceMessages = <?= json_encode($voiceMessages, JSON_UNESCAPED_UNICODE) ?>;
 let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
 let missingPerson = <?= json_encode($missingPerson) ?>;
 // weather can be non-null purely because exposureUrgencyOn fetched it for the
@@ -11739,12 +11768,14 @@ setTimeout(() => {
     renderMissionIncidents(missionIncidents);
     renderPointsOfInterest(pointsOfInterest);
     renderSosAlerts(sosAlerts);
+    renderVoiceMessages(voiceMessages);
     renderNearbyTeams(nearbyTeams);
     renderRestrictedAreaProximity(restrictedAreaProximity);
     renderBroadcastPhotos(broadcastPhotos);
     renderMissingPersonCard(missingPerson);
     renderWeatherCard(weather, exposureUrgency);
     updateSosAlarmState(sosAlerts);
+    updateVoiceAlarmState(voiceMessages);
     // Ungated (unlike updateSosAlarmState just above) — same reasoning as the
     // poll-path wiring in pollWarRoomData(): this alarm's primary audience is
     // the field volunteer's own device, not just command staff.
@@ -11776,6 +11807,253 @@ function unlockWarRoomAudio() {
     if (warRoomAudioCtx.state === 'suspended') warRoomAudioCtx.resume().catch(() => {});
 }
 ['click', 'touchstart', 'keydown'].forEach(evt => document.addEventListener(evt, unlockWarRoomAudio, {once: true}));
+
+// ── Push-to-talk emergency voice channel ────────────────────────────────────
+//
+// Hold the button, speak, let go, it sends. Deliberately the INVERSE of the SOS
+// tab-bar gesture directly above, which arms on press and fires after a delay:
+// here the press starts recording immediately and the release is the send, so
+// the time held is the message rather than a confirmation.
+//
+// Nothing here touches SOS. A denied microphone, a mic held by another app, or
+// an engine that cannot record at all costs the volunteer this channel and
+// nothing else — see mission-voice.php's docblock for why that separation is
+// the whole design rather than a convenience.
+const VOICE_MIN_MS = 700;
+const VOICE_MAX_MS = 60000;
+
+let voiceRecorder = null, voiceChunks = [], voiceStream = null;
+let voiceStartedAt = 0, voiceTickTimer = null, voiceWaveTimer = null, voiceStopReason = '';
+
+function voiceSetStatus(text, cls) {
+    const el = document.getElementById('voiceHoldStatus');
+    if (el) { el.textContent = text; el.className = 'small mt-2 ' + (cls || 'text-muted'); }
+}
+
+function voiceResetButton() {
+    const btn = document.getElementById('voiceHoldBtn');
+    if (!btn) return;
+    btn.classList.remove('btn-dark');
+    btn.classList.add('btn-danger');
+    document.getElementById('voiceHoldIcon')?.classList.remove('d-none');
+    document.getElementById('voiceHoldLabel')?.classList.remove('d-none');
+    document.getElementById('voiceHoldTimer')?.classList.add('d-none');
+    const wave = document.getElementById('voiceWave');
+    if (wave) { wave.classList.add('d-none'); wave.classList.remove('d-flex'); }
+    if (voiceTickTimer) { clearInterval(voiceTickTimer); voiceTickTimer = null; }
+    if (voiceWaveTimer) { clearInterval(voiceWaveTimer); voiceWaveTimer = null; }
+}
+
+function voiceBuildWave() {
+    const wave = document.getElementById('voiceWave');
+    if (!wave || wave.children.length) return;
+    for (let i = 0; i < 20; i++) {
+        const bar = document.createElement('div');
+        bar.style.cssText = 'width:3px;background:#fff;border-radius:2px;height:4px;transition:height .1s;';
+        wave.appendChild(bar);
+    }
+}
+
+async function voiceStartRecording() {
+    if (voiceRecorder) return;
+    if (typeof MediaRecorder === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        voiceSetStatus(t('voice.not_supported'), 'text-danger');
+        return;
+    }
+    const mime = (typeof pickVideoCompressionMimeType === 'function' && typeof AUDIO_RECORDER_MIME_CANDIDATES !== 'undefined')
+        ? pickVideoCompressionMimeType(AUDIO_RECORDER_MIME_CANDIDATES, c => MediaRecorder.isTypeSupported(c))
+        : null;
+
+    try {
+        // Asked for on each press rather than held open for the whole mission:
+        // an always-live mic is both a battery cost and a red recording
+        // indicator sitting on the volunteer's phone all shift.
+        voiceStream = await navigator.mediaDevices.getUserMedia({audio: true});
+    } catch (err) {
+        const denied = /NotAllowed|Permission|SecurityError/i.test(String(err && (err.name || err.message)));
+        voiceSetStatus(denied ? t('voice.mic_denied') : t('voice.mic_unavailable'), 'text-danger');
+        return;
+    }
+
+    voiceChunks = [];
+    voiceStopReason = '';
+    try {
+        voiceRecorder = mime ? new MediaRecorder(voiceStream, {mimeType: mime}) : new MediaRecorder(voiceStream);
+    } catch (err) {
+        voiceStream.getTracks().forEach(tr => tr.stop());
+        voiceStream = null;
+        voiceSetStatus(t('voice.not_supported'), 'text-danger');
+        return;
+    }
+    voiceRecorder.addEventListener('dataavailable', e => { if (e.data && e.data.size) voiceChunks.push(e.data); });
+    voiceRecorder.addEventListener('stop', voiceHandleStop);
+    voiceRecorder.start();
+    voiceStartedAt = Date.now();
+
+    const btn = document.getElementById('voiceHoldBtn');
+    if (btn) { btn.classList.remove('btn-danger'); btn.classList.add('btn-dark'); }
+    document.getElementById('voiceHoldIcon')?.classList.add('d-none');
+    document.getElementById('voiceHoldLabel')?.classList.add('d-none');
+    const timerEl = document.getElementById('voiceHoldTimer');
+    if (timerEl) { timerEl.classList.remove('d-none'); timerEl.textContent = '0.0s'; }
+    voiceBuildWave();
+    const wave = document.getElementById('voiceWave');
+    if (wave) { wave.classList.remove('d-none'); wave.classList.add('d-flex'); }
+    voiceSetStatus(t('voice.recording'), 'text-danger');
+    if (navigator.vibrate) navigator.vibrate(40);
+
+    voiceTickTimer = setInterval(() => {
+        const ms = Date.now() - voiceStartedAt;
+        if (timerEl) timerEl.textContent = (ms / 1000).toFixed(1) + 's';
+        // The cap is not a nicety: a button pressed by accident in a pocket
+        // would otherwise record until the tab died.
+        if (ms >= VOICE_MAX_MS) { voiceStopReason = 'max'; voiceStopRecording(); }
+    }, 90);
+    voiceWaveTimer = setInterval(() => {
+        const wv = document.getElementById('voiceWave');
+        if (wv) for (const bar of wv.children) bar.style.height = (4 + Math.random() * 20) + 'px';
+    }, 110);
+}
+
+function voiceStopRecording() {
+    if (!voiceRecorder) return;
+    try { if (voiceRecorder.state !== 'inactive') voiceRecorder.stop(); } catch (e) {}
+}
+
+function voiceHandleStop() {
+    const heldMs = Date.now() - voiceStartedAt;
+    const mimeType = (voiceRecorder && voiceRecorder.mimeType) || 'audio/webm';
+    voiceRecorder = null;
+    if (voiceStream) { voiceStream.getTracks().forEach(tr => tr.stop()); voiceStream = null; }
+    voiceResetButton();
+
+    // A tap is not a message. Same rule as "a tap alone must never fire SOS" —
+    // without it a pocket brush sends an empty clip and a siren with it.
+    if (heldMs < VOICE_MIN_MS) {
+        voiceChunks = [];
+        voiceSetStatus(t('voice.too_short'), 'text-warning');
+        return;
+    }
+    if (!voiceChunks.length) {
+        voiceSetStatus(t('voice.send_failed'), 'text-danger');
+        return;
+    }
+
+    const blob = new Blob(voiceChunks, {type: mimeType});
+    voiceChunks = [];
+    const ext = (typeof audioExtensionForMimeType === 'function') ? audioExtensionForMimeType(mimeType) : 'webm';
+    voiceSetStatus(voiceStopReason === 'max' ? t('voice.max_reached') : t('voice.sending'), 'text-muted');
+    voiceSendClip(blob, ext, heldMs);
+}
+
+function voiceSendClip(blob, ext, heldMs) {
+    const send = (lat, lng) => {
+        const fd = new FormData();
+        fd.append('csrf_token', csrfToken);
+        fd.append('action', 'send');
+        fd.append('mission_id', '<?= $missionId ?>');
+        fd.append('duration_ms', String(Math.round(heldMs)));
+        if (lat !== null) { fd.append('lat', String(lat)); fd.append('lng', String(lng)); }
+        // The filename's extension must come from the NEGOTIATED type, never
+        // guessed — mission-voice.php checks extension and sniffed MIME
+        // against each other and rejects a mismatch.
+        fd.append('clip', blob, 'voice.' + ext);
+        fetch('mission-voice.php', {method: 'POST', body: fd})
+            .then(r => r.json())
+            .then(result => {
+                voiceSetStatus(result.ok ? t('voice.sent') : (result.error || t('voice.send_failed')),
+                               result.ok ? 'text-success' : 'text-danger');
+            })
+            .catch(() => voiceSetStatus(t('voice.send_failed'), 'text-danger'));
+    };
+    // A fix is worth a moment but never worth the message: a short timeout and
+    // then send regardless, because where somebody is matters less than what
+    // they said.
+    if (!navigator.geolocation) { send(null, null); return; }
+    let settled = false;
+    const done = (lat, lng) => { if (!settled) { settled = true; send(lat, lng); } };
+    setTimeout(() => done(null, null), 3000);
+    navigator.geolocation.getCurrentPosition(
+        pos => done(pos.coords.latitude, pos.coords.longitude),
+        () => done(null, null),
+        {enableHighAccuracy: true, timeout: 2800, maximumAge: 30000}
+    );
+}
+
+(function wireVoiceHoldButton() {
+    const btn = document.getElementById('voiceHoldBtn');
+    if (!btn) return;
+    btn.addEventListener('pointerdown', e => { e.preventDefault(); voiceStartRecording(); });
+    // pointerleave and pointercancel included on purpose: a finger sliding off
+    // the button mid-sentence must still send what was said, not discard it.
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev =>
+        btn.addEventListener(ev, e => { e.preventDefault(); voiceStopRecording(); }));
+    btn.addEventListener('contextmenu', e => e.preventDefault());
+})();
+
+// ── Command side: the clips waiting to be heard ─────────────────────────────
+let voiceRenderedSig = null;
+function renderVoiceMessages(items) {
+    const list = document.getElementById('voiceMessagesList');
+    if (!list) return;
+    const sig = JSON.stringify(items);
+    if (sig === voiceRenderedSig) return;
+    voiceRenderedSig = sig;
+
+    if (!items.length) {
+        list.innerHTML = '<p class="text-muted mb-0">' + t('voice.staff_empty') + '</p>';
+        return;
+    }
+    // team_label arrives already escaped server-side, same as the SOS list.
+    list.innerHTML = items.map(v => `
+        <div class="border border-danger rounded p-2 mb-2">
+            <div><strong>🔊 ${v.team_label}</strong> — ${guestNameHtml(v.user_name, v.is_external, v.home_team_name, v.home_team_color_bg, v.home_team_color_fg, v.guest_country_code)}${k9BadgeHtml(v.user_id, true)}${captainBadgeHtml(v.user_id, true)}</div>
+            <div class="text-muted" style="font-size:.75rem;">${v.created_at}${v.duration_s ? ' · ' + t('voice.duration_s', {n: v.duration_s}) : ''}</div>
+            <audio class="w-100 mt-1" style="height:36px;" controls preload="none" src="mission-voice-play.php?id=${v.id}"></audio>
+            ${navigationBtnHtml(v.lat, v.lng, {block: true})}
+            <button type="button" class="btn btn-sm btn-warning w-100 mt-1 voice-ack-btn" data-id="${v.id}">${t('voice.ack_btn')}</button>
+        </div>
+    `).join('');
+
+    list.querySelectorAll('.voice-ack-btn').forEach(btn => btn.addEventListener('click', () => {
+        btn.disabled = true;
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge',
+                                          mission_id: '<?= $missionId ?>', id: btn.dataset.id});
+        fetch('mission-voice.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+            if (result.ok) {
+                voiceMessages = voiceMessages.filter(x => String(x.id) !== String(btn.dataset.id));
+                renderVoiceMessages(voiceMessages);
+                updateVoiceAlarmState(voiceMessages);
+            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
+        }).catch(() => { btn.disabled = false; });
+    }));
+}
+
+// The loud half. A voice message is an emergency channel, so an unheard one
+// keeps a ticker row up and beeps ONCE when a new one lands — never on every
+// five-second poll, the same restraint the overdue-orders alarm uses.
+let voiceLastSeenMaxId = 0;
+// Separate from the id above, and it has to be: keying "is this the first
+// paint" on the id being 0 would mean a console that opened with an EMPTY list
+// stayed at 0 and then swallowed the beep for the very first real message —
+// the one case this alarm exists for.
+let voiceAlarmPrimed = false;
+function updateVoiceAlarmState(items) {
+    const list = items || [];
+    upsertPersistentBannerRow(
+        'voice-waiting',
+        list.length ? t('voice.ticker', {name: list[0].user_name, team: list[0].team_label}) : '',
+        '🔊'
+    );
+    const maxId = list.reduce((m, v) => Math.max(m, Number(v.id) || 0), 0);
+    if (maxId > voiceLastSeenMaxId) {
+        // Silent on the very first paint: opening the console should not replay
+        // a beep for something that arrived an hour ago.
+        if (voiceAlarmPrimed) playWarRoomAlertSound();
+        voiceLastSeenMaxId = maxId;
+    }
+    voiceAlarmPrimed = true;
+}
 
 function playWarRoomAlertSound() {
     unlockWarRoomAudio();
@@ -14643,6 +14921,10 @@ function pollWarRoomData() {
         if (data.sosAlerts) {
             renderSosAlerts(sosAlerts = data.sosAlerts);
             updateSosAlarmState(sosAlerts);
+        }
+        if (data.voiceMessages) {
+            renderVoiceMessages(voiceMessages = data.voiceMessages);
+            updateVoiceAlarmState(voiceMessages);
         }
         if (data.pointsOfInterest) {
             pointsOfInterest = data.pointsOfInterest;

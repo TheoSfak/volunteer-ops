@@ -2633,6 +2633,35 @@ CREATE TABLE IF NOT EXISTS `mission_sos_alerts` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- VOICE MESSAGES (War Room push-to-talk emergency channel, volunteer -> command)
+-- Own table, not a media_type on mission_photos: an emergency call must not be
+-- filed into the field photo gallery, it needs its own acknowledgement
+-- lifecycle, and it carries a duration a photo row has no use for. Independent
+-- of mission_sos_alerts on purpose, so SOS never depends on mic permission.
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_voice_messages` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `pr_id` INT UNSIGNED NULL,
+    `team_id` INT UNSIGNED NULL,
+    `stored_name` VARCHAR(255) NOT NULL,
+    `mime_type` VARCHAR(100) NOT NULL,
+    `file_size` INT UNSIGNED NOT NULL,
+    `duration_ms` INT UNSIGNED NULL,
+    `lat` DECIMAL(10,7) NULL,
+    `lng` DECIMAL(10,7) NULL,
+    `acknowledged_at` TIMESTAMP NULL,
+    `acknowledged_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`pr_id`) REFERENCES `participation_requests`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`acknowledged_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_voice_mission` (`mission_id`, `acknowledged_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- =============================================
 -- RESTRICTED AREAS (War Room hazard/danger-zone polygons + breach alarm log)
 -- =============================================
 CREATE TABLE IF NOT EXISTS `mission_restricted_areas` (

@@ -1215,6 +1215,115 @@ function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
 }
 
 /**
+ * Cache headers for a media file whose bytes can never change, and the 304 that
+ * goes with them. Shared by mission-photo-view.php and mission-voice-play.php.
+ *
+ * $etagSeed identifies WHICH representation is being served, not just which
+ * record: one photo id serves both a thumbnail and the full image, and they
+ * must not share an ETag.
+ *
+ * Extracted from mission-photo-view.php, where the reasoning lives in full. The
+ * two lines that look like superstition are not:
+ *
+ *   · header_remove('Expires'/'Pragma') — session_start() stamps every response
+ *     with a 1981 Expires and Pragma: no-cache via PHP's default session cache
+ *     limiter. Setting Cache-Control does NOT remove them, and a response that
+ *     says max-age=86400 while also carrying those two is self-contradictory;
+ *     Chrome resolves it conservatively and revalidates every single item.
+ *
+ *   · Range requests are exempt from the 304 — a browser scrubbing audio or
+ *     video sends If-Range, not If-None-Match, and answering a ranged request
+ *     with 304 breaks seeking, which is the whole reason Range exists here.
+ *
+ * Exits with 304 when the client already has the bytes; returns otherwise.
+ */
+function emitImmutableMediaCacheHeaders(string $path, string $etagSeed): void {
+    $mtime = filemtime($path);
+    $etag  = '"' . $etagSeed . '-' . filesize($path) . '-' . $mtime . '"';
+
+    header_remove('Expires');
+    header_remove('Pragma');
+
+    header('Cache-Control: private, max-age=86400');
+    header('Vary: Cookie');
+    header('ETag: ' . $etag);
+    header('Last-Modified: ' . gmdate('D, d M Y H:i:s', $mtime) . ' GMT');
+
+    if (isset($_SERVER['HTTP_RANGE'])) {
+        return;
+    }
+    foreach (explode(',', (string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? '')) as $candidate) {
+        // Strips a weak-validator prefix if the client sent one; the tag
+        // itself starts with a quote, so this never eats into it.
+        if (ltrim(trim($candidate), 'W/') === $etag) {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            http_response_code(304);
+            exit;
+        }
+    }
+}
+
+/**
+ * Send a media file, honouring a Range request. Always exits.
+ *
+ * Range support is not an optimisation here: mobile Safari refuses to play
+ * <audio> or <video> at all from a source that does not answer ranged
+ * requests, so a voice message from the field would be silent on an iPad at
+ * the command post. A client that sends no Range header gets the whole file
+ * and none of this runs.
+ *
+ * The caller is responsible for permission, for deciding the MIME type, and
+ * for cache headers — all three differ between a field photo and an emergency
+ * voice clip, while the byte-pushing below does not.
+ */
+function streamMediaFileWithRanges(string $filePath, string $mime, string $downloadName): void {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
+    $fileSize = filesize($filePath);
+    header('Content-Type: ' . $mime);
+    header('X-Content-Type-Options: nosniff');
+    header('Content-Disposition: inline; filename="' . $downloadName . '"');
+    header('Accept-Ranges: bytes');
+
+    $rangeHeader = $_SERVER['HTTP_RANGE'] ?? null;
+    if ($rangeHeader && preg_match('/bytes=(\d*)-(\d*)/', $rangeHeader, $matches)) {
+        $start = $matches[1] === '' ? 0 : (int) $matches[1];
+        $end   = $matches[2] === '' ? $fileSize - 1 : (int) $matches[2];
+        $end   = min($end, $fileSize - 1);
+
+        if ($start > $end || $start >= $fileSize) {
+            http_response_code(416);
+            header('Content-Range: bytes */' . $fileSize);
+            exit;
+        }
+
+        http_response_code(206);
+        header('Content-Range: bytes ' . $start . '-' . $end . '/' . $fileSize);
+        header('Content-Length: ' . ($end - $start + 1));
+
+        $handle = fopen($filePath, 'rb');
+        fseek($handle, $start);
+        $remaining = $end - $start + 1;
+        while ($remaining > 0 && !feof($handle)) {
+            $chunk = min(8192, $remaining);
+            echo fread($handle, $chunk);
+            $remaining -= $chunk;
+            flush();
+        }
+        fclose($handle);
+        exit;
+    }
+
+    header('Content-Length: ' . $fileSize);
+    readfile($filePath);
+    exit;
+}
+
+/**
  * War Room: whether $userId has admin/manager-level control of an Action Room
  * (close the mission, broadcast, manage teams, issue orders, view reports, ...).
  * External/guest accounts (users.is_external) are hard-excluded here regardless
@@ -2608,6 +2717,63 @@ function loadOpenSosAlertsForMission(int $missionId): array {
             'lng'                => $row['lng'] !== null ? (float) $row['lng'] : null,
             'created_at'         => date('d/m H:i', strtotime($row['created_at'])),
             'acknowledged_at'    => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
+        ];
+    }, $rows);
+}
+
+/**
+ * War Room: push-to-talk voice messages from the field that nobody has
+ * confirmed hearing yet.
+ *
+ * Unacknowledged only, exactly like loadOpenSosAlertsForMission() above and for
+ * the same reason: this feeds a card that must empty itself as command works
+ * through it, not a log. The full history lives in the mission report.
+ *
+ * $limit is a floor under a pathological case rather than a paging mechanism —
+ * a stuck button in somebody's pocket could otherwise put an unbounded list
+ * into a payload that ships every five seconds. Oldest first, because the call
+ * that has been waiting longest is the one to answer.
+ */
+function loadUnacknowledgedVoiceMessagesForMission(int $missionId, int $limit = 20): array {
+    $rows = dbFetchAll(
+        "SELECT v.id, v.user_id, v.lat, v.lng, v.duration_ms, v.created_at, v.acknowledged_at,
+                v.team_id, u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
+                COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
+                mt.codename, mt.team_number
+         FROM mission_voice_messages v
+         JOIN users u ON u.id = v.user_id
+         LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+         LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
+         LEFT JOIN mission_teams mt ON mt.id = v.team_id
+         WHERE v.mission_id = ? AND v.acknowledged_at IS NULL
+         ORDER BY v.created_at ASC
+         LIMIT " . (int) $limit,
+        [$missionId]
+    );
+
+    // user_name unescaped for the JS-side guestNameHtml() to wrap, team_label
+    // pre-escaped — the same split every other loader on this page uses.
+    return array_map(function ($row) {
+        [$homeBg, $homeFg] = teamBadgeColors($row['home_team_color']);
+        return [
+            'id'                 => (int) $row['id'],
+            'user_id'            => (int) $row['user_id'],
+            'user_name'          => $row['user_name'],
+            'is_external'        => (bool) $row['is_external'],
+            'guest_org_name'     => $row['guest_org_name'],
+            'home_team_name'     => $row['home_team_name'],
+            'home_team_color_bg' => $homeBg,
+            'home_team_color_fg' => $homeFg,
+            'guest_country_code' => $row['guest_country_code'],
+            'team_label'         => h($row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized')),
+            'lat'                => $row['lat'] !== null ? (float) $row['lat'] : null,
+            'lng'                => $row['lng'] !== null ? (float) $row['lng'] : null,
+            // Seconds, rounded up: a 1.4s clip reading "1s" looks like a
+            // truncation bug, and the figure is only ever a rough "how long do
+            // I need to listen".
+            'duration_s'         => $row['duration_ms'] !== null ? max(1, (int) ceil(((int) $row['duration_ms']) / 1000)) : null,
+            'created_at'         => date('d/m H:i', strtotime($row['created_at'])),
+            'created_ts'         => strtotime($row['created_at']),
         ];
     }, $rows);
 }

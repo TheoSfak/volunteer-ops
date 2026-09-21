@@ -110,46 +110,11 @@ if (!$canManageWarRoom && !$isApprovedParticipant) {
  * 304 would break seeking — the exact thing the Range support below exists for.
  */
 $emitCacheHeaders = function (string $path, bool $isThumb) use ($photoId) {
-    $mtime = filemtime($path);
-    $etag = '"' . $photoId . ($isThumb ? 't' : 'f') . '-' . filesize($path) . '-' . $mtime . '"';
-
-    // session_start() (inside bootstrap.php) applies PHP's default
-    // session.cache_limiter, which stamps every response with
-    //     Expires: Thu, 19 Nov 1981 08:52:00 GMT
-    //     Pragma: no-cache
-    // Overwriting Cache-Control below does NOT remove those two, and a
-    // response that says max-age=86400 while also carrying a 1981 Expires and
-    // Pragma: no-cache is self-contradictory — Chrome resolves it
-    // conservatively and revalidates. Measured with them still present: all 31
-    // gallery items sent a conditional request and got 304s on a plain
-    // navigation, instead of being read straight out of the cache.
-    //
-    // Dropped here, per response, rather than by changing the cache limiter at
-    // session_start() — that would change the caching posture of every page in
-    // the app, and no other page has established that its output is safe to
-    // keep. This one has: see the docblock above.
-    header_remove('Expires');
-    header_remove('Pragma');
-
-    header('Cache-Control: private, max-age=86400');
-    header('Vary: Cookie');
-    header('ETag: ' . $etag);
-    header('Last-Modified: ' . gmdate('D, d M Y H:i:s', $mtime) . ' GMT');
-
-    if (isset($_SERVER['HTTP_RANGE'])) {
-        return;
-    }
-    foreach (explode(',', (string) ($_SERVER['HTTP_IF_NONE_MATCH'] ?? '')) as $candidate) {
-        // Strips a weak-validator prefix if the client sent one; the tag
-        // itself starts with a quote, so this never eats into it.
-        if (ltrim(trim($candidate), 'W/') === $etag) {
-            while (ob_get_level() > 0) {
-                ob_end_clean();
-            }
-            http_response_code(304);
-            exit;
-        }
-    }
+    // The body of this moved to emitImmutableMediaCacheHeaders()
+    // (includes/functions-warroom.php) so mission-voice-play.php gets the same
+    // treatment rather than a second copy of it. The seed keeps the thumb/full
+    // split this endpoint needs: one photo id serves two different files.
+    emitImmutableMediaCacheHeaders($path, $photoId . ($isThumb ? 't' : 'f'));
 };
 
 // The small JPEG behind a tile — a video's client-captured poster frame, or a
@@ -199,50 +164,14 @@ if (!in_array($mime, $allowedMimes, true)) {
     exit(t('media.unsupported_file_type'));
 }
 
-while (ob_get_level() > 0) {
-    ob_end_clean();
-}
-
-$fileSize = filesize($filePath);
 $downloadName = preg_replace('/[^A-Za-z0-9._-]/', '_', basename((string)($photo['original_name'] ?: $photo['stored_name'])));
 
-header('Content-Type: ' . $mime);
-header('X-Content-Type-Options: nosniff');
-header('Content-Disposition: inline; filename="' . $downloadName . '"');
+// Cache validators FIRST: this can exit 304 with no body, and there is no
+// point pushing bytes the browser already has. It is also exempt from that 304
+// on a ranged request, which is why the order matters.
 $emitCacheHeaders($filePath, false);
-header('Accept-Ranges: bytes');
 
-// Videos need Range support for seeking/scrubbing — mobile Safari refuses
-// to play otherwise. Photos never send a Range header so this is a no-op for them.
-$rangeHeader = $_SERVER['HTTP_RANGE'] ?? null;
-if ($rangeHeader && preg_match('/bytes=(\d*)-(\d*)/', $rangeHeader, $matches)) {
-    $start = $matches[1] === '' ? 0 : (int) $matches[1];
-    $end = $matches[2] === '' ? $fileSize - 1 : (int) $matches[2];
-    $end = min($end, $fileSize - 1);
-
-    if ($start > $end || $start >= $fileSize) {
-        http_response_code(416);
-        header('Content-Range: bytes */' . $fileSize);
-        exit;
-    }
-
-    http_response_code(206);
-    header('Content-Range: bytes ' . $start . '-' . $end . '/' . $fileSize);
-    header('Content-Length: ' . ($end - $start + 1));
-
-    $handle = fopen($filePath, 'rb');
-    fseek($handle, $start);
-    $remaining = $end - $start + 1;
-    while ($remaining > 0 && !feof($handle)) {
-        $chunk = min(8192, $remaining);
-        echo fread($handle, $chunk);
-        $remaining -= $chunk;
-        flush();
-    }
-    fclose($handle);
-    exit;
-}
-
-header('Content-Length: ' . $fileSize);
-readfile($filePath);
-exit;
+// Videos need Range support for seeking/scrubbing — mobile Safari refuses to
+// play otherwise. Photos never send a Range header so this is a no-op for them.
+// Shared with mission-voice-play.php; see streamMediaFileWithRanges().
+streamMediaFileWithRanges($filePath, $mime, $downloadName);

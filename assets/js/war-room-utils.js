@@ -784,6 +784,42 @@ function videoExtensionForMimeType(mimeType) {
     return mimeType && mimeType.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
 }
 
+// Audio containers for the push-to-talk emergency channel, most- to least-
+// preferred, and the ordering is the whole point rather than a preference.
+//
+// MP4/AAC leads because Safari is the browser that cannot fall back: it is the
+// only engine here that will not decode Opus-in-WebM, so a clip recorded as
+// WebM by an Android volunteer is silent on the coordinator's iPad, and a
+// Safari that cannot RECORD anything else leaves the volunteer with no voice
+// channel at all. Every browser in play can play back MP4/AAC; not every one
+// can play WebM. Where both are recordable, choosing the one everybody can
+// hear costs nothing.
+//
+// Both mp4 spellings are listed for the same reason the video list carries
+// four: engines genuinely disagree about which string they answer true to,
+// and one that can record MP4 must never be pushed onto WebM merely because
+// the first spelling tried was not the one it recognises.
+//
+// ogg trails as a last resort for an older Firefox, which historically
+// reported neither mp4 nor webm audio but would record ogg/opus.
+const AUDIO_RECORDER_MIME_CANDIDATES = [
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/mp4',
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+];
+
+// Same rule as videoExtensionForMimeType(): the extension must be derived from
+// the NEGOTIATED output type, never guessed, because mission-voice.php checks
+// extension and sniffed MIME against each other and rejects a mismatch.
+function audioExtensionForMimeType(mimeType) {
+    const m = String(mimeType || '').toLowerCase();
+    if (m.indexOf('mp4') !== -1 || m.indexOf('m4a') !== -1 || m.indexOf('aac') !== -1) return 'm4a';
+    if (m.indexOf('ogg') !== -1) return 'ogg';
+    return 'webm';
+}
+
 // MediaRecorder output containers, most- to least-preferred. MP4 leads for
 // a reason that has nothing to do with file size: WebM is refused outright
 // by several of the share targets field crews actually use. Viber takes
@@ -1035,6 +1071,8 @@ if (typeof module !== 'undefined' && module.exports) {
         isUnshareableVideoContainer,
         MP4_RECORDER_MIME_CANDIDATES,
         WEBM_RECORDER_MIME_CANDIDATES,
+        AUDIO_RECORDER_MIME_CANDIDATES,
+        audioExtensionForMimeType,
         shouldSkipPhotoCompression,
         speechChunks,
         SPEECH_CHUNK_CHARS,

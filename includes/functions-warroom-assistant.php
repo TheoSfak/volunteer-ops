@@ -90,6 +90,7 @@ const ASSISTANT_TARGETS = [
     'order'     => 'reportModal',
     'dispatch'  => 'dispatchCard',
     'sector'    => 'sectorsListCard',
+    'voice'     => 'voiceMessagesCard',
     'breach'    => 'restrictedAreasCard',
     'silent'    => 'participantsCard',
     'stalled'   => 'teamsCard',
@@ -418,6 +419,22 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
            AND COALESCE(s.status_updated_at, s.created_at) <= ?
          ORDER BY COALESCE(s.status_updated_at, s.created_at) ASC",
         [$missionId, $orderCutoffSql]
+    );
+
+    // ── Voice messages from the field nobody has confirmed hearing ──────────
+    //
+    // No grace period, unlike orders and dispatches above: those are waiting on
+    // somebody ELSE to answer, and ten minutes of silence is normal. This is a
+    // rescuer's own voice already sitting on the coordinator's screen, and the
+    // only thing between it and being heard is pressing play.
+    $raw['voice'] = dbFetchAll(
+        "SELECT v.id, UNIX_TIMESTAMP(v.created_at) AS ts, v.duration_ms, u.name AS who, {$teamLabelExpr}
+         FROM mission_voice_messages v
+         JOIN users u ON u.id = v.user_id
+         LEFT JOIN mission_teams mt ON mt.id = v.team_id
+         WHERE v.mission_id = ? AND v.acknowledged_at IS NULL
+         ORDER BY v.created_at ASC",
+        [$missionId]
     );
 
     // ── Hazard-zone breaches still open ─────────────────────────────────────
@@ -795,6 +812,26 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
             'ts'     => (int) $row['ts'],
             'is_new' => false,
             'target' => ASSISTANT_TARGETS['sector'],
+        ];
+    }
+
+    // ── Voice messages nobody has listened to ───────────────────────────────
+    foreach ($raw['voice'] ?? [] as $row) {
+        $seconds = $row['duration_ms'] !== null ? max(1, (int) ceil(((int) $row['duration_ms']) / 1000)) : null;
+        $pending[] = [
+            'kind'   => 'voice',
+            // No ref: aiLiveBuildDigest() does not read mission_voice_messages,
+            // so a code here would cite nothing — same rule as dispatch above.
+            // Nor could the model say anything useful about audio it cannot hear.
+            'sev'    => 'high',
+            'icon'   => 'bi-mic-fill',
+            'title'  => t('assistant.voice_unheard', ['name' => $row['who']], $lang),
+            'detail' => trim(assistantTeamLabel($row, $lang) . ($seconds !== null ? ' · ' . t('voice.duration_s', ['n' => $seconds], $lang) : '')),
+            'ts'     => (int) $row['ts'],
+            // Genuinely news to the coordinator, unlike an order they sent
+            // themselves — somebody spoke and they have not heard it yet.
+            'is_new' => $isNew($row['ts']),
+            'target' => ASSISTANT_TARGETS['voice'],
         ];
     }
 
