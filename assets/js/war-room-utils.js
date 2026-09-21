@@ -810,6 +810,60 @@ const AUDIO_RECORDER_MIME_CANDIDATES = [
     'audio/ogg;codecs=opus',
 ];
 
+// Capture settings for the push-to-talk channel. Every one of these is about
+// making a rescuer's words understandable, not about fidelity:
+//
+//   channelCount 1 — voice is mono. A stereo clip spends half its bits
+//   describing a second microphone that heard the same thing, so mono is
+//   better quality at the same bitrate, not a compromise.
+//
+//   noiseSuppression / autoGainControl — the two that matter most outdoors.
+//   Wind and a river are exactly what the first one removes, and the second is
+//   the difference between someone shouting over a rotor and someone speaking
+//   faintly from under a rock being equally audible at the command post.
+//
+//   sampleRate 48000 — matches what the AAC encoder wants anyway; asking for
+//   less makes the browser resample rather than saving anything.
+//
+// These are plain values, deliberately NOT {exact: …}: a plain value is a hint
+// the browser may ignore, while an exact one throws OverconstrainedError on a
+// device that cannot meet it. A voice channel must never fail to open because
+// a phone would only give stereo.
+const VOICE_AUDIO_CONSTRAINTS = {
+    channelCount: 1,
+    sampleRate: 48000,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+};
+
+// 128 kbps, and the number matters less than what it is spent ON.
+//
+// Measured on Chrome here, the default for an audio-only recorder was already
+// 128 kbps — but STEREO, so roughly 64 kbps per channel, and both channels
+// carrying the same voice. Combined with channelCount 1 above, the same 128
+// kbps now describes a single channel: double the bits per channel of what
+// this produced before, for a file of the same size. That is the actual
+// quality win here, not the bitrate figure.
+//
+// Set explicitly rather than left to the engine because the default is not
+// specified anywhere and differs between them — a browser that picks 64 kbps
+// stereo would be putting 32 kbps on the voice, which is where consonants
+// smear, and consonants are what a place name or a call sign is made of.
+//
+// ~960KB for the full 60-second maximum, an eighth of what mission-voice.php
+// accepts.
+const VOICE_AUDIO_BITS_PER_SECOND = 128000;
+
+function voiceRecorderOptions(mimeType) {
+    const opts = {audioBitsPerSecond: VOICE_AUDIO_BITS_PER_SECOND};
+    // An unsupported mimeType passed to MediaRecorder throws, so a null
+    // negotiation result must yield options WITHOUT the key rather than one
+    // holding null — the caller then gets the browser's own default container.
+    if (mimeType) opts.mimeType = mimeType;
+    return opts;
+}
+
 // Same rule as videoExtensionForMimeType(): the extension must be derived from
 // the NEGOTIATED output type, never guessed, because mission-voice.php checks
 // extension and sniffed MIME against each other and rejects a mismatch.
@@ -1073,6 +1127,9 @@ if (typeof module !== 'undefined' && module.exports) {
         WEBM_RECORDER_MIME_CANDIDATES,
         AUDIO_RECORDER_MIME_CANDIDATES,
         audioExtensionForMimeType,
+        VOICE_AUDIO_CONSTRAINTS,
+        VOICE_AUDIO_BITS_PER_SECOND,
+        voiceRecorderOptions,
         shouldSkipPhotoCompression,
         speechChunks,
         SPEECH_CHUNK_CHARS,

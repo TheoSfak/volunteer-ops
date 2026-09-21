@@ -21,6 +21,9 @@ const {
     AUDIO_RECORDER_MIME_CANDIDATES,
     audioExtensionForMimeType,
     pickVideoCompressionMimeType,
+    VOICE_AUDIO_CONSTRAINTS,
+    VOICE_AUDIO_BITS_PER_SECOND,
+    voiceRecorderOptions,
 } = require('../../assets/js/war-room-utils.js');
 
 test('MP4 is offered before WebM, because Safari cannot fall back', () => {
@@ -85,4 +88,68 @@ test('a junk or missing mimeType still yields something uploadable', () => {
     assert.equal(audioExtensionForMimeType(''), 'webm');
     assert.equal(audioExtensionForMimeType(null), 'webm');
     assert.equal(audioExtensionForMimeType(undefined), 'webm');
+});
+
+// ── Capture quality ─────────────────────────────────────────────────────────
+
+test('capture is mono, because stereo spends half its bits on a second mic', () => {
+    // Voice is mono. A stereo clip at the same bitrate is WORSE, not better.
+    assert.equal(VOICE_AUDIO_CONSTRAINTS.channelCount, 1);
+});
+
+test('the two processors that matter outdoors are on', () => {
+    // Wind and running water are what noiseSuppression removes; autoGainControl
+    // is what makes a shout over a rotor and a whisper from under a rock
+    // equally audible at the command post.
+    assert.equal(VOICE_AUDIO_CONSTRAINTS.noiseSuppression, true);
+    assert.equal(VOICE_AUDIO_CONSTRAINTS.autoGainControl, true);
+});
+
+test('no constraint is exact, so a phone that cannot meet one still records', () => {
+    // A plain value is a hint the browser may ignore; {exact: …} throws
+    // OverconstrainedError. A voice channel must never fail to OPEN because a
+    // device would only give stereo — that trades quality for silence.
+    for (const [key, value] of Object.entries(VOICE_AUDIO_CONSTRAINTS)) {
+        assert.ok(
+            value === null || typeof value !== 'object',
+            `${key} is an object, which risks OverconstrainedError`
+        );
+    }
+});
+
+test('the bitrate is at least what the engine default was, never below it', () => {
+    // Measured: Chrome's own default for an audio-only recorder was 128 kbps
+    // STEREO, i.e. ~64 kbps carrying the voice. Paired with channelCount 1 the
+    // same figure now describes one channel, which is the real improvement.
+    // Setting anything lower here would quietly make clips WORSE than before
+    // this feature tried to improve them — the trap this test exists to catch.
+    assert.ok(VOICE_AUDIO_BITS_PER_SECOND >= 128000, 'below the engine default is a regression, not a tuning');
+    assert.ok(VOICE_AUDIO_BITS_PER_SECOND <= 192000, 'past the point more bits buy intelligibility for speech');
+});
+
+test('the bitrate buys a mono channel, not a duplicated stereo one', () => {
+    // The pairing is the point: 128 kbps across two channels of the same voice
+    // is half the bitrate per channel of 128 kbps across one.
+    assert.equal(VOICE_AUDIO_CONSTRAINTS.channelCount, 1);
+    assert.equal(voiceRecorderOptions('audio/mp4').audioBitsPerSecond, VOICE_AUDIO_BITS_PER_SECOND);
+});
+
+test('a full-length clip still fits well inside what the server accepts', () => {
+    // VOICE_MAX_MS is 60s in war-room.php; mission-voice.php caps uploads at 8MB.
+    const maxBytes = (VOICE_AUDIO_BITS_PER_SECOND / 8) * 60;
+    assert.ok(maxBytes < 8 * 1024 * 1024, 'a 60s clip could be refused on arrival');
+});
+
+test('recorder options carry the bitrate and the negotiated container', () => {
+    const opts = voiceRecorderOptions('audio/mp4;codecs=mp4a.40.2');
+    assert.equal(opts.mimeType, 'audio/mp4;codecs=mp4a.40.2');
+    assert.equal(opts.audioBitsPerSecond, VOICE_AUDIO_BITS_PER_SECOND);
+});
+
+test('nothing negotiated means NO mimeType key, not a null one', () => {
+    // new MediaRecorder(stream, {mimeType: null}) throws. Omitting the key
+    // lets the browser fall back to its own default container.
+    const opts = voiceRecorderOptions(null);
+    assert.ok(!('mimeType' in opts), 'a null mimeType would throw at construction');
+    assert.equal(opts.audioBitsPerSecond, VOICE_AUDIO_BITS_PER_SECOND);
 });

@@ -440,10 +440,9 @@ if (isPost()) {
                 redirect('war-room.php?id=' . $missionId);
             }
 
+            // Same directory, same guard as mission-photo.php.
             $destDir = __DIR__ . '/uploads/mission-photos/';
-            if (!is_dir($destDir)) {
-                mkdir($destDir, 0755, true);
-            }
+            ensurePrivateUploadDir($destDir);
             $storedName = 'orderphoto_' . $missionId . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
             if (!move_uploaded_file($file['tmp_name'], $destDir . $storedName)) {
                 setFlash('error', t('photo.save_failed'));
@@ -11868,7 +11867,14 @@ async function voiceStartRecording() {
         // Asked for on each press rather than held open for the whole mission:
         // an always-live mic is both a battery cost and a red recording
         // indicator sitting on the volunteer's phone all shift.
-        voiceStream = await navigator.mediaDevices.getUserMedia({audio: true});
+        //
+        // VOICE_AUDIO_CONSTRAINTS (war-room-utils.js) is mono + noise
+        // suppression + auto gain — the settings that make a rescuer in wind
+        // understandable. Guarded so an older cached copy of that file falls
+        // back to a plain request rather than recording nothing at all.
+        voiceStream = await navigator.mediaDevices.getUserMedia({
+            audio: (typeof VOICE_AUDIO_CONSTRAINTS !== 'undefined') ? VOICE_AUDIO_CONSTRAINTS : true
+        });
     } catch (err) {
         const denied = /NotAllowed|Permission|SecurityError/i.test(String(err && (err.name || err.message)));
         voiceSetStatus(denied ? t('voice.mic_denied') : t('voice.mic_unavailable'), 'text-danger');
@@ -11878,7 +11884,12 @@ async function voiceStartRecording() {
     voiceChunks = [];
     voiceStopReason = '';
     try {
-        voiceRecorder = mime ? new MediaRecorder(voiceStream, {mimeType: mime}) : new MediaRecorder(voiceStream);
+        // voiceRecorderOptions() carries the bitrate as well as the container,
+        // and omits mimeType entirely when nothing was negotiated — passing
+        // {mimeType: null} would throw.
+        voiceRecorder = (typeof voiceRecorderOptions === 'function')
+            ? new MediaRecorder(voiceStream, voiceRecorderOptions(mime))
+            : (mime ? new MediaRecorder(voiceStream, {mimeType: mime}) : new MediaRecorder(voiceStream));
     } catch (err) {
         voiceStream.getTracks().forEach(tr => tr.stop());
         voiceStream = null;
