@@ -218,7 +218,11 @@ return [
         'global_message.notify_acknowledged_title' => '👍 Ελήφθη Καθολικό Μήνυμα',
         'global_message.notify_acknowledged_message' => '{name} έλαβε το Καθολικό Μήνυμα της αποστολής «{mission}».',
         'global_message.card_title' => 'Καθολικό Μήνυμα',
-        'global_message.note' => 'Εμφανίζεται ως κυλιόμενο μήνυμα (60 δευτ.) σε όσους έχουν ανοιχτό το Action Room και στέλνεται ως ειδοποίηση σε όλους τους εγκεκριμένους εθελοντές της αποστολής.',
+        'global_message.note' => 'Εμφανίζεται ως κυλιόμενο μήνυμα (60 δευτ.) σε όσους έχουν ανοιχτό το Action Room και στέλνεται ως ειδοποίηση σε όσους εθελοντές βρίσκονται σε ενεργή βάρδια. Εμφανίζεται επίσης στις «Εντολές μου» τους, ώστε να μπορούν να το επιβεβαιώσουν και αργότερα.',
+        // Shown in the volunteer's own orders card when a broadcast carried a
+        // photo and no text at all — the row needs a name, and the photo
+        // itself lives in the Φωτογραφία Αναφοράς card.
+        'order.message.title' => '📢 Καθολικό Μήνυμα',
         'global_message.placeholder' => 'Γράψτε το μήνυμα προς όλους τους εθελοντές…',
         'global_message.photo_label' => 'Φωτογραφία (προαιρετικό)',
         'global_message.photo_only_text' => '📷 Στάλθηκε φωτογραφία αναφοράς.',
@@ -235,7 +239,8 @@ return [
         // as SOS, but command-initiated and broadcast to everyone at once.
         'wr.perm.end_mission_broadcast' => 'Δεν έχετε δικαίωμα για αυτή την ενέργεια.',
         'end_mission_broadcast.card_title' => 'Λήξη Αποστολής — Επιστροφή στη Βάση',
-        'end_mission_broadcast.note' => 'Στέλνει σε όλους τους εγκεκριμένους εθελοντές δυνατό ηχητικό σήμα και κόκκινη οθόνη συναγερμού, ίδιο με το SOS, ζητώντας άμεση επιστροφή στη βάση.',
+        'end_mission_broadcast.note' => 'Στέλνει σε όσους εθελοντές βρίσκονται σε ενεργή βάρδια δυνατό ηχητικό σήμα και κόκκινη οθόνη συναγερμού, ίδιο με το SOS, ζητώντας άμεση επιστροφή στη βάση. Εμφανίζεται επίσης στις «Εντολές μου» τους για επιβεβαίωση λήψης.',
+        'order.return_to_base.title' => '🏁 Επιστροφή στη Βάση',
         'end_mission_broadcast.confirm' => 'Σίγουρα θέλετε να στείλετε σήμα «Λήξη Αποστολής — Επιστροφή στη Βάση» σε όλους τους εθελοντές;',
         'end_mission_broadcast.submit_btn' => 'Λήξη Αποστολής — Επιστροφή στη Βάση ({count})',
         'end_mission_broadcast.sent_flash' => 'Το σήμα «Επιστροφή στη Βάση» εστάλη σε {count} εθελοντές.',
@@ -1891,7 +1896,8 @@ return [
         'global_message.notify_acknowledged_title' => '👍 Broadcast Message acknowledged',
         'global_message.notify_acknowledged_message' => '{name} acknowledged the Broadcast Message for mission "{mission}".',
         'global_message.card_title' => 'Broadcast Message',
-        'global_message.note' => 'Appears as scrolling text (60 sec) to anyone with Action Room open, and is sent as a notification to every approved volunteer of the mission.',
+        'global_message.note' => 'Appears as scrolling text (60 sec) to anyone with Action Room open, and is sent as a notification to every volunteer currently on shift. It also appears in their My Orders card, so they can acknowledge it later.',
+        'order.message.title' => '📢 Broadcast Message',
         'global_message.placeholder' => 'Write the message to all volunteers…',
         'global_message.photo_label' => 'Photo (optional)',
         'global_message.photo_only_text' => '📷 A reference photo was sent.',
@@ -1902,7 +1908,8 @@ return [
 
         'wr.perm.end_mission_broadcast' => 'You do not have permission to do this.',
         'end_mission_broadcast.card_title' => 'End of Mission — Return to Base',
-        'end_mission_broadcast.note' => 'Sends every approved volunteer a loud alarm sound and red alert screen, the same as SOS, asking them to return to base immediately.',
+        'end_mission_broadcast.note' => 'Sends every volunteer currently on shift a loud alarm sound and red alert screen, the same as SOS, asking them to return to base immediately. It also appears in their My Orders card for acknowledgement.',
+        'order.return_to_base.title' => '🏁 Return to Base',
         'end_mission_broadcast.confirm' => 'Are you sure you want to send an "End of Mission — Return to Base" alert to all volunteers?',
         'end_mission_broadcast.submit_btn' => 'End of Mission — Return to Base ({count})',
         'end_mission_broadcast.sent_flash' => '"Return to Base" alert sent to {count} volunteers.',

@@ -1155,13 +1155,25 @@ function loadMissionAnnotationsForMission(int $missionId): array {
  * loadMissionPhotosForUser above.
  */
 function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
-    // The two order types NOT listed below are excluded on purpose, not by
-    // oversight: 'message' and 'return_to_base' are broadcasts. They announce
-    // something rather than ask this person for anything, so a row for one
-    // could never be cleared and would hold the volunteer's orders badge on
-    // for the rest of the mission. Anything NEW that asks the volunteer to act
-    // belongs in this list — 'live' was added late and missed it, so a request
-    // arrived by push with no trace in the volunteer's orders card.
+    // 'message' and 'return_to_base' are broadcasts: they announce something
+    // rather than ask this person for anything. They were once excluded here
+    // for that reason, because a row that could never be cleared would hold
+    // the volunteer's orders badge on for the rest of the mission — but the
+    // exclusion turned out to be the more serious bug of the two. Their ONLY
+    // acknowledgement path was the live scrolling banner, and that banner
+    // replays nothing: war-room.php starts each page load at MAX(notification
+    // id), so a broadcast sent while the volunteer's tab was closed could
+    // never be acknowledged by them at all, and the coordinator's «Τι μου
+    // ξέφυγε» panel showed it unanswered forever.
+    //
+    // They are listed now, and the badge problem is solved where it actually
+    // belongs: war-room.php treats them as "acknowledgement IS completion"
+    // (the same ackCompletes rule 'charge_phone' and 'speak' already use), so
+    // the row clears the moment the volunteer presses «Ελήφθη».
+    //
+    // Anything NEW that asks the volunteer to act belongs in this list —
+    // 'live' was added late and missed it, so a request arrived by push with
+    // no trace in the volunteer's orders card.
     //
     // 'route' belongs in that card too but not in this query: it lives in
     // mission_routes with its own waypoint UI, so war-room.php folds it in
@@ -1171,24 +1183,35 @@ function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
         "SELECT o.id AS order_id, o.order_type, o.task_text, o.created_at, r.acknowledged_at, r.fulfilled_at
          FROM mission_order_recipients r
          JOIN mission_orders o ON o.id = r.order_id
-         WHERE o.mission_id = ? AND r.user_id = ? AND o.order_type IN ('task', 'speak', 'location', 'photo', 'video', 'live', 'charge_phone')
+         WHERE o.mission_id = ? AND r.user_id = ? AND o.order_type IN ('task', 'speak', 'location', 'photo', 'video', 'live', 'charge_phone', 'message', 'return_to_base')
          ORDER BY o.created_at DESC",
         [$missionId, $userId]
     );
 
-    return array_map(fn($row) => [
-        'order_id'        => (int) $row['order_id'],
-        'order_type'      => $row['order_type'],
-        'task_text'       => $row['task_text'],
-        // 'speak' joins 'task' here: both store what the coordinator actually
-        // typed, and for an announcement the text IS the order — a row reading
-        // "Voice Announcement" would hide the one thing the volunteer needs to
-        // re-read when the words went past them. war-room.php escapes both.
-        'label'           => in_array($row['order_type'], ['task', 'speak'], true) ? $row['task_text'] : t('order.' . $row['order_type'] . '.title'),
-        'sent_at'         => date('d/m H:i', strtotime($row['created_at'])),
-        'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
-        'fulfilled_at'    => $row['fulfilled_at'] ? date('d/m H:i', strtotime($row['fulfilled_at'])) : null,
-    ], $rows);
+    return array_map(function ($row) {
+        // 'speak' and 'message' join 'task' here: all three store what the
+        // coordinator actually typed, and for an announcement the text IS the
+        // order — a row reading "Voice Announcement" would hide the one thing
+        // the volunteer needs to re-read when the words went past them.
+        // war-room.php escapes all three.
+        //
+        // The fallback is not defensive padding: a photo-only broadcast is a
+        // real and supported case (global_message accepts a photo with no
+        // text), and it stores NULL in task_text. Without this it would render
+        // as an empty row with an acknowledge button and nothing above it.
+        $freeText = in_array($row['order_type'], ['task', 'speak', 'message'], true)
+            ? trim((string) $row['task_text'])
+            : '';
+        return [
+            'order_id'        => (int) $row['order_id'],
+            'order_type'      => $row['order_type'],
+            'task_text'       => $row['task_text'],
+            'label'           => $freeText !== '' ? $freeText : t('order.' . $row['order_type'] . '.title'),
+            'sent_at'         => date('d/m H:i', strtotime($row['created_at'])),
+            'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
+            'fulfilled_at'    => $row['fulfilled_at'] ? date('d/m H:i', strtotime($row['fulfilled_at'])) : null,
+        ];
+    }, $rows);
 }
 
 /**

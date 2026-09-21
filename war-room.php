@@ -71,14 +71,21 @@ function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $
 }
 
 /**
- * War Room: resolve which active-shift volunteers a location/photo/video/task
- * request targets — either every currently-active participant, or just the
- * ones the admin checked. Shared by the 4 near-identical request_* handlers
- * below (each used to run this exact query + intersection independently).
+ * War Room: every approved participant of $missionId who is on shift RIGHT NOW.
+ *
+ * This is what "a volunteer this order can actually reach" means everywhere in
+ * the Action Room, and it is deliberately the ONE definition of it. The two
+ * broadcasts (global_message / end_mission_broadcast) used to run their own
+ * query without the shift-time clause, so they went to every approved
+ * participant of the whole mission — including tomorrow's shift and yesterday's.
+ * Those people cannot acknowledge an order they were never on duty for, which
+ * left their mission_order_recipients rows NULL forever and kept the
+ * coordinator's «Τι μου ξέφυγε» panel permanently showing an obligation that
+ * nobody could ever clear.
  */
-function resolveRequestedActiveRecipients(int $missionId): array {
+function activeMissionRecipientIds(int $missionId): array {
     $activeRecipients = dbFetchAll(
-        "SELECT DISTINCT pr.volunteer_id, u.name
+        "SELECT DISTINCT pr.volunteer_id
          FROM participation_requests pr
          JOIN shifts s ON s.id = pr.shift_id
          JOIN users u ON u.id = pr.volunteer_id
@@ -86,7 +93,17 @@ function resolveRequestedActiveRecipients(int $missionId): array {
            AND s.start_time <= NOW() AND s.end_time > NOW()",
         [$missionId, PARTICIPATION_APPROVED]
     );
-    $activeIds = array_map('intval', array_column($activeRecipients, 'volunteer_id'));
+    return array_map('intval', array_column($activeRecipients, 'volunteer_id'));
+}
+
+/**
+ * War Room: resolve which active-shift volunteers a location/photo/video/task
+ * request targets — either every currently-active participant, or just the
+ * ones the admin checked. Shared by the 4 near-identical request_* handlers
+ * below (each used to run this exact query + intersection independently).
+ */
+function resolveRequestedActiveRecipients(int $missionId): array {
+    $activeIds = activeMissionRecipientIds($missionId);
     return post('request_scope') === 'all'
         ? $activeIds
         : array_values(array_intersect($activeIds, array_map('intval', (array)($_POST['volunteers'] ?? []))));
@@ -438,17 +455,13 @@ if (isPost()) {
         if ($broadcastText === '' && $photoUpload === null) {
             setFlash('warning', t('global_message.empty_warning'));
         } else {
-            $recipients = dbFetchAll(
-                "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
-                 JOIN shifts s ON s.id = pr.shift_id
-                 WHERE s.mission_id = ? AND pr.status = ?",
-                [$missionId, PARTICIPATION_APPROVED]
-            );
-            // createMissionOrderAndNotify() itself never excludes the creator from
-            // the real-recipient loop (none of its other 4 callers needed to) — the
-            // exclusion has to happen here, same as the old hand-rolled loop did.
+            // On-shift only, same as every other order type (see
+            // activeMissionRecipientIds). createMissionOrderAndNotify() itself
+            // never excludes the creator from the real-recipient loop (none of
+            // its other callers needed to) — the exclusion has to happen here,
+            // same as the old hand-rolled loop did.
             $recipientIds = array_values(array_diff(
-                array_map('intval', array_column($recipients, 'volunteer_id')),
+                activeMissionRecipientIds($missionId),
                 [(int) $user['id']]
             ));
 
@@ -476,14 +489,12 @@ if (isPost()) {
             redirect('war-room.php?id=' . $missionId);
         }
 
-        $recipients = dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             WHERE s.mission_id = ? AND pr.status = ?",
-            [$missionId, PARTICIPATION_APPROVED]
-        );
+        // On-shift only — see activeMissionRecipientIds(). A recall order is
+        // addressed to the people who are in the field right now; someone whose
+        // shift ended two hours ago has already returned, and someone whose
+        // shift starts tomorrow has nothing to return from.
         $recipientIds = array_values(array_diff(
-            array_map('intval', array_column($recipients, 'volunteer_id')),
+            activeMissionRecipientIds($missionId),
             [(int) $user['id']]
         ));
 
@@ -4289,7 +4300,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                         <label class="form-label small mb-1"><?= t('global_message.photo_label') ?></label>
                         <input type="file" name="global_message_photo" accept="image/*" class="form-control form-control-sm">
                     </div>
-                    <button type="submit" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('global_message.submit_btn', ['count' => count($participants)]) ?></button>
+                    <button type="submit" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('global_message.submit_btn', ['count' => count($activeParticipants)]) ?></button>
                 </form>
             </div>
         </div>
@@ -4302,7 +4313,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="end_mission_broadcast">
                     <button type="submit" class="btn btn-danger btn-lg w-100 fw-bold">
-                        <i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('end_mission_broadcast.submit_btn', ['count' => count($participants)]) ?>
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('end_mission_broadcast.submit_btn', ['count' => count($activeParticipants)]) ?>
                     </button>
                 </form>
             </div>
@@ -9399,9 +9410,13 @@ document.getElementById('mediaViewModal').addEventListener('hidden.bs.modal', ()
 // it — waypoint steps, floor checklists — because duplicating those controls
 // here would mean two places to keep in sync and two places to misread.
 //
-// Still deliberately absent: 'message' and 'return_to_base'. Both announce
-// something rather than ask this person for anything, so their rows could
-// never be cleared and would hold the badge on for the rest of the mission.
+// 'message' and 'return_to_base' are here too, and their rows DO clear: both
+// are treated as "acknowledgement is completion" below, so pressing «Ελήφθη»
+// finishes them. That is what makes listing them safe — the reason they were
+// once left out was a badge that could never be turned off, not the broadcast
+// nature itself. Leaving them out meant the live scrolling banner was their
+// only acknowledgement path, and a volunteer whose tab was closed when one was
+// sent could never acknowledge it at all (see loadMyTaskOrdersForUser()).
 
 // One row shape, so every source reads the same way down the list.
 function myOrderRow(labelHtml, metaHtml, actionHtml) {
@@ -9416,13 +9431,15 @@ function myOrderEntriesFromOrders(items) {
     return (items || []).map(task => {
         const isTask = task.order_type === 'task';
         const isSpeak = task.order_type === 'speak';
-        // A battery alert and a voice announcement have no fulfilment event —
-        // nothing in the app can observe a phone being plugged in, or a person
-        // hearing a sentence — so for those two the acknowledgement IS the
-        // completion (see loadMyTaskOrdersForUser()).
+        const isBroadcast = task.order_type === 'message' || task.order_type === 'return_to_base';
+        // A battery alert, a voice announcement and the two broadcasts have no
+        // fulfilment event — nothing in the app can observe a phone being
+        // plugged in, a person hearing a sentence, or someone walking back to
+        // base — so for these the acknowledgement IS the completion (see
+        // loadMyTaskOrdersForUser()).
         // Without this branch they would fall into the "⏳ Εκκρεμεί" case below
         // and stay outstanding, and counted, for the rest of the mission.
-        const ackCompletes = task.order_type === 'charge_phone' || isSpeak;
+        const ackCompletes = task.order_type === 'charge_phone' || isSpeak || isBroadcast;
         let actionHtml;
         if (task.fulfilled_at) {
             actionHtml = `<span class="badge bg-success">${t('mytasks.completed_at_prefix', {time: task.fulfilled_at})}</span>`;
@@ -9447,11 +9464,11 @@ function myOrderEntriesFromOrders(items) {
             actionHtml = `<button type="button" class="btn btn-sm btn-outline-info w-100 mb-1 wr-speak-btn my-speak-replay-btn" data-order-id="${task.order_id}"><i class="bi bi-volume-up me-1"></i>${t('mytasks.replay_btn')}</button>` + actionHtml;
         }
         // task.label is already the right display text either way (raw
-        // task_text for a task or an announcement, the localized
+        // task_text for a task, an announcement or a broadcast, the localized
         // "order.X.title" string otherwise) — only the free-typed cases need
-        // escaping here, and BOTH of them do: 'speak' now reaches this line
-        // carrying whatever the coordinator typed.
-        const labelHtml = (isTask || isSpeak) ? escapeHtml(task.label) : task.label;
+        // escaping here, and all THREE of them do: 'speak' and now 'message'
+        // both reach this line carrying whatever the coordinator typed.
+        const labelHtml = (isTask || isSpeak || task.order_type === 'message') ? escapeHtml(task.label) : task.label;
         const done = ackCompletes ? !!task.acknowledged_at : !!task.fulfilled_at;
         return {outstanding: !done, html: myOrderRow(labelHtml, t('mytasks.sent_prefix', {time: task.sent_at}), actionHtml)};
     });
