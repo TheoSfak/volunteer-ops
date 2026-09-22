@@ -482,10 +482,169 @@ function runHealthChecks() {
     return $results;
 }
 
+// Owned by the Action Room tab, saved through its own action below. Kept in
+// one named list rather than inline so that adding a control there cannot
+// quietly leave its value unsaved, and so it is obvious at a glance that
+// none of these appear in the general form any more — a key in both lists
+// would be wiped by whichever tab was saved last.
+$actionRoomFields = [
+    'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_area_unit',
+    'war_room_grid_max_size_m', 'war_room_grid_max_cells',
+    'war_room_auto_ping_seconds', 'war_room_auto_ping_high_accuracy',
+    'war_room_max_ping_accuracy_m', 'war_room_max_ping_speed_kmh',
+    'war_room_low_battery_pct', 'war_room_max_shift_minutes',
+    'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct',
+    'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
+    'vitals_episode_tachy_minutes', 'vitals_episode_brady_minutes', 'vitals_episode_strain_minutes',
+    'google_maps_api_key',
+    'search_rings_enabled',
+];
+
 if (isPost()) {
     verifyCsrf();
     $action = post('action', 'save_general');
     
+    // Applies the posted value of one named setting at a time, carrying every
+    // clamp, allowlist and "keep the existing key" rule this page needs. A
+    // closure rather than a second copy of the loop because the Action Room tab
+    // now saves its own subset through its own action, and two copies of these
+    // rules would drift apart the first time one of them was edited.
+    //
+    // It stays deliberately strict about WHICH fields it is handed: any field
+    // named here that is absent from the POST body is stored as empty (and a
+    // checkbox as '0'), which is correct for a form that really does contain
+    // them all and destructive for one that does not. That is exactly why each
+    // tab passes its own list rather than sharing one.
+    $applySettingFields = function (array $fieldsToUpdate) use (&$settings) {
+        foreach ($fieldsToUpdate as $field) {
+                    $value = isset($_POST[$field]) ? $_POST[$field] : '';
+
+                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy'])) {
+                        $value = isset($_POST[$field]) ? '1' : '0';
+                    }
+
+                    // Trim the API key to avoid whitespace issues from copy-paste
+                    $isAiKey   = str_starts_with($field, 'ai_api_key_');
+                    $isAiModel = str_starts_with($field, 'ai_model_');
+                    $isAiUrl   = str_starts_with($field, 'ai_base_url_');
+                    if ($field === 'openweathermap_api_key' || $field === 'google_maps_api_key'
+                        || $isAiKey || $isAiModel || $isAiUrl) {
+                        $value = trim($value);
+                    }
+
+                    // Same allowlist-or-fall-back shape as war_room_ticker_position:
+                    // this key selects which stored API key is used and which
+                    // endpoint is called, so a crafted POST must not be able to name
+                    // a provider aiProviders() has never heard of.
+                    if ($field === 'ai_provider' && !array_key_exists($value, aiProviders())) {
+                        $value = 'gemini';
+                    }
+
+                    // Only http(s), and never a bare path. The base URL is where an
+                    // API key is sent, so a malformed or non-http value must fall
+                    // back to the provider's own default rather than be stored.
+                    if ($isAiUrl && $value !== '' && !preg_match('#^https?://#i', $value)) {
+                        $value = '';
+                    }
+
+                    // Clamp to the range this same form's number input already
+                    // advertises (min="5" max="1440") — that attribute alone is only
+                    // a browser-side hint, not enforced against a crafted request, and
+                    // every consumer of this value (includes/auth.php's session
+                    // cookie lifetime + inactivity check, includes/footer.php's
+                    // client-side timer) trusts whatever is stored here directly.
+                    if ($field === 'session_timeout_minutes') {
+                        $value = (string) max(5, min(1440, (int) $value ?: 120));
+                    }
+
+                    // Same "form attribute is only a browser hint" reasoning as
+                    // session_timeout_minutes above — this value drives the War
+                    // Room fatigue flag shown to every viewer, so it's worth
+                    // clamping server-side too.
+                    if ($field === 'war_room_max_shift_minutes') {
+                        $value = (string) max(30, min(2880, (int) $value ?: 480));
+                    }
+
+                    // Upper end of the sector-size slider in the Action Room's grid
+                    // tool. Same "form attribute is only a browser hint" reasoning as
+                    // the two above. The floor is 200 rather than the slider's own
+                    // 150m minimum so the slider always has room to move, and the
+                    // ceiling matches GRID_SECTOR_SIZE_MAX_M (config.php), which is
+                    // where buildSectorGridCells() clamps on both sides regardless.
+                    if ($field === 'war_room_grid_max_size_m') {
+                        $value = (string) max(200, min(GRID_SECTOR_SIZE_MAX_M, (int) $value ?: 900));
+                    }
+
+                    // Ceiling is MAX_GRID_CELLS (config.php), which exists because
+                    // every sector rides the 5-second Action Room poll to every open
+                    // tab — see that constant's own note for the measured cost. Same
+                    // browser-hint reasoning as every clamp above for why this is
+                    // enforced here and not just by the form's max attribute.
+                    if ($field === 'war_room_grid_max_cells') {
+                        $value = (string) max(10, min(MAX_GRID_CELLS, (int) $value ?: 120));
+                    }
+
+                    // Same allowlist-or-fall-back shape as war_room_ticker_position
+                    // below: a value outside the three the form offers can only come
+                    // from a hand-made POST, and 'auto' is the harmless answer.
+                    if ($field === 'war_room_area_unit' && !in_array($value, ['auto', 'mid', 'm2'], true)) {
+                        $value = 'auto';
+                    }
+
+                    // vitalsConfig() clamps every one of these again on read, so this
+                    // is not the safety guard — it exists so the number an admin sees
+                    // in this form is the number the app is actually using, instead of
+                    // a stored 9999 silently behaving as 1800 everywhere.
+                    $vitalsBounds = [
+                        'vitals_sample_seconds'  => [1, 60, 5],
+                        'vitals_elevated_pct'    => [40, 100, 75],
+                        'vitals_critical_pct'    => [50, 100, 88],
+                        'vitals_low_bpm'         => [25, 60, 45],
+                        'vitals_reference_age'   => [16, 90, 40],
+                        'vitals_stale_seconds'   => [30, 1800, 120],
+                        'vitals_retention_days'  => [7, 3650, 365],
+                        'vitals_episode_tachy_minutes' => [1, 120, 10],
+                        'vitals_episode_brady_minutes' => [1, 120, 5],
+                        'vitals_episode_strain_minutes'=> [5, 240, 20],
+                    ];
+                    if (isset($vitalsBounds[$field])) {
+                        [$vMin, $vMax, $vDefault] = $vitalsBounds[$field];
+                        $value = (string) max($vMin, min($vMax, (int) $value ?: $vDefault));
+                    }
+
+                    // Closed <select> in the form only offers these two — a crafted
+                    // request could still post anything, and this drives a live CSS
+                    // attribute selector in war-room.php that must never see a
+                    // third value.
+                    if ($field === 'war_room_ticker_position' && !in_array($value, ['top', 'bottom'], true)) {
+                        $value = 'top';
+                    }
+
+                    // Don't overwrite API key if form was submitted empty (acts like a "keep existing" field)
+                    if ($field === 'openweathermap_api_key' && empty($value) && !empty($settings['openweathermap_api_key'] ?? '')) {
+                        continue;
+                    }
+                    // Same "keep existing" behaviour for both AI keys. They are stored
+                    // per provider rather than in one shared field on purpose: an
+                    // admin comparing the two flips the dropdown back and forth, and a
+                    // single field would make them re-paste a key every time — which
+                    // is exactly the moment a key gets pasted into the wrong provider.
+                    if ($isAiKey && $value === '' && !empty($settings[$field] ?? '')) {
+                        continue;
+                    }
+                
+                    $exists = dbFetchValue("SELECT COUNT(*) FROM settings WHERE setting_key = ?", [$field]);
+                
+                    if ($exists) {
+                        dbExecute("UPDATE settings SET setting_value = ?, updated_at = NOW() WHERE setting_key = ?", [$value, $field]);
+                    } else {
+                        dbInsert("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$field, $value]);
+                    }
+                
+                    $settings[$field] = $value;
+        }
+    };
+
     if ($action === 'save_general') {
         // Handle logo upload
         if (!empty($_FILES['app_logo']['name'])) {
@@ -619,9 +778,7 @@ if (isPost()) {
 
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_auto_ping_high_accuracy', 'war_room_max_ping_accuracy_m', 'war_room_max_ping_speed_kmh', 'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_grid_max_size_m', 'war_room_grid_max_cells', 'war_room_area_unit',
-            'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct', 'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
-            'vitals_episode_tachy_minutes', 'vitals_episode_brady_minutes', 'vitals_episode_strain_minutes',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size',
             'admin_email', 'developer_email', 'timezone', 'date_format',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
@@ -630,8 +787,6 @@ if (isPost()) {
             'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled',
             'qr_checkin_enabled',
             'openweathermap_api_key', 'weather_map_compass_enabled', 'exposure_urgency_enabled',
-            'google_maps_api_key',
-            'search_rings_enabled',
             'ai_enabled', 'ai_provider', 'ai_playbook',
         ];
         // Key, model and base URL are stored per provider, and the provider
@@ -643,133 +798,7 @@ if (isPost()) {
             $fieldsToUpdate[] = 'ai_base_url_' . $aiKey;
         }
 
-        foreach ($fieldsToUpdate as $field) {
-            $value = isset($_POST[$field]) ? $_POST[$field] : '';
-
-            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy'])) {
-                $value = isset($_POST[$field]) ? '1' : '0';
-            }
-
-            // Trim the API key to avoid whitespace issues from copy-paste
-            $isAiKey   = str_starts_with($field, 'ai_api_key_');
-            $isAiModel = str_starts_with($field, 'ai_model_');
-            $isAiUrl   = str_starts_with($field, 'ai_base_url_');
-            if ($field === 'openweathermap_api_key' || $field === 'google_maps_api_key'
-                || $isAiKey || $isAiModel || $isAiUrl) {
-                $value = trim($value);
-            }
-
-            // Same allowlist-or-fall-back shape as war_room_ticker_position:
-            // this key selects which stored API key is used and which
-            // endpoint is called, so a crafted POST must not be able to name
-            // a provider aiProviders() has never heard of.
-            if ($field === 'ai_provider' && !array_key_exists($value, aiProviders())) {
-                $value = 'gemini';
-            }
-
-            // Only http(s), and never a bare path. The base URL is where an
-            // API key is sent, so a malformed or non-http value must fall
-            // back to the provider's own default rather than be stored.
-            if ($isAiUrl && $value !== '' && !preg_match('#^https?://#i', $value)) {
-                $value = '';
-            }
-
-            // Clamp to the range this same form's number input already
-            // advertises (min="5" max="1440") — that attribute alone is only
-            // a browser-side hint, not enforced against a crafted request, and
-            // every consumer of this value (includes/auth.php's session
-            // cookie lifetime + inactivity check, includes/footer.php's
-            // client-side timer) trusts whatever is stored here directly.
-            if ($field === 'session_timeout_minutes') {
-                $value = (string) max(5, min(1440, (int) $value ?: 120));
-            }
-
-            // Same "form attribute is only a browser hint" reasoning as
-            // session_timeout_minutes above — this value drives the War
-            // Room fatigue flag shown to every viewer, so it's worth
-            // clamping server-side too.
-            if ($field === 'war_room_max_shift_minutes') {
-                $value = (string) max(30, min(2880, (int) $value ?: 480));
-            }
-
-            // Upper end of the sector-size slider in the Action Room's grid
-            // tool. Same "form attribute is only a browser hint" reasoning as
-            // the two above. The floor is 200 rather than the slider's own
-            // 150m minimum so the slider always has room to move, and the
-            // ceiling matches GRID_SECTOR_SIZE_MAX_M (config.php), which is
-            // where buildSectorGridCells() clamps on both sides regardless.
-            if ($field === 'war_room_grid_max_size_m') {
-                $value = (string) max(200, min(GRID_SECTOR_SIZE_MAX_M, (int) $value ?: 900));
-            }
-
-            // Ceiling is MAX_GRID_CELLS (config.php), which exists because
-            // every sector rides the 5-second Action Room poll to every open
-            // tab — see that constant's own note for the measured cost. Same
-            // browser-hint reasoning as every clamp above for why this is
-            // enforced here and not just by the form's max attribute.
-            if ($field === 'war_room_grid_max_cells') {
-                $value = (string) max(10, min(MAX_GRID_CELLS, (int) $value ?: 120));
-            }
-
-            // Same allowlist-or-fall-back shape as war_room_ticker_position
-            // below: a value outside the three the form offers can only come
-            // from a hand-made POST, and 'auto' is the harmless answer.
-            if ($field === 'war_room_area_unit' && !in_array($value, ['auto', 'mid', 'm2'], true)) {
-                $value = 'auto';
-            }
-
-            // vitalsConfig() clamps every one of these again on read, so this
-            // is not the safety guard — it exists so the number an admin sees
-            // in this form is the number the app is actually using, instead of
-            // a stored 9999 silently behaving as 1800 everywhere.
-            $vitalsBounds = [
-                'vitals_sample_seconds'  => [1, 60, 5],
-                'vitals_elevated_pct'    => [40, 100, 75],
-                'vitals_critical_pct'    => [50, 100, 88],
-                'vitals_low_bpm'         => [25, 60, 45],
-                'vitals_reference_age'   => [16, 90, 40],
-                'vitals_stale_seconds'   => [30, 1800, 120],
-                'vitals_retention_days'  => [7, 3650, 365],
-                'vitals_episode_tachy_minutes' => [1, 120, 10],
-                'vitals_episode_brady_minutes' => [1, 120, 5],
-                'vitals_episode_strain_minutes'=> [5, 240, 20],
-            ];
-            if (isset($vitalsBounds[$field])) {
-                [$vMin, $vMax, $vDefault] = $vitalsBounds[$field];
-                $value = (string) max($vMin, min($vMax, (int) $value ?: $vDefault));
-            }
-
-            // Closed <select> in the form only offers these two — a crafted
-            // request could still post anything, and this drives a live CSS
-            // attribute selector in war-room.php that must never see a
-            // third value.
-            if ($field === 'war_room_ticker_position' && !in_array($value, ['top', 'bottom'], true)) {
-                $value = 'top';
-            }
-
-            // Don't overwrite API key if form was submitted empty (acts like a "keep existing" field)
-            if ($field === 'openweathermap_api_key' && empty($value) && !empty($settings['openweathermap_api_key'] ?? '')) {
-                continue;
-            }
-            // Same "keep existing" behaviour for both AI keys. They are stored
-            // per provider rather than in one shared field on purpose: an
-            // admin comparing the two flips the dropdown back and forth, and a
-            // single field would make them re-paste a key every time — which
-            // is exactly the moment a key gets pasted into the wrong provider.
-            if ($isAiKey && $value === '' && !empty($settings[$field] ?? '')) {
-                continue;
-            }
-            
-            $exists = dbFetchValue("SELECT COUNT(*) FROM settings WHERE setting_key = ?", [$field]);
-            
-            if ($exists) {
-                dbExecute("UPDATE settings SET setting_value = ?, updated_at = NOW() WHERE setting_key = ?", [$value, $field]);
-            } else {
-                dbInsert("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [$field, $value]);
-            }
-            
-            $settings[$field] = $value;
-        }
+        $applySettingFields($fieldsToUpdate);
 
         // Clear settings cache after update
         clearSettingsCache();
@@ -813,6 +842,16 @@ if (isPost()) {
             setFlash('success', 'Οι γενικές ρυθμίσεις αποθηκεύτηκαν.');
         }
         redirect('settings.php?tab=general');
+
+    } elseif ($action === 'save_action_room') {
+        // Its own action, never folded into save_general: that branch's field
+        // list covers the whole general form, and saving it from here — where
+        // none of those inputs exist — would clear every one of them.
+        $applySettingFields($actionRoomFields);
+        clearSettingsCache();
+        logAudit('update_settings', 'settings', null, 'Ρυθμίσεις Action Room');
+        setFlash('success', 'Οι ρυθμίσεις του Action Room αποθηκεύτηκαν.');
+        redirect('settings.php?tab=actionroom');
 
     } elseif ($action === 'telegram_reregister_webhook') {
         // Own action, deliberately not folded into save_general above: that
@@ -1340,6 +1379,7 @@ include __DIR__ . '/includes/header.php';
 $settingsNav = [
     'Βασικά' => [
         ['tab' => 'general',       'icon' => 'bi-sliders',            'label' => 'Γενικά',            'hint' => 'Όνομα, λογότυπο, ζώνη ώρας'],
+        ['tab' => 'actionroom',    'icon' => 'bi-crosshair',          'label' => 'Action Room',       'hint' => 'Στίγματα, παλμοί, χάρτης'],
         ['tab' => 'notifications', 'icon' => 'bi-bell',               'label' => 'Ειδοποιήσεις',      'hint' => 'Τι στέλνεται και πού'],
         ['tab' => 'menu',          'icon' => 'bi-palette',            'label' => 'Πλαϊνό Μενού',      'hint' => 'Χρώματα και άνοιγμα ενοτήτων'],
     ],
@@ -1531,167 +1571,6 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <input type="number" class="form-control" style="max-width:160px;" name="cert_signature_font_size"
                                value="<?= h($settings['cert_signature_font_size']) ?>" min="4" max="24" step="0.5">
                         <small class="text-muted">Μέγεθος γραμμάτων του ονόματος Προέδρου/Γεν. Γραμματέα πάνω από την υπογραφή στη Βεβαίωση Συμμετοχής.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Μέγεθος Κυλιόμενου Κειμένου Action Room (rem)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_banner_font_size"
-                               value="<?= h($settings['war_room_banner_font_size']) ?>" min="0.8" max="3" step="0.05">
-                        <small class="text-muted">Μέγεθος του κυλιόμενου κειμένου συναγερμού (banner) στο Action Room, σε desktop οθόνες.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Θέση Κυλιόμενης Μπάρας Action Room</label>
-                        <select class="form-select" style="max-width:220px;" name="war_room_ticker_position">
-                            <option value="top" <?= $settings['war_room_ticker_position'] === 'top' ? 'selected' : '' ?>>Πάνω στη σελίδα</option>
-                            <option value="bottom" <?= $settings['war_room_ticker_position'] === 'bottom' ? 'selected' : '' ?>>Κάτω στη σελίδα</option>
-                        </select>
-                        <small class="text-muted">Η μπάρα (SOS/απαγορευμένη ζώνη ενεργά, ανακοινώσεις &amp; εντολές) μένει πάντα ορατή στην οθόνη, ό,τι tab ή σημείο της σελίδας κι αν βρίσκεται ο χρήστης — αυτό επιλέγει αν κάθεται πάνω ή κάτω.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Συχνότητα Αυτόματου Στίγματος Action Room (δευτ.)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_auto_ping_seconds"
-                               value="<?= h($settings['war_room_auto_ping_seconds']) ?>" min="5" max="1800" step="5">
-                        <small class="text-muted">Πόσο συχνά στέλνεται αυτόματα το στίγμα GPS ενός εθελοντή όσο έχει ανοιχτό το Action Room. Λειτουργεί μόνο ενώ η σελίδα παραμένει ανοιχτή στο προσκήνιο — αν κλειδώσει η οθόνη ή αλλάξει εφαρμογή, το πρόγραμμα περιήγησης σταματά το αυτόματο στίγμα (περιορισμός των κινητών, όχι της εφαρμογής).</small>
-                    </div>
-                    <div class="form-check mb-3">
-                        <input class="form-check-input" type="checkbox" name="war_room_auto_ping_high_accuracy" id="warRoomAutoPingHighAccuracy"
-                               <?= ($settings['war_room_auto_ping_high_accuracy'] ?? '1') === '1' ? 'checked' : '' ?>>
-                        <label class="form-check-label" for="warRoomAutoPingHighAccuracy">
-                            Υψηλή ακρίβεια στο αυτόματο στίγμα (GPS αντί για Wi-Fi/κεραία)
-                        </label>
-                        <div><small class="text-muted">Όσο είναι κλειστό, το κινητό δεν ανάβει τον δέκτη GPS για το αυτόματο στίγμα και απαντά με θέση υπολογισμένη από τα γύρω Wi-Fi και τις κεραίες κινητής — σε πυκνοδομημένη περιοχή αυτό σημαίνει σφάλμα δεκάδων μέτρων που <strong>δεν βελτιώνεται αν ο εθελοντής σταθεί ακίνητος</strong>. Αφήστε το ανοιχτό για κάθε πραγματική επιχείρηση ή άσκηση· κλείστε το μόνο αν η αυτονομία μπαταρίας σε πολύωρη αποστολή είναι πιο κρίσιμη από τη θέση. Το χειροκίνητο στίγμα («Στείλε στίγμα») ζητούσε πάντα υψηλή ακρίβεια και δεν επηρεάζεται.</small></div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Μέγιστη Αποδεκτή Αβεβαιότητα Στίγματος (μ.)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_max_ping_accuracy_m"
-                               value="<?= h($settings['war_room_max_ping_accuracy_m']) ?>" min="0" max="5000" step="5">
-                        <small class="text-muted">Στίγμα που η ίδια η συσκευή δηλώνει ότι μπορεί να απέχει περισσότερο από τόσα μέτρα <strong>δεν καταγράφεται</strong>. Είναι χειρότερο από το να μην έρθει τίποτα: αποθηκευμένο γίνεται σίγουρη κουκκίδα στον χάρτη που δεν ξεχωρίζει από μια σωστή, και στέλνεις ομάδα εκεί. Αν δεν καταγραφεί, ο εθελοντής απλώς εμφανίζεται χωρίς πρόσφατη θέση — που είναι η αλήθεια. Ισχύει και για τις τρεις πηγές (χειροκίνητο, αυτόματο, εφαρμογή Android). Συσκευές που δεν δηλώνουν καθόλου ακρίβεια δεν απορρίπτονται ποτέ. <strong>Μετρημένο στην άσκηση της 21/09/2026:</strong> στα 50 μ. κόβονται 93 από 1.381 στίγματα (6,7%) και εξαφανίζονται 42 από τα 70 αδύνατα άλματα — είναι το ίδιο όριο με το κίτρινο που ήδη εμφανίζεται στον χάρτη, δηλαδή ό,τι δείχνουμε ως αναξιόπιστο δεν το αποθηκεύουμε κιόλας. <strong>0 = απενεργοποιημένο.</strong></small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Μέγιστη Πιθανή Ταχύτητα Μετακίνησης (km/h)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_max_ping_speed_kmh"
-                               value="<?= h($settings['war_room_max_ping_speed_kmh']) ?>" min="0" max="2000" step="5">
-                        <small class="text-muted">Στίγμα που θα σήμαινε μετακίνηση γρηγορότερη από αυτό, σε σχέση με το προηγούμενο στίγμα του ίδιου εθελοντή, <strong>δεν καταγράφεται</strong> — είναι σφάλμα GPS, και στον χάρτη η πινέζα πέφτει σε υπαρκτό σημείο ενώ η πορεία χαράζει ευθεία πάνω από ό,τι μεσολαβεί. Απορρίπτεται μόνο αν το άλμα είναι και μεγαλύτερο από την αβεβαιότητα των δύο στιγμάτων, ώστε να μη «φεύγει» ένα ακίνητο κινητό με θορυβώδεις μετρήσεις. <strong>Δεν χρειάζεται να δηλώσετε αν η αποστολή είναι με τα πόδια ή με οχήματα — ούτε καν αν έχει και τα δύο μαζί.</strong> Ένα στίγμα κρίνεται μόνο όσο υπάρχει πρόσφατο στίγμα να συγκριθεί· μόλις περάσει ο χρόνος που η εφαρμογή θεωρεί ένα στίγμα παλιό (τριπλάσιος του κύκλου παραπάνω), το επόμενο γίνεται δεκτό ό,τι κι αν συνεπάγεται. Έτσι ένα μεμονωμένο τίναγμα GPS σβήνει, ενώ κάποιος που όντως μετακινείται γρήγορα απλώς καταγράφεται αραιότερα όσο κινείται — <strong>ποτέ δεν χάνεται από τον χάρτη</strong>. Ένας πεζός δεν ξεπερνά τα 25 km/h· στην άσκηση της 21/09/2026, όπου όλοι ήταν πεζοί, υπήρχαν <strong>70 σκέλη πάνω από 20 km/h</strong> και το παλιό όριο των 180 έκοβε μόνο 3. <strong>0 = απενεργοποιημένο.</strong></small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Όριο Χαμηλής Μπαταρίας Action Room (%)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_low_battery_pct"
-                               value="<?= h($settings['war_room_low_battery_pct']) ?>" min="0" max="100" step="5">
-                        <small class="text-muted">Ποσοστό μπαταρίας κινητού κάτω από το οποίο εμφανίζεται προειδοποίηση στο στίγμα εθελοντή στο Action Room (χάρτης, Κοντινές Ομάδες, Αποστάσεις Ομάδων). Η "κρίσιμη" ένδειξη (κόκκινο) εμφανίζεται στο μισό αυτού του ποσοστού.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Όριο Συνεχόμενης Βάρδιας Action Room (λεπτά)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_max_shift_minutes"
-                               value="<?= h($settings['war_room_max_shift_minutes']) ?>" min="30" max="2880" step="30">
-                        <small class="text-muted">Λεπτά συνεχόμενης παρουσίας εθελοντή σε αλυσίδα εγκεκριμένων βαρδιών στην ίδια αποστολή, πάνω από τα οποία εμφανίζεται προειδοποίηση κόπωσης στο Action Room (ρόστερ, χάρτης, Κοντινές Ομάδες, Αποστάσεις Ομάδων) και προτείνεται αντικατάσταση. Προεπιλογή 480 = 8 ώρες. Η "κρίσιμη" ένδειξη (κόκκινο) εμφανίζεται στο 1,5x του ορίου.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Μέγιστο Μέγεθος Τομέα Αυτόματου Πλέγματος (μ.)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_grid_max_size_m"
-                               value="<?= h($settings['war_room_grid_max_size_m'] ?? '900') ?>" min="200" max="<?= GRID_SECTOR_SIZE_MAX_M ?>" step="50">
-                        <small class="text-muted">Πόσο μεγάλο τομέα μπορεί να ζητήσει ο συντονιστής στο «Αυτόματο πλέγμα» του Action Room — το πάνω άκρο του διακόπτη. Το κάτω άκρο μένει στα 150 μ. Μεγαλύτερος τομέας σημαίνει λιγότερους τομείς για την ίδια περιοχή: σε μεγάλες ορεινές περιοχές το 900 μπορεί να μη φτάνει και το πλέγμα να κόβεται από το όριο τομέων ανά περιοχή που ορίζεται ακριβώς παρακάτω. Προεπιλογή 900, μέγιστο <?= GRID_SECTOR_SIZE_MAX_M ?>.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Μέγιστοι Τομείς ανά Αυτόματο Πλέγμα</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_grid_max_cells"
-                               value="<?= h($settings['war_room_grid_max_cells'] ?? '120') ?>" min="10" max="<?= MAX_GRID_CELLS ?>" step="10">
-                        <small class="text-muted">Πόσους τομείς το πολύ μπορεί να παράγει ένα πλέγμα σε μία περιοχή έρευνας. Πάνω από αυτό, το κουμπί δημιουργίας κλειδώνει και ζητείται μεγαλύτερο μέγεθος τομέα. <strong>Δεν είναι όριο της βάσης — είναι όριο δικτύου:</strong> κάθε τομέας της αποστολής στέλνεται ολόκληρος σε κάθε ανανέωση των 5 δευτερολέπτων, σε κάθε ανοιχτή οθόνη Action Room, και κοστίζει περίπου 739 bytes (μετρημένο σε πραγματική αποστολή). Με 120 τομείς αυτό είναι ~87KB ανά 5 δευτερόλεπτα ανά οθόνη, με 400 γίνεται ~290KB. Ανεβάστε το μόνο αν χρειάζεστε πυκνότερο πλέγμα και οι συντονιστές δεν κρατούν πολλές οθόνες ανοιχτές ταυτόχρονα. Επίσης: κάθε τομέας ζωγραφίζει μόνιμη ετικέτα στον χάρτη, και ήδη στους 49 αρχίζουν να στριμώχνονται μεταξύ τους. Προεπιλογή 120, μέγιστο <?= MAX_GRID_CELLS ?>.</small>
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label">Μονάδα Έκτασης Action Room</label>
-                        <select class="form-select" style="max-width:260px;" name="war_room_area_unit">
-                            <option value="auto" <?= ($settings['war_room_area_unit'] ?? 'auto') === 'auto' ? 'selected' : '' ?>>Αυτόματη επιλογή</option>
-                            <option value="mid" <?= ($settings['war_room_area_unit'] ?? 'auto') === 'mid' ? 'selected' : '' ?>>Πάντα στρέμματα</option>
-                            <option value="m2" <?= ($settings['war_room_area_unit'] ?? 'auto') === 'm2' ? 'selected' : '' ?>>Πάντα τετραγωνικά μέτρα</option>
-                        </select>
-                        <small class="text-muted">Σε ποια μονάδα εμφανίζεται η έκταση μιας περιοχής έρευνας ή ενός τομέα — όσο τη σχεδιάζετε, στο «Αυτόματο πλέγμα», στη διαίρεση σε τομείς και στα popup του χάρτη. <strong>Αυτόματη επιλογή:</strong> τετραγωνικά μέτρα κάτω από 10 στρέμματα, στρέμματα μέχρι το 1 τ.χλμ., τετραγωνικά χιλιόμετρα πάνω από εκεί — και όσα νούμερα εμφανίζονται μαζί μοιράζονται πάντα την ίδια μονάδα, αυτή του μικρότερου, ώστε να συγκρίνονται με τη μία. <strong>Πάντα στρέμματα:</strong> ποτέ τ.χλμ., οπότε μια περιοχή 35 τ.χλμ. γράφει 35.604 στρ. <strong>Πάντα τετραγωνικά μέτρα:</strong> η ίδια περιοχή γράφει 35.604.000 τ.μ. — διαβάζεται δύσκολα σε μεγάλες περιοχές, αλλά είναι η μονάδα που ζητούν κάποιες υπηρεσίες σε αναφορά. Σε αγγλικό περιβάλλον η μεσαία μονάδα είναι εκτάρια (1 εκτάριο = 10 στρέμματα).</small>
-                    </div>
-
-                    <hr class="my-4">
-                    <h6 class="fw-bold mb-2"><i class="bi bi-heart-pulse me-1"></i>Καρδιακοί Παλμοί Διασώστη</h6>
-                    <p class="text-muted small">
-                        Ζωντανή ένδειξη παλμών δίπλα στο όνομα κάθε εθελοντή στο Action Room, και αναλυτική καμπύλη παλμών ανά εθελοντή στην αναφορά μετά την αποστολή — από τις ίδιες μετρήσεις.
-                        Χρειάζεται αισθητήρα με <strong>τυπικό Bluetooth LE Heart Rate Service</strong>: ζώνη στήθους ή περιβραχιόνιο (Polar, Garmin, Wahoo, ή οικονομικές ζώνες), ή ρολόι/band Huawei σε λειτουργία «Εκπομπή καρδιακών παλμών» (Ρυθμίσεις → HR Data Broadcasts — δεν το διαθέτουν όλα τα μοντέλα).
-                        Οι παλμοί είναι <strong>δεδομένα υγείας (άρθρο 9 GDPR)</strong>: τους βλέπει μόνο το επιτελείο και ο ίδιος ο εθελοντής, ποτέ οι υπόλοιποι εθελοντές. Χρειάζεται ρητή συγκατάθεση κάθε εθελοντή πριν φορέσει αισθητήρα.
-                    </p>
-                    <div class="form-check mb-3">
-                        <input class="form-check-input" type="checkbox" name="vitals_enabled" id="vitalsEnabled"
-                               <?= ($settings['vitals_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
-                        <label class="form-check-label" for="vitalsEnabled">
-                            Ενεργοποίηση παρακολούθησης καρδιακών παλμών
-                        </label>
-                        <div><small class="text-muted">Όσο είναι κλειστό, η εφαρμογή δεν ζητά, δεν αποθηκεύει και δεν εμφανίζει καμία μέτρηση παλμών — ούτε εκτελεί επιπλέον ερώτημα στη βάση.</small></div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Συχνότητα Καταγραφής (δευτ.)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_sample_seconds"
-                               value="<?= h($settings['vitals_sample_seconds'] ?? '5') ?>" min="1" max="60" step="1">
-                        <small class="text-muted">Ο αισθητήρας στέλνει μέτρηση κάθε δευτερόλεπτο· εδώ ορίζεται πόσα δευτερόλεπτα συμπυκνώνονται σε μία αποθηκευμένη τιμή. Προεπιλογή 5 δευτ. — αρκετά πυκνό για την καμπύλη της αναφοράς, χωρίς να γράφει ~21.600 γραμμές ανά εθελοντή σε βάρδια 6 ωρών.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Όριο «Αυξημένων» Παλμών (% μέγιστης καρδιακής συχνότητας)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_elevated_pct"
-                               value="<?= h($settings['vitals_elevated_pct'] ?? '75') ?>" min="40" max="100" step="1">
-                        <small class="text-muted">Πάνω από αυτό το ποσοστό η ένδειξη γίνεται πορτοκαλί. Η μέγιστη καρδιακή συχνότητα υπολογίζεται ως 220 − ηλικία αναφοράς (βλ. παρακάτω).</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Ηλικία Αναφοράς (έτη)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_reference_age"
-                               value="<?= h($settings['vitals_reference_age'] ?? '40') ?>" min="16" max="90" step="1">
-                        <small class="text-muted">Η εφαρμογή <strong>δεν αποθηκεύει ημερομηνία γέννησης εθελοντή</strong> (υπάρχει μόνο στις αιτήσεις υποψηφίων και στους πολίτες), οπότε τα όρια ζωνών υπολογίζονται με κοινή ηλικία αναφοράς για όλους: μέγιστη καρδιακή συχνότητα = 220 − αυτή η τιμή. Με 40 έτη βγαίνει 180 bpm, άρα «αυξημένοι» στους 135 και «κρίσιμοι» στους ~158. Βάλτε τη μέση ηλικία του δικού σας μητρώου.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Όριο «Κρίσιμων» Παλμών (% μέγιστης καρδιακής συχνότητας)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_critical_pct"
-                               value="<?= h($settings['vitals_critical_pct'] ?? '88') ?>" min="50" max="100" step="1">
-                        <small class="text-muted">Πάνω από αυτό το ποσοστό η ένδειξη γίνεται κόκκινη και αναβοσβήνει. Πρέπει να είναι μεγαλύτερο από το όριο των αυξημένων — αλλιώς διορθώνεται αυτόματα.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Όριο Επικίνδυνα Χαμηλών Παλμών (bpm)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_low_bpm"
-                               value="<?= h($settings['vitals_low_bpm'] ?? '40') ?>" min="25" max="60" step="1">
-                        <small class="text-muted">Απόλυτο όριο, όχι ποσοστό: η βραδυκαρδία είναι το ίδιο επικίνδυνη σε κάθε ηλικία. Κάτω από αυτό η ένδειξη γίνεται μπλε — σκόπιμα διαφορετικό χρώμα από το κόκκινο των υψηλών, ώστε να ξεχωρίζει από απόσταση ποιο από τα δύο συμβαίνει.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Όριο Παλαιότητας Μέτρησης (δευτ.)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_stale_seconds"
-                               value="<?= h($settings['vitals_stale_seconds'] ?? '120') ?>" min="30" max="1800" step="10">
-                        <small class="text-muted">Μετά από τόση ώρα χωρίς νέα μέτρηση, η ένδειξη γκριζάρει ως «χωρίς σήμα». Σκόπιμα μικρότερο από το αντίστοιχο όριο του GPS: αισθητήρας που σταμάτησε σημαίνει συνήθως ότι έφυγε η ζώνη ή κόπηκε το Bluetooth, και αυτό το θέλει γρήγορα το επιτελείο.</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Διατήρηση Μετρήσεων (ημέρες)</label>
-                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_retention_days"
-                               value="<?= h($settings['vitals_retention_days'] ?? '365') ?>" min="7" max="3650" step="1">
-                        <small class="text-muted">Μετά από τόσες ημέρες οι μετρήσεις διαγράφονται αυτόματα. Είναι ο πυκνότερος πίνακας της εφαρμογής και ταυτόχρονα δεδομένα υγείας — κρατήστε τον όσο χρειάζεται για τις αναφορές των αποστολών, όχι περισσότερο.</small>
-                    </div>
-
-                    <h6 class="fw-bold mt-4 mb-2">Κατώφλια Επεισοδίων (Αναφορά Παλμών)</h6>
-                    <p class="text-muted small">
-                        Ορίζουν πότε μια περίοδος καταγράφεται ως <strong>επεισόδιο</strong> στην Αναφορά Παλμών του Action Room.
-                        Εδώ ρυθμίζετε <strong>μόνο τη διάρκεια</strong>: τα όρια σε bpm είναι τα ίδια ακριβώς που χρωματίζουν το badge και το στίγμα στον χάρτη (παραπάνω) — μία γραμμή ανά ζώνη για όλη την εφαρμογή, ώστε να μη γράφει ποτέ ο πίνακας «Φυσιολογικοί» δίπλα σε επεισόδιο «Βραδυκαρδία».
-                        Η διάρκεια είναι που ξεχωρίζει το σήμα από τον θόρυβο: διασώστης που ανεβαίνει πλαγιά με εξοπλισμό αγγίζει στιγμιαία το όριο συνέχεια — δέκα λεπτά <em>πάνω</em> από αυτό είναι εντελώς άλλη δήλωση. Αν τις χαλαρώσετε, η σελίδα θα είναι μόνιμα κόκκινη και θα πάψει να σημαίνει κάτι.
-                    </p>
-                    <?php $__vc = vitalsConfig(); ?>
-                    <p class="small mb-2">
-                        Με τις τρέχουσες ρυθμίσεις: <strong>ταχυκαρδία ≥ <?= (int) $__vc['tachy_bpm'] ?> bpm</strong> ·
-                        <strong>βραδυκαρδία ≤ <?= (int) $__vc['brady_bpm'] ?> bpm</strong> ·
-                        <strong>καταπόνηση ≥ <?= vitalsZoneBpm($__vc['elevated_pct']) ?> bpm</strong>.
-                        Για να γίνει η ταχυκαρδία π.χ. 150 bpm, αλλάξτε το ποσοστό «κρίσιμων» παραπάνω.
-                    </p>
-                    <div class="row g-3 mb-3">
-                        <div class="col-6 col-md-3">
-                            <label class="form-label small">Ταχυκαρδία: λεπτά</label>
-                            <input type="number" class="form-control" name="vitals_episode_tachy_minutes" value="<?= h($settings['vitals_episode_tachy_minutes'] ?? '10') ?>" min="1" max="120" step="1">
-                        </div>
-                        <div class="col-6 col-md-3">
-                            <label class="form-label small">Βραδυκαρδία: λεπτά</label>
-                            <input type="number" class="form-control" name="vitals_episode_brady_minutes" value="<?= h($settings['vitals_episode_brady_minutes'] ?? '5') ?>" min="1" max="120" step="1">
-                        </div>
-                        <div class="col-6 col-md-3">
-                            <label class="form-label small">Παρατεταμένη καταπόνηση: λεπτά</label>
-                            <input type="number" class="form-control" name="vitals_episode_strain_minutes" value="<?= h($settings['vitals_episode_strain_minutes'] ?? '20') ?>" min="5" max="240" step="1">
-                            <small class="text-muted">Συνεχόμενος χρόνος πάνω από το όριο «αυξημένων» παλμών.</small>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -1938,76 +1817,6 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                 </div>
             </div>
 
-            <!-- Route distance -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-signpost-split me-1"></i>Αποστάσεις Διαδρομής</h5>
-                </div>
-                <div class="card-body">
-                    <p class="small text-muted mb-3">
-                        Ο βοηθός του Action Room υπολογίζει πόσο απέχει κάθε άτομο από το σημείο,
-                        τον τομέα ή την πορεία που του ανατέθηκε. Η <strong>ευθεία γραμμή</strong>
-                        υπολογίζεται πάντα τοπικά και δεν χρειάζεται καμία ρύθμιση. Το πεδίο εδώ
-                        αφορά μόνο την <strong>απόσταση διαδρομής</strong>.
-                    </p>
-                    <div class="mb-3">
-                        <label class="form-label" for="googleMapsApiKey">Google Routes API Key <span class="text-muted">(προαιρετικό)</span></label>
-                        <div class="input-group">
-                            <input type="password" class="form-control" id="googleMapsApiKey"
-                                   name="google_maps_api_key"
-                                   autocomplete="new-password"
-                                   value="<?= h($settings['google_maps_api_key'] ?? '') ?>"
-                                   placeholder="Χωρίς κλειδί χρησιμοποιείται το OSRM">
-                            <button type="button" class="btn btn-outline-secondary" onclick="toggleKeyVisibility('googleMapsApiKey')" tabindex="-1">
-                                <i class="bi bi-eye" id="eye-googleMapsApiKey"></i>
-                            </button>
-                        </div>
-                        <div class="form-text">
-                            <a href="https://console.cloud.google.com/apis/library/routes.googleapis.com" target="_blank" rel="noopener noreferrer">Routes API στο Google Cloud</a>
-                            — χρεώνεται στον δικό σας λογαριασμό.
-                        </div>
-                    </div>
-                    <?php /* Always shown, unlike the weather one, which appears
-                             only once a key exists. "Does this work" is a fair
-                             question for the free router too — and the answer
-                             with no key is the one an organisation that never
-                             intends to pay actually needs. It tests the key
-                             currently IN THE FIELD, so a wrong paste is caught
-                             before it is saved rather than after. */ ?>
-                    <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
-                        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnTestRouteKey">
-                            <i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης
-                        </button>
-                        <span class="small text-muted">Δοκιμαστική διαδρομή Ηράκλειο → Κνωσός</span>
-                    </div>
-                    <div id="routeTestResult" class="mb-2" style="display:none;"></div>
-                    <?php /* Which router is in use is not a detail an admin
-                             should have to infer from whether a field is
-                             empty: the two give materially different numbers
-                             — a walking route up a monopati and a driving
-                             route round the mountain are not the same answer
-                             to "how far". */ ?>
-                    <?php if (!empty($settings['google_maps_api_key'] ?? '')): ?>
-                    <div class="alert alert-success py-2 px-2 mb-0 small">
-                        <i class="bi bi-check-circle me-1"></i>
-                        Σε χρήση: <strong>Google Routes</strong> με <strong>πεζοπορία</strong>.
-                    </div>
-                    <?php else: ?>
-                    <div class="alert alert-secondary py-2 px-2 mb-0 small">
-                        <i class="bi bi-info-circle me-1"></i>
-                        Σε χρήση: <strong>OSRM</strong> (δωρεάν, χωρίς κλειδί) — υπολογίζει
-                        <strong>οδικώς</strong> και κολλάει τη θέση στον κοντινότερο δρόμο, που
-                        στο βουνό μπορεί να απέχει. Η ευθεία γραμμή δίπλα του παραμένει πάντα
-                        το τίμιο νούμερο.
-                    </div>
-                    <?php endif; ?>
-                    <div class="alert alert-warning py-2 px-2 mt-3 mb-0 small">
-                        <i class="bi bi-shield-lock me-1"></i>
-                        Στον δρομολογητή στέλνονται <strong>μόνο δύο ζεύγη συντεταγμένων</strong> —
-                        κανένα όνομα, καμία ομάδα, κανένα αναγνωριστικό.
-                    </div>
-                </div>
-            </div>
 
             <!-- AI Settings -->
             <?php
@@ -2228,24 +2037,6 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                 </div>
             </div>
 
-            <!-- LPB Search Rings Settings -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-bullseye me-1"></i>Ρυθμίσεις Ζωνών Αναζήτησης (LPB Rings)</h5>
-                </div>
-                <div class="card-body">
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" name="search_rings_enabled" id="searchRingsEnabled"
-                               <?= ($settings['search_rings_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
-                        <label class="form-check-label" for="searchRingsEnabled">
-                            <strong>Ενδεικτικές Ζώνες Αναζήτησης στον Χάρτη</strong>
-                        </label>
-                        <div class="form-text">
-                            Μόνο σε αποστολές τύπου «Αγνοούμενο άτομο». Σχεδιάζει ομόκεντρους κύκλους γύρω από το σημείο τελευταίας θέασης, με ακτίνα ανάλογη της κατηγορίας ατόμου (παιδί, πεζοπόρος, άτομο με άνοια κ.λπ.). <strong>Ενδεικτικό εργαλείο σχεδιασμού, όχι επιχειρησιακή βεβαιότητα</strong> — οι αποστάσεις είναι κατά προσέγγιση τιμές από γενική βιβλιογραφία SAR, όχι επικυρωμένα δεδομένα. Συνιστάται έλεγχος από άτομο με εκπαίδευση SAR πριν τη χρήση σε πραγματική επιχείρηση.
-                        </div>
-                    </div>
-                </div>
-            </div>
 
             <!-- Telegram Bot Settings -->
             <div class="card mb-4">
@@ -2353,6 +2144,309 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
 <form id="telegramReregisterForm" method="post" class="d-none">
     <?= csrfField() ?>
     <input type="hidden" name="action" value="telegram_reregister_webhook">
+</form>
+<?php endif; ?>
+
+<!-- Action Room Tab -->
+<?php if ($activeTab === 'actionroom'): ?>
+<form method="post">
+    <?= csrfField() ?>
+    <input type="hidden" name="action" value="save_action_room">
+
+    <div class="row">
+        <div class="col-lg-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-geo-alt-fill me-1"></i>Στίγματα Θέσης</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Συχνότητα Αυτόματου Στίγματος Action Room (δευτ.)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_auto_ping_seconds"
+                               value="<?= h($settings['war_room_auto_ping_seconds']) ?>" min="5" max="1800" step="5">
+                        <small class="text-muted">Πόσο συχνά στέλνεται αυτόματα το στίγμα GPS ενός εθελοντή όσο έχει ανοιχτό το Action Room. Λειτουργεί μόνο ενώ η σελίδα παραμένει ανοιχτή στο προσκήνιο — αν κλειδώσει η οθόνη ή αλλάξει εφαρμογή, το πρόγραμμα περιήγησης σταματά το αυτόματο στίγμα (περιορισμός των κινητών, όχι της εφαρμογής).</small>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="war_room_auto_ping_high_accuracy" id="warRoomAutoPingHighAccuracy"
+                               <?= ($settings['war_room_auto_ping_high_accuracy'] ?? '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="warRoomAutoPingHighAccuracy">
+                            Υψηλή ακρίβεια στο αυτόματο στίγμα (GPS αντί για Wi-Fi/κεραία)
+                        </label>
+                        <div><small class="text-muted">Όσο είναι κλειστό, το κινητό δεν ανάβει τον δέκτη GPS για το αυτόματο στίγμα και απαντά με θέση υπολογισμένη από τα γύρω Wi-Fi και τις κεραίες κινητής — σε πυκνοδομημένη περιοχή αυτό σημαίνει σφάλμα δεκάδων μέτρων που <strong>δεν βελτιώνεται αν ο εθελοντής σταθεί ακίνητος</strong>. Αφήστε το ανοιχτό για κάθε πραγματική επιχείρηση ή άσκηση· κλείστε το μόνο αν η αυτονομία μπαταρίας σε πολύωρη αποστολή είναι πιο κρίσιμη από τη θέση. Το χειροκίνητο στίγμα («Στείλε στίγμα») ζητούσε πάντα υψηλή ακρίβεια και δεν επηρεάζεται.</small></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Μέγιστη Αποδεκτή Αβεβαιότητα Στίγματος (μ.)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_max_ping_accuracy_m"
+                               value="<?= h($settings['war_room_max_ping_accuracy_m']) ?>" min="0" max="5000" step="5">
+                        <small class="text-muted">Στίγμα που η ίδια η συσκευή δηλώνει ότι μπορεί να απέχει περισσότερο από τόσα μέτρα <strong>δεν καταγράφεται</strong>. Είναι χειρότερο από το να μην έρθει τίποτα: αποθηκευμένο γίνεται σίγουρη κουκκίδα στον χάρτη που δεν ξεχωρίζει από μια σωστή, και στέλνεις ομάδα εκεί. Αν δεν καταγραφεί, ο εθελοντής απλώς εμφανίζεται χωρίς πρόσφατη θέση — που είναι η αλήθεια. Ισχύει και για τις τρεις πηγές (χειροκίνητο, αυτόματο, εφαρμογή Android). Συσκευές που δεν δηλώνουν καθόλου ακρίβεια δεν απορρίπτονται ποτέ. <strong>Μετρημένο στην άσκηση της 21/09/2026:</strong> στα 50 μ. κόβονται 93 από 1.381 στίγματα (6,7%) και εξαφανίζονται 42 από τα 70 αδύνατα άλματα — είναι το ίδιο όριο με το κίτρινο που ήδη εμφανίζεται στον χάρτη, δηλαδή ό,τι δείχνουμε ως αναξιόπιστο δεν το αποθηκεύουμε κιόλας. <strong>0 = απενεργοποιημένο.</strong></small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Μέγιστη Πιθανή Ταχύτητα Μετακίνησης (km/h)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_max_ping_speed_kmh"
+                               value="<?= h($settings['war_room_max_ping_speed_kmh']) ?>" min="0" max="2000" step="5">
+                        <small class="text-muted">Στίγμα που θα σήμαινε μετακίνηση γρηγορότερη από αυτό, σε σχέση με το προηγούμενο στίγμα του ίδιου εθελοντή, <strong>δεν καταγράφεται</strong> — είναι σφάλμα GPS, και στον χάρτη η πινέζα πέφτει σε υπαρκτό σημείο ενώ η πορεία χαράζει ευθεία πάνω από ό,τι μεσολαβεί. Απορρίπτεται μόνο αν το άλμα είναι και μεγαλύτερο από την αβεβαιότητα των δύο στιγμάτων, ώστε να μη «φεύγει» ένα ακίνητο κινητό με θορυβώδεις μετρήσεις. <strong>Δεν χρειάζεται να δηλώσετε αν η αποστολή είναι με τα πόδια ή με οχήματα — ούτε καν αν έχει και τα δύο μαζί.</strong> Ένα στίγμα κρίνεται μόνο όσο υπάρχει πρόσφατο στίγμα να συγκριθεί· μόλις περάσει ο χρόνος που η εφαρμογή θεωρεί ένα στίγμα παλιό (τριπλάσιος του κύκλου παραπάνω), το επόμενο γίνεται δεκτό ό,τι κι αν συνεπάγεται. Έτσι ένα μεμονωμένο τίναγμα GPS σβήνει, ενώ κάποιος που όντως μετακινείται γρήγορα απλώς καταγράφεται αραιότερα όσο κινείται — <strong>ποτέ δεν χάνεται από τον χάρτη</strong>. Ένας πεζός δεν ξεπερνά τα 25 km/h· στην άσκηση της 21/09/2026, όπου όλοι ήταν πεζοί, υπήρχαν <strong>70 σκέλη πάνω από 20 km/h</strong> και το παλιό όριο των 180 έκοβε μόνο 3. <strong>0 = απενεργοποιημένο.</strong></small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-shield-exclamation me-1"></i>Ασφάλεια Εθελοντή</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Όριο Χαμηλής Μπαταρίας Action Room (%)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_low_battery_pct"
+                               value="<?= h($settings['war_room_low_battery_pct']) ?>" min="0" max="100" step="5">
+                        <small class="text-muted">Ποσοστό μπαταρίας κινητού κάτω από το οποίο εμφανίζεται προειδοποίηση στο στίγμα εθελοντή στο Action Room (χάρτης, Κοντινές Ομάδες, Αποστάσεις Ομάδων). Η "κρίσιμη" ένδειξη (κόκκινο) εμφανίζεται στο μισό αυτού του ποσοστού.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Όριο Συνεχόμενης Βάρδιας Action Room (λεπτά)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_max_shift_minutes"
+                               value="<?= h($settings['war_room_max_shift_minutes']) ?>" min="30" max="2880" step="30">
+                        <small class="text-muted">Λεπτά συνεχόμενης παρουσίας εθελοντή σε αλυσίδα εγκεκριμένων βαρδιών στην ίδια αποστολή, πάνω από τα οποία εμφανίζεται προειδοποίηση κόπωσης στο Action Room (ρόστερ, χάρτης, Κοντινές Ομάδες, Αποστάσεις Ομάδων) και προτείνεται αντικατάσταση. Προεπιλογή 480 = 8 ώρες. Η "κρίσιμη" ένδειξη (κόκκινο) εμφανίζεται στο 1,5x του ορίου.</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-heart-pulse me-1"></i>Καρδιακοί Παλμοί Διασώστη</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small">
+                        Ζωντανή ένδειξη παλμών δίπλα στο όνομα κάθε εθελοντή στο Action Room, και αναλυτική καμπύλη παλμών ανά εθελοντή στην αναφορά μετά την αποστολή — από τις ίδιες μετρήσεις.
+                        Χρειάζεται αισθητήρα με <strong>τυπικό Bluetooth LE Heart Rate Service</strong>: ζώνη στήθους ή περιβραχιόνιο (Polar, Garmin, Wahoo, ή οικονομικές ζώνες), ή ρολόι/band Huawei σε λειτουργία «Εκπομπή καρδιακών παλμών» (Ρυθμίσεις → HR Data Broadcasts — δεν το διαθέτουν όλα τα μοντέλα).
+                        Οι παλμοί είναι <strong>δεδομένα υγείας (άρθρο 9 GDPR)</strong>: τους βλέπει μόνο το επιτελείο και ο ίδιος ο εθελοντής, ποτέ οι υπόλοιποι εθελοντές. Χρειάζεται ρητή συγκατάθεση κάθε εθελοντή πριν φορέσει αισθητήρα.
+                    </p>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="vitals_enabled" id="vitalsEnabled"
+                               <?= ($settings['vitals_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="vitalsEnabled">
+                            Ενεργοποίηση παρακολούθησης καρδιακών παλμών
+                        </label>
+                        <div><small class="text-muted">Όσο είναι κλειστό, η εφαρμογή δεν ζητά, δεν αποθηκεύει και δεν εμφανίζει καμία μέτρηση παλμών — ούτε εκτελεί επιπλέον ερώτημα στη βάση.</small></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Συχνότητα Καταγραφής (δευτ.)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_sample_seconds"
+                               value="<?= h($settings['vitals_sample_seconds'] ?? '5') ?>" min="1" max="60" step="1">
+                        <small class="text-muted">Ο αισθητήρας στέλνει μέτρηση κάθε δευτερόλεπτο· εδώ ορίζεται πόσα δευτερόλεπτα συμπυκνώνονται σε μία αποθηκευμένη τιμή. Προεπιλογή 5 δευτ. — αρκετά πυκνό για την καμπύλη της αναφοράς, χωρίς να γράφει ~21.600 γραμμές ανά εθελοντή σε βάρδια 6 ωρών.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Όριο «Αυξημένων» Παλμών (% μέγιστης καρδιακής συχνότητας)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_elevated_pct"
+                               value="<?= h($settings['vitals_elevated_pct'] ?? '75') ?>" min="40" max="100" step="1">
+                        <small class="text-muted">Πάνω από αυτό το ποσοστό η ένδειξη γίνεται πορτοκαλί. Η μέγιστη καρδιακή συχνότητα υπολογίζεται ως 220 − ηλικία αναφοράς (βλ. παρακάτω).</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Ηλικία Αναφοράς (έτη)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_reference_age"
+                               value="<?= h($settings['vitals_reference_age'] ?? '40') ?>" min="16" max="90" step="1">
+                        <small class="text-muted">Η εφαρμογή <strong>δεν αποθηκεύει ημερομηνία γέννησης εθελοντή</strong> (υπάρχει μόνο στις αιτήσεις υποψηφίων και στους πολίτες), οπότε τα όρια ζωνών υπολογίζονται με κοινή ηλικία αναφοράς για όλους: μέγιστη καρδιακή συχνότητα = 220 − αυτή η τιμή. Με 40 έτη βγαίνει 180 bpm, άρα «αυξημένοι» στους 135 και «κρίσιμοι» στους ~158. Βάλτε τη μέση ηλικία του δικού σας μητρώου.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Όριο «Κρίσιμων» Παλμών (% μέγιστης καρδιακής συχνότητας)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_critical_pct"
+                               value="<?= h($settings['vitals_critical_pct'] ?? '88') ?>" min="50" max="100" step="1">
+                        <small class="text-muted">Πάνω από αυτό το ποσοστό η ένδειξη γίνεται κόκκινη και αναβοσβήνει. Πρέπει να είναι μεγαλύτερο από το όριο των αυξημένων — αλλιώς διορθώνεται αυτόματα.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Όριο Επικίνδυνα Χαμηλών Παλμών (bpm)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_low_bpm"
+                               value="<?= h($settings['vitals_low_bpm'] ?? '40') ?>" min="25" max="60" step="1">
+                        <small class="text-muted">Απόλυτο όριο, όχι ποσοστό: η βραδυκαρδία είναι το ίδιο επικίνδυνη σε κάθε ηλικία. Κάτω από αυτό η ένδειξη γίνεται μπλε — σκόπιμα διαφορετικό χρώμα από το κόκκινο των υψηλών, ώστε να ξεχωρίζει από απόσταση ποιο από τα δύο συμβαίνει.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Όριο Παλαιότητας Μέτρησης (δευτ.)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_stale_seconds"
+                               value="<?= h($settings['vitals_stale_seconds'] ?? '120') ?>" min="30" max="1800" step="10">
+                        <small class="text-muted">Μετά από τόση ώρα χωρίς νέα μέτρηση, η ένδειξη γκριζάρει ως «χωρίς σήμα». Σκόπιμα μικρότερο από το αντίστοιχο όριο του GPS: αισθητήρας που σταμάτησε σημαίνει συνήθως ότι έφυγε η ζώνη ή κόπηκε το Bluetooth, και αυτό το θέλει γρήγορα το επιτελείο.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Διατήρηση Μετρήσεων (ημέρες)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="vitals_retention_days"
+                               value="<?= h($settings['vitals_retention_days'] ?? '365') ?>" min="7" max="3650" step="1">
+                        <small class="text-muted">Μετά από τόσες ημέρες οι μετρήσεις διαγράφονται αυτόματα. Είναι ο πυκνότερος πίνακας της εφαρμογής και ταυτόχρονα δεδομένα υγείας — κρατήστε τον όσο χρειάζεται για τις αναφορές των αποστολών, όχι περισσότερο.</small>
+                    </div>
+
+                    <h6 class="fw-bold mt-4 mb-2">Κατώφλια Επεισοδίων (Αναφορά Παλμών)</h6>
+                    <p class="text-muted small">
+                        Ορίζουν πότε μια περίοδος καταγράφεται ως <strong>επεισόδιο</strong> στην Αναφορά Παλμών του Action Room.
+                        Εδώ ρυθμίζετε <strong>μόνο τη διάρκεια</strong>: τα όρια σε bpm είναι τα ίδια ακριβώς που χρωματίζουν το badge και το στίγμα στον χάρτη (παραπάνω) — μία γραμμή ανά ζώνη για όλη την εφαρμογή, ώστε να μη γράφει ποτέ ο πίνακας «Φυσιολογικοί» δίπλα σε επεισόδιο «Βραδυκαρδία».
+                        Η διάρκεια είναι που ξεχωρίζει το σήμα από τον θόρυβο: διασώστης που ανεβαίνει πλαγιά με εξοπλισμό αγγίζει στιγμιαία το όριο συνέχεια — δέκα λεπτά <em>πάνω</em> από αυτό είναι εντελώς άλλη δήλωση. Αν τις χαλαρώσετε, η σελίδα θα είναι μόνιμα κόκκινη και θα πάψει να σημαίνει κάτι.
+                    </p>
+                    <?php $__vc = vitalsConfig(); ?>
+                    <p class="small mb-2">
+                        Με τις τρέχουσες ρυθμίσεις: <strong>ταχυκαρδία ≥ <?= (int) $__vc['tachy_bpm'] ?> bpm</strong> ·
+                        <strong>βραδυκαρδία ≤ <?= (int) $__vc['brady_bpm'] ?> bpm</strong> ·
+                        <strong>καταπόνηση ≥ <?= vitalsZoneBpm($__vc['elevated_pct']) ?> bpm</strong>.
+                        Για να γίνει η ταχυκαρδία π.χ. 150 bpm, αλλάξτε το ποσοστό «κρίσιμων» παραπάνω.
+                    </p>
+                    <div class="row g-3 mb-3">
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small">Ταχυκαρδία: λεπτά</label>
+                            <input type="number" class="form-control" name="vitals_episode_tachy_minutes" value="<?= h($settings['vitals_episode_tachy_minutes'] ?? '10') ?>" min="1" max="120" step="1">
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small">Βραδυκαρδία: λεπτά</label>
+                            <input type="number" class="form-control" name="vitals_episode_brady_minutes" value="<?= h($settings['vitals_episode_brady_minutes'] ?? '5') ?>" min="1" max="120" step="1">
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small">Παρατεταμένη καταπόνηση: λεπτά</label>
+                            <input type="number" class="form-control" name="vitals_episode_strain_minutes" value="<?= h($settings['vitals_episode_strain_minutes'] ?? '20') ?>" min="5" max="240" step="1">
+                            <small class="text-muted">Συνεχόμενος χρόνος πάνω από το όριο «αυξημένων» παλμών.</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+        <div class="col-lg-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-map me-1"></i>Χάρτης & Εμφάνιση</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Μέγεθος Κυλιόμενου Κειμένου Action Room (rem)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_banner_font_size"
+                               value="<?= h($settings['war_room_banner_font_size']) ?>" min="0.8" max="3" step="0.05">
+                        <small class="text-muted">Μέγεθος του κυλιόμενου κειμένου συναγερμού (banner) στο Action Room, σε desktop οθόνες.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Θέση Κυλιόμενης Μπάρας Action Room</label>
+                        <select class="form-select" style="max-width:220px;" name="war_room_ticker_position">
+                            <option value="top" <?= $settings['war_room_ticker_position'] === 'top' ? 'selected' : '' ?>>Πάνω στη σελίδα</option>
+                            <option value="bottom" <?= $settings['war_room_ticker_position'] === 'bottom' ? 'selected' : '' ?>>Κάτω στη σελίδα</option>
+                        </select>
+                        <small class="text-muted">Η μπάρα (SOS/απαγορευμένη ζώνη ενεργά, ανακοινώσεις &amp; εντολές) μένει πάντα ορατή στην οθόνη, ό,τι tab ή σημείο της σελίδας κι αν βρίσκεται ο χρήστης — αυτό επιλέγει αν κάθεται πάνω ή κάτω.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Μέγιστο Μέγεθος Τομέα Αυτόματου Πλέγματος (μ.)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_grid_max_size_m"
+                               value="<?= h($settings['war_room_grid_max_size_m'] ?? '900') ?>" min="200" max="<?= GRID_SECTOR_SIZE_MAX_M ?>" step="50">
+                        <small class="text-muted">Πόσο μεγάλο τομέα μπορεί να ζητήσει ο συντονιστής στο «Αυτόματο πλέγμα» του Action Room — το πάνω άκρο του διακόπτη. Το κάτω άκρο μένει στα 150 μ. Μεγαλύτερος τομέας σημαίνει λιγότερους τομείς για την ίδια περιοχή: σε μεγάλες ορεινές περιοχές το 900 μπορεί να μη φτάνει και το πλέγμα να κόβεται από το όριο τομέων ανά περιοχή που ορίζεται ακριβώς παρακάτω. Προεπιλογή 900, μέγιστο <?= GRID_SECTOR_SIZE_MAX_M ?>.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Μέγιστοι Τομείς ανά Αυτόματο Πλέγμα</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_grid_max_cells"
+                               value="<?= h($settings['war_room_grid_max_cells'] ?? '120') ?>" min="10" max="<?= MAX_GRID_CELLS ?>" step="10">
+                        <small class="text-muted">Πόσους τομείς το πολύ μπορεί να παράγει ένα πλέγμα σε μία περιοχή έρευνας. Πάνω από αυτό, το κουμπί δημιουργίας κλειδώνει και ζητείται μεγαλύτερο μέγεθος τομέα. <strong>Δεν είναι όριο της βάσης — είναι όριο δικτύου:</strong> κάθε τομέας της αποστολής στέλνεται ολόκληρος σε κάθε ανανέωση των 5 δευτερολέπτων, σε κάθε ανοιχτή οθόνη Action Room, και κοστίζει περίπου 739 bytes (μετρημένο σε πραγματική αποστολή). Με 120 τομείς αυτό είναι ~87KB ανά 5 δευτερόλεπτα ανά οθόνη, με 400 γίνεται ~290KB. Ανεβάστε το μόνο αν χρειάζεστε πυκνότερο πλέγμα και οι συντονιστές δεν κρατούν πολλές οθόνες ανοιχτές ταυτόχρονα. Επίσης: κάθε τομέας ζωγραφίζει μόνιμη ετικέτα στον χάρτη, και ήδη στους 49 αρχίζουν να στριμώχνονται μεταξύ τους. Προεπιλογή 120, μέγιστο <?= MAX_GRID_CELLS ?>.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Μονάδα Έκτασης Action Room</label>
+                        <select class="form-select" style="max-width:260px;" name="war_room_area_unit">
+                            <option value="auto" <?= ($settings['war_room_area_unit'] ?? 'auto') === 'auto' ? 'selected' : '' ?>>Αυτόματη επιλογή</option>
+                            <option value="mid" <?= ($settings['war_room_area_unit'] ?? 'auto') === 'mid' ? 'selected' : '' ?>>Πάντα στρέμματα</option>
+                            <option value="m2" <?= ($settings['war_room_area_unit'] ?? 'auto') === 'm2' ? 'selected' : '' ?>>Πάντα τετραγωνικά μέτρα</option>
+                        </select>
+                        <small class="text-muted">Σε ποια μονάδα εμφανίζεται η έκταση μιας περιοχής έρευνας ή ενός τομέα — όσο τη σχεδιάζετε, στο «Αυτόματο πλέγμα», στη διαίρεση σε τομείς και στα popup του χάρτη. <strong>Αυτόματη επιλογή:</strong> τετραγωνικά μέτρα κάτω από 10 στρέμματα, στρέμματα μέχρι το 1 τ.χλμ., τετραγωνικά χιλιόμετρα πάνω από εκεί — και όσα νούμερα εμφανίζονται μαζί μοιράζονται πάντα την ίδια μονάδα, αυτή του μικρότερου, ώστε να συγκρίνονται με τη μία. <strong>Πάντα στρέμματα:</strong> ποτέ τ.χλμ., οπότε μια περιοχή 35 τ.χλμ. γράφει 35.604 στρ. <strong>Πάντα τετραγωνικά μέτρα:</strong> η ίδια περιοχή γράφει 35.604.000 τ.μ. — διαβάζεται δύσκολα σε μεγάλες περιοχές, αλλά είναι η μονάδα που ζητούν κάποιες υπηρεσίες σε αναφορά. Σε αγγλικό περιβάλλον η μεσαία μονάδα είναι εκτάρια (1 εκτάριο = 10 στρέμματα).</small>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Route distance -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-signpost-split me-1"></i>Αποστάσεις Διαδρομής</h5>
+                </div>
+                <div class="card-body">
+                    <p class="small text-muted mb-3">
+                        Ο βοηθός του Action Room υπολογίζει πόσο απέχει κάθε άτομο από το σημείο,
+                        τον τομέα ή την πορεία που του ανατέθηκε. Η <strong>ευθεία γραμμή</strong>
+                        υπολογίζεται πάντα τοπικά και δεν χρειάζεται καμία ρύθμιση. Το πεδίο εδώ
+                        αφορά μόνο την <strong>απόσταση διαδρομής</strong>.
+                    </p>
+                    <div class="mb-3">
+                        <label class="form-label" for="googleMapsApiKey">Google Routes API Key <span class="text-muted">(προαιρετικό)</span></label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="googleMapsApiKey"
+                                   name="google_maps_api_key"
+                                   autocomplete="new-password"
+                                   value="<?= h($settings['google_maps_api_key'] ?? '') ?>"
+                                   placeholder="Χωρίς κλειδί χρησιμοποιείται το OSRM">
+                            <button type="button" class="btn btn-outline-secondary" onclick="toggleKeyVisibility('googleMapsApiKey')" tabindex="-1">
+                                <i class="bi bi-eye" id="eye-googleMapsApiKey"></i>
+                            </button>
+                        </div>
+                        <div class="form-text">
+                            <a href="https://console.cloud.google.com/apis/library/routes.googleapis.com" target="_blank" rel="noopener noreferrer">Routes API στο Google Cloud</a>
+                            — χρεώνεται στον δικό σας λογαριασμό.
+                        </div>
+                    </div>
+                    <?php /* Always shown, unlike the weather one, which appears
+                             only once a key exists. "Does this work" is a fair
+                             question for the free router too — and the answer
+                             with no key is the one an organisation that never
+                             intends to pay actually needs. It tests the key
+                             currently IN THE FIELD, so a wrong paste is caught
+                             before it is saved rather than after. */ ?>
+                    <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnTestRouteKey">
+                            <i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης
+                        </button>
+                        <span class="small text-muted">Δοκιμαστική διαδρομή Ηράκλειο → Κνωσός</span>
+                    </div>
+                    <div id="routeTestResult" class="mb-2" style="display:none;"></div>
+                    <?php /* Which router is in use is not a detail an admin
+                             should have to infer from whether a field is
+                             empty: the two give materially different numbers
+                             — a walking route up a monopati and a driving
+                             route round the mountain are not the same answer
+                             to "how far". */ ?>
+                    <?php if (!empty($settings['google_maps_api_key'] ?? '')): ?>
+                    <div class="alert alert-success py-2 px-2 mb-0 small">
+                        <i class="bi bi-check-circle me-1"></i>
+                        Σε χρήση: <strong>Google Routes</strong> με <strong>πεζοπορία</strong>.
+                    </div>
+                    <?php else: ?>
+                    <div class="alert alert-secondary py-2 px-2 mb-0 small">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Σε χρήση: <strong>OSRM</strong> (δωρεάν, χωρίς κλειδί) — υπολογίζει
+                        <strong>οδικώς</strong> και κολλάει τη θέση στον κοντινότερο δρόμο, που
+                        στο βουνό μπορεί να απέχει. Η ευθεία γραμμή δίπλα του παραμένει πάντα
+                        το τίμιο νούμερο.
+                    </div>
+                    <?php endif; ?>
+                    <div class="alert alert-warning py-2 px-2 mt-3 mb-0 small">
+                        <i class="bi bi-shield-lock me-1"></i>
+                        Στον δρομολογητή στέλνονται <strong>μόνο δύο ζεύγη συντεταγμένων</strong> —
+                        κανένα όνομα, καμία ομάδα, κανένα αναγνωριστικό.
+                    </div>
+                </div>
+            </div>
+
+            <!-- LPB Search Rings Settings -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-bullseye me-1"></i>Ρυθμίσεις Ζωνών Αναζήτησης (LPB Rings)</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="search_rings_enabled" id="searchRingsEnabled"
+                               <?= ($settings['search_rings_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="searchRingsEnabled">
+                            <strong>Ενδεικτικές Ζώνες Αναζήτησης στον Χάρτη</strong>
+                        </label>
+                        <div class="form-text">
+                            Μόνο σε αποστολές τύπου «Αγνοούμενο άτομο». Σχεδιάζει ομόκεντρους κύκλους γύρω από το σημείο τελευταίας θέασης, με ακτίνα ανάλογη της κατηγορίας ατόμου (παιδί, πεζοπόρος, άτομο με άνοια κ.λπ.). <strong>Ενδεικτικό εργαλείο σχεδιασμού, όχι επιχειρησιακή βεβαιότητα</strong> — οι αποστάσεις είναι κατά προσέγγιση τιμές από γενική βιβλιογραφία SAR, όχι επικυρωμένα δεδομένα. Συνιστάται έλεγχος από άτομο με εκπαίδευση SAR πριν τη χρήση σε πραγματική επιχείρηση.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check-lg me-1"></i>Αποθήκευση Ρυθμίσεων
+            </button>
+        </div>
+    </div>
 </form>
 <?php endif; ?>
 
