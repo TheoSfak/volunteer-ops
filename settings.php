@@ -1619,9 +1619,6 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                     </div>
                 </div>
             </div>
-        </div>
-        
-        <div class="col-lg-6">
             <!-- Points Settings -->
             <div class="card mb-4">
                 <div class="card-header">
@@ -1757,67 +1754,8 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                 </div>
             </div>
 
-            <!-- Weather API Settings -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-cloud-sun me-1"></i>Ρυθμίσεις Καιρού</h5>
-                </div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label" for="weatherApiKey">OpenWeatherMap API Key</label>
-                        <div class="input-group">
-                            <input type="password" class="form-control" id="weatherApiKey"
-                                   name="openweathermap_api_key"
-                                   autocomplete="new-password"
-                                   value="<?= h($settings['openweathermap_api_key'] ?? '') ?>"
-                                   placeholder="Εισάγετε το API key σας">
-                            <button type="button" class="btn btn-outline-secondary" onclick="toggleKeyVisibility('weatherApiKey')" tabindex="-1">
-                                <i class="bi bi-eye" id="eye-weatherApiKey"></i>
-                            </button>
-                        </div>
-                        <div class="form-text">
-                            Απαιτείται για την εμφάνιση πρόβλεψης καιρού στις αποστολές.
-                            <a href="https://openweathermap.org/appid" target="_blank" rel="noopener noreferrer">Δωρεάν εγγραφή στο OpenWeatherMap</a>
-                        </div>
-                    </div>
-                    <?php if (!empty($settings['openweathermap_api_key'] ?? '')): ?>
-                    <div class="d-flex align-items-center gap-2 flex-wrap">
-                        <div class="alert alert-success py-1 px-2 mb-0 small flex-grow-1">
-                            <i class="bi bi-check-circle me-1"></i>API Key έχει οριστεί
-                        </div>
-                        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnTestWeatherKey">
-                            <i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης
-                        </button>
-                    </div>
-                    <div id="weatherTestResult" class="mt-2" style="display:none;"></div>
-                    <?php else: ?>
-                    <div class="alert alert-secondary py-1 px-2 mb-0 small">
-                        <i class="bi bi-info-circle me-1"></i>Χωρίς API key η πρόβλεψη καιρού δεν εμφανίζεται στις αποστολές
-                    </div>
-                    <?php endif; ?>
-
-                    <hr>
-
-                    <div class="form-check form-switch mb-3">
-                        <input class="form-check-input" type="checkbox" name="weather_map_compass_enabled" id="weatherCompassEnabled"
-                               <?= ($settings['weather_map_compass_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
-                        <label class="form-check-label" for="weatherCompassEnabled">
-                            <strong>Πυξίδα Ανέμου στον Χάρτη Action Room</strong>
-                        </label>
-                        <div class="form-text">Κατεύθυνση και ένταση ανέμου ως στοιχείο ελέγχου στον χάρτη κάθε αποστολής. Χρησιμοποιεί το ίδιο API key παραπάνω — καμία επιπλέον ρύθμιση.</div>
-                    </div>
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" name="exposure_urgency_enabled" id="exposureUrgencyEnabled"
-                               <?= ($settings['exposure_urgency_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
-                        <label class="form-check-label" for="exposureUrgencyEnabled">
-                            <strong>Ένδειξη Επείγοντος λόγω Έκθεσης</strong>
-                        </label>
-                        <div class="form-text">Μόνο σε αποστολές τύπου «Αγνοούμενο άτομο». Ενδεικτικός υπολογισμός από ηλικία, θερμοκρασία και άνεμο — <strong>όχι κλινική πρόγνωση</strong>. Προτείνεται έλεγχος πριν την ενεργοποίηση σε πραγματική επιχείρηση.</div>
-                    </div>
-                </div>
-            </div>
-
-
+        </div>
+        <div class="col-lg-6">
             <!-- AI Settings -->
             <?php
             $aiProviders    = aiProviders();
@@ -2038,6 +1976,67 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
             </div>
 
 
+            <!-- Weather API Settings -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-cloud-sun me-1"></i>Ρυθμίσεις Καιρού</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="weatherApiKey">OpenWeatherMap API Key</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="weatherApiKey"
+                                   name="openweathermap_api_key"
+                                   autocomplete="new-password"
+                                   value="<?= h($settings['openweathermap_api_key'] ?? '') ?>"
+                                   placeholder="Εισάγετε το API key σας">
+                            <button type="button" class="btn btn-outline-secondary" onclick="toggleKeyVisibility('weatherApiKey')" tabindex="-1">
+                                <i class="bi bi-eye" id="eye-weatherApiKey"></i>
+                            </button>
+                        </div>
+                        <div class="form-text">
+                            Απαιτείται για την εμφάνιση πρόβλεψης καιρού στις αποστολές.
+                            <a href="https://openweathermap.org/appid" target="_blank" rel="noopener noreferrer">Δωρεάν εγγραφή στο OpenWeatherMap</a>
+                        </div>
+                    </div>
+                    <?php if (!empty($settings['openweathermap_api_key'] ?? '')): ?>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <div class="alert alert-success py-1 px-2 mb-0 small flex-grow-1">
+                            <i class="bi bi-check-circle me-1"></i>API Key έχει οριστεί
+                        </div>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="btnTestWeatherKey">
+                            <i class="bi bi-plug me-1"></i>Έλεγχος σύνδεσης
+                        </button>
+                    </div>
+                    <div id="weatherTestResult" class="mt-2" style="display:none;"></div>
+                    <?php else: ?>
+                    <div class="alert alert-secondary py-1 px-2 mb-0 small">
+                        <i class="bi bi-info-circle me-1"></i>Χωρίς API key η πρόβλεψη καιρού δεν εμφανίζεται στις αποστολές
+                    </div>
+                    <?php endif; ?>
+
+                    <hr>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" name="weather_map_compass_enabled" id="weatherCompassEnabled"
+                               <?= ($settings['weather_map_compass_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="weatherCompassEnabled">
+                            <strong>Πυξίδα Ανέμου στον Χάρτη Action Room</strong>
+                        </label>
+                        <div class="form-text">Κατεύθυνση και ένταση ανέμου ως στοιχείο ελέγχου στον χάρτη κάθε αποστολής. Χρησιμοποιεί το ίδιο API key παραπάνω — καμία επιπλέον ρύθμιση.</div>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="exposure_urgency_enabled" id="exposureUrgencyEnabled"
+                               <?= ($settings['exposure_urgency_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="exposureUrgencyEnabled">
+                            <strong>Ένδειξη Επείγοντος λόγω Έκθεσης</strong>
+                        </label>
+                        <div class="form-text">Μόνο σε αποστολές τύπου «Αγνοούμενο άτομο». Ενδεικτικός υπολογισμός από ηλικία, θερμοκρασία και άνεμο — <strong>όχι κλινική πρόγνωση</strong>. Προτείνεται έλεγχος πριν την ενεργοποίηση σε πραγματική επιχείρηση.</div>
+                    </div>
+                </div>
+            </div>
+
+
             <!-- Telegram Bot Settings -->
             <div class="card mb-4">
                 <div class="card-header">
@@ -2110,8 +2109,6 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                     </div>
                 </div>
             </div>
-        </div>
-
             <!-- QR Check-in Settings -->
             <div class="card mb-4">
                 <div class="card-header">
@@ -2130,7 +2127,7 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                     </div>
                 </div>
             </div>
-    </div>
+        </div>
     </div>
 
     <div class="card">
