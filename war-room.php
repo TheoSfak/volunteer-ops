@@ -2347,6 +2347,29 @@ include __DIR__ . '/includes/header.php';
         padding-left: 8px;
         padding-right: 8px;
     }
+    /* Same problem one card up. The teams card's leader line puts three
+       badges on one row — the squad label (.badge.fs-6, 32px), the "my team"
+       pill (24px) and the leader's home-organisation tag
+       (.team-name-badge-corner, 22px) — so three heights on one line. They
+       were already centred on each other, which is why this read as merely
+       untidy rather than broken, but the boxes never matched.
+       One height for all three. The squad label stays the headline through
+       its type size and its colour, which is where that job belongs, rather
+       than through being ten pixels taller than its neighbours.
+       The child combinator is load-bearing: the member chips below live in
+       their own .small wrapper and are a different set at a different scale,
+       and this must not reach them. */
+    [data-card-id="teamsCard"] .wr-team-roster > .badge,
+    [data-card-id="teamsCard"] .wr-team-roster > .team-name-badge-corner {
+        height: 1.75rem;
+        padding-top: 0;
+        padding-bottom: 0;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        vertical-align: middle;
+        border-radius: 999px;
+    }
     .presence-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
     .presence-dot.presence-online { background: #28a745; }
     .presence-dot.presence-offline { background: #adb5bd; }
