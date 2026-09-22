@@ -13131,7 +13131,19 @@ document.getElementById('mapCard')?.addEventListener('scroll', syncMapFullscreen
 // tick. Reuses activeBannerRows as the single source of truth for the
 // container's own show/hide, so this can never leave #warRoomBanner
 // visibly empty-but-shown, or leave a real order row hidden along with it.
-function upsertPersistentBannerRow(id, text, icon) {
+// $onClose is optional and almost never passed. A persistent row tracks a live
+// condition, and for SOS and hazard-zone breaches the whole point is that it
+// cannot be dismissed — someone is in danger and the row goes when that stops
+// being true, not when it stops being convenient.
+//
+// The overdue-orders row is the one exception, and only since the
+// acknowledgement panel exists: the panel now names those orders and shows who
+// has not answered each of them, so the row is no longer the only place that
+// information lives. It is an escalation prompt on top of a list the
+// coordinator already has, and an escalation prompt that has been read and
+// understood should be closable. See updateAssistantOverdueAlarm() for what
+// "closed" means there — it is not "gone for good".
+function upsertPersistentBannerRow(id, text, icon, onClose) {
     const existing = activeBannerRows.get(id);
     if (!text) {
         if (existing) hideWarRoomBannerRow(id);
@@ -13146,7 +13158,11 @@ function upsertPersistentBannerRow(id, text, icon) {
     row.innerHTML = `
         <span style="flex-shrink:0;">${icon}</span>
         <div class="war-room-banner-track"><span></span></div>
+        ${onClose ? `<button type="button" class="war-room-banner-close" aria-label="${escapeHtml(t('common.close'))}" title="${escapeHtml(t('assistant.overdue_dismiss_title'))}">&times;</button>` : ''}
     `;
+    if (onClose) {
+        row.querySelector('.war-room-banner-close').addEventListener('click', onClose);
+    }
     row.querySelector('.war-room-banner-track span').textContent = text;
     const container = document.getElementById('warRoomBanner');
     container.prepend(row);
@@ -14276,17 +14292,72 @@ function updateAssistantFab() {
 //     one beep; the same beep repeated twelve times a minute is what makes
 //     people mute a console.
 let assistantOverdueLastCount = 0;
+
+// The count this row was dismissed at, or 0 for "not dismissed".
+//
+// Closing the row is not "hide this for ever" and not "hide it until the page
+// reloads" — both are wrong for an escalation prompt. It means "I have seen
+// that N orders are overdue, stop telling me": the row stays down while the
+// situation is no worse than what was acknowledged, and comes back the moment
+// it gets worse. Reloading the page is not news, so the threshold is persisted
+// per device, the same rule the acknowledgement cards' own X follows.
+const OVERDUE_DISMISS_KEY = 'wr-overdue-dismissed-<?= (int) $missionId ?>';
+let assistantOverdueDismissedAt = 0;
+try {
+    assistantOverdueDismissedAt = parseInt(localStorage.getItem(OVERDUE_DISMISS_KEY) || '0', 10) || 0;
+} catch (e) { /* blocked storage — the row simply shows, which is the safe side */ }
+
+function persistOverdueDismissed() {
+    try {
+        if (assistantOverdueDismissedAt > 0) localStorage.setItem(OVERDUE_DISMISS_KEY, String(assistantOverdueDismissedAt));
+        else localStorage.removeItem(OVERDUE_DISMISS_KEY);
+    } catch (e) {}
+}
+
 function updateAssistantOverdueAlarm(data) {
     const n = (data && data.counts && data.counts.overdue) ? data.counts.overdue : 0;
     const mins = (data && data.overdue_after_minutes) ? data.overdue_after_minutes : 30;
 
+    // Everything got answered: the alarm is over, so the dismissal that was
+    // about it is over too. Without this, clearing a backlog of seven and then
+    // letting three new orders go overdue would stay silent, because three is
+    // still "no worse than the seven I dismissed".
+    if (n === 0 && assistantOverdueDismissedAt !== 0) {
+        assistantOverdueDismissedAt = 0;
+        persistOverdueDismissed();
+    }
+    // Some were answered but not all. Follow the count down, so that ANY rise
+    // from here re-raises the alarm rather than only a rise past the original
+    // high-water mark.
+    if (n > 0 && assistantOverdueDismissedAt > n) {
+        assistantOverdueDismissedAt = n;
+        persistOverdueDismissed();
+    }
+
+    const suppressed = n > 0 && n <= assistantOverdueDismissedAt;
+
     upsertPersistentBannerRow(
         'orders-overdue',
-        n === 0 ? '' : t(n === 1 ? 'assistant.overdue_ticker_one' : 'assistant.overdue_ticker_many', {n: n, mins: mins}),
-        '⏳'
+        (n === 0 || suppressed) ? '' : t(n === 1 ? 'assistant.overdue_ticker_one' : 'assistant.overdue_ticker_many', {n: n, mins: mins}),
+        '⏳',
+        // Reads the live count, NOT the `n` of this call. upsertPersistentBannerRow()
+        // wires the handler once, when the row is first created, so a closure
+        // over `n` freezes at whatever the count happened to be at that moment
+        // and never moves again. Measured: a row that first appeared at 2
+        // overdue, dismissed later while it read 7, recorded 2 — and then
+        // reappeared immediately, because 7 is worse than 2.
+        () => {
+            assistantOverdueDismissedAt = assistantOverdueLastCount;
+            persistOverdueDismissed();
+            hideWarRoomBannerRow('orders-overdue');
+        }
     );
 
-    if (n > assistantOverdueLastCount) playWarRoomAlertSound();
+    // Unchanged in spirit — one beep when the number rises, never on the way
+    // down and never on every poll — but a rise that is still under the
+    // dismissed threshold must stay silent too, or closing the row would buy
+    // visual quiet and leave the sound behind.
+    if (n > assistantOverdueLastCount && !suppressed) playWarRoomAlertSound();
     assistantOverdueLastCount = n;
 }
 
