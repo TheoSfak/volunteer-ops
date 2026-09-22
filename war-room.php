@@ -3732,6 +3732,17 @@ include __DIR__ . '/includes/header.php';
                     <p class="small text-muted mb-0"><?= $autoPingSeconds >= 60
                         ? t('myping.auto_note_minutes', ['n' => (int) round($autoPingSeconds / 60)])
                         : t('myping.auto_note_seconds', ['n' => $autoPingSeconds]) ?></p>
+                    <!-- Live quality of this volunteer's OWN fix, filled by
+                         renderMyGpsQuality() as positions arrive and by the
+                         geolocation error callbacks when they stop arriving.
+                         One per person like the heart-rate block above, not
+                         per assignment. The volunteer is the only one who can
+                         act on a bad fix — step out from under a balcony, come
+                         out of the treeline — and until now they had no way to
+                         know there was anything to act on. Empty until the
+                         first fix or the first error, so it adds no noise to
+                         a card that is working. -->
+                    <div id="myGpsQuality" class="small mt-1"></div>
                     <?php endif; ?>
                 <?php endif; ?>
             </div>
@@ -13935,7 +13946,7 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
                 status.className = 'small mb-2 ' + (result.ok ? 'text-success' : 'text-danger');
             }).catch(() => { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; }).finally(() => button.disabled = false);
         });
-    }, () => { status.textContent = t('myping.gps_denied'); status.className = 'small mb-2 text-danger'; button.disabled = false; }, {enableHighAccuracy:true, timeout:10000});
+    }, err => { status.textContent = geolocationErrorText(err); status.className = 'small mb-2 text-danger'; button.disabled = false; }, {enableHighAccuracy:true, timeout:10000});
 }));
 
 // Passive background capture while this page stays open — silent (no status
@@ -13981,6 +13992,77 @@ let lastAutoPingSentAt = Date.now();
 // stack them up, which is exactly the battery cost this block is careful
 // about everywhere else.
 let autoFixInFlight = false;
+// getCurrentPosition() and watchPosition() below both feed this, and for the
+// first seconds they race — the one-shot almost always answers first and with
+// the coarse fix, because a coarse fix is precisely what exists before GNSS
+// has locked. Assigning unconditionally therefore made every volunteer's
+// FIRST recorded position systematically their worst one, and that was the
+// position being sent until watchPosition happened to produce its next
+// update.
+//
+// So a newer fix only displaces a recent one when it is at least as accurate.
+// Past this window the newer one always wins however coarse: somebody walking
+// away must never be pinned to an old precise fix, and 10s at walking pace is
+// about 14m — far less than the error this is protecting against. An accuracy
+// missing on either side is not comparable, so the newer fix wins by default.
+const AUTO_PING_PREFER_ACCURATE_MS = 10000;
+function holdBestAutoPosition(position) {
+    const current = latestAutoPosition;
+    if (!current) { latestAutoPosition = position; return; }
+    // Out-of-order delivery is rare but real; an older fix never wins.
+    if (position.timestamp < current.timestamp) return;
+    const withinWindow = (position.timestamp - current.timestamp) <= AUTO_PING_PREFER_ACCURATE_MS;
+    const incoming = position.coords.accuracy, held = current.coords.accuracy;
+    if (withinWindow && typeof incoming === 'number' && typeof held === 'number' && incoming > held) return;
+    latestAutoPosition = position;
+}
+// Every accepted fix also refreshes what the volunteer is told about their
+// own signal — the decision above has several early exits, so the display is
+// driven from here rather than from inside it, where three of the four paths
+// would have missed it.
+function acceptAutoPosition(position) {
+    holdBestAutoPosition(position);
+    renderMyGpsQuality();
+}
+
+// The volunteer is the only person who can do anything about a bad fix: step
+// out from under a balcony, walk clear of the treeline, turn location back
+// on. Until now nothing on their screen said there was anything to do — the
+// page looked identical whether their phone was reporting ±6m or ±400m.
+function renderMyGpsQuality() {
+    const el = document.getElementById('myGpsQuality');
+    if (!el || !latestAutoPosition) return;
+    const acc = latestAutoPosition.coords.accuracy;
+    if (typeof acc !== 'number') { el.textContent = ''; return; }
+    const m = Math.round(acc);
+    // Same 50m line the map popups use, so "poor" means the same thing to the
+    // volunteer and to the coordinator looking at their pin.
+    const poor = m > 50;
+    el.className = 'small mt-1 ' + (poor ? 'text-warning fw-bold' : 'text-muted');
+    el.textContent = t('myping.gps_quality', {m: m}) + (poor ? ' ' + t('myping.gps_quality_hint') : '');
+}
+
+// A PositionError is not one thing. Refusing permission, a phone that cannot
+// get a fix at all, and a fix that simply took too long are three different
+// situations with three different things to do about them, and every one of
+// them used to arrive as either silence or the word "denied".
+function geolocationErrorText(err) {
+    const code = err && typeof err.code === 'number' ? err.code : 0;
+    if (code === 1) return t('myping.gps_denied');
+    if (code === 2) return t('myping.gps_unavailable');
+    if (code === 3) return t('myping.gps_timeout');
+    return t('myping.gps_error_unknown');
+}
+// Replaces the `() => {}` that used to sit on every passive-capture callback.
+// A volunteer whose location permission was revoked looked exactly like one
+// standing still, both to themselves and, through the staleness indicator,
+// to the command post.
+function reportAutoGeolocationError(err) {
+    const el = document.getElementById('myGpsQuality');
+    if (!el) return;
+    el.className = 'small mt-1 text-danger fw-bold';
+    el.textContent = geolocationErrorText(err);
+}
 
 function sendAutoPing(position) {
     const buttons = document.querySelectorAll('.send-ping');
@@ -14014,13 +14096,13 @@ function sendAutoPing(position) {
 setTimeout(() => {
     if (!navigator.geolocation || !document.querySelectorAll('.send-ping').length) return;
     navigator.geolocation.getCurrentPosition(
-        position => { latestAutoPosition = position; },
-        () => {},
+        acceptAutoPosition,
+        reportAutoGeolocationError,
         AUTO_PING_GEO_OPTS
     );
     navigator.geolocation.watchPosition(
-        position => { latestAutoPosition = position; },
-        () => {},
+        acceptAutoPosition,
+        reportAutoGeolocationError,
         AUTO_PING_GEO_OPTS
     );
 }, 5000);
@@ -14043,8 +14125,12 @@ setInterval(() => {
     if (autoFixInFlight || !navigator.geolocation || !document.querySelectorAll('.send-ping').length) return;
     autoFixInFlight = true;
     navigator.geolocation.getCurrentPosition(
-        position => { autoFixInFlight = false; latestAutoPosition = position; sendAutoPing(position); },
-        () => { autoFixInFlight = false; },
+        position => { autoFixInFlight = false; acceptAutoPosition(position); sendAutoPing(position); },
+        // Stored through acceptAutoPosition so the held fix stays the best
+        // one, but SENT directly: this read only happened because nothing
+        // fresh was available, and what we just obtained is by definition
+        // fresh even if a slightly older held fix was tighter.
+        err => { autoFixInFlight = false; reportAutoGeolocationError(err); },
         AUTO_PING_GEO_OPTS
     );
 }, 15000);
@@ -14062,8 +14148,12 @@ document.addEventListener('visibilitychange', () => {
     if (autoFixInFlight) return;
     autoFixInFlight = true;
     navigator.geolocation.getCurrentPosition(
-        position => { autoFixInFlight = false; latestAutoPosition = position; sendAutoPing(position); },
-        () => { autoFixInFlight = false; },
+        position => { autoFixInFlight = false; acceptAutoPosition(position); sendAutoPing(position); },
+        // Stored through acceptAutoPosition so the held fix stays the best
+        // one, but SENT directly: this read only happened because nothing
+        // fresh was available, and what we just obtained is by definition
+        // fresh even if a slightly older held fix was tighter.
+        err => { autoFixInFlight = false; reportAutoGeolocationError(err); },
         AUTO_PING_GEO_OPTS
     );
 });
