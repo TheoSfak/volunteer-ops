@@ -57,6 +57,14 @@ if ($action === 'send') {
         echo json_encode(['ok' => false, 'error' => t('battery_alert.recipient_not_found')]);
         exit;
     }
+    // Normally unreachable — this button lives on a GPS pin's popup and
+    // somebody without the Action Room tick has no pin. It is reachable for
+    // one real case: a volunteer switched off AFTER their last fix, whose
+    // battery reading is still on file while their Action Room is not.
+    if (!isActionRoomParticipant($missionId, $targetUserId)) {
+        echo json_encode(['ok' => false, 'error' => t('gps_participant.recipient_not_found')]);
+        exit;
+    }
 
     // Never trust a client-supplied battery % — re-derive fresh from the
     // volunteer's latest ping, same "server independently re-checks

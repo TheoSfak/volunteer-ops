@@ -463,6 +463,12 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
     // The viewer is excluded: a coordinator sitting at the command post will
     // never send a GPS fix, and "you have gone quiet" is not information they
     // can act on. It was the single loudest row on a real screen.
+    //
+    // So is everyone without the Action Room GPS tick, for exactly the same
+    // reason: their phone was never asked for a position, so reporting their
+    // silence is reporting a decision the coordinator made on purpose. On a
+    // ten-person operation run by two phones that was eight false alarms, and
+    // the two real ones would have been lost among them.
     $raw['silent'] = dbFetchAll(
         "SELECT pr.volunteer_id AS id, u.name AS who,
                 UNIX_TIMESTAMP(lp.created_at) AS last_ping_ts,
@@ -480,6 +486,8 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
          LEFT JOIN mission_team_members mtm
                 ON mtm.user_id = pr.volunteer_id AND mtm.mission_id = ?
          LEFT JOIN mission_teams mt ON mt.id = mtm.team_id AND mt.mission_id = ?
+         JOIN mission_action_room_participants arp
+                ON arp.mission_id = s.mission_id AND arp.user_id = pr.volunteer_id
          WHERE s.mission_id = ? AND pr.status = ? AND pr.volunteer_id <> ?
            AND s.start_time <= NOW() AND s.end_time > NOW()",
         array_merge($shiftBinds, [$missionId, $missionId, $missionId, PARTICIPATION_APPROVED, $userId])

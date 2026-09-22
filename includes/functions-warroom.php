@@ -29,6 +29,134 @@ function getUserTeamIdForMission(int $missionId, int $userId): ?int {
 }
 
 /**
+ * Who actually takes part in the Action Room on this mission — the people
+ * whose GPS is tracked, who appear in the coordinator's recipient lists, and
+ * who count in the operational reports.
+ *
+ * Being approved on the mission is a DIFFERENT question and stays in
+ * participation_requests. Ten volunteers go out as two teams of five and one
+ * phone per team carries the operation: the other eight are on duty, on the
+ * roster, on the attendance sheet and on their certificate, and they are not
+ * in here. Membership is ticked per person in either team form, or with the
+ * GPS switch on the participants card (which also reaches someone on no team
+ * at all, and is how a phone is handed over mid-operation).
+ *
+ * Cached per request because almost every list on the page asks this, and
+ * they all ask it about the same mission. Any write goes through
+ * setActionRoomParticipation()/replaceTeamActionRoomParticipants() below,
+ * which drop the entry — nothing else may write this table.
+ */
+function actionRoomParticipantIds(int $missionId, bool $forget = false): array {
+    static $cache = [];
+    if ($forget) {
+        unset($cache[$missionId]);
+        return [];
+    }
+    if (!isset($cache[$missionId])) {
+        $cache[$missionId] = array_map('intval', array_column(
+            dbFetchAll("SELECT user_id FROM mission_action_room_participants WHERE mission_id = ?", [$missionId]),
+            'user_id'
+        ));
+    }
+    return $cache[$missionId];
+}
+
+/**
+ * Cache invalidation for the above. Called by every writer here; a caller
+ * that has just changed the table itself must call it too, or the rest of
+ * the request keeps answering from the list as it was before the write.
+ */
+function forgetActionRoomParticipantIds(int $missionId): void {
+    actionRoomParticipantIds($missionId, true);
+}
+
+function isActionRoomParticipant(int $missionId, int $userId): bool {
+    return in_array($userId, actionRoomParticipantIds($missionId), true);
+}
+
+/**
+ * Keep only the rows of $rows whose $key column names an Action Room
+ * participant. The one place the filter is spelled out, so a list that gains
+ * a new source later cannot quietly drift from the rest.
+ */
+function filterToActionRoomParticipants(array $rows, int $missionId, string $key = 'volunteer_id'): array {
+    $allowed = actionRoomParticipantIds($missionId);
+    return array_values(array_filter($rows, fn($row) => in_array((int) ($row[$key] ?? 0), $allowed, true)));
+}
+
+/**
+ * Tick or untick one person, mid-operation. Returns true when the table
+ * actually changed, so the caller only writes an audit line for a real change
+ * (the participants card posts the state it wants, not a toggle, so a double
+ * tap from a phone on a slow connection arrives twice).
+ */
+function setActionRoomParticipation(int $missionId, int $userId, bool $takesPart, int $byUserId): bool {
+    if ($takesPart) {
+        $changed = dbExecute(
+            "INSERT IGNORE INTO mission_action_room_participants (mission_id, user_id, added_by) VALUES (?, ?, ?)",
+            [$missionId, $userId, $byUserId]
+        );
+    } else {
+        $changed = dbExecute(
+            "DELETE FROM mission_action_room_participants WHERE mission_id = ? AND user_id = ?",
+            [$missionId, $userId]
+        );
+    }
+    forgetActionRoomParticipantIds($missionId);
+    return (bool) $changed;
+}
+
+/**
+ * Who an Action Room notification may go to: approved on the mission AND
+ * taking part in the Action Room, optionally narrowed to one team and always
+ * minus the person who caused the event.
+ *
+ * The one resolver for "notify the field", replacing five near-identical
+ * copies of the same SELECT (dispatch points and areas, sector assignment,
+ * sector status change, points of interest) which each had to learn the GPS
+ * tick separately. Deliberately NOT shift-time-scoped: unlike an order, these
+ * are informational and the callers never scoped them that way either —
+ * changing that here would quietly alter who hears about a hazard.
+ */
+function actionRoomNotifyRecipientIds(int $missionId, ?int $teamId = null, int $excludeUserId = 0): array {
+    $sql = "SELECT DISTINCT pr.volunteer_id AS user_id
+            FROM participation_requests pr
+            JOIN shifts s ON s.id = pr.shift_id
+            JOIN mission_action_room_participants arp
+                 ON arp.mission_id = s.mission_id AND arp.user_id = pr.volunteer_id
+            WHERE s.mission_id = ? AND pr.status = ?";
+    $params = [$missionId, PARTICIPATION_APPROVED];
+    if ($teamId) {
+        $sql .= " AND pr.volunteer_id IN (SELECT user_id FROM mission_team_members WHERE team_id = ?)";
+        $params[] = $teamId;
+    }
+    $ids = array_map('intval', array_column(dbFetchAll($sql, $params), 'user_id'));
+    return array_values(array_diff($ids, array_filter([$excludeUserId])));
+}
+
+/**
+ * Apply a team form's GPS ticks: every member this save names is set to
+ * exactly what its checkbox said. Deliberately scoped to the members being
+ * saved — dropping somebody from a team does NOT untick them, because a
+ * volunteer moved out of a team is usually being moved INTO another one in
+ * the same breath, and losing their position mid-move is the one thing the
+ * single-save team move (v3.248.0) exists to prevent. Untick is always an
+ * explicit act, either here or on the participants card.
+ *
+ * Returns the ids whose state actually changed, for the audit line.
+ */
+function applyTeamActionRoomTicks(int $missionId, array $memberIds, array $tickedIds, int $byUserId): array {
+    $changed = [];
+    foreach ($memberIds as $memberId) {
+        $memberId = (int) $memberId;
+        if (setActionRoomParticipation($missionId, $memberId, in_array($memberId, $tickedIds, true), $byUserId)) {
+            $changed[] = $memberId;
+        }
+    }
+    return $changed;
+}
+
+/**
  * External/guest accounts (users.is_external) are locked to Action Room for
  * only the mission(s) an admin has approved them on — this is that scope,
  * derived from the same participation_requests rows normal volunteers use
@@ -691,6 +819,8 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
              FROM volunteer_pings vp
              JOIN shifts s ON s.id = vp.shift_id
              JOIN users u ON u.id = vp.user_id
+             JOIN mission_action_room_participants arp
+                  ON arp.mission_id = s.mission_id AND arp.user_id = vp.user_id
              LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = vp.user_id
              LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
              WHERE s.mission_id = ?
@@ -1870,6 +2000,11 @@ function loadMissionTeamsForMission(int $missionId): array {
                 'is_external' => (bool) $row['member_is_external'], 'guest_org_name' => $row['member_guest_org_name'],
                 'guest_country_code' => $row['member_guest_country_code'],
                 'home_team_name' => $row['member_home_team_name'], 'home_team_color' => $row['member_home_team_color'],
+                // Carried on the member rather than looked up at render time
+                // because this same array is both the server-rendered teams
+                // card and the 5s poll payload that redraws it — two places
+                // that must agree on who is carrying the operation.
+                'takes_part' => in_array((int) $row['user_id'], actionRoomParticipantIds($missionId), true),
             ];
         }
     }
@@ -2254,6 +2389,18 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
 
     if (!$pr) {
         return ['ok' => false, 'error' => t('ping.mission_not_open_or_not_approved', [], $lang)];
+    }
+
+    // Approved on the mission is not the same as taking part in the Action
+    // Room. Somebody without the GPS tick is not being tracked, so their fix
+    // is refused here rather than merely hidden: this is the one funnel every
+    // source goes through (browser manual, browser auto, native background
+    // service), and a position that is never stored cannot later leak through
+    // a report, a trail or a map layer that forgets to filter. SOS is
+    // deliberately NOT affected — volunteer-status.php captures its own fix,
+    // so an emergency still arrives with coordinates from anyone at all.
+    if (!isActionRoomParticipant((int) $pr['mission_id'], $userId)) {
+        return ['ok' => false, 'error' => t('ping.not_action_room_participant', [], $lang)];
     }
 
     try {
@@ -4369,6 +4516,8 @@ function loadTeamPositionsForMission(int $missionId, array $continuousFieldMinut
                 GROUP BY user_id, shift_id) l
          JOIN volunteer_pings vp ON vp.id = l.max_id
          JOIN mission_team_members mtm ON mtm.user_id = vp.user_id AND mtm.mission_id = ?
+         JOIN mission_action_room_participants arp
+              ON arp.mission_id = mtm.mission_id AND arp.user_id = vp.user_id
          ORDER BY vp.created_at DESC",
         array_merge($shiftIds, [$missionId])
     ) as $pingRow) {
@@ -5130,8 +5279,9 @@ function missionTeamDisciplineScore(array $fw): array {
  * a real production PDF where a single forgotten order distorted everything
  * downstream of it:
  *  1. Rows whose actor is no longer an approved participant in this mission
- *     (their participation was later canceled/removed — "left by mistake")
- *     are dropped from every score computation entirely, via $approvedIds.
+ *     (their participation was later canceled/removed — "left by mistake"),
+ *     or who does not take part in the Action Room at all, are dropped from
+ *     every score computation entirely, via $scoredIds.
  *     This ONLY affects scoring, never the archival detail — $report itself
  *     is untouched (PHP arrays are copy-on-write), so mission-stats.php /
  *     mission-report-print.php's detail tables and activity feed keep
@@ -5168,8 +5318,16 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     $responseHalfLifeMinutes = 24;
     $resolutionHalfLifeMinutes = 66;
 
-    $scoredDetail = array_values(array_filter($detail, fn($d) => in_array($d['user_id'], $approvedIds, true)));
-    $scoredShortage = array_values(array_filter($shortageDetail, fn($d) => in_array($d['reporter_id'], $approvedIds, true)));
+    // Approved AND actually taking part in the Action Room. The second half
+    // matters for the same fairness reason as the first: a volunteer switched
+    // off mid-operation (their phone died and the crew handed tracking to
+    // somebody else) cannot answer the orders that were already addressed to
+    // them, and scoring a team on obligations nobody can clear is the exact
+    // distortion this pass exists to prevent. Archival detail is untouched, as
+    // above — $report still shows every order that was ever sent.
+    $scoredIds = array_values(array_intersect($approvedIds, actionRoomParticipantIds($missionId)));
+    $scoredDetail = array_values(array_filter($detail, fn($d) => in_array($d['user_id'], $scoredIds, true)));
+    $scoredShortage = array_values(array_filter($shortageDetail, fn($d) => in_array($d['reporter_id'], $scoredIds, true)));
 
     // Named incidents for the narrative to cite directly ("η εντολή X προς Y
     // έμεινε αναπάντητη Z ώρες") rather than only ever speaking in aggregates.

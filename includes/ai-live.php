@@ -1944,6 +1944,8 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
          LEFT JOIN mission_team_members mtm
                 ON mtm.user_id = pr.volunteer_id AND mtm.mission_id = ?
          LEFT JOIN mission_teams mt ON mt.id = mtm.team_id AND mt.mission_id = ?
+         JOIN mission_action_room_participants arp
+                ON arp.mission_id = s.mission_id AND arp.user_id = pr.volunteer_id
          WHERE s.mission_id = ? AND pr.status = ? AND s.start_time <= NOW() AND s.end_time > NOW()",
         array_merge($shiftBinds, [$missionId, $missionId, $missionId, PARTICIPATION_APPROVED])
     );

@@ -412,6 +412,13 @@ function buildMissionAiDigest(int $missionId, array $mission, array $score, arra
             'νυχτερινη'        => $startTs ? ((int) date('G', $startTs) >= 20 || (int) date('G', $startTs) < 6) : null,
             'αριθμος_ομαδων'   => count($score['teams']),
             'εθελοντες_εγκεκριμενοι' => $approved,
+            // Of those, the ones who actually carried the operation: tracked
+            // position, reachable by orders, measured by everything below.
+            // Stated rather than left to be inferred, because without it a
+            // model reading "10 approved" beside two teams' worth of
+            // acknowledgements concludes that eight people ignored their
+            // orders, when in fact eight were never sent any.
+            'εθελοντες_επιχειρησιακοι' => count(actionRoomParticipantIds($missionId)),
             'θεσεις_βαρδιων'   => $capacity,
         ],
     ];

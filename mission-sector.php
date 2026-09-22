@@ -23,17 +23,7 @@ header('Content-Type: application/json');
  * other team on the mission).
  */
 function notifySectorAssigned(int $missionId, string $missionTitle, int $teamId, string $label, int $excludeUserId): void {
-    $recipients = dbFetchAll(
-        "SELECT DISTINCT pr.volunteer_id AS user_id FROM participation_requests pr
-         JOIN shifts s ON s.id = pr.shift_id
-         WHERE s.mission_id = ? AND pr.status = ?
-           AND pr.volunteer_id IN (SELECT user_id FROM mission_team_members WHERE team_id = ?)",
-        [$missionId, PARTICIPATION_APPROVED, $teamId]
-    );
-    $recipientIds = array_values(array_diff(
-        array_map(fn($r) => (int) $r['user_id'], $recipients),
-        [$excludeUserId]
-    ));
+    $recipientIds = actionRoomNotifyRecipientIds($missionId, $teamId, $excludeUserId);
     if (empty($recipientIds)) {
         return;
     }
@@ -63,14 +53,7 @@ function notifySectorStatusChanged(int $missionId, string $missionTitle, ?int $r
         if (!$sector['team_id']) {
             return;
         }
-        $recipients = dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id AS user_id FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             WHERE s.mission_id = ? AND pr.status = ?
-               AND pr.volunteer_id IN (SELECT user_id FROM mission_team_members WHERE team_id = ?)",
-            [$missionId, PARTICIPATION_APPROVED, $sector['team_id']]
-        );
-        $recipientIds = array_values(array_diff(array_map(fn($r) => (int) $r['user_id'], $recipients), [$actorId]));
+        $recipientIds = actionRoomNotifyRecipientIds($missionId, (int) $sector['team_id'], $actorId);
     } else {
         $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $actorId);
     }

@@ -82,6 +82,11 @@ function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $
  * left their mission_order_recipients rows NULL forever and kept the
  * coordinator's «Τι μου ξέφυγε» panel permanently showing an obligation that
  * nobody could ever clear.
+ *
+ * The same argument is why the GPS tick is joined in here and not bolted onto
+ * each caller: a volunteer without it has no Action Room on their phone to
+ * receive the order in, so an order addressed to them is another obligation
+ * that can never be cleared.
  */
 function activeMissionRecipientIds(int $missionId): array {
     $activeRecipients = dbFetchAll(
@@ -89,6 +94,8 @@ function activeMissionRecipientIds(int $missionId): array {
          FROM participation_requests pr
          JOIN shifts s ON s.id = pr.shift_id
          JOIN users u ON u.id = pr.volunteer_id
+         JOIN mission_action_room_participants arp
+              ON arp.mission_id = s.mission_id AND arp.user_id = pr.volunteer_id
          WHERE s.mission_id = ? AND pr.status = ?
            AND s.start_time <= NOW() AND s.end_time > NOW()",
         [$missionId, PARTICIPATION_APPROVED]
@@ -533,6 +540,15 @@ if (isPost()) {
             $approvedIds
         )));
         $leaderId = (int) post('leader_id');
+        // Whatever the form's GPS column said, narrowed to people actually
+        // being saved onto this team. No server-side default for the leader:
+        // the form ticks them as the leader is chosen (they are the one who in
+        // practice carries the phone), and a coordinator who then unticks them
+        // means it — a leader without a phone is a real arrangement.
+        $gpsIds = array_values(array_intersect(
+            array_map('intval', (array)($_POST['gps_ids'] ?? [])),
+            $memberIds
+        ));
         $movedIds = array_values(array_filter($memberIds, fn($id) => isset($otherAssignments[$id])));
         $blockedTeams = teamsBlockedFromMemberMove($movedIds, $otherAssignments);
 
@@ -589,15 +605,21 @@ if (isPost()) {
                             [$teamId, $missionId, $memberId]
                         );
                     }
+                    applyTeamActionRoomTicks($missionId, $memberIds, $gpsIds, (int) $user['id']);
                     db()->commit();
                 } catch (Throwable $e) {
                     db()->rollBack();
                     throw $e;
                 }
+                // The static id cache was filled before the write if anything
+                // on this request had already asked — drop it after the commit
+                // too, since the rollback path leaves the table as it was.
+                forgetActionRoomParticipantIds($missionId);
                 logAudit('create_mission_team', 'mission_teams', $teamId, null, [
                     'mission_id' => $missionId,
                     'member_ids' => $memberIds,
                     'leader_id'  => $leaderId,
+                    'gps_ids'    => $gpsIds,
                     'moved_from' => array_map(fn($id) => ['user_id' => $id, 'team' => $otherAssignments[$id]['label']], $movedIds),
                 ]);
                 notifyMissionTeamMembers($missionId, $mission['title'], $codename, $teamNumber, $memberIds, $leaderId, $namesByUserId);
@@ -640,6 +662,10 @@ if (isPost()) {
             $approvedIds
         )));
         $leaderId = (int) post('leader_id');
+        $gpsIds = array_values(array_intersect(
+            array_map('intval', (array)($_POST['gps_ids'] ?? [])),
+            $memberIds
+        ));
         $movedIds = array_values(array_filter($memberIds, fn($id) => isset($otherAssignments[$id])));
         $blockedTeams = teamsBlockedFromMemberMove($movedIds, $otherAssignments);
 
@@ -654,6 +680,7 @@ if (isPost()) {
                 dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]),
                 'user_id'
             ));
+            $oldGpsIds = array_values(array_intersect(actionRoomParticipantIds($missionId), $oldMemberIds));
             // One transaction: a move is a delete from the old team plus an
             // insert into this one, and a volunteer left in neither — or in
             // both — is worse than the edit simply failing.
@@ -674,14 +701,17 @@ if (isPost()) {
                     );
                 }
                 dbExecute("UPDATE mission_teams SET leader_id = ?, updated_at = NOW() WHERE id = ?", [$leaderId, $teamId]);
+                applyTeamActionRoomTicks($missionId, $memberIds, $gpsIds, (int) $user['id']);
                 db()->commit();
             } catch (Throwable $e) {
                 db()->rollBack();
                 throw $e;
             }
-            logAudit('update_mission_team', 'mission_teams', $teamId, ['member_ids' => $oldMemberIds], [
+            forgetActionRoomParticipantIds($missionId);
+            logAudit('update_mission_team', 'mission_teams', $teamId, ['member_ids' => $oldMemberIds, 'gps_ids' => $oldGpsIds], [
                 'member_ids' => $memberIds,
                 'leader_id'  => $leaderId,
+                'gps_ids'    => $gpsIds,
                 // Who was taken and from where — without this the audit trail
                 // shows a team gaining a member and says nothing about the
                 // other team quietly losing one in the same action.
@@ -1093,6 +1123,15 @@ $missionShiftIds = array_column(
 $missionShiftBinds = $missionShiftIds ?: [0];
 $missionShiftPlaceholders = implode(',', array_fill(0, count($missionShiftBinds), '?'));
 
+// Who of the roster actually takes part in the Action Room: whose position is
+// tracked, who can be sent an order, who counts in the operational report.
+// Everyone else stays approved, on duty and on the attendance sheet — they
+// are simply not carrying the operation. Resolved this early because the poll
+// payload built a few lines below is the first thing that needs it.
+// See actionRoomParticipantIds().
+$actionRoomParticipantIds = actionRoomParticipantIds($missionId);
+$iTakePartInActionRoom = in_array((int)$user['id'], $actionRoomParticipantIds, true);
+
 $continuousFieldMinutesByVolunteerId = computeContinuousFieldMinutesByVolunteerId($missionId);
 $warRoomMaxShiftMinutes = (int) getSetting('war_room_max_shift_minutes', '480');
 $warRoomCriticalShiftMinutes = (int) round($warRoomMaxShiftMinutes * 1.5);
@@ -1121,6 +1160,15 @@ foreach (dbFetchAll(
     array_merge($missionShiftBinds, [$missionId, PARTICIPATION_APPROVED])
 ) as $pingRow) {
     $volunteerId = (int)$pingRow['volunteer_id'];
+    // Nothing about position is measured for somebody without the GPS tick,
+    // so they get no entry in either array. Leaving them out here (rather
+    // than only dimming their roster row) is what stops the 5s poll from
+    // patching a last-seen time and a staleness warning back over a row the
+    // page deliberately rendered blank — and it keeps their position out of
+    // every open tab's poll response entirely.
+    if (!in_array($volunteerId, $actionRoomParticipantIds, true)) {
+        continue;
+    }
     // Only set a staleness entry when a ping actually exists. A missing
     // key (never a false one) is how renderPresence()'s hasFreshPing
     // check tells "no ping ever" apart from "pinged recently" — both
@@ -1154,7 +1202,10 @@ foreach (dbFetchAll(
 // One closure, three consumers (this payload, the roster markup, and the map
 // pins) so the rule is written once. Three copies of the same condition is how
 // one of them eventually drifts and leaks.
-$vitalsByVolunteerId = loadLatestVitalsByVolunteerId($missionId, $missionShiftBinds, $missionShiftPlaceholders);
+$vitalsByVolunteerId = array_intersect_key(
+    loadLatestVitalsByVolunteerId($missionId, $missionShiftBinds, $missionShiftPlaceholders),
+    array_flip($actionRoomParticipantIds)
+);
 $viewerUserId = (int) $user['id'];
 $canSeeVitalsOf = function (int $subjectUserId) use ($canManageWarRoom, $viewerUserId): bool {
     return $canManageWarRoom || $subjectUserId === $viewerUserId;
@@ -1177,7 +1228,7 @@ foreach ($vitalsByVolunteerId as $vitalsUserId => $reading) {
 // has no such cutoff) still showed them. The map now shows every last-known
 // position always, marking it 'is_stale' (reusing the same $pingStaleThresholdSeconds
 // as the sidebar list) once it's past due, rather than hiding it outright.
-$loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds, $continuousFieldMinutesByVolunteerId, $missionShiftBinds, $missionShiftPlaceholders, $vitalsByVolunteerId, $canSeeVitalsOf) {
+$loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds, $continuousFieldMinutesByVolunteerId, $missionShiftBinds, $missionShiftPlaceholders, $vitalsByVolunteerId, $canSeeVitalsOf, $actionRoomParticipantIds) {
     try {
         $field = $hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status';
         // The latest ping per volunteer+shift, plus the one immediately before
@@ -1254,6 +1305,15 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
 
         $pins = [];
         foreach ($rawPins as $pin) {
+            // A volunteer without the GPS tick leaves no pin on the map, even
+            // when older fixes of theirs are still on file from before they
+            // were switched off. The server also refuses their new pings (see
+            // recordVolunteerPing) — this is the display half of the same
+            // rule, and the reason an untick takes effect on the next poll
+            // rather than whenever their last fix happens to age out.
+            if (!in_array((int) $pin['user_id'], $actionRoomParticipantIds, true)) {
+                continue;
+            }
             $pingTs = strtotime($pin['created_at']);
             $isStale = $pingTs < (time() - $pingStaleThresholdSeconds);
 
@@ -1757,9 +1817,29 @@ $firstShift = $shifts[0]['start_time'] ?? $mission['start_datetime'];
 $lastShift = !empty($shifts) ? end($shifts)['end_time'] : $mission['end_datetime'];
 $now = time();
 $timeState = strtotime($firstShift) > $now ? 'upcoming' : (strtotime($lastShift) < $now ? 'overdue' : 'active');
+// On duty right now AND taking part in the Action Room. This one list is
+// every recipient picker on the page — the six request cards, the global
+// message and the end-of-mission broadcast — so the GPS tick has to be part
+// of its definition rather than repeated at each of the eight call sites.
+// $participants (the roster card) deliberately keeps everybody.
 $activeParticipants = array_values(array_filter($participants, fn($participant) =>
     strtotime($participant['start_time']) <= $now && strtotime($participant['end_time']) > $now
+    && in_array((int)$participant['volunteer_id'], $actionRoomParticipantIds, true)
 ));
+// Same window without the GPS tick: only for telling the coordinator that
+// people are on duty but nobody is carrying the operation.
+$onDutyNotInActionRoomCount = count(array_filter($participants, fn($participant) =>
+    strtotime($participant['start_time']) <= $now && strtotime($participant['end_time']) > $now
+    && !in_array((int)$participant['volunteer_id'], $actionRoomParticipantIds, true)
+));
+// What the six request cards say when they have nobody to offer. "Nobody is
+// on duty" and "eight people are on duty and none of them has the GPS tick"
+// are completely different problems, and reading the first when the second is
+// true sends a coordinator looking at the shift roster for a fault that isn't
+// there.
+$noActiveMsg = ($onDutyNotInActionRoomCount > 0 && empty($activeParticipants))
+    ? t('gps_participant.none_ticked_hint', ['count' => $onDutyNotInActionRoomCount])
+    : t('common.no_active_now');
 
 // ── Mission teams ─────────────────────────────────────────────────────────
 $teams = loadMissionTeamsForMission($missionId);
@@ -2226,6 +2306,16 @@ include __DIR__ . '/includes/header.php';
     .war-room-hero .btn { padding: .3rem .65rem; font-size: .8125rem; }
     .participant-row { border-left: 4px solid #e2e8f0; }
     .participant-row.needs-help { border-left-color: #dc2626; }
+    /* On duty, on the roster, not carrying the operation. Dimmed rather than
+       hidden, and only the NAME half: the GPS switch beside it has to stay at
+       full contrast, because it is the one control that brings them in. */
+    .participant-no-gps > div:first-child { opacity: .5; }
+    .participant-no-gps { border-left-style: dashed; }
+    .participant-gps-switch { padding-left: 2.2em; }
+    .participant-gps-switch .form-check-label { cursor: pointer; }
+    /* Team member chip for somebody without the GPS tick. Dimmed, never
+       hidden — they are on the team and walking with it. */
+    .wr-no-gps-chip { opacity: .55; border-style: dashed !important; }
     .presence-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
     .presence-dot.presence-online { background: #28a745; }
     .presence-dot.presence-offline { background: #adb5bd; }
@@ -3537,10 +3627,12 @@ include __DIR__ . '/includes/header.php';
                     <p class="text-muted mb-0"><?= t('myping.no_shift') ?></p>
                 <?php else: ?>
                     <?php foreach ($myAssignments as $assignment): ?>
+                    <?php if ($iTakePartInActionRoom): ?>
                     <button type="button" class="btn btn-primary w-100 mb-2 send-ping" data-shift-id="<?= $assignment['shift_id'] ?>" data-pr-id="<?= $assignment['pr_id'] ?>">
                         <i class="bi bi-send-fill me-1"></i><?= t('myping.send_btn') ?>
                     </button>
                     <div class="small mb-2" id="pingStatus-<?= $assignment['pr_id'] ?>"></div>
+                    <?php endif; ?>
                     <?php $myFieldStatus = $assignment['field_status'] ?? null; ?>
                     <div class="small mb-1" id="statusBadge-<?= $assignment['pr_id'] ?>">
                         <?= $myFieldStatus ? h(['on_way' => t('status.self_on_way'), 'on_site' => t('status.self_on_site'), 'needs_help' => t('status.self_sos')][$myFieldStatus] ?? '') : t('status.self_none') ?>
@@ -3551,7 +3643,7 @@ include __DIR__ . '/includes/header.php';
                         <button type="button" class="btn btn-sm wr-touch-btn <?= $myFieldStatus === 'needs_help' ? 'btn-danger' : 'btn-outline-danger' ?>" onclick="setFieldStatus(this, <?= $assignment['pr_id'] ?>, 'needs_help')"><?= t('myping.btn_sos') ?></button>
                     </div>
                     <?php endforeach; ?>
-                    <?php if (vitalsEnabled()): ?>
+                    <?php if (vitalsEnabled() && $iTakePartInActionRoom): ?>
                     <!-- Heart-rate sensor. One per person, not per assignment,
                          so it sits outside the loop above and uses the first
                          shift: a volunteer with two consecutive shifts on one
@@ -3566,10 +3658,21 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div id="vitalsSensorStatus" class="small text-muted mb-2"></div>
                     <?php endif; ?>
+                    <?php if (!$iTakePartInActionRoom): ?>
+                    <!-- No .send-ping button was rendered above, which is what
+                         actually switches this person's tracking off: both the
+                         browser watcher and the native background service are
+                         gated on one being present in the DOM. The note only
+                         explains the absence — the field-status and SOS
+                         buttons deliberately stay, since an emergency must
+                         never depend on a coordinator's roster choice. -->
+                    <p class="small text-muted mb-0"><i class="bi bi-geo-alt-slash me-1"></i><?= t('gps_participant.self_note') ?></p>
+                    <?php else: ?>
                     <?php $autoPingSeconds = (int) getSetting('war_room_auto_ping_seconds', '180'); ?>
                     <p class="small text-muted mb-0"><?= $autoPingSeconds >= 60
                         ? t('myping.auto_note_minutes', ['n' => (int) round($autoPingSeconds / 60)])
                         : t('myping.auto_note_seconds', ['n' => $autoPingSeconds]) ?></p>
+                    <?php endif; ?>
                 <?php endif; ?>
             </div>
         </div>
@@ -3771,7 +3874,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                             <?php endif; ?>
                             <div class="small mt-2">
                                 <?php foreach ($team['members'] as $member): ?>
-                                <span class="badge bg-light text-dark border me-1 mb-1<?= (int) $member['user_id'] === (int) $user['id'] ? ' wr-me-chip' : '' ?>"><?= guestNameHtml($member['name'], $member['is_external'], $member['home_team_name'], $member['home_team_color'], $member['guest_country_code']) ?><?= k9BadgeHtml((int) $member['user_id'], true) ?><?= captainBadgeHtml((int) $member['user_id'], true) ?><?= $member['user_id'] === $team['leader_id'] ? ' ⭐' : '' ?></span>
+                                <span class="badge bg-light text-dark border me-1 mb-1<?= (int) $member['user_id'] === (int) $user['id'] ? ' wr-me-chip' : '' ?><?= empty($member['takes_part']) ? ' wr-no-gps-chip' : '' ?>"><?= empty($member['takes_part']) ? '' : '<i class="bi bi-geo-alt-fill text-primary me-1" title="' . h(t('gps_participant.tick_title')) . '"></i>' ?><?= guestNameHtml($member['name'], $member['is_external'], $member['home_team_name'], $member['home_team_color'], $member['guest_country_code']) ?><?= k9BadgeHtml((int) $member['user_id'], true) ?><?= captainBadgeHtml((int) $member['user_id'], true) ?><?= $member['user_id'] === $team['leader_id'] ? ' ⭐' : '' ?></span>
                                 <?php endforeach; ?>
                             </div>
                         </div>
@@ -3828,14 +3931,36 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 // the payload itself further up this file.
                 $maySeeVitals = $canSeeVitalsOf((int)$participant['volunteer_id']);
                 $participantVitals = $maySeeVitals ? ($vitalsByVolunteerId[(int)$participant['volunteer_id']] ?? null) : null;
+                // Everyone approved stays on this card — the whole point of a
+                // roster is knowing who is out there. The ones without the GPS
+                // tick are simply dimmed, and carry no position, no staleness
+                // warning and no fatigue clock, because none of the three is
+                // being measured for them.
+                $takesPart = in_array((int)$participant['volunteer_id'], $actionRoomParticipantIds, true);
+                // Staleness is only computed for people whose position is
+                // being tracked, so read it defensively: somebody unticked
+                // mid-operation still carries their last_ping_at from before,
+                // and an unguarded lookup would be an undefined-key warning on
+                // a live site that runs with display_errors on.
+                $hasFreshPing = $takesPart && !empty($participant['last_ping_at'])
+                    && empty($pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]);
+                $isOnlineNow = in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || $hasFreshPing;
                 ?>
-                <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap" id="participant-row-<?= (int)$participant['volunteer_id'] ?>">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? 'presence-online' : 'presence-offline' ?>" title="<?= (in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || (!empty($participant['last_ping_at']) && !$pingIsStaleByVolunteerId[(int)$participant['volunteer_id']])) ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?><?= k9BadgeHtml((int) $participant['volunteer_id']) ?><?= captainBadgeHtml((int) $participant['volunteer_id']) ?></strong><?= $maySeeVitals ? vitalsBadgeHtml($participantVitals, null, (int)$participant['volunteer_id']) : '' ?><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><?php if (!empty($participant['phone']) && ($canManageWarRoom || ($myTeamId && ($teamIdByUserId[(int)$participant['volunteer_id']] ?? null) === $myTeamId))): ?><br><a href="tel:<?= h($participant['phone']) ?>" class="text-decoration-none"><i class="bi bi-telephone me-1"></i><?= h($participant['phone']) ?></a><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= $participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping') ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= (!empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= $isFatigued ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span></small></div>
+                <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?><?= $takesPart ? '' : ' participant-no-gps' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap" id="participant-row-<?= (int)$participant['volunteer_id'] ?>">
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= $isOnlineNow ? 'presence-online' : 'presence-offline' ?>" title="<?= $isOnlineNow ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?><?= k9BadgeHtml((int) $participant['volunteer_id']) ?><?= captainBadgeHtml((int) $participant['volunteer_id']) ?></strong><?= $maySeeVitals ? vitalsBadgeHtml($participantVitals, null, (int)$participant['volunteer_id']) : '' ?><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><?php if (!empty($participant['phone']) && ($canManageWarRoom || ($myTeamId && ($teamIdByUserId[(int)$participant['volunteer_id']] ?? null) === $myTeamId))): ?><br><a href="tel:<?= h($participant['phone']) ?>" class="text-decoration-none"><i class="bi bi-telephone me-1"></i><?= h($participant['phone']) ?></a><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= !$takesPart ? '' : ($participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping')) ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= ($takesPart && !empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= ($isFatigued && $takesPart) ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span><span id="no-gps-note-<?= (int)$participant['volunteer_id'] ?>" class="<?= $takesPart ? 'd-none' : '' ?>"> · <i class="bi bi-geo-alt-slash"></i> <?= t('gps_participant.row_off') ?></span></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>" id="status-badge-<?= (int)$participant['volunteer_id'] ?>">
                         <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
                     <?php if ($canManageWarRoom): ?>
-                    <button type="button" class="btn btn-sm btn-outline-danger suggest-replacement-btn <?= $isFatigued ? '' : 'd-none' ?>" id="suggest-replacement-btn-<?= (int)$participant['volunteer_id'] ?>" data-volunteer-id="<?= (int)$participant['volunteer_id'] ?>" data-volunteer-name="<?= h($participant['name']) ?>" title="<?= t('fatigue.suggest_replacement_btn') ?>">
+                    <div class="form-check form-switch mb-0 participant-gps-switch" title="<?= t('gps_participant.tick_title') ?>">
+                        <input class="form-check-input participant-gps-check" type="checkbox" role="switch"
+                               id="gps-switch-<?= (int)$participant['volunteer_id'] ?>"
+                               data-volunteer-id="<?= (int)$participant['volunteer_id'] ?>"
+                               data-volunteer-name="<?= h($participant['name']) ?>"
+                               <?= $takesPart ? 'checked' : '' ?>>
+                        <label class="form-check-label small text-muted" for="gps-switch-<?= (int)$participant['volunteer_id'] ?>"><i class="bi bi-geo-alt-fill"></i> <?= t('gps_participant.label') ?></label>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-danger suggest-replacement-btn <?= ($isFatigued && $takesPart) ? '' : 'd-none' ?>" id="suggest-replacement-btn-<?= (int)$participant['volunteer_id'] ?>" data-volunteer-id="<?= (int)$participant['volunteer_id'] ?>" data-volunteer-name="<?= h($participant['name']) ?>" title="<?= t('fatigue.suggest_replacement_btn') ?>">
                         <i class="bi bi-arrow-left-right"></i>
                     </button>
                     <?php endif; ?>
@@ -3854,7 +3979,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     </div>
                     <div class="card-body collapse" id="requestLocationCollapse">
                         <?php if (empty($activeParticipants)): ?>
-                            <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
+                            <p class="text-muted mb-0"><?= $noActiveMsg ?></p>
                         <?php else: ?>
                             <p class="small text-muted"><?= t('common.push_vibrate_note') ?></p>
                             <form method="post">
@@ -3888,7 +4013,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     </div>
                     <div class="card-body collapse" id="requestPhotoCollapse">
                         <?php if (empty($activeParticipants)): ?>
-                            <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
+                            <p class="text-muted mb-0"><?= $noActiveMsg ?></p>
                         <?php else: ?>
                             <p class="small text-muted"><?= t('common.push_vibrate_note') ?></p>
                             <form method="post">
@@ -3921,7 +4046,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     </div>
                     <div class="card-body collapse" id="requestVideoCollapse">
                         <?php if (empty($activeParticipants)): ?>
-                            <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
+                            <p class="text-muted mb-0"><?= $noActiveMsg ?></p>
                         <?php else: ?>
                             <p class="small text-muted"><?= t('common.push_vibrate_note') ?></p>
                             <form method="post">
@@ -3955,7 +4080,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     </div>
                     <div class="card-body collapse" id="requestLiveCollapse">
                         <?php if (empty($activeParticipants)): ?>
-                            <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
+                            <p class="text-muted mb-0"><?= $noActiveMsg ?></p>
                         <?php else: ?>
                             <p class="small text-muted"><?= t('request.live.note', ['min' => (int) round(MISSION_LIVE_MAX_SECONDS / 60)]) ?></p>
                             <form method="post">
@@ -4026,7 +4151,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     </div>
                     <div class="card-body collapse" id="requestTaskCollapse">
                         <?php if (empty($activeParticipants)): ?>
-                            <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
+                            <p class="text-muted mb-0"><?= $noActiveMsg ?></p>
                         <?php else: ?>
                             <p class="small text-muted"><?= t('request.task.note') ?></p>
                             <form method="post">
@@ -4059,7 +4184,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     </div>
                     <div class="card-body collapse" id="requestSpeakCollapse">
                         <?php if (empty($activeParticipants)): ?>
-                            <p class="text-muted mb-0"><?= t('common.no_active_now') ?></p>
+                            <p class="text-muted mb-0"><?= $noActiveMsg ?></p>
                         <?php else: ?>
                             <p class="small text-muted"><?= t('request.speak.note') ?></p>
                             <?php // Filled in by JS only when the browser turns out to have no
@@ -4846,7 +4971,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
  * re-checks both in teamsBlockedFromMemberMove(); this is so the admin never
  * gets that far.
  */
-$teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamId) use ($teamIdByUserId, $teamLabelByUserId, $teamColorByUserId, $teams) {
+$teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamId) use ($teamIdByUserId, $teamLabelByUserId, $teamColorByUserId, $teams, $actionRoomParticipantIds) {
     $userId = (int) $person['user_id'];
     $fromTeamId = $teamIdByUserId[$userId] ?? null;
     $isElsewhere = $fromTeamId !== null && $fromTeamId !== $currentTeamId;
@@ -4855,21 +4980,33 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
         $fromTeam = $teams[$fromTeamId];
         $blocked = ((int) ($fromTeam['leader_id'] ?? 0) === $userId) || count($fromTeam['members']) <= 1;
     }
+    $gpsOn = in_array($userId, $actionRoomParticipantIds, true);
     ob_start();
+    // Two separate <label>s rather than one wrapping both inputs: a label's
+    // labeled control is its FIRST labelable descendant, so a GPS box nested
+    // inside the member's label would have every click on it also forwarded
+    // to the member checkbox — ticking GPS would untick the person.
     ?>
-    <label class="form-check d-flex align-items-center gap-2 py-1<?= $blocked ? ' opacity-50' : '' ?>">
-        <input class="form-check-input team-member-check" type="checkbox" name="member_ids[]"
-               value="<?= $userId ?>" data-name="<?= h($person['name']) ?>"
-               <?= $checked ? 'checked' : '' ?> <?= $blocked ? 'disabled' : '' ?>>
-        <span><?= h($person['name']) ?></span>
-        <?php if ($isElsewhere): ?>
-            <?php [$fromBg, $fromFg] = teamBadgeColors($teamColorByUserId[$userId] ?? null); ?>
-            <span class="badge" style="background:<?= h($fromBg) ?>;color:<?= h($fromFg) ?>;font-size:.68rem;"><?= h($teamLabelByUserId[$userId] ?? '') ?></span>
-            <?php if ($blocked): ?>
-            <span class="small text-muted"><?= t('teams.move.cannot_take') ?></span>
+    <div class="d-flex align-items-center gap-2 py-1<?= $blocked ? ' opacity-50' : '' ?>">
+        <label class="form-check d-flex align-items-center gap-2 mb-0 flex-grow-1">
+            <input class="form-check-input team-member-check" type="checkbox" name="member_ids[]"
+                   value="<?= $userId ?>" data-name="<?= h($person['name']) ?>"
+                   <?= $checked ? 'checked' : '' ?> <?= $blocked ? 'disabled' : '' ?>>
+            <span><?= h($person['name']) ?></span>
+            <?php if ($isElsewhere): ?>
+                <?php [$fromBg, $fromFg] = teamBadgeColors($teamColorByUserId[$userId] ?? null); ?>
+                <span class="badge" style="background:<?= h($fromBg) ?>;color:<?= h($fromFg) ?>;font-size:.68rem;"><?= h($teamLabelByUserId[$userId] ?? '') ?></span>
+                <?php if ($blocked): ?>
+                <span class="small text-muted"><?= t('teams.move.cannot_take') ?></span>
+                <?php endif; ?>
             <?php endif; ?>
-        <?php endif; ?>
-    </label>
+        </label>
+        <label class="form-check d-flex align-items-center gap-1 mb-0 team-gps-label" title="<?= t('gps_participant.tick_title') ?>">
+            <input class="form-check-input team-gps-check" type="checkbox" name="gps_ids[]"
+                   value="<?= $userId ?>" <?= $gpsOn ? 'checked' : '' ?> <?= $blocked ? 'disabled' : '' ?>>
+            <span class="small text-muted"><i class="bi bi-geo-alt-fill"></i> <?= t('gps_participant.label') ?></span>
+        </label>
+    </div>
     <?php
     return ob_get_clean();
 };
@@ -5449,7 +5586,7 @@ function t(key, vars = {}) {
 }
 const jsLocale = <?= json_encode($__viewerLang === 'en' ? 'en-US' : 'el-GR') ?>;
 
-<?php if (vitalsEnabled() && !empty($myAssignments)): ?>
+<?php if (vitalsEnabled() && !empty($myAssignments) && $iTakePartInActionRoom): ?>
 // Heart-rate sensor. Started here rather than on DOMContentLoaded because
 // this script block already runs after the card's markup — and because a
 // volunteer who reloads mid-shift should be back on their strap before they
@@ -5543,10 +5680,17 @@ let restrictedAreaProximity = <?= json_encode($restrictedAreaProximity) ?>;
 // Team rosters for the Route Order composer's member picker — lets an admin
 // narrow a route to a subset of a team (e.g. 2 of 4) instead of always the
 // whole team. See includes/migrations.php v109.
+// Only the members who take part in the Action Room: a route is an order to
+// acknowledge and walk, so offering the other four of a five-person team as
+// recipients would be offering people who will never see it. This is the
+// picker's data only — the teams card above still lists every member.
 const missionTeamsForRoute = <?= json_encode(array_values(array_map(fn($t) => [
     'id' => $t['id'],
     'label' => teamLabel($t['codename'], $t['team_number']),
-    'members' => array_map(fn($m) => ['id' => $m['user_id'], 'name' => $m['name']], $t['members']),
+    'members' => array_values(array_map(
+        fn($m) => ['id' => $m['user_id'], 'name' => $m['name']],
+        array_filter($t['members'], fn($m) => in_array((int) $m['user_id'], $actionRoomParticipantIds, true))
+    )),
 ], $teams)), JSON_UNESCAPED_UNICODE) ?>;
 // Every approved participant of the mission, with their current team label
 // (or none) — feeds the composer's cross-team picker mode, where a route
@@ -5554,7 +5698,7 @@ const missionTeamsForRoute = <?= json_encode(array_values(array_map(fn($t) => [
 // teams instead of always one nominal team. See includes/migrations.php v110.
 const allApprovedForRoute = <?= json_encode(array_values(array_map(
     fn($p) => ['id' => $p['user_id'], 'name' => $p['name'], 'team_label' => $teamLabelByUserId[$p['user_id']] ?? null],
-    $distinctApprovedById
+    array_filter($distinctApprovedById, fn($p) => in_array((int) $p['user_id'], $actionRoomParticipantIds, true))
 )), JSON_UNESCAPED_UNICODE) ?>;
 let shortageReports = <?= json_encode($shortageReports) ?>;
 let missionIncidents = <?= json_encode($incidents) ?>;
@@ -6475,7 +6619,12 @@ function teamRosterHtml(team) {
     html += '<div class="small mt-2">' + team.members.map(m => {
         const [mBg, mFg] = teamBadgeColorsJs(m.home_team_color);
         const meClass = Number(m.user_id) === WR_MY_USER_ID ? ' wr-me-chip' : '';
-        return `<span class="badge bg-light text-dark border me-1 mb-1${meClass}">${guestNameHtml(m.name, m.is_external, m.home_team_name, mBg, mFg, m.guest_country_code)}${k9BadgeHtml(m.user_id, true)}${captainBadgeHtml(m.user_id, true)}${m.user_id === team.leader_id ? ' ⭐' : ''}</span>`;
+        // Mirrors the PHP chip exactly, pin included — the first poll after
+        // any roster change redraws this, and a marker that only the
+        // server-rendered version had would vanish five seconds later.
+        const gpsClass = m.takes_part ? '' : ' wr-no-gps-chip';
+        const gpsPin = m.takes_part ? `<i class="bi bi-geo-alt-fill text-primary me-1" title="${escapeHtml(t('gps_participant.tick_title'))}"></i>` : '';
+        return `<span class="badge bg-light text-dark border me-1 mb-1${meClass}${gpsClass}">${gpsPin}${guestNameHtml(m.name, m.is_external, m.home_team_name, mBg, mFg, m.guest_country_code)}${k9BadgeHtml(m.user_id, true)}${captainBadgeHtml(m.user_id, true)}${m.user_id === team.leader_id ? ' ⭐' : ''}</span>`;
     }).join('') + '</div>';
     return html;
 }
@@ -13534,6 +13683,53 @@ document.querySelectorAll('.suggest-replacement-btn').forEach(btn => {
     btn.addEventListener('click', () => openSuggestReplacementModal(btn.dataset.volunteerId, btn.dataset.volunteerName));
 });
 
+// GPS participation switch on each roster row — the mid-operation version of
+// the team form's tick, for handing tracking to another phone without editing
+// a team. Posts the state it wants (never "flip"), and puts the switch back
+// where it was if the server refuses, so what is on screen is always what the
+// server actually stored.
+document.querySelectorAll('.participant-gps-check').forEach(box => {
+    box.addEventListener('change', () => {
+        const wanted = box.checked;
+        const uid = box.dataset.volunteerId;
+        box.disabled = true;
+        const body = new URLSearchParams({
+            csrf_token: csrfToken,
+            mission_id: '<?= $missionId ?>',
+            user_id: uid,
+            takes_part: wanted ? '1' : '0',
+        });
+        fetch('mission-action-room-gps.php', {method: 'POST', body})
+            .then(r => r.json())
+            .then(result => {
+                if (!result.ok) {
+                    box.checked = !wanted;
+                    alert(result.error || t('common.error'));
+                    return;
+                }
+                applyGpsParticipationToRow(uid, wanted);
+            })
+            .catch(() => { box.checked = !wanted; })
+            .finally(() => { box.disabled = false; });
+    });
+});
+
+// The row's own appearance, so the change is visible before the next poll.
+// Only the parts the poll does not own: the ping time and staleness warning
+// are patched by renderParticipantLiveData/renderPingStaleness, which stop
+// sending anything for a volunteer who is no longer taking part.
+function applyGpsParticipationToRow(uid, takesPart) {
+    document.getElementById('participant-row-' + uid)?.classList.toggle('participant-no-gps', !takesPart);
+    document.getElementById('no-gps-note-' + uid)?.classList.toggle('d-none', takesPart);
+    if (!takesPart) {
+        const timeEl = document.getElementById('ping-time-' + uid);
+        if (timeEl) timeEl.textContent = '';
+        document.getElementById('ping-stale-' + uid)?.classList.add('d-none');
+        document.getElementById('fatigue-badge-' + uid)?.classList.add('d-none');
+        document.getElementById('suggest-replacement-btn-' + uid)?.classList.add('d-none');
+    }
+}
+
 function openSuggestReplacementModal(volunteerId, volunteerName) {
     const modalEl = document.getElementById('suggestReplacementModal');
     if (!modalEl) return;
@@ -15928,8 +16124,42 @@ document.querySelectorAll('.team-form').forEach(form => {
             leaderSelect.appendChild(opt);
         });
     }
-    checkboxes.forEach(cb => cb.addEventListener('change', refreshLeaderOptions));
+    // The GPS column: only meaningful for somebody who is actually on the
+    // team, and pre-ticked for whoever is chosen as leader — in practice the
+    // one carrying the phone. Only ever ticks: unticking the leader is a
+    // deliberate choice the form must not undo on the next redraw.
+    const gpsBoxes = form.querySelectorAll('.team-gps-check');
+    function gpsBoxFor(userId) {
+        return Array.from(gpsBoxes).find(box => box.value === String(userId)) || null;
+    }
+    function syncGpsAvailability() {
+        checkboxes.forEach(cb => {
+            const box = gpsBoxFor(cb.value);
+            if (!box || box.disabled) return;
+            const row = box.closest('.team-gps-label');
+            if (row) row.classList.toggle('opacity-25', !cb.checked);
+            if (!cb.checked) box.checked = false;
+        });
+    }
+    // Fires only when the leader genuinely CHANGES, never on every redraw:
+    // otherwise unticking the leader's GPS and then adding one more member
+    // would silently tick them again, and the form would look like it was
+    // fighting the coordinator.
+    let lastLeaderId = leaderSelect.value || currentLeaderId || '';
+    function tickLeaderGpsIfChanged() {
+        if (leaderSelect.value === lastLeaderId) return;
+        lastLeaderId = leaderSelect.value;
+        const box = gpsBoxFor(leaderSelect.value);
+        if (box && !box.disabled) box.checked = true;
+    }
+    checkboxes.forEach(cb => cb.addEventListener('change', () => {
+        refreshLeaderOptions();
+        syncGpsAvailability();
+        tickLeaderGpsIfChanged();
+    }));
+    leaderSelect.addEventListener('change', tickLeaderGpsIfChanged);
     refreshLeaderOptions();
+    syncGpsAvailability();
 });
 
 (function() {

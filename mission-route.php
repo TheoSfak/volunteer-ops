@@ -354,9 +354,18 @@ if ($action === 'create') {
         // team. No subset submitted (or nothing survives the intersection)
         // falls back to the whole team — the composer's default, unchanged
         // old behavior.
-        $teamRoster = array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]), 'user_id'));
+        //
+        // Narrowed to the team members who take part in the Action Room: a
+        // route is an order with waypoints to acknowledge and walk, and
+        // somebody whose phone is not in the operation can neither see it nor
+        // clear it. On a team of five carried by one phone, the route goes to
+        // that phone.
+        $teamRoster = array_values(array_intersect(
+            array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]), 'user_id')),
+            actionRoomParticipantIds($missionId)
+        ));
         if (empty($teamRoster)) {
-            echo json_encode(['ok' => false, 'error' => t('route.team_has_no_members')]);
+            echo json_encode(['ok' => false, 'error' => t('route.team_has_no_gps_members')]);
             exit;
         }
         $recipientIds = !empty($submittedMemberIds)
@@ -372,12 +381,15 @@ if ($action === 'create') {
         // who this route applies to. Validated against every approved
         // participant of the MISSION (not just one team), so a forged id
         // still can't add a recipient/actor who isn't even on this mission.
-        $approvedIds = array_map('intval', array_column(dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             WHERE s.mission_id = ? AND pr.status = ?",
-            [$missionId, PARTICIPATION_APPROVED]
-        ), 'volunteer_id'));
+        $approvedIds = array_values(array_intersect(
+            array_map('intval', array_column(dbFetchAll(
+                "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
+                 JOIN shifts s ON s.id = pr.shift_id
+                 WHERE s.mission_id = ? AND pr.status = ?",
+                [$missionId, PARTICIPATION_APPROVED]
+            ), 'volunteer_id')),
+            actionRoomParticipantIds($missionId)
+        ));
         $recipientIds = array_values(array_intersect($approvedIds, $submittedMemberIds));
         if (empty($recipientIds)) {
             echo json_encode(['ok' => false, 'error' => t('route.select_at_least_one_member')]);

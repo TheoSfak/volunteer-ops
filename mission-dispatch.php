@@ -278,30 +278,13 @@ if ($action === 'create') {
     // alarm for every other team on the mission. A dispatch with no team
     // (sent to "all teams") still notifies everyone, since that's genuinely
     // for the whole mission.
-    $recipients = $teamId
-        ? dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id AS user_id FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             WHERE s.mission_id = ? AND pr.status = ?
-               AND pr.volunteer_id IN (SELECT user_id FROM mission_team_members WHERE team_id = ?)",
-            [$missionId, PARTICIPATION_APPROVED, $teamId]
-        )
-        : dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id AS user_id FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             WHERE s.mission_id = ? AND pr.status = ?",
-            [$missionId, PARTICIPATION_APPROVED]
-        );
+    $recipientIds = actionRoomNotifyRecipientIds($missionId, $teamId ?: null, (int) $userId);
 
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     $titleKey = $type === 'point' ? 'dispatch.create_notify_title_point' : 'dispatch.create_notify_title_area';
     $kindKey = $type === 'point' ? 'dispatch.a_point' : 'dispatch.an_area';
     $labelSuffix = $label ? ' (' . $label . ')' : '';
 
-    $recipientIds = array_values(array_diff(
-        array_map(fn($r) => (int) $r['user_id'], $recipients),
-        [(int) $userId]
-    ));
     $langByUserId = getUserLanguages($recipientIds);
     foreach ($recipientIds as $recipientId) {
         $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;

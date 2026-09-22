@@ -50,17 +50,11 @@ function notifyPhotoReceived(int $missionId, string $missionTitle, ?int $respons
 function notifyPoiReported(int $missionId, string $missionTitle, ?int $responsibleUserId, string $senderName, int $senderId, bool $isMerge): void {
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
 
-    $participantIds = array_map('intval', array_column(
-        dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id AS user_id FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             WHERE s.mission_id = ? AND pr.status = ?",
-            [$missionId, PARTICIPATION_APPROVED]
-        ),
-        'user_id'
-    ));
     $recipientIds = array_values(array_unique(array_diff(
-        array_merge($participantIds, getMissionCommandStaffIds($missionId, $responsibleUserId, $senderId)),
+        array_merge(
+            actionRoomNotifyRecipientIds($missionId, null, $senderId),
+            getMissionCommandStaffIds($missionId, $responsibleUserId, $senderId)
+        ),
         [$senderId]
     )));
 

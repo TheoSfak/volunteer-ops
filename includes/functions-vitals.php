@@ -257,6 +257,14 @@ function recordVolunteerVitals(array $user, int $shiftId, array $samples, ?float
     if (!$participation) {
         return ['ok' => false, 'error' => t('ping.mission_not_open_or_not_approved', [], $lang)];
     }
+    // Same gate recordVolunteerPing() applies, for the same reason: a heart
+    // rate belongs to the operational picture, and someone without the Action
+    // Room GPS tick is not in that picture. Refused at the door rather than
+    // filtered at display, so no reading is ever stored for a volunteer whose
+    // vitals nobody is watching.
+    if (!isActionRoomParticipant((int) $participation['mission_id'], $userId)) {
+        return ['ok' => false, 'error' => t('ping.not_action_room_participant', [], $lang)];
+    }
 
     $serverNowMs = microtime(true) * 1000;
     // No client clock reading at all (a curl test, a minimal client): treat

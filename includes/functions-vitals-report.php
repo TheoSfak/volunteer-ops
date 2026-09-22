@@ -63,9 +63,16 @@ function vitalsOrderedSeries(int $missionId): array {
 }
 
 /**
- * Name, team and shift context for everyone who has an approved participation
+ * Name, team and shift context for everyone who takes part in the Action Room
  * on this mission, keyed by user id. Used to put a name and a team colour next
  * to a user id without every caller writing the same four joins.
+ *
+ * Scoped to the GPS tick rather than to "approved", because this doubles as
+ * the population the vitals report calls UNMEASURED. A volunteer who is not in
+ * the Action Room is not wearing a strap and cannot be — recordVolunteerVitals()
+ * refuses their readings — so listing them as people whose heart rate is
+ * unknown reports a decision as a gap, and on a ten-person operation carried by
+ * two phones that is eight lines of it.
  */
 function vitalsParticipantContext(int $missionId): array {
     try {
@@ -80,6 +87,8 @@ function vitalsParticipantContext(int $missionId): array {
              LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
              LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = pr.volunteer_id
              LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
+             JOIN mission_action_room_participants arp
+                  ON arp.mission_id = s.mission_id AND arp.user_id = pr.volunteer_id
              WHERE s.mission_id = ? AND pr.status = ?",
             [$missionId, PARTICIPATION_APPROVED]
         );

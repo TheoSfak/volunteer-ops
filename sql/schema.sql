@@ -2022,6 +2022,25 @@ CREATE TABLE IF NOT EXISTS `mission_team_members` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- ACTION ROOM PARTICIPANTS (who takes part with GPS + orders)
+-- A row here means the volunteer takes part in the Action Room: their position
+-- is tracked, they appear in the coordinator's recipient lists, and they count
+-- in the operational reports. Approved-on-the-mission is a different question
+-- and stays where it was (participation_requests) — ten people can be out as
+-- two teams while only two phones carry the operation.
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_action_room_participants` (
+    `mission_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `added_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`mission_id`, `user_id`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`added_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- MISSION DISPATCH POINTS (War Room send point/area to teams)
 -- =============================================
 CREATE TABLE IF NOT EXISTS `mission_dispatch_points` (

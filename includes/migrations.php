@@ -6888,6 +6888,33 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 158,
+            'description' => 'Add mission_action_room_participants - which of a mission\'s approved volunteers actually take part in the Action Room (GPS position + orders). Until now every approved participant was implicitly one, which is wrong for how these operations are really run: ten people go out as two teams of five, and one phone per team carries the position and receives the orders while the other four simply work. The other four were still asked for their GPS, still filled every recipient list the coordinator had to read through, and still produced "has gone quiet" advisories about a phone that was never meant to be reporting. Presence of a row means "takes part" - deliberately a row rather than a flag on mission_team_members, because it has to cover an approved volunteer who is on no team at all (and a mission where no teams were ever created), which that table cannot represent. New members start OUT (the team leader is ticked automatically on create, being the one who in practice carries the phone), so the backfill below is what keeps every mission that already exists - running or long closed - behaving exactly as it did: without it, every historical mission report would lose every participant it ever had.',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_action_room_participants (
+                    mission_id INT UNSIGNED NOT NULL,
+                    user_id INT UNSIGNED NOT NULL,
+                    added_by INT UNSIGNED NULL COMMENT 'Who ticked GPS for them; NULL for the rows created by this backfill',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (mission_id, user_id),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY (added_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                // Every (mission, volunteer) pair that is approved TODAY, so
+                // nothing that already exists changes behaviour. INSERT IGNORE
+                // rather than a NOT EXISTS guard: the primary key is the whole
+                // pair, and the SELECT's DISTINCT can still yield the same pair
+                // twice across two shifts of the same mission.
+                dbExecute("INSERT IGNORE INTO mission_action_room_participants (mission_id, user_id, added_by)
+                           SELECT DISTINCT s.mission_id, pr.volunteer_id, NULL
+                             FROM participation_requests pr
+                             JOIN shifts s ON s.id = pr.shift_id
+                            WHERE pr.status = 'APPROVED'");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
