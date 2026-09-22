@@ -15224,8 +15224,16 @@ function renderAckTracker(cards) {
 
     const dockedSig = sigOf(docked);
     if (list.dataset.ackSig !== dockedSig) {
+        // Rebuilding innerHTML resets the box's own scroll to the top. With
+        // four or five orders up the stack is taller than its height cap, so a
+        // coordinator reading the card at the bottom would be thrown back to
+        // the top every time anyone anywhere confirmed anything — the new card
+        // still lands on top, but it no longer moves the page out from under
+        // whoever is mid-sentence.
+        const keepScroll = list.scrollTop;
         list.innerHTML = docked.map(ackCardHtml).join('');
         list.dataset.ackSig = dockedSig;
+        list.scrollTop = Math.min(keepScroll, Math.max(0, list.scrollHeight - list.clientHeight));
     }
 
     const floatSig = sigOf(floating);
