@@ -2385,6 +2385,26 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
         return ['ok' => false, 'error' => t('ping.invalid_coordinates', [], $lang)];
     }
 
+    // A fix the device itself says could be a couple of hundred metres out is
+    // worse than no fix: stored, it becomes a confident dot on the map that
+    // nobody can tell apart from a good one, and a coordinator sends the
+    // nearest team to it. Refused, the person simply has no current position
+    // and the staleness threshold already draws that honestly.
+    //
+    // Checked here, before any query, because this is the one funnel all
+    // three sources go through (browser manual, browser auto, native Android
+    // background) — and because a garbage fix should not cost two lookups.
+    // A null accuracy is NOT refused: plenty of browsers report no accuracy
+    // at all, and silently dropping everyone on them would be a far bigger
+    // failure than the one this guards against. 0 disables the gate.
+    $maxAccuracy = (float) getSetting('war_room_max_ping_accuracy_m', '200');
+    if ($maxAccuracy > 0 && $accuracy !== null && $accuracy > $maxAccuracy) {
+        return ['ok' => false, 'error' => t('ping.accuracy_too_poor', [
+            'acc' => (int) round($accuracy),
+            'max' => (int) round($maxAccuracy),
+        ], $lang)];
+    }
+
     // Verify user has an APPROVED participation for this shift
     $pr = dbFetchOne(
         "SELECT pr.id, s.mission_id, m.title AS mission_title, m.responsible_user_id FROM participation_requests pr
@@ -2409,6 +2429,53 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     // so an emergency still arrives with coordinates from anyone at all.
     if (!isActionRoomParticipant((int) $pr['mission_id'], $userId)) {
         return ['ok' => false, 'error' => t('ping.not_action_room_participant', [], $lang)];
+    }
+
+    // A fix that would require the volunteer to have travelled faster than any
+    // transport they could plausibly be on is not a position, it is a glitch —
+    // and on the map it is worse than a glitch, because the pin lands somewhere
+    // real and the trail draws a straight line through everything in between.
+    //
+    // Two conditions, both required. Speed alone would reject a genuinely
+    // stationary phone whose two noisy fixes seconds apart imply a high speed,
+    // so the jump must also be bigger than what the two fixes' own uncertainty
+    // could account for — the same reasoning war-room.php's $requiredMeters
+    // already uses to decide whether somebody is moving, with the same 75m
+    // fallback when a device reports no accuracy at all.
+    //
+    // The default is deliberately high. Measured over the 1.069 legs of the
+    // 21/09/2026 exercise: median implied speed 1,4 km/h, p99 48 km/h, and
+    // exactly one leg above 120 (216m in 4 seconds — 194 km/h, on foot, in a
+    // park). A road vehicle on Crete cannot reach this threshold; an org that
+    // ever tracks aircraft should raise it. 0 disables the gate.
+    //
+    // Self-healing on purpose: if a bad fix ever does get stored, the next
+    // good one may be rejected as a jump away from it, but only until enough
+    // time passes for the implied speed to fall back under the threshold. No
+    // state is kept, and nobody stays frozen.
+    $maxSpeedKmh = (float) getSetting('war_room_max_ping_speed_kmh', '180');
+    if ($maxSpeedKmh > 0) {
+        $prev = dbFetchOne(
+            "SELECT lat, lng, accuracy_meters, created_at FROM volunteer_pings
+             WHERE user_id = ? AND shift_id = ? ORDER BY id DESC LIMIT 1",
+            [$userId, $shiftId]
+        );
+        if ($prev) {
+            $elapsed = time() - strtotime($prev['created_at']);
+            if ($elapsed > 0) {
+                $jumpMeters = gpsDistanceMeters((float) $prev['lat'], (float) $prev['lng'], $lat, $lng);
+                $uncertainty = ($prev['accuracy_meters'] !== null && $accuracy !== null)
+                    ? (float) $prev['accuracy_meters'] + (float) $accuracy
+                    : 75.0;
+                $impliedKmh = $jumpMeters / $elapsed * 3.6;
+                if ($impliedKmh > $maxSpeedKmh && $jumpMeters > $uncertainty) {
+                    return ['ok' => false, 'error' => t('ping.jump_implausible', [
+                        'kmh' => (int) round($impliedKmh),
+                        'max' => (int) round($maxSpeedKmh),
+                    ], $lang)];
+                }
+            }
+        }
     }
 
     try {

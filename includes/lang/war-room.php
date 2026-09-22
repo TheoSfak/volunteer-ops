@@ -1160,6 +1160,8 @@ return [
         'ping.mission_not_open_or_not_approved' => 'Η αποστολή δεν είναι ανοιχτή στο Επιχειρησιακό ή δεν έχετε εγκεκριμένη συμμετοχή',
         'ping.not_action_room_participant' => 'Δεν συμμετέχετε στο Action Room σε αυτήν την αποστολή, οπότε δεν καταγράφεται στίγμα',
         'ping.gps_unavailable_migration' => 'Η λειτουργία GPS δεν είναι διαθέσιμη ακόμη (χρειάζεται migration βάσης).',
+        'ping.accuracy_too_poor' => 'Το στίγμα δεν καταγράφηκε: η συσκευή δηλώνει ακρίβεια ±{acc} μ. (όριο {max} μ.). Βγες σε ανοιχτό χώρο και ξαναδοκίμασε.',
+        'ping.jump_implausible' => 'Το στίγμα δεν καταγράφηκε: θα σήμαινε μετακίνηση με {kmh} km/h από το προηγούμενο (όριο {max} km/h) — πιθανό σφάλμα GPS.',
         'bgtrack.notification_text' => 'Η τοποθεσία σας κοινοποιείται στο Επιχειρησιακό όσο η βάρδια είναι ενεργή.',
 
         // mission-chat.php
@@ -2873,6 +2875,8 @@ return [
         'ping.mission_not_open_or_not_approved' => 'The mission is not open in Operations, or you do not have an approved participation',
         'ping.not_action_room_participant' => 'You are not taking part in the Action Room on this mission, so no position is recorded',
         'ping.gps_unavailable_migration' => 'GPS is not available yet (database migration required).',
+        'ping.accuracy_too_poor' => 'Position not recorded: the device reports ±{acc} m accuracy (limit {max} m). Move into the open and try again.',
+        'ping.jump_implausible' => 'Position not recorded: it would mean travelling at {kmh} km/h since the previous one (limit {max} km/h) — likely a GPS glitch.',
         'bgtrack.notification_text' => 'Your location is being shared with Operations while your shift is active.',
 
         'chat.no_room_access' => 'You do not have access to this chat.',

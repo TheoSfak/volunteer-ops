@@ -44,6 +44,8 @@ $defaults = [
     'war_room_ticker_position' => 'top',
     'war_room_auto_ping_seconds' => '180',
     'war_room_auto_ping_high_accuracy' => '1',
+    'war_room_max_ping_accuracy_m' => '200',
+    'war_room_max_ping_speed_kmh' => '180',
     'war_room_low_battery_pct' => '60',
     'war_room_max_shift_minutes' => '480',
     'war_room_grid_max_size_m' => '900',
@@ -617,7 +619,7 @@ if (isPost()) {
 
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_auto_ping_high_accuracy', 'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_grid_max_size_m', 'war_room_grid_max_cells', 'war_room_area_unit',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_auto_ping_high_accuracy', 'war_room_max_ping_accuracy_m', 'war_room_max_ping_speed_kmh', 'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_grid_max_size_m', 'war_room_grid_max_cells', 'war_room_area_unit',
             'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct', 'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
             'vitals_episode_tachy_minutes', 'vitals_episode_brady_minutes', 'vitals_episode_strain_minutes',
             'admin_email', 'developer_email', 'timezone', 'date_format',
@@ -1557,6 +1559,18 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             Υψηλή ακρίβεια στο αυτόματο στίγμα (GPS αντί για Wi-Fi/κεραία)
                         </label>
                         <div><small class="text-muted">Όσο είναι κλειστό, το κινητό δεν ανάβει τον δέκτη GPS για το αυτόματο στίγμα και απαντά με θέση υπολογισμένη από τα γύρω Wi-Fi και τις κεραίες κινητής — σε πυκνοδομημένη περιοχή αυτό σημαίνει σφάλμα δεκάδων μέτρων που <strong>δεν βελτιώνεται αν ο εθελοντής σταθεί ακίνητος</strong>. Αφήστε το ανοιχτό για κάθε πραγματική επιχείρηση ή άσκηση· κλείστε το μόνο αν η αυτονομία μπαταρίας σε πολύωρη αποστολή είναι πιο κρίσιμη από τη θέση. Το χειροκίνητο στίγμα («Στείλε στίγμα») ζητούσε πάντα υψηλή ακρίβεια και δεν επηρεάζεται.</small></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Μέγιστη Αποδεκτή Αβεβαιότητα Στίγματος (μ.)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_max_ping_accuracy_m"
+                               value="<?= h($settings['war_room_max_ping_accuracy_m']) ?>" min="0" max="5000" step="10">
+                        <small class="text-muted">Στίγμα που η ίδια η συσκευή δηλώνει ότι μπορεί να απέχει περισσότερο από τόσα μέτρα <strong>δεν καταγράφεται</strong>. Είναι χειρότερο από το να μην έρθει τίποτα: αποθηκευμένο γίνεται σίγουρη κουκκίδα στον χάρτη που δεν ξεχωρίζει από μια σωστή, και στέλνεις ομάδα εκεί. Αν δεν καταγραφεί, ο εθελοντής απλώς εμφανίζεται χωρίς πρόσφατη θέση — που είναι η αλήθεια. Ισχύει και για τις τρεις πηγές (χειροκίνητο, αυτόματο, εφαρμογή Android). Συσκευές που δεν δηλώνουν καθόλου ακρίβεια δεν απορρίπτονται ποτέ. <strong>0 = απενεργοποιημένο.</strong></small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Μέγιστη Πιθανή Ταχύτητα Μετακίνησης (km/h)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_max_ping_speed_kmh"
+                               value="<?= h($settings['war_room_max_ping_speed_kmh']) ?>" min="0" max="2000" step="10">
+                        <small class="text-muted">Στίγμα που θα σήμαινε μετακίνηση γρηγορότερη από αυτό, σε σχέση με το προηγούμενο στίγμα του ίδιου εθελοντή, <strong>δεν καταγράφεται</strong> — είναι σφάλμα GPS, και στον χάρτη η πινέζα πέφτει σε υπαρκτό σημείο ενώ η πορεία χαράζει ευθεία πάνω από ό,τι μεσολαβεί. Απορρίπτεται μόνο αν το άλμα είναι και μεγαλύτερο από την αβεβαιότητα των δύο στιγμάτων, ώστε να μη «φεύγει» ένα ακίνητο κινητό με θορυβώδεις μετρήσεις. Στην άσκηση της 21/09/2026 η διάμεση ταχύτητα ήταν 1,4 km/h και μόνο 1 στα 1.069 σκέλη ξεπέρασε τα 120. <strong>Ανεβάστε το αν παρακολουθείτε ποτέ εναέριο μέσο· 0 = απενεργοποιημένο.</strong></small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Όριο Χαμηλής Μπαταρίας Action Room (%)</label>
