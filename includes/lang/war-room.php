@@ -889,6 +889,8 @@ return [
         'map.charge_alert_btn' => 'Φόρτισε!',
         'map.charge_alert_inactive_hint' => 'Αυτό το κουμπί ενεργοποιείται όταν η μπαταρία είναι κάτω από {pct}%.',
         'map.pin_moving' => 'Σε κίνηση',
+        'map.accuracy_label' => 'Ακρίβεια',
+        'map.accuracy_poor_hint' => '— χαμηλή ακρίβεια, πιθανόν χωρίς GPS',
         'map.navigate_btn' => '🧭 Πλοήγηση',
         // Fatigue / max-continuous-shift flag — shared by the map pin popup,
         // Nearby Teams, Team Distances (fatigue.pin_line) and the roster row
@@ -2610,6 +2612,8 @@ return [
         'map.charge_alert_btn' => 'Charge!',
         'map.charge_alert_inactive_hint' => 'This button activates when battery is below {pct}%.',
         'map.pin_moving' => 'Moving',
+        'map.accuracy_label' => 'Accuracy',
+        'map.accuracy_poor_hint' => '— low accuracy, probably no GPS',
         'map.navigate_btn' => '🧭 Navigate',
         // Fatigue / max-continuous-shift flag — see the el block for the
         // sharing convention (fatigue.pin_line/fatigue.badge_label reused

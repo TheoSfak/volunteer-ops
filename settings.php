@@ -43,6 +43,7 @@ $defaults = [
     'war_room_banner_font_size' => '1.35',
     'war_room_ticker_position' => 'top',
     'war_room_auto_ping_seconds' => '180',
+    'war_room_auto_ping_high_accuracy' => '1',
     'war_room_low_battery_pct' => '60',
     'war_room_max_shift_minutes' => '480',
     'war_room_grid_max_size_m' => '900',
@@ -616,7 +617,7 @@ if (isPost()) {
 
         // Save general settings
         $fieldsToUpdate = [
-            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_grid_max_size_m', 'war_room_grid_max_cells', 'war_room_area_unit',
+            'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size', 'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_auto_ping_seconds', 'war_room_auto_ping_high_accuracy', 'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_grid_max_size_m', 'war_room_grid_max_cells', 'war_room_area_unit',
             'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct', 'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
             'vitals_episode_tachy_minutes', 'vitals_episode_brady_minutes', 'vitals_episode_strain_minutes',
             'admin_email', 'developer_email', 'timezone', 'date_format',
@@ -643,7 +644,7 @@ if (isPost()) {
         foreach ($fieldsToUpdate as $field) {
             $value = isset($_POST[$field]) ? $_POST[$field] : '';
 
-            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'vitals_enabled', 'ai_enabled'])) {
+            if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy'])) {
                 $value = isset($_POST[$field]) ? '1' : '0';
             }
 
@@ -1548,6 +1549,14 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <input type="number" class="form-control" style="max-width:160px;" name="war_room_auto_ping_seconds"
                                value="<?= h($settings['war_room_auto_ping_seconds']) ?>" min="5" max="1800" step="5">
                         <small class="text-muted">Πόσο συχνά στέλνεται αυτόματα το στίγμα GPS ενός εθελοντή όσο έχει ανοιχτό το Action Room. Λειτουργεί μόνο ενώ η σελίδα παραμένει ανοιχτή στο προσκήνιο — αν κλειδώσει η οθόνη ή αλλάξει εφαρμογή, το πρόγραμμα περιήγησης σταματά το αυτόματο στίγμα (περιορισμός των κινητών, όχι της εφαρμογής).</small>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="war_room_auto_ping_high_accuracy" id="warRoomAutoPingHighAccuracy"
+                               <?= ($settings['war_room_auto_ping_high_accuracy'] ?? '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="warRoomAutoPingHighAccuracy">
+                            Υψηλή ακρίβεια στο αυτόματο στίγμα (GPS αντί για Wi-Fi/κεραία)
+                        </label>
+                        <div><small class="text-muted">Όσο είναι κλειστό, το κινητό δεν ανάβει τον δέκτη GPS για το αυτόματο στίγμα και απαντά με θέση υπολογισμένη από τα γύρω Wi-Fi και τις κεραίες κινητής — σε πυκνοδομημένη περιοχή αυτό σημαίνει σφάλμα δεκάδων μέτρων που <strong>δεν βελτιώνεται αν ο εθελοντής σταθεί ακίνητος</strong>. Αφήστε το ανοιχτό για κάθε πραγματική επιχείρηση ή άσκηση· κλείστε το μόνο αν η αυτονομία μπαταρίας σε πολύωρη αποστολή είναι πιο κρίσιμη από τη θέση. Το χειροκίνητο στίγμα («Στείλε στίγμα») ζητούσε πάντα υψηλή ακρίβεια και δεν επηρεάζεται.</small></div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Όριο Χαμηλής Μπαταρίας Action Room (%)</label>

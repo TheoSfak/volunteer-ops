@@ -812,8 +812,8 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
     // trail while everyone else kept theirs in full, for no reason
     // connected to anything about their actual participation.
     $rows = dbFetchAll(
-        "SELECT user_id, lat, lng, created_at, source, name, team_id, team_color FROM (
-            SELECT vp.user_id, vp.lat, vp.lng, vp.created_at, vp.source,
+        "SELECT user_id, lat, lng, accuracy_meters, created_at, source, name, team_id, team_color FROM (
+            SELECT vp.user_id, vp.lat, vp.lng, vp.accuracy_meters, vp.created_at, vp.source,
                     u.name, mtm.team_id, mt.color AS team_color,
                     ROW_NUMBER() OVER (PARTITION BY vp.user_id ORDER BY vp.created_at DESC) AS rn
              FROM volunteer_pings vp
@@ -873,6 +873,14 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
         $trailsByUser[$userId]['points'][] = [
             'lat'    => (float) $row['lat'],
             'lng'    => (float) $row['lng'],
+            // The Geolocation API's own uncertainty radius for this fix, in
+            // metres. Stored since v103 and already used server-side to
+            // decide "is this person moving or is that just noise"
+            // (war-room.php's $requiredMeters), but never shown to anybody —
+            // so a 150m network fix and a 6m GNSS fix drew the same confident
+            // dot and no coordinator could tell them apart. Null for older
+            // rows and for browsers that report no accuracy at all.
+            'acc'    => $row['accuracy_meters'] === null ? null : (float) $row['accuracy_meters'],
             'bpm'    => $vitals ? $vitals['bpm'] : null,
             'hr_zone' => $vitals ? $vitals['zone'] : null,
             // 'd/m H:i' (not the live dot's bare 'H:i') — a trail is often

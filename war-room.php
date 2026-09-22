@@ -1382,6 +1382,12 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 'time' => date('H:i d/m/Y', $pingTs),
                 'is_stale' => $isStale, 'is_moving' => $isMoving, 'heading_deg' => $headingDeg,
                 'battery_level' => $pin['battery_level'] !== null ? (int) $pin['battery_level'] : null,
+                // The fix's own uncertainty radius. A fixed value per ping,
+                // so it cannot move between polls on its own and the payload
+                // hash stays as quiet as it was before this was added.
+                // Rounded to whole metres: the device reports fractions that
+                // mean nothing and would only make the number look precise.
+                'accuracy_m' => $pin['accuracy_meters'] !== null ? (int) round((float) $pin['accuracy_meters']) : null,
                 'continuous_field_minutes' => $continuousFieldMinutesByVolunteerId[(int) $pin['user_id']] ?? null,
                 'heart_rate' => $pinVitals ? (int) $pinVitals['bpm'] : null,
                 'heart_rate_zone' => $pinVitals ? $pinVitals['zone'] : null,
@@ -8871,6 +8877,25 @@ function heartRateBlockHtml(bpm, zone) {
         + `<span class="wr-hr-zone">${t('vitals.zone_' + z)}</span>`
         + `</div>`;
 }
+// How far off this fix could be, in metres — the Geolocation API's own
+// uncertainty radius, stored on every ping since v103 and until now visible
+// to nobody. Shared by the live pin and by every trail point for the same
+// reason heartRateBlockHtml() is: a coordinator reading a position back an
+// hour later needs to know exactly what they needed to know live, which is
+// whether the dot means "here" or "somewhere around here".
+//
+// The threshold is what a GNSS fix outdoors comfortably beats and what a
+// Wi-Fi/cell fix comfortably fails, so the warning colour is in practice an
+// answer to "did this phone actually use its GPS". Rendered as a plain line
+// rather than a map circle on purpose: a circle per point would bury the
+// trail, and the live map is deliberately kept free of new drawn geometry.
+function accuracyLineHtml(accuracyMeters) {
+    if (accuracyMeters === null || accuracyMeters === undefined) return '';
+    const m = Math.round(accuracyMeters);
+    const poor = m > 50;
+    return `<br><span class="small ${poor ? 'text-warning' : 'text-muted'}">`
+        + `${t('map.accuracy_label')}: ±${m} m${poor ? ' ' + t('map.accuracy_poor_hint') : ''}</span>`;
+}
 // Deliberately separate from LOW_BATTERY_PCT above, fixed (not a Settings
 // field) — LOW_BATTERY_PCT gates the passive "getting low" badge, this
 // gates the active charge-alert button (below/right of the Navigate
@@ -8990,6 +9015,9 @@ function buildPinMarker(pin, interactive = true) {
         ? `<br><span class="${pin.continuous_field_minutes >= WR_CRITICAL_SHIFT_MINUTES ? 'text-danger' : 'text-warning'} small">⏱ ${t('fatigue.pin_line', fatigueHm(pin.continuous_field_minutes))}</span>`
         : '';
     const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
+    // Directly under the timestamp below, because the two qualify each other:
+    // "20:57, ±120 m" is a different piece of information from "20:57".
+    const accuracyLine = accuracyLineHtml(pin.accuracy_m);
     const navUrl = navigationUrl(pin.lat, pin.lng);
     // Always rendered for an admin regardless of battery level, so there's
     // something to notice/hover even on a healthy pin — deliberately NOT
@@ -9012,7 +9040,7 @@ function buildPinMarker(pin, interactive = true) {
     // (depends on which render*() happened to run last that poll tick). A
     // volunteer's own live position should never be the one that silently
     // disappears underneath another marker.
-    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}${heartRateBlock}<br>${pin.time}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
+    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}${heartRateBlock}<br>${pin.time}${accuracyLine}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
 }
 
 function renderPins(items) {
@@ -9243,7 +9271,7 @@ function renderTrailUpTo(trails, cutoffTs) {
             // Same block as the live pin, on purpose: reading a trail back an
             // hour later must not look like a different kind of information
             // from watching it live, because it is literally the same samples.
-            marker.bindPopup(`<strong>${escapeHtml(trail.name)}</strong>${heartRateBlockHtml(point.bpm, point.hr_zone)}<br>${point.time}${sourceLabel}<br>${t('trail.speed_label')}: ${speedLabel}`);
+            marker.bindPopup(`<strong>${escapeHtml(trail.name)}</strong>${heartRateBlockHtml(point.bpm, point.hr_zone)}<br>${point.time}${sourceLabel}${accuracyLineHtml(point.acc)}<br>${t('trail.speed_label')}: ${speedLabel}`);
             bounds.push([point.lat, point.lng]);
         });
     });
@@ -13919,8 +13947,40 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
 // decides when the ~3-minute cadence is actually due, preserving the exact
 // send/DB-write volume every existing source='auto' consumer already assumes.
 const AUTO_PING_CADENCE_MS = <?= (int) getSetting('war_room_auto_ping_seconds', '180') * 1000 ?>;
+// Whether the passive capture may power up the GNSS receiver. Configurable
+// because it is a real battery-vs-truth trade, but it defaults ON: without
+// it the fix comes from Wi-Fi/cell trilateration, which in a built-up area
+// is tens of metres out and cannot be improved by standing still, because
+// it is not measuring the phone at all — it is looking up what is nearby.
+//
+// Measured on the 21/09/2026 SAR exercise (mission 455, Πάρκο Γεωργιάδη),
+// four volunteers standing together at one stop: 96% of their points were
+// source='auto', so this setting produced nearly the whole record. Compared
+// at matching timestamps they disagreed with each other by 26-92m, their
+// reported position sat ~35m off where they actually were, and 7-15% of
+// every trail's points were byte-identical to the point before them. None
+// of that is survivable for deciding who is nearest to a casualty.
+const AUTO_PING_HIGH_ACCURACY = <?= getSetting('war_room_auto_ping_high_accuracy', '1') === '1' ? 'true' : 'false' ?>;
+// A fix older than this is not worth sending. watchPosition() hands us
+// whatever it last managed to acquire and goes on handing us that same
+// object once the OS stops producing new ones (phone in a pocket, screen
+// locked, no sky) — so re-sending latestAutoPosition unconditionally wrote
+// the same coordinates to the database every cadence and drew a confident
+// pin on a position that was minutes stale. Half the cadence rather than a
+// fixed number, so configuring a faster cadence tightens this too instead
+// of leaving a constant that would swallow it whole.
+const AUTO_PING_MAX_FIX_AGE_MS = Math.round(AUTO_PING_CADENCE_MS / 2);
+// maximumAge:0 for the same reason: the previous 60000 let the browser
+// answer with a fix up to a minute old, which at walking pace is ~80m of
+// staleness handed over as if it were current.
+const AUTO_PING_GEO_OPTS = {enableHighAccuracy: AUTO_PING_HIGH_ACCURACY, maximumAge: 0, timeout: 20000};
 let latestAutoPosition = null;
 let lastAutoPingSentAt = Date.now();
+// One outstanding one-shot read at a time. Without this a phone that never
+// gets a fix would start a fresh geolocation request on every 15s tick and
+// stack them up, which is exactly the battery cost this block is careful
+// about everywhere else.
+let autoFixInFlight = false;
 
 function sendAutoPing(position) {
     const buttons = document.querySelectorAll('.send-ping');
@@ -13934,10 +13994,10 @@ function sendAutoPing(position) {
     });
 }
 
-// enableHighAccuracy is deliberately false here (unlike the manual button
-// above) — a live ops-map pin doesn't need meter-level precision, and pairing
-// continuous high-accuracy GPS with the keep-awake screen (below)
-// over a multi-hour mission is a real battery cost not worth paying twice.
+// Both reads use AUTO_PING_GEO_OPTS, so the accuracy/staleness decision is
+// made once above rather than repeated at each call site — the old code
+// spelled the options out three times and they had already drifted (the
+// visibilitychange one below carried no maximumAge at all).
 // Delayed a few seconds so the location-permission prompt doesn't fire the
 // instant the page renders, before anyone's read anything on it.
 //
@@ -13956,23 +14016,37 @@ setTimeout(() => {
     navigator.geolocation.getCurrentPosition(
         position => { latestAutoPosition = position; },
         () => {},
-        {enableHighAccuracy: false, maximumAge: 60000, timeout: 20000}
+        AUTO_PING_GEO_OPTS
     );
     navigator.geolocation.watchPosition(
         position => { latestAutoPosition = position; },
         () => {},
-        {enableHighAccuracy: false, maximumAge: 60000, timeout: 20000}
+        AUTO_PING_GEO_OPTS
     );
 }, 5000);
 
-// Local-only check, no GPS/network call of its own — just decides whether the
-// cadence window has elapsed and, if so, sends whatever watchPosition most
-// recently handed us. Ticks far more often than the cadence itself (15s vs
-// 3min) so send timing stays accurate without a one-shot GPS read per send.
+// Decides whether the cadence window has elapsed and, if so, sends the fix
+// watchPosition most recently handed us — but only while that fix is still
+// worth sending. Ticks far more often than the cadence itself (15s vs 3min)
+// so send timing stays accurate without a one-shot GPS read per send.
 setInterval(() => {
-    if (!latestAutoPosition) return;
     if (Date.now() - lastAutoPingSentAt < AUTO_PING_CADENCE_MS) return;
-    sendAutoPing(latestAutoPosition);
+    if (latestAutoPosition && (Date.now() - latestAutoPosition.timestamp) <= AUTO_PING_MAX_FIX_AGE_MS) {
+        sendAutoPing(latestAutoPosition);
+        return;
+    }
+    // Nothing fresh to send: take one read rather than re-sending an old
+    // fix. A missing ping is an honest "we do not know where they are" and
+    // the staleness threshold already draws it that way; a repeated old fix
+    // is a claim the map has no way to mark as doubtful, and it is what put
+    // byte-identical coordinates minutes apart into 7-15% of every trail.
+    if (autoFixInFlight || !navigator.geolocation || !document.querySelectorAll('.send-ping').length) return;
+    autoFixInFlight = true;
+    navigator.geolocation.getCurrentPosition(
+        position => { autoFixInFlight = false; latestAutoPosition = position; sendAutoPing(position); },
+        () => { autoFixInFlight = false; },
+        AUTO_PING_GEO_OPTS
+    );
 }, 15000);
 
 // Catch-up: if the tab was backgrounded/suspended through a whole cadence
@@ -13985,10 +14059,12 @@ document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     if (!navigator.geolocation || !document.querySelectorAll('.send-ping').length) return;
     if (Date.now() - lastAutoPingSentAt < AUTO_PING_CADENCE_MS) return;
+    if (autoFixInFlight) return;
+    autoFixInFlight = true;
     navigator.geolocation.getCurrentPosition(
-        position => { latestAutoPosition = position; sendAutoPing(position); },
-        () => {},
-        {enableHighAccuracy: false, timeout: 10000}
+        position => { autoFixInFlight = false; latestAutoPosition = position; sendAutoPing(position); },
+        () => { autoFixInFlight = false; },
+        AUTO_PING_GEO_OPTS
     );
 });
 
