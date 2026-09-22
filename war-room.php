@@ -14078,12 +14078,33 @@ function acceptAutoPosition(position) {
 // out from under a balcony, walk clear of the treeline, turn location back
 // on. Until now nothing on their screen said there was anything to do — the
 // page looked identical whether their phone was reporting ±6m or ±400m.
+// The server's own gate, handed to the client so the volunteer can be told
+// exactly why nothing is being stored instead of being left to infer it from
+// a number. 0 means the gate is off.
+const WR_MAX_PING_ACCURACY_M = <?= (int) getSetting('war_room_max_ping_accuracy_m', '50') ?>;
+// Past this, the phone is not making a bad GNSS fix — it is not using GNSS at
+// all. Android's "approximate location" permission answers with roughly a
+// kilometre and NEVER reports an error, so it cannot be caught on the error
+// path; this number is the only thing that separates it from a genuinely poor
+// fix, and the two need opposite advice. Walking into the open fixes one of
+// them and does nothing whatsoever for the other.
+const WR_APPROXIMATE_LOCATION_M = 500;
 function renderMyGpsQuality() {
     const el = document.getElementById('myGpsQuality');
     if (!el || !latestAutoPosition) return;
     const acc = latestAutoPosition.coords.accuracy;
     if (typeof acc !== 'number') { el.textContent = ''; return; }
     const m = Math.round(acc);
+    if (m > WR_APPROXIMATE_LOCATION_M) {
+        el.className = 'small mt-1 text-danger fw-bold';
+        el.textContent = t('myping.gps_approximate', {m: m});
+        return;
+    }
+    if (WR_MAX_PING_ACCURACY_M > 0 && m > WR_MAX_PING_ACCURACY_M) {
+        el.className = 'small mt-1 text-danger fw-bold';
+        el.textContent = t('myping.gps_rejected', {m: m, max: WR_MAX_PING_ACCURACY_M});
+        return;
+    }
     // Same 50m line the map popups use, so "poor" means the same thing to the
     // volunteer and to the coordinator looking at their pin.
     const poor = m > 50;
@@ -14106,6 +14127,16 @@ function geolocationErrorText(err) {
 // A volunteer whose location permission was revoked looked exactly like one
 // standing still, both to themselves and, through the staleness indicator,
 // to the command post.
+// Why the last automatic position was thrown away. Shares the one line the
+// accuracy readout uses rather than adding a second place to look: they are
+// answers to the same question, and only one of them is ever true at a time.
+function showMyPingRefused(message) {
+    const el = document.getElementById('myGpsQuality');
+    if (!el || !message) return;
+    el.className = 'small mt-1 text-danger fw-bold';
+    el.textContent = message;
+}
+
 function reportAutoGeolocationError(err) {
     const el = document.getElementById('myGpsQuality');
     if (el) {
@@ -14150,7 +14181,14 @@ function sendAutoPing(position) {
     getBatteryLevelPct().then(batteryLevel => {
         buttons.forEach(button => {
             const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || '', battery_level: batteryLevel ?? '', source: 'auto'});
-            fetch('ping-location.php', {method: 'POST', body: data}).then(checkSessionAlive).catch(() => {});
+            // The server's answer is read, not discarded. Both write-time
+            // gates refuse a ping by replying ok:false, and until this was
+            // wired up a volunteer whose every fix was being refused saw a
+            // page that looked exactly like one that was working.
+            fetch('ping-location.php', {method: 'POST', body: data})
+                .then(response => checkSessionAlive(response) ? response.json() : null)
+                .then(result => { if (result && !result.ok) showMyPingRefused(result.error); })
+                .catch(() => {});
         });
     });
 }

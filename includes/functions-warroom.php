@@ -130,14 +130,36 @@ function volunteerGpsErrorFromCode(int $code): string {
  * blank.
  */
 function recordVolunteerGpsError(int $missionId, int $userId, int $code): bool {
+    return recordVolunteerGpsErrorReason($missionId, $userId, volunteerGpsErrorFromCode($code));
+}
+
+/**
+ * The same thing by reason rather than by PositionError code, for the cases
+ * the device never reported as an error at all.
+ *
+ * Those are the ones that need it most. A phone set to "approximate location"
+ * does not fail — it succeeds and hands back a fix that is a kilometre wide,
+ * which the accuracy gate then refuses on every single ping. Without this the
+ * volunteer's roster line would simply go quiet, indistinguishable from
+ * somebody resting, while their screen told them to walk into the open, which
+ * would not have helped: the fault is the permission, not the sky.
+ *
+ * An unknown reason is stored as 'unknown' rather than refused, same as the
+ * code path — the enum is what the database will accept, and a value it has
+ * never heard of would throw away the report instead of the label.
+ */
+function recordVolunteerGpsErrorReason(int $missionId, int $userId, string $reason): bool {
     if (!isActionRoomParticipant($missionId, $userId)) {
         return false;
+    }
+    if (!in_array($reason, ['denied', 'unavailable', 'timeout', 'imprecise', 'implausible', 'unknown'], true)) {
+        $reason = 'unknown';
     }
     return (bool) dbExecute(
         "UPDATE mission_action_room_participants
             SET last_gps_error = ?, last_gps_error_at = NOW()
           WHERE mission_id = ? AND user_id = ?",
-        [volunteerGpsErrorFromCode($code), $missionId, $userId]
+        [$reason, $missionId, $userId]
     );
 }
 
@@ -2439,26 +2461,6 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
         return ['ok' => false, 'error' => t('ping.invalid_coordinates', [], $lang)];
     }
 
-    // A fix the device itself says could be a couple of hundred metres out is
-    // worse than no fix: stored, it becomes a confident dot on the map that
-    // nobody can tell apart from a good one, and a coordinator sends the
-    // nearest team to it. Refused, the person simply has no current position
-    // and the staleness threshold already draws that honestly.
-    //
-    // Checked here, before any query, because this is the one funnel all
-    // three sources go through (browser manual, browser auto, native Android
-    // background) — and because a garbage fix should not cost two lookups.
-    // A null accuracy is NOT refused: plenty of browsers report no accuracy
-    // at all, and silently dropping everyone on them would be a far bigger
-    // failure than the one this guards against. 0 disables the gate.
-    $maxAccuracy = (float) getSetting('war_room_max_ping_accuracy_m', '200');
-    if ($maxAccuracy > 0 && $accuracy !== null && $accuracy > $maxAccuracy) {
-        return ['ok' => false, 'error' => t('ping.accuracy_too_poor', [
-            'acc' => (int) round($accuracy),
-            'max' => (int) round($maxAccuracy),
-        ], $lang)];
-    }
-
     // Verify user has an APPROVED participation for this shift
     $pr = dbFetchOne(
         "SELECT pr.id, s.mission_id, m.title AS mission_title, m.responsible_user_id FROM participation_requests pr
@@ -2483,6 +2485,30 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     // so an emergency still arrives with coordinates from anyone at all.
     if (!isActionRoomParticipant((int) $pr['mission_id'], $userId)) {
         return ['ok' => false, 'error' => t('ping.not_action_room_participant', [], $lang)];
+    }
+
+    // A fix the device itself says could be hundreds of metres out is worse
+    // than no fix: stored, it becomes a confident dot on the map that nobody
+    // can tell apart from a good one, and a coordinator sends the nearest
+    // team to it. Refused, the person simply has no current position.
+    //
+    // Checked AFTER the two lookups above, not before them as when it first
+    // shipped. It costs a garbage fix the same two queries as any other ping,
+    // and that is the price of being able to say WHY: recording the reason
+    // needs the mission id, and a volunteer whose phone hands back
+    // approximate locations would otherwise have every ping dropped with
+    // nothing on anyone's screen to explain the silence.
+    //
+    // A null accuracy is NOT refused: plenty of browsers report no accuracy
+    // at all, and silently dropping everyone on them would be a far bigger
+    // failure than the one this guards against. 0 disables the gate.
+    $maxAccuracy = (float) getSetting('war_room_max_ping_accuracy_m', '50');
+    if ($maxAccuracy > 0 && $accuracy !== null && $accuracy > $maxAccuracy) {
+        recordVolunteerGpsErrorReason((int) $pr['mission_id'], $userId, 'imprecise');
+        return ['ok' => false, 'error' => t('ping.accuracy_too_poor', [
+            'acc' => (int) round($accuracy),
+            'max' => (int) round($maxAccuracy),
+        ], $lang)];
     }
 
     // A fix that would require the volunteer to have travelled faster than any
@@ -2548,6 +2574,10 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
                     : 75.0;
                 $impliedKmh = $jumpMeters / $elapsed * 3.6;
                 if ($impliedKmh > $maxSpeedKmh && $jumpMeters > $uncertainty) {
+                    // Cleared by the next accepted ping, so a one-off jump
+                    // shows for at most one cadence; only a phone that keeps
+                    // producing them stays flagged to the command post.
+                    recordVolunteerGpsErrorReason((int) $pr['mission_id'], $userId, 'implausible');
                     return ['ok' => false, 'error' => t('ping.jump_implausible', [
                         'kmh' => (int) round($impliedKmh),
                         'max' => (int) round($maxSpeedKmh),

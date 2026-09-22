@@ -105,6 +105,54 @@ final class ActionRoomParticipantsTest extends TestCase
         }
     }
 
+    // ── A refused ping says why (v3.319.0) ──────────────────────────────────
+
+    public function testAPingRefusedForPoorAccuracyTellsTheCommandPostWhy(): void
+    {
+        // The case this exists for: a phone on Android's "approximate
+        // location" never reports an error, it just answers with a fix a
+        // kilometre wide. Every ping is refused, and without this the roster
+        // line would go quiet and read exactly like somebody resting.
+        $this->tick($this->volunteerIds[0]);
+
+        $result = recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, 35.33, 25.13, 1500.0, 80, 'auto', 'browser');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('imprecise', $this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
+    }
+
+    public function testAPingRefusedAsAnImpossibleJumpIsRecordedAsSuch(): void
+    {
+        $this->tick($this->volunteerIds[0]);
+        $this->seedPing($this->volunteerIds[0], 35.33, 25.13, 10);
+
+        $result = recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, $this->northOf(35.33, 300), 25.13, 8.0, 80, 'auto', 'browser');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('implausible', $this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
+    }
+
+    public function testTheNextGoodPingClearsARefusalFlag(): void
+    {
+        // A refusal flag says "nothing is arriving", not "something went wrong
+        // once" — so a fix that does arrive has to clear it.
+        $this->tick($this->volunteerIds[0]);
+        recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, 35.33, 25.13, 1500.0, 80, 'auto', 'browser');
+        $this->assertSame('imprecise', $this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
+
+        $good = recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, 35.33, 25.13, 9.0, 80, 'auto', 'browser');
+
+        $this->assertTrue($good['ok']);
+        $this->assertNull($this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
+    }
+
+    public function testAnUnknownReasonIsStoredAsUnknownRatherThanThrownAway(): void
+    {
+        $this->tick($this->volunteerIds[0]);
+        $this->assertTrue(recordVolunteerGpsErrorReason($this->missionId, $this->volunteerIds[0], 'nonsense'));
+        $this->assertSame('unknown', $this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
+    }
+
     // ── Spike vs. real travel (v3.316.0) ────────────────────────────────────
 
     /** Insert a ping directly, $secondsAgo in the past, bypassing the gates. */
@@ -173,15 +221,18 @@ final class ActionRoomParticipantsTest extends TestCase
 
     public function testANoisyStationaryPhoneIsNotMistakenForMovement(): void
     {
-        // 120m apart in 10 seconds is 43 km/h, but both fixes admit to +-80m,
-        // so their own uncertainty already covers the gap. Refusing here would
-        // throw away the readings of anybody standing under a balcony.
+        // 80m apart in 10 seconds is 29 km/h, past the speed limit, but both
+        // fixes admit to +-45m, so their own uncertainty already covers the
+        // gap. Refusing here would throw away the readings of anybody standing
+        // under a balcony. Both accuracies are deliberately inside the 50m
+        // accuracy gate: this test is about the SPEED gate, and letting the
+        // other one fire would have made it pass for the wrong reason.
         $this->tick($this->volunteerIds[0]);
-        $this->seedPing($this->volunteerIds[0], 35.33, 25.13, 10, 80.0);
+        $this->seedPing($this->volunteerIds[0], 35.33, 25.13, 10, 45.0);
 
         $result = recordVolunteerPing(
             $this->userRow($this->volunteerIds[0]), $this->shiftId,
-            $this->northOf(35.33, 120), 25.13, 80.0, 80, 'auto', 'browser'
+            $this->northOf(35.33, 80), 25.13, 45.0, 80, 'auto', 'browser'
         );
 
         $this->assertTrue($result['ok']);
@@ -241,15 +292,17 @@ final class ActionRoomParticipantsTest extends TestCase
 
     public function testARefusedPositionDoesNotClearTheFailure(): void
     {
-        // A fix refused for being hopelessly imprecise is not a recovery, and
-        // clearing on it would hide the very situation the warning is for.
+        // A fix refused for being hopelessly imprecise is not a recovery, so the
+        // flag must not be cleared. Since v3.319.0 the refusal writes its own
+        // reason over the older one, which is the more useful answer: what the
+        // device is doing NOW, not what it last managed to complain about.
         $this->tick($this->volunteerIds[0]);
         recordVolunteerGpsError($this->missionId, $this->volunteerIds[0], 2);
 
         $result = recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, 35.33, 25.13, 4000.0, 80, 'auto', 'browser');
 
         $this->assertFalse($result['ok']);
-        $this->assertSame('unavailable', $this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
+        $this->assertSame('imprecise', $this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
     }
 
     // ── The flag itself ─────────────────────────────────────────────────────

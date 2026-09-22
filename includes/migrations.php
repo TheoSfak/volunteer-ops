@@ -6952,6 +6952,20 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 161,
+            'description' => "Widen mission_action_room_participants.last_gps_error with 'imprecise' and 'implausible' - the two reasons a position never arrives WITHOUT the device reporting any error. A phone set to Android's \"approximate location\" does not fail: it succeeds and returns a fix a kilometre wide, which the accuracy gate then refuses on every ping, so the volunteer's roster line simply went quiet and read exactly like somebody resting. 'implausible' is the speed gate's own refusal; it clears on the next accepted ping, so a one-off jump shows for at most a cadence and only a phone that keeps producing them stays flagged.",
+            'up' => function () {
+                // Widening an ENUM keeps every existing row: the stored
+                // strings are unchanged and the four old values stay in the
+                // same positions, so nothing has to be rewritten.
+                dbExecute("ALTER TABLE mission_action_room_participants
+                           MODIFY COLUMN last_gps_error
+                           ENUM('denied','unavailable','timeout','imprecise','implausible','unknown') NULL
+                           COMMENT 'Last reason this volunteer produced no position; NULL = none outstanding'");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
