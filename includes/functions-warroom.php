@@ -2377,7 +2377,7 @@ function computeContinuousFieldMinutesByVolunteerId(int $missionId, int $toleran
  * $user must be a full users row (id, name, language) — callers resolve it
  * their own way (session vs. token lookup) before calling this.
  */
-function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, ?float $accuracy, ?int $batteryLevel, string $source): array {
+function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, ?float $accuracy, ?int $batteryLevel, string $source, ?string $via = null): array {
     $userId = (int) $user['id'];
     $lang = $user['language'] ?? DEFAULT_LANGUAGE;
 
@@ -2480,8 +2480,13 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
 
     try {
         dbInsert(
-            "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, battery_level, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
-            [$userId, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source]
+            "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, battery_level, source, via, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+            // Anything that is not one of the two known clients is stored as
+            // NULL ("not known") rather than guessed into one of them — an
+            // unrecognised caller is exactly the case where a guess would be
+            // wrong, and NULL is what every pre-v159 row already says.
+            [$userId, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source,
+             in_array($via, ['browser', 'native'], true) ? $via : null]
         );
     } catch (Exception $e) {
         return ['ok' => false, 'error' => t('ping.gps_unavailable_migration', [], $lang)];

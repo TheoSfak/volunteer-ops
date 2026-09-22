@@ -6915,6 +6915,20 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 159,
+            'description' => 'Add `via` to volunteer_pings - whether a position came from the native Android background service or from a browser tab. Deliberately a NEW nullable column rather than a third value on `source`: every existing consumer branches on source = auto/manual (the trail filter, the reports that exclude auto, the activity feed, the "is moving" check), and widening that enum would change what all of them mean. The two paths are currently indistinguishable - mobile-ping-location.php and ping-location.php both write source=auto - which matters operationally, because a browser tab stops producing positions the moment the screen locks while the native service keeps going. A coordinator looking at a quiet pin cannot presently tell "they have stopped moving" from "their phone locked". NULL on every existing row and on anything that does not say, which reads as "not known" rather than being guessed either way.',
+            'up' => function () {
+                $exists = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'volunteer_pings' AND COLUMN_NAME = 'via'"
+                );
+                if (!$exists) {
+                    dbExecute("ALTER TABLE volunteer_pings ADD COLUMN via ENUM('browser','native') NULL COMMENT 'Which client produced the fix; NULL = unknown (pre-v159 rows)' AFTER source");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

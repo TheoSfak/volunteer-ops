@@ -1461,6 +1461,7 @@ CREATE TABLE IF NOT EXISTS `volunteer_pings` (
     `accuracy_meters` DECIMAL(8, 2) NULL COMMENT 'Geolocation API accuracy radius, meters',
     `battery_level` TINYINT UNSIGNED NULL COMMENT 'Phone battery percentage (0-100) at time of ping, best-effort',
     `source` ENUM('manual','auto') NOT NULL DEFAULT 'manual',
+    `via` ENUM('browser','native') NULL COMMENT 'Which client produced the fix; NULL = unknown (pre-v159 rows)',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`shift_id`) REFERENCES `shifts`(`id`) ON DELETE CASCADE,

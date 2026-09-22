@@ -50,4 +50,7 @@ $batteryLevel = ($rawBattery !== null && $rawBattery !== '' && is_numeric($rawBa
     ? (int) $rawBattery
     : null;
 
-echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source));
+// 'browser': this endpoint is only ever reached from the live war-room.php
+// tab, whose watcher the phone suspends the moment the screen locks. The
+// native service posts to mobile-ping-location.php instead.
+echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source, 'browser'));

@@ -891,6 +891,7 @@ return [
         'map.pin_moving' => 'Σε κίνηση',
         'map.accuracy_label' => 'Ακρίβεια',
         'map.accuracy_poor_hint' => '— χαμηλή ακρίβεια, πιθανόν χωρίς GPS',
+        'map.tracked_by_browser' => 'Παρακολούθηση από καρτέλα browser — σταματά αν κλειδώσει η οθόνη',
         'map.navigate_btn' => '🧭 Πλοήγηση',
         // Fatigue / max-continuous-shift flag — shared by the map pin popup,
         // Nearby Teams, Team Distances (fatigue.pin_line) and the roster row
@@ -2621,6 +2622,7 @@ return [
         'map.pin_moving' => 'Moving',
         'map.accuracy_label' => 'Accuracy',
         'map.accuracy_poor_hint' => '— low accuracy, probably no GPS',
+        'map.tracked_by_browser' => 'Tracked from a browser tab — stops when the screen locks',
         'map.navigate_btn' => '🧭 Navigate',
         // Fatigue / max-continuous-shift flag — see the el block for the
         // sharing convention (fatigue.pin_line/fatigue.badge_label reused

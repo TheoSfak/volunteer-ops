@@ -1265,7 +1265,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
         // than on the previous one — zero distance, hence never "moving".
         $rawPins = dbFetchAll(
             "SELECT * FROM (
-                SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.battery_level, vp.created_at, u.name,
+                SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.battery_level, vp.via, vp.created_at, u.name,
                         u.is_external, u.guest_org_name, u.guest_country_code,
                         COALESCE(ht.name, mvt.label) AS home_team_name, COALESCE(ht.color, mvt.color) AS home_team_color,
                         mt.color AS team_color, mt.codename, mt.team_number{$field},
@@ -1388,6 +1388,9 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 // Rounded to whole metres: the device reports fractions that
                 // mean nothing and would only make the number look precise.
                 'accuracy_m' => $pin['accuracy_meters'] !== null ? (int) round((float) $pin['accuracy_meters']) : null,
+                // Which client produced the fix. Also fixed per ping, so it
+                // cannot churn the poll payload hash on its own.
+                'via' => $pin['via'] ?? null,
                 'continuous_field_minutes' => $continuousFieldMinutesByVolunteerId[(int) $pin['user_id']] ?? null,
                 'heart_rate' => $pinVitals ? (int) $pinVitals['bpm'] : null,
                 'heart_rate_zone' => $pinVitals ? $pinVitals['zone'] : null,
@@ -9029,6 +9032,18 @@ function buildPinMarker(pin, interactive = true) {
     // Directly under the timestamp below, because the two qualify each other:
     // "20:57, ±120 m" is a different piece of information from "20:57".
     const accuracyLine = accuracyLineHtml(pin.accuracy_m);
+    // Only the browser case is drawn, following the same "rendered when it
+    // actually matters" idiom as fatigueLine below rather than putting a line
+    // on every pin. A position coming from the native app needs no comment —
+    // it keeps arriving with the screen off. A position coming from a browser
+    // tab does: the phone suspends that watcher the moment the screen locks,
+    // so this pin can go quiet for a reason that has nothing to do with the
+    // volunteer. Until now a coordinator could not tell that apart from "they
+    // have stopped moving". Absent (older rows, any unrecognised client) is
+    // left silent rather than guessed either way.
+    const trackingLine = pin.via === 'browser'
+        ? `<br><span class="small text-muted"><i class="bi bi-window me-1"></i>${t('map.tracked_by_browser')}</span>`
+        : '';
     const navUrl = navigationUrl(pin.lat, pin.lng);
     // Always rendered for an admin regardless of battery level, so there's
     // something to notice/hover even on a healthy pin — deliberately NOT
@@ -9051,7 +9066,7 @@ function buildPinMarker(pin, interactive = true) {
     // (depends on which render*() happened to run last that poll tick). A
     // volunteer's own live position should never be the one that silently
     // disappears underneath another marker.
-    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}${heartRateBlock}<br>${pin.time}${accuracyLine}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
+    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}${heartRateBlock}<br>${pin.time}${accuracyLine}${trackingLine}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
 }
 
 function renderPins(items) {

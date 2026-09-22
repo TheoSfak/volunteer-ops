@@ -2223,6 +2223,7 @@ CREATE TABLE `volunteer_pings` (
   `accuracy_meters` decimal(8,2) DEFAULT NULL,
   `battery_level` tinyint(3) unsigned DEFAULT NULL,
   `source` enum('manual','auto') NOT NULL DEFAULT 'manual',
+  `via` enum('browser','native') DEFAULT NULL COMMENT 'Which client produced the fix; NULL = unknown (pre-v159 rows)',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   KEY `idx_pings_shift_time` (`shift_id`,`created_at`),

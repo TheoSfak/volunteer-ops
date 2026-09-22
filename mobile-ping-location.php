@@ -85,4 +85,6 @@ $batteryLevel = ($rawBattery !== null && $rawBattery !== '' && is_numeric($rawBa
     ? (int) $rawBattery
     : null;
 
-echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source));
+// 'native': bearer-token auth means this can only be the Capacitor Android
+// background-location plugin, which keeps reporting with the screen off.
+echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source, 'native'));
