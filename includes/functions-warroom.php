@@ -1232,21 +1232,26 @@ function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
 const ACK_TRACKER_MAX_PER_KIND = 12;
 
 /**
- * Order types that get an acknowledgement card.
+ * Order types that get an acknowledgement card — every type a volunteer can
+ * press «Ελήφθη» on.
  *
- * Exactly the set whose «Ελήφθη» used to fire a scrolling banner at command
- * staff, plus 'return_to_base' — a broadcast identical in shape to 'message'
- * that never got the banner treatment by oversight, and the one order where
- * "did every single person see this?" is a safety question rather than an
- * administrative one.
+ * 'location', 'photo' and 'video' were left out at first, on the argument that
+ * a request for data is answered by the data: the GPS pin lands on the map, the
+ * photo lands in the gallery, and a tickbox saying the volunteer saw the
+ * request adds a weaker second answer to a question already answered better.
  *
- * 'location', 'photo' and 'video' are NOT here, and their acknowledgement was
- * silent before this too. A request for data is answered by the data: the GPS
- * pin lands on the map, the photo lands in the gallery, and those arrivals are
- * already their own loud event. A tickbox saying the volunteer saw the request
- * would add a second, weaker answer to a question already answered better.
+ * That argument confuses two different questions. "Has the photo arrived?" is
+ * indeed answered by the photo. "Has anyone picked this up?" is not, and it is
+ * the more urgent of the two — it is the one a coordinator asks in the first
+ * minute, while the gallery is still empty and there is nothing to distinguish
+ * a volunteer who is climbing to a vantage point from one whose phone is face
+ * down in a pack. The card answers that question and keeps answering it until
+ * the data lands. They are in.
  */
-const ACK_TRACKER_ORDER_TYPES = ['task', 'speak', 'message', 'return_to_base', 'route', 'live', 'charge_phone'];
+const ACK_TRACKER_ORDER_TYPES = [
+    'task', 'speak', 'message', 'return_to_base', 'route', 'live', 'charge_phone',
+    'location', 'photo', 'video',
+];
 
 /**
  * Every order/sector/dispatch this mission is currently waiting on, each with
@@ -2551,10 +2556,22 @@ function createMissionOrderAndNotify(
                 'mission'    => $missionTitle,
                 'text'       => $rawMessage ?? '',
             ], $lang);
+            // No 'bannerMission', so no scrolling row — deliberately unlike
+            // the recipients' own notification above, which keeps it.
+            //
+            // A bystander admin was getting BOTH a marquee saying "Χ ζήτησε
+            // στίγμα από Ψ" and, from the same order, an acknowledgement card
+            // naming those same people with a box each. Two announcements of
+            // one event, and the marquee was the weaker of the two: it names
+            // the recipients once and then expires, while the card names them
+            // and then goes on to answer whether they replied.
+            //
+            // The recipients must keep theirs. For them the marquee is not a
+            // notice about someone else's order, it IS the order — and it is
+            // where the «Ελήφθη» button lives.
             $fyiPushData = [
                 'url' => $warRoomUrl,
                 'tag' => $orderType . '-request-mission-' . $missionId,
-                'bannerMission' => $missionId,
             ];
             if ($alarmStyle) {
                 $fyiPushData['alarmStyle'] = $alarmStyle;

@@ -331,10 +331,15 @@ if ($action === 'create') {
                 'label_suffix' => $labelSuffix,
                 'target' => $teamLabel ?: t('common.all_teams', [], $lang),
             ], $lang);
+            // No 'bannerMission': same rule as createMissionOrderAndNotify()'s
+            // own admin FYI. This dispatch already produces an acknowledgement
+            // card on every command-staff screen, listing the team it went to
+            // with a box per person; a marquee saying the same thing less well
+            // is the second announcement of one event. The targeted team's own
+            // notification, just above, keeps its banner.
             sendNotification($adminId, t($titleKey, [], $lang), $fyiMessage, 'info', '', [
                 'url' => $warRoomUrl,
                 'tag' => 'dispatch-point-mission-' . $missionId,
-                'bannerMission' => $missionId,
             ]);
         }
     }

@@ -165,19 +165,50 @@ final class AckTrackerPanelTest extends TestCase
     }
 
     /**
-     * Data requests are answered by the data arriving, not by a tickbox saying
-     * the volunteer read the request — so they are deliberately not tracked.
+     * Requests for data get a card too.
+     *
+     * They were excluded at first, on the argument that a request for data is
+     * answered by the data itself. That confuses two questions. "Has the photo
+     * arrived?" is answered by the photo; "has anyone picked this up?" is not,
+     * and it is the more urgent of the two — it is what a coordinator asks in
+     * the first minute, while the gallery is still empty and nothing
+     * distinguishes a volunteer climbing to a vantage point from one whose
+     * phone is face down in a pack.
      */
-    public function testDataRequestOrdersGetNoCard(): void
+    public function testDataRequestOrdersGetTheirOwnCard(): void
     {
         $photoId = $this->sendOrder('photo', null);
         $locationId = $this->sendOrder('location', null);
-        $taskId = $this->sendOrder('task', 'Έλεγχος');
+        $videoId = $this->sendOrder('video', null);
 
         $cards = loadAckTrackerCardsForMission($this->missionId);
-        $this->assertNull($this->cardFor($cards, 'order:' . $photoId));
-        $this->assertNull($this->cardFor($cards, 'order:' . $locationId));
-        $this->assertNotNull($this->cardFor($cards, 'order:' . $taskId), 'Control: the filter is not rejecting everything.');
+        foreach (['photo' => $photoId, 'location' => $locationId, 'video' => $videoId] as $type => $id) {
+            $card = $this->cardFor($cards, 'order:' . $id);
+            $this->assertNotNull($card, "A {$type} request must produce a card.");
+            $this->assertCount(3, $card['people'], 'It lists everyone asked, same as any other order.');
+            $this->assertSame(t('order.' . $type . '.card_title'), $card['title']);
+            $this->assertNull($card['detail'], 'These carry no typed text; the title is the whole meaning.');
+        }
+    }
+
+    /**
+     * Every order type a volunteer can press «Ελήφθη» on is tracked. If a new
+     * one is ever added to the mission_orders enum and not to this list, it
+     * would silently be the one order nobody can see the status of.
+     */
+    public function testEveryAcknowledgeableOrderTypeIsTracked(): void
+    {
+        foreach (ACK_TRACKER_ORDER_TYPES as $type) {
+            $this->assertNotNull(
+                t('order.' . $type . '.card_title'),
+                "Tracked type '{$type}' has no card title, so its card would render blank."
+            );
+            $this->assertNotSame(
+                'order.' . $type . '.card_title',
+                t('order.' . $type . '.card_title'),
+                "Tracked type '{$type}' is missing a translation — t() echoed the key back."
+            );
+        }
     }
 
     /** An order nobody was addressed to is not a card. */
