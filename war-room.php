@@ -2687,8 +2687,17 @@ include __DIR__ . '/includes/header.php';
         .ack-tracker {
             right: 8px; left: 8px; width: auto; max-width: none;
             top: auto; bottom: 12px;
-            max-height: 62vh;
+            /* 44vh, not 62: the panel opens by default on a phone now, and on
+               a 812px screen 62vh is 500px — the map reduced to a strip. At
+               44vh two cards are readable at once and more than half the map
+               is still map. Past that the list scrolls inside itself. */
+            max-height: 44vh;
         }
+        /* A dragged-out card must obey the same ceiling, or one with eight
+           recipients becomes taller than the phone and its lower half is
+           unreachable — there is no page scroll to reach it with, because the
+           float layer is pinned to the viewport. */
+        .ack-tracker-float .ack-card { max-height: 56vh; overflow-y: auto; }
         body.wr-tabs-ready .ack-tracker { bottom: 90px; }
         /* A bottom-anchored ticker occupies the same corner — stack above it
            rather than under it. */
@@ -15457,14 +15466,24 @@ document.getElementById('ackTrackerToggle')?.addEventListener('click', () => {
     try { localStorage.setItem(ACK_DISMISS_KEY + '-collapsed', collapsed ? '1' : '0'); } catch (e) {}
 });
 
-// Phones start collapsed — the bar alone is the whole panel until it is
-// wanted. A remembered choice wins over both defaults.
+// Open on every screen size, phones included.
+//
+// Phones originally started collapsed, on the reasoning that a 296px column
+// down the right of a 375px screen would be the map, covered. That reasoning
+// was right about the column and wrong about the conclusion: docked to the
+// bottom it is not a column at all, and collapsed to a single 37px strip at
+// the very bottom edge it was so easy to miss that on a phone the feature
+// effectively was not there. A panel nobody notices answers nobody's
+// question. It opens; the height cap below is what protects the map.
+//
+// A remembered choice still wins — collapsing it is one tap, and it stays
+// collapsed until the same person opens it again.
 (function initAckTrackerCollapse() {
     const panel = document.getElementById('ackTracker');
     if (!panel) return;
     let stored = null;
     try { stored = localStorage.getItem(ACK_DISMISS_KEY + '-collapsed'); } catch (e) {}
-    const collapsed = stored !== null ? stored === '1' : window.matchMedia('(max-width: 767.98px)').matches;
+    const collapsed = stored === '1';
     panel.classList.toggle('ack-collapsed', collapsed);
     document.getElementById('ackTrackerToggle')?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 })();
