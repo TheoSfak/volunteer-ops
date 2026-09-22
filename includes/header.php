@@ -1296,6 +1296,32 @@ if (isLoggedIn()) {
             white-space: nowrap;
             cursor: help;
         }
+        /* The navbar's user block puts two badge families side by side on
+           every page of the app: the name pills above (home org + flag, K9,
+           captain — .62em, ~16px) and volunteerTypeBadge()'s plain Bootstrap
+           .badge (~24px, square-ish, on the baseline). Eight pixels and two
+           alignments apart, right next to each other, all day. A guest sees
+           it too — their partner-org pill sits in exactly this spot.
+           One height for both, centred. Scoped to the navbar so the same
+           pills keep their own smaller superscript geometry everywhere they
+           ride beside a name in a table or a list.
+           A ~1px difference in optical centre survives this and is not worth
+           chasing: it comes from the name text's own line box, not from the
+           badges — measured, inline-flex on the button does not move it. */
+        .top-navbar .user-name-text .team-name-badge,
+        .top-navbar .user-name-text .k9-badge,
+        .top-navbar .user-name-text .captain-badge,
+        .top-navbar .user-type-badge .badge {
+            height: 1.35rem;
+            padding-top: 0;
+            padding-bottom: 0;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            vertical-align: middle;
+            border-radius: 999px;
+        }
+
         .vitals-zone-ok       { background: #15803d; }
         .vitals-zone-elevated { background: #b45309; }
         .vitals-zone-critical { background: #b91c1c; animation: vitalsPulse 1.4s ease-in-out infinite; }

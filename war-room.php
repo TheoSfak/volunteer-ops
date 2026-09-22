@@ -2316,6 +2316,37 @@ include __DIR__ . '/includes/header.php';
     /* Team member chip for somebody without the GPS tick. Dimmed, never
        hidden — they are on the team and walking with it. */
     .wr-no-gps-chip { opacity: .55; border-style: dashed !important; }
+    /* A roster row can carry five badges after the name: home org, K9,
+       captain, heart rate — four pills from the same family, all 16px tall
+       on vertical-align:top — and the mission team, which is the odd one out:
+       a plain Bootstrap .badge, 24px tall, sitting on the baseline with a
+       square-ish radius. Five badges on one line at two heights and two
+       alignments read as sloppy rather than as a set.
+       One explicit height for all five, centred, so they are provably equal
+       instead of equal-by-arithmetic that drifts the moment a font size
+       changes. Each keeps its own font size: the team label stays the
+       largest because it is the operational fact, the other four are
+       context. Scoped to the roster — these four badges appear beside names
+       all over the app, and nothing else should move. */
+    .participant-row .team-name-badge,
+    .participant-row .k9-badge,
+    .participant-row .captain-badge,
+    .participant-row .vitals-badge,
+    .participant-row .roster-team-badge {
+        height: 1.25rem;
+        padding-top: 0;
+        padding-bottom: 0;
+        line-height: 1;
+        vertical-align: middle;
+        align-items: center;
+        border-radius: 999px;
+    }
+    .participant-row .roster-team-badge {
+        display: inline-flex;
+        margin-left: 4px;
+        padding-left: 8px;
+        padding-right: 8px;
+    }
     .presence-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
     .presence-dot.presence-online { background: #28a745; }
     .presence-dot.presence-offline { background: #adb5bd; }
@@ -3947,7 +3978,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 $isOnlineNow = in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || $hasFreshPing;
                 ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?><?= $takesPart ? '' : ' participant-no-gps' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap" id="participant-row-<?= (int)$participant['volunteer_id'] ?>">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= $isOnlineNow ? 'presence-online' : 'presence-offline' ?>" title="<?= $isOnlineNow ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?><?= k9BadgeHtml((int) $participant['volunteer_id']) ?><?= captainBadgeHtml((int) $participant['volunteer_id']) ?></strong><?= $maySeeVitals ? vitalsBadgeHtml($participantVitals, null, (int)$participant['volunteer_id']) : '' ?><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><?php if (!empty($participant['phone']) && ($canManageWarRoom || ($myTeamId && ($teamIdByUserId[(int)$participant['volunteer_id']] ?? null) === $myTeamId))): ?><br><a href="tel:<?= h($participant['phone']) ?>" class="text-decoration-none"><i class="bi bi-telephone me-1"></i><?= h($participant['phone']) ?></a><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= !$takesPart ? '' : ($participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping')) ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= ($takesPart && !empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= ($isFatigued && $takesPart) ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span><span id="no-gps-note-<?= (int)$participant['volunteer_id'] ?>" class="<?= $takesPart ? 'd-none' : '' ?>"> · <i class="bi bi-geo-alt-slash"></i> <?= t('gps_participant.row_off') ?></span></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= $isOnlineNow ? 'presence-online' : 'presence-offline' ?>" title="<?= $isOnlineNow ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?><?= k9BadgeHtml((int) $participant['volunteer_id']) ?><?= captainBadgeHtml((int) $participant['volunteer_id']) ?></strong><?= $maySeeVitals ? vitalsBadgeHtml($participantVitals, null, (int)$participant['volunteer_id']) : '' ?><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge roster-team-badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><?php if (!empty($participant['phone']) && ($canManageWarRoom || ($myTeamId && ($teamIdByUserId[(int)$participant['volunteer_id']] ?? null) === $myTeamId))): ?><br><a href="tel:<?= h($participant['phone']) ?>" class="text-decoration-none"><i class="bi bi-telephone me-1"></i><?= h($participant['phone']) ?></a><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= !$takesPart ? '' : ($participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping')) ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= ($takesPart && !empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= ($isFatigued && $takesPart) ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span><span id="no-gps-note-<?= (int)$participant['volunteer_id'] ?>" class="<?= $takesPart ? 'd-none' : '' ?>"> · <i class="bi bi-geo-alt-slash"></i> <?= t('gps_participant.row_off') ?></span></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>" id="status-badge-<?= (int)$participant['volunteer_id'] ?>">
                         <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
