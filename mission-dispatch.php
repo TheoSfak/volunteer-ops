@@ -38,11 +38,17 @@ function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $respo
 
 /**
  * Notify command staff that a team confirmed receipt ("Ελήφθη") of a dispatch
- * point/area — the earlier stage of notifyDispatchArrival() above. Also threads
- * bannerMission into pushData so this pops the scrolling banner + alert sound
- * for command staff (war-room.php's banner mechanism is generic: any
- * sendNotification() pushData with bannerMission => $missionId qualifies, no
- * per-feature banner code needed), same as arrival now gets above.
+ * point/area — the earlier stage of notifyDispatchArrival() above.
+ *
+ * No 'bannerMission' any more, and so no scrolling banner: this is a receipt,
+ * and receipts are now rendered by the acknowledgement panel
+ * (loadAckTrackerCardsForMission), which shows a dispatch's whole recipient
+ * list with a box each rather than one marquee per person.
+ *
+ * notifyDispatchArrival() above deliberately keeps its banner. Arriving
+ * somewhere is a change in the state of the operation; confirming you read the
+ * order to go there is the closing half of something command already knows it
+ * sent.
  */
 function notifyDispatchReceive(int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $receiverName, int $receiverId): void {
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
@@ -58,7 +64,6 @@ function notifyDispatchReceive(int $missionId, string $missionTitle, ?int $respo
         sendNotification($recipientId, t('dispatch.receive_notify_title', [], $lang), $message, 'info', 'mission_dispatch_receive', [
             'url' => $warRoomUrl,
             'tag' => 'dispatch-receive-mission-' . $missionId,
-            'bannerMission' => $missionId,
         ]);
     }
 }

@@ -49,18 +49,23 @@ if ($action === 'acknowledge') {
         dbExecute("UPDATE mission_order_recipients SET acknowledged_at = NOW() WHERE id = ?", [$recipient['id']]);
         logAudit('acknowledge_mission_order', 'mission_order_recipients', $recipient['id'], null, ['order_id' => $orderId]);
 
-        // Route/task/message orders each get a loud sound alert to command
-        // staff the instant the recipient acknowledges (bannerMission tag
-        // below is what makes showWarRoomBanner()'s existing
-        // playWarRoomAlertSound() call fire — no new audio code needed).
-        // Photo/video/location request acknowledges stay exactly as silent
-        // as they've always been; this was asked for these three order
-        // types specifically, not a blanket behavior change.
+        // These used to fire a scrolling banner and an alert beep at every
+        // member of command staff, once per person who confirmed. A task sent
+        // to a seven-person team therefore produced seven marquees and seven
+        // beeps that between them said nothing except "somebody else has read
+        // it" — while burying, under themselves, the SOS row they shared the
+        // strip with.
         //
-        // 'live' joins the loud group rather than the silent one: unlike a
-        // photo request, command is waiting to WATCH something, and needs to
-        // know to look at the screen. A silent acknowledgement would leave
-        // them staring at a card with no idea the volunteer had answered.
+        // The notification itself is unchanged (bell, history, push): what is
+        // gone is the banner treatment, hence notifyCommandStaffQuiet(). The
+        // information those rows carried is now rendered properly by the
+        // acknowledgement panel (loadAckTrackerCardsForMission), which shows
+        // all recipients of an order at once with a box each — and so can also
+        // answer the question the banners never could: who has NOT confirmed.
+        //
+        // Photo/video/location acknowledgements were silent before this and
+        // stay silent; they are also deliberately absent from the panel (see
+        // ACK_TRACKER_ORDER_TYPES for why).
         if ($recipient['order_type'] === 'route') {
             $route = dbFetchOne(
                 "SELECT r.id AS route_id, r.mission_id, r.team_id, m.title AS mission_title, m.responsible_user_id, mt.codename, mt.team_number
@@ -74,7 +79,7 @@ if ($action === 'acknowledge') {
                 $teamLbl = $route['team_id']
                     ? teamLabel($route['codename'], $route['team_number'])
                     : routeMixedTeamLabel((int) $route['route_id']);
-                notifyCommandStaffBanner(
+                notifyCommandStaffQuiet(
                     (int) $route['mission_id'], $route['mission_title'], $route['responsible_user_id'] ? (int) $route['responsible_user_id'] : null, $userId,
                     'mission_route_acknowledged', 'route.notify_acknowledged_title', [],
                     'route.notify_acknowledged_message', ['team' => $teamLbl, 'mission' => $route['mission_title']]
@@ -91,7 +96,7 @@ if ($action === 'acknowledge') {
             if ($order) {
                 $recipientName = getCurrentUser()['name'] ?? '';
                 if ($recipient['order_type'] === 'task') {
-                    notifyCommandStaffBanner(
+                    notifyCommandStaffQuiet(
                         (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
                         'mission_task_acknowledged', 'order.task.notify_acknowledged_title', [],
                         'order.task.notify_acknowledged_message', ['name' => $recipientName, 'mission' => $order['mission_title']]
@@ -102,21 +107,23 @@ if ($action === 'acknowledge') {
                     // browser that has not been tapped yet, a helicopter
                     // overhead. The acknowledgement is therefore not a
                     // courtesy here, it is the only confirmation command gets
-                    // that the words landed, so it sounds the same alert as
-                    // the other three.
-                    notifyCommandStaffBanner(
+                    // that the words landed. That argument is why it still
+                    // notifies at all; it is not an argument for a marquee,
+                    // and the panel answers it better — an announcement's card
+                    // shows at a glance which phones stayed silent.
+                    notifyCommandStaffQuiet(
                         (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
                         'mission_speak_acknowledged', 'order.speak.notify_acknowledged_title', [],
                         'order.speak.notify_acknowledged_message', ['name' => $recipientName, 'mission' => $order['mission_title']]
                     );
                 } elseif ($recipient['order_type'] === 'live') {
-                    notifyCommandStaffBanner(
+                    notifyCommandStaffQuiet(
                         (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
                         'mission_live_acknowledged', 'order.live.notify_acknowledged_title', [],
                         'order.live.notify_acknowledged_message', ['name' => $recipientName, 'mission' => $order['mission_title']]
                     );
                 } else {
-                    notifyCommandStaffBanner(
+                    notifyCommandStaffQuiet(
                         (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
                         'global_message_acknowledged', 'global_message.notify_acknowledged_title', [],
                         'global_message.notify_acknowledged_message', ['name' => $recipientName, 'mission' => $order['mission_title']]
@@ -146,7 +153,9 @@ if ($action === 'acknowledge') {
                     [
                         'url' => rtrim(BASE_URL, '/') . '/war-room.php?id=' . $order['mission_id'],
                         'tag' => 'charge_phone-ack-' . $orderId,
-                        'bannerMission' => (int) $order['mission_id'],
+                        // No 'bannerMission': same rule as the four above. The
+                        // sender still gets the notification, and the battery
+                        // alert's own acknowledgement card shows the tick.
                     ]
                 );
             }

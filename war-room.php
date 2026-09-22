@@ -1591,6 +1591,11 @@ if (get('ajax') === '1') {
         'assistant' => $canManageWarRoom
             ? buildMissionAssistantPanel($missionId, (int) $user['id'], $missionShiftIds)
             : null,
+        // Acknowledgement panel. Command staff only, and deliberately free of
+        // anything now()-relative (see ACK_TRACKER_MAX_PER_KIND) so a mission
+        // where nobody has pressed anything hashes identically tick after
+        // tick and costs no bandwidth at all.
+        'ackTracker' => $canManageWarRoom ? loadAckTrackerCardsForMission($missionId) : null,
     ];
 
     // Don't re-send 51KB that the client already has.
@@ -1743,6 +1748,10 @@ $restrictedAreaProximity = $loadRestrictedAreaProximity();
 $assistantPanel = $canManageWarRoom
     ? buildMissionAssistantPanel($missionId, (int) $user['id'], $missionShiftIds)
     : null;
+// Acknowledgement panel — the replacement for the «Ελήφθη» scrolling rows.
+// Command staff only, same as the assistant above and for the same reason:
+// it is a list of other people's names across the whole mission.
+$ackTrackerCards = $canManageWarRoom ? loadAckTrackerCardsForMission($missionId) : [];
 
 $firstShift = $shifts[0]['start_time'] ?? $mission['start_datetime'];
 $lastShift = !empty($shifts) ? end($shifts)['end_time'] : $mission['end_datetime'];
@@ -2536,6 +2545,157 @@ include __DIR__ . '/includes/header.php';
     body.wr-tabs-ready .assistant-fab { bottom: 140px; }
     .assistant-fab:hover { background: #1e3a8a; }
 
+    /* ── Acknowledgement panel ────────────────────────────────────────────
+       Fixed to the right edge so it survives scrolling — the whole point of
+       the thing it replaced. z-index 1150: above the map and its controls,
+       above the sticky .top-navbar (1020, which it must clear rather than
+       hide under), but BELOW the ticker (1900) and the SOS overlay. A list of
+       who confirmed a task must never cover an actual alarm.
+
+       --wr-acktracker-top is measured at runtime (syncAckTrackerOffset), not
+       hardcoded: the navbar's height depends on the theme's padding, and the
+       ticker's on how many alert rows are currently up. A constant here was
+       wrong the moment either changed.
+
+       The bottom stop clears the assistant FAB, which lives at right:16px /
+       bottom:96px — overlapping it would put a scrollable list on top of the
+       button a coordinator reaches for under pressure. */
+    .ack-tracker {
+        position: fixed;
+        right: 12px;
+        top: var(--wr-acktracker-top, 84px);
+        z-index: 1150;
+        width: 296px;
+        max-width: calc(100vw - 24px);
+        max-height: calc(100vh - var(--wr-acktracker-top, 84px) - 160px);
+        display: flex;
+        flex-direction: column;
+        background: #0f172a;
+        color: #e2e8f0;
+        border: 1px solid #1e3a5f;
+        border-radius: 10px;
+        box-shadow: 0 8px 28px rgba(0,0,0,.45);
+        overflow: hidden;
+    }
+    .ack-tracker[hidden] { display: none; }
+    .ack-tracker-bar {
+        display: flex; align-items: center; gap: .25rem;
+        padding: .4rem .3rem .4rem .55rem;
+        background: #172554;
+        border-bottom: 1px solid #1e3a5f;
+        flex-shrink: 0;
+    }
+    .ack-tracker-toggle {
+        flex: 1; min-width: 0;
+        display: flex; align-items: center; gap: .45rem;
+        background: transparent; border: none; color: #e2e8f0;
+        font-size: .78rem; font-weight: 700; text-align: left;
+        padding: .1rem .15rem; cursor: pointer;
+    }
+    .ack-tracker-toggle > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ack-tracker-chevron { font-size: .7rem; transition: transform .15s ease; flex-shrink: 0; }
+    .ack-tracker.ack-collapsed .ack-tracker-chevron { transform: rotate(-90deg); }
+    .ack-tracker.ack-collapsed .ack-tracker-list { display: none; }
+    /* Every card has been dragged out — the bar stays for the total and the
+       «close all», but an empty scroll box under it would just be a stray
+       8px strip. */
+    .ack-tracker.ack-stack-empty .ack-tracker-list { display: none; }
+    .ack-tracker-close {
+        background: transparent; border: none; color: #93c5fd;
+        font-size: 1.25rem; line-height: 1; cursor: pointer;
+        padding: 0 .35rem; flex-shrink: 0;
+    }
+    .ack-tracker-close:hover { color: #fff; }
+    .ack-tracker-list { overflow-y: auto; padding: .4rem; display: flex; flex-direction: column; gap: .4rem; }
+
+    /* One card per order. The left border is the state: amber while anyone is
+       still silent, green once every box is ticked — so the stack is readable
+       before a single word of it is. */
+    .ack-card {
+        border: 1px solid #1e3a5f;
+        border-left: 4px solid #f59e0b;
+        border-radius: 7px;
+        background: #111c33;
+        padding: .4rem .45rem .35rem;
+    }
+    .ack-card.ack-card-done { border-left-color: #22c55e; }
+    .ack-card-head { display: flex; align-items: flex-start; gap: .35rem; }
+    /* The header doubles as the drag handle. touch-action:none is what makes
+       this work on a phone at all — without it the browser claims the gesture
+       as a scroll and the pointermove events stop arriving mid-drag. */
+    .ack-card-head { cursor: grab; touch-action: none; }
+    .ack-card-head .ack-tracker-close { cursor: pointer; }
+    .ack-card.ack-dragging { opacity: .93; box-shadow: 0 14px 34px rgba(0,0,0,.6); }
+    .ack-card.ack-dragging .ack-card-head { cursor: grabbing; }
+
+    /* Dragged-out cards. inset:0 rather than a sized box so a card can be
+       dropped anywhere; pointer-events are handed back only to the cards
+       themselves, so the empty space in this layer stays transparent to
+       clicks on the map beneath it. */
+    .ack-tracker-float { position: fixed; inset: 0; z-index: 1151; pointer-events: none; }
+    .ack-tracker-float .ack-card {
+        position: absolute;
+        width: 296px;
+        max-width: calc(100vw - 16px);
+        pointer-events: auto;
+        border: 1px solid #1e3a5f;
+        border-left-width: 4px;
+        box-shadow: 0 8px 28px rgba(0,0,0,.5);
+    }
+    .ack-card-titles { flex: 1; min-width: 0; }
+    .ack-card-kind { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: #93c5fd; }
+    .ack-card-detail {
+        font-size: .78rem; color: #f1f5f9; font-weight: 600;
+        margin-top: .1rem;
+        display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+        overflow-wrap: anywhere;
+    }
+    .ack-card-meta { font-size: .66rem; color: #94a3b8; margin-top: .12rem; }
+    .ack-card-count { font-size: .68rem; font-weight: 700; color: #fbbf24; margin-top: .2rem; }
+    .ack-card.ack-card-done .ack-card-count { color: #4ade80; }
+    .ack-card-people { list-style: none; margin: .3rem 0 0; padding: 0; }
+    .ack-card-person {
+        display: flex; align-items: center; gap: .4rem;
+        font-size: .74rem; padding: .12rem 0; color: #cbd5e1;
+    }
+    /* A real disabled checkbox, not a glyph: it reads as a checkbox to a
+       screen reader, and it cannot be clicked — nobody in the command post
+       gets to tick a confirmation on a volunteer's behalf. */
+    .ack-card-person input { margin: 0; flex-shrink: 0; accent-color: #22c55e; pointer-events: none; }
+    .ack-card-person.ack-done { color: #86efac; }
+    .ack-card-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ack-card-team { font-size: .64rem; color: #64748b; flex-shrink: 0; }
+    .ack-card-time { font-size: .64rem; color: #4ade80; flex-shrink: 0; }
+    /* The tick that just landed. Brief, and disabled under
+       prefers-reduced-motion — this panel exists to be calmer than what it
+       replaced, not to flash. */
+    .ack-card-person.ack-just-in { animation: ack-flash 1.1s ease-out 1; }
+    @keyframes ack-flash {
+        0%   { background: rgba(34,197,94,.34); }
+        100% { background: transparent; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .ack-card-person.ack-just-in { animation: none; }
+        .ack-tracker-chevron { transition: none; }
+    }
+
+    /* Phone: dock to the bottom, full width, and start collapsed to the
+       one-line summary. The map is the screen on a phone; a column down the
+       right of it would be the feature covering the thing it reports on.
+       Bottom offset clears .wr-tabbar when the volunteer tab bar is up. */
+    @media (max-width: 767.98px) {
+        .ack-tracker {
+            right: 8px; left: 8px; width: auto; max-width: none;
+            top: auto; bottom: 12px;
+            max-height: 62vh;
+        }
+        body.wr-tabs-ready .ack-tracker { bottom: 90px; }
+        /* A bottom-anchored ticker occupies the same corner — stack above it
+           rather than under it. */
+        body.wr-ticker-bottom .ack-tracker { bottom: calc(var(--wr-ticker-bottom-h, 0px) + 12px); }
+        body.wr-ticker-bottom.wr-tabs-ready .ack-tracker { bottom: calc(var(--wr-ticker-bottom-h, 0px) + 90px); }
+    }
+
     /* One row per finding. The left border is the severity, so a coordinator
        reads the shape of the list before reading a single word of it. */
     .assistant-item {
@@ -2835,6 +2995,37 @@ include __DIR__ . '/includes/header.php';
 <?= showFlash() ?>
 
 <div id="warRoomBanner" class="war-room-banner" data-ticker-pos="<?= getSetting('war_room_ticker_position', 'top') === 'bottom' ? 'bottom' : 'top' ?>"></div>
+
+<?php if ($canManageWarRoom): ?>
+<!-- Acknowledgement panel. position:fixed, so it follows the page up and down
+     and stays on screen through every tab and every scroll position — the
+     scrolling rows it replaced were fixed for the same reason.
+
+     Empty markup on purpose: renderAckTracker() owns everything inside,
+     including the initial paint, so there is exactly one code path building a
+     card instead of a PHP one and a JS one that can drift apart.
+
+     On a phone it collapses to a single summary bar docked at the bottom
+     (see the CSS) — a 290px column down the right of a 375px screen would be
+     the map, covered. -->
+<div id="ackTracker" class="ack-tracker" hidden>
+    <div class="ack-tracker-bar">
+        <button type="button" id="ackTrackerToggle" class="ack-tracker-toggle" aria-expanded="true" aria-controls="ackTrackerList">
+            <i class="bi bi-check2-square"></i>
+            <span id="ackTrackerBarLabel"><?= t('acktracker.title') ?></span>
+            <i class="bi bi-chevron-down ack-tracker-chevron"></i>
+        </button>
+        <button type="button" id="ackTrackerCloseAll" class="ack-tracker-close" aria-label="<?= t('acktracker.close_all') ?>" title="<?= t('acktracker.close_all') ?>">&times;</button>
+    </div>
+    <div id="ackTrackerList" class="ack-tracker-list"></div>
+</div>
+<!-- Cards the coordinator has dragged out of the stack. A separate layer
+     because #ackTracker is overflow:hidden and scrollable — a card cannot be
+     dropped anywhere on screen while it is still a child of a box it is
+     clipped by. The layer itself is pointer-events:none so it never steals a
+     click from the map underneath it; only the cards in it are clickable. -->
+<div id="ackTrackerFloat" class="ack-tracker-float"></div>
+<?php endif; ?>
 
 <?php if ($canManageWarRoom): ?>
 <!-- The hero is not sticky (nothing on this page is), so the button up there
@@ -12804,11 +12995,29 @@ const wrBaseContentPad = wrContentWrapperEl ? {
     bottom: parseFloat(getComputedStyle(wrContentWrapperEl).paddingBottom) || 0
 } : {top: 0, bottom: 0};
 function syncTickerSpacing() {
-    if (!wrContentWrapperEl) return;
     const bannerEl = document.getElementById('warRoomBanner');
     const mapCardEl = document.getElementById('mapCard');
     const relocated = !!(mapCardEl && mapCardEl.classList.contains('map-fullscreen-active'));
     const h = (!relocated && bannerEl && bannerEl.style.display === 'flex') ? bannerEl.offsetHeight : 0;
+    // The acknowledgement panel is fixed to the right edge and has to start
+    // below whatever is already pinned to the top of the viewport. Two things
+    // can be: the sticky .top-navbar (always) and the ticker (only when it is
+    // showing AND configured to the top, where it covers the navbar outright).
+    // Measured rather than hardcoded — the navbar's height moves with the
+    // theme's padding, and the ticker's with how many alerts are up — and
+    // published as a CSS variable so the panel's own max-height can subtract
+    // it without a second measurement going stale.
+    const navH = document.querySelector('.top-navbar')?.offsetHeight || 0;
+    const topOccupied = wrTickerPos === 'top' ? Math.max(navH, h) : navH;
+    document.documentElement.style.setProperty('--wr-acktracker-top', (topOccupied + 12) + 'px');
+    document.documentElement.style.setProperty('--wr-ticker-bottom-h', (wrTickerPos === 'bottom' ? h : 0) + 'px');
+    // Read by the phone-width rules, which dock the panel to the same bottom
+    // corner a bottom-anchored ticker occupies.
+    document.body.classList.toggle('wr-ticker-bottom', wrTickerPos === 'bottom');
+
+    // Guarded here rather than at the top of the function: the offsets above
+    // must still be published on a page with no .content-wrapper.
+    if (!wrContentWrapperEl) return;
     if (wrTickerPos === 'bottom') {
         wrContentWrapperEl.style.paddingBottom = h ? (wrBaseContentPad.bottom + h) + 'px' : '';
     } else {
@@ -12816,6 +13025,7 @@ function syncTickerSpacing() {
     }
 }
 window.addEventListener('resize', syncTickerSpacing);
+syncTickerSpacing();
 
 // Persistent status rows (SOS/Restricted-Area) — unlike showWarRoomBanner's
 // one-shot order/dispatch notices below, these track a live condition: no
@@ -14835,6 +15045,423 @@ document.querySelectorAll('textarea[data-ai-draft="order"], textarea[data-ai-dra
 });
 
 renderAssistant(assistantData);
+
+// ── Acknowledgement panel ────────────────────────────────────────────────────
+// Replaced the «Ελήφθη» scrolling rows. Those could only report the events that
+// happened — one marquee per person who confirmed, sixty seconds each, gone.
+// The question a coordinator actually has is the one no event can answer: who
+// has NOT confirmed. Silence emits nothing, so it has to be rendered from the
+// recipient list, which is what arrives in data.ackTracker.
+//
+// Server decides WHAT is outstanding; this decides only what is on screen.
+let ackTrackerCards = <?= json_encode($ackTrackerCards, JSON_UNESCAPED_UNICODE) ?>;
+const ACK_DISMISS_KEY = 'wr-ack-dismissed-<?= (int) $missionId ?>';
+
+// Keys the coordinator has closed with X. Persisted per device, per mission:
+// closing a card is a judgement ("I have seen this, stop showing it to me")
+// and a page reload is not a reason to overrule it. Per device and not
+// server-side on purpose — it is one person's view of the stack, and an admin
+// dismissing a card must not blank it on their colleague's screen.
+let ackDismissed = new Set();
+try {
+    const stored = JSON.parse(localStorage.getItem(ACK_DISMISS_KEY) || '[]');
+    if (Array.isArray(stored)) ackDismissed = new Set(stored.map(String));
+} catch (e) { /* private window, blocked storage — an empty set is correct */ }
+
+// Where the coordinator has parked each card, {key: {x, y}} in viewport
+// coordinates. A key being present here is the ONLY thing that decides whether
+// its card is in the stack or floating free, which keeps drag, drop and dock
+// as three edits to one object rather than three pieces of state to keep in
+// agreement. Persisted per device, like the dismissals: a parked card is a
+// layout choice about one person's screen, not a fact about the operation.
+const ACK_POS_KEY = 'wr-ack-pos-<?= (int) $missionId ?>';
+let ackPositions = {};
+try {
+    const stored = JSON.parse(localStorage.getItem(ACK_POS_KEY) || '{}');
+    if (stored && typeof stored === 'object' && !Array.isArray(stored)) ackPositions = stored;
+} catch (e) { /* blocked storage — every card simply starts docked */ }
+
+function persistAckPositions() {
+    try { localStorage.setItem(ACK_POS_KEY, JSON.stringify(ackPositions)); } catch (e) {}
+}
+
+// Keeps a card fully on screen. Needed in three places: while dragging, on
+// resize, and when reading a remembered position back on load — a card parked
+// at the right-hand edge of a desktop is off-screen entirely on the phone the
+// same coordinator picks up next, and an invisible card cannot be dragged back.
+function clampAckPos(x, y, w, h) {
+    const maxX = Math.max(4, window.innerWidth - w - 4);
+    const maxY = Math.max(4, window.innerHeight - h - 4);
+    return {x: Math.round(Math.min(Math.max(4, x), maxX)), y: Math.round(Math.min(Math.max(4, y), maxY))};
+}
+
+function persistAckDismissed() {
+    try {
+        // Bounded: a long operation must not grow this without limit, and the
+        // only entries worth keeping are recent ones — an order old enough to
+        // have fallen out of the server's newest-N can never come back anyway.
+        localStorage.setItem(ACK_DISMISS_KEY, JSON.stringify(Array.from(ackDismissed).slice(-200)));
+    } catch (e) { /* storage full or blocked — the panel still works this session */ }
+}
+
+// Every key this tab has ever been told about. The rule that makes a refresh
+// behave the way a coordinator expects:
+//
+//   · first payload after load → seed this set silently, and open cards ONLY
+//     for orders still waiting on someone. Yesterday's fully-confirmed traffic
+//     does not come back to be closed by hand a second time.
+//   · every payload after that → a key not in the set is genuinely new, so it
+//     opens a card whatever its state. A brand-new order is always 0-of-N at
+//     birth, so "new" and "unconfirmed" agree here.
+const ackSeenKeys = new Set();
+// Cards currently on screen, keyed the same way. Held here rather than read
+// back out of the DOM so a card SURVIVES leaving the server payload: once
+// everyone has confirmed and the order ages past ACK_TRACKER_MAX_PER_KIND, the
+// card stays exactly as it was until the X is pressed, which is what "μέχρι να
+// το κλείσει ο admin" means.
+const ackOpenCards = new Map();
+let ackTrackerSeeded = false;
+// Which people were already ticked last render, so the green flash fires once
+// for the confirmation that just landed and never again on a later poll.
+const ackTickedBefore = new Map();
+
+function ackCardIsPending(card) {
+    return card.people.some(p => !p.ack_ts);
+}
+
+function ackTimeLabel(ts) {
+    if (!ts) return '';
+    const d = new Date(ts * 1000);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function ackCardHtml(card, inlineStyle) {
+    const acked = card.people.filter(p => p.ack_ts).length;
+    const total = card.people.length;
+    const done = acked === total;
+    const before = ackTickedBefore.get(card.key) || new Set();
+
+    const people = card.people.map((person, i) => {
+        // Index-based identity, not name: two volunteers can share a name, and
+        // the server returns this list in a stable ORDER BY either way.
+        const personKey = card.key + '#' + i;
+        const isNew = !!person.ack_ts && !before.has(personKey);
+        const cls = 'ack-card-person' + (person.ack_ts ? ' ack-done' : '') + (isNew ? ' ack-just-in' : '');
+        const team = person.team ? `<span class="ack-card-team">${escapeHtml(person.team)}</span>` : '';
+        const when = person.ack_ts
+            ? `<span class="ack-card-time">${escapeHtml(ackTimeLabel(person.ack_ts))}</span>`
+            : '';
+        // aria-label carries what the colour and the empty box say visually,
+        // so the panel is readable to a screen reader without it.
+        const label = person.ack_ts
+            ? escapeHtml(person.name)
+            : escapeHtml(person.name) + ' — ' + escapeHtml(t('acktracker.pending_hint'));
+        return `<li class="${cls}">
+                    <input type="checkbox" disabled ${person.ack_ts ? 'checked' : ''} aria-label="${label}">
+                    <span class="ack-card-name" title="${escapeHtml(person.name)}">${escapeHtml(person.name)}</span>
+                    ${team}${when}
+                </li>`;
+    }).join('');
+
+    const detail = card.detail
+        ? `<div class="ack-card-detail">${escapeHtml(card.detail)}</div>`
+        : '';
+    const countText = done
+        ? t('acktracker.all_done')
+        : t('acktracker.count', {acked: acked, total: total});
+
+    return `<div class="ack-card${done ? ' ack-card-done' : ''}" data-ack-key="${escapeHtml(card.key)}"${inlineStyle ? ` style="${inlineStyle}"` : ''}>
+                <div class="ack-card-head" title="${escapeHtml(t('acktracker.drag_hint'))}">
+                    <div class="ack-card-titles">
+                        <div class="ack-card-kind">${escapeHtml(card.title)}</div>
+                        ${detail}
+                        <div class="ack-card-meta">${escapeHtml(ackTimeLabel(card.ts))} · ${escapeHtml(t('acktracker.sent_by', {name: card.by || ''}))}</div>
+                        <div class="ack-card-count">${escapeHtml(countText)}</div>
+                    </div>
+                    <button type="button" class="ack-tracker-close ack-card-close"
+                            aria-label="${escapeHtml(t('acktracker.close_card'))}"
+                            title="${escapeHtml(t('acktracker.close_card'))}">&times;</button>
+                </div>
+                <ul class="ack-card-people">${people}</ul>
+            </div>`;
+}
+
+function renderAckTracker(cards) {
+    const panel = document.getElementById('ackTracker');
+    if (!panel || !Array.isArray(cards)) return;
+
+    cards.forEach(card => {
+        const isNewToThisTab = !ackSeenKeys.has(card.key);
+        ackSeenKeys.add(card.key);
+        if (ackDismissed.has(card.key)) return;
+        // On the very first payload only pending cards open; after that any
+        // key this tab has not seen before is a freshly issued order.
+        if (!ackTrackerSeeded && !ackCardIsPending(card)) return;
+        if (!isNewToThisTab && !ackOpenCards.has(card.key)) return;
+        ackOpenCards.set(card.key, card);
+    });
+    ackTrackerSeeded = true;
+
+    const open = Array.from(ackOpenCards.values()).sort((a, b) => b.ts - a.ts);
+    // A card the coordinator has dragged somewhere lives in the floating
+    // layer; everything else stays in the stack. Which of the two a card is in
+    // is decided by one thing only — whether it has a remembered position — so
+    // dragging, dropping and docking are all just edits to ackPositions.
+    const docked = open.filter(c => !ackPositions[c.key]);
+    const floating = open.filter(c => ackPositions[c.key]);
+
+    const list = document.getElementById('ackTrackerList');
+    const floatLayer = document.getElementById('ackTrackerFloat');
+
+    // Signature guard, same idea as the map's own renderers: this runs every
+    // 5 seconds, and rebuilding identical HTML would throw away the scroll
+    // position inside the list, restart the flash animation on every tick,
+    // and — now — yank the card out from under a drag in progress.
+    const sigOf = list2 => list2.map(c =>
+        c.key + ':' + c.people.map(p => p.ack_ts || 0).join(',') +
+        (ackPositions[c.key] ? '@' + ackPositions[c.key].x + ',' + ackPositions[c.key].y : '')
+    ).join('|');
+
+    const dockedSig = sigOf(docked);
+    if (list.dataset.ackSig !== dockedSig) {
+        list.innerHTML = docked.map(ackCardHtml).join('');
+        list.dataset.ackSig = dockedSig;
+    }
+
+    const floatSig = sigOf(floating);
+    if (floatLayer.dataset.ackSig !== floatSig) {
+        floatLayer.innerHTML = floating.map(card => {
+            const pos = ackPositions[card.key];
+            return ackCardHtml(card, `left:${pos.x}px;top:${pos.y}px;`);
+        }).join('');
+        floatLayer.dataset.ackSig = floatSig;
+    }
+
+    // The bar stays up while ANY card is open, even when every one of them has
+    // been dragged out — it carries the running total and the «close all», and
+    // both still apply to cards that are no longer in the stack. The empty
+    // list underneath it is collapsed rather than left as a bare strip.
+    panel.hidden = open.length === 0;
+    panel.classList.toggle('ack-stack-empty', docked.length === 0);
+
+    // Recorded AFTER the render, so the row that flashed this time is quiet
+    // the next time around.
+    ackTickedBefore.clear();
+    open.forEach(card => {
+        const ticked = new Set();
+        card.people.forEach((person, i) => { if (person.ack_ts) ticked.add(card.key + '#' + i); });
+        ackTickedBefore.set(card.key, ticked);
+    });
+
+    if (open.length) syncAckTrackerBar();
+}
+
+// The collapsed bar's label. On a phone this line IS the panel most of the
+// time, so it has to carry the number that decides whether it is worth
+// opening — not just the word "Acknowledgements".
+function syncAckTrackerBar() {
+    const open = Array.from(ackOpenCards.values());
+    if (!open.length) return;
+    let acked = 0, total = 0;
+    open.forEach(card => {
+        total += card.people.length;
+        acked += card.people.filter(p => p.ack_ts).length;
+    });
+    const label = document.getElementById('ackTrackerBarLabel');
+    if (!label) return;
+    label.textContent = open.length === 1
+        ? t('acktracker.mobile_summary_one', {acked: acked, total: total})
+        : t('acktracker.mobile_summary', {cards: open.length, acked: acked, total: total});
+}
+
+function dismissAckCard(key) {
+    ackDismissed.add(key);
+    ackOpenCards.delete(key);
+    ackTickedBefore.delete(key);
+    // A closed card must not leave its parking spot behind: reopening the same
+    // key later (it cannot today, but nothing stops a future caller) would put
+    // it back at coordinates the coordinator has long forgotten choosing.
+    if (ackPositions[key]) { delete ackPositions[key]; persistAckPositions(); }
+    persistAckDismissed();
+    // Both signatures, because the card could have been in either place.
+    const list = document.getElementById('ackTrackerList');
+    if (list) list.dataset.ackSig = '';
+    const floatLayer = document.getElementById('ackTrackerFloat');
+    if (floatLayer) floatLayer.dataset.ackSig = '';
+    renderAckTracker([]);
+}
+
+// One handler for both places a card can live, because a card in the floating
+// layer is the same markup with the same close button.
+[document.getElementById('ackTrackerList'), document.getElementById('ackTrackerFloat')].forEach(root => {
+    root?.addEventListener('click', e => {
+        const btn = e.target.closest('.ack-card-close');
+        if (!btn) return;
+        const key = btn.closest('.ack-card')?.dataset.ackKey;
+        if (key) dismissAckCard(key);
+    });
+    // Double-click the header to send a parked card back to the stack. The
+    // only way back otherwise would be to drag it into the panel, which means
+    // hitting a target that moves as the stack rebuilds under it.
+    root?.addEventListener('dblclick', e => {
+        if (e.target.closest('.ack-card-close')) return;
+        const card = e.target.closest('.ack-card-head')?.closest('.ack-card');
+        const key = card?.dataset.ackKey;
+        if (!key || !ackPositions[key]) return;
+        delete ackPositions[key];
+        persistAckPositions();
+        renderAckTracker([]);
+    });
+});
+
+// ── Dragging a card out of the stack ─────────────────────────────────────────
+// Pointer events rather than mouse events: one code path covers a mouse, a
+// finger and a stylus, which matters because this is used on a laptop in the
+// command post and on a tablet in the back of a vehicle.
+//
+// The card is NOT lifted on pointerdown. A coordinator pressing a card to read
+// it, or starting a text selection, must not find it has silently torn loose
+// and been remembered there — so nothing happens until the pointer has
+// actually travelled past a threshold, and only then does the card detach.
+(function initAckCardDragging() {
+    const DRAG_THRESHOLD_PX = 5;
+    let pending = null;   // {key, startX, startY, grabDX, grabDY, w, h}
+    let dragging = null;  // the floating element currently following the pointer
+
+    function cardElement(key) {
+        return document.querySelector(`.ack-tracker-float .ack-card[data-ack-key="${CSS.escape(key)}"]`);
+    }
+
+    function onPointerDown(e) {
+        // Left button / touch / pen only, and never when the gesture starts on
+        // the close button — that is a click, not a handle.
+        if (e.button !== undefined && e.button !== 0) return;
+        const head = e.target.closest('.ack-card-head');
+        if (!head || e.target.closest('.ack-card-close')) return;
+        const card = head.closest('.ack-card');
+        const key = card?.dataset.ackKey;
+        if (!key) return;
+
+        const rect = card.getBoundingClientRect();
+        pending = {
+            key,
+            startX: e.clientX,
+            startY: e.clientY,
+            // Where inside the card the pointer grabbed it, so the card does
+            // not jump to have its corner under the cursor on lift-off.
+            grabDX: e.clientX - rect.left,
+            grabDY: e.clientY - rect.top,
+            w: rect.width,
+            h: rect.height,
+            originX: rect.left,
+            originY: rect.top
+        };
+    }
+
+    function onPointerMove(e) {
+        if (!pending) return;
+
+        if (!dragging) {
+            const moved = Math.hypot(e.clientX - pending.startX, e.clientY - pending.startY);
+            if (moved < DRAG_THRESHOLD_PX) return;
+            // Lift: park the card exactly where it already is on screen, then
+            // re-render. It moves from the stack into the floating layer with
+            // no visible jump, because the position it is given is the
+            // position it was already occupying.
+            ackPositions[pending.key] = clampAckPos(pending.originX, pending.originY, pending.w, pending.h);
+            renderAckTracker([]);
+            dragging = cardElement(pending.key);
+            if (!dragging) { pending = null; return; }
+            dragging.classList.add('ack-dragging');
+            // Captured on the document, not the card: the re-render above
+            // replaced the element the gesture started on, so a capture set on
+            // the old node would have died with it.
+            document.body.style.userSelect = 'none';
+        }
+
+        const pos = clampAckPos(e.clientX - pending.grabDX, e.clientY - pending.grabDY, pending.w, pending.h);
+        ackPositions[pending.key] = pos;
+        dragging.style.left = pos.x + 'px';
+        dragging.style.top = pos.y + 'px';
+        e.preventDefault();
+    }
+
+    function onPointerUp() {
+        if (dragging) {
+            dragging.classList.remove('ack-dragging');
+            document.body.style.userSelect = '';
+            // The signature carries the position, so without this the next
+            // poll would see a stale signature and skip the re-render that
+            // keeps the DOM and ackPositions in agreement.
+            const floatLayer = document.getElementById('ackTrackerFloat');
+            if (floatLayer) floatLayer.dataset.ackSig = '';
+            persistAckPositions();
+            renderAckTracker([]);
+        }
+        pending = null;
+        dragging = null;
+    }
+
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('pointermove', onPointerMove, {passive: false});
+    document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointercancel', onPointerUp);
+
+    // A parked card must not be left stranded off-screen when the window
+    // shrinks, is rotated, or the same account is opened on a smaller device.
+    window.addEventListener('resize', () => {
+        let changed = false;
+        Object.keys(ackPositions).forEach(key => {
+            const el = cardElement(key);
+            const w = el ? el.offsetWidth : 296;
+            const h = el ? el.offsetHeight : 120;
+            const clamped = clampAckPos(ackPositions[key].x, ackPositions[key].y, w, h);
+            if (clamped.x !== ackPositions[key].x || clamped.y !== ackPositions[key].y) {
+                ackPositions[key] = clamped;
+                changed = true;
+            }
+        });
+        if (changed) {
+            persistAckPositions();
+            const floatLayer = document.getElementById('ackTrackerFloat');
+            if (floatLayer) floatLayer.dataset.ackSig = '';
+            renderAckTracker([]);
+        }
+    });
+})();
+
+document.getElementById('ackTrackerCloseAll')?.addEventListener('click', () => {
+    Array.from(ackOpenCards.keys()).forEach(key => {
+        ackDismissed.add(key);
+        ackTickedBefore.delete(key);
+        delete ackPositions[key];
+    });
+    ackOpenCards.clear();
+    persistAckDismissed();
+    persistAckPositions();
+    renderAckTracker([]);
+});
+
+document.getElementById('ackTrackerToggle')?.addEventListener('click', () => {
+    const panel = document.getElementById('ackTracker');
+    const collapsed = panel.classList.toggle('ack-collapsed');
+    document.getElementById('ackTrackerToggle').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    try { localStorage.setItem(ACK_DISMISS_KEY + '-collapsed', collapsed ? '1' : '0'); } catch (e) {}
+});
+
+// Phones start collapsed — the bar alone is the whole panel until it is
+// wanted. A remembered choice wins over both defaults.
+(function initAckTrackerCollapse() {
+    const panel = document.getElementById('ackTracker');
+    if (!panel) return;
+    let stored = null;
+    try { stored = localStorage.getItem(ACK_DISMISS_KEY + '-collapsed'); } catch (e) {}
+    const collapsed = stored !== null ? stored === '1' : window.matchMedia('(max-width: 767.98px)').matches;
+    panel.classList.toggle('ack-collapsed', collapsed);
+    document.getElementById('ackTrackerToggle')?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+})();
+
+renderAckTracker(ackTrackerCards);
 <?php endif; ?>
 
 // Named (not the previous inline arrow passed straight to setInterval) so
@@ -15001,6 +15628,12 @@ function pollWarRoomData() {
         // always carries this key and it is legitimately null for a
         // volunteer, whose page never defines the renderer at all.
         if (data.assistant && typeof renderAssistant === 'function') renderAssistant(data.assistant);
+        // Same typeof guard and the same reason: the key is always present and
+        // is legitimately null for a volunteer, whose page never defines the
+        // renderer. An empty array is a real value here (nothing outstanding)
+        // and must still reach the renderer, which is why this tests the
+        // function rather than the data.
+        if (typeof renderAckTracker === 'function' && Array.isArray(data.ackTracker)) renderAckTracker(data.ackTracker);
         if (data.nearbyTeams) renderNearbyTeams(nearbyTeams = data.nearbyTeams);
         if (data.restrictedAreaProximity) renderRestrictedAreaProximity(restrictedAreaProximity = data.restrictedAreaProximity);
         if (data.teamDistances) renderTeamDistances(teamDistances = data.teamDistances);

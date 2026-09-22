@@ -1215,6 +1215,265 @@ function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
 }
 
 /**
+ * How many of each kind of order the acknowledgement panel tracks at once.
+ *
+ * Deliberately a hard cap rather than a time window. A window would have to be
+ * expressed relative to now(), and every value in this payload is hashed to
+ * decide whether the 5s poll needs to re-send 51KB (see war-room.php's
+ * $payloadHash) — a sliding cutoff changes the hash on a tick where nothing
+ * actually happened, which quietly turns the whole caching layer off. Newest-N
+ * depends only on real events, so a quiet mission re-sends nothing at all.
+ *
+ * Nothing is lost when an unanswered order falls off the end: «Τι μου ξέφυγε»
+ * (buildMissionAssistantPanel) lists every order nobody has confirmed, with no
+ * cap and no dismissal, and that is the right place for a backlog. This panel
+ * is for what is happening now.
+ */
+const ACK_TRACKER_MAX_PER_KIND = 12;
+
+/**
+ * Order types that get an acknowledgement card.
+ *
+ * Exactly the set whose «Ελήφθη» used to fire a scrolling banner at command
+ * staff, plus 'return_to_base' — a broadcast identical in shape to 'message'
+ * that never got the banner treatment by oversight, and the one order where
+ * "did every single person see this?" is a safety question rather than an
+ * administrative one.
+ *
+ * 'location', 'photo' and 'video' are NOT here, and their acknowledgement was
+ * silent before this too. A request for data is answered by the data: the GPS
+ * pin lands on the map, the photo lands in the gallery, and those arrivals are
+ * already their own loud event. A tickbox saying the volunteer saw the request
+ * would add a second, weaker answer to a question already answered better.
+ */
+const ACK_TRACKER_ORDER_TYPES = ['task', 'speak', 'message', 'return_to_base', 'route', 'live', 'charge_phone'];
+
+/**
+ * Every order/sector/dispatch this mission is currently waiting on, each with
+ * the full list of people it went to and whether each of them has confirmed.
+ *
+ * This is what replaced the «Ελήφθη» scrolling banners. The banner could only
+ * ever say "someone confirmed", one row at a time, expiring after 60 seconds;
+ * the question a coordinator actually has is the opposite one — who has NOT
+ * confirmed — and no amount of scrolling text can answer it, because the people
+ * who are silent generate no events.
+ *
+ * Command staff only. Every query here reads other people's names across the
+ * whole mission; a volunteer's tab must neither pay for it nor receive it.
+ *
+ * Three sources, because "an order" is three different tables in this app:
+ *   · mission_orders + mission_order_recipients — tasks, announcements,
+ *     broadcasts, battery alerts, live-video requests, and route orders (a
+ *     route is a mission_orders row of type 'route' plus its own waypoints).
+ *   · mission_search_sectors — one acknowledged_at for the whole sector, not
+ *     one per person, so its card carries a single row naming the team. That
+ *     is honest about what was actually recorded; inventing a tick for every
+ *     member because one of them pressed the button would not be.
+ *   · mission_dispatch_points + mission_dispatch_receipts — receipts only.
+ *     mission_dispatch_acks is arrival («Έφτασα»), a different event that
+ *     keeps its banner.
+ */
+function loadAckTrackerCardsForMission(int $missionId): array {
+    $cards = [];
+
+    // ── Orders (incl. routes) ───────────────────────────────────────────────
+    $placeholders = implode(',', array_fill(0, count(ACK_TRACKER_ORDER_TYPES), '?'));
+    $orders = dbFetchAll(
+        "SELECT o.id, o.order_type, o.task_text, UNIX_TIMESTAMP(o.created_at) AS ts,
+                cu.name AS by_name, rt.title AS route_title
+         FROM mission_orders o
+         JOIN users cu ON cu.id = o.created_by
+         LEFT JOIN mission_routes rt ON rt.order_id = o.id
+         WHERE o.mission_id = ? AND o.order_type IN ({$placeholders})
+         ORDER BY o.created_at DESC, o.id DESC
+         LIMIT " . ACK_TRACKER_MAX_PER_KIND,
+        array_merge([$missionId], ACK_TRACKER_ORDER_TYPES)
+    );
+
+    if ($orders) {
+        $orderIds = array_map(fn($o) => (int) $o['id'], $orders);
+        $idPlaceholders = implode(',', array_fill(0, count($orderIds), '?'));
+        // One query for every card's recipients rather than one per card:
+        // this runs on every 5s poll of every open command-staff tab, and the
+        // Action Room has already had one connection-exhaustion incident.
+        $recipientRows = dbFetchAll(
+            "SELECT r.order_id, r.user_id, u.name, mt.codename, mt.team_number,
+                    UNIX_TIMESTAMP(r.acknowledged_at) AS ack_ts
+             FROM mission_order_recipients r
+             JOIN users u ON u.id = r.user_id
+             LEFT JOIN mission_teams mt ON mt.id = r.team_id
+             WHERE r.order_id IN ({$idPlaceholders})
+             ORDER BY u.name ASC",
+            $orderIds
+        );
+        $byOrder = [];
+        foreach ($recipientRows as $row) {
+            $byOrder[(int) $row['order_id']][] = [
+                'name'   => $row['name'],
+                'team'   => $row['codename'] !== null ? teamLabel($row['codename'], $row['team_number']) : null,
+                'ack_ts' => $row['ack_ts'] !== null ? (int) $row['ack_ts'] : null,
+            ];
+        }
+
+        foreach ($orders as $order) {
+            $people = $byOrder[(int) $order['id']] ?? [];
+            // An order with no recipient rows at all is not a card. It can
+            // happen legitimately — a broadcast sent when nobody was on shift
+            // — and a card listing nobody would be a permanently 0/0 box the
+            // admin can only close by hand.
+            if (!$people) {
+                continue;
+            }
+            // Same rule loadMyTaskOrdersForUser uses: for the three types
+            // where the coordinator typed the words, the words ARE the order,
+            // and a card reading "Voice Announcement" would hide the one thing
+            // worth reading. A route shows its own title for the same reason.
+            $freeText = in_array($order['order_type'], ['task', 'speak', 'message'], true)
+                ? trim((string) $order['task_text'])
+                : ($order['order_type'] === 'route' ? trim((string) $order['route_title']) : '');
+            $cards[] = [
+                'key'     => 'order:' . (int) $order['id'],
+                'kind'    => $order['order_type'],
+                'title'   => t('order.' . $order['order_type'] . '.card_title'),
+                'detail'  => $freeText !== '' ? $freeText : null,
+                'ts'      => (int) $order['ts'],
+                'by'      => $order['by_name'],
+                'people'  => $people,
+            ];
+        }
+    }
+
+    // ── Search sectors ──────────────────────────────────────────────────────
+    // COALESCE on status_updated_at, not created_at: a sector is usually drawn
+    // long before it is handed to a team, and the card is about the handover.
+    $sectors = dbFetchAll(
+        "SELECT s.id, s.label, UNIX_TIMESTAMP(COALESCE(s.status_updated_at, s.created_at)) AS ts,
+                UNIX_TIMESTAMP(s.acknowledged_at) AS ack_ts,
+                au.name AS ack_name, cu.name AS by_name, mt.codename, mt.team_number
+         FROM mission_search_sectors s
+         LEFT JOIN users au ON au.id = s.acknowledged_by
+         LEFT JOIN users cu ON cu.id = s.created_by
+         JOIN mission_teams mt ON mt.id = s.team_id
+         WHERE s.mission_id = ? AND s.status <> 'not_started'
+         ORDER BY COALESCE(s.status_updated_at, s.created_at) DESC, s.id DESC
+         LIMIT " . ACK_TRACKER_MAX_PER_KIND,
+        [$missionId]
+    );
+    foreach ($sectors as $sector) {
+        $team = teamLabel($sector['codename'], $sector['team_number']);
+        $cards[] = [
+            'key'    => 'sector:' . (int) $sector['id'],
+            'kind'   => 'sector',
+            'title'  => t('order.sector.card_title'),
+            'detail' => $sector['label'],
+            'ts'     => (int) $sector['ts'],
+            'by'     => $sector['by_name'],
+            // One row, and it names the team rather than a person, because
+            // that is precisely what the column records: whoever pressed the
+            // button did it on the team's behalf. Once acknowledged the row
+            // says who that was, so the information is not lost — it is just
+            // not pretended to be seven separate confirmations.
+            'people' => [[
+                'name'   => $sector['ack_ts'] !== null && $sector['ack_name']
+                    ? $team . ' — ' . $sector['ack_name']
+                    : $team,
+                'team'   => null,
+                'ack_ts' => $sector['ack_ts'] !== null ? (int) $sector['ack_ts'] : null,
+            ]],
+        ];
+    }
+
+    // ── Dispatch points/areas ───────────────────────────────────────────────
+    $dispatches = dbFetchAll(
+        "SELECT d.id, d.label, d.type, d.team_id, d.created_by, UNIX_TIMESTAMP(d.created_at) AS ts,
+                cu.name AS by_name, mt.codename, mt.team_number
+         FROM mission_dispatch_points d
+         JOIN users cu ON cu.id = d.created_by
+         LEFT JOIN mission_teams mt ON mt.id = d.team_id
+         WHERE d.mission_id = ?
+         ORDER BY d.created_at DESC, d.id DESC
+         LIMIT " . ACK_TRACKER_MAX_PER_KIND,
+        [$missionId]
+    );
+
+    if ($dispatches) {
+        // A dispatch has no recipient table — who it went to is derived, the
+        // same way mission-dispatch.php derives it when it sends the alert:
+        // the targeted team's approved participants, or every approved
+        // participant when it went to all teams. Loaded ONCE for the mission
+        // and partitioned in PHP, rather than a query per dispatch.
+        $participants = dbFetchAll(
+            "SELECT DISTINCT pr.volunteer_id AS user_id, u.name, mtm.team_id, mt.codename, mt.team_number
+             FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             JOIN users u ON u.id = pr.volunteer_id
+             LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = pr.volunteer_id
+             LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
+             WHERE s.mission_id = ? AND pr.status = ?
+             ORDER BY u.name ASC",
+            [$missionId, PARTICIPATION_APPROVED]
+        );
+
+        $dispatchIds = array_map(fn($d) => (int) $d['id'], $dispatches);
+        $idPlaceholders = implode(',', array_fill(0, count($dispatchIds), '?'));
+        $receiptRows = dbFetchAll(
+            "SELECT dispatch_id, user_id, UNIX_TIMESTAMP(created_at) AS ts
+             FROM mission_dispatch_receipts
+             WHERE dispatch_id IN ({$idPlaceholders})",
+            $dispatchIds
+        );
+        $receiptTs = [];
+        foreach ($receiptRows as $row) {
+            $receiptTs[(int) $row['dispatch_id']][(int) $row['user_id']] = (int) $row['ts'];
+        }
+
+        foreach ($dispatches as $dispatch) {
+            $teamId = $dispatch['team_id'] !== null ? (int) $dispatch['team_id'] : null;
+            $creatorId = (int) $dispatch['created_by'];
+            $people = [];
+            foreach ($participants as $participant) {
+                $participantId = (int) $participant['user_id'];
+                // The sender is excluded here because they were excluded from
+                // the alert too (mission-dispatch.php diffs them out) — an
+                // admin who is also on the roster cannot confirm receipt of
+                // their own dispatch, so a box they can never tick would make
+                // every such card permanently incomplete.
+                if ($participantId === $creatorId) {
+                    continue;
+                }
+                if ($teamId !== null && (int) ($participant['team_id'] ?? 0) !== $teamId) {
+                    continue;
+                }
+                $people[] = [
+                    'name'   => $participant['name'],
+                    'team'   => $participant['codename'] !== null ? teamLabel($participant['codename'], $participant['team_number']) : null,
+                    'ack_ts' => $receiptTs[(int) $dispatch['id']][$participantId] ?? null,
+                ];
+            }
+            if (!$people) {
+                continue;
+            }
+            $cards[] = [
+                'key'    => 'dispatch:' . (int) $dispatch['id'],
+                'kind'   => 'dispatch',
+                'title'  => t($dispatch['type'] === 'point' ? 'order.dispatch_point.card_title' : 'order.dispatch_area.card_title'),
+                'detail' => $dispatch['label'] !== null && trim((string) $dispatch['label']) !== ''
+                    ? $dispatch['label']
+                    : ($dispatch['codename'] !== null ? teamLabel($dispatch['codename'], $dispatch['team_number']) : null),
+                'ts'     => (int) $dispatch['ts'],
+                'by'     => $dispatch['by_name'],
+                'people' => $people,
+            ];
+        }
+    }
+
+    // Newest first across all three sources, so the card the coordinator just
+    // created is the one at the top of the stack.
+    usort($cards, fn($a, $b) => $b['ts'] <=> $a['ts']);
+    return $cards;
+}
+
+/**
  * Cache headers for a media file whose bytes can never change, and the 304 that
  * goes with them. Shared by mission-photo-view.php and mission-voice-play.php.
  *
@@ -1769,16 +2028,57 @@ function filterActionRoomManagers(array $userIds, ?int $responsibleUserId): arra
  * actively misleading on a non-route notification.
  */
 function notifyCommandStaffBanner(int $missionId, string $missionTitle, ?int $responsibleUserId, int $actorId, string $code, string $titleKey, array $titleVars, string $messageKey, array $messageVars): void {
+    notifyCommandStaff($missionId, $responsibleUserId, $actorId, $code, $titleKey, $titleVars, $messageKey, $messageVars, true);
+}
+
+/**
+ * Same recipients, same notification, WITHOUT the scrolling banner — the
+ * notification still lands in the bell and still pushes, it just no longer
+ * hijacks the top of everyone's screen with a marquee.
+ *
+ * This exists for one category only: confirmations of receipt («Ελήφθη»).
+ * Those used to be the noisiest thing in the room — a task sent to a
+ * seven-person team produced seven scrolling rows and seven alert beeps, each
+ * one saying nothing more than "one more person has seen it", and each one
+ * pushing the row that actually mattered further down the stack. They are now
+ * rendered as the acknowledgement panel instead (loadAckTrackerCardsForMission
+ * below), which answers the real question — who has NOT confirmed yet — in one
+ * glance rather than in seven interruptions.
+ *
+ * Events that are not receipts (a task completed, a team departed/arrived, an
+ * incident, an SOS) deliberately keep notifyCommandStaffBanner(): they are new
+ * information, not the closing half of something command already knows it sent.
+ *
+ * Dropping 'bannerMission' also drops the Android app's own urgency flag for
+ * these (mobile-alerts.php reads that exact key to decide 'urgent'), which is
+ * the same judgement applied to the same events on the other platform.
+ *
+ * Signature is identical to notifyCommandStaffBanner()'s, unused $missionTitle
+ * included, so converting a call site is a rename and nothing else — the diff
+ * then shows exactly one decision per line instead of hiding it in reshuffled
+ * arguments.
+ */
+function notifyCommandStaffQuiet(int $missionId, string $missionTitle, ?int $responsibleUserId, int $actorId, string $code, string $titleKey, array $titleVars, string $messageKey, array $messageVars): void {
+    notifyCommandStaff($missionId, $responsibleUserId, $actorId, $code, $titleKey, $titleVars, $messageKey, $messageVars, false);
+}
+
+/**
+ * Shared body of the two above. $banner is the only difference between them.
+ */
+function notifyCommandStaff(int $missionId, ?int $responsibleUserId, int $actorId, string $code, string $titleKey, array $titleVars, string $messageKey, array $messageVars, bool $banner): void {
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $actorId);
     $langByUserId = getUserLanguages($recipientIds);
+    $pushData = [
+        'url' => $warRoomUrl,
+        'tag' => $code . '-mission-' . $missionId,
+    ];
+    if ($banner) {
+        $pushData['bannerMission'] = $missionId;
+    }
     foreach ($recipientIds as $recipientId) {
         $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
-        sendNotification($recipientId, t($titleKey, $titleVars, $lang), t($messageKey, $messageVars, $lang), 'info', $code, [
-            'url' => $warRoomUrl,
-            'tag' => $code . '-mission-' . $missionId,
-            'bannerMission' => $missionId,
-        ]);
+        sendNotification($recipientId, t($titleKey, $titleVars, $lang), t($messageKey, $messageVars, $lang), 'info', $code, $pushData);
     }
 }
 

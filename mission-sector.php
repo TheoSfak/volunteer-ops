@@ -293,15 +293,14 @@ if ($action === 'acknowledge') {
         logAudit('acknowledge_mission_sector', 'mission_search_sectors', $sectorId, null, ['mission_id' => $missionId]);
 
         // Sector "Ελήφθη" is the exact counterpart of a Route Order's own
-        // acknowledge (mission-order.php), which has fired a loud banner to
-        // command staff since it shipped — this one never did, so the one
-        // signal that a team had actually seen its sector assignment reached
-        // the map as nothing but a small timestamp on a 5s poll. Inside the
+        // acknowledge (mission-order.php), and follows it here too: the
+        // notification stays, the scrolling banner is gone, and the signal now
+        // lands on the sector's acknowledgement card instead. Inside the
         // idempotency guard, so a double-tap or retry can't re-alert.
         // Admin-acknowledged (a manager standing in for a team) is included
-        // deliberately: notifyCommandStaffBanner() already excludes the
-        // actor, so the rest of the command staff still learns it happened.
-        notifyCommandStaffBanner(
+        // deliberately: the notify helper already excludes the actor, so the
+        // rest of the command staff still learns it happened.
+        notifyCommandStaffQuiet(
             $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
             'mission_sector_acknowledged', 'sector.acknowledged_notify_title', [],
             'sector.acknowledged_notify_message',
