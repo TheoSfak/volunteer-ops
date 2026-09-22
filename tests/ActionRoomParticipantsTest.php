@@ -105,6 +105,71 @@ final class ActionRoomParticipantsTest extends TestCase
         }
     }
 
+    // ── Why a device stopped reporting (v160) ───────────────────────────────
+
+    private function storedGpsError(int $userId): ?array
+    {
+        return dbFetchOne(
+            "SELECT last_gps_error, last_gps_error_at FROM mission_action_room_participants
+              WHERE mission_id = ? AND user_id = ?",
+            [$this->missionId, $userId]
+        );
+    }
+
+    public function testEachPositionErrorCodeIsStoredAsItsOwnReason(): void
+    {
+        $this->tick($this->volunteerIds[0]);
+        foreach ([1 => 'denied', 2 => 'unavailable', 3 => 'timeout'] as $code => $expected) {
+            $this->assertTrue(recordVolunteerGpsError($this->missionId, $this->volunteerIds[0], $code));
+            $this->assertSame($expected, $this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
+        }
+    }
+
+    public function testAnUnrecognisedCodeIsStoredAsUnknownRatherThanDropped(): void
+    {
+        // "Their phone failed and we could not tell how" is still worth more
+        // to a coordinator than silence.
+        $this->tick($this->volunteerIds[0]);
+        $this->assertTrue(recordVolunteerGpsError($this->missionId, $this->volunteerIds[0], 99));
+        $this->assertSame('unknown', $this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
+    }
+
+    public function testSomebodyWithoutTheTickCannotRaiseAWarningOnTheRoster(): void
+    {
+        // Their roster line is deliberately blank; a red GPS warning on it
+        // would contradict the page.
+        $this->assertFalse(recordVolunteerGpsError($this->missionId, $this->volunteerIds[0], 1));
+        $this->assertNull($this->storedGpsError($this->volunteerIds[0]));
+    }
+
+    public function testAPositionArrivingClearsTheOutstandingFailure(): void
+    {
+        // The warning must never outlive the problem: somebody who walked out
+        // of a gorge cannot still read as unreachable an hour later.
+        $this->tick($this->volunteerIds[0]);
+        recordVolunteerGpsError($this->missionId, $this->volunteerIds[0], 1);
+        $this->assertSame('denied', $this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
+
+        $result = recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, 35.33, 25.13, 12.0, 80, 'auto', 'browser');
+
+        $this->assertTrue($result['ok']);
+        $this->assertNull($this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
+        $this->assertNull($this->storedGpsError($this->volunteerIds[0])['last_gps_error_at']);
+    }
+
+    public function testARefusedPositionDoesNotClearTheFailure(): void
+    {
+        // A fix refused for being hopelessly imprecise is not a recovery, and
+        // clearing on it would hide the very situation the warning is for.
+        $this->tick($this->volunteerIds[0]);
+        recordVolunteerGpsError($this->missionId, $this->volunteerIds[0], 2);
+
+        $result = recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, 35.33, 25.13, 4000.0, 80, 'auto', 'browser');
+
+        $this->assertFalse($result['ok']);
+        $this->assertSame('unavailable', $this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
+    }
+
     // ── The flag itself ─────────────────────────────────────────────────────
 
     public function testApprovedOnTheMissionIsNotTheSameAsTakingPart(): void

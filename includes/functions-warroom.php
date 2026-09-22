@@ -107,6 +107,60 @@ function setActionRoomParticipation(int $missionId, int $userId, bool $takesPart
 }
 
 /**
+ * The four things a browser's Geolocation API can fail with, keyed by the
+ * PositionError code it reports. Spelled out once, server-side, because the
+ * client is not trusted to name them: anything else that arrives is stored as
+ * 'unknown' rather than rejected, since "their phone failed and we could not
+ * tell how" is still worth more to a coordinator than silence.
+ */
+function volunteerGpsErrorFromCode(int $code): string {
+    return [1 => 'denied', 2 => 'unavailable', 3 => 'timeout'][$code] ?? 'unknown';
+}
+
+/**
+ * Record why a volunteer's device stopped producing positions. Writes onto
+ * their Action Room participation row — the absence of a ping is exactly what
+ * this explains, so there is no volunteer_pings row to hang it on, and
+ * (mission_id, user_id) is already the scope of the question.
+ *
+ * Returns false when they do not take part in this mission's Action Room,
+ * which is the same gate recordVolunteerPing() applies: somebody who is not
+ * being tracked has no GPS failure worth reporting, and letting the row be
+ * written anyway would put a red warning on a roster line that is deliberately
+ * blank.
+ */
+function recordVolunteerGpsError(int $missionId, int $userId, int $code): bool {
+    if (!isActionRoomParticipant($missionId, $userId)) {
+        return false;
+    }
+    return (bool) dbExecute(
+        "UPDATE mission_action_room_participants
+            SET last_gps_error = ?, last_gps_error_at = NOW()
+          WHERE mission_id = ? AND user_id = ?",
+        [volunteerGpsErrorFromCode($code), $missionId, $userId]
+    );
+}
+
+/**
+ * Drop a volunteer's outstanding GPS failure. Called from the ping write path
+ * the moment a fix does arrive, so the warning can never outlive the problem
+ * it describes — somebody who stepped out of a gorge must not still be flagged
+ * as unreachable an hour later.
+ *
+ * The `IS NOT NULL` is what keeps this cheap enough to run on every single
+ * ping: MySQL finds the row by primary key and writes nothing at all in the
+ * overwhelmingly common case where there was no error to clear.
+ */
+function clearVolunteerGpsError(int $missionId, int $userId): void {
+    dbExecute(
+        "UPDATE mission_action_room_participants
+            SET last_gps_error = NULL, last_gps_error_at = NULL
+          WHERE mission_id = ? AND user_id = ? AND last_gps_error IS NOT NULL",
+        [$missionId, $userId]
+    );
+}
+
+/**
  * Who an Action Room notification may go to: approved on the mission AND
  * taking part in the Action Room, optionally narrowed to one team and always
  * minus the person who caused the event.
@@ -2491,6 +2545,13 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     } catch (Exception $e) {
         return ['ok' => false, 'error' => t('ping.gps_unavailable_migration', [], $lang)];
     }
+
+    // A fix arrived, so whatever the device last failed with is over. Placed
+    // here rather than in the client: the browser that recovers may not be the
+    // one that reported the failure (the native service and a reopened tab
+    // both land here), and a warning the command post cannot clear by watching
+    // positions come back in would be worse than no warning at all.
+    clearVolunteerGpsError((int) $pr['mission_id'], $userId);
 
     // Geofence check against any admin-drawn restricted areas — best-effort,
     // same "non-critical" treatment as the order-auto-fulfill block below: a

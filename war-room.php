@@ -1147,9 +1147,12 @@ $warRoomCriticalShiftMinutes = (int) round($warRoomMaxShiftMinutes * 1.5);
 // inserts, so the two orderings agree.
 foreach (dbFetchAll(
     "SELECT pr.volunteer_id" . ($hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status') . ",
-            lp.created_at AS last_ping_at
+            lp.created_at AS last_ping_at,
+            arp.last_gps_error, arp.last_gps_error_at
      FROM participation_requests pr
      JOIN shifts s ON s.id = pr.shift_id
+     LEFT JOIN mission_action_room_participants arp
+            ON arp.mission_id = s.mission_id AND arp.user_id = pr.volunteer_id
      LEFT JOIN (SELECT user_id, shift_id, MAX(id) AS max_id
                   FROM volunteer_pings
                  WHERE shift_id IN ({$missionShiftPlaceholders})
@@ -1182,6 +1185,14 @@ foreach (dbFetchAll(
         'last_ping_time' => $pingRow['last_ping_at'] ? formatDateTime($pingRow['last_ping_at'], 'H:i d/m/Y') : null,
         'field_status' => $pingRow['field_status'],
         'continuous_field_minutes' => $continuousFieldMinutesByVolunteerId[$volunteerId] ?? null,
+        // Why this person's device stopped reporting, if it said. Both fields
+        // are fixed for as long as the failure stands — no now()-relative
+        // value goes into the poll payload, so this cannot churn the hash
+        // that lets an unchanged poll answer 304-cheap.
+        'gps_error' => $pingRow['last_gps_error'],
+        'gps_error_time' => $pingRow['last_gps_error_at']
+            ? formatDateTime($pingRow['last_gps_error_at'], 'H:i')
+            : null,
     ];
 }
 
@@ -1711,15 +1722,20 @@ $participants = dbFetchAll(
             u.name, u.phone, u.is_external, u.guest_org_name, u.guest_country_code,
             COALESCE(ht.name, mvt.label) AS home_team_name, COALESCE(ht.color, mvt.color) AS home_team_color,
             s.id AS shift_id, s.start_time, s.end_time,
-            (SELECT MAX(vp.created_at) FROM volunteer_pings vp WHERE vp.user_id = pr.volunteer_id AND vp.shift_id = pr.shift_id) AS last_ping_at
+            (SELECT MAX(vp.created_at) FROM volunteer_pings vp WHERE vp.user_id = pr.volunteer_id AND vp.shift_id = pr.shift_id) AS last_ping_at,
+            arp.last_gps_error, arp.last_gps_error_at
      FROM participation_requests pr
      JOIN users u ON u.id = pr.volunteer_id
+     LEFT JOIN mission_action_room_participants arp
+            ON arp.mission_id = ? AND arp.user_id = pr.volunteer_id
      LEFT JOIN volunteer_teams ht ON ht.id = u.volunteer_team_id
      LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
      JOIN shifts s ON s.id = pr.shift_id
      WHERE s.mission_id = ? AND pr.status = ?
      ORDER BY s.start_time, u.name",
-    [$missionId, PARTICIPATION_APPROVED]
+    // $missionId twice: once for the participation join above, once for the
+    // shift filter below it.
+    [$missionId, $missionId, PARTICIPATION_APPROVED]
 );
 $myAssignments = array_values(array_filter($participants, fn($participant) => (int)$participant['volunteer_id'] === (int)$user['id']));
 $onlinePresenceIds = loadOnlinePresenceUserIds($missionId);
@@ -4021,7 +4037,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 $isOnlineNow = in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || $hasFreshPing;
                 ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?><?= $takesPart ? '' : ' participant-no-gps' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap" id="participant-row-<?= (int)$participant['volunteer_id'] ?>">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= $isOnlineNow ? 'presence-online' : 'presence-offline' ?>" title="<?= $isOnlineNow ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?><?= k9BadgeHtml((int) $participant['volunteer_id']) ?><?= captainBadgeHtml((int) $participant['volunteer_id']) ?></strong><?= $maySeeVitals ? vitalsBadgeHtml($participantVitals, null, (int)$participant['volunteer_id']) : '' ?><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge roster-team-badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><?php if (!empty($participant['phone']) && ($canManageWarRoom || ($myTeamId && ($teamIdByUserId[(int)$participant['volunteer_id']] ?? null) === $myTeamId))): ?><br><a href="tel:<?= h($participant['phone']) ?>" class="text-decoration-none"><i class="bi bi-telephone me-1"></i><?= h($participant['phone']) ?></a><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= !$takesPart ? '' : ($participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping')) ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= ($takesPart && !empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= ($isFatigued && $takesPart) ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span><span id="no-gps-note-<?= (int)$participant['volunteer_id'] ?>" class="<?= $takesPart ? 'd-none' : '' ?>"> · <i class="bi bi-geo-alt-slash"></i> <?= t('gps_participant.row_off') ?></span></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= $isOnlineNow ? 'presence-online' : 'presence-offline' ?>" title="<?= $isOnlineNow ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?><?= k9BadgeHtml((int) $participant['volunteer_id']) ?><?= captainBadgeHtml((int) $participant['volunteer_id']) ?></strong><?= $maySeeVitals ? vitalsBadgeHtml($participantVitals, null, (int)$participant['volunteer_id']) : '' ?><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge roster-team-badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><?php if (!empty($participant['phone']) && ($canManageWarRoom || ($myTeamId && ($teamIdByUserId[(int)$participant['volunteer_id']] ?? null) === $myTeamId))): ?><br><a href="tel:<?= h($participant['phone']) ?>" class="text-decoration-none"><i class="bi bi-telephone me-1"></i><?= h($participant['phone']) ?></a><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= !$takesPart ? '' : ($participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping')) ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= ($takesPart && !empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= ($isFatigued && $takesPart) ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span><span id="gps-error-<?= (int)$participant['volunteer_id'] ?>" class="text-danger fw-bold <?= ($takesPart && !empty($participant['last_gps_error'])) ? '' : 'd-none' ?>"> · <i class="bi bi-slash-circle-fill"></i> <span class="gps-error-text"><?= ($takesPart && !empty($participant['last_gps_error'])) ? h(t('gps_error.row_' . $participant['last_gps_error']) . ($participant['last_gps_error_at'] ? ' ' . formatDateTime($participant['last_gps_error_at'], 'H:i') : '')) : '' ?></span></span><span id="no-gps-note-<?= (int)$participant['volunteer_id'] ?>" class="<?= $takesPart ? 'd-none' : '' ?>"> · <i class="bi bi-geo-alt-slash"></i> <?= t('gps_participant.row_off') ?></span></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>" id="status-badge-<?= (int)$participant['volunteer_id'] ?>">
                         <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
@@ -10887,6 +10903,20 @@ function renderParticipantLiveData(data) {
         const timeEl = document.getElementById('ping-time-' + uid);
         if (timeEl) timeEl.textContent = info.last_ping_time ? t('participants.last_ping_label', {time: info.last_ping_time}) : t('participants.no_ping');
 
+        // Why their device stopped reporting. Drawn in the roster row rather
+        // than on the map pin on purpose: somebody whose GPS has failed has
+        // no recent pin — that IS the symptom — so a pin popup is the one
+        // place the warning could never appear.
+        const gpsErrEl = document.getElementById('gps-error-' + uid);
+        if (gpsErrEl) {
+            const key = info.gps_error;
+            gpsErrEl.classList.toggle('d-none', !key);
+            if (key) {
+                const textEl = gpsErrEl.querySelector('.gps-error-text');
+                if (textEl) textEl.textContent = t('gps_error.row_' + key) + (info.gps_error_time ? ' ' + info.gps_error_time : '');
+            }
+        }
+
         const badgeEl = document.getElementById('status-badge-' + uid);
         if (badgeEl) {
             const meta = PARTICIPANT_STATUS_BADGE_META[info.field_status];
@@ -13961,7 +13991,7 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
                 status.className = 'small mb-2 ' + (result.ok ? 'text-success' : 'text-danger');
             }).catch(() => { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; }).finally(() => button.disabled = false);
         });
-    }, err => { status.textContent = geolocationErrorText(err); status.className = 'small mb-2 text-danger'; button.disabled = false; }, {enableHighAccuracy:true, timeout:10000});
+    }, err => { status.textContent = geolocationErrorText(err); status.className = 'small mb-2 text-danger'; button.disabled = false; sendGeolocationErrorToCommandPost(err); }, {enableHighAccuracy:true, timeout:10000});
 }));
 
 // Passive background capture while this page stays open — silent (no status
@@ -14038,6 +14068,10 @@ function holdBestAutoPosition(position) {
 function acceptAutoPosition(position) {
     holdBestAutoPosition(position);
     renderMyGpsQuality();
+    // The server clears the stored failure when the ping lands; this clears
+    // the client's throttle so that if things go wrong AGAIN the next failure
+    // is reported at once instead of waiting out a cadence window.
+    lastReportedGpsErrorCode = null;
 }
 
 // The volunteer is the only person who can do anything about a bad fix: step
@@ -14074,9 +14108,39 @@ function geolocationErrorText(err) {
 // to the command post.
 function reportAutoGeolocationError(err) {
     const el = document.getElementById('myGpsQuality');
-    if (!el) return;
-    el.className = 'small mt-1 text-danger fw-bold';
-    el.textContent = geolocationErrorText(err);
+    if (el) {
+        el.className = 'small mt-1 text-danger fw-bold';
+        el.textContent = geolocationErrorText(err);
+    }
+    sendGeolocationErrorToCommandPost(err);
+}
+
+// Telling the command post, not just the person holding the phone. Without
+// this the staleness indicator says "gone quiet" for a volunteer who is
+// resting, one who walked into a gorge, and one whose location permission is
+// off and will never report again — three situations with three different
+// answers, shown identically.
+let lastReportedGpsErrorCode = null;
+let lastGpsErrorReportAt = 0;
+function sendGeolocationErrorToCommandPost(err) {
+    // Only somebody the page is actually tracking has a failure worth
+    // reporting; the server re-checks this, but not firing at all keeps a
+    // volunteer with no GPS tick from posting on every watchPosition error.
+    if (!document.querySelectorAll('.send-ping').length) return;
+    const code = err && typeof err.code === 'number' ? err.code : 0;
+    // watchPosition can fail repeatedly and fast — a phone that cannot get a
+    // fix will produce one error per timeout window, indefinitely. Report a
+    // CHANGE immediately (that is news), and otherwise no more often than the
+    // ping cadence, so this can never cost more requests than the positions
+    // it stands in for.
+    const now = Date.now();
+    if (code === lastReportedGpsErrorCode && (now - lastGpsErrorReportAt) < AUTO_PING_CADENCE_MS) return;
+    lastReportedGpsErrorCode = code;
+    lastGpsErrorReportAt = now;
+    fetch('mission-gps-error.php', {
+        method: 'POST',
+        body: new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>', code: String(code)}),
+    }).catch(() => {});
 }
 
 function sendAutoPing(position) {

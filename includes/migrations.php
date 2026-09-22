@@ -6929,6 +6929,29 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 160,
+            'description' => 'Add last_gps_error / last_gps_error_at to mission_action_room_participants - why a volunteer stopped producing positions, so the command post can tell "they have stopped moving" from "their phone will never report again". The browser has always known this (the Geolocation API hands back a PositionError with a code) and always threw it away. Stored on this table rather than on volunteer_pings because it is the absence of a ping that it explains - there is no row to hang it on - and (mission_id, user_id) is already exactly the scope of the question. Cleared by recordVolunteerPing() the moment a fix does arrive, so it can never outlive the problem it describes.',
+            'up' => function () {
+                $cols = dbFetchAll(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_action_room_participants'
+                        AND COLUMN_NAME IN ('last_gps_error', 'last_gps_error_at')"
+                );
+                $have = array_column($cols, 'COLUMN_NAME');
+                if (!in_array('last_gps_error', $have, true)) {
+                    dbExecute("ALTER TABLE mission_action_room_participants
+                               ADD COLUMN last_gps_error ENUM('denied','unavailable','timeout','unknown') NULL
+                               COMMENT 'Last Geolocation API failure reported by this volunteer device; NULL = none outstanding'");
+                }
+                if (!in_array('last_gps_error_at', $have, true)) {
+                    dbExecute("ALTER TABLE mission_action_room_participants
+                               ADD COLUMN last_gps_error_at TIMESTAMP NULL
+                               COMMENT 'When that failure was reported'");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

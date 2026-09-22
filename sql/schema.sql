@@ -2034,6 +2034,8 @@ CREATE TABLE IF NOT EXISTS `mission_action_room_participants` (
     `mission_id` INT UNSIGNED NOT NULL,
     `user_id` INT UNSIGNED NOT NULL,
     `added_by` INT UNSIGNED NULL,
+    `last_gps_error` ENUM('denied','unavailable','timeout','unknown') NULL COMMENT 'Last Geolocation API failure reported by this volunteer device; NULL = none outstanding',
+    `last_gps_error_at` TIMESTAMP NULL COMMENT 'When that failure was reported',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`mission_id`, `user_id`),
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
