@@ -2507,7 +2507,7 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     // good one may be rejected as a jump away from it, but only until enough
     // time passes for the implied speed to fall back under the threshold. No
     // state is kept, and nobody stays frozen.
-    $maxSpeedKmh = (float) getSetting('war_room_max_ping_speed_kmh', '180');
+    $maxSpeedKmh = (float) getSetting('war_room_max_ping_speed_kmh', '25');
     if ($maxSpeedKmh > 0) {
         $prev = dbFetchOne(
             "SELECT lat, lng, accuracy_meters, created_at FROM volunteer_pings
@@ -2516,7 +2516,32 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
         );
         if ($prev) {
             $elapsed = time() - strtotime($prev['created_at']);
-            if ($elapsed > 0) {
+            // A new fix is judged only while there is a RECENT one to judge it
+            // against, and "recent" is the app's own existing definition of a
+            // position that has not yet gone stale. Past that, it is accepted
+            // whatever it implies.
+            //
+            // This is what lets the limit be a walking-pace number without
+            // ever erasing somebody who is genuinely travelling, and it is why
+            // nobody has to declare a mission (or a person) as on-foot or
+            // vehicle — the two cases separate themselves:
+            //
+            //   · a GPS spike is ISOLATED. It is refused, and the next fix a
+            //     cadence later is normal again, so one bad point disappears.
+            //   · real travel is PERSISTENT. Refusals stop the stored position
+            //     advancing, so the gap grows until it passes the staleness
+            //     line, and the next fix is taken — from then on the distance
+            //     is measured from where they actually are. Somebody driving
+            //     is recorded less often while they move, never lost.
+            //
+            // Without this the gate compares against the last STORED fix, so
+            // a volunteer travelling at a constant speed above the limit would
+            // have every single fix refused: distance and elapsed time both
+            // grow, their ratio does not, and they would vanish from the map
+            // for as long as they kept moving. At the old 180 km/h default
+            // that was unreachable in practice; at a walking-pace limit it
+            // would happen on every drive to a callout.
+            if ($elapsed > 0 && $elapsed < warRoomPingStaleThresholdSeconds()) {
                 $jumpMeters = gpsDistanceMeters((float) $prev['lat'], (float) $prev['lng'], $lat, $lng);
                 $uncertainty = ($prev['accuracy_meters'] !== null && $accuracy !== null)
                     ? (float) $prev['accuracy_meters'] + (float) $accuracy

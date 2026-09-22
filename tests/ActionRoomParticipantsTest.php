@@ -105,6 +105,88 @@ final class ActionRoomParticipantsTest extends TestCase
         }
     }
 
+    // ── Spike vs. real travel (v3.316.0) ────────────────────────────────────
+
+    /** Insert a ping directly, $secondsAgo in the past, bypassing the gates. */
+    private function seedPing(int $userId, float $lat, float $lng, int $secondsAgo, float $acc = 8.0): void
+    {
+        dbExecute(
+            "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, source, created_at)
+             VALUES (?, ?, ?, ?, ?, 'auto', DATE_SUB(NOW(), INTERVAL ? SECOND))",
+            [$userId, $this->shiftId, $lat, $lng, $acc, $secondsAgo]
+        );
+    }
+
+    /** Metres north of a point, as degrees of latitude. */
+    private function northOf(float $lat, float $metres): float
+    {
+        return $lat + $metres / 111320.0;
+    }
+
+    public function testAnIsolatedSpikeIsRefused(): void
+    {
+        // 300m in 10 seconds is 108 km/h. Nobody on foot does that, and the
+        // fix before it is recent, so there is something to judge it against.
+        $this->tick($this->volunteerIds[0]);
+        $this->seedPing($this->volunteerIds[0], 35.33, 25.13, 10);
+
+        $result = recordVolunteerPing(
+            $this->userRow($this->volunteerIds[0]), $this->shiftId,
+            $this->northOf(35.33, 300), 25.13, 8.0, 80, 'auto', 'browser'
+        );
+
+        $this->assertFalse($result['ok']);
+    }
+
+    public function testSomebodyGenuinelyTravellingIsNotErasedOnceTheirPositionGoesStale(): void
+    {
+        // Same impossible-on-foot speed, but nothing has been stored for
+        // longer than the app's own staleness line. At that point "we do not
+        // know where they are" is worse than "they may be moving fast", so
+        // the fix is taken and the trail picks them up again.
+        $this->tick($this->volunteerIds[0]);
+        $staleAfter = warRoomPingStaleThresholdSeconds();
+        $this->seedPing($this->volunteerIds[0], 35.33, 25.13, $staleAfter + 30);
+
+        $result = recordVolunteerPing(
+            $this->userRow($this->volunteerIds[0]), $this->shiftId,
+            $this->northOf(35.33, 3000), 25.13, 8.0, 80, 'auto', 'browser'
+        );
+
+        $this->assertTrue($result['ok']);
+    }
+
+    public function testWalkingPaceIsNeverTouched(): void
+    {
+        // 30m in 20 seconds is 5,4 km/h — the ordinary case, which must pass
+        // however tight the limit gets.
+        $this->tick($this->volunteerIds[0]);
+        $this->seedPing($this->volunteerIds[0], 35.33, 25.13, 20);
+
+        $result = recordVolunteerPing(
+            $this->userRow($this->volunteerIds[0]), $this->shiftId,
+            $this->northOf(35.33, 30), 25.13, 8.0, 80, 'auto', 'browser'
+        );
+
+        $this->assertTrue($result['ok']);
+    }
+
+    public function testANoisyStationaryPhoneIsNotMistakenForMovement(): void
+    {
+        // 120m apart in 10 seconds is 43 km/h, but both fixes admit to +-80m,
+        // so their own uncertainty already covers the gap. Refusing here would
+        // throw away the readings of anybody standing under a balcony.
+        $this->tick($this->volunteerIds[0]);
+        $this->seedPing($this->volunteerIds[0], 35.33, 25.13, 10, 80.0);
+
+        $result = recordVolunteerPing(
+            $this->userRow($this->volunteerIds[0]), $this->shiftId,
+            $this->northOf(35.33, 120), 25.13, 80.0, 80, 'auto', 'browser'
+        );
+
+        $this->assertTrue($result['ok']);
+    }
+
     // ── Why a device stopped reporting (v160) ───────────────────────────────
 
     private function storedGpsError(int $userId): ?array
