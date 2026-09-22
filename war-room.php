@@ -2150,6 +2150,42 @@ include __DIR__ . '/includes/header.php';
     #mapCard.map-fullscreen-active #warRoomBanner { position: absolute; left: 0; right: 0; z-index: 600; }
     #mapCard.map-fullscreen-active #warRoomBanner[data-ticker-pos="top"] { top: 0; bottom: auto; border-top: none; border-bottom: 2px solid #dc2626; }
     #mapCard.map-fullscreen-active #warRoomBanner[data-ticker-pos="bottom"] { top: auto; bottom: 0; border-top: 2px solid #dc2626; border-bottom: none; }
+    /* The acknowledgement panel and its dragged-out cards, once the fullscreen
+       handler has moved them inside #mapCard (it has to — native fullscreen
+       paints only the fullscreen element's own subtree, so a sibling is simply
+       absent, whatever its z-index). Absolute rather than fixed, matching the
+       ticker two rules up: #mapCard is itself position:fixed inset:0 while
+       active, so absolute here resolves against the same box the viewport
+       would have given, without depending on how a given engine treats a fixed
+       descendant of a top-layer element.
+
+       position:fixed is KEPT here, unlike the ticker's switch to absolute two
+       rules up. #mapCard is the direct parent in this state and it carries a
+       transform while active, which already makes it the containing block for
+       a fixed descendant — so fixed resolves against exactly the box we want,
+       and keeps resolving correctly if that transform ever goes away, because
+       then it falls back to the viewport, which #mapCard covers anyway.
+       Absolute would instead inherit any scroll offset on #mapCard, which is
+       overflow:hidden and does carry one.
+
+       Above the ticker's 600 so the stack is not buried by an alert strip it
+       is already taller than, and the float layer one above the panel so a
+       card dragged out still lands on top of the stack it came from. */
+       That immunity is load-bearing, not incidental. This card is
+       overflow:hidden but its content really does overflow it — on a 375px
+       phone the card measures 438px wide — so it carries a horizontal scroll
+       offset, 62px of it when measured. Anything ABSOLUTE inside it inherits
+       that offset and hangs off the left edge (which is exactly what the first
+       attempt here did, landing the panel at x=-54); a fixed child does not
+       move with it, and measured x=8 whether the card was scrolled or not.
+       Zeroing the card's scroll instead would have been worse than the bug:
+       the exit-fullscreen button sits at x=382 on a 375px screen, so that
+       scroll offset is the only thing bringing it within reach. It is cancelled
+       for these two nodes instead, by an inline transform that
+       syncMapFullscreenOffset() writes — deliberately not a rule here, because
+       the rule form was tried and did not take. */
+    #mapCard.map-fullscreen-active #ackTracker { z-index: 620; }
+    #mapCard.map-fullscreen-active #ackTrackerFloat { z-index: 621; }
     /* Strips Leaflet's default white tooltip box/arrow so only our own colored
        pill (inline-styled per team in dispatchTeamLabelHtml()) shows through. */
     .dispatch-team-label { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
@@ -13016,10 +13052,21 @@ function syncTickerSpacing() {
     // theme's padding, and the ticker's with how many alerts are up — and
     // published as a CSS variable so the panel's own max-height can subtract
     // it without a second measurement going stale.
+    //
+    // While the map is fullscreen there is no navbar to clear — the map covers
+    // the whole screen and the ticker has been moved inside it — so the only
+    // thing above the panel is the ticker itself, if it is set to the top.
+    // Measured from the element rather than from `h`, which is deliberately
+    // zeroed for the relocated case because .content-wrapper needs no padding
+    // when the ticker is no longer floating over the page.
+    const bannerShown = !!(bannerEl && bannerEl.style.display === 'flex');
+    const bannerH = bannerShown ? bannerEl.offsetHeight : 0;
     const navH = document.querySelector('.top-navbar')?.offsetHeight || 0;
-    const topOccupied = wrTickerPos === 'top' ? Math.max(navH, h) : navH;
+    const topOccupied = relocated
+        ? (wrTickerPos === 'top' ? bannerH : 0)
+        : (wrTickerPos === 'top' ? Math.max(navH, bannerH) : navH);
     document.documentElement.style.setProperty('--wr-acktracker-top', (topOccupied + 12) + 'px');
-    document.documentElement.style.setProperty('--wr-ticker-bottom-h', (wrTickerPos === 'bottom' ? h : 0) + 'px');
+    document.documentElement.style.setProperty('--wr-ticker-bottom-h', (wrTickerPos === 'bottom' ? bannerH : 0) + 'px');
     // Read by the phone-width rules, which dock the panel to the same bottom
     // corner a bottom-anchored ticker occupies.
     document.body.classList.toggle('wr-ticker-bottom', wrTickerPos === 'bottom');
@@ -13035,6 +13082,46 @@ function syncTickerSpacing() {
 }
 window.addEventListener('resize', syncTickerSpacing);
 syncTickerSpacing();
+
+// Cancels out the fullscreen map card's own scroll offset for anything pinned
+// inside it.
+//
+// #mapCard is overflow:hidden but its content genuinely overflows — on a 375px
+// phone the card measures 438px wide, Leaflet's layers and the map toolbar
+// between them — so the box carries a horizontal scroll offset, 62px of it when
+// measured. While fullscreen the card also carries a transform, which makes it
+// the containing block for every fixed descendant, and once anything triggers a
+// reflow those descendants are laid out against the SCROLLED box: the
+// acknowledgement panel moved from x=8 to x=-54, half of it off the screen.
+//
+// Zeroing the card's scrollLeft instead is the obvious fix and it is wrong; it
+// was tried. That 62px is not junk — the exit-fullscreen button sits at x=382 on
+// a 375px screen, so the scroll offset is the only thing bringing it within
+// reach. Snapping it to 0 lines the panel up perfectly and strands the
+// coordinator in fullscreen with no way out.
+//
+// So the card keeps its scroll and the panel is translated back by the same
+// amount. Called from three places on purpose: the fullscreen toggle, the
+// card's scroll event, and every acknowledgement render — because a
+// programmatic scroll on an overflow:hidden box does not reliably fire a scroll
+// event, and the render pass guarantees the offset is corrected within one poll
+// tick even when the event never arrives.
+// Written as an inline style rather than a CSS variable read by a stylesheet
+// rule: the rule form was tried and silently did nothing, and an inline
+// transform cannot be out-specified, mis-scoped, or lost to a selector that
+// stops matching the moment the node is moved.
+function syncMapFullscreenOffset() {
+    const mapCardEl = document.getElementById('mapCard');
+    const active = !!(mapCardEl && mapCardEl.classList.contains('map-fullscreen-active'));
+    const x = active ? mapCardEl.scrollLeft : 0;
+    const y = active ? mapCardEl.scrollTop : 0;
+    const value = (x || y) ? `translate(${x}px, ${y}px)` : '';
+    ['ackTracker', 'ackTrackerFloat'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.style.transform !== value) el.style.transform = value;
+    });
+}
+document.getElementById('mapCard')?.addEventListener('scroll', syncMapFullscreenOffset);
 
 // Persistent status rows (SOS/Restricted-Area) — unlike showWarRoomBanner's
 // one-shot order/dispatch notices below, these track a live condition: no
@@ -13244,22 +13331,57 @@ function hideWarRoomBannerRow(id) {
     const bannerEl = document.getElementById('warRoomBanner');
     const mapBodyEl = mapCardEl.querySelector('.card-body');
     const bannerHome = bannerEl ? {parent: bannerEl.parentNode, next: bannerEl.nextSibling} : null;
+
+    // Everything that has to stay visible over a fullscreen map has to be
+    // MOVED into it, not merely stacked above it.
+    //
+    // This is the native Fullscreen API (mapCardEl.requestFullscreen() below),
+    // and it renders only the fullscreen element's own subtree. A node outside
+    // that subtree is not painted at all — no z-index reaches it, because it is
+    // not competing for a layer, it is not in the picture. That is the whole
+    // reason the ticker above is physically relocated rather than just
+    // restyled, and the acknowledgement panel needs exactly the same treatment
+    // or it disappears the moment a coordinator opens the map on their phone,
+    // which is precisely when they are watching the field most closely.
+    //
+    // Both nodes: the docked stack and the layer holding dragged-out cards.
+    const ackNodes = ['ackTracker', 'ackTrackerFloat']
+        .map(id => document.getElementById(id))
+        .filter(Boolean)
+        .map(el => ({el: el, parent: el.parentNode, next: el.nextSibling}));
+
     function setMapFullscreen(active) {
         mapCardEl.classList.toggle('map-fullscreen-active', active);
         mapFsBtn.innerHTML = active ? '<i class="bi bi-fullscreen-exit"></i>' : '<i class="bi bi-arrows-fullscreen"></i>';
         mapFsBtn.title = active ? t('map.btn_exit_fullscreen') : t('map.btn_fullscreen');
+        // Into #mapCard itself, NOT its .card-body like the ticker above.
+        // Measured while building this: in the fullscreen state that card-body
+        // sits at x=-62 rather than x=0, because #mapCard is overflow:hidden
+        // and carries a horizontal scroll offset — so everything positioned
+        // inside the card-body inherits that 62px shift and hangs off the left
+        // edge. #mapCard's own border box is where the viewport actually is.
+        ackNodes.forEach(home => {
+            if (active) {
+                mapCardEl.appendChild(home.el);
+            } else {
+                home.parent.insertBefore(home.el, home.next);
+            }
+        });
         if (bannerEl && mapBodyEl && bannerHome) {
             if (active) {
                 mapBodyEl.appendChild(bannerEl);
             } else {
                 bannerHome.parent.insertBefore(bannerEl, bannerHome.next);
             }
-            // #mapCard.map-fullscreen-active #warRoomBanner (CSS) takes over
-            // positioning entirely while active — nothing to compensate for
-            // on .content-wrapper either way, but re-sync right away rather
-            // than waiting for the next banner mutation to notice.
-            if (typeof syncTickerSpacing === 'function') syncTickerSpacing();
         }
+        if (typeof syncMapFullscreenOffset === 'function') syncMapFullscreenOffset();
+        // Outside the banner branch above, not inside it: this also republishes
+        // --wr-acktracker-top, and the panel's offset has to be recomputed on
+        // every fullscreen toggle whether or not a ticker happens to be up.
+        // Inside fullscreen there is no sticky navbar to clear, so the same
+        // 12px gap that sits under the navbar normally sits at the top of the
+        // map instead.
+        if (typeof syncTickerSpacing === 'function') syncTickerSpacing();
         setTimeout(() => { if (map) map.invalidateSize(); }, 150);
     }
     mapFsBtn.addEventListener('click', () => {
@@ -15198,6 +15320,9 @@ function ackCardHtml(card, inlineStyle) {
 function renderAckTracker(cards) {
     const panel = document.getElementById('ackTracker');
     if (!panel || !Array.isArray(cards)) return;
+    // Cheap, and the safety net for a fullscreen map whose scroll event never
+    // fired — see syncMapFullscreenOffset().
+    if (typeof syncMapFullscreenOffset === 'function') syncMapFullscreenOffset();
 
     cards.forEach(card => {
         const isNewToThisTab = !ackSeenKeys.has(card.key);
