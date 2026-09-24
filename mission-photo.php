@@ -173,6 +173,9 @@ if ($action === 'upload') {
     if ($lat !== null && ($lat < -90 || $lat > 90)) { $lat = null; }
     if ($lng !== null && ($lng < -180 || $lng > 180)) { $lng = null; }
     if ($lat === 0.0 && $lng === 0.0) { $lat = null; $lng = null; }
+    // The fix's own uncertainty, so a Point of Interest pinned from a ±200m
+    // Wi-Fi lookup is not drawn with the same confidence as a GNSS one.
+    $accuracy = parseAccuracyMeters(post('accuracy'), $lng === null ? null : $lat);
 
     // Point of Interest: a photographed physical clue (e.g. clothing found
     // while searching for a missing person), auto-GPS-tagged and shown as
@@ -285,9 +288,10 @@ if ($action === 'upload') {
     }
 
     $photoId = dbInsert(
-        "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, thumb_stored_name, original_name, mime_type, file_size, lat, lng, route_waypoint_id, poi_id, poi_note, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $userId, $mediaType, $storedName, $thumbStoredName, $origName, $mime, (int) $file['size'], $lat, $lng, $routeWaypointId, $poiId, $poiNote]
+        "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, thumb_stored_name, original_name, mime_type, file_size, lat, lng, accuracy_m, route_waypoint_id, poi_id, poi_note, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $userId, $mediaType, $storedName, $thumbStoredName, $origName, $mime, (int) $file['size'], $lat, $lng, $accuracy,
+         $routeWaypointId, $poiId, $poiNote]
     );
     logAudit('upload_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId, 'media_type' => $mediaType, 'route_waypoint_id' => $routeWaypointId, 'poi_id' => $poiId]);
 
@@ -331,6 +335,7 @@ if ($action === 'upload') {
         'time'               => date('d/m H:i'),
         'lat'                => $lat,
         'lng'                => $lng,
+        'accuracy_m'         => $accuracy !== null ? (int) round($accuracy) : null,
         'can_delete'         => true,
         'poi_id'             => $poiId,
     ]]);

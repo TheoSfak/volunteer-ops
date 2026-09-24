@@ -974,8 +974,10 @@ if (isPost()) {
         $allowedGenders = array_keys(INCIDENT_GENDER_LABELS);
         $phone = $isUnknownPatient ? '' : mb_substr(trim((string) post('phone')), 0, 30);
         $notes = mb_substr(trim((string) post('notes')), 0, 2000);
-        $lat = post('lat') !== '' ? (float) post('lat') : null;
-        $lng = post('lng') !== '' ? (float) post('lng') : null;
+        $lat = is_numeric(post('lat')) ? (float) post('lat') : null;
+        $lng = is_numeric(post('lng')) ? (float) post('lng') : null;
+        if ($lat === null || $lng === null) { $lat = null; $lng = null; }
+        $accuracy = parseAccuracyMeters(post('accuracy'), $lat);
 
         if (!in_array($incidentType, $allowedTypes, true) || !in_array($severity, $allowedSeverities, true)) {
             setFlash('error', t('incident.invalid_fields'));
@@ -987,11 +989,11 @@ if (isPost()) {
             $teamId = getUserTeamIdForMission($missionId, $user['id']);
             $incidentId = dbInsert(
                 "INSERT INTO mission_incidents
-                    (mission_id, reporter_id, team_id, lat, lng, incident_type, severity,
+                    (mission_id, reporter_id, team_id, lat, lng, accuracy_m, incident_type, severity,
                      is_unknown_patient, patient_name, estimated_age, gender, phone, notes, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
                 [
-                    $missionId, $user['id'], $teamId, $lat, $lng, $incidentType, $severity,
+                    $missionId, $user['id'], $teamId, $lat, $lng, $accuracy, $incidentType, $severity,
                     $isUnknownPatient ? 1 : 0, $patientName ?: null, $estimatedAge ?: null,
                     $gender ?: null, $phone ?: null, $notes ?: null,
                 ]
@@ -3762,6 +3764,11 @@ include __DIR__ . '/includes/header.php';
                          first fix or the first error, so it adds no noise to
                          a card that is working. -->
                     <div id="myGpsQuality" class="small mt-1"></div>
+                    <!-- Android app only: what on the PHONE stands between it
+                         and a good position (approximate permission, location
+                         switch, battery saver). Filled from the app's own
+                         diagnostics; stays hidden in a browser. -->
+                    <div id="myNativeGpsNote" class="small mt-1 d-none"></div>
                     <?php endif; ?>
                 <?php endif; ?>
             </div>
@@ -3811,6 +3818,7 @@ include __DIR__ . '/includes/header.php';
                     <input type="hidden" name="action" value="report_incident">
                     <input type="hidden" name="lat" id="incidentLat" value="">
                     <input type="hidden" name="lng" id="incidentLng" value="">
+                    <input type="hidden" name="accuracy" id="incidentAccuracy" value="">
                     <label class="form-label small fw-semibold"><?= t('incident.type_label') ?></label>
                     <select name="incident_type" class="form-select mb-2" required>
                         <?php foreach (INCIDENT_TYPE_LABELS as $val => $label): ?>
@@ -8926,6 +8934,13 @@ function accuracyLineHtml(accuracyMeters) {
     return `<br><span class="small ${poor ? 'text-warning' : 'text-muted'}">`
         + `${t('map.accuracy_label')}: ±${m} m${poor ? ' ' + t('map.accuracy_poor_hint') : ''}</span>`;
 }
+// The same fact on one line, for places that already sit inside a line of
+// text (the SOS card, list rows). Same 50m line, so "poor" means one thing.
+function accuracyInlineHtml(accuracyMeters) {
+    if (accuracyMeters === null || accuracyMeters === undefined) return '';
+    const m = Math.round(accuracyMeters);
+    return ` · <span class="${m > 50 ? 'text-warning fw-bold' : ''}">±${m} m</span>`;
+}
 // Deliberately separate from LOW_BATTERY_PCT above, fixed (not a Settings
 // field) — LOW_BATTERY_PCT gates the passive "getting low" badge, this
 // gates the active charge-alert button (below/right of the Navigate
@@ -10552,7 +10567,9 @@ function routeArrive(waypointId, confirmed) {
             .then(result => handleRouteActionResult(result, () => routeArrive(waypointId, true)));
     };
     if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(pos => post(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy), () => post(null, null, null), {enableHighAccuracy: true, timeout: 10000});
+        // The arrival distance to the waypoint is computed from this fix, so
+        // the best one within the budget, not the first (usually coarse) one.
+        acquireBestFix(10000, ONE_SHOT_GOOD_ENOUGH_M).then(({fix}) => fix ? post(fix.lat, fix.lng, fix.acc) : post(null, null, null));
     } else {
         post(null, null, null);
     }
@@ -10616,26 +10633,21 @@ function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
     const compressPromise = isVideo
         ? compressVideoForUpload(file, pct => setMediaProgress(pct))
         : compressPhotoForUpload(file);
-    const geoPromise = new Promise(resolve => {
-        if (!navigator.geolocation) { resolve([null, null]); return; }
-        navigator.geolocation.getCurrentPosition(
-            pos => resolve([pos.coords.latitude, pos.coords.longitude]),
-            () => resolve([null, null]),
-            {enableHighAccuracy: true, timeout: 8000}
-        );
-    });
+    // Runs alongside compression, which dominates the wait anyway, so the
+    // best fix within 8s costs the volunteer nothing extra.
+    const geoPromise = acquireBestFix(8000, ONE_SHOT_GOOD_ENOUGH_M).then(({fix}) => fix);
 
     compressPromise.then(finalFile => {
         if (statusEl) statusEl.textContent = t('media.uploading');
         setMediaProgress(0, t('media.uploading'));
-        geoPromise.then(([lat, lng]) => {
+        geoPromise.then(fix => {
             const data = new FormData();
             data.append('csrf_token', csrfToken);
             data.append('action', 'upload');
             data.append('mission_id', '<?= $missionId ?>');
             data.append('media', finalFile);
             data.append('route_waypoint_id', String(waypointId));
-            if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
+            if (fix) { data.append('lat', fix.lat); data.append('lng', fix.lng); if (fix.acc !== null) data.append('accuracy', fix.acc); }
             postFormDataWithProgress('mission-photo.php', data, pct => setMediaProgress(pct)).then(result => {
                 hideMediaProgressModal();
                 if (result.ok) {
@@ -11127,6 +11139,7 @@ function renderIncidentLayer(items) {
         const popupHtml = `<strong>${r.severity_label} — ${r.type_label}</strong><br>${escapeHtml(who)}` +
             (details ? `<br><span class="small">${escapeHtml(details)}</span>` : '') +
             `<br><span class="small text-muted">${escapeHtml(r.team_label)} · ${r.created_at}</span>` +
+            accuracyLineHtml(r.accuracy_m) +
             '<br>' + navigationBtnHtml(r.lat, r.lng);
         return L.marker([r.lat, r.lng], {icon}).bindPopup(popupHtml);
     });
@@ -11225,6 +11238,7 @@ function renderPoiLayer(items) {
         // A clue somebody has to go and rule in or out is a place, and the
         // whole point of the pin is that a second team goes back to it.
         const popupHtml = `<strong>${t('poi.popup_title')}</strong><br>${reportedBy}${notesHtml}<br><span class="small text-muted">${p.created_at}</span>` +
+            accuracyLineHtml(p.accuracy_m) +
             (p.checked_at ? `<br><span class="small text-success">${t('poi.checked_at_prefix', {time: p.checked_at, name: escapeHtml(p.checked_by_name || '')})}</span>` : '') +
             '<br>' + navigationBtnHtml(p.lat, p.lng);
         return L.marker([p.lat, p.lng], {icon}).bindPopup(popupHtml);
@@ -11668,7 +11682,7 @@ function renderSosAlerts(items) {
     list.innerHTML = items.map(a => `
         <div class="border border-danger rounded p-2 mb-2">
             <div><strong>🆘 ${a.team_label}</strong> — ${guestNameHtml(a.user_name, a.is_external, a.home_team_name, a.home_team_color_bg, a.home_team_color_fg, a.guest_country_code)}${k9BadgeHtml(a.user_id, true)}${captainBadgeHtml(a.user_id, true)}</div>
-            <div class="text-muted" style="font-size:.75rem;">${a.created_at}${a.lat !== null ? ` · <a href="#" class="sos-locate-link" data-lat="${a.lat}" data-lng="${a.lng}">${t('sos.view_on_map')}</a>` : t('sos.no_gps')}${a.acknowledged_at ? t('sos.ack_at_prefix', {time: a.acknowledged_at}) : ''}</div>
+            <div class="text-muted" style="font-size:.75rem;">${a.created_at}${a.lat !== null ? ` · <a href="#" class="sos-locate-link" data-lat="${a.lat}" data-lng="${a.lng}">${t('sos.view_on_map')}</a>${accuracyInlineHtml(a.accuracy_m)}` : t('sos.no_gps')}${a.acknowledged_at ? t('sos.ack_at_prefix', {time: a.acknowledged_at}) : ''}</div>
             ${navigationBtnHtml(a.lat, a.lng, {block: true})}
             <div class="mt-1">${a.acknowledged_at
                 ? `<button type="button" class="btn btn-sm btn-success w-100 sos-resolve-btn" data-alert-id="${a.id}">${t('shortage.resolve_btn')}</button>`
@@ -12111,27 +12125,22 @@ function wireMediaInput(inputId, sentLabel) {
         const compressPromise = isVideo
             ? compressVideoForUpload(file, pct => setMediaProgress(pct))
             : compressPhotoForUpload(file);
-        const geoPromise = new Promise(resolve => {
-            if (!navigator.geolocation) { resolve([null, null]); return; }
-            navigator.geolocation.getCurrentPosition(
-                position => resolve([position.coords.latitude, position.coords.longitude]),
-                () => resolve([null, null]),
-                {enableHighAccuracy: true, timeout: 8000}
-            );
-        });
+        // Concurrent with compression, which dominates the wait, so taking
+        // the best fix within 8s instead of the first costs nothing extra.
+        const geoPromise = acquireBestFix(8000, ONE_SHOT_GOOD_ENOUGH_M).then(({fix}) => fix);
 
         compressPromise.then(finalFile => {
             status.textContent = t('media.uploading');
             setMediaProgress(0, t('media.uploading'));
             const thumbPromise = finalFile.type.startsWith('video/') ? captureVideoThumbnail(finalFile) : Promise.resolve(null);
-            Promise.all([geoPromise, thumbPromise]).then(([[lat, lng], thumbBlob]) => {
+            Promise.all([geoPromise, thumbPromise]).then(([fix, thumbBlob]) => {
                 const data = new FormData();
                 data.append('csrf_token', csrfToken);
                 data.append('action', 'upload');
                 data.append('mission_id', '<?= $missionId ?>');
                 data.append('media', finalFile);
                 if (thumbBlob) data.append('thumb', thumbBlob, 'thumb.jpg');
-                if (lat !== null) { data.append('lat', lat); data.append('lng', lng); }
+                if (fix) { data.append('lat', fix.lat); data.append('lng', fix.lng); if (fix.acc !== null) data.append('accuracy', fix.acc); }
                 postFormDataWithProgress('mission-photo.php', data, pct => setMediaProgress(pct)).then(result => {
                     hideMediaProgressModal();
                     if (result.ok) {
@@ -12204,19 +12213,24 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
             resetStage();
             return;
         }
-        navigator.geolocation.getCurrentPosition(
-            position => {
-                stagedCoords = {lat: position.coords.latitude, lng: position.coords.longitude};
-                sendBtn.disabled = false;
-                sendBtn.innerHTML = '<i class="bi bi-send-fill me-1"></i>' + t('poi.send_btn');
-            },
-            () => {
+        // A Point of Interest IS its position — a pin that stays on the map
+        // and that other reports within 30m merge into — so it waits for the
+        // best fix within 8s rather than taking the first, coarse one.
+        const stagedFor = file;
+        acquireBestFix(8000, ONE_SHOT_GOOD_ENOUGH_M).then(({fix}) => {
+            // A second photo picked while this one was still locating owns
+            // the stage now; this answer belongs to a photo nobody will send.
+            if (stagedFile !== stagedFor) return;
+            if (!fix) {
                 status.textContent = t('poi.gps_required');
                 status.className = 'small mb-2 text-danger';
                 resetStage();
-            },
-            {enableHighAccuracy: true, timeout: 8000}
-        );
+                return;
+            }
+            stagedCoords = fix;
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = '<i class="bi bi-send-fill me-1"></i>' + t('poi.send_btn');
+        });
     });
 
     sendBtn.addEventListener('click', () => {
@@ -12238,6 +12252,7 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
             data.append('note', note);
             data.append('lat', stagedCoords.lat);
             data.append('lng', stagedCoords.lng);
+            if (stagedCoords.acc !== null) data.append('accuracy', stagedCoords.acc);
             postFormDataWithProgress('mission-photo.php', data, pct => setMediaProgress(pct)).then(result => {
                 hideMediaProgressModal();
                 if (result.ok) {
@@ -12265,13 +12280,39 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 (function wireIncidentReportForm() {
     const form = document.getElementById('incidentReportForm');
     if (!form) return;
-    // Best-effort, non-blocking — same "denied/unavailable never blocks submission"
-    // rule as every other geolocation call in this file. Captured once up front
-    // rather than on submit so a slow/denied GPS fix never delays sending the report.
-    navigator.geolocation.getCurrentPosition(pos => {
-        document.getElementById('incidentLat').value = pos.coords.latitude;
-        document.getElementById('incidentLng').value = pos.coords.longitude;
-    }, () => {}, {enableHighAccuracy: true, timeout: 10000});
+    // Best-effort, non-blocking — same "denied/unavailable never blocks
+    // submission" rule as every other geolocation call in this file, and still
+    // never waited for on submit.
+    //
+    // It used to be captured ONCE, when the page loaded. The Action Room stays
+    // open for a whole operation, so a casualty reported two hours in was
+    // filed at wherever the reporter had been standing two hours earlier. Now
+    // it is taken while the form is being filled (the first field touched,
+    // then at most every 30s), and at the moment of sending it is swapped for
+    // the passive capture's fix if that one is fresher or better — which costs
+    // no wait, since it is already in memory.
+    const latEl = document.getElementById('incidentLat');
+    const lngEl = document.getElementById('incidentLng');
+    const accEl = document.getElementById('incidentAccuracy');
+    let filledFix = null;
+    const fillFix = fix => {
+        if (!fix) return;
+        filledFix = fix;
+        latEl.value = fix.lat;
+        lngEl.value = fix.lng;
+        accEl.value = fix.acc ?? '';
+    };
+    let lastIncidentFixAt = 0;
+    form.addEventListener('focusin', () => {
+        if (Date.now() - lastIncidentFixAt < 30000) return;
+        lastIncidentFixAt = Date.now();
+        acquireBestFix(10000, ONE_SHOT_GOOD_ENOUGH_M).then(({fix}) => fillFix(betterFix(filledFix, fix)));
+    });
+    form.addEventListener('submit', () => {
+        if (latestAutoPosition && Date.now() - latestAutoPosition.timestamp <= ONE_SHOT_HELD_FIX_MAX_AGE_MS) {
+            fillFix(betterFix(filledFix, fixFromPosition(latestAutoPosition)));
+        }
+    });
 
     const unknownCheckbox = document.getElementById('incidentUnknownPatient');
     const patientFields = document.getElementById('incidentPatientFields');
@@ -12481,13 +12522,17 @@ function voiceHandleStop() {
 }
 
 function voiceSendClip(blob, ext, heldMs) {
-    const send = (lat, lng) => {
+    const send = fix => {
         const fd = new FormData();
         fd.append('csrf_token', csrfToken);
         fd.append('action', 'send');
         fd.append('mission_id', '<?= $missionId ?>');
         fd.append('duration_ms', String(Math.round(heldMs)));
-        if (lat !== null) { fd.append('lat', String(lat)); fd.append('lng', String(lng)); }
+        if (fix) {
+            fd.append('lat', String(fix.lat));
+            fd.append('lng', String(fix.lng));
+            if (fix.acc !== null) fd.append('accuracy', String(fix.acc));
+        }
         // The filename's extension must come from the NEGOTIATED type, never
         // guessed — mission-voice.php checks extension and sniffed MIME
         // against each other and rejects a mismatch.
@@ -12500,18 +12545,11 @@ function voiceSendClip(blob, ext, heldMs) {
             })
             .catch(() => voiceSetStatus(t('voice.send_failed'), 'text-danger'));
     };
-    // A fix is worth a moment but never worth the message: a short timeout and
-    // then send regardless, because where somebody is matters less than what
-    // they said.
-    if (!navigator.geolocation) { send(null, null); return; }
-    let settled = false;
-    const done = (lat, lng) => { if (!settled) { settled = true; send(lat, lng); } };
-    setTimeout(() => done(null, null), 3000);
-    navigator.geolocation.getCurrentPosition(
-        pos => done(pos.coords.latitude, pos.coords.longitude),
-        () => done(null, null),
-        {enableHighAccuracy: true, timeout: 2800, maximumAge: 30000}
-    );
+    // A fix is worth a moment but never worth the message: at most ~3s, then
+    // send regardless, because where somebody is matters less than what they
+    // said. acquireBestFix() resolves by its budget whatever happens, and
+    // answers at once from the passive capture's fix when that one is fresh.
+    acquireBestFix(2800, SOS_GOOD_ENOUGH_M).then(({fix}) => send(fix));
 }
 
 (function wireVoiceHoldButton() {
@@ -13974,14 +14012,24 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
     const status = document.getElementById('pingStatus-' + button.dataset.prId);
     if (!navigator.geolocation) { status.textContent = t('myping.gps_unsupported'); return; }
     button.disabled = true; status.textContent = t('myping.locating');
-    // Fired concurrently with, not chained before, getCurrentPosition() below
+    // Fired concurrently with, not chained before, acquireBestFix() below
     // so the geolocation call stays the very next thing invoked synchronously
     // from this click handler — no reason to risk a stricter browser's
     // user-activation gating over a battery read.
     const batteryPromise = getBatteryLevelPct();
-    navigator.geolocation.getCurrentPosition(position => {
+    // The best fix within 10s rather than the first one: the first is usually
+    // the coarse network fix, which the server's accuracy gate then refused —
+    // so the button the volunteer pressed to be SEEN reported a failure.
+    acquireBestFix(10000, ONE_SHOT_GOOD_ENOUGH_M).then(({fix, error}) => {
+        if (!fix) {
+            status.textContent = geolocationErrorText(error);
+            status.className = 'small mb-2 text-danger';
+            button.disabled = false;
+            sendGeolocationErrorToCommandPost(error);
+            return;
+        }
         batteryPromise.then(batteryLevel => {
-            const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || '', battery_level: batteryLevel ?? ''});
+            const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: fix.lat, lng: fix.lng, accuracy: fix.acc ?? '', battery_level: batteryLevel ?? '', fix_age_ms: Math.max(0, Date.now() - fix.ts)});
             fetch('ping-location.php', {method:'POST', body:data}).then(response => {
                 if (!checkSessionAlive(response)) { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; return null; }
                 return response.json();
@@ -13991,7 +14039,7 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
                 status.className = 'small mb-2 ' + (result.ok ? 'text-success' : 'text-danger');
             }).catch(() => { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; }).finally(() => button.disabled = false);
         });
-    }, err => { status.textContent = geolocationErrorText(err); status.className = 'small mb-2 text-danger'; button.disabled = false; sendGeolocationErrorToCommandPost(err); }, {enableHighAccuracy:true, timeout:10000});
+    });
 }));
 
 // Passive background capture while this page stays open — silent (no status
@@ -14073,6 +14121,92 @@ function acceptAutoPosition(position) {
     // is reported at once instead of waiting out a cadence window.
     lastReportedGpsErrorCode = null;
 }
+
+// ── One-shot positions: SOS, Point of Interest, photos, incident, route
+// arrival, voice, the manual button ──────────────────────────────────────────
+// Each of these used to call getCurrentPosition() cold and take the FIRST
+// answer. That first answer is almost always the coarse Wi-Fi/cell fix,
+// because it is what exists before GNSS locks — the same fault v3.313.0 fixed
+// for the passive capture — while right beside it the passive capture was
+// already holding a GNSS fix taken seconds ago. So an SOS went out pinned to a
+// ±150m guess when a ±6m position was sitting in memory.
+//
+// acquireBestFix() takes the held fix when it is fresh and already good (no
+// wait at all, which matters most for SOS), otherwise listens for up to
+// `budgetMs` and keeps the best fix it hears, stopping early the moment one is
+// good enough. It never rejects: it resolves {fix, error}, where fix is null
+// only when nothing usable arrived, so every caller keeps its existing
+// "send without coordinates rather than not at all" behaviour.
+const ONE_SHOT_HELD_FIX_MAX_AGE_MS = 15000;
+// When nothing fresh arrives inside the budget, a held fix up to this old is
+// still sent — a position a minute old is more use to a rescuer than none.
+// Its true age travels with it where the endpoint accepts one.
+const ONE_SHOT_FALLBACK_MAX_AGE_MS = 60000;
+function fixFromPosition(position) {
+    return {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        acc: typeof position.coords.accuracy === 'number' ? position.coords.accuracy : null,
+        ts: position.timestamp || Date.now(),
+    };
+}
+// Same rule as holdBestAutoPosition(): within the preference window the more
+// accurate fix wins, past it the newer one does.
+function betterFix(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    const newer = b.ts >= a.ts ? b : a;
+    const older = newer === b ? a : b;
+    if (newer.ts - older.ts > AUTO_PING_PREFER_ACCURATE_MS) return newer;
+    if (older.acc !== null && (newer.acc === null || older.acc < newer.acc)) return older;
+    return newer;
+}
+// A fix object back into the shape the passive-capture functions take.
+function positionFromFix(fix) {
+    return {coords: {latitude: fix.lat, longitude: fix.lng, accuracy: fix.acc}, timestamp: fix.ts};
+}
+// fallbackMaxAgeMs: how old a held fix may be and still be answered with
+// when nothing fresh arrives. The passive capture passes 0 — it must never
+// re-send a fix it already sent (the v3.311.0 byte-identical-points fault);
+// the one-shot captures accept up to a minute.
+function acquireBestFix(budgetMs, goodEnoughM, fallbackMaxAgeMs = ONE_SHOT_FALLBACK_MAX_AGE_MS) {
+    return new Promise(resolve => {
+        const heldFix = latestAutoPosition ? fixFromPosition(latestAutoPosition) : null;
+        let best = (heldFix && Date.now() - heldFix.ts <= ONE_SHOT_HELD_FIX_MAX_AGE_MS) ? heldFix : null;
+        let lastError = null;
+        if (best && best.acc !== null && best.acc <= goodEnoughM) { resolve({fix: best, error: null}); return; }
+        let done = false, watchId = null, timer = null;
+        const finish = () => {
+            if (done) return;
+            done = true;
+            if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+            clearTimeout(timer);
+            if (!best && heldFix && Date.now() - heldFix.ts <= fallbackMaxAgeMs) best = heldFix;
+            // No fix and no error means the budget ran out first: that IS a
+            // timeout, and saying so beats "unknown error".
+            resolve({fix: best, error: best ? null : (lastError || {code: 3})});
+        };
+        if (!navigator.geolocation) { finish(); return; }
+        timer = setTimeout(finish, budgetMs);
+        // Called synchronously from the caller's click handler, so a browser
+        // that gates geolocation on user activation still sees the gesture.
+        watchId = navigator.geolocation.watchPosition(position => {
+            const fix = fixFromPosition(position);
+            best = betterFix(best, fix);
+            if (fix.acc !== null && fix.acc <= goodEnoughM) finish();
+        }, err => {
+            lastError = err;
+            // Refused permission will not change inside the budget; anything
+            // else (no fix YET, a slow fix) might, so keep listening.
+            if (err && err.code === 1) finish();
+        }, {enableHighAccuracy: true, maximumAge: 0, timeout: budgetMs});
+    });
+}
+// Stop early at this accuracy. 20m is what a GNSS fix in the open reaches
+// within seconds; an SOS stops at the server's own acceptance line instead,
+// because for an emergency seconds matter more than the last few metres.
+const ONE_SHOT_GOOD_ENOUGH_M = 20;
+const SOS_GOOD_ENOUGH_M = 50;
 
 // The volunteer is the only person who can do anything about a bad fix: step
 // out from under a balcony, walk clear of the treeline, turn location back
@@ -14180,7 +14314,10 @@ function sendAutoPing(position) {
     lastAutoPingSentAt = Date.now();
     getBatteryLevelPct().then(batteryLevel => {
         buttons.forEach(button => {
-            const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || '', battery_level: batteryLevel ?? '', source: 'auto'});
+            // fix_age_ms: how old the fix already is, on the phone's own clock
+            // (a wrong clock cancels out). The server stamps the row with when
+            // the fix was taken rather than when it arrived.
+            const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || '', battery_level: batteryLevel ?? '', source: 'auto', fix_age_ms: Math.max(0, Date.now() - position.timestamp)});
             // The server's answer is read, not discarded. Both write-time
             // gates refuse a ping by replying ok:false, and until this was
             // wired up a volunteer whose every fix was being refused saw a
@@ -14240,17 +14377,42 @@ setInterval(() => {
     // is a claim the map has no way to mark as doubtful, and it is what put
     // byte-identical coordinates minutes apart into 7-15% of every trail.
     if (autoFixInFlight || !navigator.geolocation || !document.querySelectorAll('.send-ping').length) return;
+    takeFreshAutoFixAndSend();
+}, 15000);
+
+// One fresh read for the passive capture when nothing fresh is held. It used
+// to be getCurrentPosition(), which answers with the FIRST fix — the coarse
+// network one when GNSS has not locked — and sent it straight on, so a phone
+// that had lost its fix was reported at ±100m and refused by the server's
+// accuracy gate. Now the best fix within the budget. The held fix is never
+// answered with (fallback 0): re-sending one already sent is exactly what put
+// byte-identical points into every trail before v3.311.0.
+const AUTO_PING_ONE_SHOT_BUDGET_MS = Math.min(15000, Math.max(5000, Math.round(AUTO_PING_CADENCE_MS / 2)));
+function takeFreshAutoFixAndSend() {
+    if (!AUTO_PING_HIGH_ACCURACY) {
+        // An org that switched GNSS off for battery keeps the old single
+        // low-power read: waiting for a better fix is pointless without it.
+        autoFixInFlight = true;
+        navigator.geolocation.getCurrentPosition(
+            position => { autoFixInFlight = false; acceptAutoPosition(position); sendAutoPing(position); },
+            err => { autoFixInFlight = false; reportAutoGeolocationError(err); },
+            AUTO_PING_GEO_OPTS
+        );
+        return;
+    }
     autoFixInFlight = true;
-    navigator.geolocation.getCurrentPosition(
-        position => { autoFixInFlight = false; acceptAutoPosition(position); sendAutoPing(position); },
+    acquireBestFix(AUTO_PING_ONE_SHOT_BUDGET_MS, ONE_SHOT_GOOD_ENOUGH_M, 0).then(({fix, error}) => {
+        autoFixInFlight = false;
+        if (!fix) { reportAutoGeolocationError(error); return; }
         // Stored through acceptAutoPosition so the held fix stays the best
         // one, but SENT directly: this read only happened because nothing
         // fresh was available, and what we just obtained is by definition
         // fresh even if a slightly older held fix was tighter.
-        err => { autoFixInFlight = false; reportAutoGeolocationError(err); },
-        AUTO_PING_GEO_OPTS
-    );
-}, 15000);
+        const position = positionFromFix(fix);
+        acceptAutoPosition(position);
+        sendAutoPing(position);
+    });
+}
 
 // Catch-up: if the tab was backgrounded/suspended through a whole cadence
 // window, don't wait for the next scheduled tick once it's visible again — a
@@ -14263,16 +14425,7 @@ document.addEventListener('visibilitychange', () => {
     if (!navigator.geolocation || !document.querySelectorAll('.send-ping').length) return;
     if (Date.now() - lastAutoPingSentAt < AUTO_PING_CADENCE_MS) return;
     if (autoFixInFlight) return;
-    autoFixInFlight = true;
-    navigator.geolocation.getCurrentPosition(
-        position => { autoFixInFlight = false; acceptAutoPosition(position); sendAutoPing(position); },
-        // Stored through acceptAutoPosition so the held fix stays the best
-        // one, but SENT directly: this read only happened because nothing
-        // fresh was available, and what we just obtained is by definition
-        // fresh even if a slightly older held fix was tighter.
-        err => { autoFixInFlight = false; reportAutoGeolocationError(err); },
-        AUTO_PING_GEO_OPTS
-    );
+    takeFreshAutoFixAndSend();
 });
 
 // Native background GPS — Capacitor Android app only, no-op in any browser
@@ -14351,6 +14504,104 @@ function bgPluginReady() {
 
 let bgTrackingKickedOff = false;
 
+// ── Android app: the phone's own location health ────────────────────────────
+// A web page can only learn that a fix failed. The app can also see WHY: only
+// "approximate" location granted (the background service then never starts at
+// all — Capacitor treats coarse-only as not granted), the location switch off,
+// battery saver set to cut GPS the moment the screen goes dark, battery
+// optimisation that will throttle the service. Each gets a line on the
+// volunteer's own card, while they are still looking at it and can fix it.
+// The first three stop positions from arriving, so the command post is told
+// too; the last two only bite later, with the screen off, and the background
+// service reports them itself if and when they do.
+//
+// Every call is guarded: an APK older than 1.1.13 / 1.0.14 has none of these
+// methods, and must keep working exactly as before.
+async function nativePluginCall(method, args) {
+    try {
+        const plugin = window.Capacitor.Plugins.BackgroundGeolocation;
+        if (typeof plugin[method] !== 'function') return null;
+        return await plugin[method](args || {});
+    } catch (e) {
+        return null;
+    }
+}
+const reportedNativeGpsReasons = {};
+function sendGpsReasonToCommandPost(reason) {
+    if (!document.querySelectorAll('.send-ping').length) return;
+    const now = Date.now();
+    if (reportedNativeGpsReasons[reason] && now - reportedNativeGpsReasons[reason] < AUTO_PING_CADENCE_MS) return;
+    reportedNativeGpsReasons[reason] = now;
+    fetch('mission-gps-error.php', {
+        method: 'POST',
+        body: new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>', reason: reason}),
+    }).catch(() => {});
+}
+async function refreshNativeGpsDiagnostics() {
+    const diag = await nativePluginCall('vopsDiagnostics');
+    const el = document.getElementById('myNativeGpsNote');
+    if (!diag) return null;
+    const problems = [];
+    let reason = null;
+    if (!diag.fine && !diag.coarse) { problems.push(['danger', t('myping.native_denied')]); reason = 'denied'; }
+    else if (!diag.locationEnabled) { problems.push(['danger', t('myping.native_location_off')]); reason = 'location_off'; }
+    else if (!diag.fine) { problems.push(['danger', t('myping.native_approximate')]); reason = 'imprecise'; }
+    if (diag.powerSaveCutsGps) problems.push(['warning', t('myping.native_power_save')]);
+    if (!diag.ignoringBatteryOptimizations) problems.push(['warning', t('myping.native_battery_optimized')]);
+    if (reason) sendGpsReasonToCommandPost(reason);
+    if (el) {
+        if (!problems.length) {
+            el.classList.add('d-none');
+            el.innerHTML = '';
+        } else {
+            // Built once per call from translated strings only — no user data.
+            el.innerHTML = problems.map(([level, text]) =>
+                `<div class="text-${level} fw-bold"><i class="bi bi-exclamation-triangle-fill me-1"></i>${escapeHtml(text)}</div>`
+            ).join('') + `<button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="myNativeGpsSettingsBtn"><i class="bi bi-gear me-1"></i>${escapeHtml(t('myping.native_open_settings'))}</button>`;
+            el.classList.remove('d-none');
+            const btn = document.getElementById('myNativeGpsSettingsBtn');
+            // Location off is fixed in the system dialog, everything else on
+            // the app's own settings page (permission, battery).
+            if (btn) btn.addEventListener('click', () => reason === 'location_off'
+                ? nativePluginCall('vopsCheckLocationSettings')
+                : nativePluginCall('openSettings'));
+        }
+    }
+    return diag;
+}
+// Android's own one-tap dialog for "turn on location / high accuracy". Shown
+// at most once per 30 minutes if the volunteer says no — a dialog on every
+// page load would teach them to dismiss it without reading.
+async function offerNativeLocationSettings(Preferences) {
+    try {
+        const last = await Preferences.get({key: 'vops_loc_settings_declined_at'});
+        if (last && last.value && Date.now() - Number(last.value) < 30 * 60 * 1000) return;
+    } catch (e) {}
+    const result = await nativePluginCall('vopsCheckLocationSettings');
+    if (result && result.prompted && !result.satisfied) {
+        try { await Preferences.set({key: 'vops_loc_settings_declined_at', value: String(Date.now())}); } catch (e) {}
+    }
+}
+// Set when start() was refused for a reason the volunteer can fix (permission,
+// location off). Coming back to the page after fixing it retries once.
+let nativeStartNeedsRetry = false;
+async function recheckNativeGps() {
+    if (document.visibilityState !== 'visible' || !bgPluginReady() || !bgTrackingKickedOff) return;
+    const diag = await refreshNativeGpsDiagnostics();
+    if (nativeStartNeedsRetry && diag && diag.fine && diag.locationEnabled) {
+        nativeStartNeedsRetry = false;
+        bgTrackingKickedOff = false;
+        startNativeBackgroundTracking();
+    }
+}
+document.addEventListener('visibilitychange', recheckNativeGps);
+// Also on a timer while the page is on screen: pulling down the quick-settings
+// shade to switch location on changes nothing the page can see, so on the
+// emulator the card kept saying "location is OFF" over a phone that was
+// already reporting again. One cheap native call every 30s, no network unless
+// something is actually wrong (and then throttled per reason).
+setInterval(recheckNativeGps, 30000);
+
 function startNativeBackgroundTracking() {
     // Guarded: the poll and the pageshow listener below can both reach here.
     if (bgTrackingKickedOff) return;
@@ -14370,9 +14621,13 @@ function startNativeBackgroundTracking() {
             const stored = await Preferences.get({ key: 'mobile_api_token' });
             let token = stored && stored.value;
             if (!token) {
+                // The phone's model rather than the literal 'Android', so the
+                // token row says which device this is. Older APKs have no
+                // diagnostics and keep the old label.
+                const diagForLabel = await nativePluginCall('vopsDiagnostics');
                 const issueResp = await fetch('mobile-token-issue.php', {
                     method: 'POST',
-                    body: new URLSearchParams({ csrf_token: csrfToken, device_label: 'Android' })
+                    body: new URLSearchParams({ csrf_token: csrfToken, device_label: (diagForLabel && diagForLabel.device) || 'Android' })
                 });
                 const issued = await issueResp.json();
                 if (issued.ok) {
@@ -14403,18 +14658,33 @@ function startNativeBackgroundTracking() {
                 authToken: token,
                 requestPermissions: true
             };
+            // start() is a CALLBACK-type plugin method: Capacitor returns the
+            // callback id at once and delivers a rejection to this callback,
+            // never to a promise (@capacitor/core createPluginMethod: only
+            // rtype 'promise' methods get nativePromise). So the try/catch
+            // that used to wrap start() could never see ALREADY_STARTED or
+            // NOT_AUTHORIZED — the debug log holds zero of either, and
+            // "start_success" was logged for a start the plugin had refused.
+            // Rejections are handled here instead.
+            let startRejectionHandled = false;
             const onLocation = (location, error) => {
-                // Native POST already handles delivery; this callback is
-                // mainly useful for debugging via a connected device.
-                if (error) console.error('[BackgroundGeolocation] location error', error);
+                if (!error) return;
+                console.error('[BackgroundGeolocation] start/location error', error);
+                // One rejection per page is acted on: a restart below starts
+                // again with this same callback, and must not loop.
+                if (startRejectionHandled) return;
+                startRejectionHandled = true;
+                handleStartRejection(error);
             };
-
-            try {
-                bgDebugLog('start_attempt', 'intervalMs=' + AUTO_PING_CADENCE_MS + ' url=' + pingUrl);
-                await BackgroundGeolocation.start(startOptions, onLocation);
-                await Preferences.set({ key: 'bg_tracking_interval_ms', value: String(AUTO_PING_CADENCE_MS) });
-                bgDebugLog('start_success', '');
-            } catch (e) {
+            const handleStartRejection = async (e) => {
+                // Whatever start() said, the diagnostics say what the
+                // volunteer can actually do about it.
+                refreshNativeGpsDiagnostics();
+                if (e && e.code === 'NOT_AUTHORIZED') {
+                    nativeStartNeedsRetry = true;
+                    bgDebugLog('start_rejected', e.message || e.code);
+                    return;
+                }
                 // The plugin flatly rejects a 2nd start() call within the same
                 // app process as ALREADY_STARTED — confirmed in
                 // BackgroundGeolocation.java: it checks serviceConnectionFuture
@@ -14431,14 +14701,15 @@ function startNativeBackgroundTracking() {
                 // reload/tab-refocus, which would otherwise cause a brief
                 // tracking gap for no reason.
                 if (e && e.code === 'ALREADY_STARTED') {
-                    const storedInterval = await Preferences.get({ key: 'bg_tracking_interval_ms' });
-                    bgDebugLog('already_started', 'storedInterval=' + storedInterval.value + ' wantInterval=' + AUTO_PING_CADENCE_MS);
-                    if (storedInterval.value !== String(AUTO_PING_CADENCE_MS)) {
+                    // Compared with the interval stored BEFORE this start was
+                    // dispatched: the rejection arrives asynchronously, after
+                    // the new value has already been written below.
+                    bgDebugLog('already_started', 'storedInterval=' + intervalBeforeStart + ' wantInterval=' + AUTO_PING_CADENCE_MS);
+                    if (intervalBeforeStart !== String(AUTO_PING_CADENCE_MS)) {
                         try {
                             await BackgroundGeolocation.stop();
-                            await BackgroundGeolocation.start(startOptions, onLocation);
-                            await Preferences.set({ key: 'bg_tracking_interval_ms', value: String(AUTO_PING_CADENCE_MS) });
-                            bgDebugLog('restart_success', '');
+                            BackgroundGeolocation.start(startOptions, onLocation);
+                            bgDebugLog('restart_dispatched', '');
                         } catch (e2) {
                             console.error('[BackgroundGeolocation] restart with new interval failed', e2);
                             bgDebugLog('restart_failed', (e2 && (e2.code || e2.message)) || String(e2));
@@ -14448,7 +14719,22 @@ function startNativeBackgroundTracking() {
                     console.error('[BackgroundGeolocation] setup failed', e);
                     bgDebugLog('start_failed', (e && (e.code || e.message)) || String(e));
                 }
-            }
+            };
+
+            const storedBefore = await Preferences.get({ key: 'bg_tracking_interval_ms' });
+            const intervalBeforeStart = storedBefore && storedBefore.value;
+            // Before start(): the dialog lets the volunteer turn location on
+            // (and Google's accuracy mode with it) in one tap. start() itself
+            // no longer refuses when the switch is off (the plugin patch), so
+            // answering "No thanks" still starts the service, which reports
+            // "location off" and resumes the moment the switch goes on.
+            await offerNativeLocationSettings(Preferences);
+            bgDebugLog('start_attempt', 'intervalMs=' + AUTO_PING_CADENCE_MS + ' url=' + pingUrl);
+            BackgroundGeolocation.start(startOptions, onLocation);
+            await Preferences.set({ key: 'bg_tracking_interval_ms', value: String(AUTO_PING_CADENCE_MS) });
+            // Dispatched — a refusal, if any, arrives at onLocation.
+            bgDebugLog('start_dispatched', '');
+            refreshNativeGpsDiagnostics();
         } catch (e) {
             console.error('[BackgroundGeolocation] setup failed', e);
             bgDebugLog('hook_exception', (e && e.message) || String(e));
@@ -14537,9 +14823,18 @@ function setFieldStatus(btn, prId, status) {
     const group = document.getElementById('statusBtns-' + prId);
     if (group) group.querySelectorAll('button').forEach(b => b.disabled = true);
 
-    const send = (lat, lng) => {
-        const extra = {reported_at: new Date().toISOString()};
-        if (lat !== null) { extra.lat = lat; extra.lng = lng; }
+    // The moment of the TAP, not of sending: an SOS may now wait a few seconds
+    // for a usable fix, and the command post must see when help was called.
+    const tappedAt = new Date().toISOString();
+    const send = fix => {
+        const extra = {reported_at: tappedAt};
+        if (fix) {
+            extra.lat = fix.lat;
+            extra.lng = fix.lng;
+            // Travels with the queued copy too, so an SOS replayed after a
+            // signal outage still says how good its position was.
+            if (fix.acc !== null) extra.accuracy = fix.acc;
+        }
         postFieldStatus(prId, status, extra).then(result => {
             // No signal, or a session that expired mid-mission. This used to
             // do nothing at all beyond re-enabling the buttons — the SOS
@@ -14578,14 +14873,13 @@ function setFieldStatus(btn, prId, status) {
 
     // SOS specifically tries to attach GPS, but never blocks on it — an alert
     // without coordinates beats no alert at all if geolocation fails/denies.
+    // Same 5s ceiling as before; the difference is that a fresh fix from the
+    // passive capture answers instantly, and otherwise the first fix within
+    // the acceptance line wins instead of simply the first fix.
     if (status === 'needs_help' && navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-            pos => send(pos.coords.latitude, pos.coords.longitude),
-            () => send(null, null),
-            {enableHighAccuracy: true, timeout: 5000}
-        );
+        acquireBestFix(5000, SOS_GOOD_ENOUGH_M).then(({fix}) => send(fix));
     } else {
-        send(null, null);
+        send(null);
     }
 }
 

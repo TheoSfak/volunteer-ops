@@ -57,6 +57,25 @@ if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_o
 // not taking part in this Action Room is not being tracked, so they have no
 // GPS failure worth recording — and a warning on their roster line would
 // contradict the blank row the page deliberately renders for them.
-$recorded = recordVolunteerGpsError($missionId, (int) $userId, $code);
+//
+// One phone, one stream — the same rule recordVolunteerPing() applies to
+// positions. Inside the Android app the page runs its own capture beside the
+// native background service; while the service is delivering fixes, the page's
+// failures describe a receiver nobody is listening to. Recording them made the
+// roster flash an error every cadence that the next native fix then cleared,
+// on a volunteer whose position was arriving perfectly well.
+if (volunteerHasRecentNativeFix($missionId, (int) $userId)) {
+    echo json_encode(['ok' => true, 'skipped' => 'native_active']);
+    exit;
+}
+
+// A `reason` by name is what the Android app's page-side check sends for the
+// things no PositionError can express (location switched off, battery saver
+// cutting GPS, approximate-only permission). Only the client-reportable set is
+// accepted by name; anything else falls back to the numeric code.
+$reason = (string) post('reason');
+$recorded = in_array($reason, VOLUNTEER_GPS_CLIENT_REASONS, true)
+    ? recordVolunteerGpsErrorReason($missionId, (int) $userId, $reason)
+    : recordVolunteerGpsError($missionId, (int) $userId, $code);
 
 echo json_encode(['ok' => $recorded]);

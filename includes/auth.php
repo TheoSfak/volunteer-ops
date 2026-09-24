@@ -89,6 +89,11 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // elapses must still refresh last_activity and return normally instead
     // of hitting the idle check itself and logging the session out.
     'war-room-keepalive.php',
+    // mission-gps-error.php (v3.315.0, "why has this phone stopped reporting")
+    // shipped without being added here, so a partner-org guest's report was
+    // redirected by bootstrap.php's guest gate and lost without a trace —
+    // and guests are the volunteers the command post knows least about.
+    'mission-gps-error.php',
 ]);
 
 function initSession() {

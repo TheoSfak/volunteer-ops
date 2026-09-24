@@ -253,6 +253,10 @@ final class ActionRoomParticipantsTest extends TestCase
     {
         $this->tick($this->volunteerIds[0]);
         foreach ([1 => 'denied', 2 => 'unavailable', 3 => 'timeout'] as $code => $expected) {
+            // Cleared each time: this pins the code-to-reason mapping. Since
+            // v3.320.0 a symptom (2, 3) deliberately does not overwrite a
+            // recent cause (1) — GpsFixIntegrityTest covers that order.
+            clearVolunteerGpsError($this->missionId, $this->volunteerIds[0]);
             $this->assertTrue(recordVolunteerGpsError($this->missionId, $this->volunteerIds[0], $code));
             $this->assertSame($expected, $this->storedGpsError($this->volunteerIds[0])['last_gps_error']);
         }

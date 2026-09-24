@@ -47,8 +47,6 @@ if (!$user) {
     exit;
 }
 
-dbExecute("UPDATE mobile_api_tokens SET last_used_at = NOW() WHERE token_hash = ?", [$tokenHash]);
-
 // Two request shapes land here: plain form fields (curl/manual testing) and
 // @capgo/background-geolocation's native JSON body (native HTTP delivery,
 // posted straight from the Android foreground service — see
@@ -67,6 +65,15 @@ if (stripos($contentType, 'application/json') !== false) {
     $source   = 'auto'; // this path is only ever the passive background watcher, never the manual "send now" button
     $rawAccuracy = $body['accuracy'] ?? null;
     $rawBattery  = $body['battery_level'] ?? null;
+    // Measured on the phone against its monotonic clock at the moment of
+    // sending, so it includes any time the fix spent in the offline queue.
+    // Missing from app versions before 1.1.13 / 1.0.14.
+    $fixAgeMs = parseFixAgeMs($body['fix_age_ms'] ?? null);
+    // Android's Location.isFromMockProvider(). Only a real boolean true counts:
+    // the plugin has always sent this field, and a missing or odd value must
+    // not turn every ping from an older build into a refusal.
+    $isMock   = ($body['simulated'] ?? false) === true;
+    $rawDevice = isset($body['device']) && is_string($body['device']) ? $body['device'] : null;
 } else {
     $shiftId  = (int) post('shift_id');
     $lat      = (float) post('lat');
@@ -74,7 +81,22 @@ if (stripos($contentType, 'application/json') !== false) {
     $source   = post('source') === 'auto' ? 'auto' : 'manual';
     $rawAccuracy = post('accuracy');
     $rawBattery  = post('battery_level');
+    $fixAgeMs = parseFixAgeMs(post('fix_age_ms'));
+    $isMock   = false;
+    $rawDevice = null;
 }
+
+// Which phone this is, as the app reports it ("samsung SM-A525F · Android 14").
+// Kept on the token rather than on every ping: it identifies the device and
+// does not change between fixes, and the token row is already written on every
+// request, so recording it costs no extra query. Before v3.320.0 every label
+// was the literal 'Android', which made "which phones give bad positions"
+// unanswerable.
+$device = $rawDevice !== null ? trim(preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $rawDevice)) : '';
+dbExecute(
+    "UPDATE mobile_api_tokens SET last_used_at = NOW(), device_label = COALESCE(?, device_label) WHERE token_hash = ?",
+    [$device !== '' ? mb_substr($device, 0, 100) : null, $tokenHash]
+);
 
 $accuracy = ($rawAccuracy !== null && $rawAccuracy !== '' && is_numeric($rawAccuracy))
     ? min((float) $rawAccuracy, 5000)
@@ -87,4 +109,4 @@ $batteryLevel = ($rawBattery !== null && $rawBattery !== '' && is_numeric($rawBa
 
 // 'native': bearer-token auth means this can only be the Capacitor Android
 // background-location plugin, which keeps reporting with the screen off.
-echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source, 'native'));
+echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source, 'native', $fixAgeMs, $isMock));

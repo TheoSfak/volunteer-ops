@@ -37,6 +37,10 @@ $lng = ($lngRaw !== '' && $lngRaw !== null && is_numeric($lngRaw)) ? (float) $ln
 if ($lat !== null && ($lat < -90 || $lat > 90)) { $lat = null; }
 if ($lng !== null && ($lng < -180 || $lng > 180)) { $lng = null; }
 if ($lat === 0.0 && $lng === 0.0) { $lat = null; $lng = null; }
+// How good that fix is, in metres. An SOS pinned to ±300m from a Wi-Fi lookup
+// sends a team to a very different place than one pinned to ±5m by GNSS, and
+// until this was stored the two looked identical to the command post.
+$accuracy = parseAccuracyMeters(post('accuracy'), $lng === null ? null : $lat);
 
 // The War Room offline queue replays this endpoint, so a status change (and
 // especially an SOS) that only reaches the server once signal returns must be
@@ -156,7 +160,15 @@ if ($status === 'needs_help') {
         );
 
         if ($existingAlertId) {
-            dbExecute("UPDATE mission_sos_alerts SET lat = ?, lng = ? WHERE id = ?", [$lat, $lng, (int) $existingAlertId]);
+            // A repeat tap refreshes the position only when it HAS one. It
+            // used to overwrite unconditionally, so a second tap whose GPS
+            // failed wiped the coordinates the first tap had delivered.
+            if ($lat !== null && $lng !== null) {
+                dbExecute(
+                    "UPDATE mission_sos_alerts SET lat = ?, lng = ?, accuracy_m = ? WHERE id = ?",
+                    [$lat, $lng, $accuracy, (int) $existingAlertId]
+                );
+            }
         } else {
             // created_at is the resolved field time, not NOW(): an SOS queued
             // offline and replayed 20 minutes later must show command staff when
@@ -164,9 +176,9 @@ if ($status === 'needs_help') {
             // unacknowledged alert (siren + push fire below regardless), it just
             // sorts and reads by its true time.
             dbInsert(
-                "INSERT INTO mission_sos_alerts (mission_id, user_id, pr_id, team_id, lat, lng, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
-                [$missionId, $userId, $prId, getUserTeamIdForMission($missionId, $userId), $lat, $lng, $eventTs]
+                "INSERT INTO mission_sos_alerts (mission_id, user_id, pr_id, team_id, lat, lng, accuracy_m, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [$missionId, $userId, $prId, getUserTeamIdForMission($missionId, $userId), $lat, $lng, $accuracy, $eventTs]
             );
         }
         db()->commit();

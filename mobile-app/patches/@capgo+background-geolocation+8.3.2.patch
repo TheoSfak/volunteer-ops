@@ -294,10 +294,132 @@ index 0000000..4501866
 +    }
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
-index 00b9e10..fdabcbd 100644
+index 00b9e10..3554a71 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
-@@ -117,7 +117,10 @@ public class BackgroundGeolocation extends Plugin {
+@@ -1,6 +1,7 @@
+ package com.capgo.capacitor_background_geolocation;
+ 
+ import android.Manifest;
++import android.app.Activity;
+ import android.app.NotificationChannel;
+ import android.app.NotificationManager;
+ import android.content.BroadcastReceiver;
+@@ -28,10 +29,14 @@ import com.getcapacitor.PluginMethod;
+ import com.getcapacitor.annotation.CapacitorPlugin;
+ import com.getcapacitor.annotation.Permission;
+ import com.getcapacitor.annotation.PermissionCallback;
++import com.google.android.gms.common.api.ResolvableApiException;
+ import com.google.android.gms.location.Geofence;
+ import com.google.android.gms.location.GeofencingClient;
+ import com.google.android.gms.location.GeofencingRequest;
++import com.google.android.gms.location.LocationRequest;
+ import com.google.android.gms.location.LocationServices;
++import com.google.android.gms.location.LocationSettingsRequest;
++import com.google.android.gms.location.Priority;
+ import java.net.URL;
+ import java.util.Collections;
+ import java.util.HashSet;
+@@ -47,10 +52,78 @@ import org.json.JSONObject;
+         @Permission(strings = { Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION }, alias = "location"),
+         @Permission(strings = { Manifest.permission.ACCESS_BACKGROUND_LOCATION }, alias = "backgroundLocation"),
+         @Permission(strings = { Manifest.permission.POST_NOTIFICATIONS }, alias = "notification")
+-    }
++    },
++    // VolunteerOps: routes the location-settings dialog's answer back here,
++    // see vopsCheckLocationSettings().
++    requestCodes = { BackgroundGeolocation.VOPS_LOCATION_SETTINGS_REQUEST }
+ )
+ public class BackgroundGeolocation extends Plugin {
+ 
++    static final int VOPS_LOCATION_SETTINGS_REQUEST = 0x5647;
++    private PluginCall vopsPendingSettingsCall;
++
++    /**
++     * VolunteerOps addition: what on this phone stands between it and a good
++     * position - precise vs approximate permission, the location switch,
++     * battery saver cutting GPS with the screen off, battery optimisation -
++     * plus the device model. See VopsGpsHealth.
++     */
++    @PluginMethod
++    public void vopsDiagnostics(PluginCall call) {
++        call.resolve(VopsGpsHealth.diagnostics(getContext()));
++    }
++
++    /**
++     * VolunteerOps addition: asks Play Services whether the phone's location
++     * settings allow a high-accuracy fix and, when they do not but the user
++     * can fix it in one tap (location off, Google Location Accuracy off),
++     * shows Android's own dialog for it. Resolves {satisfied, prompted}; never
++     * rejects, because a page must be able to carry on either way.
++     */
++    @PluginMethod
++    public void vopsCheckLocationSettings(PluginCall call) {
++        LocationSettingsRequest request = new LocationSettingsRequest.Builder()
++            .addLocationRequest(new LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10000L).build())
++            .setAlwaysShow(true)
++            .build();
++        LocationServices.getSettingsClient(getContext())
++            .checkLocationSettings(request)
++            .addOnSuccessListener(response -> {
++                JSObject ret = new JSObject();
++                ret.put("satisfied", true);
++                ret.put("prompted", false);
++                call.resolve(ret);
++            })
++            .addOnFailureListener(e -> {
++                if (e instanceof ResolvableApiException && getActivity() != null && vopsPendingSettingsCall == null) {
++                    try {
++                        vopsPendingSettingsCall = call;
++                        ((ResolvableApiException) e).startResolutionForResult(getActivity(), VOPS_LOCATION_SETTINGS_REQUEST);
++                        return;
++                    } catch (Exception ignored) {
++                        vopsPendingSettingsCall = null;
++                    }
++                }
++                JSObject ret = new JSObject();
++                ret.put("satisfied", false);
++                ret.put("prompted", false);
++                call.resolve(ret);
++            });
++    }
++
++    @Override
++    protected void handleOnActivityResult(int requestCode, int resultCode, Intent data) {
++        if (requestCode != VOPS_LOCATION_SETTINGS_REQUEST || vopsPendingSettingsCall == null) {
++            return;
++        }
++        JSObject ret = new JSObject();
++        ret.put("satisfied", resultCode == Activity.RESULT_OK);
++        ret.put("prompted", true);
++        PluginCall call = vopsPendingSettingsCall;
++        vopsPendingSettingsCall = null;
++        call.resolve(ret);
++    }
++
+     private final String pluginVersion = "";
+ 
+     private CompletableFuture<BackgroundGeolocationService.LocalBinder> serviceConnectionFuture;
+@@ -97,9 +170,16 @@ public class BackgroundGeolocation extends Plugin {
+         }
+ 
+         // location permission granted.
++        // VolunteerOps patch: upstream rejected here when the phone's location
++        // switch was off, so the service never started at all - and turning
++        // location on afterwards (from the quick-settings shade, which is how
++        // people do it) started nothing, because nothing retries start().
++        // Started anyway: Play Services simply delivers nothing until the
++        // switch is on, the service reports "location_off" to the command
++        // post itself (VopsGpsHealth, via onLocationAvailability), and fixes
++        // flow the moment it is switched back on.
+         if (!isLocationEnabled(getContext())) {
+-            call.reject("Location services disabled.", "NOT_AUTHORIZED");
+-            return;
++            DebugLog.log(getContext(), "start_location_off", "starting anyway; fixes resume when location is switched on");
+         }
+ 
+         // Everything is OK, continuing to adding a watcher
+@@ -117,7 +197,10 @@ public class BackgroundGeolocation extends Plugin {
                  call.getString("backgroundTitle", "Using your location"),
                  call.getString("backgroundMessage", ""),
                  call.getFloat("distanceFilter", 0f),
@@ -310,7 +432,7 @@ index 00b9e10..fdabcbd 100644
          });
      }
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
-index 85f2a02..e04ceac 100644
+index 85f2a02..e613014 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 @@ -12,6 +12,7 @@ import android.graphics.Color;
@@ -321,14 +443,18 @@ index 85f2a02..e04ceac 100644
  import android.os.Binder;
  import android.os.Build;
  import android.os.Bundle;
-@@ -21,8 +22,20 @@ import android.os.Looper;
+@@ -19,10 +20,24 @@ import android.os.Handler;
+ import android.os.IBinder;
+ import android.os.Looper;
  import android.os.PowerManager;
++import android.os.SystemClock;
  import androidx.localbroadcastmanager.content.LocalBroadcastManager;
  import com.getcapacitor.Logger;
 +// VolunteerOps patch — see the "client"/"locationCallback" field comments
 +// below for why this service moved off raw LocationManager.GPS_PROVIDER
 +// onto Play Services' fused provider.
 +import com.google.android.gms.location.FusedLocationProviderClient;
++import com.google.android.gms.location.LocationAvailability;
 +import com.google.android.gms.location.LocationCallback;
 +import com.google.android.gms.location.LocationRequest;
 +import com.google.android.gms.location.LocationResult;
@@ -342,7 +468,7 @@ index 85f2a02..e04ceac 100644
  import org.json.JSONObject;
  
  // A bound and started service that is promoted to a foreground service
-@@ -40,8 +53,19 @@ public class BackgroundGeolocationService extends Service {
+@@ -40,8 +55,19 @@ public class BackgroundGeolocationService extends Service {
  
      private String callbackId;
  
@@ -364,7 +490,7 @@ index 85f2a02..e04ceac 100644
      private MediaPlayer mediaPlayer;
      private double[][] route;
      private double distanceThreshold;
-@@ -50,7 +74,11 @@ public class BackgroundGeolocationService extends Service {
+@@ -50,7 +76,11 @@ public class BackgroundGeolocationService extends Service {
      private Handler watchdogHandler = new Handler(Looper.getMainLooper());
      private Runnable watchdogRunnable;
      private Runnable restartRunnable;
@@ -376,7 +502,7 @@ index 85f2a02..e04ceac 100644
      private PowerManager.WakeLock wakeLock;
  
      // When set (via the "url" start option), each location is also POSTed to
-@@ -78,7 +106,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -78,7 +108,7 @@ public class BackgroundGeolocationService extends Service {
              return false;
          }
          if (client != null && locationCallback != null) {
@@ -385,7 +511,7 @@ index 85f2a02..e04ceac 100644
          }
          releaseMediaPlayer();
          releaseWakeLock();
-@@ -112,9 +140,11 @@ public class BackgroundGeolocationService extends Service {
+@@ -112,9 +142,11 @@ public class BackgroundGeolocationService extends Service {
          nativePostUrl = LocationStore.getUrl(context);
          promoteToForeground(LocationStore.getTitle(context), LocationStore.getMessage(context));
          if (client == null || locationCallback == null) {
@@ -398,7 +524,7 @@ index 85f2a02..e04ceac 100644
              locationCallback = createLocationListener(this);
              requestLocationUpdates();
              startWatchdog();
-@@ -125,7 +155,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -125,7 +157,7 @@ public class BackgroundGeolocationService extends Service {
      @Override
      public void onDestroy() {
          if (client != null && locationCallback != null) {
@@ -407,11 +533,18 @@ index 85f2a02..e04ceac 100644
          }
          super.onDestroy();
          releaseMediaPlayer();
-@@ -183,10 +213,11 @@ public class BackgroundGeolocationService extends Service {
+@@ -183,10 +215,18 @@ public class BackgroundGeolocationService extends Service {
  
      private void restartLocationUpdates() {
          Logger.debug("Location watchdog timed out, restarting updates");
-+        DebugLog.log(getApplicationContext(), "watchdog_restart", "no location received in the last 60s, forcing re-registration");
++        DebugLog.log(getApplicationContext(), "watchdog_restart", "no location received in the last " + watchdogTimeoutMs() + "ms, forcing re-registration");
++        // VolunteerOps: no fix for a whole watchdog window is exactly the
++        // moment the command post needs a reason, and with the screen off this
++        // service is the only thing still running that can give one.
++        if (nativePostUrl != null) {
++            String reason = VopsGpsHealth.problemReason(getApplicationContext());
++            VopsGpsHealth.report(getApplicationContext(), reason != null ? reason : "unavailable");
++        }
          if (client == null || locationCallback == null) {
              return;
          }
@@ -420,7 +553,7 @@ index 85f2a02..e04ceac 100644
          if (restartRunnable != null) {
              watchdogHandler.removeCallbacks(restartRunnable);
          }
-@@ -194,11 +225,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -194,11 +234,7 @@ public class BackgroundGeolocationService extends Service {
              if (client == null || locationCallback == null) {
                  return;
              }
@@ -433,7 +566,26 @@ index 85f2a02..e04ceac 100644
              startWatchdog();
          };
          watchdogHandler.postDelayed(restartRunnable, 10000);
-@@ -221,8 +248,42 @@ public class BackgroundGeolocationService extends Service {
+@@ -209,7 +245,17 @@ public class BackgroundGeolocationService extends Service {
+         if (watchdogRunnable == null) {
+             watchdogRunnable = this::restartLocationUpdates;
+         }
+-        watchdogHandler.postDelayed(watchdogRunnable, 60000);
++        watchdogHandler.postDelayed(watchdogRunnable, watchdogTimeoutMs());
++    }
++
++    // VolunteerOps patch: was a fixed 60s. The update interval is the Action
++    // Room cadence, so at any cadence above 60s (the default is 180s) the
++    // watchdog fired before the next fix was even due, tore the request down
++    // and re-registered it every ~70s - and the first answer to a fresh
++    // request may be a cached location up to one interval old. Now it waits
++    // two intervals plus slack, and never less than the old 60s.
++    private long watchdogTimeoutMs() {
++        return Math.max(60000L, 2 * currentIntervalMs + 15000L);
+     }
+ 
+     private void stopWatchdog() {
+@@ -221,8 +267,43 @@ public class BackgroundGeolocationService extends Service {
          }
      }
  
@@ -468,6 +620,7 @@ index 85f2a02..e04ceac 100644
 +
      private void handleLocationChanged(android.location.Location location) {
          startWatchdog();
++        VopsGpsHealth.clear();
 +        DebugLog.log(
 +            getApplicationContext(),
 +            "location_received",
@@ -476,7 +629,7 @@ index 85f2a02..e04ceac 100644
          if (nativePostUrl != null) {
              postLocationNatively(location);
          }
-@@ -240,24 +301,51 @@ public class BackgroundGeolocationService extends Service {
+@@ -240,24 +321,60 @@ public class BackgroundGeolocationService extends Service {
          LocalBroadcastManager.getInstance(getApplicationContext()).sendBroadcast(intent);
      }
  
@@ -515,8 +668,17 @@ index 85f2a02..e04ceac 100644
          Context context = getApplicationContext();
 -        JSONObject payload = locationToJson(location);
 +        JSONObject payload = locationToJson(location, context);
++        final long fixElapsedNanos = location.getElapsedRealtimeNanos();
          postExecutor.execute(() -> {
              try {
++                // VolunteerOps patch: how old this fix is at the moment it is
++                // actually sent - measured here, on the executor, so the time
++                // it waited in the offline queue is included. Monotonic clock
++                // on both sides, so a phone whose wall clock is wrong still
++                // reports a correct age. The server stamps the row with
++                // arrival minus this, instead of stamping a fix that sat in
++                // the queue for three minutes as "now".
++                payload.put("fix_age_ms", Math.max(0L, (SystemClock.elapsedRealtimeNanos() - fixElapsedNanos) / 1000000L));
                  LocationStore.sendLocation(context, payload);
 +                DebugLog.log(context, "post_success", "");
              } catch (Exception e) {
@@ -531,7 +693,7 @@ index 85f2a02..e04ceac 100644
          JSONObject obj = new JSONObject();
          try {
              obj.put("latitude", location.getLatitude());
-@@ -276,38 +364,64 @@ public class BackgroundGeolocationService extends Service {
+@@ -276,38 +393,92 @@ public class BackgroundGeolocationService extends Service {
              // Lets the server distinguish native-delivered updates from those
              // forwarded by the JavaScript callback.
              obj.put("source", "native");
@@ -540,6 +702,10 @@ index 85f2a02..e04ceac 100644
 +            // (same reason "source" above is native-only — the WebView/JS
 +            // layer isn't running to read this itself in that state).
 +            obj.put("battery_level", getBatteryLevelPct(context));
++            // VolunteerOps patch: which phone produced this ("samsung SM-A525F
++            // · Android 14"), stored on the app's token server-side so a
++            // coordinator can tell which models give poor positions.
++            obj.put("device", VopsGpsHealth.deviceLabel());
          } catch (org.json.JSONException e) {
              Logger.error("Could not serialize location", e);
          }
@@ -556,9 +722,6 @@ index 85f2a02..e04ceac 100644
 -
 -            @Override
 -            public void onStatusChanged(String provider, int status, Bundle extras) {}
--
--            @Override
--            public void onProviderEnabled(String provider) {}
 +    // VolunteerOps patch — see locationToJson() above. BATTERY_PROPERTY_CAPACITY
 +    // returns 0-100 directly in one call, no SDK-version gating needed at this
 +    // module's minSdkVersion 24 — same one-line getSystemService() shape this
@@ -583,11 +746,29 @@ index 85f2a02..e04ceac 100644
 +    static LocationCallback createLocationListener(final BackgroundGeolocationService service) {
 +        return new LocationCallback() {
              @Override
--            public void onProviderDisabled(String provider) {}
+-            public void onProviderEnabled(String provider) {}
 +            public void onLocationResult(LocationResult locationResult) {
 +                android.location.Location location = locationResult.getLastLocation();
 +                if (location != null) {
 +                    service.handleLocationChanged(location);
++                }
++            }
+ 
++            // VolunteerOps patch: Play Services says right away when it can no
++            // longer produce locations - the switch was turned off, or the
++            // permission revoked - so those are reported at once instead of
++            // waiting out the watchdog. Only a cause the phone itself can name
++            // is reported here: "not available" on its own is routinely a few
++            // seconds indoors, and the watchdog covers it if it lasts.
+             @Override
+-            public void onProviderDisabled(String provider) {}
++            public void onLocationAvailability(LocationAvailability availability) {
++                if (availability.isLocationAvailable() || service.nativePostUrl == null) {
++                    return;
++                }
++                String reason = VopsGpsHealth.problemReason(service.getApplicationContext());
++                if (reason != null) {
++                    VopsGpsHealth.report(service.getApplicationContext(), reason);
 +                }
 +            }
          };
@@ -601,6 +782,13 @@ index 85f2a02..e04ceac 100644
 +                .setMinUpdateIntervalMillis(currentIntervalMs)
 +                .setMinUpdateDistanceMeters(currentDistanceFilter)
 +                .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
++                // VolunteerOps patch: by default the first answer to a new
++                // request may be a cached location as old as one interval
++                // (up to 3 minutes at the default cadence). Cap it at 5s, and
++                // let the first fix wait briefly for GNSS instead of handing
++                // over the coarse network fix that exists before lock.
++                .setMaxUpdateAgeMillis(Math.min(currentIntervalMs, 5000L))
++                .setWaitForAccurateLocation(true)
 +                .build();
 +            client.requestLocationUpdates(request, locationCallback, Looper.getMainLooper());
 +            DebugLog.log(getApplicationContext(), "request_updates_ok", "intervalMs=" + currentIntervalMs);
@@ -612,7 +800,7 @@ index 85f2a02..e04ceac 100644
          }
      }
  
-@@ -344,32 +458,42 @@ public class BackgroundGeolocationService extends Service {
+@@ -344,32 +515,42 @@ public class BackgroundGeolocationService extends Service {
              final String notificationTitle,
              final String notificationMessage,
              float distanceFilter,
@@ -660,7 +848,7 @@ index 85f2a02..e04ceac 100644
              stopForeground(true);
              stopSelf();
              releaseMediaPlayer();
-@@ -462,7 +586,9 @@ public class BackgroundGeolocationService extends Service {
+@@ -462,7 +643,9 @@ public class BackgroundGeolocationService extends Service {
      }
  
      // Gets the identifier of the app's resource by name, returning 0 if not found.
@@ -841,3 +1029,213 @@ index 2e19afe..ab2d535 100644
              try (OutputStream outputStream = connection.getOutputStream()) {
                  outputStream.write(body);
              }
+diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGpsHealth.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGpsHealth.java
+new file mode 100644
+index 0000000..60ef0e6
+--- /dev/null
++++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGpsHealth.java
+@@ -0,0 +1,204 @@
++package com.capgo.capacitor_background_geolocation;
++
++import android.Manifest;
++import android.content.Context;
++import android.content.pm.PackageManager;
++import android.location.LocationManager;
++import android.os.Build;
++import android.os.PowerManager;
++import android.provider.Settings;
++import androidx.core.content.ContextCompat;
++import com.getcapacitor.JSObject;
++import com.getcapacitor.Logger;
++import java.io.OutputStream;
++import java.net.HttpURLConnection;
++import java.net.URL;
++import java.nio.charset.StandardCharsets;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import org.json.JSONObject;
++
++/**
++ * VolunteerOps addition (not upstream).
++ *
++ * Why a phone is not producing good positions, from the one place that can
++ * see it. A web page can only learn that a fix failed; it cannot see the
++ * phone's location switch, whether the user granted only "approximate"
++ * location, or that battery saver is cutting GPS the moment the screen goes
++ * dark - and the last of those is exactly the case where the page is frozen
++ * and cannot report anything at all.
++ *
++ * Two uses:
++ *  - diagnostics(): read by the Action Room page when tracking starts, so the
++ *    volunteer is told what to fix while they are still looking at the screen;
++ *  - report(): called by the background service when its watchdog finds no
++ *    fix has arrived, so the command post's roster says WHY this volunteer
++ *    went quiet instead of reading like somebody resting.
++ *
++ * Reason names are the server's (VOLUNTEER_GPS_CLIENT_REASONS in
++ * includes/functions-warroom.php); anything else is refused there.
++ */
++final class VopsGpsHealth {
++
++    // PowerManager.LOCATION_MODE_* values that stop or throttle location for
++    // a screen-off phone. FOREGROUND_ONLY (3) is not among them: a foreground
++    // service counts as foreground for that mode, which is what this is.
++    private static final int LOCATION_MODE_GPS_DISABLED_WHEN_SCREEN_OFF = 1;
++    private static final int LOCATION_MODE_ALL_DISABLED_WHEN_SCREEN_OFF = 2;
++    private static final int LOCATION_MODE_THROTTLE_REQUESTS_WHEN_SCREEN_OFF = 4;
++
++    private static ExecutorService executor;
++    private static String lastReportedReason;
++    private static long lastReportedAt;
++    // The same reason is not re-sent more often than this. The server keeps
++    // it until a fix arrives anyway, and protects it from the page's own less
++    // specific reports for 5 minutes (recordVolunteerGpsErrorReason()) - so
++    // this must stay UNDER 5 minutes, or a cause that still holds could lapse
++    // and be replaced by a symptom between two repeats.
++    private static final long REPORT_REPEAT_MS = 4 * 60 * 1000L;
++
++    private VopsGpsHealth() {}
++
++    static String deviceLabel() {
++        String maker = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.trim();
++        String model = Build.MODEL == null ? "" : Build.MODEL.trim();
++        // Most models already start with the maker's name ("Pixel" does not,
++        // "SM-A525F" does not, "Redmi Note 12" does not; some do). Avoid
++        // "samsung samsung SM-...".
++        String name = model.toLowerCase().startsWith(maker.toLowerCase()) ? model : (maker + " " + model).trim();
++        return name + " · Android " + Build.VERSION.RELEASE;
++    }
++
++    static boolean hasFine(Context context) {
++        return ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
++    }
++
++    static boolean hasCoarse(Context context) {
++        return ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
++    }
++
++    static boolean locationEnabled(Context context) {
++        try {
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
++                LocationManager lm = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
++                return lm != null && lm.isLocationEnabled();
++            }
++            return Settings.Secure.getInt(context.getContentResolver(), Settings.Secure.LOCATION_MODE, Settings.Secure.LOCATION_MODE_OFF)
++                != Settings.Secure.LOCATION_MODE_OFF;
++        } catch (Exception e) {
++            return true; // unknown: do not claim it is off
++        }
++    }
++
++    /** Battery saver is on AND set to cut or throttle location with the screen off. */
++    static boolean powerSaveCutsGps(Context context) {
++        try {
++            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
++            if (pm == null || !pm.isPowerSaveMode() || Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
++                return false;
++            }
++            int mode = pm.getLocationPowerSaveMode();
++            return mode == LOCATION_MODE_GPS_DISABLED_WHEN_SCREEN_OFF
++                || mode == LOCATION_MODE_ALL_DISABLED_WHEN_SCREEN_OFF
++                || mode == LOCATION_MODE_THROTTLE_REQUESTS_WHEN_SCREEN_OFF;
++        } catch (Exception e) {
++            return false;
++        }
++    }
++
++    static boolean screenOn(Context context) {
++        try {
++            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
++            return pm == null || pm.isInteractive();
++        } catch (Exception e) {
++            return true;
++        }
++    }
++
++    static boolean ignoringBatteryOptimizations(Context context) {
++        try {
++            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
++            return pm != null && pm.isIgnoringBatteryOptimizations(context.getPackageName());
++        } catch (Exception e) {
++            return true; // unknown: do not nag
++        }
++    }
++
++    static JSObject diagnostics(Context context) {
++        JSObject o = new JSObject();
++        o.put("fine", hasFine(context));
++        o.put("coarse", hasCoarse(context));
++        o.put("locationEnabled", locationEnabled(context));
++        o.put("powerSaveCutsGps", powerSaveCutsGps(context));
++        o.put("ignoringBatteryOptimizations", ignoringBatteryOptimizations(context));
++        o.put("device", deviceLabel());
++        return o;
++    }
++
++    /**
++     * The most specific explanation for "no fix is arriving", or null when
++     * nothing on the phone explains it (then it is the sky: indoors, a gorge,
++     * a pocket - and 'unavailable' is the honest answer).
++     */
++    static String problemReason(Context context) {
++        if (!hasFine(context) && !hasCoarse(context)) return "denied";
++        if (!locationEnabled(context)) return "location_off";
++        if (!hasFine(context)) return "imprecise";
++        if (!screenOn(context) && powerSaveCutsGps(context)) return "power_save";
++        return null;
++    }
++
++    /** A fix arrived: whatever was reported is over, so the next problem is news again. */
++    static synchronized void clear() {
++        lastReportedReason = null;
++        lastReportedAt = 0L;
++    }
++
++    /**
++     * POSTs {reason} to mobile-gps-error.php, derived from the configured ping
++     * URL so a subfolder install and the shift_id query string both carry
++     * over. Fire-and-forget on its own thread; a failure is only logged.
++     */
++    static synchronized void report(Context context, String reason) {
++        long now = System.currentTimeMillis();
++        if (reason.equals(lastReportedReason) && now - lastReportedAt < REPORT_REPEAT_MS) {
++            return;
++        }
++        String pingUrl = LocationStore.getUrl(context);
++        String token = LocationStore.getAuthToken(context);
++        if (pingUrl == null || !pingUrl.contains("mobile-ping-location.php") || token == null || token.isEmpty()) {
++            return;
++        }
++        lastReportedReason = reason;
++        lastReportedAt = now;
++        final String url = pingUrl.replace("mobile-ping-location.php", "mobile-gps-error.php");
++        final Context app = context.getApplicationContext();
++        if (executor == null) {
++            executor = Executors.newSingleThreadExecutor();
++        }
++        executor.execute(() -> {
++            HttpURLConnection connection = null;
++            try {
++                byte[] body = new JSONObject().put("reason", reason).toString().getBytes(StandardCharsets.UTF_8);
++                connection = (HttpURLConnection) new URL(url).openConnection();
++                connection.setRequestMethod("POST");
++                connection.setConnectTimeout(8000);
++                connection.setReadTimeout(8000);
++                connection.setDoOutput(true);
++                connection.setRequestProperty("Accept", "application/json");
++                connection.setRequestProperty("Content-Type", "application/json");
++                connection.setRequestProperty("Authorization", "Bearer " + token);
++                try (OutputStream out = connection.getOutputStream()) {
++                    out.write(body);
++                }
++                int code = connection.getResponseCode();
++                DebugLog.log(app, "gps_error_reported", reason + " http=" + code);
++            } catch (Exception e) {
++                Logger.error("GPS error report failed", e);
++                DebugLog.log(app, "gps_error_report_failed", reason + " " + e.getMessage());
++            } finally {
++                if (connection != null) connection.disconnect();
++            }
++        });
++    }
++}

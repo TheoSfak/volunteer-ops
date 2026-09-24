@@ -730,6 +730,11 @@ function sendGpsPing(btn) {
                 shift_id:   btn.dataset.shiftId,
                 lat:        pos.coords.latitude,
                 lng:        pos.coords.longitude,
+                // Without these the server could not apply its accuracy gate
+                // (a missing accuracy is never refused) and stamped the row
+                // with its arrival time.
+                accuracy:   pos.coords.accuracy || '',
+                fix_age_ms: Math.max(0, Date.now() - pos.timestamp),
             });
             fetch('ping-location.php', { method: 'POST', body })
                 .then(r => r.json())
@@ -783,9 +788,10 @@ function setStatus(btn, prId, status) {
     const group = document.getElementById('statusBtns-' + prId);
     if (group) group.querySelectorAll('button').forEach(b => b.disabled = true);
 
-    const send = (lat, lng) => {
+    const send = (lat, lng, accuracy) => {
         const params = { csrf_token: CSRF_TOKEN, pr_id: prId, status: status };
         if (lat !== null) { params.lat = lat; params.lng = lng; }
+        if (lat !== null && accuracy) { params.accuracy = accuracy; }
         fetch('volunteer-status.php', { method: 'POST', body: new URLSearchParams(params) })
             .then(r => r.json())
             .then(d => {
@@ -821,8 +827,8 @@ function setStatus(btn, prId, status) {
     // without coordinates beats no alert at all if geolocation fails/denies.
     if (status === 'needs_help' && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
-            pos => send(pos.coords.latitude, pos.coords.longitude),
-            () => send(null, null),
+            pos => send(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
+            () => send(null, null, null),
             { enableHighAccuracy: true, timeout: 5000 }
         );
     } else {

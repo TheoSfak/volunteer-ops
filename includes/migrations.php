@@ -6966,6 +6966,29 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 162,
+            'description' => "GPS fix integrity. (1) Widen mission_action_room_participants.last_gps_error with 'mock' (the Android app reported a mock-provider fix, i.e. a fake-GPS app), 'location_off' (the phone's location switch is off) and 'power_save' (battery saver is cutting GPS with the screen off) - the three reasons the native app can now name instead of just going quiet. Appended after 'unknown' so the ALTER never has to renumber a stored value. (2) accuracy_m on mission_sos_alerts, mission_photos, mission_incidents and mission_voice_messages: each of these captured a position and threw away how good it was, so an SOS fixed to +/-300m from a Wi-Fi lookup read exactly like one fixed to +/-5m by GNSS. mission_route_waypoints.arrived_accuracy_m was the only one that kept it.",
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_action_room_participants
+                           MODIFY COLUMN last_gps_error
+                           ENUM('denied','unavailable','timeout','imprecise','implausible','unknown','mock','location_off','power_save') NULL
+                           COMMENT 'Last reason this volunteer produced no position; NULL = none outstanding'");
+                foreach (['mission_sos_alerts', 'mission_photos', 'mission_incidents', 'mission_voice_messages'] as $table) {
+                    $exists = dbFetchValue(
+                        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'accuracy_m'",
+                        [$table]
+                    );
+                    if (!$exists) {
+                        dbExecute("ALTER TABLE `{$table}` ADD COLUMN accuracy_m DECIMAL(8,2) NULL
+                                   COMMENT 'Device-reported uncertainty radius of the fix, metres; NULL = not reported'
+                                   AFTER lng");
+                    }
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -107,6 +107,76 @@ function setActionRoomParticipation(int $missionId, int $userId, bool $takesPart
 }
 
 /**
+ * Every value mission_action_room_participants.last_gps_error accepts, and so
+ * the whitelist recordVolunteerGpsErrorReason() applies. The last three come
+ * only from the Android app, which can see what a web page cannot: a fix from
+ * a mock provider, the phone's location switch, and battery saver cutting GPS
+ * with the screen off.
+ */
+const VOLUNTEER_GPS_ERROR_REASONS = [
+    'denied', 'unavailable', 'timeout', 'imprecise', 'implausible', 'unknown',
+    'mock', 'location_off', 'power_save',
+];
+
+/**
+ * The reasons a CLIENT may report by name (mission-gps-error.php's `reason`,
+ * mobile-gps-error.php). 'implausible' and 'mock' are deliberately absent:
+ * those are the server's own verdicts on a fix it received, and a client
+ * claiming them would only be painting a warning nobody measured.
+ */
+const VOLUNTEER_GPS_CLIENT_REASONS = ['denied', 'unavailable', 'timeout', 'imprecise', 'location_off', 'power_save'];
+
+/**
+ * How specific each reason is. recordVolunteerGpsErrorReason() never lets a
+ * reason overwrite a RECENT one of a higher tier — see there.
+ *   1  a symptom: no position came, cause unknown;
+ *   2  a cause a browser can see (permission refused) or the server's own
+ *      verdict on a fix it received;
+ *   3  a cause only the Android app can see on the phone itself.
+ */
+const VOLUNTEER_GPS_REASON_TIERS = [
+    'unavailable' => 1, 'timeout' => 1, 'unknown' => 1,
+    'denied' => 2, 'imprecise' => 2, 'implausible' => 2,
+    'mock' => 3, 'location_off' => 3, 'power_save' => 3,
+];
+
+/**
+ * A fix older than this when it reaches the server is history, not a
+ * position. Only the Android app's offline queue can produce one (it holds
+ * the last 8 fixes through a signal outage), and only after a long outage.
+ */
+const WAR_ROOM_MAX_FIX_AGE_SECONDS = 1800;
+
+/**
+ * A client's fix_age_ms, as sent. Both ping endpoints read it the same way:
+ * anything that is not a number means "not reported" (null), never zero, so
+ * an old client and a garbled value both fall back to arrival-time stamping
+ * instead of claiming the fix is brand new. Capped at a day only so that a
+ * garbage value cannot overflow an int; recordVolunteerPing() applies the
+ * real limit.
+ */
+function parseFixAgeMs($raw): ?int {
+    if ($raw === null || $raw === '' || is_bool($raw) || !is_numeric($raw)) {
+        return null;
+    }
+    return (int) min(max((float) $raw, 0.0), 86400000.0);
+}
+
+/**
+ * A client's reported accuracy radius (metres) for a position it attached to
+ * an SOS, a photo, an incident or a voice message. Null when absent or not a
+ * positive number — "not reported" must never read as "perfectly accurate".
+ * Capped at 5 km, the same ceiling the ping endpoints apply, and never kept
+ * without the coordinates it describes.
+ */
+function parseAccuracyMeters($raw, ?float $lat): ?float {
+    if ($lat === null || $raw === null || $raw === '' || !is_numeric($raw) || (float) $raw <= 0) {
+        return null;
+    }
+    return round(min((float) $raw, 5000.0), 2);
+}
+
+/**
  * The four things a browser's Geolocation API can fail with, keyed by the
  * PositionError code it reports. Spelled out once, server-side, because the
  * client is not trusted to name them: anything else that arrives is stored as
@@ -152,8 +222,38 @@ function recordVolunteerGpsErrorReason(int $missionId, int $userId, string $reas
     if (!isActionRoomParticipant($missionId, $userId)) {
         return false;
     }
-    if (!in_array($reason, ['denied', 'unavailable', 'timeout', 'imprecise', 'implausible', 'unknown'], true)) {
+    if (!in_array($reason, VOLUNTEER_GPS_ERROR_REASONS, true)) {
         $reason = 'unknown';
+    }
+    // A less specific reason never overwrites a recent more specific one
+    // (VOLUNTEER_GPS_REASON_TIERS). With the phone's location switched off,
+    // the page's own capture keeps reporting "no position" or "denied" — true,
+    // but the RESULT of the switch, and letting it win made the roster flip
+    // between the cause and the symptom every cadence and settle on the less
+    // useful one (seen on the emulator: the app's "location off" replaced by
+    // the page's "denied" 40 seconds later). Five minutes is longer than the
+    // Android service's repeat (VopsGpsHealth.REPORT_REPEAT_MS, 4 minutes), so
+    // a cause that still holds is refreshed before it can lapse, and one that
+    // has been fixed stops blocking soon after. Any accepted fix clears either
+    // at once (clearVolunteerGpsError()).
+    $tier = VOLUNTEER_GPS_REASON_TIERS[$reason];
+    $higher = array_keys(array_filter(VOLUNTEER_GPS_REASON_TIERS, fn($t) => $t > $tier));
+    if ($higher) {
+        $placeholders = implode(',', array_fill(0, count($higher), '?'));
+        dbExecute(
+            "UPDATE mission_action_room_participants
+                SET last_gps_error = ?, last_gps_error_at = NOW()
+              WHERE mission_id = ? AND user_id = ?
+                -- IS NOT NULL first: with no flag stored, NULL IN (...) is
+                -- NULL, NOT NULL is NULL, and the row would never be written.
+                AND NOT (last_gps_error IS NOT NULL
+                         AND last_gps_error IN ($placeholders)
+                         AND last_gps_error_at > DATE_SUB(NOW(), INTERVAL 5 MINUTE))",
+            array_merge([$reason, $missionId, $userId], $higher)
+        );
+        // Received either way; when the more specific reason was kept, the
+        // roster already says more than this report would have.
+        return true;
     }
     return (bool) dbExecute(
         "UPDATE mission_action_room_participants
@@ -986,7 +1086,7 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
  */
 function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canManageWarRoom, int $limit = 30): array {
     $rows = dbFetchAll(
-        "SELECT p.id, p.user_id, p.media_type, p.thumb_stored_name, p.lat, p.lng, p.created_at, p.poi_id, p.poi_note,
+        "SELECT p.id, p.user_id, p.media_type, p.thumb_stored_name, p.lat, p.lng, p.accuracy_m, p.created_at, p.poi_id, p.poi_note,
                 u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
                 COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
                 mt.codename, mt.team_number
@@ -1020,6 +1120,7 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
             'time'               => date('d/m H:i', strtotime($row['created_at'])),
             'lat'                => $row['lat'] !== null ? (float) $row['lat'] : null,
             'lng'                => $row['lng'] !== null ? (float) $row['lng'] : null,
+            'accuracy_m'         => $row['accuracy_m'] !== null ? (int) round((float) $row['accuracy_m']) : null,
             'can_delete'         => $canManageWarRoom || (int) $row['user_id'] === $currentUserId,
             'is_poi'             => $row['poi_id'] !== null,
             'poi_note'           => $row['poi_note'],
@@ -2358,6 +2459,30 @@ function warRoomPingStaleThresholdSeconds(): int {
 }
 
 /**
+ * How recently the Android app's native service must have delivered a fix for
+ * it to count as THE source for this phone ("one phone, one stream"): two
+ * cadences, so one late or refused fix does not hand the phone back to the
+ * page, while a service that has really died is replaced within a minute or
+ * two. Shared by recordVolunteerPing() and mission-gps-error.php so the two
+ * can never disagree about which receiver is in charge.
+ */
+function warRoomNativeActiveWindowSeconds(): int {
+    return 2 * (int) getSetting('war_room_auto_ping_seconds', '180');
+}
+
+/** True while the native service is delivering fixes for this volunteer. */
+function volunteerHasRecentNativeFix(int $missionId, int $userId): bool {
+    return (bool) dbFetchValue(
+        "SELECT 1 FROM volunteer_pings vp
+           JOIN shifts s ON s.id = vp.shift_id
+          WHERE vp.user_id = ? AND s.mission_id = ? AND vp.via = 'native'
+            AND vp.created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND)
+          LIMIT 1",
+        [$userId, $missionId, warRoomNativeActiveWindowSeconds()]
+    );
+}
+
+/**
  * War Room fatigue flag: minutes each currently-on-duty volunteer has been
  * continuously in the field on this mission — a CHAIN of back-to-back
  * APPROVED shifts (gap <= $toleranceMinutes between one shift's end_time and
@@ -2452,8 +2577,15 @@ function computeContinuousFieldMinutesByVolunteerId(int $missionId, int $toleran
  * codebase's separate report/live-tab event aggregators once did.
  * $user must be a full users row (id, name, language) — callers resolve it
  * their own way (session vs. token lookup) before calling this.
+ *
+ * $fixAgeMs is how old the fix already was when the device sent it, measured
+ * ON the device (so a phone whose clock is wrong still reports a correct
+ * age). Null = not reported, which is every client older than v3.320.0 —
+ * those are stored exactly as before, stamped with the arrival time.
+ * $isMock is Android's own "this came from a mock provider" flag; only the
+ * native app can see it.
  */
-function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, ?float $accuracy, ?int $batteryLevel, string $source, ?string $via = null): array {
+function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, ?float $accuracy, ?int $batteryLevel, string $source, ?string $via = null, ?int $fixAgeMs = null, bool $isMock = false): array {
     $userId = (int) $user['id'];
     $lang = $user['language'] ?? DEFAULT_LANGUAGE;
 
@@ -2485,6 +2617,63 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     // so an emergency still arrives with coordinates from anyone at all.
     if (!isActionRoomParticipant((int) $pr['mission_id'], $userId)) {
         return ['ok' => false, 'error' => t('ping.not_action_room_participant', [], $lang)];
+    }
+
+    // A fake-GPS app feeds Android a position through a "mock provider", and
+    // Android marks every such fix. It is never a real field position, so it
+    // is refused outright and named on the roster — silently dropping it
+    // would leave a volunteer who looks present and is somewhere else.
+    if ($isMock) {
+        recordVolunteerGpsErrorReason((int) $pr['mission_id'], $userId, 'mock');
+        return ['ok' => false, 'error' => t('ping.mock_location', [], $lang)];
+    }
+
+    // How old the fix is, in whole seconds. The row is stamped with when the
+    // fix was TAKEN, not when it arrived: the Android app queues fixes while
+    // it has no signal and sends them all within seconds once it does, and
+    // stamping those with the arrival time drew a position minutes old as
+    // current and made the speed gate below see a walk as an impossible jump.
+    // Negative (a device that measured badly) counts as fresh. Past half an
+    // hour the fix is history rather than a position, and it is dropped
+    // without flagging the phone — nothing is wrong with it NOW.
+    $fixAgeSeconds = $fixAgeMs === null ? 0 : (int) round(max(0, $fixAgeMs) / 1000);
+    if ($fixAgeSeconds > WAR_ROOM_MAX_FIX_AGE_SECONDS) {
+        return ['ok' => false, 'error' => t('ping.fix_too_old', [], $lang)];
+    }
+
+    // The newest fix already stored for this person, with its age taken from
+    // the database's own clock so PHP's and MySQL's clocks never have to
+    // agree. Everything below that compares against "the last position"
+    // compares against this one row.
+    $prev = dbFetchOne(
+        "SELECT lat, lng, accuracy_meters, via, TIMESTAMPDIFF(SECOND, created_at, NOW()) AS age_s
+           FROM volunteer_pings
+          WHERE user_id = ? AND shift_id = ? ORDER BY id DESC LIMIT 1",
+        [$userId, $shiftId]
+    );
+
+    // One phone, one stream. Inside the Android app the page's own passive
+    // capture and the native background service both report, each on its own
+    // timer, so the pin alternated between two independent fixes seconds
+    // apart, "moving" and the speed gate compared one source against the
+    // other, and every position was written twice. While the native service
+    // is delivering, the page's automatic fix is simply not stored; the page
+    // keeps running, so if the service dies it takes over by itself within
+    // two cadences. A manual tap is never skipped — somebody asked for it.
+    // Checked before the accuracy gate so a poor fix from the page cannot flag
+    // a phone whose native fixes are fine.
+    if ($source === 'auto' && $via === 'browser' && $prev && $prev['via'] === 'native'
+        && (int) $prev['age_s'] < warRoomNativeActiveWindowSeconds()) {
+        return ['ok' => true, 'skipped' => 'native_active', 'ts' => date('H:i:s')];
+    }
+
+    // Never store a fix older than the newest one already on file. It keeps
+    // "the highest id is the latest position" true, which the map pin, the
+    // team positions and every MAX(id) lookup rely on. With real fix times
+    // this can only happen when two sources overlap, and the older of two
+    // overlapping fixes adds nothing.
+    if ($prev && $fixAgeSeconds > (int) $prev['age_s']) {
+        return ['ok' => true, 'skipped' => 'older_than_latest', 'ts' => date('H:i:s')];
     }
 
     // A fix the device itself says could be hundreds of metres out is worse
@@ -2535,13 +2724,12 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     // state is kept, and nobody stays frozen.
     $maxSpeedKmh = (float) getSetting('war_room_max_ping_speed_kmh', '25');
     if ($maxSpeedKmh > 0) {
-        $prev = dbFetchOne(
-            "SELECT lat, lng, accuracy_meters, created_at FROM volunteer_pings
-             WHERE user_id = ? AND shift_id = ? ORDER BY id DESC LIMIT 1",
-            [$userId, $shiftId]
-        );
         if ($prev) {
-            $elapsed = time() - strtotime($prev['created_at']);
+            // Time between the two FIXES, not between their arrivals. Floored
+            // at one second rather than skipped at zero: two fixes stamped in
+            // the same second used to bypass this gate entirely, and a queue
+            // replayed by an old app version lands many in the same second.
+            $elapsed = max(1, (int) $prev['age_s'] - $fixAgeSeconds);
             // A new fix is judged only while there is a RECENT one to judge it
             // against, and "recent" is the app's own existing definition of a
             // position that has not yet gone stale. Past that, it is accepted
@@ -2567,7 +2755,7 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
             // for as long as they kept moving. At the old 180 km/h default
             // that was unreachable in practice; at a walking-pace limit it
             // would happen on every drive to a callout.
-            if ($elapsed > 0 && $elapsed < warRoomPingStaleThresholdSeconds()) {
+            if ($elapsed < warRoomPingStaleThresholdSeconds()) {
                 $jumpMeters = gpsDistanceMeters((float) $prev['lat'], (float) $prev['lng'], $lat, $lng);
                 $uncertainty = ($prev['accuracy_meters'] !== null && $accuracy !== null)
                     ? (float) $prev['accuracy_meters'] + (float) $accuracy
@@ -2589,13 +2777,14 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
 
     try {
         dbInsert(
-            "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, battery_level, source, via, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+            "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, battery_level, source, via, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL ? SECOND))",
             // Anything that is not one of the two known clients is stored as
             // NULL ("not known") rather than guessed into one of them — an
             // unrecognised caller is exactly the case where a guess would be
             // wrong, and NULL is what every pre-v159 row already says.
             [$userId, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source,
-             in_array($via, ['browser', 'native'], true) ? $via : null]
+             in_array($via, ['browser', 'native'], true) ? $via : null,
+             $fixAgeSeconds]
         );
     } catch (Exception $e) {
         return ['ok' => false, 'error' => t('ping.gps_unavailable_migration', [], $lang)];
@@ -3084,7 +3273,7 @@ function maskPatientPhone(string $phone): string {
 function loadUnresolvedIncidentsForMission(int $missionId, bool $unmasked): array {
     $rows = dbFetchAll(
         "SELECT i.id, i.incident_type, i.severity, i.is_unknown_patient, i.patient_name,
-                i.estimated_age, i.gender, i.phone, i.notes, i.team_id, i.lat, i.lng,
+                i.estimated_age, i.gender, i.phone, i.notes, i.team_id, i.lat, i.lng, i.accuracy_m,
                 i.created_at, i.acknowledged_at,
                 u.name AS reporter_name, u.is_external, u.guest_org_name, u.guest_country_code,
                 COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
@@ -3123,6 +3312,7 @@ function loadUnresolvedIncidentsForMission(int $missionId, bool $unmasked): arra
             'team_label'         => $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized'),
             'lat'                => $row['lat'] !== null ? (float) $row['lat'] : null,
             'lng'                => $row['lng'] !== null ? (float) $row['lng'] : null,
+            'accuracy_m'         => $row['accuracy_m'] !== null ? (int) round((float) $row['accuracy_m']) : null,
             'created_at'         => date('d/m H:i', strtotime($row['created_at'])),
             'acknowledged_at'    => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
         ];
@@ -3158,7 +3348,7 @@ function loadPointsOfInterestForMission(int $missionId): array {
     $poiIds = array_map('intval', array_column($pois, 'id'));
     $placeholders = implode(',', array_fill(0, count($poiIds), '?'));
     $photoRows = dbFetchAll(
-        "SELECT ph.id, ph.poi_id, ph.media_type, ph.thumb_stored_name, ph.user_id, ph.poi_note, ph.created_at,
+        "SELECT ph.id, ph.poi_id, ph.media_type, ph.thumb_stored_name, ph.user_id, ph.poi_note, ph.created_at, ph.accuracy_m,
                 u.name AS reporter_name, u.is_external, u.guest_org_name, u.guest_country_code,
                 COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color
          FROM mission_photos ph
@@ -3185,6 +3375,7 @@ function loadPointsOfInterestForMission(int $missionId): array {
             'guest_country_code' => $row['guest_country_code'],
             'note'               => $row['poi_note'],
             'time'               => date('d/m H:i', strtotime($row['created_at'])),
+            'accuracy_m'         => $row['accuracy_m'] !== null ? (int) round((float) $row['accuracy_m']) : null,
         ];
     }
 
@@ -3209,6 +3400,10 @@ function loadPointsOfInterestForMission(int $missionId): array {
             'created_at'      => date('d/m H:i', strtotime($p['created_at'])),
             'reporter_names'  => $reporterNames,
             'photos'          => $photos,
+            // The pin sits where the FIRST photo was taken (later reports
+            // within 30m merge into it without moving it), so that photo's
+            // accuracy is the pin's accuracy.
+            'accuracy_m'      => $photos[0]['accuracy_m'] ?? null,
         ];
     }, $pois);
 }
@@ -3341,7 +3536,7 @@ function loadIncidentDetailForMissionReport(int $missionId): array {
  */
 function loadOpenSosAlertsForMission(int $missionId): array {
     $rows = dbFetchAll(
-        "SELECT a.id, a.pr_id, a.lat, a.lng, a.created_at, a.acknowledged_at,
+        "SELECT a.id, a.pr_id, a.lat, a.lng, a.accuracy_m, a.created_at, a.acknowledged_at,
                 a.team_id, a.user_id, u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
                 COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
                 mt.codename, mt.team_number
@@ -3375,6 +3570,10 @@ function loadOpenSosAlertsForMission(int $missionId): array {
             'team_label'         => h($row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized')),
             'lat'                => $row['lat'] !== null ? (float) $row['lat'] : null,
             'lng'                => $row['lng'] !== null ? (float) $row['lng'] : null,
+            // Whole metres; null = the phone did not say (older clients). A
+            // rescue team heading for ±300m searches very differently from
+            // one heading for ±5m.
+            'accuracy_m'         => $row['accuracy_m'] !== null ? (int) round((float) $row['accuracy_m']) : null,
             'created_at'         => date('d/m H:i', strtotime($row['created_at'])),
             'acknowledged_at'    => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
         ];

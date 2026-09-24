@@ -160,11 +160,12 @@ if ($action === 'send') {
 
     $voiceId = dbInsert(
         "INSERT INTO mission_voice_messages
-            (mission_id, user_id, pr_id, team_id, stored_name, mime_type, file_size, duration_ms, lat, lng, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+            (mission_id, user_id, pr_id, team_id, stored_name, mime_type, file_size, duration_ms, lat, lng, accuracy_m, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
         [
             $missionId, $userId, (int) $pr['id'], getUserTeamIdForMission($missionId, $userId),
             $storedName, $mime, (int) $file['size'], $durationMs, $lat, $lng,
+            parseAccuracyMeters(post('accuracy'), $lng === null ? null : $lat),
         ]
     );
     logAudit('send_mission_voice_message', 'mission_voice_messages', $voiceId, null, [
