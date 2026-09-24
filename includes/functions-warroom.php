@@ -176,34 +176,47 @@ function parseSpeedMps($raw): ?float {
 }
 
 /**
- * One step of the position filter (v3.321.0): a Kalman filter with a
- * constant-position model, run once per accepted fix at write time.
+ * One step of the position filter: a Kalman filter with a constant-position
+ * model, run once per accepted fix at write time (v3.321.0, reworked in
+ * v3.322.1 after a real walk).
  *
  * Why at all: a volunteer standing still reports a position that wanders
- * 10-40m from fix to fix, and every consumer (the pin, "nearest team", the
- * distances, the assistant) read the latest raw fix, so the answer to "where
- * is she" jumped every cadence. Averaging successive fixes shrinks that noise;
- * the whole art is not to average across real movement, which would drag the
- * pin behind somebody walking. What decides between the two is how much the
- * person may have moved since the last estimate (the process noise):
+ * 10-40m from fix to fix on a poor sky, and every consumer (the pin, "nearest
+ * team", the distances, the assistant) reads the latest stored fix. Averaging
+ * successive fixes shrinks that noise; the whole art is not to average across
+ * real movement, which drags the pin behind somebody walking. What decides
+ * between the two is how much the person may have moved since the last
+ * estimate (the process noise):
  *
- *   · the device's own Doppler speed when it gives one — under 0.3 m/s is
- *     standing still, so only a slow drift is allowed and the fixes are
- *     averaged hard; walking or faster lets the new fix through almost as-is;
- *   · without a speed, the jump itself: within two combined sigmas it is read
- *     as noise around a standing person, beyond that as movement.
+ *   · the fixes themselves (gpsFixesShowMovement()): a run of fixes heading
+ *     steadily one way is somebody moving, however slowly;
+ *   · the device's own Doppler speed when it gives one — under 0.3 m/s and no
+ *     steady run is standing still, so only a slow drift is allowed and the
+ *     fixes are averaged; anything else lets the new fix through almost as-is;
+ *   · without a speed or a run, the jump itself: within two combined sigmas
+ *     it is read as noise around a standing person, beyond that as movement.
+ *
+ * v3.322.1, from a real walk on yphresies.gr: a Xiaomi walking slowly along a
+ * street reported ~0.2 m/s, under the old 0.3 "standing" line, and the
+ * estimate fell up to 8.5m behind fixes that were on the road — the pin sat
+ * inside a house. Hence the run test above, and a hard rule on top of it: the
+ * estimate is never placed farther from the device's own fix than HALF the
+ * accuracy the device claims. Smoothing may refine a position inside the
+ * phone's own uncertainty; it may never overrule the phone. (Replay of that
+ * walk: tests/fixtures/gps-live-walk-relative.json.)
  *
  * A jump beyond three sigmas resets to the new fix outright, as does a gap
  * longer than the staleness line or a first fix. The reported accuracy never
  * claims more than a halving of the device's own: real GNSS error is
  * correlated in time (reflections off the same wall), so averaging buys less
- * than the textbook square root, and a filter that believed otherwise would
- * also stop listening to new fixes.
+ * than the textbook square root.
  *
  * $prev is the previous ESTIMATE ['lat','lng','acc'] or null; $dtSeconds the
- * time between the two fixes. Returns ['lat','lng','acc'].
+ * time between the two fixes; $recentRaw the device's own earlier fixes,
+ * newest first, each ['lat','lng','acc','age'] with age in seconds before
+ * this fix. Returns ['lat','lng','acc'].
  */
-function gpsFilterStep(?array $prev, float $lat, float $lng, float $accuracy, ?float $speedMps, int $dtSeconds, int $staleSeconds): array {
+function gpsFilterStep(?array $prev, float $lat, float $lng, float $accuracy, ?float $speedMps, int $dtSeconds, int $staleSeconds, array $recentRaw = []): array {
     $r = max($accuracy, 3.0) ** 2;
     $reset = ['lat' => $lat, 'lng' => $lng, 'acc' => round(max($accuracy, 2.0), 2)];
     if ($prev === null || $prev['acc'] === null || $dtSeconds <= 0 || $dtSeconds >= $staleSeconds) {
@@ -217,23 +230,72 @@ function gpsFilterStep(?array $prev, float $lat, float $lng, float $accuracy, ?f
     $de = ($lng - $prev['lng']) * $mPerDegLng;
     $jump = sqrt($dn * $dn + $de * $de);
     $pPrev = max((float) $prev['acc'], 2.0) ** 2;
+    $moving = gpsFixesShowMovement($lat, $lng, $accuracy, $recentRaw);
 
     if ($speedMps !== null) {
-        $v = $speedMps < 0.3 ? 0.15 : $speedMps + 0.5;
+        $v = ($speedMps < 0.3 && !$moving) ? 0.15 : max($speedMps, $moving ? 1.0 : 0.0) + 0.5;
     } else {
-        $v = $jump <= 2 * sqrt($pPrev + $r) ? 0.3 : 1.5;
+        $v = (!$moving && $jump <= 2 * sqrt($pPrev + $r)) ? 0.3 : 1.5;
     }
     $p = $pPrev + ($v * $dtSeconds) ** 2;
     if ($jump * $jump > 9 * ($p + $r)) {
         return $reset;
     }
     $k = $p / ($p + $r);
+    // Never farther from the device's fix than half its stated accuracy. The
+    // estimate sits (1-k) x jump from the fix, so this raises k just enough.
+    $cap = 0.5 * max($accuracy, 3.0);
+    if ((1 - $k) * $jump > $cap) {
+        $k = 1 - $cap / $jump;
+    }
     $pNew = (1 - $k) * $p;
     return [
         'lat' => $prev['lat'] + $k * $dn / $mPerDegLat,
         'lng' => $prev['lng'] + $k * $de / $mPerDegLng,
         'acc' => round(max(sqrt($pNew), 0.5 * sqrt($r), 2.0), 2),
     ];
+}
+
+/**
+ * Whether the device's own recent fixes show the person moving: the newer
+ * half of the last ~90 seconds of fixes sits clearly apart from the older
+ * half, AND they got there by heading one way rather than scattering. Both,
+ * because either alone misfires: a standing phone on a poor sky can put two
+ * averages 15m apart by chance, but its fixes zig-zag; a slow walker's
+ * fixes step a few metres at a time, always in roughly the same direction.
+ * Needs three fixes; with fewer there is nothing to judge and the answer is
+ * no — the Doppler speed and the jump test still apply.
+ */
+function gpsFixesShowMovement(float $lat, float $lng, float $accuracy, array $recentRaw): bool {
+    $pts = [['lat' => $lat, 'lng' => $lng, 'acc' => $accuracy]];
+    foreach ($recentRaw as $f) {
+        if (count($pts) >= 5 || !isset($f['age']) || $f['age'] > 90 || $f['age'] < 0) break;
+        $pts[] = $f;
+    }
+    $n = count($pts);
+    if ($n < 3) {
+        return false;
+    }
+    $mLat = 111320.0;
+    $mLng = 111320.0 * cos(deg2rad($lat));
+    $xy = array_map(fn($p) => [((float) $p['lat'] - $lat) * $mLat, ((float) $p['lng'] - $lng) * $mLng], $pts);
+    $half = intdiv($n, 2);
+    $mean = function (array $s) {
+        $c = count($s);
+        return [array_sum(array_column($s, 0)) / $c, array_sum(array_column($s, 1)) / $c];
+    };
+    [$aN, $aE] = $mean(array_slice($xy, 0, $half));      // newer half
+    [$bN, $bE] = $mean(array_slice($xy, $n - $half));    // older half
+    $net = hypot($aN - $bN, $aE - $bE);
+    $path = 0.0;
+    for ($i = 1; $i < $n; $i++) {
+        $path += hypot($xy[$i][0] - $xy[$i - 1][0], $xy[$i][1] - $xy[$i - 1][1]);
+    }
+    $straight = $path > 0 ? hypot($xy[0][0] - $xy[$n - 1][0], $xy[0][1] - $xy[$n - 1][1]) / $path : 0.0;
+    $accs = array_map(fn($p) => (float) ($p['acc'] ?? $accuracy), $pts);
+    sort($accs);
+    $medAcc = $accs[intdiv($n, 2)];
+    return $net > max(3.0, 0.8 * $medAcc) && $straight > 0.5;
 }
 
 /**
@@ -2796,12 +2858,19 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     // the database's own clock so PHP's and MySQL's clocks never have to
     // agree. Everything below that compares against "the last position"
     // compares against this one row.
-    $prev = dbFetchOne(
-        "SELECT lat, lng, accuracy_meters, via, TIMESTAMPDIFF(SECOND, created_at, NOW()) AS age_s
+    //
+    // The four newest, in one indexed read: the newest is $prev, and the raw
+    // fixes of all four let the position filter see a steady run of movement
+    // that the Doppler speed alone misses (gpsFixesShowMovement()).
+    $recentRows = dbFetchAll(
+        "SELECT lat, lng, accuracy_meters, via, TIMESTAMPDIFF(SECOND, created_at, NOW()) AS age_s,
+                COALESCE(raw_lat, lat) AS rlat, COALESCE(raw_lng, lng) AS rlng,
+                COALESCE(raw_accuracy_m, accuracy_meters) AS racc
            FROM volunteer_pings
-          WHERE user_id = ? AND shift_id = ? ORDER BY id DESC LIMIT 1",
+          WHERE user_id = ? AND shift_id = ? ORDER BY id DESC LIMIT 4",
         [$userId, $shiftId]
     );
+    $prev = $recentRows[0] ?? null;
 
     // One phone, one stream. Inside the Android app the page's own passive
     // capture and the native background service both report, each on its own
@@ -2937,13 +3006,23 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     // invent a confidence the device never claimed.
     $estimate = ['lat' => $lat, 'lng' => $lng, 'acc' => $accuracy];
     if ($accuracy !== null && getSetting('war_room_gps_smoothing', '1') === '1') {
+        $recentRaw = [];
+        foreach ($recentRows as $row) {
+            $recentRaw[] = [
+                'lat' => (float) $row['rlat'], 'lng' => (float) $row['rlng'],
+                'acc' => $row['racc'] !== null ? (float) $row['racc'] : $accuracy,
+                // Seconds before THIS fix, from the database's own clock.
+                'age' => (int) $row['age_s'] - $fixAgeSeconds,
+            ];
+        }
         $estimate = gpsFilterStep(
             ($prev && $prev['accuracy_meters'] !== null)
                 ? ['lat' => (float) $prev['lat'], 'lng' => (float) $prev['lng'], 'acc' => (float) $prev['accuracy_meters']]
                 : null,
             $lat, $lng, $accuracy, $speedMps,
             $prev ? max(1, (int) $prev['age_s'] - $fixAgeSeconds) : 0,
-            warRoomPingStaleThresholdSeconds()
+            warRoomPingStaleThresholdSeconds(),
+            $recentRaw
         );
     }
 

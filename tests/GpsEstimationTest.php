@@ -44,7 +44,7 @@ final class GpsEstimationTest extends TestCase
     {
         $lat0 = 35.33; $lng0 = 25.13;
         $mLat = 111320.0; $mLng = 111320.0 * cos(deg2rad($lat0));
-        $prev = null; $raw = []; $est = [];
+        $prev = null; $raw = []; $est = []; $history = [];
         $nN = 0.0; $nE = 0.0;
         for ($i = 0; $i < $n; $i++) {
             $nN = $rho * $nN + sqrt(1 - $rho * $rho) * $sigma * $this->gauss();
@@ -53,8 +53,16 @@ final class GpsEstimationTest extends TestCase
             $lat = $lat0 + ($tN + $nN) / $mLat;
             $lng = $lng0 + ($tE + $nE) / $mLng;
             $acc = $reportedAcc > 0 ? $reportedAcc : $sigma * 1.2;
-            $e = gpsFilterStep($prev, $lat, $lng, $acc, $speed ? $speed($i) : null, $prev ? $dt : 0, self::STALE);
+            // The device's own earlier fixes, newest first, as recordVolunteerPing()
+            // hands them over since v3.322.1.
+            $recent = [];
+            foreach ($history as $k => $h) {
+                $recent[] = $h + ['age' => ($k + 1) * $dt];
+            }
+            $e = gpsFilterStep($prev, $lat, $lng, $acc, $speed ? $speed($i) : null, $prev ? $dt : 0, self::STALE, $recent);
             $prev = $e;
+            array_unshift($history, ['lat' => $lat, 'lng' => $lng, 'acc' => $acc]);
+            $history = array_slice($history, 0, 4);
             $raw[] = hypot($tN + $nN - $tN, $tE + $nE - $tE);
             $est[] = hypot(($e['lat'] - $lat0) * $mLat - $tN, ($e['lng'] - $lng0) * $mLng - $tE);
         }
@@ -114,6 +122,57 @@ final class GpsEstimationTest extends TestCase
         [, $est] = $this->simulate(40, $truth, 8.0, $speed);
         // Three fixes after stopping, the estimate is where they stopped.
         $this->assertLessThan(20.0, max(array_slice($est, 23, 17)));
+    }
+
+    // ── v3.322.1: a slow walk the Doppler speed calls "standing" ─────────────
+
+    public function testASlowWalkUnderTheDopplerLineIsNotHeldBack(): void
+    {
+        // What a Xiaomi did on yphresies.gr: good sky (±3.6m), walking at
+        // 0.25 m/s, Doppler reporting 0.2 — under the 0.3 "standing" line, so
+        // v3.321.0 averaged the walk away and fell metres behind.
+        mt_srand(3232);
+        [$raw, $est] = $this->simulate(40, fn($i) => [$i * 0.25 * 14, 0.0], 3.0, fn($i) => 0.2, 14);
+        $this->assertLessThan($this->median($raw) + 0.5, $this->median($est),
+            sprintf('raw %.1fm, estimate %.1fm', $this->median($raw), $this->median($est)));
+    }
+
+    public function testTheRealWalkFromYphresiesIsNoLongerHeldBehind(): void
+    {
+        // The fixes of that walk (relative metres only). Replayed with the
+        // worst case the device could have sent — a Doppler speed of 0 the
+        // whole way — the estimate must stay within half the claimed accuracy
+        // of every fix, and in the slow-walk stretch within 3m. v3.321.0
+        // reached 8.1m here, which is what put the pin inside a house.
+        $fixes = json_decode(file_get_contents(__DIR__ . '/fixtures/gps-live-walk-relative.json'), true)['fixes'];
+        $lat0 = 35.33; $lng0 = 25.13; $mLat = 111320.0; $mLng = 111320.0 * cos(deg2rad($lat0));
+        $prev = null; $walkMax = 0.0;
+        foreach ($fixes as $i => [$t, $n, $e, $acc]) {
+            $recent = [];
+            for ($j = $i - 1; $j >= 0 && $j >= $i - 4; $j--) {
+                $recent[] = ['lat' => $lat0 + $fixes[$j][1] / $mLat, 'lng' => $lng0 + $fixes[$j][2] / $mLng, 'acc' => (float) $fixes[$j][3], 'age' => $t - $fixes[$j][0]];
+            }
+            $lat = $lat0 + $n / $mLat; $lng = $lng0 + $e / $mLng;
+            $prev = gpsFilterStep($prev, $lat, $lng, (float) $acc, 0.0, $i ? $t - $fixes[$i - 1][0] : 0, self::STALE, $recent);
+            $lag = hypot(($prev['lat'] - $lat) * $mLat, ($prev['lng'] - $lng) * $mLng);
+            $this->assertLessThanOrEqual(0.5 * max((float) $acc, 3.0) + 0.01, $lag, "t=$t: estimate further from the fix than half its accuracy");
+            if ($t >= 928 && $t <= 1068) $walkMax = max($walkMax, $lag);
+        }
+        $this->assertLessThanOrEqual(3.0, $walkMax, sprintf('slow-walk lag %.1fm', $walkMax));
+    }
+
+    public function testMovementIsReadFromASteadyRunNotFromScatter(): void
+    {
+        $at = fn(float $n, float $e, int $age) => ['lat' => 35.33 + $n / 111320.0, 'lng' => 25.13 + $e / (111320.0 * cos(deg2rad(35.33))), 'acc' => 6.0, 'age' => $age];
+        // Four earlier fixes stepping 3m south each 14s, then the current one.
+        $run = [$at(3, 0, 14), $at(6, 0, 28), $at(9, 0, 42), $at(12, 0, 56)];
+        $this->assertTrue(gpsFixesShowMovement(35.33, 25.13, 6.0, $run));
+        // The same spread, zig-zagging around one spot.
+        $scatter = [$at(5, 4, 14), $at(-4, -5, 28), $at(6, -3, 42), $at(-5, 5, 56)];
+        $this->assertFalse(gpsFixesShowMovement(35.33, 25.13, 6.0, $scatter));
+        // Too few fixes, or too old, is not evidence either way.
+        $this->assertFalse(gpsFixesShowMovement(35.33, 25.13, 6.0, [$at(3, 0, 14)]));
+        $this->assertFalse(gpsFixesShowMovement(35.33, 25.13, 6.0, [$at(3, 0, 120), $at(6, 0, 134)]));
     }
 
     public function testAJumpBeyondThreeSigmaResetsToTheNewFix(): void
@@ -213,6 +272,22 @@ final class GpsEstimationTest extends TestCase
         $this->assertGreaterThan(35.33, (float) $row['lat']);
         $this->assertSame('10.00', $row['raw_accuracy_m']);
         $this->assertSame('0.00', $row['speed_mps']);
+    }
+
+    public function testTheWritePathHandsTheFilterTheRecentFixes(): void
+    {
+        // A slow walk (3.5m south every 14s, Doppler 0.2) through the real
+        // write path. Without the earlier fixes the filter could only cap the
+        // lag at half the accuracy (3m here); seeing the steady run, it lets
+        // the fix through and the stored position stays with the walker.
+        $this->fixture();
+        $v = $this->volunteer('Αργό Βάδισμα');
+        for ($i = 0; $i < 6; $i++) {
+            recordVolunteerPing($this->user($v), $this->shiftId, 35.33 - $i * 3.5 / 111320.0, 25.13, 6.0, 80, 'auto', 'native', (5 - $i) * 14000, false, 0.2);
+        }
+        $row = dbFetchOne("SELECT lat, raw_lat FROM volunteer_pings WHERE user_id = ? ORDER BY id DESC LIMIT 1", [$v]);
+        $this->assertSame(6, (int) dbFetchValue("SELECT COUNT(*) FROM volunteer_pings WHERE user_id = ?", [$v]));
+        $this->assertLessThan(1.5, abs((float) $row['lat'] - (float) $row['raw_lat']) * 111320.0);
     }
 
     public function testAFixWithNoAccuracyIsStoredExactlyAsSent(): void
