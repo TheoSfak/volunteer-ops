@@ -22,7 +22,7 @@ header('Content-Type: application/json');
  * own create-notification fix (a team-targeted alert must not fire for every
  * other team on the mission).
  */
-function notifySectorAssigned(int $missionId, string $missionTitle, int $teamId, string $label, int $excludeUserId): void {
+function notifySectorAssigned(int $missionId, string $missionTitle, int $teamId, int $sectorId, string $label, int $excludeUserId): void {
     $recipientIds = actionRoomNotifyRecipientIds($missionId, $teamId, $excludeUserId);
     if (empty($recipientIds)) {
         return;
@@ -37,6 +37,9 @@ function notifySectorAssigned(int $missionId, string $missionTitle, int $teamId,
             'url' => $warRoomUrl,
             'tag' => 'sector-assigned-mission-' . $missionId,
             'bannerMission' => $missionId,
+            // Lets the Action Room open this as the order popup and frame the
+            // sector on the map (see war-room.php's banners).
+            'sectorId' => $sectorId,
         ]);
     }
 }
@@ -439,7 +442,7 @@ if ($action === 'create') {
     // No notification if created unassigned — an admin laying out several
     // sectors before assigning any teams must not fire a push per sector.
     if ($teamId) {
-        notifySectorAssigned($missionId, $mission['title'], $teamId, $label, $userId);
+        notifySectorAssigned($missionId, $mission['title'], $teamId, (int) $sectorId, $label, $userId);
     }
 
     echo json_encode(['ok' => true, 'id' => (int) $sectorId] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
@@ -624,7 +627,7 @@ if ($action === 'assign') {
     }
 
     if ($newTeamId && $newTeamId !== $oldTeamId) {
-        notifySectorAssigned($missionId, $mission['title'], $newTeamId, $sector['label'], $userId);
+        notifySectorAssigned($missionId, $mission['title'], $newTeamId, (int) $sectorId, $sector['label'], $userId);
     }
 
     echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));

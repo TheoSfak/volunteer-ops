@@ -293,6 +293,9 @@ if ($action === 'create') {
             'url' => $warRoomUrl,
             'tag' => 'dispatch-point-mission-' . $missionId,
             'bannerMission' => $missionId,
+            // Lets the Action Room open this as the order popup and jump
+            // straight to the point on the map (see war-room.php's banners).
+            'dispatchId' => (int) $dispatchId,
         ]);
     }
 

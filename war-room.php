@@ -1557,11 +1557,27 @@ if (get('ajax') === '1') {
                 $orderId = (int) $rawOrderId;
             }
         }
+        // Which of this person's own orders the notification announces, so the
+        // page can open it as a popup instead of a scrolling line. Separate from
+        // orderId above on purpose: that one is nulled once acknowledged,
+        // because it drives an «Ελήφθη» button, while this one only says which
+        // item to show — and a dispatch or a sector has no order id at all.
+        // Only notifications addressed to the recipients carry these keys; a
+        // bystander admin's FYI copy has none, so it stays a ticker line.
+        $popup = null;
+        if ($rawOrderId) {
+            $popup = ['kind' => 'order', 'id' => (int) $rawOrderId];
+        } elseif (!empty($bannerData['dispatchId'])) {
+            $popup = ['kind' => 'dispatch', 'id' => (int) $bannerData['dispatchId']];
+        } elseif (!empty($bannerData['sectorId'])) {
+            $popup = ['kind' => 'sector', 'id' => (int) $bannerData['sectorId']];
+        }
         $banners[] = [
             'id' => (int) $bannerRow['id'],
             'message' => $bannerRow['message'],
             'orderId' => $orderId,
             'alarmStyle' => $bannerData['alarmStyle'] ?? null,
+            'popup' => $popup,
         ];
     }
 
@@ -2498,6 +2514,99 @@ include __DIR__ . '/includes/header.php';
     @keyframes warRoomBannerScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
     .war-room-banner .bi-broadcast { color: #ff3b30; flex-shrink: 0; }
     .war-room-banner-close { background: transparent; border: none; color: #ff3b30; font-size: 1.3rem; line-height: 1; cursor: pointer; padding: 0 4px; flex-shrink: 0; }
+
+    /* ── Order popup ──────────────────────────────────────────────────────
+       An order addressed to this person opens here instead of scrolling past
+       in the ticker. Stacking: above the ticker (1900) and the SOS hint (1910),
+       below the full-screen alarms (#sosOverlay, #returnToBaseOverlay and
+       #restrictedAreaOverlay are all 2000) — an order must never cover an
+       alarm. --wr-op-bottom is measured by orderPopupLayout(): it is whatever
+       is pinned to the bottom of the screen, normally the phone tab bar, which
+       is left uncovered on purpose so the SOS button is always one press away.
+
+       The root is the one fixed element and everything inside it is absolute.
+       That is for the fullscreen map, which the root is moved into (see
+       setMapFullscreen): there #mapCard carries a scroll offset that has to be
+       cancelled with a transform, and a transform on a fixed element moves it
+       with all its absolute children, where fixed children would each need
+       their own. Clicks pass through the root; only its contents take them. */
+    .wr-op-root { position: fixed; inset: 0; z-index: 1905; pointer-events: none; }
+    .wr-op-backdrop { position: absolute; left: 0; right: 0; top: 0; bottom: var(--wr-op-bottom, 0px); background: rgba(15, 23, 42, .45); pointer-events: auto; }
+    .wr-op-stage {
+        position: absolute; left: 0; right: 0; top: env(safe-area-inset-top, 0px); bottom: var(--wr-op-bottom, 0px);
+        display: flex; align-items: center; justify-content: center;
+        padding: 12px; pointer-events: none;
+    }
+    /* The step view is opened from the strip at the bottom, so it opens where
+       the thumb already is. */
+    .wr-op-stage.wr-op-stage-review { align-items: flex-end; }
+    .wr-op-card {
+        pointer-events: auto; width: 100%; max-width: 420px; max-height: 100%; overflow-y: auto;
+        background: #fff; color: #212529; border-radius: 14px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, .35);
+    }
+    .wr-op-cat-move  { --wr-op-bg: #e7f1ff; --wr-op-fg: #0a58ca; --wr-op-bd: #6ea8fe; }
+    .wr-op-cat-media { --wr-op-bg: #efe9ff; --wr-op-fg: #5b3cc4; --wr-op-bd: #a98eff; }
+    .wr-op-cat-task  { --wr-op-bg: #fff3cd; --wr-op-fg: #7a5200; --wr-op-bd: #ffc107; }
+    .wr-op-cat-info  { --wr-op-bg: #f1f3f5; --wr-op-fg: #495057; --wr-op-bd: #adb5bd; }
+    .wr-op-review-card { border: 2px solid var(--wr-op-bd); }
+    .wr-op-head { display: flex; align-items: center; gap: .5rem; padding: .6rem .75rem; background: var(--wr-op-bg); color: var(--wr-op-fg); font-weight: 600; }
+    .wr-op-head .bi { font-size: 1.1rem; }
+    .wr-op-headplain { display: flex; align-items: center; gap: .5rem; padding: .7rem .75rem .25rem; color: var(--wr-op-fg); font-weight: 600; font-size: .85rem; }
+    .wr-op-ic { width: 30px; height: 30px; border-radius: 50%; background: var(--wr-op-bg); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .wr-op-pager { margin-left: auto; display: inline-flex; align-items: center; gap: .1rem; font-size: .8rem; font-weight: 500; white-space: nowrap; }
+    .wr-op-headbtn { border: 0; background: transparent; color: inherit; padding: .2rem .4rem; line-height: 1; font-size: 1.05rem; min-width: 32px; min-height: 32px; }
+    .wr-op-spacer { margin-left: auto; }
+    .wr-op-body { padding: .75rem; }
+    .wr-op-text { font-size: 1.05rem; font-weight: 600; line-height: 1.3; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .wr-op-meta { font-size: .8rem; color: #6c757d; margin-top: .2rem; }
+    .wr-op-hint { font-size: .8rem; color: #6c757d; margin-top: .5rem; }
+    .wr-op-mini { position: relative; height: 140px; border-radius: 8px; overflow: hidden; margin-top: .6rem; background: #e9ecef; }
+    .wr-op-mini-chip { position: absolute; bottom: 6px; z-index: 500; background: #fff; color: #212529; border-radius: 6px; padding: 2px 7px; font-size: .75rem; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); text-decoration: none; }
+    .wr-op-mini-dist { left: 6px; }
+    .wr-op-mini-nav { right: 6px; color: #0a58ca; font-weight: 600; }
+    .wr-op-actions .btn { min-height: 44px; }
+    .wr-op-steps { margin-top: .75rem; }
+    .wr-op-step { display: flex; gap: .6rem; position: relative; padding-bottom: .65rem; }
+    .wr-op-step:not(:last-child)::before { content: ''; position: absolute; left: 10px; top: 24px; bottom: 2px; width: 2px; background: #dee2e6; }
+    .wr-op-dot { width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: .75rem; border: 2px solid #ced4da; background: #fff; }
+    .wr-op-step-done .wr-op-dot { background: #d1e7dd; border-color: #198754; color: #146c43; }
+    .wr-op-step-current .wr-op-dot { background: var(--wr-op-bg); border-color: var(--wr-op-fg); }
+    .wr-op-step-body { flex: 1; min-width: 0; padding-top: 1px; }
+    .wr-op-step-done .wr-op-step-label, .wr-op-step-todo .wr-op-step-label { color: #6c757d; }
+    .wr-op-step-current .wr-op-step-label { font-weight: 600; }
+    .wr-op-step-body .btn { min-height: 40px; }
+    .wr-op-strip {
+        position: absolute; left: 0; right: 0; bottom: var(--wr-op-bottom, 0px); pointer-events: auto;
+        display: flex; align-items: center; gap: .5rem; width: 100%; min-height: 44px;
+        padding: .45rem .9rem; border: 0; border-top: 2px solid #ffc107;
+        background: #fff3cd; color: #664d03; font-size: .9rem; text-align: left;
+        animation: wr-op-breathe 2.6s ease-in-out infinite;
+    }
+    .wr-op-strip .bi { font-size: 1.1rem; flex-shrink: 0; }
+    .wr-op-strip-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wr-op-strip-new { width: 9px; height: 9px; border-radius: 50%; background: #fd7e14; flex-shrink: 0; animation: wr-op-blink 1.2s ease-in-out infinite; }
+    @keyframes wr-op-breathe { 0%, 100% { background: #fff3cd; } 50% { background: #ffe08a; } }
+    @keyframes wr-op-blink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+    /* No tab bar on a desktop, so a full-width bar along the bottom of the
+       whole window would read as page chrome. A corner card instead. */
+    @media (min-width: 992px) {
+        .wr-op-strip { left: auto; right: 16px; bottom: calc(var(--wr-op-bottom, 0px) + 16px); width: auto; max-width: 380px; border: 2px solid #ffc107; border-radius: 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, .2); }
+    }
+    .wr-op-toast {
+        position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--wr-op-bottom, 0px) + 58px);
+        z-index: 1; max-width: calc(100vw - 24px); background: #d1e7dd; color: #0f5132;
+        border-radius: 10px; padding: .5rem .9rem; font-size: .9rem; font-weight: 600;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, .2);
+    }
+    .wr-op-toast[hidden] { display: none; }
+    /* Marks the spot on the live map for a few seconds after "see it on the map". */
+    .wr-op-pulse { width: 48px; height: 48px; border-radius: 50%; border: 3px solid #fd7e14; animation: wr-op-pulse 1.4s ease-out infinite; }
+    @keyframes wr-op-pulse { 0% { transform: scale(.35); opacity: 1; } 100% { transform: scale(1.5); opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) {
+        .wr-op-strip, .wr-op-strip-new, .wr-op-pulse { animation: none; }
+        .wr-op-pulse { opacity: .8; }
+    }
     @media (min-width: 992px) {
         /* Set on the track itself, not the span inside it — both tracks size
            their height in `em` relative to their own font-size, so bumping
@@ -3226,6 +3335,13 @@ include __DIR__ . '/includes/header.php';
 <?= showFlash() ?>
 
 <div id="warRoomBanner" class="war-room-banner" data-ticker-pos="<?= getSetting('war_room_ticker_position', 'top') === 'bottom' ? 'bottom' : 'top' ?>"></div>
+<!-- The order popup and the strip it shrinks to (see orderPopupSync()). For
+     everyone, not only volunteers: whoever an order is addressed to gets it
+     here instead of as a line in the ticker above. Filled entirely by JS. -->
+<div id="orderPopupRoot" class="wr-op-root">
+    <div id="orderPopupLayer"></div>
+    <div id="orderPopupToast" class="wr-op-toast" role="status" aria-live="polite" hidden></div>
+</div>
 
 <?php if ($canManageWarRoom): ?>
 <!-- Acknowledgement panel. position:fixed, so it follows the page up and down
@@ -10104,8 +10220,144 @@ function myOrderEntriesFromOrders(items) {
         // both reach this line carrying whatever the coordinator typed.
         const labelHtml = (isTask || isSpeak || task.order_type === 'message') ? escapeHtml(task.label) : task.label;
         const done = ackCompletes ? !!task.acknowledged_at : !!task.fulfilled_at;
-        return {outstanding: !done, html: myOrderRow(labelHtml, t('mytasks.sent_prefix', {time: task.sent_at}), actionHtml)};
+        return {
+            outstanding: !done,
+            html: myOrderRow(labelHtml, t('mytasks.sent_prefix', {time: task.sent_at}), actionHtml),
+            popup: opModelFromOrder(task, !done),
+        };
     });
+}
+
+// ── What the order popup shows for each row ─────────────────────────────────
+// Every row above also carries a plain-data description of itself for the
+// order popup (orderPopupSync, below renderMyTasks). Built right here, from the
+// same fields and the same `done` rule as the row, so the popup and this card
+// cannot disagree: the popup's strip goes away on exactly the poll that turns
+// the row green. Plain data only — the row signature is its JSON.
+const OP_ORDER_LOOK = {
+    task:           {cat: 'task',  icon: 'bi-clipboard-check'},
+    photo:          {cat: 'media', icon: 'bi-camera-fill'},
+    video:          {cat: 'media', icon: 'bi-camera-reels-fill'},
+    location:       {cat: 'media', icon: 'bi-crosshair'},
+    live:           {cat: 'media', icon: 'bi-broadcast-pin'},
+    speak:          {cat: 'info',  icon: 'bi-megaphone-fill'},
+    message:        {cat: 'info',  icon: 'bi-chat-left-text-fill'},
+    charge_phone:   {cat: 'info',  icon: 'bi-battery-charging'},
+    return_to_base: {cat: 'task',  icon: 'bi-house-door-fill'},
+};
+// Types whose whole content is what the coordinator typed, and types that get
+// a sentence of their own instead of the row's short "📷 Ζητείται..." label.
+const OP_TYPED_TEXT = ['task', 'speak', 'message', 'return_to_base'];
+const OP_OWN_TEXT = ['photo', 'video', 'location', 'live', 'charge_phone', 'return_to_base'];
+
+function opPolygonNav(geo) {
+    return (typeof polygonNavPoint === 'function') ? polygonNavPoint(geo) : null;
+}
+
+function opModelFromOrder(task, outstanding) {
+    const type = task.order_type;
+    const look = OP_ORDER_LOOK[type] || OP_ORDER_LOOK.message;
+    const acked = !!task.acknowledged_at;
+    const fulfilled = !!task.fulfilled_at;
+    const typed = String(task.task_text || '').trim();
+    const text = (OP_TYPED_TEXT.includes(type) && typed) ? typed
+        : (OP_OWN_TEXT.includes(type) ? t('popup.text.' + type) : task.label);
+    // Same split as ackCompletes in the row: for these, «Ελήφθη» is the whole
+    // order. A location request is one step too, but the step is sending it.
+    let steps, step;
+    if (['speak', 'message', 'charge_phone', 'return_to_base'].includes(type)) {
+        steps = [t('popup.step.ack')];
+        step = acked ? 1 : 0;
+    } else if (type === 'location') {
+        steps = [t('popup.step.location')];
+        step = fulfilled ? 1 : 0;
+    } else {
+        steps = [t('popup.step.ack'), type === 'task' ? t('popup.step.complete') : t('popup.step.' + type)];
+        step = fulfilled ? 2 : (acked ? 1 : 0);
+    }
+    const cardByType = {location: 'myLocationCard', photo: 'mediaCard', video: 'mediaCard', live: 'myLiveCard'};
+    return {
+        key: 'order:' + task.order_id, kind: 'order', id: task.order_id, type: type,
+        cat: look.cat, icon: look.icon, title: t('popup.type.' + type), text: text,
+        meta: t('mytasks.sent_prefix', {time: task.sent_at}),
+        acked: acked, outstanding: outstanding, steps: steps, step: step,
+        stepTimes: acked && steps.length > 1 ? {0: task.acknowledged_at} : {},
+        hint: ['photo', 'video', 'location', 'live'].includes(type) ? t('popup.hint.' + type) : '',
+        speakText: type === 'speak' ? (typed || task.label) : '',
+        target: null,
+        card: cardByType[type] || 'myTasksCard',
+    };
+}
+
+function opModelFromDispatch(d) {
+    const isPoint = d.type === 'point';
+    const nav = isPoint ? {lat: Number(d.geo.lat), lng: Number(d.geo.lng)} : opPolygonNav(d.geo);
+    const acked = !!d.my_receipt || !!d.my_ack || !d.can_receive;
+    const arrived = !!d.my_ack;
+    return {
+        key: 'dispatch:' + d.id, kind: 'dispatch', id: d.id, type: isPoint ? 'dispatch_point' : 'dispatch_area',
+        cat: 'move', icon: isPoint ? 'bi-geo-alt-fill' : 'bi-bounding-box-circles',
+        title: t(isPoint ? 'popup.type.dispatch_point' : 'popup.type.dispatch_area'),
+        text: d.label || t(isPoint ? 'popup.text.dispatch_point' : 'popup.text.dispatch_area'),
+        meta: t('popup.to_team', {team: d.team_label}),
+        acked: acked, outstanding: !arrived,
+        steps: [t('popup.step.ack'), t('popup.step.travel'), t('popup.step.arrive')],
+        step: arrived ? 3 : (acked ? 1 : 0),
+        stepTimes: Object.assign({}, d.my_receipt ? {0: d.my_receipt} : {}, d.my_ack ? {2: d.my_ack} : {}),
+        canArrive: !!d.can_ack,
+        hint: '', speakText: '',
+        target: isPoint
+            ? {kind: 'point', lat: nav.lat, lng: nav.lng, nav: nav}
+            : {kind: 'polygon', pts: d.geo, nav: nav || {lat: Number(d.geo[0][0]), lng: Number(d.geo[0][1])}},
+        card: 'myTasksCard',
+    };
+}
+
+function opModelFromRoute(route) {
+    const wps = route.waypoints || [];
+    const doneCount = wps.filter(wp => wp.completed_at || wp.skipped_at).length;
+    const acked = !!route.my_acknowledged_at;
+    // Aimed at the next point still to visit, not the first: an hour into a
+    // route, "directions" to the start would send the team backwards.
+    const nextWp = wps.find(wp => !wp.completed_at && !wp.skipped_at) || wps[0];
+    return {
+        key: 'route:' + route.id, kind: 'route', id: route.id, orderId: route.order_id, type: 'route',
+        cat: 'move', icon: 'bi-signpost-split-fill', title: t('popup.type.route'),
+        text: route.title || t('route.default_title'),
+        meta: t('popup.route_points', {count: wps.length}),
+        acked: acked, outstanding: true,
+        steps: [t('popup.step.ack'), t('popup.step.waypoints', {done: doneCount, total: wps.length}), t('popup.step.route_end')],
+        step: acked ? 1 : 0, stepTimes: {},
+        hint: '', speakText: '',
+        target: wps.length
+            ? {kind: 'line', pts: wps.map(wp => [wp.lat, wp.lng]), nav: {lat: nextWp.lat, lng: nextWp.lng}}
+            : null,
+        card: 'myRouteCard',
+    };
+}
+
+function opModelFromSector(sector) {
+    // Mirrors the server's $needsAcknowledgeFirst: only a fresh assignment
+    // waits for «Ελήφθη»; a sector already past 'assigned' was received.
+    const acked = !(sector.status === 'assigned' && !sector.acknowledged_at);
+    const searching = sector.status === 'in_progress' || sector.status === 'needs_recheck';
+    const area = (areas || []).find(a => a.id === sector.area_id);
+    const nav = opPolygonNav(sector.geo);
+    return {
+        key: 'sector:' + sector.id, kind: 'sector', id: sector.id, type: 'sector',
+        cat: 'move', icon: 'bi-grid-3x3-gap-fill', title: t('popup.type.sector'),
+        text: sector.label + (area ? ' — ' + area.label : ''),
+        meta: t('popup.to_team', {team: sector.team_label}),
+        acked: acked, outstanding: true,
+        steps: [t('popup.step.ack'), t('popup.step.travel'), t('popup.step.search'), t('popup.step.complete')],
+        step: !acked ? 0 : (searching ? 2 : 1),
+        stepTimes: sector.acknowledged_at ? {0: sector.acknowledged_at} : {},
+        advanceStatus: sector.can_self_report ? sector.next_status : null,
+        advanceLabel: sector.can_self_report ? sectorActionLabel(sector.status) : '',
+        hint: '', speakText: '',
+        target: nav ? {kind: 'polygon', pts: sector.geo, nav: nav} : null,
+        card: 'mySectorsCard',
+    };
 }
 
 // A dispatch is "mine" when the server left me something to do with it, or a
@@ -10139,7 +10391,8 @@ function myOrderEntriesFromDispatches(items) {
             const directionsHtml = `<a href="${dispatchDirectionsUrl(d)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success w-100 mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
             return {
                 outstanding: !d.my_ack,
-                html: myOrderRow(labelHtml, escapeHtml(d.team_label), receiptHtml + actionHtml + directionsHtml)
+                html: myOrderRow(labelHtml, escapeHtml(d.team_label), receiptHtml + actionHtml + directionsHtml),
+                popup: opModelFromDispatch(d),
             };
         });
 }
@@ -10155,7 +10408,8 @@ function myOrderEntriesFromRoutes(items) {
                 : `<button type="button" class="btn btn-sm btn-outline-primary w-100 my-open-card-btn" data-card="myRouteCard">${t('mytasks.open_card_btn')}</button>`;
             return {
                 outstanding: true,
-                html: myOrderRow(labelHtml, t('mytasks.route_progress', {done: done, total: route.waypoints.length}), actionHtml)
+                html: myOrderRow(labelHtml, t('mytasks.route_progress', {done: done, total: route.waypoints.length}), actionHtml),
+                popup: opModelFromRoute(route),
             };
         });
 }
@@ -10176,7 +10430,8 @@ function myOrderEntriesFromSectors(items) {
                     escapeHtml(t('mytasks.sector_label', {label: sector.label})),
                     escapeHtml(sector.status_label),
                     actionHtml + polygonNavigationBtnHtml(sector.geo, {block: true})
-                )
+                ),
+                popup: opModelFromSector(sector),
             };
         });
 }
@@ -10207,6 +10462,10 @@ function renderMyTasks(items) {
     // before, then dispatches, then the route, then sectors.
     entries.sort((a, b) => Number(b.outstanding) - Number(a.outstanding));
 
+    // Before the signature guard: the popup keeps its own, and it must hear
+    // about every tick this card does.
+    orderPopupSync(entries);
+
     const sig = JSON.stringify(entries);
     if (sig === myOrdersRenderedSig) return;
     myOrdersRenderedSig = sig;
@@ -10231,28 +10490,10 @@ function renderMyTasks(items) {
         if (item) speakAnnouncement(item.task_text || item.label);
     }));
 
-    list.querySelectorAll('.my-task-ack-btn').forEach(btn => btn.addEventListener('click', () => {
-        btn.disabled = true;
-        const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge', order_id: btn.dataset.orderId});
-        fetch('mission-order.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
-            if (result.ok) {
-                const item = myTasks.find(task => String(task.order_id) === btn.dataset.orderId);
-                if (item) item.acknowledged_at = item.acknowledged_at || t('common.now');
-                renderMyTasks(myTasks);
-            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
-    }));
-    list.querySelectorAll('.my-task-complete-btn').forEach(btn => btn.addEventListener('click', () => {
-        btn.disabled = true;
-        const data = new URLSearchParams({csrf_token: csrfToken, action: 'complete', order_id: btn.dataset.orderId});
-        fetch('mission-order.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
-            if (result.ok) {
-                const item = myTasks.find(task => String(task.order_id) === btn.dataset.orderId);
-                if (item) { item.fulfilled_at = t('common.now'); item.acknowledged_at = item.acknowledged_at || t('common.now'); }
-                renderMyTasks(myTasks);
-            } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
-    }));
+    list.querySelectorAll('.my-task-ack-btn').forEach(btn => btn.addEventListener('click', () =>
+        postMyTaskAction('acknowledge', btn.dataset.orderId, btn)));
+    list.querySelectorAll('.my-task-complete-btn').forEach(btn => btn.addEventListener('click', () =>
+        postMyTaskAction('complete', btn.dataset.orderId, btn)));
     // The other four reuse the exact handlers their own cards use, so a
     // receive/arrival/acknowledge means the same thing whichever surface it
     // was tapped on, and the server's response re-renders both of them.
@@ -10267,6 +10508,567 @@ function renderMyTasks(items) {
     list.querySelectorAll('.my-open-card-btn').forEach(btn =>
         btn.addEventListener('click', () => scrollToCard(btn.dataset.card)));
 }
+
+// «Ελήφθη» and «Ολοκληρώθηκε» for a mission_orders row, from either surface
+// that offers them: this card and the order popup. Same request, same local
+// update, same re-render, whichever one was tapped.
+function postMyTaskAction(action, orderId, btn) {
+    if (btn) btn.disabled = true;
+    const data = new URLSearchParams({csrf_token: csrfToken, action: action, order_id: String(orderId)});
+    return fetch('mission-order.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+        if (result.ok) {
+            const item = myTasks.find(task => String(task.order_id) === String(orderId));
+            if (item) {
+                item.acknowledged_at = item.acknowledged_at || t('common.now');
+                if (action === 'complete') item.fulfilled_at = t('common.now');
+            }
+            renderMyTasks(myTasks);
+        } else { if (btn) btn.disabled = false; alert(result.error || t('common.failed')); }
+    }).catch(() => { if (btn) btn.disabled = false; });
+}
+
+// ── Order popup ─────────────────────────────────────────────────────────────
+// An order addressed to this person arrives as a popup instead of a line of
+// scrolling text: what is being asked, and one button that does it — open the
+// camera, send the location, show the point on the map. That button (or
+// «Αργότερα») shrinks it to a strip above the tab bar, which keeps pulsing
+// gently until the order is actually finished. Tapping the strip brings it back
+// as a list of steps: what is done, what is next.
+//
+// Everything it shows comes from the rows of "Οι Εντολές μου" (the .popup model
+// on each), never from the notification. That is what lets it survive a reload
+// — the ticker replays nothing, see $bannerSinceId — and what makes it vanish
+// on the very poll that turns the row green. The notification only decides WHEN
+// it pops up, and with the alert sound.
+let opEntries = new Map();   // key → model, every row including finished ones
+let opOutstanding = [];      // keys still to do, not-yet-received first
+let opMode = 'closed';       // 'closed' (strip, if anything is open) | 'arrival' | 'review'
+let opArrival = [];          // what arrived and was not dealt with yet, newest first
+let opIndex = 0;
+// The order on screen, followed by key rather than by position: the list
+// re-sorts as orders are received (not-yet-received first), and pressing
+// «Ελήφθη» must leave you looking at that order's next step, not at whichever
+// other order slid into its slot.
+let opShownKey = null;
+let opSynced = false;
+let opPending = [];          // banners whose order has not reached the page state yet
+let opRenderedSig = null;
+let opMiniMap = null;
+let opHighlightLayer = null;
+let opToastTimer = null;
+// Orders put off with «Αργότερα», so a reload does not throw them back up.
+const OP_LATER_STORE = 'wrOpLater_<?= $missionId ?>';
+// How long a banner may wait for its order to appear in the page state before
+// it is drawn as an ordinary ticker line instead — so it is never lost.
+const OP_PENDING_MS = 20000;
+
+function opLaterKeys() {
+    try { return JSON.parse(localStorage.getItem(OP_LATER_STORE) || '[]'); } catch (e) { return []; }
+}
+function opRememberLater(keys) {
+    if (!keys.length) return;
+    try {
+        const all = Array.from(new Set(opLaterKeys().concat(keys))).slice(-200);
+        localStorage.setItem(OP_LATER_STORE, JSON.stringify(all));
+    } catch (e) {}
+}
+
+function orderPopupSync(entries) {
+    const models = entries.map(entry => entry.popup).filter(Boolean);
+    const previous = opEntries;
+    opEntries = new Map(models.map(m => [m.key, m]));
+    if (opSynced) {
+        // Still listed but no longer outstanding means finished — say so. One
+        // that vanished outright (a dispatch deleted, a route cancelled) gets
+        // no toast: "done" would be the wrong word for it.
+        models.forEach(m => {
+            const before = previous.get(m.key);
+            if (before && before.outstanding && !m.outstanding) opToast(t('popup.done_toast', {title: m.title}));
+        });
+    }
+    const open = models.filter(m => m.outstanding);
+    opOutstanding = open.filter(m => !m.acked).concat(open.filter(m => m.acked)).map(m => m.key);
+    opArrival = opArrival.filter(key => opOutstanding.includes(key));
+    opResolvePending();
+    if (!opSynced) {
+        opSynced = true;
+        // After the first paint rather than during it: the tab layout, the map
+        // and the cards this popup jumps to are still being put in place.
+        setTimeout(opOpenMissedOnLoad, 700);
+    }
+    orderPopupRender();
+}
+
+// A page opened after an order was sent — most often by tapping its push
+// notification — shows the ones not yet received, without the sound: the
+// phone already made its noise.
+function opOpenMissedOnLoad() {
+    if (opMode !== 'closed') return;
+    const later = opLaterKeys();
+    const missed = opOutstanding.filter(key => !opEntries.get(key).acked && !later.includes(key));
+    if (!missed.length) return;
+    opArrival = missed;
+    opMode = 'arrival';
+    opIndex = 0;
+    opShownKey = null;
+    orderPopupRender();
+}
+
+function opKeyForRef(ref) {
+    if (!ref) return null;
+    let key = ref.kind + ':' + ref.id;
+    if (ref.kind === 'order' && !opEntries.has(key)) {
+        // A Route Order's notification carries the order id; the route is
+        // listed under its own id.
+        const route = (routes || []).find(r => String(r.order_id) === String(ref.id));
+        if (route) key = 'route:' + route.id;
+    }
+    return opEntries.has(key) ? key : null;
+}
+
+// Called for each banner in the poll. True means the popup took it, and the
+// ticker draws nothing for it.
+function orderPopupTakeBanner(b) {
+    if (!b.popup || !document.getElementById('orderPopupRoot')) return false;
+    const key = opKeyForRef(b.popup);
+    if (key) {
+        if (!opEntries.get(key).outstanding) return false;
+        opArrive(key, b);
+        return true;
+    }
+    // Not in the page state yet. A Route Order is the known case: the route's
+    // order_id is stamped a moment after its notification is written.
+    opPending.push({banner: b, since: Date.now()});
+    setTimeout(opResolvePending, OP_PENDING_MS + 500);
+    return true;
+}
+function opResolvePending() {
+    if (!opPending.length) return;
+    const now = Date.now();
+    opPending = opPending.filter(p => {
+        const key = opKeyForRef(p.banner.popup);
+        if (key && opEntries.get(key).outstanding) { opArrive(key, p.banner); return false; }
+        if (key || now - p.since >= OP_PENDING_MS) {
+            showWarRoomBanner(p.banner.id, p.banner.message, p.banner.orderId, p.banner.alarmStyle);
+            return false;
+        }
+        return true;
+    });
+}
+
+function opArrive(key, b) {
+    playWarRoomAlertSound();
+    // What the ticker line did on arrival beyond the beep.
+    if (b.alarmStyle === 'return_to_base') triggerReturnToBaseAlarm(b.message);
+    if (b.alarmStyle === 'speak') setTimeout(() => speakAnnouncement(b.message), 1100);
+    opArrival = [key].concat(opArrival.filter(k => k !== key));
+    opMode = 'arrival';
+    opIndex = 0;
+    opShownKey = key;
+    orderPopupRender();
+}
+
+function opList() {
+    if (opMode === 'arrival') return opArrival;
+    if (opMode === 'review') return opOutstanding;
+    return [];
+}
+
+function opMinimize() {
+    if (opMode === 'arrival') opRememberLater(opArrival.filter(key => opEntries.has(key) && !opEntries.get(key).acked));
+    opMode = 'closed';
+    opArrival = [];
+    orderPopupRender();
+}
+
+function orderPopupRender() {
+    const layer = document.getElementById('orderPopupLayer');
+    if (!layer) return;
+    let list = opList();
+    if (opMode !== 'closed' && !list.length) { opMode = 'closed'; list = []; }
+    if (opShownKey && list.includes(opShownKey)) opIndex = list.indexOf(opShownKey);
+    opIndex = Math.min(Math.max(opIndex, 0), Math.max(list.length - 1, 0));
+    opShownKey = opMode === 'closed' ? null : (list[opIndex] || null);
+    const m = opMode === 'closed' ? null : opEntries.get(list[opIndex]);
+    const strip = opMode === 'closed' ? opStripModel() : null;
+    // Every poll re-syncs, and a rebuilt card loses its mini map and whatever
+    // the thumb was about to press — so only redraw when something shown changed.
+    const sig = JSON.stringify([opMode, opIndex, list, m, strip]);
+    if (sig === opRenderedSig) return;
+    opRenderedSig = sig;
+    if (opMiniMap) { opMiniMap.remove(); opMiniMap = null; }
+    let html = '';
+    if (m) {
+        html = '<div class="wr-op-backdrop" data-op="min"></div>'
+            + '<div class="wr-op-stage' + (opMode === 'review' ? ' wr-op-stage-review' : '') + '">'
+            + (opMode === 'arrival' ? opArrivalCardHtml(m, opIndex, list.length) : opReviewCardHtml(m, opIndex, list.length))
+            + '</div>';
+    } else if (strip) {
+        html = opStripHtml(strip);
+    }
+    layer.innerHTML = html;
+    if (m && opMode === 'arrival' && m.target) opBuildMiniMap(m);
+    orderPopupLayout();
+}
+
+// Whatever is pinned to the bottom of the screen — the phone tab bar, and a
+// bottom ticker on top of it — stays uncovered: the SOS button lives there.
+function orderPopupLayout() {
+    const root = document.getElementById('orderPopupRoot');
+    if (!root) return;
+    let bottom = 0;
+    // Inside the fullscreen map (see setMapFullscreen) nothing else is painted.
+    if (!root.closest('#mapCard')) {
+        const bar = document.getElementById('wrTabBar');
+        if (bar && document.body.classList.contains('wr-tabs-ready') && bar.offsetHeight) bottom = bar.offsetHeight;
+        const banner = document.getElementById('warRoomBanner');
+        if (banner && banner.dataset.tickerPos === 'bottom' && banner.style.display === 'flex') {
+            bottom = Math.max(bottom, Math.round(window.innerHeight - banner.getBoundingClientRect().top));
+        }
+    }
+    root.style.setProperty('--wr-op-bottom', bottom + 'px');
+}
+window.addEventListener('resize', orderPopupLayout);
+
+function opStripModel() {
+    if (!opOutstanding.length) return null;
+    const first = opEntries.get(opOutstanding[0]);
+    return {
+        n: opOutstanding.length, icon: first.icon, title: first.title,
+        hasNew: opOutstanding.some(key => !opEntries.get(key).acked),
+    };
+}
+function opStripHtml(s) {
+    const text = s.n > 1
+        ? t('popup.strip_many', {n: s.n})
+        : s.title + ' · ' + (s.hasNew ? t('popup.strip_new') : t('popup.strip_in_progress'));
+    return `<button type="button" class="wr-op-strip" data-op="expand" title="${escapeHtml(t('popup.strip_open'))}">
+        <i class="bi ${s.n > 1 ? 'bi-list-check' : s.icon}"></i>
+        ${s.hasNew ? '<span class="wr-op-strip-new"></span>' : ''}
+        <span class="wr-op-strip-text">${escapeHtml(text)}</span>
+        <i class="bi bi-chevron-up"></i>
+    </button>`;
+}
+
+function opPagerHtml(i, n) {
+    if (n < 2) return '<span class="wr-op-spacer"></span>';
+    return `<span class="wr-op-pager">
+        <button type="button" class="wr-op-headbtn" data-op="prev" aria-label="${escapeHtml(t('popup.prev'))}"${i === 0 ? ' disabled' : ''}><i class="bi bi-chevron-left"></i></button>
+        ${escapeHtml(t('popup.pager', {i: i + 1, n: n}))}
+        <button type="button" class="wr-op-headbtn" data-op="next" aria-label="${escapeHtml(t('popup.next'))}"${i === n - 1 ? ' disabled' : ''}><i class="bi bi-chevron-right"></i></button>
+    </span>`;
+}
+function opMinBtnHtml() {
+    const label = escapeHtml(t('popup.minimize'));
+    return `<button type="button" class="wr-op-headbtn" data-op="min" aria-label="${label}" title="${label}"><i class="bi bi-dash-lg"></i></button>`;
+}
+function opBtn(op, icon, label, cls) {
+    return `<button type="button" class="btn btn-sm ${cls || 'btn-primary'} w-100 mt-1" data-op="${op}"><i class="bi ${icon} me-1"></i>${escapeHtml(label)}</button>`;
+}
+function opReplayBtnHtml() {
+    return `<button type="button" class="btn btn-sm btn-outline-info w-100 mt-2" data-op="replay"><i class="bi bi-volume-up me-1"></i>${escapeHtml(t('mytasks.replay_btn'))}</button>`;
+}
+function opDirectionsHtml(m) {
+    const nav = m.target && m.target.nav;
+    return nav ? `<a href="${navigationUrl(nav.lat, nav.lng)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success w-100 mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${escapeHtml(t('dispatch.directions_btn'))}</a>` : '';
+}
+
+// The one button of the first step: [data-op, icon, label]. Every one of them
+// also counts as «Ελήφθη» — whoever opens the camera for a photo request has,
+// by doing so, received it.
+function opGoAction(m) {
+    const mapLess = !map || !m.target;
+    switch (m.type) {
+        case 'photo': return ['camera', 'bi-camera-fill', t('popup.btn.open_camera')];
+        case 'video': return ['video', 'bi-camera-reels-fill', t('popup.btn.open_video')];
+        case 'location': return ['ping', 'bi-send-fill', t('popup.btn.send_location')];
+        case 'live': return ['live', 'bi-broadcast-pin', t('popup.btn.open_live')];
+        case 'dispatch_point': case 'dispatch_area': case 'route': case 'sector':
+            if (mapLess) return ['card', 'bi-box-arrow-in-down', t('popup.btn.take_me')];
+            return ['map', 'bi-map', t({dispatch_point: 'popup.btn.show_point', dispatch_area: 'popup.btn.show_area', route: 'popup.btn.show_route', sector: 'popup.btn.show_sector'}[m.type])];
+        default: return ['ack', 'bi-check2', t('banner.ack_btn')];
+    }
+}
+
+// Design Α: what just arrived, with a small map when it is a place.
+function opArrivalCardHtml(m, i, n) {
+    const [op, icon, label] = opGoAction(m);
+    return `<div class="wr-op-card wr-op-cat-${m.cat}" role="dialog" aria-modal="true" aria-label="${escapeHtml(m.title)}">
+        <div class="wr-op-head"><i class="bi ${m.icon}"></i><span>${escapeHtml(m.title)}</span>${opPagerHtml(i, n)}${opMinBtnHtml()}</div>
+        <div class="wr-op-body">
+            <div class="wr-op-text">${escapeHtml(m.text)}</div>
+            <div class="wr-op-meta">${escapeHtml(m.meta)}</div>
+            ${m.target ? opMiniHtml(m) : ''}
+            ${m.hint ? `<div class="wr-op-hint"><i class="bi bi-info-circle me-1"></i>${escapeHtml(m.hint)}</div>` : ''}
+            <div class="wr-op-actions mt-2">
+                <button type="button" class="btn btn-primary w-100 fw-semibold" data-op="${op}"><i class="bi ${icon} me-1"></i>${escapeHtml(label)}</button>
+                ${m.type === 'speak' ? opReplayBtnHtml() : ''}
+                <button type="button" class="btn btn-outline-secondary w-100 mt-2" data-op="min">${escapeHtml(t('popup.btn.later'))}</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+// Design Γ: the same order reopened from the strip, as steps.
+function opReviewCardHtml(m, i, n) {
+    const steps = m.steps.map((label, k) => {
+        const state = k < m.step ? 'done' : (k === m.step ? 'current' : 'todo');
+        const time = m.stepTimes && m.stepTimes[k] ? ' · ' + m.stepTimes[k] : '';
+        return `<div class="wr-op-step wr-op-step-${state}">
+            <span class="wr-op-dot">${state === 'done' ? '<i class="bi bi-check-lg"></i>' : ''}</span>
+            <div class="wr-op-step-body">
+                <div class="wr-op-step-label">${escapeHtml(label + time)}</div>
+                ${opStepActionsHtml(m, k, state)}
+            </div>
+        </div>`;
+    }).join('');
+    return `<div class="wr-op-card wr-op-review-card wr-op-cat-${m.cat}" role="dialog" aria-modal="true" aria-label="${escapeHtml(m.title)}">
+        <div class="wr-op-headplain"><span class="wr-op-ic"><i class="bi ${m.icon}"></i></span><span>${escapeHtml(m.title)}</span>${opPagerHtml(i, n)}${opMinBtnHtml()}</div>
+        <div class="wr-op-body pt-1">
+            <div class="wr-op-text">${escapeHtml(m.text)}</div>
+            <div class="wr-op-meta">${escapeHtml(m.meta)}</div>
+            ${m.type === 'speak' ? opReplayBtnHtml() : ''}
+            <div class="wr-op-steps">${steps}</div>
+            ${m.hint ? `<div class="wr-op-hint mt-0"><i class="bi bi-info-circle me-1"></i>${escapeHtml(m.hint)}</div>` : ''}
+        </div>
+    </div>`;
+}
+
+function opStepActionsHtml(m, k, state) {
+    if (state === 'current' && k === 0) {
+        const [op, icon, label] = opGoAction(m);
+        return opBtn(op, icon, label);
+    }
+    if (state === 'current') {
+        switch (m.type) {
+            case 'task': return opBtn('complete', 'bi-check2-circle', t('mytasks.complete_btn'), 'btn-success');
+            case 'photo': return opBtn('camera', 'bi-camera-fill', t('popup.btn.open_camera'));
+            case 'video': return opBtn('video', 'bi-camera-reels-fill', t('popup.btn.open_video'));
+            case 'live': return opBtn('live', 'bi-broadcast-pin', t('popup.btn.open_live'));
+            case 'dispatch_point': case 'dispatch_area':
+                return (map ? opBtn('map', 'bi-map', t('popup.btn.take_me'), 'btn-outline-primary') : '') + opDirectionsHtml(m);
+            case 'route':
+                return opBtn('card', 'bi-signpost-split', t('mytasks.open_card_btn'))
+                    + (map && m.target ? opBtn('map', 'bi-map', t('popup.btn.show_route'), 'btn-outline-primary') : '');
+            case 'sector':
+                // The advance button is the card's own action, sent through the
+                // card's own handler; floors and notes stay on the card.
+                return (m.advanceStatus ? opBtn('advance', 'bi-arrow-right-circle', m.advanceLabel) : '')
+                    + opBtn('card', 'bi-list-check', t('mytasks.open_card_btn'), 'btn-outline-primary')
+                    + (map && m.target ? opBtn('map', 'bi-map', t('popup.btn.show_sector'), 'btn-outline-primary') : '');
+        }
+    }
+    // A dispatch finishes with its arrival, so that last step carries the
+    // button that finishes it as soon as there is anything to arrive at.
+    if (m.kind === 'dispatch' && k === 2 && state === 'todo' && m.step >= 1 && m.canArrive) {
+        return opBtn('arrive', 'bi-flag-fill', t('dispatch.arrival_btn'), 'btn-success');
+    }
+    return '';
+}
+
+function opMyPosition() {
+    if (latestAutoPosition && latestAutoPosition.coords && Date.now() - latestAutoPosition.timestamp < 15 * 60000) {
+        return {lat: latestAutoPosition.coords.latitude, lng: latestAutoPosition.coords.longitude};
+    }
+    const mine = (pins || []).find(p => Number(p.user_id) === WR_MY_USER_ID && p.lat !== null && p.lat !== undefined);
+    return mine ? {lat: Number(mine.lat), lng: Number(mine.lng)} : null;
+}
+function opDistanceMetres(m) {
+    const me = opMyPosition();
+    const nav = m.target && m.target.nav;
+    if (!me || !nav || typeof L === 'undefined') return null;
+    return L.latLng(me.lat, me.lng).distanceTo(L.latLng(nav.lat, nav.lng));
+}
+function opDistanceText(m) {
+    const parts = [];
+    const metres = opDistanceMetres(m);
+    if (metres !== null) {
+        parts.push(metres < 1000 ? Math.round(metres) + ' m' : (metres / 1000).toLocaleString(jsLocale, {maximumFractionDigits: 1}) + ' km');
+    }
+    // Read live rather than kept in the model: the ETA moves every poll, and a
+    // model that changed with it would rebuild the card, map and all, each time.
+    const d = m.kind === 'dispatch' ? (dispatches || []).find(x => String(x.id) === String(m.id)) : null;
+    if (d && d.eta) parts.push(d.eta.minutes < 1 ? t('dispatch.eta_lt_1min') : t('dispatch.eta_minutes', {n: d.eta.minutes}));
+    return parts.join(' · ');
+}
+function opMiniHtml(m) {
+    const nav = m.target.nav;
+    const dist = opDistanceText(m);
+    return `<div class="wr-op-mini" data-op="${opGoAction(m)[0]}" role="button" aria-label="${escapeHtml(opGoAction(m)[2])}">
+        <div id="wrOpMiniMap" style="position:absolute;inset:0;"></div>
+        ${dist ? `<span class="wr-op-mini-chip wr-op-mini-dist">${escapeHtml(dist)}</span>` : ''}
+        ${nav ? `<a class="wr-op-mini-chip wr-op-mini-nav" href="${navigationUrl(nav.lat, nav.lng)}" target="_blank" rel="noopener"><i class="bi bi-signpost-2-fill me-1"></i>${escapeHtml(t('popup.btn.directions'))}</a>` : ''}
+    </div>`;
+}
+function opBuildMiniMap(m) {
+    const el = document.getElementById('wrOpMiniMap');
+    if (!el || typeof L === 'undefined') return;
+    opMiniMap = L.map(el, {
+        zoomControl: false, attributionControl: false, dragging: false, touchZoom: false,
+        scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false,
+    });
+    addMapBaseLayers(opMiniMap, null);
+    const tg = m.target;
+    const bounds = L.latLngBounds([]);
+    if (tg.kind === 'point') {
+        L.marker([tg.lat, tg.lng], {
+            interactive: false,
+            icon: L.divIcon({className: '', html: '<i class="bi bi-geo-alt-fill" style="font-size:28px;color:#7c3aed;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize: [28, 28], iconAnchor: [14, 26]}),
+        }).addTo(opMiniMap);
+        bounds.extend([tg.lat, tg.lng]);
+    } else if (tg.kind === 'polygon') {
+        bounds.extend(L.polygon(tg.pts, {color: '#7c3aed', weight: 2, fillOpacity: 0.2, interactive: false}).addTo(opMiniMap).getBounds());
+    } else {
+        L.polyline(tg.pts, {color: '#d9480f', weight: 3, dashArray: '6 4', interactive: false}).addTo(opMiniMap);
+        tg.pts.forEach(p => L.circleMarker(p, {radius: 4, color: '#d9480f', fillColor: '#d9480f', fillOpacity: 1, interactive: false}).addTo(opMiniMap));
+        bounds.extend(L.latLngBounds(tg.pts));
+    }
+    // Your own dot only when it is near enough to share the frame. Thirty
+    // kilometres away, it would shrink the target to a speck.
+    const me = opMyPosition();
+    const metres = opDistanceMetres(m);
+    if (me && metres !== null && metres < 3000) {
+        L.circleMarker([me.lat, me.lng], {radius: 6, color: '#fff', weight: 2, fillColor: '#0d6efd', fillOpacity: 1, interactive: false}).addTo(opMiniMap);
+        bounds.extend([me.lat, me.lng]);
+    }
+    if (!bounds.isValid()) return;
+    if (bounds.getNorthEast().equals(bounds.getSouthWest())) opMiniMap.setView(bounds.getCenter(), 16);
+    else opMiniMap.fitBounds(bounds, {padding: [20, 20], maxZoom: 17});
+}
+
+function opToast(text) {
+    const el = document.getElementById('orderPopupToast');
+    if (!el) return;
+    el.textContent = text;
+    el.hidden = false;
+    clearTimeout(opToastTimer);
+    opToastTimer = setTimeout(() => { el.hidden = true; }, 3200);
+}
+
+// ── Where the buttons take you ──
+function opGotoTab(tab) {
+    document.dispatchEvent(new CustomEvent('wr-goto-tab', {detail: {tab: tab}}));
+}
+function opLeaveMapFullscreen() {
+    const mapCardEl = document.getElementById('mapCard');
+    if (mapCardEl && mapCardEl.classList.contains('map-fullscreen-active')) document.getElementById('mapFullscreenToggle')?.click();
+}
+function opGotoCard(cardId) {
+    const el = cardId ? document.querySelector('[data-card-id="' + cardId + '"]') : null;
+    if (!el) return;
+    opLeaveMapFullscreen();
+    const pane = el.closest('.wr-tab-pane');
+    if (pane) opGotoTab(pane.dataset.tab);
+    // setTab() scrolls to the top on the way in; find the card after that.
+    setTimeout(() => scrollToCard(cardId), 80);
+}
+function opHighlight(latlng) {
+    if (opHighlightLayer) opHighlightLayer.remove();
+    opHighlightLayer = L.marker([latlng.lat, latlng.lng], {
+        interactive: false, keyboard: false,
+        icon: L.divIcon({className: '', html: '<div class="wr-op-pulse"></div>', iconSize: [48, 48], iconAnchor: [24, 24]}),
+    }).addTo(map);
+    const mine = opHighlightLayer;
+    setTimeout(() => { if (opHighlightLayer === mine) { mine.remove(); opHighlightLayer = null; } }, 9000);
+}
+function opGotoMap(m, afterAck) {
+    if (!map || !m.target) { opGotoCard(m.card); return; }
+    const mapCardEl = document.getElementById('mapCard');
+    if (!(mapCardEl && mapCardEl.classList.contains('map-fullscreen-active'))) {
+        if (document.body.classList.contains('wr-tabs-ready')) opGotoTab('map');
+        else scrollToCard('mapCard');
+    }
+    // After the tab switch has shown the map: measured while hidden, Leaflet
+    // frames a 0x0 box. Moving it this way also switches auto-follow off (see
+    // the movestart listener), so the view is not pulled back to the pins.
+    setTimeout(() => {
+        map.invalidateSize();
+        const tg = m.target;
+        if (tg.kind === 'point') map.setView([tg.lat, tg.lng], Math.max(map.getZoom(), 16));
+        else map.fitBounds(L.latLngBounds(tg.pts), {padding: [40, 40], maxZoom: 17});
+        if (tg.nav) opHighlight(tg.nav);
+        // The dispatch's own map popup holds «Άφιξη» and the directions. After
+        // the receipt has landed: its reply re-renders the layer and closes
+        // any popup open at that moment.
+        if (m.kind === 'dispatch' && dispatchLayer) {
+            Promise.resolve(afterAck).then(() => dispatchLayer.eachLayer(layer => {
+                if (String(layer.dispatchId) === String(m.id)) layer.openPopup();
+            }));
+        }
+    }, 200);
+}
+function opOpenCamera(isVideo) {
+    // The same inputs the media card uses, so the upload, its GPS stamp and the
+    // automatic fulfilment are all theirs. The camera twin is phone-only (it is
+    // d-lg-none, and desktops ignore capture=), hence the breakpoint.
+    const desktop = window.matchMedia('(min-width: 992px)').matches;
+    const input = document.getElementById((isVideo ? 'video' : 'photo') + (desktop ? 'GalleryInput' : 'CaptureInput'));
+    // Synchronously, inside the tap: a file picker opened from anywhere else
+    // is refused by the browser.
+    if (input) input.click();
+    opGotoCard('mediaCard');
+}
+function opSendLocation() {
+    const btn = document.querySelector('.send-ping');
+    opGotoCard('myLocationCard');
+    if (btn && !btn.disabled) btn.click();
+}
+function opAcknowledge(m, btn) {
+    if (m.kind === 'order') return postMyTaskAction('acknowledge', m.id, null);
+    if (m.kind === 'dispatch') return postDispatchAction('receive', m.id, null);
+    if (m.kind === 'route') return routeAcknowledge(m.id, m.orderId, btn || document.createElement('button'));
+    if (m.kind === 'sector') return sectorAcknowledge(m.id, null);
+}
+
+function opAct(op, m, btn) {
+    if (op === 'replay') { speakAnnouncement(m.speakText); return; }
+    const ack = (!m.acked && op !== 'complete' && op !== 'arrive') ? opAcknowledge(m, btn) : null;
+    switch (op) {
+        case 'ack':
+            // Received is all it asked for, or all there is to do from here.
+            // It leaves the arrival queue; the strip and the steps keep it if
+            // something is still to come (a task still has to be completed).
+            if (opMode === 'arrival') { opArrival = opArrival.filter(key => key !== m.key); orderPopupRender(); }
+            return;
+        case 'complete': postMyTaskAction('complete', m.id, btn); return;
+        case 'arrive': postDispatchAction('ack', m.id, btn); return;
+        case 'advance': sectorSelfAdvance(m.id, m.advanceStatus, btn); return;
+        case 'camera': opOpenCamera(false); break;
+        case 'video': opOpenCamera(true); break;
+        case 'ping': opSendLocation(); break;
+        case 'live': opGotoCard('myLiveCard'); break;
+        case 'card': opGotoCard(m.card); break;
+        case 'map': opGotoMap(m, ack); break;
+        default: return;
+    }
+    // Everything that took the volunteer somewhere: out of the way of it.
+    opArrival = opArrival.filter(key => key !== m.key);
+    opMode = 'closed';
+    orderPopupRender();
+}
+
+document.getElementById('orderPopupRoot')?.addEventListener('click', e => {
+    // Directions links open by themselves, and are not "see it on the map".
+    if (e.target.closest('a')) return;
+    const el = e.target.closest('[data-op]');
+    if (!el || el.disabled) return;
+    const op = el.dataset.op;
+    if (op === 'expand') { opMode = 'review'; opIndex = 0; opShownKey = null; orderPopupRender(); return; }
+    if (op === 'min') { opMinimize(); return; }
+    if (op === 'prev' || op === 'next') {
+        const list = opList();
+        opIndex = Math.min(Math.max(opIndex + (op === 'next' ? 1 : -1), 0), list.length - 1);
+        opShownKey = list[opIndex];
+        orderPopupRender();
+        return;
+    }
+    const m = opEntries.get(opList()[opIndex]);
+    if (m) opAct(op, m, el.tagName === 'BUTTON' ? el : null);
+});
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && opMode !== 'closed') opMinimize();
+});
+
 // ── Route Orders ("Εντολή Πορείας") ─────────────────────────────────────────
 // One team-scoped multi-waypoint patrol. A map-less viewer has no map/media panel at
 // all (see the map block above), so this card is fully
@@ -13434,6 +14236,8 @@ function syncTickerSpacing() {
     // Read by the phone-width rules, which dock the panel to the same bottom
     // corner a bottom-anchored ticker occupies.
     document.body.classList.toggle('wr-ticker-bottom', wrTickerPos === 'bottom');
+    // A bottom ticker coming or going moves the order popup's strip too.
+    orderPopupLayout();
 
     // Guarded here rather than at the top of the function: the offsets above
     // must still be published on a page with no .content-wrapper.
@@ -13480,7 +14284,7 @@ function syncMapFullscreenOffset() {
     const x = active ? mapCardEl.scrollLeft : 0;
     const y = active ? mapCardEl.scrollTop : 0;
     const value = (x || y) ? `translate(${x}px, ${y}px)` : '';
-    ['ackTracker', 'ackTrackerFloat'].forEach(id => {
+    ['ackTracker', 'ackTrackerFloat', 'orderPopupRoot'].forEach(id => {
         const el = document.getElementById(id);
         if (el && el.style.transform !== value) el.style.transform = value;
     });
@@ -13725,7 +14529,9 @@ function hideWarRoomBannerRow(id) {
     // which is precisely when they are watching the field most closely.
     //
     // Both nodes: the docked stack and the layer holding dragged-out cards.
-    const ackNodes = ['ackTracker', 'ackTrackerFloat']
+    // The order popup rides along for the same reason: an order that arrives
+    // while a volunteer has the map fullscreen must still be seen.
+    const ackNodes = ['ackTracker', 'ackTrackerFloat', 'orderPopupRoot']
         .map(id => document.getElementById(id))
         .filter(Boolean)
         .map(el => ({el: el, parent: el.parentNode, next: el.nextSibling}));
@@ -16732,6 +17538,9 @@ function pollWarRoomData() {
         if (data.banners && data.banners.length) {
             data.banners.forEach(b => {
                 if (b.id > bannerAfterId) bannerAfterId = b.id;
+                // An order addressed to this person opens as the order popup
+                // instead of a ticker line (see orderPopupTakeBanner).
+                if (orderPopupTakeBanner(b)) return;
                 showWarRoomBanner(b.id, b.message, b.orderId, b.alarmStyle);
             });
         }
