@@ -602,10 +602,96 @@ function flagHtml(?string $countryCode): string {
 }
 
 /**
+ * Which row of mission_dispatch_progress a person's «Ξεκινάω / Έφτασα /
+ * Ολοκληρώθηκε» belongs to. A dispatch moves as a team — the first member to
+ * press moves the whole team on, same as sectors and routes — so it is the
+ * team, and only a volunteer with no team counts on their own.
+ */
+function dispatchProgressScopeKey(?int $teamId, int $userId): string {
+    return $teamId ? 't' . $teamId : 'u' . $userId;
+}
+
+/**
+ * Records one team step on a dispatch and returns the steps THIS call was the
+ * first to record, in order — e.g. ['depart', 'arrive'] when a team pressed
+ * «Έφτασα» without ever pressing «Ξεκινάω». Earlier steps are backfilled rather
+ * than refused (the same choice Route Orders make): a team that forgot the
+ * first button has still arrived.
+ *
+ * Each step is one conditional UPDATE, so of two members pressing together
+ * exactly one gets the row back — which is what keeps the coordinator from
+ * hearing the same arrival once per member.
+ *
+ * @param string $step 'depart' | 'arrive' | 'complete'
+ */
+function recordDispatchProgress(int $dispatchId, ?int $teamId, int $userId, string $step): array {
+    $scopeKey = dispatchProgressScopeKey($teamId, $userId);
+    dbExecute(
+        "INSERT IGNORE INTO mission_dispatch_progress (dispatch_id, team_id, scope_key) VALUES (?, ?, ?)",
+        [$dispatchId, $teamId, $scopeKey]
+    );
+    $columns = ['depart' => 'departed', 'arrive' => 'arrived', 'complete' => 'completed'];
+    $recorded = [];
+    foreach ($columns as $name => $column) {
+        $changed = dbExecute(
+            "UPDATE mission_dispatch_progress SET {$column}_at = NOW(), {$column}_by = ?
+             WHERE dispatch_id = ? AND scope_key = ? AND {$column}_at IS NULL",
+            [$userId, $dispatchId, $scopeKey]
+        );
+        if ($changed) {
+            $recorded[] = $name;
+        }
+        if ($name === $step) {
+            break;
+        }
+    }
+    return $recorded;
+}
+
+/**
+ * Every team's depart/arrive/complete for the given dispatches, keyed
+ * [dispatch_id][scope_key]. Times are 'H:i' for display and raw for sorting.
+ */
+function loadDispatchProgress(array $dispatchIds): array {
+    if (empty($dispatchIds)) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($dispatchIds), '?'));
+    $rows = dbFetchAll(
+        "SELECT p.dispatch_id, p.team_id, p.scope_key, p.departed_at, p.arrived_at, p.completed_at,
+                mt.codename, mt.team_number, su.name AS solo_name
+         FROM mission_dispatch_progress p
+         LEFT JOIN mission_teams mt ON mt.id = p.team_id
+         LEFT JOIN users su ON p.scope_key LIKE 'u%' AND su.id = CAST(SUBSTRING(p.scope_key, 2) AS UNSIGNED)
+         WHERE p.dispatch_id IN ($placeholders)
+         ORDER BY p.id",
+        $dispatchIds
+    );
+    $hm = fn($ts) => $ts ? date('H:i', strtotime($ts)) : null;
+    $byDispatch = [];
+    foreach ($rows as $row) {
+        $byDispatch[(int) $row['dispatch_id']][$row['scope_key']] = [
+            'label'     => $row['codename'] !== null ? teamLabel($row['codename'], $row['team_number']) : ($row['solo_name'] ?? '—'),
+            'departed'  => $hm($row['departed_at']),
+            'arrived'   => $hm($row['arrived_at']),
+            'completed' => $hm($row['completed_at']),
+            'arrived_raw' => $row['arrived_at'],
+        ];
+    }
+    return $byDispatch;
+}
+
+/**
  * War Room: load dispatch points/areas visible to $userId, each augmented with
  * its receipt (mission_dispatch_receipts, "Ελήφθη") and arrival (mission_dispatch_acks,
  * "Άφιξη") acknowledgements — shared by war-room.php (live map, twice) and
  * mission-dispatch.php (AJAX poll) so all three stay in sync.
+ *
+ * Since v3.325.0 it also carries the team's own progress (Ξεκινάω → Έφτασα →
+ * Ολοκληρώθηκε, see recordDispatchProgress). Arrival is a TEAM fact now: once
+ * one member has reported it, nobody else on that team is offered the button.
+ * A dispatch from before that release has arrivals in mission_dispatch_acks
+ * but no progress row; those still count as the team having arrived.
  */
 function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
     $rows = dbFetchAll(
@@ -652,6 +738,7 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'home_team_color_fg' => $homeFg,
             'guest_country_code' => $ack['guest_country_code'],
             'user_id'            => (int) $ack['user_id'],
+            'team_id'            => $ack['team_id'] ? (int) $ack['team_id'] : null,
             'time'               => date('H:i', strtotime($ack['created_at'])),
         ];
     }
@@ -668,18 +755,28 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
     }
 
     $myTeamId = getUserTeamIdForMission($missionId, $userId);
+    $progressByDispatch = loadDispatchProgress($dispatchIds);
+    $myScopeKey = dispatchProgressScopeKey($myTeamId, $userId);
 
-    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch, $receiptsByDispatch) {
+    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch, $receiptsByDispatch, $progressByDispatch, $myScopeKey) {
         $dispatchId = (int) $row['id'];
         $teamId = $row['team_id'] ? (int) $row['team_id'] : null;
         $acks = $acksByDispatch[$dispatchId] ?? [];
         $eligible = $teamId === null || $teamId === $myTeamId;
 
-        $myAck = null;
-        foreach ($acks as $ack) {
-            if ($ack['user_id'] === $userId) {
-                $myAck = $ack['time'];
-                break;
+        $progress = $progressByDispatch[$dispatchId] ?? [];
+        $mine = $progress[$myScopeKey] ?? ['departed' => null, 'arrived' => null, 'completed' => null];
+        // My team's arrival. A dispatch from before v3.325.0 has none in the
+        // progress table, only per-person rows — any one of those from my team
+        // (or from me, with no team) still means we arrived.
+        $teamArrived = $mine['arrived'];
+        if (!$teamArrived) {
+            foreach ($acks as $ack) {
+                $sameScope = $myTeamId ? $ack['team_id'] === $myTeamId : $ack['user_id'] === $userId;
+                if ($sameScope) {
+                    $teamArrived = $ack['time'];
+                    break;
+                }
             }
         }
         $myReceipt = $receiptsByDispatch[$dispatchId][$userId] ?? null;
@@ -689,7 +786,13 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
         // ETA only makes sense for a single point sent to one specific team —
         // a polygon zone has no one destination, and a broadcast to "all
         // teams" (team_id null) has no one team's position to measure from.
-        $eta = ($row['type'] === 'point' && $teamId !== null)
+        // Nor once that team is there: "ETA ~22 λεπτά" under "έφτασε 21:37"
+        // is the pin contradicting itself.
+        $targetTeamArrived = $teamId !== null && (
+            !empty($progress['t' . $teamId]['arrived'])
+            || in_array($teamId, array_column($acks, 'team_id'), true)
+        );
+        $eta = ($row['type'] === 'point' && $teamId !== null && !$targetTeamArrived)
             ? computeDispatchEta($dispatchId, $teamId, (float) $geo['lat'], (float) $geo['lng'])
             : null;
 
@@ -700,6 +803,7 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'eta'         => $eta,
             'label'       => $row['label'],
             'ring_index'  => $row['ring_index'] !== null ? (int) $row['ring_index'] : null,
+            'team_id'     => $teamId,
             'team_label'  => $teamId ? teamLabel($row['codename'], $row['team_number']) : t('common.all_teams'),
             'team_color_bg' => $teamColorBg,
             'team_color_fg' => $teamColorFg,
@@ -710,10 +814,20 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
                 'home_team_name' => $a['home_team_name'], 'home_team_color_bg' => $a['home_team_color_bg'], 'home_team_color_fg' => $a['home_team_color_fg'],
                 'guest_country_code' => $a['guest_country_code'], 'time' => $a['time'],
             ], $acks),
-            'my_ack'      => $myAck,
-            'can_ack'     => $isApprovedParticipant && !$myAck && $eligible,
-            'my_receipt'  => $myReceipt,
-            'can_receive' => $isApprovedParticipant && !$myReceipt && $eligible,
+            // «Ελήφθη» is per person; the three steps after it belong to the
+            // team, so my_ack/my_departed/my_completed are my TEAM's times.
+            'my_receipt'   => $myReceipt,
+            'can_receive'  => $isApprovedParticipant && !$myReceipt && $eligible,
+            'my_departed'  => $mine['departed'],
+            'can_depart'   => $isApprovedParticipant && $eligible && !$mine['departed'] && !$teamArrived && !$mine['completed'],
+            'my_ack'       => $teamArrived,
+            'can_ack'      => $isApprovedParticipant && $eligible && !$teamArrived && !$mine['completed'],
+            'my_completed' => $mine['completed'],
+            'can_complete' => $isApprovedParticipant && $eligible && !$mine['completed'],
+            // Every team's progress, for the coordinator's view of the pin.
+            'progress'     => array_values(array_map(fn($p) => [
+                'label' => $p['label'], 'departed' => $p['departed'], 'arrived' => $p['arrived'], 'completed' => $p['completed'],
+            ], $progress)),
         ];
     }, $rows);
 }
@@ -1957,6 +2071,9 @@ function loadAckTrackerCardsForMission(int $missionId): array {
         foreach ($receiptRows as $row) {
             $receiptTs[(int) $row['dispatch_id']][(int) $row['user_id']] = (int) $row['ts'];
         }
+        // Ξεκινάω / Έφτασα / Ολοκληρώθηκε are one row per team, not a box per
+        // person, so they go under the list rather than into it.
+        $progressByDispatch = loadDispatchProgress($dispatchIds);
 
         foreach ($dispatches as $dispatch) {
             $teamId = $dispatch['team_id'] !== null ? (int) $dispatch['team_id'] : null;
@@ -1994,6 +2111,9 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                 'ts'     => (int) $dispatch['ts'],
                 'by'     => $dispatch['by_name'],
                 'people' => $people,
+                'progress' => array_values(array_map(fn($p) => [
+                    'label' => $p['label'], 'departed' => $p['departed'], 'arrived' => $p['arrived'], 'completed' => $p['completed'],
+                ], $progressByDispatch[(int) $dispatch['id']] ?? [])),
             ];
         }
     }
@@ -5358,6 +5478,18 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
                 $byDispatchUser[$key]['team_id'] = (int) $a['team_id'];
             }
         }
+        // Arrival is a team fact since v3.325.0 — one member presses «Έφτασα»
+        // and nobody else on the team is offered the button — so a member who
+        // confirmed receipt arrived when their team did, not "never".
+        $progressByDispatch = loadDispatchProgress($dispatchIds);
+        foreach ($byDispatchUser as &$entry) {
+            if ($entry['fulfill_at'] !== null) {
+                continue;
+            }
+            $scopeKey = dispatchProgressScopeKey($entry['team_id'], $entry['user_id']);
+            $entry['fulfill_at'] = $progressByDispatch[$entry['dispatch_id']][$scopeKey]['arrived_raw'] ?? null;
+        }
+        unset($entry);
 
         foreach ($byDispatchUser as $entry) {
             $d = $dispatchById[$entry['dispatch_id']];
@@ -7708,6 +7840,37 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
                 . ($teamLabel ? ' (' . h($row['actor_name']) . ')' : ''),
             'ts'   => strtotime($row['created_at']),
         ];
+    }
+
+    // Departure and completion (v3.325.0): one row per team, see
+    // recordDispatchProgress(). Arrival is not repeated here — it is still
+    // written to mission_dispatch_acks just above.
+    $progressRows = dbFetchAll(
+        "SELECT p.departed_at, p.completed_at, p.team_id, mt.codename, mt.team_number,
+                du.name AS departed_name, cu.name AS completed_name, d.label AS dispatch_label
+         FROM mission_dispatch_progress p
+         JOIN mission_dispatch_points d ON d.id = p.dispatch_id
+         LEFT JOIN mission_teams mt ON mt.id = p.team_id
+         LEFT JOIN users du ON du.id = p.departed_by
+         LEFT JOIN users cu ON cu.id = p.completed_by
+         WHERE d.mission_id = ?" . $dispatchScope,
+        array_merge([$missionId], $dispatchBinds)
+    );
+    foreach ($progressRows as $row) {
+        $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : null;
+        $where = $row['dispatch_label'] ? ' για το «' . h($row['dispatch_label']) . '»' : '';
+        foreach ([['departed', '🚶', ' ξεκίνησε'], ['completed', '🏁', ' ολοκλήρωσε την εντολή']] as [$step, $icon, $verb]) {
+            if (!$row[$step . '_at']) {
+                continue;
+            }
+            $actor = (string) $row[$step . '_name'];
+            $events[] = [
+                'icon' => $icon,
+                'text' => ($teamLabel ? 'Η ομάδα ' . h($teamLabel) : h($actor)) . $verb . $where
+                    . ($teamLabel && $actor !== '' ? ' (' . h($actor) . ')' : ''),
+                'ts'   => strtotime($row[$step . '_at']),
+            ];
+        }
     }
 
     // Search areas — no status/team, so nothing to log beyond creation.

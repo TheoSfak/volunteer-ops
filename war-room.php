@@ -2982,6 +2982,10 @@ include __DIR__ . '/includes/header.php';
     .ack-card-count { font-size: .68rem; font-weight: 700; color: #fbbf24; margin-top: .2rem; }
     .ack-card.ack-card-done .ack-card-count { color: #4ade80; }
     .ack-card-people { list-style: none; margin: .3rem 0 0; padding: 0; }
+    .ack-card-progress { list-style: none; margin: .3rem 0 0; padding: .25rem 0 0; border-top: 1px solid #1e3a5f; }
+    .ack-card-progress-row { display: flex; align-items: center; gap: .4rem; font-size: .72rem; padding: .1rem 0; color: #fbbf24; }
+    .ack-card-progress-row.ack-done { color: #86efac; }
+    .ack-card-progress-row .ack-card-time { color: inherit; white-space: nowrap; }
     .ack-card-person {
         display: flex; align-items: center; gap: .4rem;
         font-size: .74rem; padding: .12rem 0; color: #cbd5e1;
@@ -6934,8 +6938,13 @@ function renderTeamRosters(items) {
 // teamBadgeColors() already returns for a null team) shown as a permanent —
 // not hover/click-only — Leaflet tooltip, so which team a dispatch point/area
 // belongs to is visible on the map at a glance.
+// A dispatch to one team also says where that team has got to, so the
+// coordinator reads it off the map without opening anything. Not for "all
+// teams": one icon cannot speak for several teams at different steps.
 function dispatchTeamLabelHtml(item) {
-    return `<span style="background:${item.team_color_bg};color:${item.team_color_fg};padding:2px 8px;border-radius:10px;font-weight:700;font-size:.72rem;white-space:nowrap;box-shadow:0 1px 3px #0006;">${escapeHtml(item.team_label)}</span>`;
+    const p = item.team_id && item.progress && item.progress.length === 1 ? item.progress[0] : null;
+    const status = p ? (p.completed ? '✅ ' : (p.arrived ? '📍 ' : (p.departed ? '🚶 ' : ''))) : '';
+    return `<span style="background:${item.team_color_bg};color:${item.team_color_fg};padding:2px 8px;border-radius:10px;font-weight:700;font-size:.72rem;white-space:nowrap;box-shadow:0 1px 3px #0006;">${status}${escapeHtml(item.team_label)}</span>`;
 }
 // Same whole-array-JSON signature technique as renderPins/mediaSignature —
 // skips the rebuild (and the open-popup-preservation dance below, which
@@ -6971,9 +6980,35 @@ function renderDispatches(items) {
         const receiveHtml = item.can_receive
             ? `<br><button type="button" class="btn btn-sm btn-warning mt-1 dispatch-receive-btn" data-id="${item.id}"><i class="bi bi-flag me-1"></i>${t('banner.ack_btn')}</button>`
             : (item.my_receipt ? `<div class="small text-muted mt-1">${t('dispatch.received_at_prefix', {time: item.my_receipt})}</div>` : '');
-        const ackHtml = item.can_ack
-            ? `<br><button type="button" class="btn btn-sm btn-success mt-1 dispatch-ack-btn" data-id="${item.id}"><i class="bi bi-check-lg me-1"></i>${t('dispatch.arrival_btn')}</button>`
-            : (item.my_ack ? `<div class="small text-success mt-1">${t('dispatch.arrived_at_prefix', {time: item.my_ack})}</div>` : '');
+        // Ξεκινάω → Έφτασα → Ολοκληρώθηκε are the team's, one at a time: the
+        // popup offers only the next one, under what the team has done so far.
+        let ackHtml = '';
+        if (item.my_completed) {
+            ackHtml = `<div class="small text-success mt-1">${t('dispatch.completed_at_prefix', {time: item.my_completed})}</div>`;
+        } else {
+            if (item.my_departed && !item.my_ack) ackHtml += `<div class="small text-muted mt-1">${t('dispatch.departed_at_prefix', {time: item.my_departed})}</div>`;
+            if (item.my_ack) ackHtml += `<div class="small text-success mt-1">${t('dispatch.arrived_at_prefix', {time: item.my_ack})}</div>`;
+            if (item.can_depart) {
+                ackHtml += `<br><button type="button" class="btn btn-sm btn-primary mt-1 dispatch-depart-btn" data-id="${item.id}"><i class="bi bi-person-walking me-1"></i>${t('dispatch.depart_btn')}</button>`;
+            } else if (item.can_ack) {
+                ackHtml += `<br><button type="button" class="btn btn-sm btn-success mt-1 dispatch-ack-btn" data-id="${item.id}"><i class="bi bi-check-lg me-1"></i>${t('dispatch.arrival_btn')}</button>`;
+            } else if (item.can_complete) {
+                ackHtml += `<br><button type="button" class="btn btn-sm btn-success mt-1 dispatch-complete-btn" data-id="${item.id}"><i class="bi bi-flag-fill me-1"></i>${t('dispatch.complete_btn')}</button>`;
+            }
+        }
+        // Every team's progress, which is what the coordinator opens this
+        // for. It replaces the per-person arrival list once there is any: an
+        // arrival is a team fact now, and the line already says when.
+        const progressHtml = (item.progress || []).length
+            ? '<div class="small mt-1">' + item.progress.map(p => {
+                const steps = [
+                    p.departed ? t('dispatch.progress_departed', {time: p.departed}) : '',
+                    p.arrived ? t('dispatch.progress_arrived', {time: p.arrived}) : '',
+                    p.completed ? t('dispatch.progress_completed', {time: p.completed}) : '',
+                ].filter(Boolean);
+                return `${p.completed ? '✅' : (p.arrived ? '📍' : '🚶')} <strong>${escapeHtml(p.label)}</strong>: ${escapeHtml(steps.join(' · '))}`;
+            }).join('<br>') + '</div>'
+            : '';
         const directionsUrl = dispatchDirectionsUrl(item);
         const directionsHtml = `<br><a href="${directionsUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-success mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
         // Live ETA — only ever present for a point sent to one specific team
@@ -6985,7 +7020,7 @@ function renderDispatches(items) {
               `${item.eta.source === 'straight_line' ? ' ' + escapeHtml(t('dispatch.eta_straight_line_suffix')) : ''}` +
               `${item.eta.is_stale ? ' ' + escapeHtml(t('dispatch.eta_stale_suffix')) : ''}</div>`
             : '';
-        const popupHtml = `<strong>${escapeHtml(item.team_label)}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + etaHtml + acksHtml + receiveHtml + ackHtml + directionsHtml +
+        const popupHtml = `<strong>${escapeHtml(item.team_label)}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + etaHtml + (progressHtml || acksHtml) + receiveHtml + ackHtml + directionsHtml +
             (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">${t('common.delete')}</button>` : '');
         let layer = null;
         if (item.type === 'point') {
@@ -7141,6 +7176,14 @@ dispatchLayer.on('popupopen', event => {
     const ackBtn = popupEl.querySelector('.dispatch-ack-btn');
     if (ackBtn) {
         ackBtn.addEventListener('click', () => postDispatchAction('ack', ackBtn.dataset.id, ackBtn));
+    }
+    const departBtn = popupEl.querySelector('.dispatch-depart-btn');
+    if (departBtn) {
+        departBtn.addEventListener('click', () => postDispatchAction('depart', departBtn.dataset.id, departBtn));
+    }
+    const completeBtn = popupEl.querySelector('.dispatch-complete-btn');
+    if (completeBtn) {
+        completeBtn.addEventListener('click', () => postDispatchAction('complete', completeBtn.dataset.id, completeBtn));
     }
     const receiveBtn = popupEl.querySelector('.dispatch-receive-btn');
     if (receiveBtn) {
@@ -10292,19 +10335,25 @@ function opModelFromOrder(task, outstanding) {
 function opModelFromDispatch(d) {
     const isPoint = d.type === 'point';
     const nav = isPoint ? {lat: Number(d.geo.lat), lng: Number(d.geo.lng)} : opPolygonNav(d.geo);
-    const acked = !!d.my_receipt || !!d.my_ack || !d.can_receive;
-    const arrived = !!d.my_ack;
+    // Received by me, or moved on by my team — either way there is no
+    // «Ελήφθη» left to ask me for.
+    const acked = !!d.my_receipt || !!d.my_departed || !!d.my_ack || !!d.my_completed || !d.can_receive;
+    const step = d.my_completed ? 4 : (d.my_ack ? 3 : (d.my_departed ? 2 : (acked ? 1 : 0)));
+    const stepTimes = {};
+    [d.my_receipt, d.my_departed, d.my_ack, d.my_completed].forEach((time, k) => { if (time) stepTimes[k] = time; });
     return {
         key: 'dispatch:' + d.id, kind: 'dispatch', id: d.id, type: isPoint ? 'dispatch_point' : 'dispatch_area',
         cat: 'move', icon: isPoint ? 'bi-geo-alt-fill' : 'bi-bounding-box-circles',
         title: t(isPoint ? 'popup.type.dispatch_point' : 'popup.type.dispatch_area'),
         text: d.label || t(isPoint ? 'popup.text.dispatch_point' : 'popup.text.dispatch_area'),
         meta: t('popup.to_team', {team: d.team_label}),
-        acked: acked, outstanding: !arrived,
-        steps: [t('popup.step.ack'), t('popup.step.travel'), t('popup.step.arrive')],
-        step: arrived ? 3 : (acked ? 1 : 0),
-        stepTimes: Object.assign({}, d.my_receipt ? {0: d.my_receipt} : {}, d.my_ack ? {2: d.my_ack} : {}),
+        acked: acked, outstanding: !d.my_completed,
+        steps: [t('popup.step.ack'), t('popup.step.depart'), t('popup.step.arrive'), t('popup.step.finish')],
+        step: step,
+        stepTimes: stepTimes,
+        canDepart: !!d.can_depart,
         canArrive: !!d.can_ack,
+        canComplete: !!d.can_complete,
         hint: '', speakText: '',
         target: isPoint
             ? {kind: 'point', lat: nav.lat, lng: nav.lng, nav: nav}
@@ -10368,29 +10417,42 @@ function opModelFromSector(sector) {
 // this needs no separate eligibility flag from the server.
 function myOrderEntriesFromDispatches(items) {
     return (items || [])
-        .filter(d => d.can_receive || d.can_ack || d.my_receipt || d.my_ack)
+        .filter(d => d.can_receive || d.can_depart || d.can_ack || d.can_complete
+            || d.my_receipt || d.my_departed || d.my_ack || d.my_completed)
         .map(d => {
             const kind = d.type === 'point' ? t('mytasks.dispatch_point_label') : t('mytasks.dispatch_area_label');
             const labelHtml = escapeHtml(kind + (d.label ? ' — ' + d.label : ''));
+            // «Ελήφθη» is mine; Ξεκινάω → Έφτασα → Ολοκληρώθηκε are my team's,
+            // offered one at a time. The order is finished at the last one now,
+            // not at arrival — for an area, getting there is not searching it.
             let actionHtml;
-            if (d.can_receive) {
+            if (d.my_completed) {
+                actionHtml = `<span class="badge bg-success">${t('dispatch.completed_at_prefix', {time: d.my_completed})}</span>`;
+            } else if (d.can_receive) {
                 actionHtml = `<button type="button" class="btn btn-sm btn-warning w-100 my-dispatch-receive-btn" data-id="${d.id}">${t('banner.ack_btn')}</button>`;
+            } else if (d.can_depart) {
+                actionHtml = `<button type="button" class="btn btn-sm btn-primary w-100 my-dispatch-depart-btn" data-id="${d.id}"><i class="bi bi-person-walking me-1"></i>${t('dispatch.depart_btn')}</button>`;
             } else if (d.can_ack) {
                 actionHtml = `<button type="button" class="btn btn-sm btn-success w-100 my-dispatch-ack-btn" data-id="${d.id}">${t('dispatch.arrival_btn')}</button>`;
-            } else if (d.my_ack) {
-                actionHtml = `<span class="badge bg-success">${t('dispatch.arrived_at_prefix', {time: d.my_ack})}</span>`;
+            } else if (d.can_complete) {
+                actionHtml = `<button type="button" class="btn btn-sm btn-success w-100 my-dispatch-complete-btn" data-id="${d.id}"><i class="bi bi-flag-fill me-1"></i>${t('dispatch.complete_btn')}</button>`;
             } else {
                 actionHtml = `<span class="badge bg-warning text-dark">${t('mytasks.pending_action_badge')}</span>`;
             }
-            const receiptHtml = (d.my_receipt && !d.my_ack)
-                ? `<div class="small text-muted mb-1">${t('dispatch.received_at_prefix', {time: d.my_receipt})}</div>`
-                : '';
+            // The last thing that happened, above the button for the next.
+            let lastStep = '';
+            if (!d.my_completed) {
+                if (d.my_ack) lastStep = t('dispatch.arrived_at_prefix', {time: d.my_ack});
+                else if (d.my_departed) lastStep = t('dispatch.departed_at_prefix', {time: d.my_departed});
+                else if (d.my_receipt) lastStep = t('dispatch.received_at_prefix', {time: d.my_receipt});
+            }
+            const receiptHtml = lastStep ? `<div class="small text-muted mb-1">${escapeHtml(lastStep)}</div>` : '';
             // The complaint this fixes was a volunteer having to find a pin on
             // the map before they could act on it at all, so the row carries
             // its own way to actually get there.
             const directionsHtml = `<a href="${dispatchDirectionsUrl(d)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success w-100 mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
             return {
-                outstanding: !d.my_ack,
+                outstanding: !d.my_completed,
                 html: myOrderRow(labelHtml, escapeHtml(d.team_label), receiptHtml + actionHtml + directionsHtml),
                 popup: opModelFromDispatch(d),
             };
@@ -10501,6 +10563,10 @@ function renderMyTasks(items) {
         btn.addEventListener('click', () => postDispatchAction('receive', btn.dataset.id, btn)));
     list.querySelectorAll('.my-dispatch-ack-btn').forEach(btn =>
         btn.addEventListener('click', () => postDispatchAction('ack', btn.dataset.id, btn)));
+    list.querySelectorAll('.my-dispatch-depart-btn').forEach(btn =>
+        btn.addEventListener('click', () => postDispatchAction('depart', btn.dataset.id, btn)));
+    list.querySelectorAll('.my-dispatch-complete-btn').forEach(btn =>
+        btn.addEventListener('click', () => postDispatchAction('complete', btn.dataset.id, btn)));
     list.querySelectorAll('.my-route-ack-btn').forEach(btn =>
         btn.addEventListener('click', () => routeAcknowledge(btn.dataset.id, btn.dataset.orderId, btn)));
     list.querySelectorAll('.my-sector-ack-btn').forEach(btn =>
@@ -10846,7 +10912,21 @@ function opStepActionsHtml(m, k, state) {
             case 'video': return opBtn('video', 'bi-camera-reels-fill', t('popup.btn.open_video'));
             case 'live': return opBtn('live', 'bi-broadcast-pin', t('popup.btn.open_live'));
             case 'dispatch_point': case 'dispatch_area':
-                return (map ? opBtn('map', 'bi-map', t('popup.btn.take_me'), 'btn-outline-primary') : '') + opDirectionsHtml(m);
+                // One team step per row: Αναχώρηση → «Ξεκινάω», Άφιξη →
+                // «Έφτασα», Ολοκλήρωση → «Ολοκληρώθηκε». The way there stays
+                // on hand until they have actually arrived.
+                if (k === 1 && m.canDepart) {
+                    return opBtn('depart', 'bi-person-walking', t('dispatch.depart_btn'))
+                        + (map ? opBtn('map', 'bi-map', t('popup.btn.take_me'), 'btn-outline-primary') : '') + opDirectionsHtml(m);
+                }
+                if (k === 2 && m.canArrive) {
+                    return opBtn('arrive', 'bi-geo-alt-fill', t('dispatch.arrival_btn'), 'btn-success')
+                        + (map ? opBtn('map', 'bi-map', t('popup.btn.take_me'), 'btn-outline-primary') : '') + opDirectionsHtml(m);
+                }
+                if (k === 3 && m.canComplete) {
+                    return opBtn('dcomplete', 'bi-flag-fill', t('dispatch.complete_btn'), 'btn-success');
+                }
+                return '';
             case 'route':
                 return opBtn('card', 'bi-signpost-split', t('mytasks.open_card_btn'))
                     + (map && m.target ? opBtn('map', 'bi-map', t('popup.btn.show_route'), 'btn-outline-primary') : '');
@@ -10857,11 +10937,6 @@ function opStepActionsHtml(m, k, state) {
                     + opBtn('card', 'bi-list-check', t('mytasks.open_card_btn'), 'btn-outline-primary')
                     + (map && m.target ? opBtn('map', 'bi-map', t('popup.btn.show_sector'), 'btn-outline-primary') : '');
         }
-    }
-    // A dispatch finishes with its arrival, so that last step carries the
-    // button that finishes it as soon as there is anything to arrive at.
-    if (m.kind === 'dispatch' && k === 2 && state === 'todo' && m.step >= 1 && m.canArrive) {
-        return opBtn('arrive', 'bi-flag-fill', t('dispatch.arrival_btn'), 'btn-success');
     }
     return '';
 }
@@ -11022,7 +11097,8 @@ function opAcknowledge(m, btn) {
 
 function opAct(op, m, btn) {
     if (op === 'replay') { speakAnnouncement(m.speakText); return; }
-    const ack = (!m.acked && op !== 'complete' && op !== 'arrive') ? opAcknowledge(m, btn) : null;
+    // The team steps record the receipt themselves, server-side.
+    const ack = (!m.acked && !['complete', 'arrive', 'depart', 'dcomplete'].includes(op)) ? opAcknowledge(m, btn) : null;
     switch (op) {
         case 'ack':
             // Received is all it asked for, or all there is to do from here.
@@ -11031,7 +11107,9 @@ function opAct(op, m, btn) {
             if (opMode === 'arrival') { opArrival = opArrival.filter(key => key !== m.key); orderPopupRender(); }
             return;
         case 'complete': postMyTaskAction('complete', m.id, btn); return;
+        case 'depart': postDispatchAction('depart', m.id, btn); return;
         case 'arrive': postDispatchAction('ack', m.id, btn); return;
+        case 'dcomplete': postDispatchAction('complete', m.id, btn); return;
         case 'advance': sectorSelfAdvance(m.id, m.advanceStatus, btn); return;
         case 'camera': opOpenCamera(false); break;
         case 'video': opOpenCamera(true); break;
@@ -17042,6 +17120,20 @@ function ackCardHtml(card, inlineStyle) {
     const detail = card.detail
         ? `<div class="ack-card-detail">${escapeHtml(card.detail)}</div>`
         : '';
+    // A dispatch's Ξεκινάω / Έφτασα / Ολοκληρώθηκε: one line per team under
+    // the per-person «Ελήφθη» boxes, since one member moves the whole team.
+    const progress = (card.progress || []).map(p => {
+        const steps = [
+            p.departed ? t('dispatch.progress_departed', {time: p.departed}) : '',
+            p.arrived ? t('dispatch.progress_arrived', {time: p.arrived}) : '',
+            p.completed ? t('dispatch.progress_completed', {time: p.completed}) : '',
+        ].filter(Boolean).join(' · ');
+        return `<li class="ack-card-progress-row${p.completed ? ' ack-done' : ''}">
+                    <span>${p.completed ? '✅' : (p.arrived ? '📍' : '🚶')}</span>
+                    <span class="ack-card-name">${escapeHtml(p.label)}</span>
+                    <span class="ack-card-time">${escapeHtml(steps)}</span>
+                </li>`;
+    }).join('');
     const countText = done
         ? t('acktracker.all_done')
         : t('acktracker.count', {acked: acked, total: total});
@@ -17059,6 +17151,7 @@ function ackCardHtml(card, inlineStyle) {
                             title="${escapeHtml(t('acktracker.close_card'))}">&times;</button>
                 </div>
                 <ul class="ack-card-people">${people}</ul>
+                ${progress ? `<ul class="ack-card-progress">${progress}</ul>` : ''}
             </div>`;
 }
 

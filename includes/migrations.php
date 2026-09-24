@@ -7042,6 +7042,31 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 165,
+            'description' => "Dispatch points/areas get the depart → arrive → complete cycle sectors and routes already have («Ξεκινάω», «Έφτασα», «Ολοκληρώθηκε»). One row per dispatch per TEAM — scope_key 't<team_id>', or 'u<user_id>' for a volunteer with no team — because the first member to press moves the whole team on. «Ελήφθη» stays per person in mission_dispatch_receipts, and arrival is still also written to mission_dispatch_acks for whoever pressed it, which the activity log, the report and the assistant read.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_dispatch_progress (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    dispatch_id INT UNSIGNED NOT NULL,
+                    team_id INT UNSIGNED NULL COMMENT 'The team that moved; NULL for a volunteer with no team',
+                    scope_key VARCHAR(20) NOT NULL COMMENT 't<team_id>, or u<user_id> for a volunteer with no team',
+                    departed_at DATETIME NULL,
+                    departed_by INT UNSIGNED NULL,
+                    arrived_at DATETIME NULL,
+                    arrived_by INT UNSIGNED NULL,
+                    completed_at DATETIME NULL,
+                    completed_by INT UNSIGNED NULL,
+                    UNIQUE KEY uk_dispatch_progress_scope (dispatch_id, scope_key),
+                    FOREIGN KEY (dispatch_id) REFERENCES mission_dispatch_points(id) ON DELETE CASCADE,
+                    FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL,
+                    FOREIGN KEY (departed_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (arrived_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (completed_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

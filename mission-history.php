@@ -169,6 +169,40 @@ foreach ($arrivedRows as $row) {
     ];
 }
 
+// ── dispatch departed / completed (one row per team, v3.325.0) ─────────────
+// Arrival is not repeated from here: it is still written to
+// mission_dispatch_acks for whoever pressed it, and listed just above.
+$progressRows = dbFetchAll(
+    "SELECT p.departed_at, p.completed_at, p.team_id, mt.codename, mt.team_number,
+            du.name AS departed_name, cu.name AS completed_name, d.label AS dispatch_label
+     FROM mission_dispatch_progress p
+     JOIN mission_dispatch_points d ON d.id = p.dispatch_id
+     LEFT JOIN mission_teams mt ON mt.id = p.team_id
+     LEFT JOIN users du ON du.id = p.departed_by
+     LEFT JOIN users cu ON cu.id = p.completed_by
+     WHERE d.mission_id = ? AND $dispatchScopeSql
+     ORDER BY p.id DESC LIMIT 200",
+    [$missionId, $isAdminParam, $userId]
+);
+foreach ($progressRows as $row) {
+    $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : null;
+    $labelSuffix = $row['dispatch_label'] ? t('history.label_suffix_for', ['label' => h($row['dispatch_label'])], $viewerLang) : '';
+    foreach ([['departed', '🚶'], ['completed', '🏁']] as [$step, $icon]) {
+        if (!$row[$step . '_at']) {
+            continue;
+        }
+        $actor = h((string) $row[$step . '_name']);
+        $events[] = [
+            'icon' => $icon,
+            'text' => $teamLabel
+                ? t('history.dispatch_' . $step . '_team', ['team' => h($teamLabel), 'label_suffix' => $labelSuffix, 'actor' => $actor], $viewerLang)
+                : t('history.dispatch_' . $step . '_solo', ['actor' => $actor, 'label_suffix' => $labelSuffix], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row[$step . '_at'])),
+            'ts'   => strtotime($row[$step . '_at']),
+        ];
+    }
+}
+
 // ── search areas: created (no status/team, so nothing else to log) ─────────
 // Same unscoped rationale as sectors below.
 $areaCreatedRows = dbFetchAll(
