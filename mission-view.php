@@ -599,6 +599,16 @@ include __DIR__ . '/includes/header.php';
                 <i class="bi bi-broadcast-pin me-1"></i>Action Room
             </a>
         <?php endif; ?>
+        <?php // Ποιότητα GPS: also for a CLOSED mission — that is when a drill is
+              // analysed, and a closed mission's Action Room redirects here, so
+              // without this the page was reachable only by typing its URL. Same
+              // gate as the page itself, so nobody sees a button that refuses them.
+        if (!empty($mission['show_in_ops'])
+            && canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, (int) getCurrentUserId())): ?>
+            <a href="mission-gps-quality.php?id=<?= $mission['id'] ?>" target="_blank" rel="noopener" class="btn btn-outline-dark">
+                <i class="bi bi-crosshair me-1"></i>Ποιότητα GPS
+            </a>
+        <?php endif; ?>
         <?php if ($isMissingPersonMission): ?>
             <a href="missing-person-guide.php?mission_id=<?= $mission['id'] ?>" target="_blank" class="btn btn-outline-info">
                 <i class="bi bi-question-circle me-1"></i>Οδηγός SAR
