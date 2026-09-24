@@ -23,15 +23,18 @@ if (isPost()) {
         $result = login($email, $password);
         if ($result['success']) {
             // Maintenance mode: block non-admin logins
-            if (getSetting('maintenance_mode', '0')) {
-                $loggedUser = getCurrentUser();
-                if ($loggedUser && !in_array($loggedUser['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN])) {
-                    logout();
-                    $error = 'Το σύστημα βρίσκεται σε συντήρηση. Παρακαλώ δοκιμάστε αργότερα.';
-                } else {
-                    redirect('dashboard.php');
-                }
+            $loggedUser = getCurrentUser();
+            if (getSetting('maintenance_mode', '0') && $loggedUser
+                && !in_array($loggedUser['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN])) {
+                logout();
+                $error = 'Το σύστημα βρίσκεται σε συντήρηση. Παρακαλώ δοκιμάστε αργότερα.';
             } else {
+                // Only once the login has really gone through: pre-fill the
+                // email next time, and remember the device if asked to.
+                rememberLoginEmail($result['user']['email']);
+                if (post('remember') === '1') {
+                    issueRememberToken((int) $result['user']['id']);
+                }
                 redirect('dashboard.php');
             }
         } else {
@@ -44,6 +47,11 @@ $flash = getFlash();
 $appName = getSetting('app_name', 'VolunteerOps');
 $appDescription = getSetting('app_description', 'Σύστημα Διαχείρισης Εθελοντών');
 $appLogo = getSetting('app_logo', '');
+// A failed attempt keeps what was typed; otherwise the last email that signed
+// in on this device, so a returning user only needs the password — or not even
+// that, once the browser's password manager has saved it.
+$prefillEmail = isPost() ? post('email') : lastLoginEmail();
+$rememberAllowed = rememberMeDays() > 0;
 ?>
 <!DOCTYPE html>
 <html lang="el">
@@ -126,24 +134,38 @@ $appLogo = getSetting('app_logo', '');
                 <div class="alert alert-danger"><?= h($error) ?></div>
             <?php endif; ?>
             
-            <form method="post" action="">
+            <!-- autocomplete="username"/"current-password" are what make the
+                 browser's (and Android's) password manager offer to save the
+                 login after the first correct sign-in and fill it in after. -->
+            <form method="post" action="" id="loginForm" autocomplete="on">
                 <?= csrfField() ?>
                 <div class="mb-3">
                     <label for="email" class="form-label">Email</label>
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-envelope"></i></span>
                         <input type="email" class="form-control" id="email" name="email" 
-                               value="<?= h(post('email')) ?>" required autofocus>
+                               value="<?= h($prefillEmail) ?>" autocomplete="username" inputmode="email"
+                               autocapitalize="none" spellcheck="false" required<?= $prefillEmail === '' ? ' autofocus' : '' ?>>
                     </div>
                 </div>
                 
-                <div class="mb-4">
+                <div class="<?= $rememberAllowed ? 'mb-3' : 'mb-4' ?>">
                     <label for="password" class="form-label">Κωδικός</label>
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-lock"></i></span>
-                        <input type="password" class="form-control" id="password" name="password" required>
+                        <input type="password" class="form-control" id="password" name="password"
+                               autocomplete="current-password" required<?= $prefillEmail !== '' ? ' autofocus' : '' ?>>
                     </div>
                 </div>
+
+                <?php if ($rememberAllowed): ?>
+                <div class="form-check mb-4">
+                    <input class="form-check-input" type="checkbox" name="remember" id="remember" value="1"
+                           <?= (isPost() ? post('remember') === '1' : true) ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="remember">Να με θυμάσαι</label>
+                    <div class="form-text">Μένετε συνδεδεμένοι σε αυτή τη συσκευή (αποσυνδέεστε μόνο αν δεν τη χρησιμοποιήσετε για <?= (int) rememberMeDays() ?> ημέρες). Μην το επιλέγετε σε κοινόχρηστο υπολογιστή.</div>
+                </div>
+                <?php endif; ?>
                 
                 <button type="submit" class="btn btn-primary btn-login w-100">
                     <i class="bi bi-box-arrow-in-right me-2"></i>Σύνδεση

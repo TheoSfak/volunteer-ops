@@ -155,9 +155,13 @@ if (function_exists('isLoggedIn') && isLoggedIn()):
     // opened before the Action Room was is still covered by the shared
     // localStorage heartbeat the Action Room broadcasts every 20 seconds.
     var warRoomProtected = <?= (isset($_SESSION['war_room_at']) && (time() - $_SESSION['war_room_at']) < 86400) ? 'true' : 'false' ?>;
+    // «Να με θυμάσαι»: the server does not idle-time-out a remembered device
+    // (includes/auth.php), so this timer must not either — it would only send
+    // the tab to login.php to be signed straight back in.
+    var rememberedDevice = <?= !empty($_SESSION['remember_selector']) ? 'true' : 'false' ?>;
 
     setInterval(function() {
-        if (warRoomProtected) { hideBanner(); return; }
+        if (warRoomProtected || rememberedDevice) { hideBanner(); return; }
         var idleMs = sharedIdleMs();
         if (idleMs >= timeoutMs) {
             window.location.href = 'logout.php?reason=inactivity';

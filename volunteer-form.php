@@ -229,6 +229,8 @@ if (isPost()) {
                     "UPDATE users SET password = ? WHERE id = ?",
                     [password_hash($password, PASSWORD_DEFAULT), $id]
                 );
+                // Same as a reset: every remembered device must use the new one.
+                revokeRememberTokens((int) $id);
             }
             
             logAudit('update', 'users', $id);

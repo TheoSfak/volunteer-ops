@@ -52,6 +52,9 @@ if (isPost()) {
             "UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?",
             [$tokenData['id']]
         );
+        // A reset is how a lost phone gets locked out: forget every
+        // «Να με θυμάσαι» device, so each has to type the new password.
+        revokeRememberTokens((int) $tokenData['user_id']);
         logAudit('password_reset', 'users', $tokenData['user_id']);
         $success = true;
     }

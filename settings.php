@@ -82,6 +82,7 @@ $defaults = [
     'require_approval' => '0',
     'maintenance_mode' => '0',
     'session_timeout_minutes' => '120',
+    'remember_me_days' => '30',
     'shift_reminder_hours' => '24',
     'resend_mission_hours_before' => '48',
     'resend_mission_enabled' => '1',
@@ -558,6 +559,12 @@ if (isPost()) {
                         $value = (string) max(5, min(1440, (int) $value ?: 120));
                     }
 
+                    // 0 is meaningful here (switches «Να με θυμάσαι» off), so
+                    // no "?: default" fallback like the one above.
+                    if ($field === 'remember_me_days') {
+                        $value = (string) max(0, min(365, (int) $value));
+                    }
+
                     // Same "form attribute is only a browser hint" reasoning as
                     // session_timeout_minutes above — this value drives the War
                     // Room fatigue flag shown to every viewer, so it's worth
@@ -784,7 +791,7 @@ if (isPost()) {
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
             'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode',
-            'session_timeout_minutes',
+            'session_timeout_minutes', 'remember_me_days',
             'shift_reminder_hours', 'resend_mission_hours_before', 'resend_mission_enabled',
             'qr_checkin_enabled',
             'openweathermap_api_key', 'weather_map_compass_enabled', 'exposure_urgency_enabled',
@@ -1617,6 +1624,12 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <input type="number" class="form-control" name="session_timeout_minutes" id="sessionTimeout"
                                value="<?= h($settings['session_timeout_minutes'] ?? '120') ?>" min="5" max="1440" style="max-width:200px;">
                         <div class="form-text">Αν ο χρήστης είναι ανενεργός για τόσα λεπτά, αποσυνδέεται αυτόματα. (5-1440 λεπτά)</div>
+                    </div>
+                    <div class="mb-0 mt-3">
+                        <label class="form-label" for="rememberMeDays"><i class="bi bi-person-check me-1"></i>«Να με θυμάσαι» στη σύνδεση (ημέρες)</label>
+                        <input type="number" class="form-control" name="remember_me_days" id="rememberMeDays"
+                               value="<?= h($settings['remember_me_days'] ?? '30') ?>" min="0" max="365" style="max-width:200px;">
+                        <div class="form-text">Όποιος το επιλέξει μένει συνδεδεμένος στη συσκευή του χωρίς αυτόματη αποσύνδεση λόγω αδράνειας, και αποσυνδέεται μόνο αν δεν τη χρησιμοποιήσει για τόσες ημέρες. 0 = απενεργοποιημένο (το κουτάκι δεν εμφανίζεται). Η αλλαγή κωδικού αποσυνδέει όλες τις συσκευές. (0-365)</div>
                     </div>
                 </div>
             </div>

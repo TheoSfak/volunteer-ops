@@ -165,6 +165,12 @@ function initSession() {
         session_name(SESSION_NAME);
         session_start();
 
+        // «Να με θυμάσαι»: no signed-in session but a remember cookie — sign
+        // the device back in before anything below looks at the session.
+        if (empty($_SESSION['user_id']) && isset($_COOKIE[REMEMBER_COOKIE])) {
+            restoreRememberedLogin();
+        }
+
         // Stamped by every War Room script, read by every other one below.
         if ($isWarRoomExempt) {
             $_SESSION['war_room_at'] = time();
@@ -247,7 +253,14 @@ function initSession() {
         // once someone is in an operation, this app keeps them signed in for
         // the day. Ordinary sessions that never touched the Action Room are
         // unaffected and still expire on the configured schedule.
-        if (!$isWarRoomExempt && !$warRoomProtected && isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeoutSeconds) {
+        //
+        // A remembered device is not idle-timed-out either: logging it out
+        // would only send it to login.php to be signed straight back in. The
+        // token is re-checked here (only when the idle rule would fire, so it
+        // costs one query per timeout, not per request) so a device forgotten
+        // by a password change elsewhere does NOT keep its session forever.
+        if (!$isWarRoomExempt && !$warRoomProtected && isset($_SESSION['last_activity']) && (time() - $_SESSION['last_activity']) > $timeoutSeconds
+            && !rememberedDeviceStillValid()) {
             logout();
             session_start();
             setFlash('warning', 'Η συνεδρία σας έληξε. Παρακαλώ συνδεθείτε ξανά.');
@@ -456,7 +469,20 @@ function login($email, $password) {
     }
 
     // --- Success: regenerate session, set data ---
+    startAuthenticatedSession($user);
 
+    // Log action
+    logAudit('login', 'users', $user['id'], null, ['ip' => $ip]);
+
+    return ['success' => true, 'user' => $user];
+}
+
+/**
+ * The session-establishing half of login(), shared with
+ * restoreRememberedLogin() so a remembered device ends up with exactly the
+ * session a typed password would have given it.
+ */
+function startAuthenticatedSession(array $user): void {
     // Prevent session fixation: bind the session to the new authenticated user
     session_regenerate_id(true);
     // Regenerate CSRF token for the new session
@@ -470,11 +496,198 @@ function login($email, $password) {
 
     // Update last login
     dbExecute("UPDATE users SET updated_at = NOW() WHERE id = ?", [$user['id']]);
+}
 
-    // Log action
-    logAudit('login', 'users', $user['id'], null, ['ip' => $ip]);
+// ─── «Να με θυμάσαι» ─────────────────────────────────────────────────────
+//
+// A ticked box on login.php stores a long-lived cookie, selector:validator.
+// The selector finds the row in user_remember_tokens; the validator is the
+// secret, and only its SHA-256 is stored, so a copy of the table cannot be
+// turned back into a working cookie. The password itself is never stored
+// anywhere — filling it in is the browser's password manager's job (login.php
+// marks the fields up so it offers to).
+//
+// When the session is gone (idle timeout, browser closed, cookie expired),
+// initSession() calls restoreRememberedLogin() and the device is signed back
+// in with the same checks login() applies. A remembered session is also not
+// idle-timed-out, because doing so would only bounce the user to login.php
+// to be signed straight back in.
+//
+// Forgotten by: logout() on this device (every logout path, including the
+// maintenance-mode one — otherwise a restore on login.php and a logout on the
+// next page would redirect forever), a password change or reset (every
+// device), a deactivated/unapproved account (checked on every restore), and
+// remember_me_days = 0 in Settings (every restore refuses).
+define('REMEMBER_COOKIE', 'vo_remember');
+// The last email that signed in successfully on this device, so login.php can
+// fill it in. Not a secret and grants nothing; kept across logouts on purpose.
+define('LAST_EMAIL_COOKIE', 'vo_last_email');
 
-    return ['success' => true, 'user' => $user];
+function rememberMeDays(): int {
+    try {
+        return max(0, min(365, (int) getSetting('remember_me_days', '30')));
+    } catch (Throwable $e) {
+        return 0;
+    }
+}
+
+function setAuthCookie(string $name, string $value, int $expires): void {
+    if (headers_sent()) {
+        return;
+    }
+    setcookie($name, $value, [
+        'expires'  => $expires,
+        'path'     => '/',
+        'secure'   => !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
+/** [selector, validator] from this request's cookie, or null if absent/malformed. */
+function readRememberCookie(): ?array {
+    $raw = $_COOKIE[REMEMBER_COOKIE] ?? '';
+    if (!is_string($raw) || !preg_match('/^([a-f0-9]{24}):([a-f0-9]{64})$/', $raw, $m)) {
+        return null;
+    }
+    return [$m[1], $m[2]];
+}
+
+function clearRememberCookie(): void {
+    unset($_COOKIE[REMEMBER_COOKIE]);
+    setAuthCookie(REMEMBER_COOKIE, '', time() - 42000);
+}
+
+function issueRememberToken(int $userId): void {
+    $days = rememberMeDays();
+    if ($days <= 0) {
+        return;
+    }
+    $selector  = bin2hex(random_bytes(12));
+    $validator = bin2hex(random_bytes(32));
+    $expires   = time() + $days * 86400;
+    try {
+        // Housekeeping for this user only — cheap, and keeps the table from
+        // collecting every expired device forever.
+        dbExecute("DELETE FROM user_remember_tokens WHERE user_id = ? AND expires_at <= NOW()", [$userId]);
+        dbInsert(
+            "INSERT INTO user_remember_tokens (user_id, selector, validator_hash, user_agent, created_at, last_used_at, expires_at)
+             VALUES (?, ?, ?, ?, NOW(), NOW(), FROM_UNIXTIME(?))",
+            [$userId, $selector, hash('sha256', $validator), mb_substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255), $expires]
+        );
+    } catch (Throwable $e) {
+        // Table not there yet (migration pending) — a normal login still works.
+        return;
+    }
+    setAuthCookie(REMEMBER_COOKIE, $selector . ':' . $validator, $expires);
+    $_SESSION['remember_selector'] = $selector;
+}
+
+/**
+ * Sign this device back in from its remember cookie. Returns true when a
+ * session was established. Any cookie that does not check out is deleted, so
+ * a bad one costs one lookup and never again.
+ */
+function restoreRememberedLogin(): bool {
+    $parts = readRememberCookie();
+    if (!$parts) {
+        if (isset($_COOKIE[REMEMBER_COOKIE])) {
+            clearRememberCookie();
+        }
+        return false;
+    }
+    [$selector, $validator] = $parts;
+
+    $days = rememberMeDays();
+    try {
+        $row = $days > 0 ? dbFetchOne(
+            "SELECT t.id AS token_id, t.validator_hash,
+                    u.id, u.name, u.email, u.role, u.is_active, u.approval_status, u.is_mission_visitor
+               FROM user_remember_tokens t
+               JOIN users u ON u.id = t.user_id
+              WHERE t.selector = ? AND t.expires_at > NOW()",
+            [$selector]
+        ) : null;
+    } catch (Throwable $e) {
+        return false;
+    }
+
+    if (!$row || !hash_equals($row['validator_hash'], hash('sha256', $validator))) {
+        clearRememberCookie();
+        return false;
+    }
+
+    // The same gates login() applies to a typed password.
+    if (!$row['is_active'] || !empty($row['is_mission_visitor'])
+        || ($row['approval_status'] ?? 'APPROVED') !== 'APPROVED') {
+        dbExecute("DELETE FROM user_remember_tokens WHERE id = ?", [$row['token_id']]);
+        clearRememberCookie();
+        return false;
+    }
+    // Maintenance mode lets admins in only — refuse without forgetting the
+    // device, so it signs straight back in once maintenance is over.
+    if (getSetting('maintenance_mode', '0') && !in_array($row['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN], true)) {
+        return false;
+    }
+
+    startAuthenticatedSession($row);
+    $_SESSION['remember_selector'] = $selector;
+
+    // Sliding: every use buys the device another full period, so someone who
+    // opens the app at least once a month is never asked for the password.
+    $expires = time() + $days * 86400;
+    dbExecute(
+        "UPDATE user_remember_tokens SET last_used_at = NOW(), expires_at = FROM_UNIXTIME(?) WHERE id = ?",
+        [$expires, $row['token_id']]
+    );
+    setAuthCookie(REMEMBER_COOKIE, $selector . ':' . $validator, $expires);
+
+    logAudit('login_remembered', 'users', $row['id'], null, ['ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown']);
+    return true;
+}
+
+/** Is this session's remembered device still valid (not revoked or expired)? */
+function rememberedDeviceStillValid(): bool {
+    $selector = $_SESSION['remember_selector'] ?? '';
+    if ($selector === '' || rememberMeDays() <= 0) {
+        return false;
+    }
+    try {
+        return (bool) dbFetchValue(
+            "SELECT COUNT(*) FROM user_remember_tokens WHERE selector = ? AND user_id = ? AND expires_at > NOW()",
+            [$selector, $_SESSION['user_id'] ?? 0]
+        );
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+/**
+ * Forget every remembered device of a user — after a password change or
+ * reset, so a stolen phone's cookie stops working the moment the password is
+ * changed. $exceptSelector keeps the device the change was made from.
+ */
+function revokeRememberTokens(int $userId, ?string $exceptSelector = null): void {
+    try {
+        if ($exceptSelector) {
+            dbExecute("DELETE FROM user_remember_tokens WHERE user_id = ? AND selector <> ?", [$userId, $exceptSelector]);
+        } else {
+            dbExecute("DELETE FROM user_remember_tokens WHERE user_id = ?", [$userId]);
+        }
+    } catch (Throwable $e) {
+        // Table not there yet — nothing to revoke.
+    }
+}
+
+/** Fill the login form's email next time; called on a successful login. */
+function rememberLoginEmail(string $email): void {
+    setAuthCookie(LAST_EMAIL_COOKIE, $email, time() + 365 * 86400);
+}
+
+/** The email to pre-fill on login.php, or '' if none/invalid. */
+function lastLoginEmail(): string {
+    $email = $_COOKIE[LAST_EMAIL_COOKIE] ?? '';
+    return (is_string($email) && filter_var($email, FILTER_VALIDATE_EMAIL)) ? $email : '';
 }
 
 /**
@@ -503,7 +716,20 @@ function logout() {
     if (isLoggedIn()) {
         logAudit('logout', 'users', $_SESSION['user_id']);
     }
-    
+
+    // Forget this device, not the user's other ones. Both sources, because a
+    // session restored from the cookie and one that just set it may each hold
+    // only one of them.
+    $selector = $_SESSION['remember_selector'] ?? (readRememberCookie()[0] ?? null);
+    if ($selector) {
+        try {
+            dbExecute("DELETE FROM user_remember_tokens WHERE selector = ?", [$selector]);
+        } catch (Throwable $e) {}
+    }
+    if (isset($_COOKIE[REMEMBER_COOKIE])) {
+        clearRememberCookie();
+    }
+
     $_SESSION = [];
     
     if (ini_get("session.use_cookies")) {
@@ -633,7 +859,12 @@ function updatePassword($userId, $currentPassword, $newPassword) {
     
     $hashed = password_hash($newPassword, PASSWORD_DEFAULT);
     dbExecute("UPDATE users SET password = ?, updated_at = NOW() WHERE id = ?", [$hashed, $userId]);
-    
+
+    // Every other remembered device must type the new password; the one the
+    // change was made from stays remembered.
+    $keep = ((int) ($_SESSION['user_id'] ?? 0) === (int) $userId) ? ($_SESSION['remember_selector'] ?? null) : null;
+    revokeRememberTokens((int) $userId, $keep);
+
     logAudit('password_change', 'users', $userId);
     
     return ['success' => true];

@@ -1525,6 +1525,21 @@ CREATE TABLE IF NOT EXISTS `mobile_api_tokens` (
     UNIQUE KEY `unique_token_hash` (`token_hash`),
     INDEX `idx_mobile_tokens_user` (`user_id`, `revoked_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- «Να με θυμάσαι» (v164): one row per remembered device. The cookie carries
+-- selector:validator; only a SHA-256 of the validator is stored here.
+CREATE TABLE IF NOT EXISTS `user_remember_tokens` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `user_id` INT UNSIGNED NOT NULL,
+    `selector` CHAR(24) NOT NULL COMMENT 'Public half of the cookie, used to find the row',
+    `validator_hash` CHAR(64) NOT NULL COMMENT 'SHA-256 of the secret half; the secret itself is never stored',
+    `user_agent` VARCHAR(255) NULL,
+    `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    `last_used_at` TIMESTAMP NULL,
+    `expires_at` DATETIME NOT NULL,
+    UNIQUE KEY `uk_remember_selector` (`selector`),
+    INDEX `idx_remember_user` (`user_id`, `expires_at`),
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
 -- INVENTORY SYSTEM TABLES
