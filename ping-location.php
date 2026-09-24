@@ -55,8 +55,10 @@ $batteryLevel = ($rawBattery !== null && $rawBattery !== '' && is_numeric($rawBa
 // out). Absent from pages cached before v3.320.0, which then keep the old
 // arrival-time stamping.
 $fixAgeMs = parseFixAgeMs(post('fix_age_ms'));
+// The Geolocation API's coords.speed (Doppler, m/s) when the phone gives one.
+$speedMps = parseSpeedMps(post('speed'));
 
 // 'browser': this endpoint is only ever reached from the live war-room.php
 // tab, whose watcher the phone suspends the moment the screen locks. The
 // native service posts to mobile-ping-location.php instead.
-echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source, 'browser', $fixAgeMs));
+echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source, 'browser', $fixAgeMs, false, $speedMps));

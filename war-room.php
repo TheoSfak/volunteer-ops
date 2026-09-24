@@ -1278,7 +1278,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
         // than on the previous one — zero distance, hence never "moving".
         $rawPins = dbFetchAll(
             "SELECT * FROM (
-                SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.battery_level, vp.via, vp.created_at, u.name,
+                SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.battery_level, vp.via, vp.speed_mps, vp.created_at, u.name,
                         u.is_external, u.guest_org_name, u.guest_country_code,
                         COALESCE(ht.name, mvt.label) AS home_team_name, COALESCE(ht.color, mvt.color) AS home_team_color,
                         mt.color AS team_color, mt.codename, mt.team_number{$field},
@@ -1356,7 +1356,14 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                     $requiredMeters = ($pin['prev_accuracy_meters'] !== null && $pin['accuracy_meters'] !== null)
                         ? max(30, (float) $pin['prev_accuracy_meters'] + (float) $pin['accuracy_meters'])
                         : 75;
-                    $isMoving = $distanceMeters >= $requiredMeters;
+                    // The phone's own Doppler speed, when it gave one, decides
+                    // it outright (v3.321.0): it reads ~0 for somebody standing
+                    // still however far their fixes wander, and a steady
+                    // walking value for somebody moving however close two
+                    // noisy fixes happen to land. 0.5 m/s is a slow shuffle.
+                    $isMoving = $pin['speed_mps'] !== null
+                        ? (float) $pin['speed_mps'] >= 0.5
+                        : $distanceMeters >= $requiredMeters;
                     // Heading only means something once we've already decided
                     // this is real movement, not GPS jitter — a bearing
                     // computed between two noisy-but-stationary fixes would
@@ -1368,6 +1375,11 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                         );
                     }
                 }
+            }
+            // With no recent previous fix there is no distance to judge, but
+            // a Doppler speed still says whether they are moving (no heading).
+            if ($headingDeg === null && !$isMoving && $pin['speed_mps'] !== null) {
+                $isMoving = (float) $pin['speed_mps'] >= 0.5;
             }
 
             [$homeBg, $homeFg] = teamBadgeColors($pin['home_team_color']);
@@ -3174,6 +3186,9 @@ include __DIR__ . '/includes/header.php';
              be read alongside. -->
         <a href="mission-vitals-report.php?id=<?= $missionId ?>" target="_blank" rel="noopener" class="btn btn-outline-light"><i class="bi bi-heart-pulse me-1"></i><?= t('hero.btn_vitals_report') ?></a>
         <?php endif; ?>
+        <!-- A new tab for the same reason as the heart-rate report: during a
+             drill it is read on a second screen while the map keeps running. -->
+        <a href="mission-gps-quality.php?id=<?= $missionId ?>" target="_blank" rel="noopener" class="btn btn-outline-light"><i class="bi bi-crosshair me-1"></i><?= t('hero.btn_gps_quality') ?></a>
         <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i><?= t('hero.btn_team_trail') ?></button>
         <button type="button" id="coverageModeToggle" class="btn btn-outline-light"><i class="bi bi-broadcast me-1"></i><?= t('hero.btn_verified_coverage') ?></button>
         <?php endif; ?>
@@ -9117,7 +9132,31 @@ function renderPins(items) {
     currentPinMarkers.forEach(m => sharedMarkerCluster.removeLayer(m));
     currentPinMarkers = items.map(pin => buildPinMarker(pin));
     sharedMarkerCluster.addLayers(currentPinMarkers);
+    renderPinAccuracyCircles(items);
     centreMapOnPins(items);
+}
+
+// The uncertainty around a pin, drawn as the area it really claims. A dot
+// reads as "here, exactly" whatever its ±; a 60m circle reads as "somewhere
+// in here", which is the truth a coordinator sending a team needs to see.
+// Only past 20m: below that the circle hides under the marker and adds
+// nothing but clutter. Not for stale pins, whose position is already in
+// doubt for a different reason that the marker shows. Never interactive, so
+// it can never swallow a click meant for the pin under it.
+const PIN_ACCURACY_CIRCLE_MIN_M = 20;
+let pinAccuracyLayer = null;
+function renderPinAccuracyCircles(items) {
+    if (!map) return;
+    if (!pinAccuracyLayer) pinAccuracyLayer = L.layerGroup().addTo(map);
+    pinAccuracyLayer.clearLayers();
+    items.forEach(pin => {
+        if (pin.is_stale || pin.accuracy_m === null || pin.accuracy_m === undefined || pin.accuracy_m <= PIN_ACCURACY_CIRCLE_MIN_M) return;
+        const colour = pin.accuracy_m > 50 ? '#f59e0b' : (pin.team_color || '#0d6efd');
+        L.circle([pin.lat, pin.lng], {
+            radius: pin.accuracy_m, color: colour, weight: 1, opacity: 0.6,
+            fillColor: colour, fillOpacity: 0.08, interactive: false,
+        }).addTo(pinAccuracyLayer);
+    });
 }
 
 // Wires the pin-charge-alert-btn built into buildPinMarker() next to the
@@ -14029,7 +14068,7 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
             return;
         }
         batteryPromise.then(batteryLevel => {
-            const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: fix.lat, lng: fix.lng, accuracy: fix.acc ?? '', battery_level: batteryLevel ?? '', fix_age_ms: Math.max(0, Date.now() - fix.ts)});
+            const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: fix.lat, lng: fix.lng, accuracy: fix.acc ?? '', battery_level: batteryLevel ?? '', fix_age_ms: Math.max(0, Date.now() - fix.ts), speed: fix.speed ?? ''});
             fetch('ping-location.php', {method:'POST', body:data}).then(response => {
                 if (!checkSessionAlive(response)) { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; return null; }
                 return response.json();
@@ -14147,6 +14186,8 @@ function fixFromPosition(position) {
         lat: position.coords.latitude,
         lng: position.coords.longitude,
         acc: typeof position.coords.accuracy === 'number' ? position.coords.accuracy : null,
+        // Doppler speed (m/s) when the phone gives one; see parseSpeedMps().
+        speed: typeof position.coords.speed === 'number' && !isNaN(position.coords.speed) ? position.coords.speed : null,
         ts: position.timestamp || Date.now(),
     };
 }
@@ -14163,7 +14204,7 @@ function betterFix(a, b) {
 }
 // A fix object back into the shape the passive-capture functions take.
 function positionFromFix(fix) {
-    return {coords: {latitude: fix.lat, longitude: fix.lng, accuracy: fix.acc}, timestamp: fix.ts};
+    return {coords: {latitude: fix.lat, longitude: fix.lng, accuracy: fix.acc, speed: fix.speed}, timestamp: fix.ts};
 }
 // fallbackMaxAgeMs: how old a held fix may be and still be answered with
 // when nothing fresh arrives. The passive capture passes 0 — it must never
@@ -14317,7 +14358,7 @@ function sendAutoPing(position) {
             // fix_age_ms: how old the fix already is, on the phone's own clock
             // (a wrong clock cancels out). The server stamps the row with when
             // the fix was taken rather than when it arrived.
-            const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || '', battery_level: batteryLevel ?? '', source: 'auto', fix_age_ms: Math.max(0, Date.now() - position.timestamp)});
+            const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy || '', battery_level: batteryLevel ?? '', source: 'auto', fix_age_ms: Math.max(0, Date.now() - position.timestamp), speed: (typeof position.coords.speed === 'number' && !isNaN(position.coords.speed)) ? position.coords.speed : ''});
             // The server's answer is read, not discarded. Both write-time
             // gates refuse a ping by replying ok:false, and until this was
             // wired up a volunteer whose every fix was being refused saw a

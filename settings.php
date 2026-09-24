@@ -46,6 +46,7 @@ $defaults = [
     'war_room_auto_ping_high_accuracy' => '1',
     'war_room_max_ping_accuracy_m' => '50',
     'war_room_max_ping_speed_kmh' => '25',
+    'war_room_gps_smoothing' => '1',
     'war_room_low_battery_pct' => '60',
     'war_room_max_shift_minutes' => '480',
     'war_room_grid_max_size_m' => '900',
@@ -491,7 +492,7 @@ $actionRoomFields = [
     'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_area_unit',
     'war_room_grid_max_size_m', 'war_room_grid_max_cells',
     'war_room_auto_ping_seconds', 'war_room_auto_ping_high_accuracy',
-    'war_room_max_ping_accuracy_m', 'war_room_max_ping_speed_kmh',
+    'war_room_max_ping_accuracy_m', 'war_room_max_ping_speed_kmh', 'war_room_gps_smoothing',
     'war_room_low_battery_pct', 'war_room_max_shift_minutes',
     'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct',
     'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
@@ -519,7 +520,7 @@ if (isPost()) {
         foreach ($fieldsToUpdate as $field) {
                     $value = isset($_POST[$field]) ? $_POST[$field] : '';
 
-                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy'])) {
+                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing'])) {
                         $value = isset($_POST[$field]) ? '1' : '0';
                     }
 
@@ -2170,6 +2171,14 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             Υψηλή ακρίβεια στο αυτόματο στίγμα (GPS αντί για Wi-Fi/κεραία)
                         </label>
                         <div><small class="text-muted">Όσο είναι κλειστό, το κινητό δεν ανάβει τον δέκτη GPS για το αυτόματο στίγμα και απαντά με θέση υπολογισμένη από τα γύρω Wi-Fi και τις κεραίες κινητής — σε πυκνοδομημένη περιοχή αυτό σημαίνει σφάλμα δεκάδων μέτρων που <strong>δεν βελτιώνεται αν ο εθελοντής σταθεί ακίνητος</strong>. Αφήστε το ανοιχτό για κάθε πραγματική επιχείρηση ή άσκηση· κλείστε το μόνο αν η αυτονομία μπαταρίας σε πολύωρη αποστολή είναι πιο κρίσιμη από τη θέση. Το χειροκίνητο στίγμα («Στείλε στίγμα») ζητούσε πάντα υψηλή ακρίβεια και δεν επηρεάζεται.</small></div>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="war_room_gps_smoothing" id="warRoomGpsSmoothing"
+                               <?= ($settings['war_room_gps_smoothing'] ?? '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="warRoomGpsSmoothing">
+                            Εξομάλυνση θέσης (φίλτρο Kalman)
+                        </label>
+                        <div><small class="text-muted">Ένας εθελοντής που στέκεται ακίνητος στέλνει θέση που «χορεύει» 10–40 μ. από στίγμα σε στίγμα. Με την εξομάλυνση, όσο η ταχύτητα του κινητού (Doppler) δείχνει ότι στέκεται, τα διαδοχικά στίγματα σταθμίζονται μεταξύ τους και η πινέζα, ο «πλησιέστερος», οι αποστάσεις και ο Βοηθός παίρνουν τη σταθερότερη θέση· μόλις κινηθεί, περνά σχεδόν αυτούσιο το νέο στίγμα, ώστε η πινέζα να μη μένει πίσω. Το ακατέργαστο στίγμα της συσκευής κρατιέται πάντα ξεχωριστά και η <strong>Ποιότητα GPS</strong> συγκρίνει τα δύο με σημείο αναφοράς. Κλείστε το μόνο αν θέλετε να βλέπετε ό,τι ακριβώς στέλνει το κινητό.</small></div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Μέγιστη Αποδεκτή Αβεβαιότητα Στίγματος (μ.)</label>

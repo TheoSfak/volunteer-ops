@@ -163,6 +163,100 @@ function parseFixAgeMs($raw): ?int {
 }
 
 /**
+ * A client's reported speed (m/s). GNSS measures speed from the Doppler shift
+ * of the satellite signals, which is far more precise than the difference of
+ * two positions that are each metres out — a phone standing still reads ~0
+ * even while its position wanders 20m. Null when absent, negative or absurd.
+ */
+function parseSpeedMps($raw): ?float {
+    if ($raw === null || $raw === '' || is_bool($raw) || !is_numeric($raw) || (float) $raw < 0) {
+        return null;
+    }
+    return round(min((float) $raw, 150.0), 2);
+}
+
+/**
+ * One step of the position filter (v3.321.0): a Kalman filter with a
+ * constant-position model, run once per accepted fix at write time.
+ *
+ * Why at all: a volunteer standing still reports a position that wanders
+ * 10-40m from fix to fix, and every consumer (the pin, "nearest team", the
+ * distances, the assistant) read the latest raw fix, so the answer to "where
+ * is she" jumped every cadence. Averaging successive fixes shrinks that noise;
+ * the whole art is not to average across real movement, which would drag the
+ * pin behind somebody walking. What decides between the two is how much the
+ * person may have moved since the last estimate (the process noise):
+ *
+ *   · the device's own Doppler speed when it gives one — under 0.3 m/s is
+ *     standing still, so only a slow drift is allowed and the fixes are
+ *     averaged hard; walking or faster lets the new fix through almost as-is;
+ *   · without a speed, the jump itself: within two combined sigmas it is read
+ *     as noise around a standing person, beyond that as movement.
+ *
+ * A jump beyond three sigmas resets to the new fix outright, as does a gap
+ * longer than the staleness line or a first fix. The reported accuracy never
+ * claims more than a halving of the device's own: real GNSS error is
+ * correlated in time (reflections off the same wall), so averaging buys less
+ * than the textbook square root, and a filter that believed otherwise would
+ * also stop listening to new fixes.
+ *
+ * $prev is the previous ESTIMATE ['lat','lng','acc'] or null; $dtSeconds the
+ * time between the two fixes. Returns ['lat','lng','acc'].
+ */
+function gpsFilterStep(?array $prev, float $lat, float $lng, float $accuracy, ?float $speedMps, int $dtSeconds, int $staleSeconds): array {
+    $r = max($accuracy, 3.0) ** 2;
+    $reset = ['lat' => $lat, 'lng' => $lng, 'acc' => round(max($accuracy, 2.0), 2)];
+    if ($prev === null || $prev['acc'] === null || $dtSeconds <= 0 || $dtSeconds >= $staleSeconds) {
+        return $reset;
+    }
+    // Local flat-earth metres around the previous estimate — exact enough over
+    // the tens of metres this ever averages across.
+    $mPerDegLat = 111320.0;
+    $mPerDegLng = 111320.0 * cos(deg2rad($prev['lat']));
+    $dn = ($lat - $prev['lat']) * $mPerDegLat;
+    $de = ($lng - $prev['lng']) * $mPerDegLng;
+    $jump = sqrt($dn * $dn + $de * $de);
+    $pPrev = max((float) $prev['acc'], 2.0) ** 2;
+
+    if ($speedMps !== null) {
+        $v = $speedMps < 0.3 ? 0.15 : $speedMps + 0.5;
+    } else {
+        $v = $jump <= 2 * sqrt($pPrev + $r) ? 0.3 : 1.5;
+    }
+    $p = $pPrev + ($v * $dtSeconds) ** 2;
+    if ($jump * $jump > 9 * ($p + $r)) {
+        return $reset;
+    }
+    $k = $p / ($p + $r);
+    $pNew = (1 - $k) * $p;
+    return [
+        'lat' => $prev['lat'] + $k * $dn / $mPerDegLat,
+        'lng' => $prev['lng'] + $k * $de / $mPerDegLng,
+        'acc' => round(max(sqrt($pNew), 0.5 * sqrt($r), 2.0), 2),
+    ];
+}
+
+/**
+ * Count a refused fix for the GPS quality report. The refused position is
+ * never stored — that is what refusing it means — so without this nothing
+ * could ever say that one phone was turned away forty times and another
+ * never. Best-effort: a missing table (before migration 163) or a lock must
+ * never turn a refusal into an error.
+ */
+function recordVolunteerPingRefusal(int $missionId, int $userId, string $reason): void {
+    try {
+        dbExecute(
+            "INSERT INTO volunteer_ping_refusals (mission_id, user_id, reason, refused_count, last_refused_at)
+             VALUES (?, ?, ?, 1, NOW())
+             ON DUPLICATE KEY UPDATE refused_count = refused_count + 1, last_refused_at = NOW()",
+            [$missionId, $userId, $reason]
+        );
+    } catch (Exception $e) {
+        // Non-critical.
+    }
+}
+
+/**
  * A client's reported accuracy radius (metres) for a position it attached to
  * an SOS, a photo, an incident or a voice message. Null when absent or not a
  * positive number — "not reported" must never read as "perfectly accurate".
@@ -2585,7 +2679,7 @@ function computeContinuousFieldMinutesByVolunteerId(int $missionId, int $toleran
  * $isMock is Android's own "this came from a mock provider" flag; only the
  * native app can see it.
  */
-function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, ?float $accuracy, ?int $batteryLevel, string $source, ?string $via = null, ?int $fixAgeMs = null, bool $isMock = false): array {
+function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, ?float $accuracy, ?int $batteryLevel, string $source, ?string $via = null, ?int $fixAgeMs = null, bool $isMock = false, ?float $speedMps = null): array {
     $userId = (int) $user['id'];
     $lang = $user['language'] ?? DEFAULT_LANGUAGE;
 
@@ -2625,6 +2719,7 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     // would leave a volunteer who looks present and is somewhere else.
     if ($isMock) {
         recordVolunteerGpsErrorReason((int) $pr['mission_id'], $userId, 'mock');
+        recordVolunteerPingRefusal((int) $pr['mission_id'], $userId, 'mock');
         return ['ok' => false, 'error' => t('ping.mock_location', [], $lang)];
     }
 
@@ -2638,6 +2733,7 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     // without flagging the phone — nothing is wrong with it NOW.
     $fixAgeSeconds = $fixAgeMs === null ? 0 : (int) round(max(0, $fixAgeMs) / 1000);
     if ($fixAgeSeconds > WAR_ROOM_MAX_FIX_AGE_SECONDS) {
+        recordVolunteerPingRefusal((int) $pr['mission_id'], $userId, 'too_old');
         return ['ok' => false, 'error' => t('ping.fix_too_old', [], $lang)];
     }
 
@@ -2694,6 +2790,7 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     $maxAccuracy = (float) getSetting('war_room_max_ping_accuracy_m', '50');
     if ($maxAccuracy > 0 && $accuracy !== null && $accuracy > $maxAccuracy) {
         recordVolunteerGpsErrorReason((int) $pr['mission_id'], $userId, 'imprecise');
+        recordVolunteerPingRefusal((int) $pr['mission_id'], $userId, 'imprecise');
         return ['ok' => false, 'error' => t('ping.accuracy_too_poor', [
             'acc' => (int) round($accuracy),
             'max' => (int) round($maxAccuracy),
@@ -2766,6 +2863,7 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
                     // shows for at most one cadence; only a phone that keeps
                     // producing them stays flagged to the command post.
                     recordVolunteerGpsErrorReason((int) $pr['mission_id'], $userId, 'implausible');
+                    recordVolunteerPingRefusal((int) $pr['mission_id'], $userId, 'implausible');
                     return ['ok' => false, 'error' => t('ping.jump_implausible', [
                         'kmh' => (int) round($impliedKmh),
                         'max' => (int) round($maxSpeedKmh),
@@ -2775,16 +2873,38 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
         }
     }
 
+    // lat/lng/accuracy_meters get the filtered ESTIMATE, raw_* what the device
+    // said. Every consumer reads lat/lng, so the pin, the nearest team, the
+    // distances and the assistant all get the steadier position without any
+    // of them changing; the GPS quality report reads raw_* to measure whether
+    // the estimate is in fact closer to the truth. A fix with no accuracy is
+    // not filtered: there is nothing to weigh it by, and an estimate would
+    // invent a confidence the device never claimed.
+    $estimate = ['lat' => $lat, 'lng' => $lng, 'acc' => $accuracy];
+    if ($accuracy !== null && getSetting('war_room_gps_smoothing', '1') === '1') {
+        $estimate = gpsFilterStep(
+            ($prev && $prev['accuracy_meters'] !== null)
+                ? ['lat' => (float) $prev['lat'], 'lng' => (float) $prev['lng'], 'acc' => (float) $prev['accuracy_meters']]
+                : null,
+            $lat, $lng, $accuracy, $speedMps,
+            $prev ? max(1, (int) $prev['age_s'] - $fixAgeSeconds) : 0,
+            warRoomPingStaleThresholdSeconds()
+        );
+    }
+
     try {
         dbInsert(
-            "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, battery_level, source, via, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL ? SECOND))",
+            "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, battery_level, source, via, created_at,
+                                          raw_lat, raw_lng, raw_accuracy_m, speed_mps)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL ? SECOND), ?, ?, ?, ?)",
             // Anything that is not one of the two known clients is stored as
             // NULL ("not known") rather than guessed into one of them — an
             // unrecognised caller is exactly the case where a guess would be
             // wrong, and NULL is what every pre-v159 row already says.
-            [$userId, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source,
+            [$userId, $shiftId, $estimate['lat'], $estimate['lng'], $estimate['acc'], $batteryLevel, $source,
              in_array($via, ['browser', 'native'], true) ? $via : null,
-             $fixAgeSeconds]
+             $fixAgeSeconds,
+             $lat, $lng, $accuracy, $speedMps]
         );
     } catch (Exception $e) {
         return ['ok' => false, 'error' => t('ping.gps_unavailable_migration', [], $lang)];

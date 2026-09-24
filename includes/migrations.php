@@ -6989,6 +6989,39 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 163,
+            'description' => "Position estimation and GPS quality. volunteer_pings keeps what the device reported in raw_lat/raw_lng/raw_accuracy_m and its Doppler speed in speed_mps, while lat/lng/accuracy_meters now hold the filtered estimate (gpsFilterStep()) — so every consumer (map pin, nearest team, distances, ETA, assistant) gets the smoothed position without being changed, and the GPS quality report can still compare raw against estimate. Added at the END of the table, not AFTER a column, so the ALTER is instant on a large production table. Old rows keep raw_* NULL: their lat/lng were always raw. Plus volunteer_ping_refusals, a per-reason count of the fixes the server refused, which is never stored anywhere else because a refused fix is by definition not kept.",
+            'up' => function () {
+                $have = array_column(dbFetchAll(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'volunteer_pings'
+                        AND COLUMN_NAME IN ('raw_lat', 'raw_lng', 'raw_accuracy_m', 'speed_mps')"
+                ), 'COLUMN_NAME');
+                $add = [
+                    'raw_lat'        => "DECIMAL(10, 8) NULL COMMENT 'What the device reported; lat/lng hold the filtered estimate (v163). NULL = pre-v163 row, lat/lng are raw'",
+                    'raw_lng'        => "DECIMAL(11, 8) NULL",
+                    'raw_accuracy_m' => "DECIMAL(8, 2) NULL COMMENT 'Device-reported accuracy of raw_lat/raw_lng; accuracy_meters is the estimate''s'",
+                    'speed_mps'      => "DECIMAL(6, 2) NULL COMMENT 'Device-reported (Doppler) speed, m/s; NULL = not reported'",
+                ];
+                foreach ($add as $col => $def) {
+                    if (!in_array($col, $have, true)) {
+                        dbExecute("ALTER TABLE volunteer_pings ADD COLUMN {$col} {$def}");
+                    }
+                }
+                dbExecute("CREATE TABLE IF NOT EXISTS volunteer_ping_refusals (
+                    mission_id INT UNSIGNED NOT NULL,
+                    user_id INT UNSIGNED NOT NULL,
+                    reason VARCHAR(20) NOT NULL,
+                    refused_count INT UNSIGNED NOT NULL DEFAULT 0,
+                    last_refused_at TIMESTAMP NULL,
+                    PRIMARY KEY (mission_id, user_id, reason),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

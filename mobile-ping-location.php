@@ -74,6 +74,9 @@ if (stripos($contentType, 'application/json') !== false) {
     // not turn every ping from an older build into a refusal.
     $isMock   = ($body['simulated'] ?? false) === true;
     $rawDevice = isset($body['device']) && is_string($body['device']) ? $body['device'] : null;
+    // Location.getSpeed() (Doppler, m/s) — the plugin has always sent it,
+    // null when the fix carries no speed.
+    $speedMps = parseSpeedMps($body['speed'] ?? null);
 } else {
     $shiftId  = (int) post('shift_id');
     $lat      = (float) post('lat');
@@ -84,6 +87,7 @@ if (stripos($contentType, 'application/json') !== false) {
     $fixAgeMs = parseFixAgeMs(post('fix_age_ms'));
     $isMock   = false;
     $rawDevice = null;
+    $speedMps = parseSpeedMps(post('speed'));
 }
 
 // Which phone this is, as the app reports it ("samsung SM-A525F · Android 14").
@@ -109,4 +113,4 @@ $batteryLevel = ($rawBattery !== null && $rawBattery !== '' && is_numeric($rawBa
 
 // 'native': bearer-token auth means this can only be the Capacitor Android
 // background-location plugin, which keeps reporting with the screen off.
-echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source, 'native', $fixAgeMs, $isMock));
+echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source, 'native', $fixAgeMs, $isMock, $speedMps));

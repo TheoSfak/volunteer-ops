@@ -1463,6 +1463,10 @@ CREATE TABLE IF NOT EXISTS `volunteer_pings` (
     `source` ENUM('manual','auto') NOT NULL DEFAULT 'manual',
     `via` ENUM('browser','native') NULL COMMENT 'Which client produced the fix; NULL = unknown (pre-v159 rows)',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `raw_lat` DECIMAL(10, 8) NULL COMMENT 'What the device reported; lat/lng hold the filtered estimate (v163). NULL = pre-v163 row, lat/lng are raw',
+    `raw_lng` DECIMAL(11, 8) NULL,
+    `raw_accuracy_m` DECIMAL(8, 2) NULL COMMENT 'Device-reported accuracy of raw_lat/raw_lng; accuracy_meters is the estimate''s',
+    `speed_mps` DECIMAL(6, 2) NULL COMMENT 'Device-reported (Doppler) speed, m/s; NULL = not reported',
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`shift_id`) REFERENCES `shifts`(`id`) ON DELETE CASCADE,
     INDEX `idx_pings_shift_time` (`shift_id`, `created_at`),
@@ -1495,6 +1499,20 @@ CREATE TABLE IF NOT EXISTS `volunteer_vitals` (
 -- MOBILE APP API TOKENS (native Android/iOS wrapper — bearer-token auth for
 -- the background-location plugin, which posts pings from detached native code
 -- with no live browser session/CSRF token to hand off)
+-- GPS fixes the server refused, counted per reason (v163). Only a count and
+-- the last time: the refused position itself is never stored (that is the
+-- point of refusing it), but "how often was this phone refused, and why" is
+-- what the GPS quality report needs to tell a bad phone from a bad sky.
+CREATE TABLE IF NOT EXISTS `volunteer_ping_refusals` (
+    `mission_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `reason` VARCHAR(20) NOT NULL,
+    `refused_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    `last_refused_at` TIMESTAMP NULL,
+    PRIMARY KEY (`mission_id`, `user_id`, `reason`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS `mobile_api_tokens` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `user_id` INT UNSIGNED NOT NULL,
